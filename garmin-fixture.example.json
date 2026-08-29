@@ -38,6 +38,14 @@
       "drained": 31
     }
   ],
+  "max_metrics": {
+    "running": {
+      "vo2MaxPreciseValue": 49
+    },
+    "cycling": {
+      "vo2MaxValue": 52
+    }
+  },
   "race_predictions": {
     "5k": 1310,
     "10k": 2740,
