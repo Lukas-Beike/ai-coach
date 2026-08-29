@@ -730,7 +730,7 @@ function competitionEditor(competition = {}, index = 0) {
   mainGrid.append(
     contextField("Name", "name", competition.name, { placeholder: "Münsterland Giro" }),
     contextField("Datum", "event_date", competition.event_date, { type: "date" }),
-    contextField("Sportart", "sport", competition.sport || "Radfahren"),
+    contextField("Sportart", "sport", competition.sport || "Radfahren", { placeholder: "Radfahren, Rad indoor, Laufen oder Krafttraining" }),
     contextField("Priorität", "priority", competition.priority || "B", { choices: ["A", "B", "C"] }),
     contextField("Distanz", "distance", competition.distance, { placeholder: "125 km" })
   );
@@ -1230,7 +1230,7 @@ async function syncCompetitions() {
   try {
     const result = await api("/api/competitions/sync", { method: "POST", body: "{}" });
     if (result.status === "already_running") toast("Zielwettkämpfe werden bereits synchronisiert");
-    else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert`);
+    else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
