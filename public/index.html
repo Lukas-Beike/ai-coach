@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0b0d">
+  <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=56">
+  <title>Intervals Coach</title>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div>
+        <span class="eyebrow">PRIVATER TRAININGSBEREICH</span>
+        <h1>Intervals Coach</h1>
+      </div>
+      <button id="headerActionButton" class="secondary-button top-action" type="button" hidden></button>
+    </header>
+
+    <main>
+      <section id="statusCard" class="status-card" aria-live="polite">
+        <div><span class="pulse"></span><strong id="statusTitle">Verbindung wird hergestellt…</strong></div>
+        <span id="statusDetail">Trainingsbereich wird geprüft</span>
+      </section>
+
+      <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
+        <div id="messages" class="messages"></div>
+        <div id="coachWorking" class="coach-working" hidden aria-live="polite">
+          <span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span>Coach arbeitet an deiner Antwort…</span>
+        </div>
+        <form id="chatForm" class="composer">
+          <textarea id="messageInput" rows="1" maxlength="12000" placeholder="Frage deinen Coach…" aria-label="Nachricht an deinen Coach"></textarea>
+          <button type="submit" id="sendButton">Senden</button>
+        </form>
+        <p class="fine-print">Trainingsempfehlungen dienen zur Orientierung und ersetzen keinen medizinischen Rat. Jede Kalenderänderung gibst du selbst frei.</p>
+      </section>
+
+      <section id="activitiesPanel" class="panel" aria-label="Absolvierte Einheiten">
+        <div class="section-heading">
+          <div><span class="eyebrow">TRAININGSVERLAUF</span><h2>Absolviert</h2><span id="activitiesSyncDetail" class="tab-sync-detail"></span></div>
+        </div>
+        <div id="activityStats" class="activity-stats-summary" aria-label="Statistik der absolvierten Einheiten"></div>
+        <div id="activities" class="activities"></div>
+      </section>
+
+      <section id="workoutsPanel" class="panel" aria-label="Geplante Einheiten">
+        <div class="section-heading">
+          <div><span class="eyebrow">KALENDER</span><h2>Geplant</h2></div>
+        </div>
+        <div id="plannedCalendar" class="planned-calendar"></div>
+        <div class="library-heading">
+          <div><h3 class="subsection-title">Trainingsbibliothek</h3><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
+          <button id="libraryLoadButton" class="secondary-button" type="button">Bibliothek synchronisieren</button>
+        </div>
+        <div id="library" class="library"></div>
+      </section>
+
+      <section id="dataPanel" class="panel" aria-label="Dynamische Daten">
+        <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
+      </section>
+
+      <section id="profilePanel" class="panel" aria-label="Athletenprofil">
+        <div class="section-heading">
+          <div><span class="eyebrow">COACHING-PROFIL</span><h2>Athletenkontext</h2></div>
+        </div>
+        <form id="profileForm" class="profile-form">
+          <fieldset class="profile-section">
+            <legend>Dauerhaftes Profil</legend>
+            <p>Diese bestätigten Angaben werden lokal gespeichert und bei jeder Coach-Anfrage berücksichtigt.</p>
+            <div class="form-grid">
+              <label>Name<input name="name" autocomplete="name"></label>
+              <label>Sportarten<input name="sports" placeholder="Radfahren, Laufen, Kraft…"></label>
+            </div>
+            <label>Trainingserfahrung<textarea name="training_background" rows="3" placeholder="Erfahrung, Trainingshistorie, Stärken und Schwächen…"></textarea></label>
+            <label>Typischer Wochenumfang<input name="typical_weekly_volume" placeholder="Zum Beispiel: 8–10 Stunden, 5 Trainingstage"></label>
+            <label>Langfristige Ziele<textarea name="goals" rows="4" placeholder="Saisonziele und Wettkampfziele…"></textarea></label>
+            <label>Verfügbarkeit pro Woche<textarea name="availability" rows="3" placeholder="Tage, Zeiten, bevorzugter Ruhetag…"></textarea></label>
+            <label>Rahmenbedingungen<textarea name="constraints" rows="3" placeholder="Verletzungen, Reisen, feste Grenzen…"></textarea></label>
+            <label>Ausrüstung<textarea name="equipment" rows="2" placeholder="Rad, Smarttrainer, Gym, Powermeter…"></textarea></label>
+            <label>Trainingspräferenzen<textarea name="training_preferences" rows="3" placeholder="Drinnen/draußen, bevorzugte Einheiten, Ruhetage…"></textarea></label>
+            <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Intervals.icu stehen…"></textarea></label>
+            <div class="form-grid">
+              <label>Coaching-Stil<input name="coaching_style"></label>
+              <label>Zeitzone<input name="timezone"></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="profile-section">
+            <legend>Zielwettkämpfe</legend>
+            <p>Speichere hier Termine und Ergebnisziele. Wettkämpfe aus Intervals.icu bleiben Teil des aktuellen Kalenderkontexts.</p>
+            <div id="competitionList" class="competition-list"></div>
+            <button type="button" id="addCompetitionButton" class="secondary-button">Wettkampf hinzufügen</button>
+          </fieldset>
+
+          <button type="submit">Athletenkontext speichern</button>
+        </form>
+        <div class="model-selector">
+          <label for="modelSelect">Coach-Modell<select id="modelSelect"></select></label>
+          <p id="modelDescription" class="fine-print">Wähle die Balance aus Qualität, Tempo und Kosten.</p>
+        </div>
+        <div class="diagnostic-actions">
+          <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
+          <p class="fine-print">Enthält aktuelle bereinigte Fehler und Laufzeitstatus, niemals API-Schlüssel oder Trainingsdaten.</p>
+        </div>
+        <section class="context-preview" aria-labelledby="contextPreviewTitle">
+          <div class="context-preview-heading">
+            <div><span class="eyebrow">TRANSPARENZ</span><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>
+            <button type="button" id="contextPreviewButton" class="secondary-button">Kontext laden</button>
+          </div>
+          <p class="fine-print context-preview-intro">Hier siehst du die gespeicherten Profil- und Wettkampfdaten, den aktuellen Trainingssnapshot und die daraus zusammengesetzte Nachricht an den Coach. Aktualisiert nach dem Speichern oder einer Synchronisierung.</p>
+          <div id="contextPreviewStatus" class="context-preview-status">Noch nicht geladen.</div>
+          <div id="contextPreviewContent" class="context-preview-content" hidden></div>
+        </section>
+      </section>
+
+      <section id="settingsPanel" class="panel" aria-label="Systemeinstellungen">
+        <div class="section-heading">
+          <div><span class="eyebrow">SYSTEM</span><h2>Anbindungen &amp; Server</h2></div>
+        </div>
+        <section class="settings-section">
+          <h3>Anbindungen</h3>
+          <p>Hier kannst du Zugangsdaten erneut setzen. Bestehende Werte werden niemals angezeigt. Leere Felder bleiben unverändert.</p>
+          <div class="connection-cards">
+            <article class="connection-card"><div><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span></div><button id="chatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
+            <article class="connection-card"><div><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="90"><small>-1 = alle verfügbaren Daten</small></label><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
+            <article class="connection-card"><div><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="30"><small>-1 = alle verfügbaren Daten</small></label><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
+          </div>
+          <p id="garminDetail" class="fine-print settings-message"></p>
+          <form id="credentialsForm" class="settings-form" autocomplete="off">
+            <label>OpenAI API-Key<input name="OPENAI_API_KEY" type="password" autocomplete="new-password" placeholder="Nur zum erneuten Setzen"></label>
+            <label>Intervals.icu API-Key<input name="INTERVALS_API_KEY" type="password" autocomplete="new-password" placeholder="Nur zum erneuten Setzen"></label>
+            <label>Garmin E-Mail<input name="GARMIN_EMAIL" type="email" autocomplete="off" placeholder="Optional"></label>
+            <label>Garmin Passwort<input name="GARMIN_PASSWORD" type="password" autocomplete="new-password" placeholder="Nur zum erneuten Setzen"></label>
+            <label>Garmin Tokenstore<input name="GARMINTOKENS" autocomplete="off" placeholder="z. B. /data/garmin_tokens"></label>
+            <label>Garmin Testdatei<input name="GARMIN_FIXTURE_PATH" autocomplete="off" placeholder="Optional, z. B. garmin-fixture.example.json"></label>
+            <button type="submit">Einstellungen speichern</button>
+          </form>
+          <p id="credentialsStatus" class="fine-print settings-message"></p>
+        </section>
+        <section class="settings-section">
+          <div class="settings-section-heading"><div><h3>Anwendung</h3><p>Nach Änderungen an Zugangsdaten ist ein Neustart erforderlich.</p></div><button id="restartButton" type="button" class="secondary-button">Anwendung neu starten</button></div>
+          <p id="restartStatus" class="fine-print settings-message"></p>
+        </section>
+        <section class="settings-section logs-section">
+          <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die letzten bereinigten Einträge aus dem Fehler- und Laufzeitprotokoll.</p></div><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button></div>
+          <pre id="logsOutput" class="logs-output">Logs werden beim Öffnen geladen…</pre>
+        </section>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Hauptnavigation">
+      <button class="nav-item active" data-panel="chatPanel"><span>●</span>Coach</button>
+      <button class="nav-item" data-panel="activitiesPanel"><span>✓</span>Absolviert</button>
+      <button class="nav-item" data-panel="workoutsPanel"><span>◇</span>Geplant</button>
+      <button class="nav-item" data-panel="dataPanel"><span>◌</span>Daten</button>
+      <button class="nav-item" data-panel="profilePanel"><span>○</span>Profil</button>
+      <button class="nav-item" data-panel="settingsPanel"><span>⚙</span>System</button>
+    </nav>
+  </div>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/app.js?v=56" defer></script>
+</body>
+</html>

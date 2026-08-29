@@ -1,0 +1,2732 @@
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import math
+import mimetypes
+import os
+import platform
+import re
+import sqlite3
+import signal
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from functools import wraps
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.request import Request, urlopen
+
+try:
+    from garminconnect import Garmin
+except ImportError:  # Optional dependency for installations without Garmin enabled.
+    Garmin = None  # type: ignore[assignment,misc]
+
+
+ROOT = Path(__file__).resolve().parent
+PUBLIC_DIR = ROOT / "public"
+DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
+DB_PATH = DATA_DIR / "intervals-coach.db"
+LOG_PATH = DATA_DIR / "intervals-coach.log"
+APP_VERSION = "0.5.0"
+MAX_BODY_BYTES = 1_000_000
+DB_LOCK = threading.RLock()
+SYNC_LOCK = threading.Lock()
+PERFORMANCE_LOCK = threading.Lock()
+OPENAI_CONVERSATION_LOCK = threading.Lock()
+MORNING_CHECKIN_LOCK = threading.Lock()
+GARMIN_LOCK = threading.Lock()
+PUSH_RE = re.compile(r"^/api/workouts/([0-9a-f-]+)/push$")
+DELETE_PLANNED_RE = re.compile(r"^/api/planned/([^/]+)$")
+DELETE_DRAFT_RE = re.compile(r"^/api/drafts/([0-9a-f-]+)$")
+PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
+
+
+def load_local_env() -> None:
+    """Load a sibling .env for direct local starts, without overriding the process environment."""
+    env_path = ROOT / ".env"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, value = line.partition("=")
+        key = key.strip()
+        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+load_local_env()
+
+
+@dataclass(frozen=True)
+class Config:
+    port: int = int(os.environ.get("PORT", "8090"))
+    openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
+    openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.6-sol")
+    intervals_api_key: str = os.environ.get("INTERVALS_API_KEY", "")
+    intervals_athlete_id: str = os.environ.get("INTERVALS_ATHLETE_ID", "0")
+    garmin_email: str = os.environ.get("GARMIN_EMAIL", "")
+    garmin_password: str = os.environ.get("GARMIN_PASSWORD", "")
+    garmin_tokenstore: str = os.environ.get("GARMINTOKENS", str(DATA_DIR / "garmin_tokens"))
+    # Optional local fixture for testing the Garmin UI/context without a Garmin
+    # login or the optional third-party package.
+    garmin_fixture_path: str = os.environ.get("GARMIN_FIXTURE_PATH", "")
+
+
+CONFIG = Config()
+LOGGER = logging.getLogger("intervals_coach")
+MODEL_OPTIONS = (
+    {"id": "gpt-5.6-sol", "label": "GPT-5.6 Sol", "description": "Maximale Qualität für komplexes Coaching"},
+    {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "description": "Ausgewogen bei Qualität, Tempo und Kosten"},
+    {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
+)
+
+
+def available_model_options() -> list[dict[str, str]]:
+    options = list(MODEL_OPTIONS)
+    if CONFIG.openai_model not in {option["id"] for option in options}:
+        options.insert(0, {"id": CONFIG.openai_model, "label": f"{CONFIG.openai_model} (konfiguriert)", "description": "In .env konfiguriert"})
+    return options
+
+
+def selected_model() -> str:
+    configured = {option["id"] for option in available_model_options()}
+    stored = get_kv("selected_model")
+    return stored if stored in configured else CONFIG.openai_model
+
+
+def save_model(model: Any) -> dict[str, str]:
+    model_id = str(model or "").strip()
+    if model_id not in {option["id"] for option in available_model_options()}:
+        raise AppError(400, "Nicht unterstützte Modellauswahl.")
+    set_kv("selected_model", model_id)
+    return {"model": model_id}
+
+
+def redact_text(value: str) -> str:
+    redacted = value
+    secret_values = (
+        CONFIG.openai_api_key,
+        CONFIG.intervals_api_key,
+    )
+    for secret_value in secret_values:
+        if secret_value and len(secret_value) >= 4:
+            redacted = redacted.replace(secret_value, "[REDACTED]")
+    redacted = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted)
+    redacted = re.sub(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+", r"\1[REDACTED]", redacted)
+    return redacted
+
+
+def sanitize_log_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return redact_text(value)
+    if isinstance(value, dict):
+        return {str(key): sanitize_log_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [sanitize_log_value(item) for item in value]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return redact_text(str(value))
+
+
+class JsonLogFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        entry: dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+            "level": record.levelname,
+            "event": getattr(record, "event", "log"),
+            "message": record.getMessage(),
+        }
+        context = getattr(record, "context", None)
+        if context:
+            entry["context"] = context
+        if record.exc_info:
+            entry["traceback"] = self.formatException(record.exc_info)
+        return json.dumps(sanitize_log_value(entry), ensure_ascii=False, separators=(",", ":"))
+
+
+def initialise_logging() -> None:
+    if LOGGER.handlers:
+        return
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    LOGGER.setLevel(logging.INFO)
+    formatter = JsonLogFormatter()
+    file_handler = RotatingFileHandler(
+        LOG_PATH,
+        maxBytes=1_000_000,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+    # Keep structured records on stdout so PowerShell's native-command runner
+    # does not misclassify normal log lines as errors.
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    LOGGER.addHandler(file_handler)
+    LOGGER.addHandler(console_handler)
+    LOGGER.propagate = False
+
+
+DEFAULT_PROFILE = {
+    "name": "",
+    "goals": "",
+    "sports": "Cycling",
+    "training_background": "",
+    "typical_weekly_volume": "",
+    "availability": "",
+    "constraints": "",
+    "equipment": "",
+    "training_preferences": "",
+    "performance_notes": "",
+    "weight_kg": "",
+    "body_fat_pct": "",
+    "height_cm": "",
+    "coaching_style": "Supportive, direct, and evidence-aware",
+    "timezone": os.environ.get("TZ", "Europe/Berlin"),
+}
+
+
+COACH_PROMPT = """You are the athlete's long-term endurance coach. You are operating inside a private coaching app and receive a fresh structured training snapshot on every turn.
+
+Priorities:
+1. Treat the STRUCTURED ATHLETE CONTEXT supplied by the server on this turn as the current source of truth. Conversation history provides dialogue continuity but may contain stale athlete facts.
+   Respect the athlete's stated goals, target events, availability, constraints, recent load, recovery, and existing calendar.
+   When planning, explicitly weigh recent training load (including CTL/ATL/TSB when available), the last several sessions, sleep duration/score, readiness, fatigue, and the upcoming calendar.
+2. Be conservative when data is missing, contradictory, or shows unusual fatigue. Never diagnose disease or injury. Recommend qualified medical help for alarming symptoms, chest pain, fainting, or persistent injury.
+3. Explain recommendations briefly and distinguish measured facts from inference.
+4. When you create a workout, use save_workout_library_entries. The app automatically saves it to the athlete's Intervals.icu training library and reports the result; never claim it was scheduled on the calendar unless that actually happened.
+5. When the athlete asks for one or more workouts or a plan, use save_workout_library_entries. Use valid Intervals.icu workout text in description. Examples include '- 15m 55-70% Warmup', '4x\n- 5m 105%\n- 5m 55%', and '- 10m 50-60% Cooldown'. Prefer targets appropriate to the athlete's sport and available data. Reuse the local training library when a suitable template exists.
+6. Do not overwrite or duplicate existing calendar workouts. Mention conflicts and ask before replacing anything.
+7. Keep normal chat answers concise and practical.
+8. When the athlete asks for the latest/recent units or explicitly asks to load and analyse current training, use the freshly loaded snapshot supplied by the app and say when the refresh failed or data may be stale.
+9. Never silently change durable athlete facts, target events, constraints, or preferences based only on chat. Explain the proposed change and ask the athlete to confirm it in the Profile screen.
+10. Reply in German unless the athlete explicitly asks for another language. Use metric units and German date conventions.
+11. Treat values labelled as AI estimates as uncertain performance inferences, never as measured facts. Do not present them as medical assessments.
+"""
+
+
+WORKOUT_TOOL = {
+    "type": "function",
+    "name": "save_workout_library_entries",
+    "description": "Create one or more workouts and save them automatically to the athlete's Intervals.icu training library. These are library templates; do not schedule calendar events automatically.",
+    "strict": True,
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "workouts": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 14,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "sport": {"type": "string", "description": "Intervals.icu activity type such as Ride, Run, Swim, or WeightTraining"},
+                        "name": {"type": "string"},
+                        "description": {"type": "string", "description": "Workout instructions in native Intervals.icu workout text"},
+                        "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 600, "description": "Approximate duration; Intervals.icu derives the final duration from the workout text"},
+                        "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"], "description": "Preferred target type for later calendar scheduling"},
+                    },
+                    "required": ["sport", "name", "description", "duration_minutes", "target"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["workouts"],
+        "additionalProperties": False,
+    },
+}
+
+
+class AppError(Exception):
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+def serialise_conversation(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with OPENAI_CONVERSATION_LOCK:
+            return function(*args, **kwargs)
+    return wrapped
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@contextmanager
+def database():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(DB_PATH, timeout=20)
+    db.row_factory = sqlite3.Row
+    try:
+        yield db
+        db.commit()
+    finally:
+        db.close()
+
+
+def initialise_database() -> None:
+    with DB_LOCK, database() as db:
+        db.executescript(
+            """
+            PRAGMA journal_mode=WAL;
+            CREATE TABLE IF NOT EXISTS kv (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS workout_drafts (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                status TEXT NOT NULL,
+                intervals_event_id TEXT,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS workout_library (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS competitions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                sport TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                distance TEXT NOT NULL,
+                target TEXT NOT NULL,
+                course_profile TEXT NOT NULL,
+                notes TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        if get_kv("profile", db) is None:
+            set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
+
+
+def get_kv(key: str, db: sqlite3.Connection | None = None) -> str | None:
+    if db is not None:
+        row = db.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+    with DB_LOCK, database() as owned:
+        return get_kv(key, owned)
+
+
+SYNC_PERIOD_DEFAULTS = {"intervals": 90, "garmin": 30}
+ALL_SYNC_DAYS = -1
+SYNC_CHUNK_DAYS = 90
+SYNC_EARLIEST_DATE = date(2000, 1, 1)
+
+
+def sync_period(source: str) -> int:
+    default = SYNC_PERIOD_DEFAULTS[source]
+    try:
+        value = int(get_kv(f"{source}_sync_days") or default)
+    except (TypeError, ValueError):
+        value = default
+    if value == ALL_SYNC_DAYS:
+        return ALL_SYNC_DAYS
+    return max(1, min(value, 365 if source == "intervals" else 90))
+
+
+def set_sync_period(source: str, value: Any) -> int:
+    try:
+        days = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Der Synchronisationszeitraum muss eine ganze Zahl sein.") from exc
+    maximum = 365 if source == "intervals" else 90
+    if days != ALL_SYNC_DAYS and not 1 <= days <= maximum:
+        raise AppError(400, f"Der Zeitraum für {source} muss -1 oder zwischen 1 und {maximum} Tagen liegen.")
+    set_kv(f"{source}_sync_days", str(days))
+    return days
+
+
+def sync_date_windows(days: int, end_date: date | None = None) -> list[tuple[date, date]]:
+    """Split long/all-time syncs into API-safe date windows."""
+    newest = end_date or date.today()
+    oldest = SYNC_EARLIEST_DATE if days == ALL_SYNC_DAYS else newest - timedelta(days=max(1, days) - 1)
+    windows: list[tuple[date, date]] = []
+    cursor = oldest
+    while cursor <= newest:
+        window_end = min(newest, cursor + timedelta(days=SYNC_CHUNK_DAYS - 1))
+        windows.append((cursor, window_end))
+        cursor = window_end + timedelta(days=1)
+    return windows
+
+
+def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
+    if db is not None:
+        db.execute(
+            "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (key, value, utc_now()),
+        )
+        return
+    with DB_LOCK, database() as owned:
+        set_kv(key, value, owned)
+
+
+def garmin_snapshot() -> dict[str, Any]:
+    try:
+        value = json.loads(get_kv("garmin_snapshot") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def garmin_configured() -> bool:
+    return bool(CONFIG.garmin_fixture_path or (Garmin is not None and (CONFIG.garmin_email and CONFIG.garmin_password)))
+
+
+def garmin_fixture_path() -> Path | None:
+    raw = (CONFIG.garmin_fixture_path or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() else ROOT / path
+
+
+def activity_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def activity_kind(activity: Any) -> str:
+    if not isinstance(activity, dict):
+        return "other"
+    value = " ".join(str(activity.get(key) or "") for key in ("type", "sport", "sport_type", "activityType", "activityName", "name")).casefold()
+    if any(term in value for term in ("ride", "bike", "cycling", "rad", "velo", "bicycle")):
+        return "cycling"
+    if any(term in value for term in ("run", "lauf", "jog")):
+        return "running"
+    if any(term in value for term in ("swim", "schwimm")):
+        return "swimming"
+    if any(term in value for term in ("strength", "kraft", "weight", "gym")):
+        return "strength"
+    return "other"
+
+
+def garmin_activity_duplicates_intervals(garmin_activity: Any, intervals_activities: list[dict[str, Any]]) -> bool:
+    """Treat the Intervals/Wahoo recording as canonical when Garmin is a near duplicate."""
+    if not isinstance(garmin_activity, dict):
+        return False
+    garmin_start = activity_datetime(garmin_activity.get("startTimeLocal") or garmin_activity.get("start_time_local"))
+    if garmin_start is None:
+        return False
+    garmin_duration = as_number(garmin_activity.get("duration") or garmin_activity.get("movingTime"))
+    garmin_distance = as_number(garmin_activity.get("distance"))
+    garmin_kind = activity_kind(garmin_activity)
+    for intervals_activity in intervals_activities:
+        intervals_start = activity_datetime(intervals_activity.get("start_date_local") or intervals_activity.get("start_date"))
+        # Garmin and Wahoo/Intervals recordings can start a little apart (for
+        # example when one device is started before the other). Treat starts
+        # within half an hour as candidates for the near-duplicate checks
+        # below, while still requiring matching duration/distance.
+        if intervals_start is None or abs((garmin_start - intervals_start).total_seconds()) > 30 * 60:
+            continue
+        if garmin_kind != activity_kind(intervals_activity) and garmin_kind != "other" and activity_kind(intervals_activity) != "other":
+            continue
+        intervals_duration = as_number(intervals_activity.get("moving_time"))
+        intervals_distance = as_number(intervals_activity.get("distance"))
+        compared = 0
+        matches = 0
+        if garmin_duration is not None and intervals_duration is not None:
+            compared += 1
+            if abs(garmin_duration - intervals_duration) <= max(120, intervals_duration * 0.10):
+                matches += 1
+        if garmin_distance is not None and intervals_distance is not None and garmin_distance > 0 and intervals_distance > 0:
+            compared += 1
+            if abs(garmin_distance - intervals_distance) <= max(500, intervals_distance * 0.10):
+                matches += 1
+        if compared and matches == compared:
+            return True
+    return False
+
+
+def filter_garmin_activities(activities: Any, intervals_activities: Any) -> tuple[list[dict[str, Any]], int]:
+    garmin_list = [item for item in activities if isinstance(item, dict)] if isinstance(activities, list) else []
+    intervals_list = [item for item in intervals_activities if isinstance(item, dict)] if isinstance(intervals_activities, list) else []
+    filtered = [item for item in garmin_list if not garmin_activity_duplicates_intervals(item, intervals_list)]
+    return filtered, len(garmin_list) - len(filtered)
+
+
+def load_garmin_fixture(days: int) -> dict[str, Any]:
+    path = garmin_fixture_path()
+    if path is None:
+        raise AppError(503, "GARMIN_FIXTURE_PATH ist nicht konfiguriert.")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise AppError(503, f"Garmin-Testdatei nicht gefunden: {path}") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AppError(503, f"Garmin-Testdatei konnte nicht gelesen werden: {exc}") from exc
+    if not isinstance(value, dict):
+        raise AppError(503, "Die Garmin-Testdatei muss ein JSON-Objekt enthalten.")
+    today = local_now().date()
+    start = SYNC_EARLIEST_DATE if days == ALL_SYNC_DAYS else today - timedelta(days=max(1, min(days, 90)) - 1)
+    payload = dict(value)
+    payload.setdefault("start", start.isoformat())
+    payload.setdefault("end", today.isoformat())
+    payload["synced_at"] = utc_now()
+    payload.setdefault("errors", [])
+    payload["source"] = "fixture"
+    return payload
+
+
+def sync_garmin(days: int = 30) -> dict[str, Any]:
+    fixture = garmin_fixture_path()
+    if Garmin is None and fixture is None:
+        raise AppError(503, "Die optionale Garmin-Bibliothek ist nicht installiert. Für lokale Tests kann GARMIN_FIXTURE_PATH gesetzt werden.")
+    if fixture is not None:
+        if not GARMIN_LOCK.acquire(blocking=False):
+            return {"status": "already_running"}
+        try:
+            set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
+            payload = load_garmin_fixture(days)
+            canonical = latest_snapshot()
+            payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
+            set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            set_kv("last_garmin_sync_at", payload["synced_at"])
+            set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
+            return {"status": "ok", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or [])}
+        finally:
+            set_kv("garmin_sync_status", "")
+            GARMIN_LOCK.release()
+    if not CONFIG.garmin_email and not Path(CONFIG.garmin_tokenstore).exists():
+        raise AppError(503, "GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist nicht konfiguriert.")
+    if not GARMIN_LOCK.acquire(blocking=False):
+        return {"status": "already_running"}
+    try:
+        today = local_now().date()
+        windows = sync_date_windows(days, today)
+        start = windows[0][0]
+        client = Garmin(CONFIG.garmin_email or None, CONFIG.garmin_password or None)
+        mfa_status, _ = client.login(CONFIG.garmin_tokenstore)
+        if mfa_status:
+            raise AppError(401, "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb des Servers eingerichtet werden.")
+        payload: dict[str, Any] = {"synced_at": utc_now(), "start": start.isoformat(), "end": today.isoformat(), "errors": []}
+        set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
+
+        def fetch_range(key: str, fetch: Any, window_start: date, window_end: date) -> None:
+            try:
+                value = fetch(window_start.isoformat(), window_end.isoformat())
+                if isinstance(value, list):
+                    payload.setdefault(key, []).extend(value)
+                elif value is not None and key not in payload:
+                    payload[key] = value
+            except Exception as exc:
+                payload["errors"].append({"source": key, "message": redact_text(str(exc))[:500]})
+                LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": key}}, exc_info=True)
+
+        for index, (window_start, window_end) in enumerate(windows, 1):
+            set_kv("garmin_sync_status", f"Garmin: Zeitraum {index}/{len(windows)} wird synchronisiert…")
+            fetch_range("sleep", client.get_sleep_daily, window_start, window_end)
+            fetch_range("hrv", client.get_hrv_data_range, window_start, window_end)
+            fetch_range("body_battery", client.get_body_battery, window_start, window_end)
+            fetch_range("activities", client.get_activities_by_date, window_start, window_end)
+        for key, fetch in {
+            "readiness": lambda: client.get_training_readiness(today.isoformat()),
+            "race_predictions": client.get_race_predictions,
+        }.items():
+            try:
+                payload[key] = fetch()
+            except Exception as exc:
+                payload["errors"].append({"source": key, "message": redact_text(str(exc))[:500]})
+                LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": key}}, exc_info=True)
+        payload["activities"] = deduplicate_api_records(payload.get("activities", []))
+        canonical = latest_snapshot()
+        payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
+        set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        set_kv("last_garmin_sync_at", payload["synced_at"])
+        set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
+        return {"status": "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or [])}
+    finally:
+        set_kv("garmin_sync_status", "")
+        GARMIN_LOCK.release()
+
+
+def garmin_public_state() -> dict[str, Any]:
+    snapshot = garmin_snapshot()
+    canonical = latest_snapshot()
+    filtered_activities, skipped = filter_garmin_activities(snapshot.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
+    raw_error = get_kv("last_garmin_error") or ""
+    try:
+        parsed_error = json.loads(raw_error) if raw_error else None
+    except json.JSONDecodeError:
+        parsed_error = raw_error
+    return {
+        "available": Garmin is not None or garmin_fixture_path() is not None,
+        "configured": bool(CONFIG.garmin_fixture_path or CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()),
+        "source": snapshot.get("source") or ("library" if Garmin is not None else None),
+        "last_sync_at": get_kv("last_garmin_sync_at"),
+        "last_error": parsed_error,
+        "activities": len(filtered_activities),
+        "duplicate_activities_skipped": skipped,
+        "has_sleep": bool(snapshot.get("sleep")),
+        "has_hrv": bool(snapshot.get("hrv")),
+        "has_readiness": bool(snapshot.get("readiness")),
+        "has_race_predictions": bool(snapshot.get("race_predictions")),
+    }
+
+
+def garmin_coach_context() -> dict[str, Any]:
+    snapshot = garmin_snapshot()
+    activities = snapshot.get("activities") if isinstance(snapshot.get("activities"), list) else []
+    canonical = latest_snapshot()
+    filtered_activities, skipped = filter_garmin_activities(activities, canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
+    return {
+        "synced_at": snapshot.get("synced_at"),
+        "start": snapshot.get("start"),
+        "end": snapshot.get("end"),
+        "sleep": snapshot.get("sleep"),
+        "hrv": snapshot.get("hrv"),
+        "readiness": snapshot.get("readiness"),
+        "body_battery": snapshot.get("body_battery"),
+        "race_predictions": snapshot.get("race_predictions"),
+        "recent_activities": [selected(activity, ("activityId", "activityName", "activityType", "startTimeLocal", "duration", "distance", "averageHR", "maxHR", "calories", "trainingEffect", "vO2MaxValue")) for activity in filtered_activities[:50] if isinstance(activity, dict)],
+        "duplicate_activities_skipped": skipped,
+        "errors": snapshot.get("errors", []),
+    }
+
+
+def add_message(role: str, content: str) -> dict[str, Any]:
+    created_at = utc_now()
+    with DB_LOCK, database() as db:
+        cursor = db.execute(
+            "INSERT INTO messages(role, content, created_at) VALUES (?, ?, ?)",
+            (role, content.strip(), created_at),
+        )
+        return {"id": cursor.lastrowid, "role": role, "content": content.strip(), "created_at": created_at}
+
+
+def list_messages(limit: int = 100) -> list[dict[str, Any]]:
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT id, role, content, created_at FROM messages ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(row) for row in reversed(rows)]
+
+
+def normalize_profile(value: dict[str, Any]) -> dict[str, str]:
+    result = dict(DEFAULT_PROFILE)
+    for key in result:
+        if key in value:
+            result[key] = str(value[key]).strip()[:4000]
+    return result
+
+
+def get_profile() -> dict[str, str]:
+    try:
+        return normalize_profile(json.loads(get_kv("profile") or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        return dict(DEFAULT_PROFILE)
+
+
+def save_profile(profile: dict[str, Any]) -> dict[str, str]:
+    normalized = normalize_profile(profile)
+    set_kv("profile", json.dumps(normalized, ensure_ascii=False))
+    return normalized
+
+
+COMPETITION_TEXT_LIMITS = {
+    "name": 200,
+    "sport": 80,
+    "distance": 80,
+    "target": 1000,
+    "course_profile": 2000,
+    "notes": 2000,
+}
+
+
+def normalize_competition(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise AppError(400, "Jeder Wettkampf muss ein Objekt sein.")
+    name = str(value.get("name") or "").strip()[:COMPETITION_TEXT_LIMITS["name"]]
+    if not name:
+        raise AppError(400, "Jeder Wettkampf benötigt einen Namen.")
+    try:
+        event_date = date.fromisoformat(str(value.get("event_date") or "")).isoformat()
+    except ValueError as exc:
+        raise AppError(400, f"Wettkampf „{name}“ benötigt ein gültiges Datum.") from exc
+    priority = str(value.get("priority") or "B").strip().upper()
+    if priority not in {"A", "B", "C"}:
+        raise AppError(400, f"Die Priorität für „{name}“ muss A, B oder C sein.")
+    raw_id = str(value.get("id") or "").strip()
+    try:
+        competition_id = str(uuid.UUID(raw_id))
+    except (ValueError, AttributeError):
+        competition_id = str(uuid.uuid4())
+    result = {
+        "id": competition_id,
+        "name": name,
+        "event_date": event_date,
+        "priority": priority,
+    }
+    for field, limit in COMPETITION_TEXT_LIMITS.items():
+        if field == "name":
+            continue
+        default = "Cycling" if field == "sport" else ""
+        result[field] = str(value.get(field) or default).strip()[:limit]
+    return result
+
+
+def list_competitions() -> list[dict[str, str]]:
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT id, name, event_date, sport, priority, distance, target, course_profile, notes "
+            "FROM competitions ORDER BY event_date, priority, name"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
+    if not isinstance(profile, dict):
+        raise AppError(400, "Das Profil muss ein Objekt sein.")
+    if not isinstance(competitions, list):
+        raise AppError(400, "Wettkämpfe müssen als Liste übergeben werden.")
+    if len(competitions) > 20:
+        raise AppError(400, "Es können maximal 20 Wettkämpfe gespeichert werden.")
+    normalized_profile = normalize_profile(profile)
+    normalized_competitions = [normalize_competition(value) for value in competitions]
+    competition_ids = [competition["id"] for competition in normalized_competitions]
+    if len(competition_ids) != len(set(competition_ids)):
+        raise AppError(400, "Wettkampf-IDs müssen eindeutig sein.")
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        set_kv("profile", json.dumps(normalized_profile, ensure_ascii=False), db)
+        for competition in normalized_competitions:
+            db.execute(
+                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET name=excluded.name, event_date=excluded.event_date, sport=excluded.sport, "
+                "priority=excluded.priority, distance=excluded.distance, target=excluded.target, "
+                "course_profile=excluded.course_profile, notes=excluded.notes, updated_at=excluded.updated_at",
+                (
+                    competition["id"], competition["name"], competition["event_date"], competition["sport"],
+                    competition["priority"], competition["distance"], competition["target"],
+                    competition["course_profile"], competition["notes"], now, now,
+                ),
+            )
+        if competition_ids:
+            placeholders = ",".join("?" for _ in competition_ids)
+            db.execute(f"DELETE FROM competitions WHERE id NOT IN ({placeholders})", competition_ids)
+        else:
+            db.execute("DELETE FROM competitions")
+    return {"profile": normalized_profile, "competitions": list_competitions()}
+
+
+def http_json(
+    method: str,
+    url: str,
+    payload: Any | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: int = 45,
+) -> Any:
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    request_headers = {"Accept": "application/json", "User-Agent": f"IntervalsCoach/{APP_VERSION}"}
+    if body is not None:
+        request_headers["Content-Type"] = "application/json"
+    request_headers.update(headers or {})
+    request = Request(url, data=body, headers=request_headers, method=method)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+            return json.loads(raw) if raw else None
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        parsed_url = urlparse(url)
+        LOGGER.error(
+            "Upstream HTTP request failed",
+            extra={
+                "event": "upstream_http_error",
+                "context": {"method": method, "host": parsed_url.netloc, "path": parsed_url.path, "status": exc.code},
+            },
+            exc_info=True,
+        )
+        raise AppError(502, f"Anfrage an externen Dienst fehlgeschlagen ({exc.code}): {detail or exc.reason}") from exc
+    except (URLError, TimeoutError) as exc:
+        parsed_url = urlparse(url)
+        LOGGER.error(
+            "Upstream service is unavailable",
+            extra={
+                "event": "upstream_network_error",
+                "context": {"method": method, "host": parsed_url.netloc, "path": parsed_url.path},
+            },
+            exc_info=True,
+        )
+        raise AppError(502, f"Externer Dienst ist nicht erreichbar: {exc}") from exc
+
+
+class IntervalsClient:
+    def __init__(self, config: Config = CONFIG):
+        self.config = config
+        credentials = base64.b64encode(f"API_KEY:{config.intervals_api_key}".encode()).decode()
+        self.headers = {"Authorization": f"Basic {credentials}"}
+        self.base = "https://intervals.icu/api/v1"
+
+    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        query = "?" + urlencode(params, doseq=True) if params else ""
+        return http_json("GET", self.base + path + query, headers=self.headers)
+
+    def post(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
+        query = "?" + urlencode(params, doseq=True) if params else ""
+        return http_json("POST", self.base + path + query, payload, self.headers)
+
+    def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        query = "?" + urlencode(params, doseq=True) if params else ""
+        return http_json("DELETE", self.base + path + query, headers=self.headers)
+
+    def get_workout_library(self) -> list[dict[str, Any]]:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        result = self.get(f"/athlete/{athlete}/workouts")
+        if not isinstance(result, list):
+            raise AppError(502, "Intervals.icu hat keine Trainingsbibliothek zurÃ¼ckgegeben.")
+        fields = (
+            "id", "name", "description", "type", "moving_time", "distance",
+            "target", "workout_doc", "icu_training_load", "icu_intensity", "indoor",
+            "tags", "folder_id",
+        )
+        return [selected(item, fields) for item in result if isinstance(item, dict)]
+
+    def create_library_workouts(self, workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        payload = []
+        for workout in workouts:
+            payload.append({
+                "name": str(workout.get("name") or "Coach-Einheit")[:200],
+                "description": str(workout.get("description") or "")[:12000],
+                "type": str(workout.get("sport") or "Ride")[:80],
+            })
+        result = self.post(f"/athlete/{athlete}/workouts/bulk", payload)
+        if not isinstance(result, list):
+            raise AppError(502, "Intervals.icu hat keine Trainingsbibliothek-Einheiten zurÃ¼ckgegeben.")
+        return [item for item in result if isinstance(item, dict)]
+
+    def plan_library_workout(self, workout_id: str, workout: dict[str, Any], plan_date: str) -> dict[str, Any]:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        payload = workout_event_payload(f"library-{workout_id}-{plan_date}", {
+            "date": plan_date,
+            "sport": workout.get("type") or workout.get("sport") or "Ride",
+            "name": workout.get("name") or "Bibliotheks-Einheit",
+            "description": workout.get("description") or "",
+            "duration_minutes": max(5, round(float(workout.get("moving_time") or 3600) / 60)),
+            "target": workout.get("target") or "AUTO",
+        })
+        result = self.post(f"/athlete/{athlete}/events/bulk", [payload], {"upsert": "true"})
+        if not isinstance(result, list) or not result:
+            raise AppError(502, "Intervals.icu hat keine geplante Einheit zurÃ¼ckgegeben.")
+        return result[0]
+
+    def fetch_snapshot(self, activity_days: int = 42) -> dict[str, Any]:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        today = date.today()
+        future_end = today + timedelta(days=28)
+        activities: list[Any] = []
+        wellness: list[Any] = []
+        for window_start, window_end in sync_date_windows(activity_days, today):
+            range_params = {"oldest": window_start.isoformat(), "newest": window_end.isoformat()}
+            activity_page = self.get(f"/athlete/{athlete}/activities", {**range_params, "limit": 500})
+            wellness_page = self.get(f"/athlete/{athlete}/wellness", range_params)
+            if isinstance(activity_page, list):
+                activities.extend(activity_page)
+            if isinstance(wellness_page, list):
+                wellness.extend(wellness_page)
+        activities = deduplicate_api_records(activities)
+        wellness = deduplicate_api_records(wellness)
+        events = self.get(
+            f"/athlete/{athlete}/events",
+            {"oldest": today.isoformat(), "newest": future_end.isoformat()},
+        )
+        athlete_data = self.get(f"/athlete/{athlete}")
+        return compact_snapshot(athlete_data, activities, wellness, events, history_days=activity_days)
+
+    def fetch_performance_snapshot(self, existing_snapshot: dict[str, Any] | None) -> dict[str, Any]:
+        """Refresh athlete settings and wellness only; do not request activities or calendar events."""
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        today = date.today()
+        wellness_start = today - timedelta(days=90)
+        athlete_data = self.get(f"/athlete/{athlete}")
+        wellness = self.get(
+            f"/athlete/{athlete}/wellness",
+            {"oldest": wellness_start.isoformat(), "newest": today.isoformat()},
+        )
+        existing_snapshot = existing_snapshot if isinstance(existing_snapshot, dict) else {}
+        return compact_snapshot(
+            athlete_data,
+            existing_snapshot.get("recent_activities", []),
+            wellness,
+            existing_snapshot.get("upcoming_calendar", []),
+            history_days=90,
+        )
+
+    def push_workout(self, draft_id: str, workout: dict[str, Any]) -> dict[str, Any]:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        payload = workout_event_payload(draft_id, workout)
+        result = self.post(f"/athlete/{athlete}/events/bulk", [payload], {"upsert": "true"})
+        if not isinstance(result, list) or not result:
+            raise AppError(502, "Intervals.icu hat nach dem Übertragen keine Kalendereinheit zurückgegeben.")
+        return result[0]
+
+    def delete_event(self, event_id: str) -> Any:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        return self.delete(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")
+
+
+def deduplicate_api_records(records: list[Any]) -> list[Any]:
+    """Merge adjacent date-window responses without duplicating boundary rows."""
+    result: list[Any] = []
+    seen: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            result.append(record)
+            continue
+        identifier = first_present(record, ("id", "activityId", "external_id"))
+        if identifier in (None, ""):
+            result.append(record)
+            continue
+        key = str(identifier)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(record)
+    return result
+
+
+def selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        return {}
+    return {key: item[key] for key in fields if key in item and item[key] is not None}
+
+
+def compact_sport_settings(athlete: Any) -> list[dict[str, Any]]:
+    if not isinstance(athlete, dict):
+        return []
+    raw_settings = athlete.get("sportSettings") or athlete.get("sport_settings") or []
+    if not isinstance(raw_settings, list):
+        return []
+    fields = (
+        "id", "types", "ftp", "indoor_ftp", "eftp", "eFTP", "w_prime", "p_max",
+        "lthr", "max_hr", "threshold_pace", "pace_units", "vo2max", "vo2_max",
+        "running_vo2max", "cycling_vo2max",
+    )
+    return [selected(item, fields) for item in raw_settings if isinstance(item, dict)][:30]
+
+
+def compact_wellness_sport_info(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    fields = (
+        "id", "type", "types", "sport", "sport_type", "ftp", "eftp", "eFTP", "wPrime", "w_prime", "pMax", "p_max",
+        "lthr", "threshold_pace", "pace_units", "vo2max", "vo2_max", "running_vo2max", "cycling_vo2max",
+    )
+    return [selected(item, fields) for item in value if isinstance(item, dict)][:30]
+
+
+def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, history_days: int = 42) -> dict[str, Any]:
+    activity_fields = (
+        "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain",
+        "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "average_heartrate",
+        "max_heartrate", "average_watts", "weighted_average_watts", "average_speed", "max_speed",
+        "icu_weighted_avg_speed", "icu_pace", "feel", "icu_rpe", "paired_event_id",
+    )
+    wellness_fields = (
+        "id", "ctl", "ctLoad", "atl", "atlLoad", "tsb", "form", "rampRate", "weight", "bodyFat",
+        "body_fat", "restingHR", "hrv", "sleepSecs", "sleepScore", "fatigue", "soreness", "stress",
+        "mood", "readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness",
+    )
+    event_fields = (
+        "id", "start_date_local", "category", "name", "description", "type", "moving_time",
+        "distance", "icu_training_load", "icu_intensity", "target", "external_id",
+    )
+    athlete_fields = (
+        "id", "name", "sex", "weight", "height", "height_cm", "bodyFat", "body_fat", "dob",
+        "icu_ftp", "icu_w_prime", "max_hr", "lthr", "vo2max", "vo2_max", "running_vo2max", "cycling_vo2max",
+    )
+    compact_activities = [selected(x, activity_fields) for x in (activities or [])]
+    compact_wellness = [
+        {**selected(x, wellness_fields), "sport_info": compact_wellness_sport_info(x.get("sportInfo") if isinstance(x, dict) else None)}
+        for x in (wellness or []) if isinstance(x, dict)
+    ]
+    if history_days != ALL_SYNC_DAYS:
+        compact_activities = compact_activities[:500]
+        compact_wellness = compact_wellness[-(max(42, history_days) + 1):]
+    return {
+        "synced_at": utc_now(),
+        "athlete": {**selected(athlete, athlete_fields), "sport_settings": compact_sport_settings(athlete)},
+        "recent_activities": compact_activities,
+        "recent_wellness": compact_wellness,
+        "upcoming_calendar": [selected(x, event_fields) for x in (events or [])][:200],
+    }
+
+
+def workout_event_payload(draft_id: str, workout: dict[str, Any]) -> dict[str, Any]:
+    try:
+        workout_date = date.fromisoformat(str(workout["date"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AppError(400, "Das Trainingsdatum muss das Format JJJJ-MM-TT haben.") from exc
+    if workout_date < date.today() - timedelta(days=1):
+        raise AppError(400, "Eine Einheit in der Vergangenheit wird nicht übertragen.")
+    duration = int(workout.get("duration_minutes", 0))
+    if duration < 5 or duration > 600:
+        raise AppError(400, "Die Trainingsdauer muss zwischen 5 und 600 Minuten liegen.")
+    return {
+        "category": "WORKOUT",
+        "start_date_local": workout_date.isoformat() + "T00:00:00",
+        "type": str(workout.get("sport") or "Ride")[:80],
+        "name": str(workout.get("name") or "Coach workout")[:200],
+        "description": str(workout.get("description") or "")[:12000],
+        "moving_time": duration * 60,
+        "target": workout.get("target") if workout.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
+        "external_id": f"intervals-coach-{draft_id}",
+    }
+
+
+def save_workout_drafts(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not isinstance(workouts, list) or not workouts:
+        raise AppError(400, "Mindestens eine Einheit ist erforderlich.")
+    created: list[dict[str, Any]] = []
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        for workout in workouts:
+            draft_id = str(uuid.uuid4())
+            workout_event_payload(draft_id, workout)
+            db.execute(
+                "INSERT INTO workout_drafts(id, payload, status, created_at, updated_at) VALUES (?, ?, 'draft', ?, ?)",
+                (draft_id, json.dumps(workout, ensure_ascii=False), now, now),
+            )
+            created.append({"id": draft_id, "status": "draft", **workout, "created_at": now, "updated_at": now})
+    return created
+
+
+def list_workout_drafts(limit: int = 50) -> list[dict[str, Any]]:
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT * FROM workout_drafts ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    drafts = []
+    for row in rows:
+        drafts.append({
+            "id": row["id"],
+            "status": row["status"],
+            "intervals_event_id": row["intervals_event_id"],
+            "error": row["error"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            **json.loads(row["payload"]),
+        })
+    return drafts
+
+
+def normalize_library_workout(workout: Any) -> dict[str, Any]:
+    if not isinstance(workout, dict):
+        raise AppError(400, "Jede Bibliothekseinheit muss ein Objekt sein.")
+    raw_id = workout.get("id")
+    if raw_id in (None, ""):
+        raise AppError(400, "Bibliothekseinheit ohne Intervals.icu-ID.")
+    result = {
+        key: value for key, value in workout.items()
+        if key in {
+            "id", "name", "description", "type", "moving_time", "distance", "target",
+            "workout_doc", "icu_training_load", "icu_intensity", "indoor", "tags", "folder_id",
+        }
+    }
+    result["id"] = str(raw_id)
+    result["name"] = str(result.get("name") or "Bibliotheks-Einheit")[:200]
+    result["description"] = str(result.get("description") or "")[:12000]
+    result["type"] = str(result.get("type") or "Ride")[:80]
+    return result
+
+
+def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool = False) -> list[dict[str, Any]]:
+    normalized = [normalize_library_workout(item) for item in workouts]
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        for workout in normalized:
+            db.execute(
+                "INSERT INTO workout_library(id, payload, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
+                (workout["id"], json.dumps(workout, ensure_ascii=False), now),
+            )
+        if remove_missing:
+            ids = [item["id"] for item in normalized]
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                db.execute(f"DELETE FROM workout_library WHERE id NOT IN ({placeholders})", ids)
+            else:
+                db.execute("DELETE FROM workout_library")
+    return normalized
+
+
+def list_workout_library(limit: int = 500) -> list[dict[str, Any]]:
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT payload FROM workout_library ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT ?",
+            (limit,),
+        ).fetchall()
+    result = []
+    for row in rows:
+        try:
+            result.append(json.loads(row["payload"]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return result
+
+
+def sync_workout_library(reason: str = "manual") -> dict[str, Any]:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    workouts = IntervalsClient().get_workout_library()
+    normalized = upsert_workout_library(workouts, remove_missing=True)
+    set_kv("last_library_sync_at", utc_now())
+    set_kv("last_library_sync_error", "")
+    add_message("event", f"Trainingsbibliothek aktualisiert ({reason}, {len(normalized)} Einheiten).")
+    return {"status": "ok", "workouts": len(normalized), "synced_at": get_kv("last_library_sync_at")}
+
+
+def create_library_workouts(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    if not isinstance(workouts, list) or not workouts:
+        raise AppError(400, "Mindestens eine Bibliothekseinheit ist erforderlich.")
+    if len(workouts) > 14:
+        raise AppError(400, "Es kÃ¶nnen maximal 14 Bibliothekseinheiten gleichzeitig angelegt werden.")
+    for workout in workouts:
+        if not isinstance(workout, dict) or not str(workout.get("description") or "").strip():
+            raise AppError(400, "Jede Bibliothekseinheit benÃ¶tigt Workout-Text in description.")
+    created = IntervalsClient().create_library_workouts(workouts)
+    normalized = upsert_workout_library(created)
+    set_kv("last_library_sync_at", utc_now())
+    set_kv("last_library_sync_error", "")
+    return normalized
+
+
+def plan_library_workout(workout_id: str, plan_date: str) -> dict[str, Any]:
+    normalized_id = str(workout_id or "").strip()
+    if not normalized_id or len(normalized_id) > 120 or "/" in normalized_id:
+        raise AppError(400, "UngÃ¼ltige Bibliothekseinheiten-ID.")
+    try:
+        date.fromisoformat(str(plan_date))
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.") from exc
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT payload FROM workout_library WHERE id = ?", (normalized_id,)).fetchone()
+    if not row:
+        raise AppError(404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.")
+    workout = json.loads(row["payload"])
+    event = IntervalsClient().plan_library_workout(normalized_id, workout, str(plan_date))
+    add_message("event", f"Bibliothekseinheit â€ž{workout.get('name', 'Einheit')}â€œ wurde fÃ¼r den {plan_date} eingeplant.")
+    return {"status": "planned", "workout_id": normalized_id, "event": event}
+
+
+def delete_workout_draft(draft_id: str) -> dict[str, Any]:
+    try:
+        normalized_id = str(uuid.UUID(str(draft_id)))
+    except (ValueError, AttributeError) as exc:
+        raise AppError(400, "UngÃ¼ltige Entwurfs-ID.") from exc
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT id, payload, status FROM workout_drafts WHERE id = ?", (normalized_id,)).fetchone()
+        if not row:
+            raise AppError(404, "Trainingsentwurf nicht gefunden.")
+        db.execute("DELETE FROM workout_drafts WHERE id = ?", (normalized_id,))
+    name = "Einheit"
+    try:
+        name = str(json.loads(row["payload"]).get("name") or name)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    add_message("event", f"Entwurf â€ž{name}â€œ wurde lokal gelÃ¶scht.")
+    return {"status": "deleted", "draft_id": normalized_id}
+
+
+def save_snapshot_view(snapshot: dict[str, Any]) -> None:
+    """Persist a local view change without changing synchronization timestamps."""
+    with DB_LOCK, database() as db:
+        db.execute(
+            "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
+            (json.dumps(snapshot, ensure_ascii=False), snapshot.get("synced_at") or utc_now()),
+        )
+        db.execute("DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT 12)")
+
+
+def delete_planned_event(event_id: str) -> dict[str, Any]:
+    normalized_id = str(event_id or "").strip()
+    if not normalized_id or len(normalized_id) > 120 or "/" in normalized_id:
+        raise AppError(400, "UngÃ¼ltige Kalender-ID.")
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    snapshot = latest_snapshot()
+    planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
+    event = next((item for item in planned if isinstance(item, dict) and str(item.get("id")) == normalized_id), None)
+    if event is None:
+        raise AppError(404, "Geplante Einheit wurde im lokalen Kalender nicht gefunden. Bitte zuerst synchronisieren.")
+    IntervalsClient().delete_event(normalized_id)
+    if isinstance(snapshot, dict):
+        snapshot["upcoming_calendar"] = [item for item in planned if str(item.get("id")) != normalized_id]
+        save_snapshot_view(snapshot)
+    name = str(event.get("name") or "Einheit")
+    add_message("event", f"Geplante Einheit â€ž{name}â€œ wurde aus Intervals.icu gelÃ¶scht.")
+    return {"status": "deleted", "event_id": normalized_id}
+
+
+def get_workout_library() -> list[dict[str, Any]]:
+    return list_workout_library()
+
+
+def push_draft(draft_id: str) -> dict[str, Any]:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT * FROM workout_drafts WHERE id = ?", (draft_id,)).fetchone()
+    if not row:
+        raise AppError(404, "Trainingsentwurf nicht gefunden.")
+    workout = json.loads(row["payload"])
+    try:
+        event = IntervalsClient().push_workout(draft_id, workout)
+    except Exception as exc:
+        with DB_LOCK, database() as db:
+            db.execute(
+                "UPDATE workout_drafts SET status='error', error=?, updated_at=? WHERE id=?",
+                (redact_text(str(exc))[:1000], utc_now(), draft_id),
+            )
+        raise
+    event_id = str(event.get("id", ""))
+    with DB_LOCK, database() as db:
+        db.execute(
+            "UPDATE workout_drafts SET status='pushed', intervals_event_id=?, error=NULL, updated_at=? WHERE id=?",
+            (event_id, utc_now(), draft_id),
+        )
+    add_message("event", f"„{workout.get('name', 'Einheit')}“ wurde für den {workout.get('date')} zu Intervals.icu übertragen.")
+    return {"draft_id": draft_id, "status": "pushed", "event": event}
+
+
+def latest_snapshot() -> dict[str, Any] | None:
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1").fetchone()
+    return json.loads(row["payload"]) if row else None
+
+
+def save_snapshot(snapshot: dict[str, Any], update_full_sync: bool = True) -> None:
+    with DB_LOCK, database() as db:
+        db.execute(
+            "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
+            (json.dumps(snapshot, ensure_ascii=False), snapshot["synced_at"]),
+        )
+        db.execute("DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT 12)")
+        if update_full_sync:
+            set_kv("last_sync_at", snapshot["synced_at"], db)
+            set_kv("last_sync_error", "", db)
+        if not update_full_sync:
+            set_kv("last_performance_refresh_at", snapshot["synced_at"], db)
+
+
+def sync_intervals(reason: str = "manual", activity_days: int = 42) -> dict[str, Any]:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    if not SYNC_LOCK.acquire(blocking=False):
+        return {"status": "already_running"}
+    try:
+        set_kv("sync_running", "1")
+        set_kv("sync_status", "Intervals.icu: Synchronisierung läuft…")
+        snapshot = IntervalsClient().fetch_snapshot(activity_days=activity_days)
+        save_snapshot(snapshot)
+        library_count = len(list_workout_library())
+        library_error = None
+        try:
+            library_result = sync_workout_library(reason=reason)
+            library_count = library_result["workouts"]
+        except Exception as exc:
+            library_error = redact_text(str(exc))[:1000]
+            set_kv("last_library_sync_error", library_error)
+            LOGGER.error(
+                "Workout library synchronization failed",
+                extra={"event": "library_sync_failed", "context": {"reason": reason}},
+                exc_info=True,
+            )
+        # A successful full sync supersedes a transient morning-check-in
+        # network error that may otherwise keep the global status in warning.
+        set_kv("morning_checkin_error", "")
+        estimate_count = 0
+        estimate_error = None
+        if activity_days == ALL_SYNC_DAYS or activity_days >= 90:
+            try:
+                estimate_count = len(estimate_performance_from_activities(snapshot).get("estimates", []))
+            except Exception as exc:
+                estimate_error = redact_text(str(exc))[:1000]
+                LOGGER.error("Performance estimation after manual sync failed", extra={"event": "performance_estimation_failed"}, exc_info=True)
+        period_label = "alle verfügbaren Daten" if activity_days == ALL_SYNC_DAYS else f"letzte {activity_days} Tage"
+        add_message("event", f"Trainingsdaten aktualisiert ({reason}, {period_label}).")
+        return {
+            "status": "ok",
+            "synced_at": snapshot["synced_at"],
+            "activities": len(snapshot["recent_activities"]),
+            "wellness": len(snapshot["recent_wellness"]),
+            "events": len(snapshot["upcoming_calendar"]),
+            "activity_days": activity_days,
+            "estimates": estimate_count,
+            "estimate_error": estimate_error,
+            "library": library_count,
+            "library_error": library_error,
+        }
+    except Exception as exc:
+        set_kv("last_sync_error", redact_text(str(exc))[:1000])
+        LOGGER.error(
+            "Intervals.icu synchronization failed",
+            extra={"event": "sync_failed", "context": {"reason": reason, "last_success": get_kv("last_sync_at")}},
+            exc_info=True,
+        )
+        raise
+    finally:
+        try:
+            set_kv("sync_running", "0")
+            set_kv("sync_status", "")
+        finally:
+            SYNC_LOCK.release()
+
+
+def ai_performance_estimates() -> dict[str, Any]:
+    try:
+        value = json.loads(get_kv("ai_performance_estimates") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def activity_sport(activity: dict[str, Any]) -> str:
+    raw = str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "Andere Sportart")
+    folded = raw.casefold()
+    if "run" in folded or "lauf" in folded:
+        return "Laufen"
+    if "ride" in folded or "rad" in folded or "cycling" in folded or "bike" in folded:
+        return "Radfahren"
+    return raw[:80]
+
+
+def recent_activity_samples(snapshot: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    activities = snapshot.get("recent_activities") if isinstance(snapshot.get("recent_activities"), list) else []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for activity in activities:
+        if isinstance(activity, dict):
+            grouped.setdefault(activity_sport(activity), []).append(activity)
+    fields = (
+        "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain",
+        "icu_training_load", "icu_intensity", "icu_ftp", "average_heartrate", "max_heartrate",
+        "average_watts", "weighted_average_watts", "average_speed", "icu_weighted_avg_speed", "icu_pace", "icu_rpe", "feel",
+    )
+    return {
+        sport: [selected(activity, fields) for activity in sorted(rows, key=lambda item: str(item.get("start_date_local") or ""), reverse=True)[:5]]
+        for sport, rows in grouped.items()
+    }
+
+
+PERFORMANCE_ESTIMATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "estimates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "enum": [
+                        "cycling_ftp_watts", "run_threshold_watts", "run_threshold_pace_seconds_per_km",
+                        "bike_threshold_hr_bpm", "run_threshold_hr_bpm", "run_5k_seconds", "run_10k_seconds",
+                        "run_half_marathon_seconds", "run_marathon_seconds", "cycling_vo2max_ml_kg_min", "running_vo2max_ml_kg_min",
+                    ]},
+                    "value": {"type": "number"},
+                    "unit": {"type": "string"},
+                    "confidence": {"type": "string", "enum": ["niedrig", "mittel", "hoch"]},
+                    "basis": {"type": "string"},
+                },
+                "required": ["key", "value", "unit", "confidence", "basis"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["estimates"],
+    "additionalProperties": False,
+}
+
+
+PERFORMANCE_ESTIMATE_RANGES = {
+    "cycling_ftp_watts": (50, 700), "run_threshold_watts": (50, 800),
+    "run_threshold_pace_seconds_per_km": (120, 900), "bike_threshold_hr_bpm": (80, 230),
+    "run_threshold_hr_bpm": (80, 230), "run_5k_seconds": (600, 7200), "run_10k_seconds": (1200, 14400),
+    "run_half_marathon_seconds": (2700, 28800), "run_marathon_seconds": (5400, 43200),
+    "cycling_vo2max_ml_kg_min": (20, 100), "running_vo2max_ml_kg_min": (20, 100),
+}
+
+
+def derived_run_race_estimates(samples: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Create a transparent fallback from recent run distance/time when the model omits race times."""
+    runs = samples.get("Laufen") or []
+    candidates: dict[str, float] = {}
+    targets = (("run_5k_seconds", 5.0), ("run_10k_seconds", 10.0), ("run_half_marathon_seconds", 21.0975), ("run_marathon_seconds", 42.195))
+    for activity in runs:
+        try:
+            distance_km = float(activity.get("distance")) / 1000
+            duration = float(activity.get("moving_time"))
+        except (TypeError, ValueError):
+            continue
+        if distance_km < 2 or duration <= 0:
+            continue
+        pace = duration / distance_km
+        if pace < 150 or pace > 900:
+            continue
+        for key, target_km in targets:
+            predicted = pace * target_km * (target_km / distance_km) ** 0.06
+            lower, upper = PERFORMANCE_ESTIMATE_RANGES[key]
+            if lower <= predicted <= upper and (key not in candidates or predicted < candidates[key]):
+                candidates[key] = predicted
+    return [{
+        "key": key, "value": round(value, 1), "unit": "s", "confidence": "niedrig",
+        "basis": "Näherung aus Distanz und Bewegungszeit der letzten Lauf-Einheiten; keine KI-Antwort für diesen Wert.",
+        "source": "Berechnete Schätzung",
+    } for key, value in candidates.items()]
+
+
+def estimate_performance_from_activities(snapshot: dict[str, Any]) -> dict[str, Any]:
+    samples = recent_activity_samples(snapshot)
+    if not CONFIG.openai_api_key:
+        return {"available": False, "reason": "OPENAI_API_KEY ist nicht konfiguriert.", "estimates": []}
+    if not samples:
+        return {"available": False, "reason": "Keine gespeicherten Aktivitäten für eine KI-Schätzung vorhanden.", "estimates": []}
+    request_context = {
+        "athlete_profile": get_profile(),
+        "current_api_performance": current_performance_context(snapshot, include_ai=False),
+        "last_five_activities_per_sport": samples,
+    }
+    request_payload = {
+        "model": selected_model(),
+        "store": False,
+        "instructions": (
+            "Du schätzt Ausdauerleistungswerte ausschließlich aus den gelieferten Daten. Antworte nur gemäß dem JSON-Schema. "
+            "Gib für jede Sportart und jeden Wert, der aus den bis zu fünf jüngsten Einheiten plausibel ableitbar ist, eine Schätzung aus. "
+            "Für Laufen sind insbesondere 5-km-, 10-km-, Halbmarathon- und Marathonzeiten zu berechnen: nutze Distanz und Bewegungszeit bzw. Pace einer Lauf-Einheit und skaliere vorsichtig mit einer Riegel-Prognose. "
+            "Wenn keine Lauf-Einheit vorhanden ist, lasse die run_* Werte weg und nenne die Datenlücke in der Begründung. "
+            "Kein medizinischer Rat, keine Diagnose. Geschätzte Wettkampfzeiten sind aktuelle, vorsichtige Leistungsprognosen und keine Ziele. "
+            "Für Radfahren verwende cycling_*, für Laufen run_* bzw. running_*. Die Schwellenpace ist Sekunden pro Kilometer. "
+            "Die Begründung muss auf Deutsch sein und kurz die verwendeten Einheiten bzw. die Datenlücke nennen."
+        ),
+        "input": json.dumps(request_context, ensure_ascii=False, separators=(",", ":")),
+        "text": {"format": {"type": "json_schema", "name": "performance_estimates", "strict": True, "schema": PERFORMANCE_ESTIMATE_SCHEMA}},
+        "max_output_tokens": 3200,
+        "truncation": "auto",
+    }
+    try:
+        response = openai_request("/responses", request_payload)
+    except AppError as exc:
+        # Some deployments expose a GPT-5.6 model before structured outputs are
+        # enabled for it. Retry once with the same German JSON contract in text.
+        if exc.status not in {400, 404, 422}:
+            raise
+        fallback_payload = dict(request_payload)
+        fallback_payload.pop("text", None)
+        fallback_payload["instructions"] += " Gib ausschließlich ein einzelnes gültiges JSON-Objekt ohne Markdown zurück."
+        response = openai_request("/responses", fallback_payload)
+    output = output_text(response)
+    parse_error = ""
+    try:
+        raw = json.loads(output or "{}")
+    except json.JSONDecodeError as exc:
+        # Be tolerant if a text-only fallback wrapped the JSON in a code fence
+        # or a short explanatory sentence.
+        match = re.search(r"\{.*\}", output, flags=re.DOTALL)
+        if not match:
+            raw = {}
+            parse_error = "Die KI-Leistungsschätzung hatte kein gültiges Datenformat."
+        try:
+            if match:
+                raw = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            raw = {}
+            parse_error = "Die KI-Leistungsschätzung hatte kein gültiges Datenformat."
+    valid: list[dict[str, Any]] = []
+    for estimate in raw.get("estimates", []) if isinstance(raw, dict) else []:
+        if not isinstance(estimate, dict):
+            continue
+        key = estimate.get("key")
+        try:
+            value = round(float(estimate.get("value")), 1)
+        except (TypeError, ValueError):
+            continue
+        lower, upper = PERFORMANCE_ESTIMATE_RANGES.get(key, (float("inf"), float("-inf")))
+        if not isinstance(key, str) or not lower <= value <= upper:
+            continue
+        valid.append({
+            "key": key, "value": value, "unit": str(estimate.get("unit") or "")[:40],
+            "confidence": estimate.get("confidence") if estimate.get("confidence") in {"niedrig", "mittel", "hoch"} else "niedrig",
+            "basis": str(estimate.get("basis") or "")[:500], "source": "KI-Schätzung",
+        })
+    reason = parse_error
+    race_keys = {"run_5k_seconds", "run_10k_seconds", "run_half_marathon_seconds", "run_marathon_seconds"}
+    if not any(item.get("key") in race_keys for item in valid):
+        derived = derived_run_race_estimates(samples)
+        valid.extend(derived)
+        if derived:
+            reason = ((reason + " ") if reason else "") + "Die KI lieferte keine Lauf-Wettkampfzeiten; diese Werte sind als transparente Näherung aus den Laufdaten berechnet."
+    if not valid:
+        run_count = len(samples.get("Laufen", []))
+        reason = (((reason + " ") if reason else "") + "Die KI hat keine belastbare Schätzung zurückgegeben. "
+                  + ("Es wurden keine Lauf-Einheiten in den gespeicherten Aktivitäten erkannt." if not run_count else "Die vorhandenen Laufdaten reichen für keine sichere Prognose aus."))
+    if valid and not reason:
+        reason = ""
+    result = {"available": True, "generated_at": utc_now(), "snapshot_synced_at": snapshot.get("synced_at"), "model": selected_model(), "estimates": valid, "reason": reason}
+    set_kv("ai_performance_estimates", json.dumps(result, ensure_ascii=False))
+    return result
+
+
+def refresh_current_performance() -> dict[str, Any]:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    if not PERFORMANCE_LOCK.acquire(blocking=False):
+        return {"status": "already_running"}
+    try:
+        set_kv("performance_refresh_running", "1")
+        snapshot = IntervalsClient().fetch_performance_snapshot(latest_snapshot())
+        save_snapshot(snapshot, update_full_sync=False)
+        try:
+            estimates = estimate_performance_from_activities(snapshot)
+            estimate_error = None
+        except Exception as exc:
+            estimates = {"estimates": []}
+            estimate_error = redact_text(str(exc))[:1000]
+            LOGGER.error("Performance estimation failed", extra={"event": "performance_estimation_failed"}, exc_info=True)
+        set_kv("last_performance_error", estimate_error or "")
+        add_message("event", "Aktuelle Leistungsdaten aktualisiert; Aktivitäten wurden nicht neu geladen.")
+        return {"status": "ok", "refreshed_at": snapshot["synced_at"], "estimates": len(estimates.get("estimates", [])), "estimate_error": estimate_error}
+    except Exception as exc:
+        error = redact_text(str(exc))[:1000]
+        set_kv("last_performance_error", error)
+        LOGGER.error("Performance refresh failed", extra={"event": "performance_refresh_failed"}, exc_info=True)
+        raise
+    finally:
+        set_kv("performance_refresh_running", "0")
+        PERFORMANCE_LOCK.release()
+
+
+def activity_rollup(activities: list[Any], days: int, end_date: date | None = None) -> dict[str, Any]:
+    anchor = end_date or date.today()
+    cutoff = anchor - timedelta(days=days - 1)
+    count = 0
+    moving_seconds = 0.0
+    training_load = 0.0
+    for activity in activities:
+        if not isinstance(activity, dict):
+            continue
+        try:
+            activity_date = date.fromisoformat(str(activity.get("start_date_local") or "")[:10])
+        except ValueError:
+            continue
+        if activity_date < cutoff or activity_date > anchor:
+            continue
+        count += 1
+        try:
+            moving_seconds += float(activity.get("moving_time") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            training_load += float(activity.get("icu_training_load") or 0)
+        except (TypeError, ValueError):
+            pass
+    return {
+        "days": days,
+        "sessions": count,
+        "duration_hours": round(moving_seconds / 3600, 1),
+        "training_load": round(training_load, 1),
+    }
+
+
+def wellness_average(rows: list[dict[str, Any]], keys: tuple[str, ...], days: int, end_date: date | None = None, divisor: float = 1.0) -> float | None:
+    anchor = end_date or date.today()
+    cutoff = anchor - timedelta(days=days - 1)
+    values: list[float] = []
+    for row in rows:
+        try:
+            row_date = date.fromisoformat(str(row.get("id") or row.get("date") or "")[:10])
+        except ValueError:
+            continue
+        if row_date < cutoff or row_date > anchor:
+            continue
+        value = as_number(first_present(row, keys))
+        if value is not None:
+            values.append(float(value) / divisor)
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def actual_atl_series(wellness_rows: list[dict[str, Any]], activities: list[Any], end_date: date | None = None) -> dict[date, float]:
+    """Reconstruct ATL from completed activity load only (default 7-day ATL decay)."""
+    dated_wellness: list[tuple[date, dict[str, Any]]] = []
+    for row in wellness_rows:
+        try:
+            row_date = date.fromisoformat(str(row.get("id") or row.get("date") or "")[:10])
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if isinstance(row, dict) and as_number(first_present(row, ("atl",))) is not None:
+            dated_wellness.append((row_date, row))
+    if not dated_wellness:
+        return {}
+    dated_wellness.sort(key=lambda item: item[0])
+    anchor = end_date or date.today()
+    load_by_date: dict[date, float] = {}
+    for activity in activities:
+        if not isinstance(activity, dict):
+            continue
+        try:
+            activity_date = date.fromisoformat(str(activity.get("start_date_local") or "")[:10])
+        except (TypeError, ValueError):
+            continue
+        if activity_date > anchor:
+            continue
+        load = as_number(first_present(activity, ("icu_training_load",)))
+        if load is not None:
+            load_by_date[activity_date] = load_by_date.get(activity_date, 0.0) + float(load)
+    first_date, first_row = dated_wellness[0]
+    # Intervals.icu uses exponential time constants.  For the default ATL
+    # setting this is exp(-1/7) retention (rather than a simple 6/7 factor).
+    retention = math.exp(-1.0 / 7.0)
+    decay = 1.0 - retention
+    previous = (float(as_number(first_present(first_row, ("atl",))) or 0) - load_by_date.get(first_date, 0.0) * decay) / retention
+    series: dict[date, float] = {}
+    cursor = first_date
+    # The first wellness row already contains the first day's load.  Seed the
+    # series with that value and only apply the recurrence to subsequent days;
+    # applying it once more on the first day creates a large artificial drop.
+    series[first_date] = round(previous * retention + load_by_date.get(first_date, 0.0) * decay, 2)
+    previous = series[first_date]
+    for row_date, _row in dated_wellness[1:]:
+        # Only dates absent from the wellness series are zero-load decay days.
+        # The target row itself is updated exactly once below.
+        while cursor + timedelta(days=1) < row_date:
+            previous *= retention
+            cursor += timedelta(days=1)
+        previous = previous * retention + load_by_date.get(row_date, 0.0) * decay
+        series[row_date] = round(previous, 2)
+        cursor = row_date
+    return series
+
+
+def eftp_30_day_average(wellness_rows: list[dict[str, Any]], activities: list[Any], end_date: date | None = None) -> float | None:
+    anchor = end_date or date.today()
+    cutoff = anchor - timedelta(days=29)
+    values: list[float] = []
+    for row in wellness_rows:
+        try:
+            row_date = date.fromisoformat(str(row.get("id") or row.get("date") or "")[:10])
+        except ValueError:
+            continue
+        if not cutoff <= row_date <= anchor:
+            continue
+        info = sport_info_setting(row, "ride")
+        value = as_number(first_present(info, ("eftp", "eFTP")))
+        if value is not None:
+            values.append(float(value))
+    for activity in activities:
+        if not isinstance(activity, dict):
+            continue
+        try:
+            activity_date = date.fromisoformat(str(activity.get("start_date_local") or "")[:10])
+        except ValueError:
+            continue
+        if not cutoff <= activity_date <= anchor:
+            continue
+        raw_type = str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold()
+        if not any(term in raw_type for term in ("ride", "rad", "bike", "cycling")):
+            continue
+        value = as_number(first_present(activity, ("icu_ftp", "eftp", "eFTP")))
+        if value is not None:
+            values.append(float(value))
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def comparison_value(current: Any, average: Any, unit: str, days: int, higher_is_better: bool = True, label: str | None = None) -> dict[str, Any] | None:
+    current_number = as_number(current)
+    average_number = as_number(average)
+    if current_number is None or average_number is None:
+        return None
+    delta = round(float(current_number) - float(average_number), 2)
+    direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
+    good = (delta > 0) if higher_is_better else (delta < 0)
+    color = "good" if good else "bad" if delta else "neutral"
+    return {
+        "current": current_number,
+        "average": average_number,
+        "delta": delta,
+        "unit": unit,
+        "days": days,
+        "direction": direction,
+        "color": color,
+        "label": label or f"{days}-Tage-Durchschnitt",
+    }
+
+
+def first_present(item: Any, keys: tuple[str, ...]) -> Any:
+    if not isinstance(item, dict):
+        return None
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def wellness_form_value(row: Any) -> float | int | None:
+    """Return Intervals.icu form/TSB, deriving it from CTL minus ATL when omitted."""
+    if not isinstance(row, dict):
+        return None
+    direct = as_number(first_present(row, ("tsb", "form", "freshness")))
+    if direct is not None:
+        return direct
+    ctl = as_number(first_present(row, ("ctl",)))
+    atl = as_number(first_present(row, ("atl",)))
+    if ctl is None or atl is None:
+        return None
+    return round(float(ctl) - float(atl), 2)
+
+
+def readiness_score_value(value: Any) -> float | int | None:
+    """Extract a readiness score from Intervals.icu/Garmin scalar or nested payloads."""
+    if isinstance(value, list):
+        dated = [item for item in value if isinstance(item, dict)]
+        if not dated:
+            return None
+        dated.sort(key=lambda item: str(first_present(item, ("calendarDate", "date", "id", "timestamp")) or ""))
+        return readiness_score_value(dated[-1])
+    if isinstance(value, dict):
+        direct = first_present(value, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness", "score", "value"))
+        if isinstance(direct, (dict, list)):
+            return readiness_score_value(direct)
+        return as_number(direct)
+    return as_number(value)
+
+
+def wellness_form_average(rows: list[dict[str, Any]], days: int, end_date: date | None = None) -> float | None:
+    anchor = end_date or date.today()
+    cutoff = anchor - timedelta(days=days - 1)
+    values: list[float] = []
+    for row in rows:
+        try:
+            row_date = date.fromisoformat(str(row.get("id") or row.get("date") or "")[:10])
+        except ValueError:
+            continue
+        if not cutoff <= row_date <= anchor:
+            continue
+        value = wellness_form_value(row)
+        if value is not None:
+            values.append(float(value))
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def as_number(value: Any) -> float | int | None:
+    try:
+        number = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in {float("inf"), float("-inf")}:
+        return None
+    return int(number) if number.is_integer() else round(number, 2)
+
+
+def sport_setting(athlete: dict[str, Any], sport: str) -> dict[str, Any]:
+    match_terms = ("run", "lauf") if sport == "run" else ("ride", "bike", "rad", "cycling")
+    for setting in athlete.get("sport_settings", []):
+        if not isinstance(setting, dict):
+            continue
+        types = setting.get("types") if isinstance(setting.get("types"), list) else []
+        if any(any(term in str(activity_type).casefold() for term in match_terms) for activity_type in types):
+            return setting
+    return {}
+
+
+def sport_info_setting(wellness: dict[str, Any], sport: str) -> dict[str, Any]:
+    match_terms = ("run", "lauf") if sport == "run" else ("ride", "bike", "rad", "cycling")
+    sport_info = wellness.get("sport_info", wellness.get("sportInfo", []))
+    if not isinstance(sport_info, list):
+        return {}
+    for info in sport_info:
+        if not isinstance(info, dict):
+            continue
+        raw_types = info.get("types") if isinstance(info.get("types"), list) else [info.get("type"), info.get("sport"), info.get("sport_type")]
+        if any(any(term in str(activity_type or "").casefold() for term in match_terms) for activity_type in raw_types):
+            return info
+    return {}
+
+
+def metric(value: Any, unit: str, source: str | None, note: str = "") -> dict[str, Any]:
+    number = as_number(value)
+    return {"value": number, "unit": unit, "source": source if number is not None else None, "note": note if number is not None else ""}
+
+
+def threshold_pace_seconds(value: Any) -> float | int | None:
+    number = as_number(value)
+    if number is None or number <= 0:
+        return None
+    # Intervals.icu exposes threshold_pace in metres per second for resolved workouts.
+    # Values already supplied as seconds per kilometre are accepted as a defensive fallback.
+    return round(1000 / number) if number < 20 else number
+
+
+def height_in_cm(value: Any) -> float | int | None:
+    number = as_number(value)
+    if number is not None and 1.2 <= float(number) <= 2.5:
+        return round(float(number) * 100, 1)
+    return number
+
+
+def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    athlete = snapshot.get("athlete") if isinstance(snapshot.get("athlete"), dict) else {}
+    wellness_rows = snapshot.get("recent_wellness") if isinstance(snapshot.get("recent_wellness"), list) else []
+    activities = snapshot.get("recent_activities") if isinstance(snapshot.get("recent_activities"), list) else []
+    latest_wellness = max((row for row in wellness_rows if isinstance(row, dict)), key=lambda row: str(row.get("id") or ""), default={})
+    ride = sport_setting(athlete, "ride")
+    run = sport_setting(athlete, "run")
+    wellness_ride = sport_info_setting(latest_wellness, "ride")
+    wellness_run = sport_info_setting(latest_wellness, "run")
+    latest_ride_activity = next((activity for activity in sorted(activities, key=lambda item: str(item.get("start_date_local") or ""), reverse=True)
+                                 if isinstance(activity, dict) and any(term in str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold() for term in ("ride", "rad", "bike", "cycling"))), {})
+    generic_lthr = first_present(athlete, ("lthr",))
+    profile = get_profile()
+    body_sources = (
+        (first_present(latest_wellness, ("weight",)), "Intervals.icu Wellness"),
+        (first_present(athlete, ("weight",)), "Intervals.icu"),
+        (profile.get("weight_kg"), "Manuell"),
+    )
+    weight_value, weight_source = next(((value, source) for value, source in body_sources if as_number(value) is not None), (None, None))
+    body_fat_value, body_fat_source = next(((value, source) for value, source in (
+        (first_present(latest_wellness, ("bodyFat", "body_fat")), "Intervals.icu Wellness"),
+        (first_present(athlete, ("bodyFat", "body_fat")), "Intervals.icu"),
+        (profile.get("body_fat_pct"), "Manuell"),
+    ) if as_number(value) is not None), (None, None))
+    height_value, height_source = next(((value, source) for value, source in (
+        (first_present(athlete, ("height_cm", "height")), "Intervals.icu"),
+        (profile.get("height_cm"), "Manuell"),
+    ) if as_number(value) is not None), (None, None))
+    return {
+        "weight_kg": metric(weight_value, "kg", weight_source),
+        "body_fat_pct": metric(body_fat_value, "%", body_fat_source),
+        "height_cm": metric(height_in_cm(height_value), "cm", height_source),
+        "cycling_ftp_watts": metric(first_present(ride, ("ftp", "indoor_ftp", "eftp", "eFTP")) or first_present(wellness_ride, ("eftp", "eFTP", "ftp")) or first_present(athlete, ("icu_ftp",)), "W", "Intervals.icu"),
+        "cycling_eftp_watts": metric(first_present(ride, ("eftp", "eFTP")) or first_present(wellness_ride, ("eftp", "eFTP")) or first_present(latest_ride_activity, ("icu_ftp", "eftp", "eFTP")), "W", "Intervals.icu"),
+        "run_threshold_watts": metric(first_present(run, ("ftp", "indoor_ftp", "eftp", "eFTP")) or first_present(wellness_run, ("eftp", "eFTP", "ftp")), "W", "Intervals.icu"),
+        "run_threshold_pace_seconds_per_km": metric(threshold_pace_seconds(first_present(run, ("threshold_pace",)) or first_present(wellness_run, ("threshold_pace",))), "s/km", "Intervals.icu"),
+        "bike_threshold_hr_bpm": metric(first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) or generic_lthr, "bpm", "Intervals.icu" if first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) else "Intervals.icu (allgemein)"),
+        "run_threshold_hr_bpm": metric(first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) or generic_lthr, "bpm", "Intervals.icu" if first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) else "Intervals.icu (allgemein)"),
+        "cycling_vo2max_ml_kg_min": metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
+        "running_vo2max_ml_kg_min": metric(first_present(run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(wellness_run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(athlete, ("running_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
+        "run_5k_seconds": metric(None, "s", None),
+        "run_10k_seconds": metric(None, "s", None),
+        "run_half_marathon_seconds": metric(None, "s", None),
+        "run_marathon_seconds": metric(None, "s", None),
+    }
+
+
+def current_performance_context(snapshot: dict[str, Any] | None = None, include_ai: bool = True) -> dict[str, Any]:
+    snapshot = snapshot if snapshot is not None else latest_snapshot()
+    if not snapshot:
+        return {"available": False, "source": "Intervals.icu", "as_of": None, "metrics": {}}
+    athlete = snapshot.get("athlete") if isinstance(snapshot.get("athlete"), dict) else {}
+    activities = snapshot.get("recent_activities") if isinstance(snapshot.get("recent_activities"), list) else []
+    wellness_rows = [row for row in snapshot.get("recent_wellness", []) if isinstance(row, dict)] if isinstance(snapshot.get("recent_wellness"), list) else []
+    latest_wellness = max(wellness_rows, key=lambda row: str(row.get("id") or ""), default={})
+    sleep_seconds = first_present(latest_wellness, ("sleepSecs",))
+    try:
+        sleep_hours = round(float(sleep_seconds) / 3600, 1) if sleep_seconds is not None else None
+    except (TypeError, ValueError):
+        sleep_hours = None
+    metrics = api_performance_metrics(snapshot)
+    estimates = ai_performance_estimates() if include_ai else {}
+    if include_ai and isinstance(estimates.get("estimates"), list):
+        for estimate in estimates["estimates"]:
+            key = estimate.get("key") if isinstance(estimate, dict) else None
+            if key in metrics and metrics[key].get("value") is None:
+                metrics[key] = {"value": estimate.get("value"), "unit": estimate.get("unit"), "source": estimate.get("source") or "KI-Schätzung", "note": estimate.get("basis", ""), "confidence": estimate.get("confidence", "niedrig")}
+    ai_reason = estimates.get("reason")
+    if any(metrics.get(key, {}).get("source") == "Berechnete Schätzung" for key in ("run_5k_seconds", "run_10k_seconds", "run_half_marathon_seconds", "run_marathon_seconds")):
+        ai_reason = "Die KI lieferte keine Lauf-Wettkampfzeiten; diese Werte sind als transparente Näherung aus den Laufdaten berechnet."
+    load = {
+        "id": latest_wellness.get("id"),
+        "ctl": first_present(latest_wellness, ("ctl", "ctLoad")),
+        "atl": first_present(latest_wellness, ("atl", "atlLoad")),
+        "tsb": wellness_form_value(latest_wellness),
+        "rampRate": first_present(latest_wellness, ("rampRate",)),
+    }
+    today = date.today()
+    last_7 = activity_rollup(activities, 7, today)
+    previous_7 = activity_rollup(activities, 7, today - timedelta(days=7))
+    last_30 = activity_rollup(activities, 30, today)
+    previous_30 = activity_rollup(activities, 30, today - timedelta(days=30))
+    actual_atl = actual_atl_series(wellness_rows, activities, today)
+    actual_atl_date = max((row_date for row_date in actual_atl if row_date <= today), default=None)
+    actual_atl_current = actual_atl.get(actual_atl_date) if actual_atl_date else None
+    actual_atl_values = [value for row_date, value in actual_atl.items() if today - timedelta(days=6) <= row_date <= today]
+    actual_atl_average = round(sum(actual_atl_values) / len(actual_atl_values), 2) if actual_atl_values else None
+    sleep_average = wellness_average(wellness_rows, ("sleepSecs", "sleep_seconds"), 7, today, 3600)
+    if sleep_average is None:
+        sleep_average = wellness_average(wellness_rows, ("sleep_hours",), 7, today)
+    readiness_current = readiness_score_value(first_present(latest_wellness, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness")))
+    if readiness_current is None:
+        readiness_current = readiness_score_value(garmin_snapshot().get("readiness"))
+    readiness_average = wellness_average(
+        wellness_rows,
+        ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness"),
+        7,
+        today,
+    )
+    comparisons = {
+        "sleep_hours": comparison_value(sleep_hours, sleep_average, "h", 7),
+        "readiness": comparison_value(readiness_current, readiness_average, "", 7),
+        "restingHR": comparison_value(first_present(latest_wellness, ("restingHR", "resting_hr")), wellness_average(wellness_rows, ("restingHR", "resting_hr"), 7, today), "bpm", 7, higher_is_better=False),
+        "hrv": comparison_value(first_present(latest_wellness, ("hrv", "hrv_ms")), wellness_average(wellness_rows, ("hrv", "hrv_ms"), 7, today), "ms", 7),
+        "cycling_eftp_30d": comparison_value(metrics["cycling_eftp_watts"]["value"], eftp_30_day_average(wellness_rows, activities, today), "W", 30),
+        "fitness_ctl": comparison_value(load["ctl"], wellness_average(wellness_rows, ("ctl", "ctLoad"), 7, today), "", 7),
+        "form_tsb": comparison_value(load["tsb"], wellness_form_average(wellness_rows, 7, today), "", 7),
+        "fatigue_atl": comparison_value(load["atl"], wellness_average(wellness_rows, ("atl", "atlLoad"), 7, today), "", 7, higher_is_better=False),
+        "fatigue_atl_actual": comparison_value(actual_atl_current, actual_atl_average, "", 7, higher_is_better=False),
+        "training_load_7d": comparison_value(last_7["training_load"], previous_7["training_load"], "", 7, label="vorherigen 7 Tagen"),
+        "training_volume_7d": comparison_value(
+            last_7["duration_hours"], previous_30["duration_hours"] * 7 / 30, "h", 30,
+            label="Schnitt der 30 Tage davor",
+        ),
+    }
+    return {
+        "available": True,
+        "source": "Letzter gespeicherter Intervals.icu-Snapshot",
+        "as_of": snapshot.get("synced_at"),
+        "metrics": metrics,
+        "thresholds": {
+            "icu_ftp": metrics["cycling_ftp_watts"]["value"], "icu_w_prime": athlete.get("icu_w_prime"),
+            "max_hr": athlete.get("max_hr"), "lthr": athlete.get("lthr"), "weight": metrics["weight_kg"]["value"],
+        },
+        "current_load": load,
+        "actual_load": {"atl": actual_atl_current, "as_of": actual_atl_date.isoformat() if actual_atl_date else None, "source": "Abgeschlossene Aktivitäten (berechnet)"},
+        "recovery": {
+            "id": latest_wellness.get("id"), "restingHR": first_present(latest_wellness, ("restingHR",)),
+            "hrv": first_present(latest_wellness, ("hrv",)), "sleepScore": first_present(latest_wellness, ("sleepScore",)),
+            "fatigue": first_present(latest_wellness, ("fatigue",)), "soreness": first_present(latest_wellness, ("soreness",)),
+            "stress": first_present(latest_wellness, ("stress",)), "mood": first_present(latest_wellness, ("mood",)),
+            "readiness": readiness_current, "sleep_hours": sleep_hours,
+        },
+        "rolling_training": {"last_7_days": last_7, "previous_7_days": previous_7, "last_30_days": last_30, "previous_30_days": previous_30, "last_28_days": activity_rollup(activities, 28, today)},
+        "comparisons": comparisons,
+        "ai_estimates": {
+            "generated_at": estimates.get("generated_at"),
+            "count": len(estimates.get("estimates", [])) if isinstance(estimates.get("estimates"), list) else 0,
+            "keys": [item.get("key") for item in estimates.get("estimates", []) if isinstance(item, dict) and item.get("key")],
+            "reason": ai_reason,
+        },
+    }
+
+
+def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    snapshot = snapshot if snapshot is not None else latest_snapshot()
+    return {
+        "durable_profile": get_profile(),
+        "target_competitions": list_competitions(),
+        "current_performance": current_performance_context(snapshot),
+        "garmin": garmin_coach_context(),
+        "source_policy": {
+            "durable_profile": "Vom Athleten bestätigte Werte, lokal in SQLite gespeichert",
+            "target_competitions": "Vom Athleten bestätigte Wettkämpfe, lokal in SQLite gespeichert",
+            "current_performance": "Aus dem letzten gespeicherten Intervals.icu-Snapshot abgeleitet; KI-Schätzungen sind separat gekennzeichnet",
+            "conversation": "Nur Dialogkontinuität; keine autoritative Quelle für dauerhafte Athletenfakten",
+        },
+    }
+
+
+def build_training_context() -> str:
+    snapshot = latest_snapshot()
+    snapshot_text = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")) if snapshot else "Noch kein Intervals.icu-Snapshot vorhanden."
+    if len(snapshot_text) > 80_000:
+        snapshot_text = snapshot_text[:80_000] + "...[truncated]"
+    library_text = json.dumps(list_workout_library(), ensure_ascii=False, separators=(",", ":"))
+    if len(library_text) > 40_000:
+        library_text = library_text[:40_000] + "...[truncated]"
+    return (
+        COACH_PROMPT
+        + "\nSTRUCTURED ATHLETE CONTEXT (authoritative for this turn):\n"
+        + json.dumps(structured_athlete_context(snapshot), ensure_ascii=False, separators=(",", ":"))
+        + "\nLATEST INTERVALS.ICU SNAPSHOT:\n"
+        + snapshot_text
+        + "\nLOCAL TRAINING LIBRARY (synced from Intervals.icu; templates available to the coach):\n"
+        + library_text
+    )
+
+
+def context_preview() -> dict[str, Any]:
+    """Return the exact, user-inspectable context assembled for the next coach turn."""
+    snapshot = latest_snapshot()
+    snapshot_text = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")) if snapshot else "Noch kein Intervals.icu-Snapshot vorhanden."
+    snapshot_truncated = len(snapshot_text) > 80_000
+    if snapshot_truncated:
+        snapshot_text = snapshot_text[:80_000] + "...[truncated]"
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "snapshot_truncated": snapshot_truncated,
+        "assembly": [
+            "COACH_PROMPT: feste Coaching-Regeln und Sicherheitsvorgaben",
+            "STRUCTURED ATHLETE CONTEXT: Profil, Zielwettkämpfe, Leistungsdaten und Garmin",
+            "LATEST INTERVALS.ICU SNAPSHOT: letzter gespeicherter Trainings-/Wellness-Snapshot",
+            "LOCAL TRAINING LIBRARY: lokal zwischengespeicherte und mit Intervals.icu synchronisierte Workout-Vorlagen",
+            "OpenAI Conversation: Dialogkontinuität; nicht autoritativ für dauerhafte Athletenfakten",
+        ],
+        "conversation": {
+            "mode": "OpenAI Responses Conversation",
+            "included_separately": True,
+            "note": "Der bisherige Dialog wird für Kontinuität mitgeführt. Dauerhafte Athletenfakten stammen ausschließlich aus Profil, Wettkämpfen und aktuellem Datensnapshot.",
+        },
+        "structured_athlete_context": structured_athlete_context(snapshot),
+        "latest_intervals_snapshot": snapshot if not snapshot_truncated else snapshot_text,
+        "context_text": build_training_context(),
+        "local_training_library": list_workout_library(),
+    }
+
+
+def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not CONFIG.openai_api_key:
+        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+    result = http_json(
+        "POST",
+        "https://api.openai.com/v1" + path,
+        payload,
+        {"Authorization": f"Bearer {CONFIG.openai_api_key}"},
+        timeout=90,
+    )
+    if not isinstance(result, dict):
+        raise AppError(502, "OpenAI hat eine unerwartete Antwort zurückgegeben.")
+    return result
+
+
+def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
+    """Call Responses API and retry transient locks on the persistent conversation."""
+    for attempt in range(3):
+        try:
+            return openai_request("/responses", payload)
+        except AppError as exc:
+            if "conversation_locked" not in exc.message or attempt == 2:
+                raise
+            delay = 2 ** attempt
+            LOGGER.warning(
+                "OpenAI conversation is temporarily locked; retrying",
+                extra={
+                    "event": "openai_conversation_locked",
+                    "context": {"attempt": attempt + 1, "retry_in_seconds": delay},
+                },
+            )
+            time.sleep(delay)
+    raise AppError(502, "Die OpenAI-Konversationsanfrage konnte nicht abgeschlossen werden.")
+
+
+def ensure_conversation() -> str:
+    existing = get_kv("openai_conversation_id")
+    if existing:
+        return existing
+    result = openai_request("/conversations", {"metadata": {"app": "intervals-coach", "purpose": "personal-coach"}})
+    conversation_id = result.get("id")
+    if not isinstance(conversation_id, str):
+        raise AppError(502, "OpenAI hat keine Konversations-ID zurückgegeben.")
+    set_kv("openai_conversation_id", conversation_id)
+    return conversation_id
+
+
+def reset_coach_chat() -> dict[str, Any]:
+    """Forget local chat history and force a new OpenAI conversation next turn."""
+    with OPENAI_CONVERSATION_LOCK:
+        with DB_LOCK, database() as db:
+            db.execute("DELETE FROM messages")
+        set_kv("openai_conversation_id", "")
+        set_kv("last_chat_reset_at", utc_now())
+    return {"status": "ok", "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
+
+
+def output_text(response: dict[str, Any]) -> str:
+    direct = response.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    parts: list[str] = []
+    for item in response.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "message":
+            for content in item.get("content", []):
+                if not isinstance(content, dict):
+                    continue
+                if content.get("type") in {"output_text", "text"} and content.get("text"):
+                    parts.append(content["text"])
+                elif content.get("type") == "refusal" and content.get("refusal"):
+                    parts.append(f"The coach declined to answer: {content['refusal']}")
+        elif item.get("type") == "refusal" and item.get("refusal"):
+            parts.append(f"The coach declined to answer: {item['refusal']}")
+    return "\n".join(parts).strip()
+
+
+def log_empty_response(response: dict[str, Any]) -> None:
+    output = response.get("output")
+    LOGGER.warning(
+        "OpenAI returned no assistant text",
+        extra={
+            "event": "coach_empty_response",
+            "context": {
+                "response_id": response.get("id"),
+                "status": response.get("status"),
+                "incomplete_details": response.get("incomplete_details"),
+                "output_types": [item.get("type") for item in output if isinstance(item, dict)] if isinstance(output, list) else [],
+            },
+        },
+    )
+
+
+def prompt_requests_fresh_data(message: str) -> bool:
+    text = message.casefold()
+    asks_for_timeframe = bool(re.search(r"\b(letzte[nr]?|neueste[nr]?|aktuell(?:e|en|er)?|recent|latest)\b", text))
+    asks_for_training = bool(re.search(r"\b(einheit(?:en)?|workout(?:s)?|training|fahr(?:t|ten)?|lauf(?:en)?|ride|session|load|belastung)\b", text))
+    asks_to_load = bool(re.search(r"\b(lad(?:e|en)?|hol(?:e|en)?|abruf(?:e|en)?|sync(?:hronisier(?:e|en)?)?|fetch|load|refresh)\b", text))
+    asks_to_analyse = bool(re.search(r"\b(analys(?:iere|ieren|e)?|bewert(?:e|en)?|auswert(?:e|en)?|check|prüf(?:e|en)?|review)\b", text))
+    return asks_for_training and ((asks_for_timeframe and (asks_to_load or asks_to_analyse)) or asks_to_load)
+
+
+@serialise_conversation
+def chat_with_coach(message: str) -> dict[str, Any]:
+    message = message.strip()
+    if not message:
+        raise AppError(400, "Die Nachricht darf nicht leer sein.")
+    if len(message) > 12_000:
+        raise AppError(400, "Die Nachricht ist zu lang.")
+    refresh_error = None
+    if prompt_requests_fresh_data(message):
+        add_message("event", "Aktuelle Intervals.icu-Trainingsdaten werden geladen…")
+        try:
+            sync_intervals("Chat-Anfrage", activity_days=sync_period("intervals"))
+        except Exception as exc:
+            refresh_error = redact_text(str(exc))[:1000]
+            add_message("event", f"Aktuelle Daten konnten nicht geladen werden: {refresh_error}")
+    conversation_id = ensure_conversation()
+    add_message("user", message)
+    model_message = message
+    if refresh_error:
+        model_message += (
+            "\n\n[Systemhinweis: Die angeforderte Intervals.icu-Aktualisierung ist fehlgeschlagen. Nutze den letzten "
+            "verfügbaren Snapshot, weise auf dessen möglichen veralteten Stand hin und stelle ihn nicht als aktuell dar.]"
+        )
+    response = responses_request(
+        {
+            "model": selected_model(),
+            "conversation": conversation_id,
+            "instructions": build_training_context(),
+            "input": model_message,
+            "tools": [WORKOUT_TOOL],
+            "tool_choice": "auto",
+            "parallel_tool_calls": False,
+            "max_output_tokens": 6000,
+            "truncation": "auto",
+        },
+    )
+    created_library: list[dict[str, Any]] = []
+    tool_outputs = []
+    for item in response.get("output", []):
+        if item.get("type") != "function_call" or item.get("name") != "save_workout_library_entries":
+            continue
+        try:
+            arguments = json.loads(item.get("arguments") or "{}")
+            library_entries = create_library_workouts(arguments.get("workouts") or [])
+            created_library.extend(library_entries)
+            result = {
+                "ok": True,
+                "library_ids": [entry["id"] for entry in library_entries],
+                "synced_to_intervals_library": True,
+                "calendar_scheduling_requires_athlete_action": True,
+            }
+        except (AppError, json.JSONDecodeError, TypeError) as exc:
+            result = {"ok": False, "error": str(exc)}
+        tool_outputs.append({"type": "function_call_output", "call_id": item.get("call_id"), "output": json.dumps(result)})
+    if tool_outputs:
+        response = responses_request(
+            {
+                "model": selected_model(),
+                "conversation": conversation_id,
+                "instructions": build_training_context(),
+                "input": tool_outputs,
+                "tools": [WORKOUT_TOOL],
+                "tool_choice": "none",
+                "max_output_tokens": 2500,
+                "truncation": "auto",
+            },
+        )
+    text = output_text(response)
+    if not text:
+        log_empty_response(response)
+        if created_library:
+            text = "Ich habe die Einheiten in deiner Intervals.icu-Trainingsbibliothek gespeichert, aber die erläuternde Antwort war unvollständig."
+        elif response.get("status") == "incomplete":
+            text = "Die Coach-Antwort wurde abgeschnitten, bevor Text erzeugt wurde. Bitte erneut versuchen; das Modell hat sein Antwortlimit erreicht."
+        else:
+            text = "Der Coach hat keine Textantwort zurückgegeben. Bitte erneut versuchen und bei Wiederholung die Diagnose prüfen."
+    assistant_message = add_message("assistant", text)
+    return {"message": assistant_message, "library": created_library}
+
+
+def local_now() -> datetime:
+    timezone_name = get_profile().get("timezone") or "Europe/Berlin"
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(timezone_name))
+    except Exception:
+        return datetime.now().astimezone()
+
+
+def morning_checkin_date() -> str | None:
+    now = local_now()
+    return now.date().isoformat() if 5 <= now.hour < 11 else None
+
+
+def run_morning_checkin(checkin_date: str) -> None:
+    try:
+        set_kv("morning_checkin_running", "1")
+        set_kv("morning_checkin_status", "working")
+        set_kv("morning_checkin_error", "")
+        add_message("event", "Morgen-Check-in: Aktuelle Garmin-/Intervals.icu-Daten werden geladen…")
+        sync_result = sync_intervals("Morgen-Check-in", activity_days=sync_period("intervals"))
+        if sync_result.get("status") == "already_running":
+            deadline = time.monotonic() + 120
+            while get_kv("sync_running") == "1" and time.monotonic() < deadline:
+                time.sleep(1)
+        chat_with_coach(
+            "Gib mir den heutigen Morgen-Check-in auf Basis des frisch aktualisierten Snapshots. "
+            "Bewerte Trainingsbelastung, Schlaf, Erholung und geplante Einheiten. Empfiehl das heutige Vorgehen "
+            "und erstelle nur bei Sinnhaftigkeit neue Bibliothekseinheiten."
+        )
+        set_kv("morning_checkin_date", checkin_date)
+        set_kv("morning_checkin_status", "ready")
+    except Exception as exc:
+        error = redact_text(str(exc))[:1000]
+        set_kv("morning_checkin_status", "error")
+        set_kv("morning_checkin_error", error)
+        add_message("event", f"Morgen-Check-in fehlgeschlagen: {error}")
+        LOGGER.error(
+            "Morning check-in failed",
+            extra={"event": "morning_checkin_failed", "context": {"date": checkin_date}},
+            exc_info=True,
+        )
+    finally:
+        set_kv("morning_checkin_running", "0")
+        MORNING_CHECKIN_LOCK.release()
+
+
+def schedule_morning_checkin() -> None:
+    checkin_date = morning_checkin_date()
+    if not checkin_date or not CONFIG.openai_api_key or not CONFIG.intervals_api_key:
+        return
+    if get_kv("morning_checkin_date") == checkin_date or get_kv("morning_checkin_attempted") == checkin_date:
+        return
+    if not MORNING_CHECKIN_LOCK.acquire(blocking=False):
+        return
+    set_kv("morning_checkin_attempted", checkin_date)
+    threading.Thread(target=run_morning_checkin, args=(checkin_date,), daemon=True).start()
+
+
+def public_state() -> dict[str, Any]:
+    snapshot = latest_snapshot()
+    activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
+    planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
+    return {
+        "messages": list_messages(),
+        "library": list_workout_library(),
+        "activities": activities,
+        "planned": planned,
+        "profile": get_profile(),
+        "competitions": list_competitions(),
+        "performance": current_performance_context(snapshot),
+        "garmin": garmin_public_state(),
+        "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
+        "sync": {
+            "last_sync_at": get_kv("last_sync_at"),
+            "last_error": get_kv("last_sync_error") or None,
+            "running": get_kv("sync_running") == "1",
+            "status": get_kv("sync_status") or None,
+        },
+        "library_sync": {
+            "last_sync_at": get_kv("last_library_sync_at"),
+            "last_error": get_kv("last_library_sync_error") or None,
+        },
+        "sync_settings": {
+            "intervals_days": sync_period("intervals"),
+            "garmin_days": sync_period("garmin"),
+        },
+        "performance_refresh": {
+            "last_refresh_at": get_kv("last_performance_refresh_at"),
+            "last_error": get_kv("last_performance_error") or None,
+            "running": get_kv("performance_refresh_running") == "1",
+        },
+        "morning_checkin": {
+            "status": get_kv("morning_checkin_status") or "waiting",
+            "running": get_kv("morning_checkin_running") == "1",
+            "date": get_kv("morning_checkin_date"),
+            "last_error": get_kv("morning_checkin_error") or None,
+        },
+        "model": {"selected": selected_model(), "options": available_model_options()},
+        "configured": {
+            "openai": bool(CONFIG.openai_api_key),
+            "intervals": bool(CONFIG.intervals_api_key),
+        },
+    }
+
+
+def recent_log_entries(limit: int = 200) -> list[dict[str, Any]]:
+    if not LOG_PATH.is_file():
+        return []
+    try:
+        lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
+    except OSError as exc:
+        return [{"timestamp": utc_now(), "level": "ERROR", "event": "log_read_failed", "message": redact_text(str(exc))}]
+    entries: list[dict[str, Any]] = []
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            entry = {"level": "UNKNOWN", "event": "unparsed_log", "message": line}
+        entries.append(sanitize_log_value(entry))
+    return entries
+
+
+SETTINGS_SECRET_KEYS = ("OPENAI_API_KEY", "INTERVALS_API_KEY", "GARMIN_PASSWORD")
+SETTINGS_VALUE_KEYS = ("GARMIN_EMAIL", "GARMINTOKENS", "GARMIN_FIXTURE_PATH")
+SETTINGS_KEYS = SETTINGS_SECRET_KEYS + SETTINGS_VALUE_KEYS
+
+
+def save_settings(values: Any) -> dict[str, Any]:
+    """Update explicitly submitted settings without ever returning their values."""
+    if not isinstance(values, dict):
+        raise AppError(400, "Die Einstellungen müssen als Objekt gesendet werden.")
+    updates: dict[str, str] = {}
+    for key in SETTINGS_KEYS:
+        if key not in values:
+            continue
+        raw = str(values.get(key) or "").replace("\r", "").replace("\n", "").strip()
+        if raw:
+            updates[key] = raw
+    if not updates:
+        raise AppError(400, "Keine neuen Zugangsdaten oder Einstellungen eingegeben.")
+    env_path = ROOT / ".env"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    except OSError as exc:
+        raise AppError(500, f".env konnte nicht gelesen werden: {exc}") from exc
+    seen: set[str] = set()
+    rewritten: list[str] = []
+    for line in lines:
+        match = re.match(r"^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s*=).*$", line)
+        key = match.group(2) if match else None
+        if key in updates and match:
+            rewritten.append(f"{match.group(1)}{key}={updates[key]}")
+            seen.add(key)
+        else:
+            rewritten.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            rewritten.append(f"{key}={value}")
+        # Make a local restart inherit the newly submitted values. The value
+        # is never returned to the browser or written to an application log.
+        os.environ[key] = value
+    try:
+        env_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise AppError(500, f".env konnte nicht gespeichert werden: {exc}") from exc
+    return {"status": "ok", "updated": sorted(updates), "restart_required": True}
+
+
+def schedule_restart() -> None:
+    """Restart locally or ask Docker's restart policy to bring the process back."""
+    def restart() -> None:
+        time.sleep(0.8)
+        if Path("/.dockerenv").exists():
+            os.kill(os.getpid(), signal.SIGTERM)
+            return
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import runpy,time; time.sleep(1.0); runpy.run_path(__import__('sys').argv[1], run_name='__main__')",
+                str(Path(__file__).resolve()),
+            ],
+            cwd=str(ROOT),
+            env=os.environ.copy(),
+            close_fds=True,
+        )
+        os._exit(0)
+    threading.Thread(target=restart, daemon=True).start()
+
+
+def diagnostic_report() -> dict[str, Any]:
+    snapshot = latest_snapshot()
+    garmin_status = garmin_public_state()
+    with DB_LOCK, database() as db:
+        message_count = db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"]
+        draft_count = db.execute("SELECT COUNT(*) AS count FROM workout_drafts").fetchone()["count"]
+        library_count = db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"]
+        competition_count = db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()["count"]
+    return {
+        "generated_at": utc_now(),
+        "app": {"name": "Intervals Coach", "version": APP_VERSION},
+        "runtime": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+        },
+        "configuration": {
+            "openai_configured": bool(CONFIG.openai_api_key),
+            "intervals_configured": bool(CONFIG.intervals_api_key),
+            "garmin_library_available": Garmin is not None,
+            "garmin_configured": garmin_status["configured"],
+            "garmin_fixture_configured": garmin_fixture_path() is not None,
+            "model": selected_model(),
+            "available_models": [option["id"] for option in available_model_options()],
+        },
+        "sync": {
+            "last_success": get_kv("last_sync_at"),
+            "last_error": redact_text(get_kv("last_sync_error") or "") or None,
+            "running": get_kv("sync_running") == "1",
+            "snapshot_counts": {
+                "activities": len(snapshot.get("recent_activities", [])) if snapshot else 0,
+                "wellness": len(snapshot.get("recent_wellness", [])) if snapshot else 0,
+                "calendar_events": len(snapshot.get("upcoming_calendar", [])) if snapshot else 0,
+            },
+        },
+        "performance_refresh": {
+            "last_refresh": get_kv("last_performance_refresh_at"),
+            "last_error": redact_text(get_kv("last_performance_error") or "") or None,
+            "running": get_kv("performance_refresh_running") == "1",
+            "ai_estimates": len(ai_performance_estimates().get("estimates", [])),
+        },
+        "garmin": garmin_status,
+        "morning_checkin": {
+            "status": get_kv("morning_checkin_status") or "waiting",
+            "running": get_kv("morning_checkin_running") == "1",
+            "date": get_kv("morning_checkin_date"),
+            "last_error": redact_text(get_kv("morning_checkin_error") or "") or None,
+        },
+        "database": {"messages": message_count, "workout_drafts_legacy": draft_count, "workout_library": library_count, "competitions": competition_count},
+        "logs": recent_log_entries(),
+        "note": "Zugangsdaten und Athleteninhalte sind bewusst ausgeschlossen. Diese JSON-Datei kann zur Fehlersuche bereitgestellt werden.",
+    }
+
+
+class RequestHandler(BaseHTTPRequestHandler):
+    server_version = f"IntervalsCoach/{APP_VERSION}"
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        LOGGER.info(
+            fmt % args,
+            extra={
+                "event": "http_access",
+                "context": {"method": self.command, "path": urlparse(self.path).path, "request_id": getattr(self, "request_id", None)},
+            },
+        )
+
+    def do_GET(self) -> None:
+        self.request_id = uuid.uuid4().hex[:12]
+        try:
+            path = urlparse(self.path).path
+            if path == "/api/health":
+                self.send_json(200, {"status": "ok"})
+            elif path == "/api/state":
+                schedule_morning_checkin()
+                self.send_json(200, public_state())
+            elif path == "/api/context-preview":
+                self.send_json(200, context_preview())
+            elif path == "/api/logs":
+                raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["200"])[0]
+                try:
+                    limit = max(1, min(int(raw_limit), 500))
+                except ValueError:
+                    limit = 200
+                self.send_json(200, {"entries": recent_log_entries(limit)})
+            elif path == "/api/diagnostics":
+                self.send_json(200, diagnostic_report())
+            elif path == "/api/library":
+                self.send_json(200, {"workouts": get_workout_library()})
+            elif path.startswith("/api/"):
+                raise AppError(404, "Nicht gefunden.")
+            else:
+                self.send_static(path)
+        except AppError as exc:
+            if exc.status >= 500:
+                LOGGER.error(
+                    exc.message,
+                    extra={"event": "http_app_error", "context": {"method": "GET", "path": self.path, "status": exc.status, "request_id": self.request_id}},
+                    exc_info=True,
+                )
+            self.send_json(exc.status, {"error": exc.message})
+        except Exception as exc:
+            LOGGER.error(
+                "Unhandled GET error",
+                extra={"event": "http_unhandled_error", "context": {"method": "GET", "path": self.path, "request_id": self.request_id}},
+                exc_info=True,
+            )
+            self.send_json(500, {"error": "Interner Serverfehler."})
+
+    def do_POST(self) -> None:
+        self.request_id = uuid.uuid4().hex[:12]
+        try:
+            path = urlparse(self.path).path
+            if path == "/api/chat":
+                payload = self.read_json()
+                self.send_json(200, chat_with_coach(str(payload.get("message", ""))))
+            elif path == "/api/sync":
+                payload = self.read_json()
+                days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))
+                self.send_json(200, sync_intervals("manuell", activity_days=days))
+            elif path == "/api/performance/refresh":
+                self.send_json(200, refresh_current_performance())
+            elif path == "/api/garmin/sync":
+                payload = self.read_json()
+                days = set_sync_period("garmin", payload.get("days", sync_period("garmin")))
+                self.send_json(200, sync_garmin(days=days))
+            elif path == "/api/chat/reset":
+                self.send_json(200, reset_coach_chat())
+            elif path == "/api/restart":
+                self.send_json(202, {"status": "restarting"})
+                schedule_restart()
+            elif path == "/api/library/sync":
+                self.send_json(200, sync_workout_library(reason="manuell"))
+            elif match := PLAN_LIBRARY_RE.match(path):
+                payload = self.read_json()
+                self.send_json(200, plan_library_workout(match.group(1), payload.get("date")))
+            elif path == "/api/drafts":
+                payload = self.read_json()
+                workouts = payload.get("workouts")
+                if workouts is None and payload.get("workout") is not None:
+                    workouts = [payload.get("workout")]
+                self.send_json(201, {"status": "ok", "drafts": save_workout_drafts(workouts)})
+            elif match := PUSH_RE.match(path):
+                self.send_json(200, push_draft(match.group(1)))
+            else:
+                raise AppError(404, "Nicht gefunden.")
+        except AppError as exc:
+            if exc.status >= 500:
+                LOGGER.error(
+                    exc.message,
+                    extra={"event": "http_app_error", "context": {"method": "POST", "path": self.path, "status": exc.status, "request_id": self.request_id}},
+                    exc_info=True,
+                )
+            self.send_json(exc.status, {"error": exc.message})
+        except Exception as exc:
+            LOGGER.error(
+                "Unhandled POST error",
+                extra={"event": "http_unhandled_error", "context": {"method": "POST", "path": self.path, "request_id": self.request_id}},
+                exc_info=True,
+            )
+            self.send_json(500, {"error": "Interner Serverfehler."})
+
+    def do_DELETE(self) -> None:
+        self.request_id = uuid.uuid4().hex[:12]
+        try:
+            path = urlparse(self.path).path
+            if match := DELETE_PLANNED_RE.match(path):
+                self.send_json(200, delete_planned_event(match.group(1)))
+            elif match := DELETE_DRAFT_RE.match(path):
+                self.send_json(200, delete_workout_draft(match.group(1)))
+            else:
+                raise AppError(404, "Nicht gefunden.")
+        except AppError as exc:
+            if exc.status >= 500:
+                LOGGER.error(
+                    exc.message,
+                    extra={"event": "http_app_error", "context": {"method": "DELETE", "path": self.path, "status": exc.status, "request_id": self.request_id}},
+                    exc_info=True,
+                )
+            self.send_json(exc.status, {"error": exc.message})
+        except Exception:
+            LOGGER.error(
+                "Unhandled DELETE error",
+                extra={"event": "http_unhandled_error", "context": {"method": "DELETE", "path": self.path, "request_id": self.request_id}},
+                exc_info=True,
+            )
+            self.send_json(500, {"error": "Interner Serverfehler."})
+
+    def do_PUT(self) -> None:
+        self.request_id = uuid.uuid4().hex[:12]
+        try:
+            path = urlparse(self.path).path
+            if path == "/api/settings/model":
+                self.send_json(200, save_model(self.read_json().get("model")))
+                return
+            if path == "/api/settings/credentials":
+                self.send_json(200, save_settings(self.read_json()))
+                return
+            if path == "/api/athlete-context":
+                payload = self.read_json()
+                self.send_json(200, save_athlete_context(payload.get("profile"), payload.get("competitions")))
+                return
+            if path != "/api/profile":
+                raise AppError(404, "Nicht gefunden.")
+            self.send_json(200, save_profile(self.read_json()))
+        except AppError as exc:
+            if exc.status >= 500:
+                LOGGER.error(
+                    exc.message,
+                    extra={"event": "http_app_error", "context": {"method": "PUT", "path": self.path, "status": exc.status, "request_id": self.request_id}},
+                    exc_info=True,
+                )
+            self.send_json(exc.status, {"error": exc.message})
+        except Exception as exc:
+            LOGGER.error(
+                "Unhandled PUT error",
+                extra={"event": "http_unhandled_error", "context": {"method": "PUT", "path": self.path, "request_id": self.request_id}},
+                exc_info=True,
+            )
+            self.send_json(500, {"error": "Interner Serverfehler."})
+
+    def read_body(self) -> bytes:
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+        except ValueError as exc:
+            raise AppError(400, "Ungültige Content-Length.") from exc
+        if size <= 0 or size > MAX_BODY_BYTES:
+            raise AppError(413 if size > MAX_BODY_BYTES else 400, "Ungültige Größe des Anfrageinhalts.")
+        return self.rfile.read(size)
+
+    def read_json(self) -> dict[str, Any]:
+        if "application/json" not in self.headers.get("Content-Type", ""):
+            raise AppError(415, "Content-Type muss application/json sein.")
+        try:
+            payload = json.loads(self.read_body())
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise AppError(400, "Ungültiges JSON.") from exc
+        if not isinstance(payload, dict):
+            raise AppError(400, "Der JSON-Inhalt muss ein Objekt sein.")
+        return payload
+
+    def send_json(self, status: int, payload: Any, headers: dict[str, str] | None = None) -> None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_static(self, path: str) -> None:
+        relative = "index.html" if path in {"", "/"} else path.lstrip("/")
+        target = (PUBLIC_DIR / relative).resolve()
+        try:
+            target.relative_to(PUBLIC_DIR.resolve())
+        except ValueError as exc:
+            raise AppError(403, "Forbidden.") from exc
+        if not target.is_file():
+            target = PUBLIC_DIR / "index.html"
+        data = target.read_bytes()
+        mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", mime + ("; charset=utf-8" if mime.startswith("text/") else ""))
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
+        no_cache = {"index.html", "app.js", "styles.css", "service-worker.js", "manifest.webmanifest"}
+        self.send_header("Cache-Control", "no-cache" if target.name in no_cache else "public, max-age=3600")
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def safe_sync(reason: str, activity_days: int = 90) -> None:
+    try:
+        sync_intervals(reason, activity_days=activity_days)
+    except Exception as exc:
+        LOGGER.error(
+            "Background synchronization failed",
+            extra={"event": "background_sync_failed", "context": {"reason": reason}},
+            exc_info=True,
+        )
+
+
+def daily_sync_loop() -> None:
+    """Keep the local snapshot fresh once per calendar day without a webhook."""
+    while True:
+        time.sleep(300)
+        if not CONFIG.intervals_api_key:
+            continue
+        today = local_now().date().isoformat()
+        last_sync = get_kv("last_sync_at") or ""
+        if garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())):
+            if (get_kv("last_garmin_sync_at") or "")[:10] != today:
+                safe_garmin_sync("tägliche automatische Aktualisierung")
+        if last_sync[:10] == today or get_kv("sync_running") == "1":
+            continue
+        safe_sync("tägliche automatische Aktualisierung", activity_days=sync_period("intervals"))
+
+
+def safe_garmin_sync(reason: str) -> None:
+    try:
+        sync_garmin()
+    except Exception:
+        LOGGER.error("Garmin synchronization failed", extra={"event": "garmin_sync_failed", "context": {"reason": reason}}, exc_info=True)
+
+
+def main() -> None:
+    initialise_logging()
+    LOGGER.info("Intervals Coach starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
+    initialise_database()
+    if CONFIG.intervals_api_key:
+        threading.Thread(target=safe_sync, args=("startup", sync_period("intervals")), daemon=True).start()
+        if garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())):
+            threading.Thread(target=safe_garmin_sync, args=("startup",), daemon=True).start()
+        threading.Thread(target=daily_sync_loop, daemon=True).start()
+    server = ThreadingHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
+    LOGGER.info("Intervals Coach listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

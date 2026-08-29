@@ -1,0 +1,10 @@
+{
+  "name": "Intervals Coach",
+  "short_name": "Coach",
+  "description": "Dein privater Intervals.icu-Trainingscoach",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#071515",
+  "theme_color": "#102a2a",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
