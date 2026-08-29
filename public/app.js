@@ -1,5 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { data: null, busy: false, profileDirty: false, localSync: { intervals: false, garmin: false, performance: false } };
+const state = { data: null, busy: false, profileDirty: false, localSync: { intervals: false, competitions: false, garmin: false, performance: false } };
 
 function cookie(name) {
   return document.cookie.split("; ").find((part) => part.startsWith(`${name}=`))?.split("=").slice(1).join("=") || "";
@@ -758,6 +758,26 @@ function renderCompetitions(competitions) {
   competitions.forEach((competition, index) => root.append(competitionEditor(competition, index)));
 }
 
+function renderCompetitionSync(data) {
+  const sync = data.competition_sync || {};
+  const button = $("#competitionSyncButton");
+  const detail = $("#competitionSyncDetail");
+  if (button) {
+    button.disabled = Boolean(sync.running || state.localSync.competitions);
+    button.textContent = sync.running || state.localSync.competitions ? "Synchronisierung läuft…" : "Mit Intervals.icu synchronisieren";
+  }
+  if (detail) {
+    detail.textContent = sync.last_error
+      ? sync.last_error
+      : sync.running
+        ? (sync.status || "Zielwettkämpfe werden synchronisiert…")
+        : sync.last_sync_at
+          ? `Letzte Aktualisierung: ${formatTime(sync.last_sync_at)}`
+          : "Noch nicht synchronisiert";
+    detail.classList.toggle("error", Boolean(sync.last_error));
+  }
+}
+
 function collectCompetitions() {
   return [...document.querySelectorAll(".competition-editor")].map((card) => {
     const competition = { id: card.dataset.id || "" };
@@ -1132,6 +1152,7 @@ function render(data) {
   renderProfile(data.profile);
   renderGarmin(data.garmin);
   renderCompetitions(data.competitions || []);
+  renderCompetitionSync(data);
   renderPerformance(data.performance);
   renderModel(data.model);
   renderThinkingLevel(data.thinking_level);
@@ -1194,6 +1215,26 @@ async function syncNow(event) {
     await load();
   } catch (error) { toast(error.message, true); await load(); }
   finally { state.localSync.intervals = false; button.disabled = false; button.classList.remove("busy"); button.textContent = defaultCaption; updateHeaderAction(); }
+}
+
+async function syncCompetitions() {
+  if (state.profileDirty) {
+    toast("Bitte zuerst die lokalen Änderungen speichern.", true);
+    return;
+  }
+  const button = $("#competitionSyncButton");
+  if (!button) return;
+  state.localSync.competitions = true;
+  button.disabled = true;
+  button.textContent = "Synchronisierung läuft…";
+  try {
+    const result = await api("/api/competitions/sync", { method: "POST", body: "{}" });
+    if (result.status === "already_running") toast("Zielwettkämpfe werden bereits synchronisiert");
+    else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert`);
+    invalidateContextPreview();
+    await load();
+  } catch (error) { toast(error.message, true); await load(); }
+  finally { state.localSync.competitions = false; renderCompetitionSync(state.data || {}); }
 }
 
 async function refreshPerformance() {
@@ -1362,6 +1403,7 @@ $("#headerActionButton").addEventListener("click", (event) => {
   else if (event.currentTarget.dataset.action === "activities") syncNow(event);
 });
 $("#systemIntervalsSyncButton").addEventListener("click", syncNow);
+$("#competitionSyncButton").addEventListener("click", syncCompetitions);
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; });
@@ -1391,6 +1433,6 @@ $("#messageInput").addEventListener("keydown", (event) => {
 });
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js");
 setInterval(() => {
-  if (state.localSync.intervals || state.localSync.garmin || state.localSync.performance) load();
+  if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.performance) load();
 }, 1500);
 bootstrapAuth();
