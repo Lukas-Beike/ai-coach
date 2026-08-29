@@ -1472,6 +1472,17 @@ document.querySelectorAll(".nav-item").forEach((button) => button.addEventListen
   if (button.dataset.panel === "chatPanel") scrollChatToLatest(true);
 }));
 
+function moveModelSettingsToSystemTab() {
+  const target = document.querySelector("#settingsPanel .context-preview");
+  if (!target) return;
+  for (const id of ["modelSelect", "thinkingLevelSelect"]) {
+    const control = document.getElementById(id);
+    const block = control?.closest(".model-selector");
+    if (block && block.parentElement !== target.parentElement) target.before(block);
+  }
+}
+
+moveModelSettingsToSystemTab();
 $("#loginForm").addEventListener("submit", login);
 $("#chatForm").addEventListener("submit", sendMessage);
 $("#headerActionButton").addEventListener("click", (event) => {
