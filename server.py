@@ -15,6 +15,7 @@ import re
 import secrets
 import shutil
 import socket
+import ssl
 import sqlite3
 import sys
 import threading
@@ -25,6 +26,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
+from http.client import HTTPResponse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from logging.handlers import RotatingFileHandler
@@ -32,7 +34,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+from urllib.request import Request, urlopen
 
 try:
     from garminconnect import Garmin
@@ -1537,6 +1539,12 @@ def list_competitions(include_sync: bool = False) -> list[dict[str, Any]]:
 def public_calendar_url(value: Any) -> str:
     raw = str(value or "").strip()
     parsed = urlparse(raw)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise AppError(400, "Public calendars must use a valid HTTPS port.") from exc
+    if port not in {None, 443}:
+        raise AppError(400, "Public calendars must use HTTPS port 443.")
     if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password:
         raise AppError(400, "Öffentliche Kalender müssen über eine HTTPS-URL ohne Zugangsdaten erreichbar sein.")
     hostname = parsed.hostname.rstrip(".").casefold()
@@ -1554,9 +1562,56 @@ def public_calendar_url(value: Any) -> str:
     return raw
 
 
-class NoRedirectCalendarHandler(HTTPRedirectHandler):
-    def redirect_request(self, request: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
-        raise AppError(400, "Der öffentliche Kalender darf nicht auf eine andere Adresse weiterleiten.")
+def fetch_public_calendar(url: str) -> bytes:
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").rstrip(".").casefold()
+    try:
+        addresses = [ipaddress.ip_address(hostname)]
+    except ValueError:
+        try:
+            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
+        except OSError as exc:
+            raise AppError(502, "The public calendar address could not be resolved.") from exc
+    if not addresses or any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
+        raise AppError(400, "Private or local calendar addresses are not fetched.")
+    port = parsed.port or 443
+    request_target = parsed.path or "/"
+    if parsed.query:
+        request_target += "?" + parsed.query
+    if any(char in request_target for char in "\r\n"):
+        raise AppError(400, "The public calendar address contains invalid characters.")
+    try:
+        host_header = hostname.encode("idna").decode("ascii")
+        request_bytes = (
+            f"GET {request_target} HTTP/1.1\r\n"
+            f"Host: {host_header}\r\n"
+            "Accept: text/calendar, text/plain;q=0.9\r\n"
+            f"User-Agent: IntervalsCoach/{APP_VERSION}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii")
+    except UnicodeError as exc:
+        raise AppError(400, "The public calendar address contains invalid characters.") from exc
+    for address in addresses:
+        raw_socket = None
+        tls_socket = None
+        try:
+            raw_socket = socket.create_connection((str(address), port), timeout=10)
+            tls_socket = ssl.create_default_context().wrap_socket(raw_socket, server_hostname=hostname)
+            raw_socket = None
+            tls_socket.sendall(request_bytes)
+            response = HTTPResponse(tls_socket, method="GET")
+            response.begin()
+            if 300 <= response.status < 400:
+                raise AppError(400, "The public calendar must not redirect to another address.")
+            if response.status >= 400:
+                raise AppError(502, f"The public calendar returned HTTP {response.status}.")
+            return response.read(MAX_PUBLIC_CALENDAR_BYTES + 1)
+        finally:
+            if tls_socket is not None:
+                tls_socket.close()
+            if raw_socket is not None:
+                raw_socket.close()
+    raise AppError(502, "The public calendar could not be loaded.")
 
 
 def parse_ics_value(value: str) -> str:
@@ -1646,14 +1701,7 @@ def import_public_calendar(value: Any) -> dict[str, Any]:
     url = public_calendar_url(value.get("url"))
     name = str(value.get("name") or "Öffentlicher Kalender").strip()[:200] or "Öffentlicher Kalender"
     try:
-        # public_calendar_url enforces HTTPS, rejects credentials and private/local
-        # DNS targets; redirects are disabled by NoRedirectCalendarHandler.
-        # lgtm [py/full-ssrf]
-        response = build_opener(NoRedirectCalendarHandler()).open(
-            Request(url, headers={"Accept": "text/calendar, text/plain;q=0.9", "User-Agent": f"IntervalsCoach/{APP_VERSION}"}),
-            timeout=10,
-        )
-        payload = response.read(MAX_PUBLIC_CALENDAR_BYTES + 1)
+        payload = fetch_public_calendar(url)
     except AppError:
         raise
     except Exception as exc:
@@ -4893,6 +4941,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def send_static(self, path: str) -> None:
         asset_name = "index.html" if path in {"", "/"} else path.lstrip("/")
+        if any(marker in asset_name for marker in ("/", "\\", ":")) or asset_name.startswith(".."):
+            raise AppError(403, "Forbidden.")
         target = STATIC_TARGETS.get(asset_name, STATIC_TARGETS["index.html"])
         if not target.is_file():
             target = STATIC_TARGETS["index.html"]
