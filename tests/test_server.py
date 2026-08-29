@@ -186,6 +186,21 @@ class CoachTests(unittest.TestCase):
         server.save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"id": "existing", "name": "Existing", "start_date_local": tomorrow + "T08:00:00"}]})
         self.assertEqual(server.calendar_conflicts({"date": tomorrow})[0]["id"], "existing")
 
+    def test_parallel_cycling_events_are_grouped_for_explicit_selection(self):
+        groups = server.parallel_cycling_event_groups([
+            {"id": "ride-1", "type": "Ride", "name": "Intervalle", "start_date_local": "2026-08-30T08:00:00", "moving_time": 3600},
+            {"id": "ride-2", "type": "Ride", "name": "Grundlage", "start_date_local": "2026-08-30T08:30:00", "moving_time": 3600},
+            {"id": "run-1", "type": "Run", "name": "Lauf", "start_date_local": "2026-08-30T08:15:00", "moving_time": 1800},
+        ])
+        self.assertEqual([[event["id"] for event in group] for group in groups], [["ride-1", "ride-2"]])
+
+    def test_separate_cycling_events_are_not_marked_as_parallel(self):
+        groups = server.parallel_cycling_event_groups([
+            {"id": "ride-1", "type": "Ride", "start_date_local": "2026-08-30T08:00:00", "moving_time": 1800},
+            {"id": "ride-2", "type": "Ride", "start_date_local": "2026-08-30T12:00:00", "moving_time": 1800},
+        ])
+        self.assertEqual(groups, [])
+
     def test_existing_snapshot_uses_incremental_intervals_window(self):
         server.save_snapshot({"synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_activities": [{"id": "old"}], "recent_wellness": [], "upcoming_calendar": []})
         client = server.IntervalsClient(server.Config(intervals_api_key="test-key"))

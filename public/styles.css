@@ -277,6 +277,14 @@ h2 {
 .performance-section .metric-grid { margin-top: 10px; }
 .subsection-title { margin: 22px 0 10px; color: var(--ink); font-size: .95rem; }
 .activities, .planned-calendar { display: grid; gap: 10px; }
+.parallel-warning { margin: 0 0 16px; padding: 15px; border: 1px solid rgba(255, 159, 10, .45); border-radius: 17px; color: var(--ink); background: rgba(255, 159, 10, .09); }
+.parallel-warning[hidden] { display: none; }
+.parallel-warning > strong { display: block; margin-bottom: 5px; }
+.parallel-warning > p { margin: 0 0 13px; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.parallel-cycling-group + .parallel-cycling-group { margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255, 159, 10, .24); }
+.parallel-cycling-options { display: grid; gap: 8px; margin-bottom: 11px; }
+.parallel-cycling-option { display: flex; align-items: flex-start; gap: 8px; color: var(--ink); font-size: .8rem; line-height: 1.35; }
+.parallel-cycling-option input { flex: 0 0 auto; margin-top: 2px; accent-color: var(--orange); }
 .activity-card, .planned-card { padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
 .activity-stats-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: -2px 0 15px; }
 .activity-stats-summary > div { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .025); }
