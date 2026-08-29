@@ -643,6 +643,61 @@ def activity_kind(activity: Any) -> str:
     return "other"
 
 
+def parallel_cycling_event_groups(events: Any) -> list[list[dict[str, Any]]]:
+    """Find planned rides whose times overlap or are too vague to distinguish."""
+    candidates = [
+        event for event in events if isinstance(event, dict)
+        and event.get("id") not in (None, "")
+        and activity_kind(event) == "cycling"
+    ] if isinstance(events, list) else []
+    edges = [set() for _ in candidates]
+
+    def interval(event: dict[str, Any]) -> tuple[datetime, datetime, bool] | None:
+        raw_start = str(event.get("start_date_local") or event.get("date") or "")
+        start = activity_datetime(raw_start)
+        if start is None:
+            return None
+        explicit_time = "T" in raw_start and start.time() != datetime.min.time()
+        duration = as_number(event.get("moving_time"))
+        seconds = max(60, float(duration)) if duration is not None and duration > 0 else 3600
+        return start, start + timedelta(seconds=seconds), explicit_time
+
+    intervals = [interval(event) for event in candidates]
+    for left_index, left in enumerate(intervals):
+        if left is None:
+            continue
+        left_start, left_end, left_has_time = left
+        for right_index in range(left_index + 1, len(intervals)):
+            right = intervals[right_index]
+            if right is None:
+                continue
+            right_start, right_end, right_has_time = right
+            if left_start.date() != right_start.date():
+                continue
+            overlaps = left_start < right_end and right_start < left_end
+            if overlaps or not (left_has_time and right_has_time):
+                edges[left_index].add(right_index)
+                edges[right_index].add(left_index)
+
+    groups: list[list[dict[str, Any]]] = []
+    visited: set[int] = set()
+    for start_index in range(len(candidates)):
+        if start_index in visited or not edges[start_index]:
+            continue
+        stack = [start_index]
+        visited.add(start_index)
+        group: list[dict[str, Any]] = []
+        while stack:
+            index = stack.pop()
+            group.append(candidates[index])
+            for neighbour in edges[index]:
+                if neighbour not in visited:
+                    visited.add(neighbour)
+                    stack.append(neighbour)
+        groups.append(sorted(group, key=lambda event: str(event.get("start_date_local") or event.get("date") or "")))
+    return groups
+
+
 def garmin_activity_duplicates_intervals(garmin_activity: Any, intervals_activities: list[dict[str, Any]]) -> bool:
     """Treat the Intervals/Wahoo recording as canonical when Garmin is a near duplicate."""
     if not isinstance(garmin_activity, dict):
@@ -2879,6 +2934,7 @@ def public_state() -> dict[str, Any]:
         "library": list_workout_library(),
         "activities": activities,
         "planned": planned,
+        "parallel_cycling": parallel_cycling_event_groups(planned),
         "profile": get_profile(),
         "competitions": list_competitions(),
         "performance": current_performance_context(snapshot),
