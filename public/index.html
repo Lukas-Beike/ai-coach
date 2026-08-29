@@ -103,6 +103,16 @@
             <legend>Zielwettkämpfe</legend>
             <p>Speichere hier Termine und Ergebnisziele. Synchronisiert werden nur Krafttraining, Lauf sowie Rad outdoor und Rad indoor/virtuell.</p>
             <div id="competitionList" class="competition-list"></div>
+            <div class="public-calendar-import">
+              <h3>Öffentliche Veranstaltungskalender</h3>
+              <p>Optional: iCalendar-Feeds (HTTPS) nach Lauf-, Rad- oder Kraftveranstaltungen durchsuchen und passende Termine als Wettkämpfe übernehmen.</p>
+              <div class="form-grid">
+                <label>Kalendername<input id="publicCalendarName" placeholder="Zum Beispiel: Breitensport NRW"></label>
+                <label>iCalendar-URL<input id="publicCalendarUrl" type="url" inputmode="url" placeholder="https://example.org/events.ics"></label>
+              </div>
+              <button type="button" id="publicCalendarImportButton" class="secondary-button">Kalender durchsuchen</button>
+              <div id="publicCalendarCandidates" class="public-calendar-candidates"></div>
+            </div>
             <div class="settings-inline-action competition-sync-actions">
               <div><strong>Intervals.icu-Zielwettkämpfe</strong><span id="competitionSyncDetail">Noch nicht synchronisiert</span></div>
               <button type="button" id="competitionSyncButton" class="secondary-button">Mit Intervals.icu synchronisieren</button>
@@ -112,6 +122,31 @@
 
           <button type="submit">Athletenkontext speichern</button>
         </form>
+        <section class="settings-section local-feedback-section" aria-labelledby="localFeedbackTitle">
+          <h3 id="localFeedbackTitle">Lokales Athleten-Feedback</h3>
+          <p>Hier werden nur eigene subjektive Angaben und Verfügbarkeiten gespeichert, die nicht aus Garmin oder Intervals.icu stammen.</p>
+          <form id="feedbackForm" class="profile-form">
+            <div class="form-grid">
+              <label>Datum<input id="feedbackDate" name="checkin_date" type="date" required></label>
+              <label>Verfügbare Trainingszeit (Min.)<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
+              <label>Muskelkater (0–10)<input name="soreness" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
+              <label>Subjektiver Stress (0–10)<input name="stress" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
+              <label>Motivation (0–10)<input name="motivation" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
+              <label>RPE der letzten Einheit (0–10)<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
+            </div>
+            <label>Krankheit / Beschwerden<textarea name="illness" rows="2" placeholder="Nur eintragen, wenn relevant"></textarea></label>
+            <label>Schmerz- oder Verletzungshinweise<textarea name="pain" rows="2" placeholder="Ort, Einschränkung oder Warnzeichen"></textarea></label>
+            <label>Verfügbarkeit / Rahmenbedingungen<textarea name="availability_notes" rows="2" placeholder="Reise, Zeitfenster, Equipment oder andere Einschränkungen"></textarea></label>
+            <label>Notizen<textarea name="notes" rows="2" placeholder="Zusätzliche subjektive Rückmeldung"></textarea></label>
+            <button type="submit">Feedback speichern</button>
+          </form>
+          <div id="feedbackHistory" class="feedback-history"></div>
+        </section>
+        <section class="settings-section planning-section" aria-labelledby="planningTitle">
+          <div class="settings-section-heading"><div><h3 id="planningTitle">Adaptive Planung</h3><p id="planningSummary">Lokale zukünftige Entwürfe können anhand deines Feedbacks überprüft werden.</p></div><button type="button" id="replanButton" class="secondary-button">Anpassung vorbereiten</button></div>
+          <div id="replanPreview" class="replan-preview" hidden></div>
+          <button type="button" id="applyReplanButton" class="secondary-button" hidden>Anpassung freigeben</button>
+        </section>
         <div class="model-selector">
           <label for="modelSelect">Coach-Modell<select id="modelSelect"></select></label>
           <p id="modelDescription" class="fine-print">Wähle die Balance aus Qualität, Tempo und Kosten.</p>
@@ -165,9 +200,21 @@
         <section class="settings-section">
           <h3>Datenschutz &amp; Verbrauch</h3>
           <p id="usageSummary" class="fine-print">OpenAI-Verbrauch wird geladen…</p>
+          <div class="settings-inline-action notification-actions">
+            <div><strong>PWA-Benachrichtigungen</strong><span id="notificationStatus">Noch nicht aktiviert</span></div>
+            <button id="notificationEnableButton" type="button" class="secondary-button">Benachrichtigungen aktivieren</button>
+          </div>
           <div class="settings-inline-action">
             <button id="privacyExportButton" type="button" class="secondary-button">Daten exportieren</button>
             <button id="privacyDeleteButton" type="button" class="secondary-button danger-button">Lokale Daten löschen</button>
+          </div>
+          <div class="settings-inline-action backup-actions">
+            <div><strong>Verschlüsseltes Datenbank-Backup</strong><span>Die Datei kann nur mit demselben APP_PASSWORD wiederhergestellt werden.</span></div>
+            <button id="backupDownloadButton" type="button" class="secondary-button">Backup herunterladen</button>
+          </div>
+          <div class="settings-inline-action backup-actions">
+            <label>Backup wiederherstellen<input id="backupFileInput" type="file" accept=".backup,.db,application/octet-stream"></label>
+            <button id="backupRestoreButton" type="button" class="secondary-button danger-button">Backup wiederherstellen</button>
           </div>
           <div class="settings-inline-action">
             <span>Die Datenbank bleibt als verschlüsselte Datei bestehen; ihr Inhalt wird geleert.</span>

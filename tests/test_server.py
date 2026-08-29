@@ -25,6 +25,10 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM workout_library")
             db.execute("DELETE FROM competitions")
             db.execute("DELETE FROM competition_sync_tombstones")
+            db.execute("DELETE FROM athlete_checkins")
+            db.execute("DELETE FROM plan_adjustments")
+            db.execute("DELETE FROM public_event_candidates")
+            db.execute("DELETE FROM public_event_sources")
             db.execute("DELETE FROM sessions")
             db.execute("DELETE FROM kv")
         server.save_profile({})
@@ -33,6 +37,42 @@ class CoachTests(unittest.TestCase):
         profile = server.normalize_profile({"name": "  Ada  ", "goals": "Finish strong", "admin": True})
         self.assertEqual(profile["name"], "Ada")
         self.assertNotIn("admin", profile)
+
+    def test_local_feedback_is_persisted_without_provider_values(self):
+        result = server.save_checkin({
+            "checkin_date": date.today().isoformat(), "soreness": "7", "stress": "4", "motivation": "8",
+            "available_minutes": "45", "pain": "left knee", "notes": "Short easy session preferred",
+        })
+        self.assertEqual(result["checkin"]["soreness"], 7)
+        self.assertEqual(server.local_feedback_context()["today"]["pain"], "left knee")
+        with self.assertRaises(server.AppError):
+            server.save_checkin({"soreness": 11})
+
+    def test_public_calendar_parser_extracts_supported_event_fields(self):
+        events = server.parse_public_calendar(
+            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:ride-1\r\nDTSTART;VALUE=DATE:20260920\r\n"
+            b"SUMMARY:Muensterland Giro\r\nCATEGORIES:Cycling\r\nLOCATION:Muenster\r\n"
+            b"DESCRIPTION:Gran fondo\\, long route\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+        self.assertEqual(events[0]["event_date"], "2026-09-20")
+        self.assertEqual(events[0]["name"], "Muensterland Giro")
+        self.assertEqual(events[0]["location"], "Muenster")
+        self.assertEqual(events[0]["description"], "Gran fondo, long route")
+
+    def test_adaptive_replan_only_changes_future_local_drafts_after_preview(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        draft = server.save_workout_drafts([{
+            "date": tomorrow, "sport": "Ride", "name": "VO2 intervals",
+            "description": "- 5m 115%", "duration_minutes": 45, "target": "POWER",
+        }])[0]
+        server.save_checkin({"illness": "Fever", "soreness": 8})
+        preview = server.adaptive_replan_preview()
+        self.assertEqual(len(preview["changes"]), 1)
+        self.assertEqual(server.list_workout_drafts()[0]["description"], "- 5m 115%")
+        result = server.apply_adaptive_replan(preview["id"])
+        self.assertEqual(result["updated"], 1)
+        self.assertNotEqual(server.list_workout_drafts()[0]["description"], "- 5m 115%")
+        self.assertEqual(server.list_workout_drafts()[0]["id"], draft["id"])
 
     def test_unlimited_retention_does_not_delete_history(self):
         with server.DB_LOCK, server.database() as db:
@@ -867,6 +907,23 @@ class CoachTests(unittest.TestCase):
 
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
+
+    def test_static_files_reject_path_traversal(self):
+        handler = object.__new__(server.RequestHandler)
+
+        for path in ("/../server.py", "/public/../../server.py", "/..\\server.py"):
+            with self.subTest(path=path):
+                with self.assertRaises(server.AppError) as error:
+                    server.RequestHandler.send_static(handler, path)
+                self.assertEqual(error.exception.status, 403)
+
+    def test_static_files_reject_absolute_path(self):
+        handler = object.__new__(server.RequestHandler)
+
+        with self.assertRaises(server.AppError) as error:
+            server.RequestHandler.send_static(handler, "/C:/Windows/win.ini")
+
+        self.assertEqual(error.exception.status, 403)
 
     def test_garmin_near_duplicate_is_skipped_in_favour_of_intervals_activity(self):
         garmin = {

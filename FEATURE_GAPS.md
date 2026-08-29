@@ -6,6 +6,27 @@ AI coaching products.
 
 Research snapshot: 2026-08-29
 
+## Product decisions
+
+Intervals Coach will not rebuild Intervals.icu. Intervals.icu remains the
+system of record for training-platform analytics, device delivery, and
+execution on Garmin, Wahoo, Zwift, and other connected platforms. Intervals
+Coach may persist selected normalized data locally when it improves AI context,
+historical comparisons, resilience, or auditability.
+
+The following decisions were made after this review:
+
+| Gap area | Decision | Product boundary |
+| --- | --- | --- |
+| Adaptive plan and replan engine | **Implement** | Coach-owned future-plan state, constraints, feedback, preview, and approval; no silent remote writes |
+| Integration and synchronization foundation | **Defer** | Keep the current Intervals.icu/Garmin integrations; consider broader providers later |
+| Structured workout delivery and indoor execution | **Do not implement locally** | Intervals.icu remains responsible for delivery to Garmin, Wahoo, Zwift, and other platforms |
+| Deep analytics and long-term history | **Implement selectively** | Persist source data needed by the AI and history; do not recreate Intervals.icu's analytics UI |
+| Athlete feedback, availability, and recovery | **Implement** | Store only local signals not already available from Garmin or Intervals.icu |
+| Annual planning and race preparation | **Implement** | Add multi-event season planning and optional import from public calendar feeds |
+| Notifications, offline behavior, and native device experience | **Implement** | Prioritize PWA notifications; keep native device execution delegated to Intervals.icu |
+| Data portability, backup, and recovery | **Implement** | Provide safe local backup/restore without exposing credentials |
+
 ## Executive summary
 
 Intervals Coach already has a strong foundation for a private, single-athlete
@@ -13,14 +34,16 @@ assistant: local encrypted persistence, Intervals.icu and Garmin data, source
 labels, 30-day trends, a conversational coach, workout-library reuse, explicit
 approval before remote writes, and transparent context/log views.
 
-The largest product gaps are not another dashboard metric. They are the
-systems that turn a chat assistant into a dependable training platform:
+The largest remaining product gaps are not another dashboard metric. They are
+the systems that turn a chat assistant into a dependable training companion:
 
 1. continuous adaptive planning and safe replanning;
-2. a broader, permission-aware integration layer;
-3. structured workout delivery and execution feedback;
-4. deeper activity analysis and long-term performance history;
-5. first-class athlete availability, subjective feedback, and health signals.
+2. first-class athlete availability, subjective feedback, and health signals;
+3. season planning and race preparation;
+4. reliable PWA notifications and local recovery workflows.
+
+Broader integrations and device delivery remain future options, while
+Intervals.icu continues to own the corresponding platform capabilities.
 
 These gaps are based on the current repository and public product information,
 not on hands-on testing of paid or device-specific features. Feature
@@ -56,10 +79,10 @@ partially covered by that baseline.
 | --- | --- | --- | --- |
 | Adaptive plan updates | Generates drafts when asked; no continuously maintained plan engine | TrainerRoad adapts plans to performance, schedule, missed workouts, and workout difficulty; Athletica and HumanGO describe continuous adaptive plans | **Critical gap** |
 | Annual/season planning | Target competitions and multi-week drafts | Intervals.icu offers annual plans with phases; TrainingPeaks offers Annual Training Plans that model future Fitness, Fatigue, and Form | **High gap** |
-| Device and service integrations | Direct Garmin read plus Intervals.icu read/write | TrainingPeaks advertises broad device connectivity; Athletica lists Garmin, Strava, Wahoo, COROS, and Concept2; Strava connects devices and third-party apps | **High gap** |
-| Structured workout delivery | Pushes approved workouts to the Intervals.icu calendar | Intervals.icu supports structured workouts and exports/imports such as ZWO, FIT, MRC, and ERG; Garmin supports sending workouts to compatible devices | **High gap** |
-| Indoor execution | No trainer control or in-workout execution surface | TrainerRoad provides adaptive cycling workouts and indoor training; TrainingPeaks offers TrainingPeaks Virtual | **High gap**, especially for cyclists |
-| Activity analysis | Snapshot summaries, selected metrics, and trends | Intervals.icu exposes extensive interval and fitness analytics; TrainingPeaks provides PMC and detailed workout analysis; Strava provides best efforts, zones, and activity analysis | **High gap** |
+| Device and service integrations | Direct Garmin read plus Intervals.icu read/write | TrainingPeaks advertises broad device connectivity; Athletica lists Garmin, Strava, Wahoo, COROS, and Concept2; Strava connects devices and third-party apps | **Deferred** |
+| Structured workout delivery | Pushes approved workouts to the Intervals.icu calendar | Intervals.icu supports structured workouts and exports/imports such as ZWO, FIT, MRC, and ERG; Garmin supports sending workouts to compatible devices | **Delegated to Intervals.icu** |
+| Indoor execution | No trainer control or in-workout execution surface | TrainerRoad provides adaptive cycling workouts and indoor training; TrainingPeaks offers TrainingPeaks Virtual | **Delegated to Intervals.icu/platforms** |
+| Activity analysis | Snapshot summaries, selected metrics, and trends | Intervals.icu exposes extensive interval and fitness analytics; TrainingPeaks provides PMC and detailed workout analysis; Strava provides best efforts, zones, and activity analysis | **Selective persistence only** |
 | Workout compliance | Planned and completed data are visible, but no dedicated compliance score or feedback workflow | TrainingPeaks advertises compliance dashboards; TrainerRoad uses post-workout surveys and progression levels | **High gap** |
 | Subjective athlete feedback | Profile notes and chat; readiness can be imported | TrainerRoad uses post-workout surveys; Athletica uses RPE/feel/comments; HumanGO advertises personal feedback and fatigue detection | **High gap** |
 | Availability and life constraints | No first-class schedule, travel, illness, injury, or time-availability model | Adaptive platforms replan around availability, travel, missed sessions, illness, and fatigue | **High gap** |
@@ -70,7 +93,7 @@ partially covered by that baseline.
 | Notifications and device-native experience | Browser PWA and long-lived login cookie | Garmin, TrainingPeaks, and other platforms provide device/app workout prompts, reminders, and native mobile experiences | **Medium gap** |
 | Coach/athlete collaboration | Intentionally one private athlete | TrainingPeaks, Intervals.icu, Final Surge, Athletica, and HumanGO provide coach dashboards, athlete management, groups, or community features | **Out of scope by design** |
 | Social/community features | None | Strava, Intervals.icu, Final Surge, and HumanGO offer social, group, or community features | **Out of scope by design** |
-| Data portability and recovery | JSON export and local encrypted database | Mature platforms generally support many import/export and synchronization paths | **Medium gap**: add backup/restore and standard formats before more connectors |
+| Data portability and recovery | JSON export and local encrypted database | Mature platforms generally support many import/export and synchronization paths | **Selected gap**: add safe backup/restore |
 
 ## Priority gaps and recommended direction
 
@@ -96,12 +119,13 @@ can write workouts and an adaptive coach. TrainerRoad, Athletica, and HumanGO
 all position adaptation to performance, fatigue, availability, or missed
 training as a core capability.
 
-### P0 - Integration and synchronization foundation
+### Deferred - Integration and synchronization foundation
 
-The current direct integrations are useful but narrow. The next connectors
-should not be added as isolated one-off clients. Build a provider abstraction
-with OAuth/token lifecycle, scopes, incremental cursors, retries, rate-limit
-handling, deduplication, conflict policy, and per-provider sync status first.
+The current direct integrations are useful but narrow. This work is explicitly
+deferred. If broader connectors are added later, they should not be added as
+isolated one-off clients. Build a provider abstraction with OAuth/token
+lifecycle, scopes, incremental cursors, retries, rate-limit handling,
+deduplication, conflict policy, and per-provider sync status first.
 
 Recommended order:
 
@@ -115,14 +139,14 @@ Recommended order:
 Every provider should expose provenance, timestamps, permissions, and a clear
 canonical-record policy. Read-only sync should remain the default.
 
-### P1 - Structured workout delivery and execution feedback
+### Delegated - Structured workout delivery and execution feedback
 
 Intervals Coach currently produces valid workout text and pushes approved
-calendar events. It does not yet deliver a workout to a watch, bike computer,
-smart trainer, or training app, nor does it receive structured execution data
-back from that device.
+calendar events. It will not become a second device-delivery platform. The
+approved workout remains in Intervals.icu, which is responsible for delivery to
+Garmin, Wahoo, Zwift, and other connected platforms.
 
-Recommended scope:
+Possible future scope, only if the Intervals.icu boundary changes:
 
 - normalize workouts into a provider-neutral step model;
 - validate sport, duration, target type, zones, and recoveries;
