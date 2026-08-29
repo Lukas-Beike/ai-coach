@@ -1,5 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { data: null, busy: false, profileDirty: false, localSync: { intervals: false, competitions: false, garmin: false, performance: false } };
+const state = { data: null, busy: false, profileDirty: false, activityTypes: new Set(), localSync: { intervals: false, competitions: false, garmin: false, performance: false } };
 
 function cookie(name) {
   return document.cookie.split("; ").find((part) => part.startsWith(`${name}=`))?.split("=").slice(1).join("=") || "";
@@ -191,6 +191,54 @@ function activitySportLabel(activity) {
   return "Andere";
 }
 
+function activityTypeKey(activity) {
+  return String(activity?.type || activity?.sport || activity?.sport_type || "Sportart unbekannt").trim() || "Sportart unbekannt";
+}
+
+function renderActivityFilters(activities) {
+  const root = $("#activityFilters");
+  if (!root) return;
+  root.replaceChildren();
+  const counts = new Map();
+  (Array.isArray(activities) ? activities : []).forEach((activity) => {
+    const type = activityTypeKey(activity);
+    counts.set(type, (counts.get(type) || 0) + 1);
+  });
+  if (!counts.size) {
+    root.hidden = true;
+    return;
+  }
+  root.hidden = false;
+  const label = document.createElement("span");
+  label.className = "activity-filters-label";
+  label.textContent = "Typ filtern:";
+  root.append(label);
+  [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).forEach(([type, count]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `activity-filter-button${state.activityTypes.has(type) ? " active" : ""}`;
+    button.textContent = `${type} (${count})`;
+    button.setAttribute("aria-pressed", state.activityTypes.has(type) ? "true" : "false");
+    button.addEventListener("click", () => {
+      if (state.activityTypes.has(type)) state.activityTypes.delete(type);
+      else state.activityTypes.add(type);
+      renderActivities(state.data?.activities || []);
+    });
+    root.append(button);
+  });
+  if (state.activityTypes.size) {
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "activity-filter-button clear";
+    clear.textContent = "Zurücksetzen";
+    clear.addEventListener("click", () => {
+      state.activityTypes.clear();
+      renderActivities(state.data?.activities || []);
+    });
+    root.append(clear);
+  }
+}
+
 function renderActivityStats(activities) {
   const root = $("#activityStats");
   if (!root) return;
@@ -202,7 +250,7 @@ function renderActivityStats(activities) {
   const range = dates.length
     ? `${new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(Math.min(...dates)))} – ${new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(Math.max(...dates)))}`
     : "Keine Einheiten";
-  const entries = [["Einheiten gesamt", list.length], ...[...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([sport, count]) => [`${sport}`, count]), ["Zeitraum", range]];
+  const entries = [["Einheiten gesamt", list.length], ...[...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([sport, count]) => [`${sport}`, count]), ["Datenbereich", range]];
   entries.forEach(([label, value]) => {
     const card = document.createElement("div");
     const number = document.createElement("strong");
@@ -215,19 +263,24 @@ function renderActivityStats(activities) {
 }
 
 function renderActivities(activities) {
-  renderActivityStats(activities);
+  const list = Array.isArray(activities) ? activities : [];
+  renderActivityFilters(list);
+  const filteredActivities = state.activityTypes.size
+    ? list.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))
+    : list;
+  renderActivityStats(filteredActivities);
   const root = $("#activities");
   root.replaceChildren();
-  if (!activities?.length) {
+  if (!filteredActivities.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
     const title = document.createElement("strong");
-    title.textContent = "Noch keine absolvierten Einheiten";
-    empty.append(title, document.createTextNode("Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen."));
+    title.textContent = list.length ? "Keine passenden Einheiten" : "Noch keine absolvierten Einheiten";
+    empty.append(title, document.createTextNode(list.length ? "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück." : "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen."));
     root.append(empty);
     return;
   }
-  activities.slice(0, 250).forEach((activity) => {
+  filteredActivities.slice(0, 250).forEach((activity) => {
     const card = document.createElement("article");
     card.className = "activity-card";
     const top = document.createElement("div");
@@ -238,9 +291,18 @@ function renderActivities(activities) {
     date.className = "eyebrow";
     date.textContent = dateLabel(activity.start_date_local);
     top.append(title, date);
-    const meta = document.createElement("div");
+    const meta = document.createElement("button");
+    meta.type = "button";
     meta.className = "activity-meta";
-    meta.textContent = activity.type || "Sportart unbekannt";
+    meta.classList.add("activity-type-button");
+    const type = activityTypeKey(activity);
+    meta.textContent = type;
+    meta.setAttribute("aria-pressed", state.activityTypes.has(type) ? "true" : "false");
+    meta.addEventListener("click", () => {
+      if (state.activityTypes.has(type)) state.activityTypes.delete(type);
+      else state.activityTypes.add(type);
+      renderActivities(state.data?.activities || []);
+    });
     const stats = document.createElement("div");
     stats.className = "activity-stats";
     const addStat = (label, value) => {
@@ -257,7 +319,7 @@ function renderActivities(activities) {
     card.append(top, meta, stats);
     root.append(card);
   });
-  if (activities.length > 250) {
+  if (filteredActivities.length > 250) {
     const note = document.createElement("p");
     note.className = "fine-print";
     note.textContent = "Es werden die 250 neuesten Einheiten angezeigt.";
@@ -1126,17 +1188,6 @@ function render(data) {
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
-  const activitiesSyncDetail = $("#activitiesSyncDetail");
-  if (activitiesSyncDetail) {
-    activitiesSyncDetail.textContent = data.sync?.running || state.localSync.intervals
-      ? (data.sync?.status || "Intervals.icu wird synchronisiert…")
-      : data.garmin_sync?.running || state.localSync.garmin
-        ? (data.garmin_sync?.status || "Garmin wird synchronisiert…")
-        : data.sync?.last_sync_at ? `Letzte Aktualisierung: ${formatTime(data.sync.last_sync_at)}` : "Noch nicht synchronisiert";
-    if (!data.sync?.running && !state.localSync.intervals && data.sync?.last_window_start && data.sync?.last_window_end) {
-      activitiesSyncDetail.textContent += ` · Zeitraum ${data.sync.last_window_start} bis ${data.sync.last_window_end}`;
-    }
-  }
   renderPlanned(data.planned || []);
   renderDrafts(data.drafts || []);
   renderLibrary(data.library || []);
