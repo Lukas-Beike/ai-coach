@@ -6,7 +6,7 @@ import json
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="intervals-coach-test-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -813,6 +813,22 @@ class CoachTests(unittest.TestCase):
         state = server.public_state()
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
         self.assertEqual(state["planned"][0]["name"], "Intervalle")
+
+    def test_json_response_ignores_client_disconnect(self):
+        handler = object.__new__(server.RequestHandler)
+        handler.request_id = "request-1"
+        handler.command = "GET"
+        handler.path = "/api/state"
+        handler.send_response = Mock()
+        handler.send_header = Mock()
+        handler.end_headers = Mock(side_effect=BrokenPipeError())
+        handler.wfile = Mock()
+        handler.log_client_disconnect = Mock()
+
+        server.RequestHandler.send_json(handler, 200, {"status": "ok"})
+
+        handler.log_client_disconnect.assert_called_once_with()
+        handler.wfile.write.assert_not_called()
 
     def test_garmin_near_duplicate_is_skipped_in_favour_of_intervals_activity(self):
         garmin = {
