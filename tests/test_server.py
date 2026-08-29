@@ -278,6 +278,15 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.prompt_requests_fresh_data("Please load my latest workouts and review them."))
         self.assertFalse(server.prompt_requests_fresh_data("Was soll ich morgen trainieren?"))
 
+    def test_context_preview_exposes_context_and_last_chat_input(self):
+        server.add_message("user", "Wie soll ich morgen trainieren?")
+        preview = server.context_preview()
+        self.assertIn("You are the athlete's long-term endurance coach.", preview["context_text"])
+        self.assertIn("BEGIN UNTRUSTED EXTERNAL DATA", preview["context_text"])
+        self.assertEqual(preview["chat_prompt"]["field"], "input")
+        self.assertEqual(preview["chat_prompt"]["content"], "Wie soll ich morgen trainieren?")
+        self.assertIn("instructions", preview["chat_prompt"]["note"])
+
     def test_model_selection_is_persisted_and_validated(self):
         self.assertEqual(server.selected_model(), "gpt-5.6-sol")
         self.assertEqual(server.save_model("gpt-5.6-terra"), {"model": "gpt-5.6-terra"})

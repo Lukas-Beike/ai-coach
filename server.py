@@ -2647,6 +2647,11 @@ def context_preview() -> dict[str, Any]:
     snapshot_truncated = len(snapshot_text) > 80_000
     if snapshot_truncated:
         snapshot_text = snapshot_text[:80_000] + "...[truncated]"
+    last_user_message = next(
+        (str(message.get("content") or "") for message in reversed(list_messages()) if message.get("role") == "user"),
+        None,
+    )
+    context_text = build_training_context()
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "snapshot_truncated": snapshot_truncated,
@@ -2662,9 +2667,15 @@ def context_preview() -> dict[str, Any]:
             "included_separately": True,
             "note": "Der bisherige Dialog wird für Kontinuität mitgeführt. Dauerhafte Athletenfakten stammen ausschließlich aus Profil, Wettkämpfen und aktuellem Datensnapshot.",
         },
+        "chat_prompt": {
+            "field": "input",
+            "role": "user",
+            "content": last_user_message or "Noch keine Chat-Nachricht gesendet.",
+            "note": "Diese Eingabe wird als input getrennt vom Kontext/instructions an die Responses API übergeben.",
+        },
         "structured_athlete_context": structured_athlete_context(snapshot),
         "latest_intervals_snapshot": snapshot if not snapshot_truncated else snapshot_text,
-        "context_text": build_training_context(),
+        "context_text": context_text,
         "local_training_library": list_workout_library(),
     }
 

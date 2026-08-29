@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=67">
+  <link rel="stylesheet" href="/styles.css?v=68">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -115,7 +115,7 @@
           <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
           <p class="fine-print">Enthält aktuelle bereinigte Fehler und Laufzeitstatus, niemals API-Schlüssel oder Trainingsdaten.</p>
         </div>
-        <section class="context-preview" aria-labelledby="contextPreviewTitle">
+        <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
           <div class="context-preview-heading">
             <div><span class="eyebrow">TRANSPARENZ</span><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>
             <button type="button" id="contextPreviewButton" class="secondary-button">Kontext laden</button>
@@ -139,6 +139,15 @@
           </div>
           <p class="fine-print settings-message">Zugangsdaten und die Athlete ID müssen über Container-Umgebungsvariablen gesetzt werden (Unraid: Docker-Template &rarr; Environment variables). Erforderlich: <code>OPENAI_API_KEY</code>, <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code>; für Garmin zusätzlich <code>GARMIN_EMAIL</code>, <code>GARMIN_PASSWORD</code> und <code>GARMINTOKENS</code> (z. B. <code>/data/garmin_tokens</code>). Nach Änderungen den Container in Unraid neu erstellen.</p>
           <p id="garminDetail" class="fine-print settings-message"></p>
+        </section>
+        <section class="settings-section context-preview" aria-labelledby="systemContextPreviewTitle">
+          <div class="context-preview-heading">
+            <div><span class="eyebrow">TRANSPARENZ</span><h3 id="systemContextPreviewTitle">Chat-Kontext und Prompt</h3></div>
+            <button type="button" id="systemContextPreviewButton" class="secondary-button">Kontext laden</button>
+          </div>
+          <p class="fine-print context-preview-intro">Hier siehst du den Kontext, der als <code>instructions</code> gesendet wird, und die letzte Chat-Eingabe, die als <code>input</code> an OpenAI übergeben wurde.</p>
+          <div id="systemContextPreviewStatus" class="context-preview-status">Noch nicht geladen.</div>
+          <div id="systemContextPreviewContent" class="context-preview-content" hidden></div>
         </section>
         <section class="settings-section logs-section">
           <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die letzten bereinigten Einträge aus dem Fehler- und Laufzeitprotokoll.</p></div><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button></div>
@@ -180,6 +189,6 @@
       <button type="submit" id="loginButton">Anmelden</button>
     </form>
   </dialog>
-  <script src="/app.js?v=67" defer></script>
+  <script src="/app.js?v=68" defer></script>
 </body>
 </html>
