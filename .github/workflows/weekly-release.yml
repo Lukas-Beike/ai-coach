@@ -72,4 +72,5 @@ jobs:
           # can start another workflow, so dispatch the image workflow explicitly.
           gh workflow run publish-container.yml \
             --repo "$REPOSITORY" \
-            --ref "$next_tag"
+            --ref main \
+            --field "release_tag=$next_tag"
