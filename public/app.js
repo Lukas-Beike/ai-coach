@@ -420,8 +420,8 @@ function scrollChatToLatest() {
 }
 
 function renderContextPreview(preview) {
-  const status = $("#contextPreviewStatus");
-  const content = $("#contextPreviewContent");
+  const status = $("#systemContextPreviewStatus");
+  const content = $("#systemContextPreviewContent");
   if (!status || !content) return;
   content.replaceChildren();
   content.hidden = true;
@@ -438,12 +438,13 @@ function renderContextPreview(preview) {
     ["Garmin-Kontext", preview.structured_athlete_context?.garmin],
     ["Gesprächskontinuität", preview.conversation],
     ["Intervals.icu-Snapshot", preview.latest_intervals_snapshot],
-    ["Exakt zusammengesetzter Kontext", preview.context_text],
+    ["Letzte Chat-Eingabe (input)", preview.chat_prompt],
+    ["Kontext (instructions)", preview.context_text],
   ];
   sections.forEach(([title, value], index) => {
     if (value == null) return;
     const details = document.createElement("details");
-    if (index < 3) details.open = true;
+    if (index < 4) details.open = true;
     const summary = document.createElement("summary");
     summary.textContent = title;
     const pre = document.createElement("pre");
@@ -457,15 +458,15 @@ function renderContextPreview(preview) {
 }
 
 function invalidateContextPreview() {
-  const button = $("#contextPreviewButton");
+  const button = $("#systemContextPreviewButton");
   if (!button) return;
   button.dataset.loaded = "false";
   button.textContent = "Kontext aktualisieren";
 }
 
 async function loadContextPreview() {
-  const button = $("#contextPreviewButton");
-  const status = $("#contextPreviewStatus");
+  const button = $("#systemContextPreviewButton");
+  const status = $("#systemContextPreviewStatus");
   if (!button || !status || button.dataset.loaded === "true") return;
   button.disabled = true;
   button.textContent = "Kontext wird geladen…";
@@ -1162,10 +1163,12 @@ async function sendMessage(event) {
   try {
     await api("/api/chat", { method: "POST", body: JSON.stringify({ message }) });
     await load();
+    invalidateContextPreview();
   } catch (error) {
     toast(error.message, true);
     input.value = message;
     await load();
+    invalidateContextPreview();
   } finally {
     state.busy = false;
     sendButton.disabled = false;
@@ -1346,7 +1349,7 @@ document.querySelectorAll(".nav-item").forEach((button) => button.addEventListen
   $(`#${button.dataset.panel}`).classList.add("active");
   if (state.data) renderStatus(state.data);
   updateHeaderAction();
-  if (button.dataset.panel === "profilePanel") loadContextPreview();
+  if (button.dataset.panel === "settingsPanel") loadContextPreview();
   if (button.dataset.panel === "settingsPanel") loadLogs();
   window.scrollTo({ top: 0, behavior: "auto" });
   if (button.dataset.panel === "chatPanel") scrollChatToLatest(true);
@@ -1372,8 +1375,8 @@ $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);
 $("#privacyDeleteButton").addEventListener("click", deletePrivacyData);
 $("#logoutButton").addEventListener("click", logout);
 $("#libraryLoadButton").addEventListener("click", loadLibrary);
-$("#contextPreviewButton").addEventListener("click", () => {
-  $("#contextPreviewButton").dataset.loaded = "false";
+$("#systemContextPreviewButton").addEventListener("click", () => {
+  $("#systemContextPreviewButton").dataset.loaded = "false";
   loadContextPreview();
 });
 $("#messageInput").addEventListener("input", (event) => {
