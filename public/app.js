@@ -35,7 +35,8 @@ async function bootstrapAuth() {
     if (status.authenticated) {
       $("#loginDialog").close();
       $("#appShell").hidden = false;
-      await load();
+      if (status.state) render(status.state);
+      else await load();
     } else showLogin();
   } catch (_) {
     $("#loginError").textContent = "Server nicht erreichbar.";
@@ -50,11 +51,12 @@ async function login(event) {
   button.disabled = true;
   error.textContent = "";
   try {
-    await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#loginPassword").value }) });
+    const result = await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#loginPassword").value }) });
     $("#loginPassword").value = "";
     $("#loginDialog").close();
     $("#appShell").hidden = false;
-    await load();
+    if (result.state) render(result.state);
+    else await load();
   } catch (exception) {
     error.textContent = exception.message;
   } finally { button.disabled = false; }
@@ -325,12 +327,20 @@ async function deletePlanned(eventId, button, name) {
   }
 }
 
-function renderMessages(messages) {
+function chatIsNearBottom() {
+  return document.documentElement.scrollHeight - (window.scrollY + window.innerHeight) <= 140;
+}
+
+function renderMessages(messages, forceScroll = false) {
   const root = $("#messages");
-  root.replaceChildren();
   // Synchronisation and refresh notices belong to their respective tabs,
   // not to the personal conversation history.
   const visibleMessages = (messages || []).filter((message) => message.role !== "event");
+  const signature = JSON.stringify(visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content]));
+  if (root.dataset.signature === signature) return;
+  const shouldScroll = forceScroll || chatIsNearBottom();
+  root.dataset.signature = signature;
+  root.replaceChildren();
   if (!visibleMessages.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
@@ -347,7 +357,7 @@ function renderMessages(messages) {
     else node.textContent = message.content;
     root.append(node);
   }
-  scrollChatToLatest();
+  if (shouldScroll) scrollChatToLatest();
 }
 
 function scrollChatToLatest() {
@@ -357,7 +367,8 @@ function scrollChatToLatest() {
   requestAnimationFrame(() => {
     const target = root.lastElementChild;
     if (!target) return;
-    const bottomOffset = Math.min(190, Math.max(150, window.innerHeight * 0.34));
+    const composer = $("#chatForm");
+    const bottomOffset = (composer?.offsetHeight || 70) + 105 + window.visualViewport?.offsetTop || 175;
     const targetBottom = target.getBoundingClientRect().bottom + window.scrollY;
     window.scrollTo({ top: Math.max(0, targetBottom - window.innerHeight + bottomOffset), behavior: "auto" });
   });
@@ -612,6 +623,7 @@ function renderGarmin(garmin) {
     button.disabled = true;
     return;
   }
+  const performanceSources = [garmin.has_vo2max ? "VO2max" : null, garmin.has_estimated_run_times ? "Laufprognosen" : null].filter(Boolean);
   status.textContent = garmin.source === "fixture"
     ? "Lokale Garmin-Testdaten aktiv"
     : garmin.last_error ? "Mit Fehlern synchronisiert" : "Optionaler Direktabruf aktiv";
@@ -619,6 +631,7 @@ function renderGarmin(garmin) {
     ? `Letzter Abruf: ${formatTime(garmin.last_sync_at)} · ${garmin.activities || 0} Aktivitäten · Schlaf/HRV/Readiness ${[garmin.has_sleep, garmin.has_hrv, garmin.has_readiness].filter(Boolean).length}/3`
     : garmin.source === "fixture" ? "Testdatei ist konfiguriert; synchronisiere sie mit dem Button."
       : "Noch kein Garmin-Abruf durchgeführt.";
+  if (performanceSources.length) detail.textContent += ` · ${performanceSources.join("/")} aus Garmin`;
 }
 
 function contextField(labelText, field, value = "", options = {}) {
@@ -1016,9 +1029,10 @@ async function loadLogs() {
 }
 
 function render(data) {
+  const firstRender = !state.data;
   state.data = data;
   renderStatus(data);
-  renderMessages(data.messages);
+  renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
   const activitiesSyncDetail = $("#activitiesSyncDetail");
   if (activitiesSyncDetail) {
@@ -1068,7 +1082,7 @@ async function sendMessage(event) {
   input.value = "";
   if (state.data) {
     state.data.messages.push({ role: "user", content: message });
-    renderMessages(state.data.messages);
+    renderMessages(state.data.messages, true);
   }
   try {
     await api("/api/chat", { method: "POST", body: JSON.stringify({ message }) });
@@ -1148,7 +1162,7 @@ async function resetCoachChat() {
     await api("/api/chat/reset", { method: "POST", body: "{}" });
     if (state.data) {
       state.data.messages = [];
-      renderMessages([]);
+      renderMessages([], true);
     }
     toast("Neuer Coach-Chat gestartet");
   } catch (error) { toast(error.message, true); }
@@ -1246,8 +1260,8 @@ document.querySelectorAll(".nav-item").forEach((button) => button.addEventListen
   updateHeaderAction();
   if (button.dataset.panel === "profilePanel") loadContextPreview();
   if (button.dataset.panel === "settingsPanel") loadLogs();
-  if (button.dataset.panel === "chatPanel") scrollChatToLatest();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: "auto" });
+  if (button.dataset.panel === "chatPanel") scrollChatToLatest(true);
 }));
 
 $("#loginForm").addEventListener("submit", login);

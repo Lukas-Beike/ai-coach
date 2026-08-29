@@ -24,6 +24,7 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM training_plans")
             db.execute("DELETE FROM workout_library")
             db.execute("DELETE FROM competitions")
+            db.execute("DELETE FROM sessions")
             db.execute("DELETE FROM kv")
         server.save_profile({})
 
@@ -146,6 +147,39 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["running_vo2max_ml_kg_min"]["value"], 55)
         self.assertEqual(metrics["running_vo2max_ml_kg_min"]["source"], "Garmin Connect")
         self.assertEqual(metrics["run_5k_seconds"]["value"], 1320)
+
+    def test_garmin_uses_latest_vo2max_value_from_range_payload(self):
+        result = server.garmin_performance_metrics({
+            "max_metrics": [
+                {"generic": {"vo2MaxValue": 51}},
+                {"generic": {"vo2MaxValue": 55}},
+            ],
+        })
+        self.assertEqual(result["running_vo2max_ml_kg_min"]["value"], 55)
+
+    @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfÃ¼gbar.")
+    def test_session_is_persisted_and_restored_from_database(self):
+        class Handler:
+            client_address = ("127.0.0.1", 8090)
+
+            def __init__(self, cookies="", csrf=""):
+                self.headers = {"Cookie": cookies, "X-CSRF-Token": csrf}
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            data_dir = Path(temp_root) / "data"
+            config = replace(server.CONFIG, app_password="test-password-123")
+            with patch.object(server, "DATA_DIR", data_dir), patch.object(server, "DB_PATH", data_dir / "intervals-coach.db"), patch.object(server, "CONFIG", config):
+                server.initialise_database()
+                login = server.login_user(Handler(), "test-password-123")
+                token = login["session_token"]
+                csrf = login["csrf"]
+                restored = server.authenticated_session(Handler(f"ic_session={token}", csrf))
+                self.assertIsNotNone(restored)
+                server.require_csrf(Handler(f"ic_session={token}", csrf), restored)
+                with server.database() as db:
+                    row = db.execute("SELECT token_hash, csrf_hash FROM sessions").fetchone()
+                    self.assertNotEqual(row["token_hash"], token)
+                    self.assertNotEqual(row["csrf_hash"], csrf)
 
     def test_calendar_conflict_is_detected_before_push(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
