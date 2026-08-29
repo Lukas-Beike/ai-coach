@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=75">
+  <link rel="stylesheet" href="/styles.css?v=76">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -247,9 +247,12 @@
       <p>Gib das im Container gesetzte APP_PASSWORD ein.</p>
       <label for="loginPassword">Passwort<input id="loginPassword" type="password" autocomplete="current-password" required></label>
       <p id="loginError" class="error" aria-live="polite"></p>
-      <button type="submit" id="loginButton">Anmelden</button>
+      <button type="submit" id="loginButton" class="login-button">
+        <span class="button-spinner" aria-hidden="true"></span>
+        <span id="loginButtonLabel">Anmelden</span>
+      </button>
     </form>
   </dialog>
-  <script src="/app.js?v=75" defer></script>
+  <script src="/app.js?v=76" defer></script>
 </body>
 </html>

@@ -266,6 +266,9 @@ h2 {
 .composer button:hover, .profile-form > button:hover, .push-button:hover { filter: brightness(1.08); }
 .composer button:active, .profile-form > button:active, .push-button:active { transform: scale(.97); }
 .composer button:disabled, .push-button:disabled { cursor: wait; opacity: .55; }
+.login-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
+.button-spinner { display: none; width: 15px; height: 15px; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff; border-radius: 50%; }
+.login-button.is-loading .button-spinner { display: inline-block; animation: spin .7s linear infinite; }
 .voice-status { margin: 9px 4px 0; color: var(--muted); text-align: center; font-size: .72rem; }
 .voice-status.error { color: #ff9a93; }
 .voice-status[hidden] { display: none; }

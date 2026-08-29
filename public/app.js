@@ -123,8 +123,12 @@ async function bootstrapAuth() {
 async function login(event) {
   event.preventDefault();
   const button = $("#loginButton");
+  const buttonLabel = $("#loginButtonLabel");
   const error = $("#loginError");
   button.disabled = true;
+  button.classList.add("is-loading");
+  button.setAttribute("aria-busy", "true");
+  buttonLabel.textContent = "Anmelden …";
   error.textContent = "";
   try {
     const result = await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#loginPassword").value }) });
@@ -136,7 +140,12 @@ async function login(event) {
     else await load();
   } catch (exception) {
     error.textContent = exception.message;
-  } finally { button.disabled = false; }
+  } finally {
+    button.disabled = false;
+    button.classList.remove("is-loading");
+    button.removeAttribute("aria-busy");
+    buttonLabel.textContent = "Anmelden";
+  }
 }
 
 function toast(message, error = false) {
