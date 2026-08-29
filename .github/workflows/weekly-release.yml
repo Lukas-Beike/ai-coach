@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -66,3 +67,9 @@ jobs:
             --target "$release_sha" \
             --title "$next_tag" \
             --notes-file "$notes_file"
+
+          # Releases created with GITHUB_TOKEN do not emit a release event that
+          # can start another workflow, so dispatch the image workflow explicitly.
+          gh workflow run publish-container.yml \
+            --repo "$REPOSITORY" \
+            --ref "$next_tag"
