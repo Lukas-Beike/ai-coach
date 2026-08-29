@@ -47,6 +47,15 @@ except ImportError:  # Local unit tests may run without optional DB crypto.
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC_DIR = ROOT / "public"
+PUBLIC_ASSET_TARGETS = {
+    "app.js": PUBLIC_DIR / "app.js",
+    "icon.svg": PUBLIC_DIR / "icon.svg",
+    "index.html": PUBLIC_DIR / "index.html",
+    "logo.png": PUBLIC_DIR / "logo.png",
+    "manifest.webmanifest": PUBLIC_DIR / "manifest.webmanifest",
+    "service-worker.js": PUBLIC_DIR / "service-worker.js",
+    "styles.css": PUBLIC_DIR / "styles.css",
+}
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
@@ -4324,13 +4333,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             or "\\" in normalized
         ):
             raise AppError(403, "Forbidden.")
-        target = (PUBLIC_DIR / normalized).resolve()
+        target = PUBLIC_ASSET_TARGETS.get(normalized, PUBLIC_ASSET_TARGETS["index.html"]).resolve()
         try:
             target.relative_to(PUBLIC_DIR.resolve())
         except ValueError as exc:
             raise AppError(403, "Forbidden.") from exc
         if not target.is_file():
-            target = PUBLIC_DIR / "index.html"
+            target = PUBLIC_ASSET_TARGETS["index.html"]
         data = target.read_bytes()
         mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         self.send_response(200)
