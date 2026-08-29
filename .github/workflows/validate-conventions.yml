@@ -1,0 +1,45 @@
+name: Validate Conventional Commits
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    # Dependabot's generated titles/commits use GitHub's own format and are
+    # handled by the dedicated Dependabot auto-merge workflow.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title and commit subjects
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          conventional_regex='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]*\))?!: .+'
+
+          if [[ ! "$PR_TITLE" =~ $conventional_regex ]]; then
+            echo "Invalid PR title: $PR_TITLE"
+            echo "Expected: <type>(<optional-scope>): <description>"
+            exit 1
+          fi
+
+          invalid=0
+          while IFS= read -r subject; do
+            if [[ ! "$subject" =~ $conventional_regex ]]; then
+              echo "Invalid commit subject: $subject"
+              invalid=1
+            fi
+          done < <(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER/commits" --paginate --jq '.[].commit.message | split("\n")[0]')
+
+          if [[ "$invalid" -ne 0 ]]; then
+            exit 1
+          fi
