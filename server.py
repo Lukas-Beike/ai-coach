@@ -3937,6 +3937,7 @@ def require_csrf(handler: BaseHTTPRequestHandler, session: dict[str, Any]) -> No
 
 class RequestHandler(BaseHTTPRequestHandler):
     server_version = f"IntervalsCoach/{APP_VERSION}"
+    client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
     def log_message(self, fmt: str, *args: Any) -> None:
         LOGGER.info(
@@ -3950,6 +3951,19 @@ class RequestHandler(BaseHTTPRequestHandler):
     def setup(self) -> None:
         super().setup()
         self.connection.settimeout(20)
+
+    def log_client_disconnect(self) -> None:
+        LOGGER.info(
+            "HTTP client disconnected before response completed",
+            extra={
+                "event": "http_client_disconnected",
+                "context": {
+                    "method": self.command,
+                    "path": urlparse(self.path).path,
+                    "request_id": getattr(self, "request_id", None),
+                },
+            },
+        )
 
     def do_GET(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
@@ -4189,8 +4203,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.send_header(key, str(item))
             else:
                 self.send_header(key, value)
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.end_headers()
+            self.wfile.write(data)
+        except self.client_disconnect_errors:
+            self.log_client_disconnect()
 
     def send_static(self, path: str) -> None:
         relative = "index.html" if path in {"", "/"} else path.lstrip("/")
@@ -4212,8 +4229,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
         no_cache = {"index.html", "app.js", "styles.css", "service-worker.js", "manifest.webmanifest"}
         self.send_header("Cache-Control", "no-cache" if target.name in no_cache else "public, max-age=3600")
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.end_headers()
+            self.wfile.write(data)
+        except self.client_disconnect_errors:
+            self.log_client_disconnect()
 
 
 class CoachHTTPServer(ThreadingHTTPServer):
