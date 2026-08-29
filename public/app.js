@@ -265,7 +265,52 @@ function renderActivities(activities) {
   }
 }
 
+function renderParallelCyclingWarning(groups) {
+  const root = $("#parallelCyclingWarning");
+  if (!root) return;
+  root.replaceChildren();
+  root.hidden = !groups?.length;
+  if (!groups?.length) return;
+
+  const title = document.createElement("strong");
+  title.textContent = "Parallele Radeinheiten erkannt";
+  const intro = document.createElement("p");
+  intro.textContent = "Bitte auswählen, welche Einheit aus Intervals.icu gelöscht werden soll. Es wird nur die ausgewählte Einheit per API entfernt.";
+  root.append(title, intro);
+  groups.forEach((group, groupIndex) => {
+    const groupRoot = document.createElement("div");
+    groupRoot.className = "parallel-cycling-group";
+    const options = document.createElement("div");
+    options.className = "parallel-cycling-options";
+    group.forEach((event, eventIndex) => {
+      const label = document.createElement("label");
+      label.className = "parallel-cycling-option";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = `parallel-cycling-${groupIndex}`;
+      radio.value = String(event.id);
+      radio.checked = eventIndex === 0;
+      const text = document.createElement("span");
+      text.textContent = `${event.name || "Radeinheit"} · ${dateLabel(event.start_date_local || event.date)}${event.type ? ` · ${event.type}` : ""}`;
+      label.append(radio, text);
+      options.append(label);
+    });
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "secondary-button danger-button";
+    deleteButton.textContent = "Ausgewählte Einheit löschen";
+    deleteButton.addEventListener("click", () => {
+      const selectedId = options.querySelector("input:checked")?.value;
+      const selected = group.find((event) => String(event.id) === selectedId);
+      if (selected) deletePlanned(selected.id, deleteButton, selected.name);
+    });
+    groupRoot.append(options, deleteButton);
+    root.append(groupRoot);
+  });
+}
+
 function renderPlanned(planned) {
+  renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   const root = $("#plannedCalendar");
   root.replaceChildren();
   if (!planned?.length) {
