@@ -203,6 +203,21 @@ h2 {
   background: transparent;
 }
 .composer textarea::placeholder { color: var(--subtle); }
+.composer-actions { display: flex; align-items: flex-end; gap: 6px; }
+.composer-actions button { min-height: 44px; }
+.composer .voice-button {
+  min-width: 44px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  background: var(--surface-raised);
+  box-shadow: none;
+  font-size: 1.08rem;
+}
+.composer .voice-button:hover { border-color: rgba(52, 207, 161, .65); background: var(--surface); }
+.composer .voice-button.recording { border-color: rgba(255, 69, 58, .7); color: #fff; background: #b83232; animation: voice-recording 1.2s ease-in-out infinite; }
+.composer .voice-button.transcribing { cursor: wait; }
+@keyframes voice-recording { 50% { box-shadow: 0 0 0 5px rgba(255, 69, 58, .15); } }
 .composer button, .profile-form > button, dialog button, .push-button {
   border: 0;
   border-radius: 15px;
@@ -216,6 +231,9 @@ h2 {
 .composer button:hover, .profile-form > button:hover, .push-button:hover { filter: brightness(1.08); }
 .composer button:active, .profile-form > button:active, .push-button:active { transform: scale(.97); }
 .composer button:disabled, .push-button:disabled { cursor: wait; opacity: .55; }
+.voice-status { margin: 9px 4px 0; color: var(--muted); text-align: center; font-size: .72rem; }
+.voice-status.error { color: #ff9a93; }
+.voice-status[hidden] { display: none; }
 .fine-print { margin: 10px 4px 0; color: var(--subtle); text-align: center; font-size: .69rem; }
 
 .section-heading { display: flex; justify-content: space-between; margin: 18px 2px 20px; }
