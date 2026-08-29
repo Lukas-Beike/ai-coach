@@ -573,7 +573,7 @@ def set_sync_period(source: str, value: Any) -> int:
 
 def sync_date_windows(days: int, end_date: date | None = None) -> list[tuple[date, date]]:
     """Split long/all-time syncs into API-safe date windows."""
-    newest = end_date or date.today()
+    newest = end_date or local_now().date()
     oldest = SYNC_EARLIEST_DATE if days == ALL_SYNC_DAYS else newest - timedelta(days=max(1, days) - 1)
     windows: list[tuple[date, date]] = []
     cursor = oldest
@@ -1374,11 +1374,11 @@ class IntervalsClient:
 
     def fetch_snapshot(self, activity_days: int = 42) -> dict[str, Any]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
-        today = date.today()
+        today = local_now().date()
         future_end = today + timedelta(days=28)
         existing = latest_snapshot() or {}
         incremental = bool(existing) and activity_days != ALL_SYNC_DAYS
-        request_days = min(activity_days, 7) if incremental else activity_days
+        request_days = activity_days
         activities: list[Any] = []
         wellness: list[Any] = []
         for window_start, window_end in sync_date_windows(request_days, today):
@@ -1409,7 +1409,7 @@ class IntervalsClient:
     def fetch_performance_snapshot(self, existing_snapshot: dict[str, Any] | None) -> dict[str, Any]:
         """Refresh athlete settings and wellness only; do not request activities or calendar events."""
         athlete = quote(self.config.intervals_athlete_id, safe="")
-        today = date.today()
+        today = local_now().date()
         wellness_start = today - timedelta(days=90)
         athlete_data = self.get(f"/athlete/{athlete}")
         wellness = self.get(
@@ -1855,9 +1855,11 @@ def save_snapshot(snapshot: dict[str, Any], update_full_sync: bool = True) -> No
             set_kv("last_performance_refresh_at", snapshot["synced_at"], db)
 
 
-def sync_intervals(reason: str = "manual", activity_days: int = 42) -> dict[str, Any]:
+def sync_intervals(reason: str = "manual", activity_days: int | None = None) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    if activity_days is None:
+        activity_days = sync_period("intervals")
     if not SYNC_LOCK.acquire(blocking=False):
         return {"status": "already_running"}
     try:
@@ -1890,6 +1892,9 @@ def sync_intervals(reason: str = "manual", activity_days: int = 42) -> dict[str,
                 estimate_error = redact_text(str(exc))[:1000]
                 LOGGER.error("Performance estimation after manual sync failed", extra={"event": "performance_estimation_failed"}, exc_info=True)
         period_label = "alle verfügbaren Daten" if activity_days == ALL_SYNC_DAYS else f"letzte {activity_days} Tage"
+        sync_window = sync_date_windows(activity_days)
+        set_kv("last_sync_window_start", sync_window[0][0].isoformat())
+        set_kv("last_sync_window_end", sync_window[-1][1].isoformat())
         add_message("event", f"Trainingsdaten aktualisiert ({reason}, {period_label}).")
         return {
             "status": "ok",
@@ -1898,6 +1903,8 @@ def sync_intervals(reason: str = "manual", activity_days: int = 42) -> dict[str,
             "wellness": len(snapshot["recent_wellness"]),
             "events": len(snapshot["upcoming_calendar"]),
             "activity_days": activity_days,
+            "window_start": sync_window[0][0].isoformat(),
+            "window_end": sync_window[-1][1].isoformat(),
             "estimates": estimate_count,
             "estimate_error": estimate_error,
             "library": library_count,
@@ -2945,6 +2952,8 @@ def public_state() -> dict[str, Any]:
             "last_error": get_kv("last_sync_error") or None,
             "running": get_kv("sync_running") == "1",
             "status": get_kv("sync_status") or None,
+            "last_window_start": get_kv("last_sync_window_start"),
+            "last_window_end": get_kv("last_sync_window_end"),
         },
         "library_sync": {
             "last_sync_at": get_kv("last_library_sync_at"),
@@ -3525,7 +3534,7 @@ class CoachHTTPServer(ThreadingHTTPServer):
     request_queue_size = 32
 
 
-def safe_sync(reason: str, activity_days: int = 90) -> None:
+def safe_sync(reason: str, activity_days: int | None = None) -> None:
     try:
         sync_intervals(reason, activity_days=activity_days)
     except Exception:
