@@ -189,6 +189,47 @@ class CoachTests(unittest.TestCase):
                     self.assertNotEqual(row["token_hash"], token)
                     self.assertNotEqual(row["csrf_hash"], csrf)
 
+    def test_garmin_extracts_weight_and_sport_specific_max_heart_rate(self):
+        result = server.garmin_performance_metrics({
+            "weight": {"dailyWeightSummaries": [
+                {"summaryDate": "2026-08-28", "latestWeight": {"weight": 73500}},
+                {"summaryDate": "2026-08-29", "latestWeight": {"weight": 72800}},
+            ]},
+            "activities": [
+                {"activityType": "cycling", "maxHR": 181},
+                {"activityType": "running", "maxHeartRate": 194},
+            ],
+        })
+        self.assertEqual(result["weight_kg"]["value"], 72.8)
+        self.assertEqual(result["cycling_max_hr_bpm"]["value"], 181)
+        self.assertEqual(result["running_max_hr_bpm"]["value"], 194)
+        self.assertEqual(result["weight_kg"]["source"], "Garmin Connect")
+
+    def test_performance_exposes_thirty_day_trends_for_api_and_garmin_values(self):
+        today = date.today()
+        snapshot = {
+            "synced_at": "now", "athlete": {}, "recent_activities": [],
+            "recent_wellness": [
+                {"id": today.isoformat(), "readiness": 80, "weight": 72,
+                 "sport_info": [{"types": ["Ride"], "ftp": 300}, {"types": ["Run"], "lthr": 175}]},
+                {"id": (today - timedelta(days=29)).isoformat(), "readiness": 70, "weight": 74,
+                 "sport_info": [{"types": ["Ride"], "ftp": 280}, {"types": ["Run"], "lthr": 170}]},
+            ],
+        }
+        server.set_kv("garmin_snapshot", json.dumps({
+            "race_predictions": {"5k": 1500},
+            "performance_history": [{"date": (today - timedelta(days=29)).isoformat(), "metrics": {"run_5k_seconds": 1600}}],
+        }))
+        performance = server.current_performance_context(snapshot)
+        comparisons = performance["comparisons"]
+        self.assertEqual(comparisons["cycling_ftp_watts_30d"]["days"], 30)
+        self.assertEqual(comparisons["cycling_ftp_watts_30d"]["delta"], 10)
+        self.assertEqual(comparisons["bike_threshold_hr_bpm_30d"], None)
+        self.assertEqual(comparisons["readiness_30d"]["delta"], 5)
+        self.assertEqual(comparisons["readiness_30d"]["color"], "good")
+        self.assertEqual(comparisons["run_5k_seconds_30d"]["delta"], -100)
+        self.assertEqual(comparisons["run_5k_seconds_30d"]["color"], "good")
+
     def test_calendar_conflict_is_detected_before_push(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         server.save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"id": "existing", "name": "Existing", "start_date_local": tomorrow + "T08:00:00"}]})

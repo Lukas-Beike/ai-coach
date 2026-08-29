@@ -731,7 +731,7 @@ function renderGarmin(garmin) {
     button.disabled = true;
     return;
   }
-  const performanceSources = [garmin.has_vo2max ? "VO2max" : null, garmin.has_estimated_run_times ? "Laufprognosen" : null].filter(Boolean);
+  const performanceSources = [garmin.has_vo2max ? "VO2max" : null, garmin.has_estimated_run_times ? "Laufprognosen" : null, garmin.has_max_hr ? "Max HF" : null, garmin.has_weight ? "Gewicht" : null].filter(Boolean);
   status.textContent = garmin.source === "fixture"
     ? "Lokale Garmin-Testdaten aktiv"
     : garmin.last_error ? "Mit Fehlern synchronisiert" : "Optionaler Direktabruf aktiv";
@@ -887,6 +887,22 @@ function comparisonText(comparison) {
   return { text: `${arrow} ${sign}${amount}${unit}`, className: comparison.color || "neutral", title: `Vergleich zum ${comparison.label || `${comparison.days}-Tage-Durchschnitt`}` };
 }
 
+function metricSourceClass(source) {
+  if (source === "Garmin Connect") return "metric-garmin";
+  if (source === "Manuell") return "metric-manual";
+  if (source && (source.startsWith("Intervals.icu") || source === "Aus Aktivitäten")) return "metric-intervals";
+  if (source === "KI-Schätzung" || source === "Berechnete Schätzung") return "metric-estimate";
+  return "";
+}
+
+function metricToneClass(label, value) {
+  if (!label.startsWith("Form") || !Number.isFinite(Number(value))) return "";
+  const tsb = Number(value);
+  if (tsb >= -10 && tsb <= 5) return "metric-form-good";
+  if (tsb >= -20 && tsb <= 15) return "metric-form-caution";
+  return "metric-form-bad";
+}
+
 function displayMetric(root, label, metricData, formatter = null, editable = null) {
   const item = document.createElement("div");
   const metric = document.createElement("strong");
@@ -898,8 +914,23 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   caption.textContent = label;
   source.textContent = metricData?.source || "Nicht verfügbar";
   source.title = metricData?.note || metricData?.source || "";
+  for (const className of [metricSourceClass(metricData?.source), metricToneClass(label, value)]) {
+    if (className) item.classList.add(className);
+  }
+  source.className = metricSourceClass(metricData?.source);
   if (metricData?.source === "KI-Schätzung" || metricData?.source === "Berechnete Schätzung") source.className = "metric-estimate";
   if (metricData?.source === "Garmin Connect") source.className = "metric-garmin";
+  const valueRow = document.createElement("div");
+  valueRow.className = "metric-value-row";
+  valueRow.append(metric);
+  const comparison = comparisonText(metricData?.comparison);
+  if (comparison) {
+    const badge = document.createElement("small");
+    badge.className = `metric-comparison ${comparison.className}`;
+    badge.textContent = comparison.text;
+    badge.title = comparison.title;
+    valueRow.append(badge);
+  }
   if (editable?.key) {
     item.classList.add("metric-editable");
     const edit = document.createElement("button");
@@ -925,17 +956,9 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
       if (editing) { input.focus(); input.select(); }
       else saveInlineMetric(editable.key, input.value, edit);
     });
-    item.append(metric, input, caption, source, edit);
+    item.append(valueRow, input, caption, source, edit);
   } else {
-    item.append(metric, caption, source);
-  }
-  const comparison = comparisonText(metricData?.comparison);
-  if (comparison) {
-    const badge = document.createElement("small");
-    badge.className = `metric-comparison ${comparison.className}`;
-    badge.textContent = comparison.text;
-    badge.title = comparison.title;
-    item.append(badge);
+    item.append(valueRow, caption, source);
   }
   root.append(item);
 }
@@ -1006,11 +1029,11 @@ function renderPerformance(performance) {
   const performanceDetail = syncNotices.length ? syncNotices.join(" · ") : refreshedAt ? `Letzte Aktualisierung: ${formatTime(refreshedAt)}` : "";
   const compared = (value, key) => value && typeof value === "object" ? { ...value, comparison: comparisons[key] } : { value, comparison: comparisons[key] };
   performanceSection(root, "Gesundheitsdaten", [
-    ["Gewicht", values.weight_kg, null, { key: "weight_kg", step: "0.1" }],
+    ["Gewicht", compared(values.weight_kg, "weight_kg_30d"), null, { key: "weight_kg", step: "0.1" }],
     ["Körperfett", values.body_fat_pct, null, { key: "body_fat_pct", step: "0.1" }],
     ["Größe", values.height_cm, null, { key: "height_cm", step: "0.1" }],
     ["Schlaf", compared({ value: recovery.sleep_hours, unit: "h", source: "Intervals.icu Wellness" }, "sleep_hours")],
-    ["Readiness", compared({ value: recovery.readiness, unit: "", source: "Intervals.icu Wellness" }, "readiness")],
+    ["Readiness", compared({ value: recovery.readiness, unit: "", source: recovery.readiness_source || "Intervals.icu Wellness" }, "readiness_30d")],
     ["Ruhepuls", compared({ value: recovery.restingHR, unit: "bpm", source: "Intervals.icu Wellness" }, "restingHR")],
     ["HRV", compared({ value: recovery.hrv, unit: "ms", source: "Intervals.icu Wellness" }, "hrv")],
   ], performanceDetail);
@@ -1023,20 +1046,22 @@ function renderPerformance(performance) {
     ["Trainingsumfang letzte 7 Tage", compared({ value: week.duration_hours, unit: "h", source: "Aus Aktivitäten" }, "training_volume_7d")],
   ]);
   performanceSection(root, "Radfahren", [
-    ["FTP", values.cycling_ftp_watts],
+    ["FTP", compared(values.cycling_ftp_watts, "cycling_ftp_watts_30d")],
     ["eFTP", compared(values.cycling_eftp_watts, "cycling_eftp_30d")],
-    ["Schwellenpuls", values.bike_threshold_hr_bpm],
-    ["VO₂max", values.cycling_vo2max_ml_kg_min],
+    ["Schwellenpuls", compared(values.bike_threshold_hr_bpm, "bike_threshold_hr_bpm_30d")],
+    ["Max HF", values.cycling_max_hr_bpm],
+    ["VO₂max", compared(values.cycling_vo2max_ml_kg_min, "cycling_vo2max_ml_kg_min_30d")],
   ]);
   performanceSection(root, "Laufen", [
-    ["Schwellenleistung", values.run_threshold_watts],
-    ["Schwellenpace", values.run_threshold_pace_seconds_per_km, formatPace],
-    ["Schwellenpuls", values.run_threshold_hr_bpm],
-    ["VO₂max", values.running_vo2max_ml_kg_min],
-    ["5 km (geschätzt)", values.run_5k_seconds, formatDuration],
-    ["10 km (geschätzt)", values.run_10k_seconds, formatDuration],
-    ["Halbmarathon (geschätzt)", values.run_half_marathon_seconds, formatDuration],
-    ["Marathon (geschätzt)", values.run_marathon_seconds, formatDuration],
+    ["Schwellenleistung", compared(values.run_threshold_watts, "run_threshold_watts_30d")],
+    ["Schwellenpace", compared(values.run_threshold_pace_seconds_per_km, "run_threshold_pace_seconds_per_km_30d"), formatPace],
+    ["Schwellenpuls", compared(values.run_threshold_hr_bpm, "run_threshold_hr_bpm_30d")],
+    ["Max HF", values.running_max_hr_bpm],
+    ["VO₂max", compared(values.running_vo2max_ml_kg_min, "running_vo2max_ml_kg_min_30d")],
+    ["5 km (geschätzt)", compared(values.run_5k_seconds, "run_5k_seconds_30d"), formatDuration],
+    ["10 km (geschätzt)", compared(values.run_10k_seconds, "run_10k_seconds_30d"), formatDuration],
+    ["Halbmarathon (geschätzt)", compared(values.run_half_marathon_seconds, "run_half_marathon_seconds_30d"), formatDuration],
+    ["Marathon (geschätzt)", compared(values.run_marathon_seconds, "run_marathon_seconds_30d"), formatDuration],
   ]);
   const explanation = document.createElement("p");
   explanation.className = "fine-print";
