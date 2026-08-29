@@ -868,6 +868,23 @@ class CoachTests(unittest.TestCase):
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
 
+    def test_static_files_reject_path_traversal(self):
+        handler = object.__new__(server.RequestHandler)
+
+        for path in ("/../server.py", "/public/../../server.py", "/..\\server.py"):
+            with self.subTest(path=path):
+                with self.assertRaises(server.AppError) as error:
+                    server.RequestHandler.send_static(handler, path)
+                self.assertEqual(error.exception.status, 403)
+
+    def test_static_files_reject_absolute_path(self):
+        handler = object.__new__(server.RequestHandler)
+
+        with self.assertRaises(server.AppError) as error:
+            server.RequestHandler.send_static(handler, "/C:/Windows/win.ini")
+
+        self.assertEqual(error.exception.status, 403)
+
     def test_garmin_near_duplicate_is_skipped_in_favour_of_intervals_activity(self):
         garmin = {
             "activityId": 1, "activityType": "running", "activityName": "Morning Run",

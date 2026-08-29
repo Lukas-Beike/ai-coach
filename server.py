@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import mimetypes
+import ntpath
 import os
 import platform
 import re
@@ -4313,7 +4314,17 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def send_static(self, path: str) -> None:
         relative = "index.html" if path in {"", "/"} else path.lstrip("/")
-        target = (PUBLIC_DIR / relative).resolve()
+        normalized = os.path.normpath(relative)
+        if (
+            os.path.isabs(normalized)
+            or ntpath.isabs(normalized)
+            or ntpath.splitdrive(normalized)[0]
+            or normalized == ".."
+            or normalized.startswith(".." + os.sep)
+            or "\\" in normalized
+        ):
+            raise AppError(403, "Forbidden.")
+        target = (PUBLIC_DIR / normalized).resolve()
         try:
             target.relative_to(PUBLIC_DIR.resolve())
         except ValueError as exc:
