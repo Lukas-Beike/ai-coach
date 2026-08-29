@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          conventional_regex='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]*\))?!: .+'
+          conventional_regex='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]*\))?!?: .+'
 
           if [[ ! "$PR_TITLE" =~ $conventional_regex ]]; then
             echo "Invalid PR title: $PR_TITLE"
