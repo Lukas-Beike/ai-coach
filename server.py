@@ -1273,23 +1273,35 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
 
 COMPETITION_SPORTS = {
     "cycling": "Ride",
+    "rad": "Ride",
+    "rad outdoor": "Ride",
     "radfahren": "Ride",
     "ride": "Ride",
+    "virtualride": "VirtualRide",
+    "virtual ride": "VirtualRide",
+    "rad indoor": "VirtualRide",
+    "indoor cycling": "VirtualRide",
+    "virtual cycling": "VirtualRide",
     "running": "Run",
+    "lauf": "Run",
     "laufen": "Run",
     "run": "Run",
-    "swimming": "Swim",
-    "schwimmen": "Swim",
-    "swim": "Swim",
     "strength": "WeightTraining",
+    "kraft": "WeightTraining",
     "krafttraining": "WeightTraining",
     "weighttraining": "WeightTraining",
 }
 
 
+def supported_competition_sport(value: Any) -> str | None:
+    raw = str(value or "").strip().casefold()
+    normalized = re.sub(r"[\s_-]+", " ", raw)
+    return COMPETITION_SPORTS.get(raw) or COMPETITION_SPORTS.get(normalized)
+
+
 def intervals_competition_sport(value: Any) -> str:
     raw = str(value or "Cycling").strip()
-    return COMPETITION_SPORTS.get(raw.casefold(), raw[:80] or "Ride")
+    return supported_competition_sport(raw) or raw[:80] or "Ride"
 
 
 def competition_external_id(competition_id: str) -> str:
@@ -1324,14 +1336,15 @@ def remote_competition_date(event: dict[str, Any]) -> str | None:
 def remote_competition_data(event: dict[str, Any]) -> dict[str, str] | None:
     event_date = remote_competition_date(event)
     name = str(event.get("name") or "").strip()[:COMPETITION_TEXT_LIMITS["name"]]
-    if not event_date or not name:
+    sport = supported_competition_sport(event.get("type") or "Ride")
+    if not event_date or not name or not sport:
         return None
     category = str(event.get("category") or "RACE_B").upper()
     priority = category.rsplit("_", 1)[-1] if category.rsplit("_", 1)[-1] in {"A", "B", "C"} else "B"
     return {
         "name": name,
         "event_date": event_date,
-        "sport": str(event.get("type") or "Ride").strip()[:COMPETITION_TEXT_LIMITS["sport"]] or "Ride",
+        "sport": sport,
         "priority": priority,
         "notes": str(event.get("description") or "").strip()[:COMPETITION_TEXT_LIMITS["notes"]],
     }
@@ -1341,7 +1354,9 @@ def is_remote_competition_event(event: dict[str, Any], linked_event_ids: set[str
     category = str(event.get("category") or "").upper()
     external_id = str(event.get("external_id") or "")
     event_id = str(event.get("id") or "")
-    return category.startswith("RACE") or external_id.startswith(COMPETITION_EXTERNAL_PREFIX) or event_id in linked_event_ids
+    return bool(supported_competition_sport(event.get("type") or "Ride")) and (
+        category.startswith("RACE") or external_id.startswith(COMPETITION_EXTERNAL_PREFIX) or event_id in linked_event_ids
+    )
 
 
 def sync_competitions(reason: str = "manual") -> dict[str, Any]:
@@ -1373,7 +1388,9 @@ def sync_competitions(reason: str = "manual") -> dict[str, Any]:
             event for event in client.fetch_competition_events()
             if is_remote_competition_event(event, linked_ids)
         ]
-        outbound = [competition_event_payload(row) for row in local_rows if row.get("sync_dirty")]
+        dirty_rows = [row for row in local_rows if row.get("sync_dirty")]
+        outbound = [competition_event_payload(row) for row in dirty_rows if supported_competition_sport(row.get("sport"))]
+        skipped = len(dirty_rows) - len(outbound)
         pushed = client.upsert_competition_events(outbound)
         pushed_by_external = {str(event.get("external_id")): event for event in pushed if event.get("external_id")}
         pushed_by_id = {str(event.get("id")): event for event in pushed if event.get("id")}
@@ -1443,6 +1460,7 @@ def sync_competitions(reason: str = "manual") -> dict[str, Any]:
             "imported": imported,
             "updated": updated,
             "pushed": len(outbound),
+            "skipped": skipped,
             "removed": removed,
             "deleted_remote": deleted_remote,
             "total": len(list_competitions()),

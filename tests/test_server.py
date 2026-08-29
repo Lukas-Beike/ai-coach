@@ -83,6 +83,13 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(payload["external_id"], "intervals-coach-abc")
         self.assertTrue(payload["start_date_local"].endswith("T00:00:00"))
 
+    def test_competition_sport_mapping_supports_indoor_and_outdoor_cycling(self):
+        self.assertEqual(server.intervals_competition_sport("Radfahren"), "Ride")
+        self.assertEqual(server.intervals_competition_sport("Rad indoor"), "VirtualRide")
+        self.assertEqual(server.intervals_competition_sport("Lauf"), "Run")
+        self.assertEqual(server.intervals_competition_sport("Kraft"), "WeightTraining")
+        self.assertEqual(server.intervals_competition_sport("Krafttraining"), "WeightTraining")
+
     def test_past_workout_is_rejected(self):
         old = (date.today() - timedelta(days=4)).isoformat()
         with self.assertRaises(server.AppError):
@@ -476,14 +483,23 @@ class CoachTests(unittest.TestCase):
 
         class FakeIntervalsClient:
             def fetch_competition_events(self):
-                return [{
-                    "id": 777,
-                    "category": "RACE_B",
-                    "start_date_local": event_date + "T08:00:00",
-                    "type": "Run",
-                    "name": "Remote Half Marathon",
-                    "description": "Ziel unter zwei Stunden",
-                }]
+                return [
+                    {
+                        "id": 777,
+                        "category": "RACE_B",
+                        "start_date_local": event_date + "T08:00:00",
+                        "type": "Run",
+                        "name": "Remote Half Marathon",
+                        "description": "Ziel unter zwei Stunden",
+                    },
+                    {
+                        "id": 778,
+                        "category": "RACE_C",
+                        "start_date_local": event_date + "T09:00:00",
+                        "type": "Swim",
+                        "name": "Unsupported Swim Race",
+                    },
+                ]
 
             def upsert_competition_events(self, events):
                 return []
@@ -502,6 +518,32 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(competition["event_date"], event_date)
         self.assertEqual(competition["intervals_event_id"], "777")
         self.assertEqual(competition["sync_dirty"], 0)
+
+    def test_competition_sync_skips_unsupported_local_sports(self):
+        event_date = (date.today() + timedelta(days=30)).isoformat()
+        server.save_athlete_context({}, [{"name": "Swim Race", "event_date": event_date, "sport": "Swim"}])
+        pushed = []
+
+        class FakeIntervalsClient:
+            def fetch_competition_events(self):
+                return []
+
+            def upsert_competition_events(self, events):
+                pushed.extend(events)
+                return []
+
+            def bulk_delete_events(self, identifiers):
+                return 0
+
+        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
+            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+        ):
+            result = server.sync_competitions("test")
+
+        self.assertEqual(result["pushed"], 0)
+        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(pushed, [])
+        self.assertEqual(server.list_competitions()[0]["name"], "Swim Race")
 
     def test_competition_removal_creates_remote_delete_tombstone(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()

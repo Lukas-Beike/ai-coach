@@ -31,7 +31,9 @@ Im Profil können Zielwettkämpfe lokal angelegt und mit **Mit Intervals.icu
 synchronisieren** bidirektional abgeglichen werden. Lokale Änderungen werden
 als `RACE_A`, `RACE_B` oder `RACE_C` mit stabiler `external_id` übertragen.
 RACE-Events aus Intervals.icu werden beim Sync in die lokale Datenbank
-übernommen. Entfernte, bereits verknüpfte Remote-Events werden lokal entfernt;
+übernommen, sofern sie Krafttraining, Lauf, Rad-Outdoor (`Ride`) oder
+Rad-Indoor/virtuell (`VirtualRide`) sind. Andere Sportarten werden übersprungen.
+Entfernte, bereits verknüpfte Remote-Events werden lokal entfernt;
 lokale Löschungen werden beim nächsten Sync auch in Intervals.icu gelöscht.
 Der automatische Startup- und Tages-Sync führt diesen Abgleich ebenfalls aus.
 
