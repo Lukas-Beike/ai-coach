@@ -140,6 +140,13 @@ erst nach einem erfolgreichen Testlauf auf `main` nach
 Python-, Docker- und Action-Abhängigkeiten und darf erfolgreiche Updates
 automatisch zusammenführen.
 
+Jeden Montag um 03:00 UTC erstellt der Workflow `Weekly release` automatisch
+das nächste Patch-Release (zum Beispiel `0.0.4`) vom aktuellen `main`. Der
+Release-Changelog enthält alle Commits seit dem vorherigen Release. Ein
+manueller Start ist über **Actions → Weekly release → Run workflow** möglich.
+Das veröffentlichte Release löst anschließend den bestehenden Test- und
+GHCR-Publish-Workflow aus.
+
 Alle manuellen Commits und Pull-Request-Titel folgen Conventional Commits, zum
 Beispiel `fix: Garmin-Konfiguration korrigieren` oder
 `feat(sync): Intervals-Zeitraum auswählbar machen`. Das wird durch einen
