@@ -39,8 +39,20 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "CONFIG", replace(server.CONFIG, data_retention_days=-1)):
             server.initialise_database()
         with server.DB_LOCK, server.database() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM messages WHERE content = 'old chat'").fetchone()[0], 1)
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM snapshots WHERE created_at LIKE '2000-%'").fetchone()[0], 1)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM messages WHERE content = 'old chat'").fetchone()["count"], 1)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM snapshots WHERE created_at LIKE '2000-%'").fetchone()["count"], 1)
+
+    @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfügbar.")
+    def test_sqlcipher_database_returns_mapping_rows(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            data_dir = Path(temp_root) / "data"
+            config = replace(server.CONFIG, app_password="test-password-123")
+            with patch.object(server, "DATA_DIR", data_dir), patch.object(server, "DB_PATH", data_dir / "intervals-coach.db"), patch.object(server, "CONFIG", config):
+                server.initialise_database()
+                with server.database() as db:
+                    row = db.execute("SELECT value FROM kv WHERE key = 'profile'").fetchone()
+                    self.assertIsInstance(row, dict)
+                    self.assertIn("value", row)
 
     def test_compact_snapshot_drops_unknown_and_sensitive_fields(self):
         result = server.compact_snapshot(
