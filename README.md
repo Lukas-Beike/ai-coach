@@ -1,90 +1,136 @@
 # Intervals Coach
 
-Intervals Coach ist eine private, mobile-first PWA für einen Athleten. Der
-Python-Server synchronisiert Intervals.icu und optional Garmin, sendet einen
-reduzierten Trainingskontext an die OpenAI Responses API und speichert Chat,
-Profil, Snapshots und Trainingsentwürfe lokal.
+Intervals Coach is a private, mobile-first PWA for a single athlete. Its
+Python standard-library HTTP server synchronizes training data from
+Intervals.icu and, optionally, Garmin Connect, sends a sanitized coaching
+context to the OpenAI Responses API, and stores the local application state in
+an encrypted SQLite database.
 
-## Funktionen
+The application is designed for use on a trusted home network or private VPN.
+It is not intended to be exposed directly to the public internet.
 
-- Profil, Zielwettkämpfe, Leistungswerte und Trainingshistorie in SQLite.
-- Startup-Sync und manuelle bzw. angeforderte Aktualisierung von Intervals.icu.
-- Optionaler Garmin-Abruf mit Deduplizierung gegen Intervals.icu; Garmin-VO₂max,
-  Garmin-Laufprognosen, Gewicht und sportartspezifische maximale Herzfrequenzen
-  werden in der Leistungsansicht ausdrücklich als „Garmin Connect“ gekennzeichnet.
-- FTP, Schwellenwerte, VO₂max, Laufprognosen, Readiness und Gewicht zeigen einen
-  Trend zum verfügbaren 30-Tage-Mittelwert. Historische Garmin-Performancewerte
-  werden bei den Synchronisierungen lokal als schlanke Verlaufspunkte gespeichert.
-- Coach-Chat mit GPT-5.6-Modellauswahl, einstellbarem Thinking Level,
-  Kontextvorschau und bereinigten Logs.
-- KI erstellt nur lokale, datierte Trainingsentwürfe. Jede Übertragung in den
-- Vor jedem Entwurf wird die lokale Trainingsbibliothek auf gleiche oder
-  ähnliche Einheiten geprüft. Vorhandene Einheiten werden wiederverwendet;
-  neue Einheiten werden bei konfiguriertem Intervals-Zugang zuerst in der
-  Intervals.icu-Bibliothek angelegt. Die Übertragung in den Kalender benötigt
-  weiterhin eine ausdrückliche Freigabe und wird vorab auf Kalenderkonflikte
-  geprüft.
-- Mehrwöchige Entwürfe werden als Plan gruppiert und können schrittweise
-  freigegeben werden.
-- Konfigurierbare Intervals.icu-Synchronisierung mit sichtbarem Zeitraum,
-  Datenexport, lokaler Löschung und konfigurierbarer Aufbewahrungsdauer.
-- OpenAI-Verbrauchsanzeige mit den zuletzt von der API gemeldeten verbleibenden
-  Request-/Token-Kontingenten. Das Dollar-Guthaben ist nur im OpenAI-Billing
-  Dashboard bzw. über berechtigte Organisationszugriffe verfügbar.
+## Features
 
-## Zielwettkämpfe und Intervals.icu
+- Athlete profile, target competitions, performance metrics, training history,
+  chat history, and workout drafts stored locally in SQLite.
+- One Intervals.icu synchronization at startup, plus user-requested refreshes.
+- Optional Garmin Connect synchronization with deduplication against
+  Intervals.icu. Garmin-sourced VO2 max, running predictions, body weight, and
+  sport-specific maximum heart rates are explicitly marked as Garmin Connect
+  data in the performance view.
+- Activity synchronization for strength training, running, outdoor cycling,
+  and indoor/virtual cycling.
+- Thirty-day trends for FTP, thresholds, VO2 max, running predictions,
+  readiness, and body weight. Garmin performance values are stored locally as
+  compact historical points during synchronization.
+- Coach chat with selectable GPT-5.6 models, configurable thinking level,
+  context preview, and structured logs.
+- The coach creates dated local workout drafts only. Each draft requires an
+  explicit athlete approval before it can be transferred to the Intervals.icu
+  calendar.
+- Before a draft is created, the local workout library is checked for an exact
+  or similar workout. Existing templates are reused; missing templates are
+  added to the Intervals.icu library when the integration is configured.
+- Multi-week plans are grouped and can be approved incrementally.
+- Bidirectional synchronization of target competitions with Intervals.icu.
+- Configurable Intervals.icu activity synchronization period, data export,
+  local cleanup, and retention policy.
+- OpenAI usage display for the latest request and token quotas reported by the
+  API. Account dollar balances are available through the OpenAI billing
+  dashboard or authorized organization access, not through this application.
 
-Im Profil können Zielwettkämpfe lokal angelegt und mit **Mit Intervals.icu
-synchronisieren** bidirektional abgeglichen werden. Lokale Änderungen werden
-als `RACE_A`, `RACE_B` oder `RACE_C` mit stabiler `external_id` übertragen.
-RACE-Events aus Intervals.icu werden beim Sync in die lokale Datenbank
-übernommen, sofern sie Krafttraining, Lauf, Rad-Outdoor (`Ride`) oder
-Rad-Indoor/virtuell (`VirtualRide`) sind. Andere Sportarten werden übersprungen.
-Entfernte, bereits verknüpfte Remote-Events werden lokal entfernt;
-lokale Löschungen werden beim nächsten Sync auch in Intervals.icu gelöscht.
-Der automatische Startup- und Tages-Sync führt diesen Abgleich ebenfalls aus.
+## Target competitions and Intervals.icu
 
-## Konfiguration
+Target competitions can be created locally in the profile and synchronized in
+both directions with Intervals.icu. Local changes are exported as `RACE_A`,
+`RACE_B`, or `RACE_C` events with a stable `external_id`. Matching race events
+from Intervals.icu are imported into the local database.
 
-Kopiere `.env.example` nach `.env` oder setze die Variablen direkt als Docker-
-bzw. Unraid-Environment-Variablen. `-e`-Werte haben Vorrang vor einer
-`.env`-Datei.
+Competition synchronization accepts strength training, running, outdoor
+cycling (`Ride`), and indoor/virtual cycling (`VirtualRide`). Other sports are
+skipped. Remote events that were previously linked but no longer exist are
+removed locally, and local deletions are propagated to Intervals.icu during the
+next synchronization.
 
-Erforderlich:
+## Configuration
+
+Copy `.env.example` to `.env`, or set the variables directly as Docker or
+Unraid environment variables. Values supplied through the container
+environment take precedence over values in `.env`.
+
+Required:
 
 ```text
-OPENAI_API_KEY
-INTERVALS_API_KEY
+OPENAI_API_KEY=replace-me
+INTERVALS_API_KEY=replace-me
 INTERVALS_ATHLETE_ID=0
-APP_PASSWORD=ein-langes-zufälliges-passwort
+APP_PASSWORD=replace-with-at-least-12-random-characters
 ```
 
-`APP_PASSWORD` schützt die Weboberfläche und alle API-Endpunkte außer
-`/api/health`, `/api/login` und `/api/auth/status`. Dasselbe Passwort ist der
-Schlüssel der SQLCipher-Datenbank. Es wird nicht gespeichert und kann nicht
-wiederhergestellt werden. Wird eine bestehende unverschlüsselte Datenbank zum
-ersten Mal mit `APP_PASSWORD` gestartet, wird sie automatisch verschlüsselt und
-eine Datei `*.plaintext-backup-*` im Datenverzeichnis zurückbehalten.
+`APP_PASSWORD` protects the web interface and all API endpoints except the
+health check, login, and authentication-status endpoints. The same password
+is used as the SQLCipher database key. It is never stored by the application
+and cannot be recovered if lost. The password must be at least 12 characters
+long.
 
-Optional für Garmin:
+When an existing unencrypted database is first started with `APP_PASSWORD`,
+the application migrates it to SQLCipher and keeps a file named
+`*.plaintext-backup-*` in the data directory. Protect this backup like any
+other unencrypted copy of the database.
+
+Optional Garmin Connect configuration:
 
 ```text
-GARMIN_EMAIL
-GARMIN_PASSWORD
+GARMIN_EMAIL=your-email@example.com
+GARMIN_PASSWORD=replace-me
 GARMINTOKENS=/data/garmin_tokens
 GARMIN_FIXTURE_PATH=garmin-fixture.example.json
 ```
 
-Weitere Betriebsvariablen sind `DATA_RETENTION_DAYS` (`-1` = keine automatische
-Löschung, Standard). Die App setzt keine eigenen OpenAI-Anfrage- oder
-Tokenlimits.
+`GARMIN_FIXTURE_PATH` is intended for local development and tests. A persistent
+Garmin token store is preferred after the first login and MFA setup.
 
-## Docker / Unraid
+Other supported operational variables are:
 
-Das Image läuft als nicht-root Benutzer und erwartet den persistenten Mount
-`/data`. Der Unraid-Appdata-Ordner muss diesem Container Schreibzugriff geben.
+```text
+OPENAI_MODEL=gpt-5.6-sol
+DATA_RETENTION_DAYS=-1
+PORT=8090
+DATA_DIR=/data
+TZ=Europe/Berlin
+```
 
-Das Unraid-Logo liegt unter [`public/logo.png`](https://raw.githubusercontent.com/Lukas-Beike/ai-coach/main/public/logo.png).
+`DATA_RETENTION_DAYS=-1` is the default and disables automatic deletion. The
+application does not impose its own OpenAI request or token limits; it displays
+remaining quotas when the API reports them.
+
+## Garmin authentication
+
+For the first Garmin login, run the one-time interactive helper with the
+persistent data directory mounted. The helper prompts for the Garmin MFA code
+when required and stores refresh tokens under `GARMINTOKENS`.
+
+```sh
+docker run --rm -it \
+  --env-file /mnt/user/appdata/ai-coach/.env \
+  -v /mnt/user/appdata/ai-coach/data:/data \
+  ghcr.io/lukas-beike/ai-coach:latest \
+  python /app/garmin-login.py
+```
+
+After the token store has been created, restart the application container with
+the same `/data` mount. The application can then use the stored Garmin tokens
+without asking for the login code on every startup.
+
+## Docker and Unraid
+
+The container runs as a non-root user and expects a persistent writable mount
+at `/data`. The Unraid Appdata directory must grant the container write access.
+
+The Unraid application logo is available at
+[`public/logo.png`](public/logo.png).
+
+Pull and run the published image:
 
 ```sh
 docker pull ghcr.io/lukas-beike/ai-coach:latest
@@ -102,66 +148,90 @@ docker run -d \
   ghcr.io/lukas-beike/ai-coach:latest
 ```
 
-Alternativ kann lokal mit `docker build -t ai-coach:local .` gebaut werden.
-Verwende niemals `docker rm -v`, damit `/data` erhalten bleibt. Für Zugriff
-außerhalb des Heimnetzes ausschließlich ein privates VPN verwenden. Das
-Projekt liefert bewusst kein HTTPS-Proxying; HTTP darf nicht direkt ins
-öffentliche Internet exponiert werden.
-
-In der Unraid-UI die Variablen unter **Environment variables** setzen. Nach
-Änderungen an Variablen den Container neu erstellen. API-Schlüssel und
-Passwörter werden nicht in der UI der Anwendung eingegeben.
-
-Für den einmaligen Garmin-Login:
+Alternatively, build locally from the project root:
 
 ```sh
-docker run --rm -it --env-file /mnt/user/appdata/ai-coach/.env \
-  -v /mnt/user/appdata/ai-coach/data:/data \
-  ghcr.io/lukas-beike/ai-coach:latest python /app/garmin-login.py
+docker build -t ai-coach:local .
 ```
 
-## Daten, Datenschutz und Logs
+Do not use `docker rm -v`, because the `/data` volume must be preserved. In
+Unraid, set credentials and the athlete ID under the container's **Environment
+variables**. Recreate the container after changing environment variables. API
+keys and passwords are not entered in the application UI.
 
-Die Anwendung schreibt die verschlüsselte Datenbank und rotierende JSONL-Logs
-nach `/data`. OpenAI erhält nur den strukturierten Coaching-Kontext; API-
-Schlüssel werden nie an den Browser oder den Coach-Kontext gegeben. Externe
-Texte werden als untrusted data behandelt. Logs enthalten Dienst, Operation,
-Pfad, Dauer und Ergebnisgrößen, aber keine Request-Payloads.
+For access outside the home network, use a private VPN. The project does not
+provide HTTPS proxying; do not expose its HTTP port directly to the public
+internet.
 
-Im Bereich **System** kann der Athlet seine lokalen Daten als JSON exportieren
-oder Chats, Snapshots, Entwürfe, Bibliothek, Wettkämpfe und Profil lokal
-löschen. Die Datenbankdatei bleibt dabei bestehen. Ein Chat-Reset und die
-lokale Löschung versuchen außerdem, die gespeicherte OpenAI-Konversation zu
-löschen; für externe API-Daten gelten die jeweiligen Anbieter-Richtlinien.
+## Data, privacy, and logs
 
-## Entwicklung und Tests
+The encrypted database and rotating JSONL logs are written to `/data`. OpenAI
+receives only the structured coaching context required for a request. API keys
+are never sent to the browser or included in the coach context. Text received
+from external services is treated as untrusted data and never as instructions.
+
+Logs record external service, operation, path, duration, and result sizes, but
+not request payloads or credentials. Client disconnects such as a closed
+browser connection are handled as normal aborted requests rather than internal
+server failures.
+
+The **System** tab allows the athlete to export local data as JSON or delete
+local chats, snapshots, drafts, library entries, competitions, and profile
+data. The database file itself remains in place. Chat reset and local cleanup
+also attempt to delete the stored OpenAI conversation; data held by external
+providers remains subject to their own policies.
+
+The login session cookie is valid for 30 days and is protected with `HttpOnly`
+and `SameSite=Strict` attributes.
+
+## Development and testing
+
+The backend is a Python standard-library HTTP server. The frontend is served
+from `public/` as a browser PWA. Runtime state belongs in `data/` and is not
+included in Docker builds.
+
+Run the test suite and syntax checks from the project root:
 
 ```powershell
 python -m unittest discover -s tests -v
 python -m py_compile server.py tests/test_server.py
 ```
 
-Der GitHub-Workflow führt diese Tests für Pull Requests aus und veröffentlicht
-erst nach einem erfolgreichen Testlauf auf `main` nach
-`ghcr.io/lukas-beike/ai-coach`. `main` ist PR-geschützt; Dependabot verwaltet
-Python-, Docker- und Action-Abhängigkeiten und darf erfolgreiche Updates
-automatisch zusammenführen.
+Pull requests run the unit tests and syntax checks. The conventional-commit
+workflow validates pull-request titles and commit subjects. Dependabot manages
+Python, Docker, and GitHub Actions dependencies and can automatically squash
+merge successful update pull requests.
 
-Jeden Montag um 03:00 UTC erstellt der Workflow `Weekly release` automatisch
-das nächste Patch-Release (zum Beispiel `0.0.4`) vom aktuellen `main`. Der
-Release-Changelog enthält alle Commits seit dem vorherigen Release. Ein
-manueller Start ist über **Actions → Weekly release → Run workflow** möglich.
-Das veröffentlichte Release löst anschließend den bestehenden Test- und
-GHCR-Publish-Workflow aus.
+## Releases and container publishing
 
-Alle manuellen Commits und Pull-Request-Titel folgen Conventional Commits, zum
-Beispiel `fix: Garmin-Konfiguration korrigieren` oder
-`feat(sync): Intervals-Zeitraum auswählbar machen`. Das wird durch einen
-eigenen GitHub-Workflow automatisch geprüft.
+The container image is published to
+`ghcr.io/lukas-beike/ai-coach` only for a published release or an explicitly
+started manual publish workflow. Ordinary pushes and pull requests run tests
+but do not publish an image.
 
-## Sicherheit und Grenzen
+The `Weekly release` workflow creates the next patch release every Monday at
+03:00 UTC from the current `main` branch. Its release notes contain all commits
+since the previous release. It can also be started manually through **Actions
+-> Weekly release -> Run workflow**. The resulting release starts the test and
+container-publish workflow.
 
-Die App ist ein privater Planungsassistent und kein Medizinprodukt. Sie sollte
-nur im vertrauenswürdigen LAN oder hinter einem privaten VPN betrieben werden.
-Prüfe jeden Trainingsentwurf vor der Übertragung und hole bei Verletzungen,
-Krankheit oder Warnsymptomen professionellen Rat ein.
+Use Conventional Commits for manual commits and pull-request titles, for
+example:
+
+```text
+fix: handle Garmin configuration errors
+feat(sync): make the Intervals.icu period configurable
+docs: rewrite the README in English
+```
+
+## Security and limitations
+
+Intervals Coach is a private planning assistant, not a medical device. Keep it
+on a trusted LAN or behind a private VPN. Review every workout draft before
+transferring it to Intervals.icu, and seek professional advice for injuries,
+illness, or warning symptoms.
+
+## License
+
+Intervals Coach is licensed under the GNU Affero General Public License v3.0.
+See [`LICENSE`](LICENSE) for the full license text.
