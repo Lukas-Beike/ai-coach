@@ -430,6 +430,11 @@ def migrate_plaintext_database() -> None:
         raise
 
 
+def database_row_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
+    """Return mapping-like rows for both sqlite3 and sqlcipher3 backends."""
+    return {description[0]: row[index] for index, description in enumerate(cursor.description)}
+
+
 @contextmanager
 def database():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -441,7 +446,7 @@ def database():
         _configure_cipher(db, CONFIG.app_password)
     else:
         db = sqlite3.connect(DB_PATH, timeout=20)
-    db.row_factory = sqlite3.Row
+    db.row_factory = database_row_factory
     try:
         yield db
         db.commit()
