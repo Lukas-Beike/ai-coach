@@ -11,9 +11,54 @@ const state = {
   voiceTranscribing: false,
   localSync: { intervals: false, competitions: false, garmin: false, performance: false },
   notificationKeys: new Set(),
+  quickTemplatesVisible: false,
+  activityTracked: false,
 };
 const VOICE_MAX_DURATION_MS = 60_000;
 const VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+const QUICK_TEMPLATES_INACTIVITY_MS = 6 * 60 * 60 * 1000;
+const LAST_PWA_ACTIVITY_KEY = "intervals-coach-last-pwa-activity";
+
+function readLastPwaActivity() {
+  try {
+    const value = Number(localStorage.getItem(LAST_PWA_ACTIVITY_KEY));
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch (_) { return 0; }
+}
+
+function savePwaActivity() {
+  try { localStorage.setItem(LAST_PWA_ACTIVITY_KEY, String(Date.now())); } catch (_) {}
+}
+
+function notePwaActivity() {
+  if (!state.activityTracked) {
+    const lastActivity = readLastPwaActivity();
+    state.quickTemplatesVisible = Boolean(lastActivity && Date.now() - lastActivity >= QUICK_TEMPLATES_INACTIVITY_MS);
+    state.activityTracked = true;
+  }
+  savePwaActivity();
+}
+
+function renderQuickMessageTemplates() {
+  const root = $("#quickMessageTemplates");
+  if (root) root.hidden = !state.quickTemplatesVisible || state.busy;
+}
+
+function checkPwaReturn() {
+  if (!state.data || document.visibilityState !== "visible") return;
+  const lastActivity = readLastPwaActivity();
+  if (lastActivity && Date.now() - lastActivity >= QUICK_TEMPLATES_INACTIVITY_MS) state.quickTemplatesVisible = true;
+  savePwaActivity();
+  renderQuickMessageTemplates();
+}
+
+function handlePwaInteraction() {
+  if (!state.data || document.visibilityState !== "visible") return;
+  const lastActivity = readLastPwaActivity();
+  if (lastActivity && Date.now() - lastActivity >= QUICK_TEMPLATES_INACTIVITY_MS) state.quickTemplatesVisible = true;
+  savePwaActivity();
+  renderQuickMessageTemplates();
+}
 
 function cookie(name) {
   return document.cookie.split("; ").find((part) => part.startsWith(`${name}=`))?.split("=").slice(1).join("=") || "";
@@ -65,6 +110,7 @@ async function bootstrapAuth() {
     if (status.authenticated) {
       $("#loginDialog").close();
       $("#appShell").hidden = false;
+      notePwaActivity();
       if (status.state) render(status.state);
       else await load();
     } else showLogin();
@@ -85,6 +131,7 @@ async function login(event) {
     $("#loginPassword").value = "";
     $("#loginDialog").close();
     $("#appShell").hidden = false;
+    notePwaActivity();
     if (result.state) render(result.state);
     else await load();
   } catch (exception) {
@@ -1488,6 +1535,7 @@ async function loadLogs() {
 function render(data) {
   const firstRender = !state.data;
   state.data = data;
+  renderQuickMessageTemplates();
   notifyState(data);
   renderStatus(data);
   renderMessages(data.messages, firstRender);
@@ -1532,6 +1580,8 @@ async function sendMessage(event) {
   const sendButton = $("#sendButton");
   const working = $("#coachWorking");
   sendButton.disabled = true;
+  state.quickTemplatesVisible = false;
+  renderQuickMessageTemplates();
   updateVoiceButton();
   sendButton.textContent = "Coach arbeitet…";
   if (working) working.hidden = false;
@@ -1863,6 +1913,14 @@ function moveModelSettingsToSystemTab() {
 moveModelSettingsToSystemTab();
 $("#loginForm").addEventListener("submit", login);
 $("#chatForm").addEventListener("submit", sendMessage);
+$("#quickMessageTemplates").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-message]");
+  if (!button || state.busy) return;
+  const input = $("#messageInput");
+  input.value = button.dataset.message || "";
+  input.dispatchEvent(new Event("input"));
+  $("#chatForm").requestSubmit();
+});
 $("#voiceButton").addEventListener("click", toggleVoiceInput);
 $("#headerActionButton").addEventListener("click", (event) => {
   if (event.currentTarget.dataset.action === "performance") refreshPerformance();
@@ -1904,6 +1962,12 @@ $("#messageInput").addEventListener("keydown", (event) => {
     $("#chatForm").requestSubmit();
   }
 });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") savePwaActivity();
+  else checkPwaReturn();
+});
+document.addEventListener("pointerdown", handlePwaInteraction, { passive: true });
+window.addEventListener("pagehide", savePwaActivity);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js");
 setInterval(() => {
   if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.performance) load();
