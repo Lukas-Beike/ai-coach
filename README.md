@@ -12,7 +12,8 @@ Profil, Snapshots und Trainingsentwürfe lokal.
 - Optionaler Garmin-Abruf mit Deduplizierung gegen Intervals.icu; Garmin-VO₂max
   und Garmin-Laufprognosen werden in der Leistungsansicht ausdrücklich als
   „Garmin Connect“ gekennzeichnet.
-- Coach-Chat mit GPT-5.6-Modellauswahl, Kontextvorschau und bereinigten Logs.
+- Coach-Chat mit GPT-5.6-Modellauswahl, einstellbarem Thinking Level,
+  Kontextvorschau und bereinigten Logs.
 - KI erstellt nur lokale, datierte Trainingsentwürfe. Jede Übertragung in den
   Intervals.icu-Kalender benötigt eine ausdrückliche Freigabe und wird vorab
   auf Kalenderkonflikte geprüft.
