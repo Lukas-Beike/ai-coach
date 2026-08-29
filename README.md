@@ -35,8 +35,22 @@ It is not intended to be exposed directly to the public internet.
   added to the Intervals.icu library when the integration is configured.
 - Multi-week plans are grouped and can be approved incrementally.
 - Bidirectional synchronization of target competitions with Intervals.icu.
+- Local athlete check-ins for subjective soreness, stress, motivation, session
+  RPE, pain/illness notes, available training time, and day-specific constraints.
+- Adaptive plan review that proposes changes to future local drafts after a
+  check-in. Changes are shown as a preview and require explicit local approval;
+  remote Intervals.icu calendar events are never changed by this process.
+- Annual event overview with base, build, peak, taper, and completed phases.
+  Public HTTPS iCalendar feeds can be imported as reviewable event candidates
+  before the athlete adds them to the local competition list.
+- Optional PWA notifications for pending draft approvals, upcoming events, and
+  synchronization errors. Notifications are opt-in and are delivered by the
+  browser/service worker while the PWA can run; device workout delivery remains
+  delegated to Intervals.icu.
 - Configurable Intervals.icu activity synchronization period, data export,
   local cleanup, and retention policy.
+- Encrypted database backup download and validated restore with an automatic
+  pre-restore copy of the previous database.
 - OpenAI usage display for the latest request and token quotas reported by the
   API. Account dollar balances are available through the OpenAI billing
   dashboard or authorized organization access, not through this application.
@@ -124,6 +138,24 @@ After the token store has been created, restart the application container with
 the same `/data` mount. The application can then use the stored Garmin tokens
 without asking for the login code on every startup.
 
+## Local planning data and public event calendars
+
+The **Profile** tab stores athlete-entered feedback separately from imported
+Garmin and Intervals.icu values. This includes subjective stress, soreness,
+motivation, session RPE, pain or illness, available time, and other daily
+constraints. These values are included in the AI context as local athlete data.
+
+The adaptive planning action reviews future local workout drafts and produces a
+change preview. Only after explicit approval are eligible local drafts updated.
+It does not overwrite, delete, or reschedule remote Intervals.icu calendar
+events.
+
+Public event discovery accepts only HTTPS iCalendar feeds. The server rejects
+URLs containing credentials and blocks local/private network addresses. Events
+are stored as candidates first; the athlete must individually import a
+candidate as a competition before it becomes part of the local season plan.
+The feed URL must be public and must not require authentication.
+
 ## Docker and Unraid
 
 The container runs as a non-root user and expects a persistent writable mount
@@ -188,6 +220,11 @@ local chats, snapshots, drafts, library entries, competitions, and profile
 data. The database file itself remains in place. Chat reset and local cleanup
 also attempt to delete the stored OpenAI conversation; data held by external
 providers remains subject to their own policies.
+
+The **System** tab also provides an encrypted database backup download and a
+validated restore action. Restoring requires the same `APP_PASSWORD` used by
+the backup database. Before replacement, the current database is retained as a
+`*.pre-restore-*` copy in `/data`. Keep both files protected.
 
 The login session cookie is valid for 30 days and is protected with `HttpOnly`
 and `SameSite=Strict` attributes.
