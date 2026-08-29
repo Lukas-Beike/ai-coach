@@ -258,6 +258,7 @@ h2 {
 .metric-grid span { margin-top: 2px; color: var(--subtle); font-size: .67rem; }
 .metric-grid small { display: block; margin-top: 6px; color: var(--subtle); font-size: .61rem; line-height: 1.2; }
 .metric-grid small.metric-estimate { color: #79d9bf; }
+.metric-grid small.metric-garmin { color: #83c7ff; }
 .metric-grid small.metric-comparison { display: inline-flex; align-items: center; gap: 3px; margin-top: 7px; padding: 3px 6px; border-radius: 999px; font-size: .62rem; font-weight: 700; }
 .metric-comparison.good { color: #72d7a8; background: rgba(52, 199, 89, .13); }
 .metric-comparison.bad { color: #ff9a93; background: rgba(255, 69, 58, .13); }
@@ -345,8 +346,6 @@ h2 {
 .connection-card .secondary-button { width: 100%; min-height: 44px; margin-top: auto; display: grid; place-items: center; text-align: center; }
 .connection-card .sync-period { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--subtle); font-size: .67rem; font-weight: 500; }
 .connection-card .sync-period input { width: 76px; padding: 7px 8px; text-align: center; font-size: .76rem; }
-.settings-form { display: grid; gap: 11px; }
-.settings-form > button { justify-self: start; }
 .settings-message { margin: 0; text-align: left; }
 .settings-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .settings-section-heading > div { display: grid; gap: 6px; }
