@@ -1,69 +1,69 @@
 # Intervals Coach
 
-A private, mobile-first coaching PWA that keeps one persistent OpenAI Conversation, reads training data from Intervals.icu on startup or on request, synchronizes the Intervals.icu workout library in both directions, and lets the athlete schedule library templates into the calendar.
+Intervals Coach ist eine private, mobile-first PWA für einen Athleten. Der
+Python-Server synchronisiert Intervals.icu und optional Garmin, sendet einen
+reduzierten Trainingskontext an die OpenAI Responses API und speichert Chat,
+Profil, Snapshots und Trainingsentwürfe lokal.
 
-## What the MVP does
+## Funktionen
 
-- Stores a structured athlete profile and target competitions locally in SQLite.
-- Syncs 42 days of activities and wellness plus 28 days of upcoming calendar events from Intervals.icu.
-- Runs one initial sync at startup; later refreshes happen when you request recent data in chat or tap the refresh button.
-- When you open the chat during the morning window (05:00–11:00 in the profile timezone), runs one Garmin/Intervals.icu sync and creates a daily check-in from training load, sleep, recovery, and planned sessions.
-- Keeps the same OpenAI Conversation ID across every chat turn.
-- Derives current thresholds, CTL/ATL/TSB, recovery, and 7/28-day load from the latest Intervals.icu snapshot.
-- Injects the confirmed profile, target competitions, derived performance, source policy, and latest training snapshot into every turn.
-- Renders coach replies as safe Markdown in the chat, including headings, lists, links, emphasis, and code blocks.
-- Lets you choose the active coach model from Profile; the selection is stored in the server database and applies to subsequent turns.
+- Profil, Zielwettkämpfe, Leistungswerte und Trainingshistorie in SQLite.
+- Startup-Sync und manuelle bzw. angeforderte Aktualisierung von Intervals.icu.
+- Optionaler Garmin-Abruf mit Deduplizierung gegen Intervals.icu; Garmin-VO₂max
+  und Garmin-Laufprognosen werden in der Leistungsansicht ausdrücklich als
+  „Garmin Connect“ gekennzeichnet.
+- Coach-Chat mit GPT-5.6-Modellauswahl, Kontextvorschau und bereinigten Logs.
+- KI erstellt nur lokale, datierte Trainingsentwürfe. Jede Übertragung in den
+  Intervals.icu-Kalender benötigt eine ausdrückliche Freigabe und wird vorab
+  auf Kalenderkonflikte geprüft.
+- Mehrwöchige Entwürfe werden als Plan gruppiert und können schrittweise
+  freigegeben werden.
+- Inkrementelle Intervals.icu-Synchronisierung mit kleinem Überlappungsfenster,
+  Datenexport, lokaler Löschung und konfigurierbarer Aufbewahrungsdauer.
+- Tägliche OpenAI-Anfrage-/Tokenlimits und Verbrauchsanzeige.
 
-- The model selector currently follows the GPT-5.6 family: Sol (flagship), Terra (balanced), and Luna (cost-sensitive).
-- Lets the coach create structured workouts directly in the Intervals.icu workout library using native workout text.
-- Requires a tap before a draft is pushed to the calendar.
-- Uses a stable `external_id`, so retrying a push updates the same app-owned event instead of creating duplicates.
-- Works as an installable PWA on a phone.
+## Konfiguration
 
-## Configuration
+Kopiere `.env.example` nach `.env` oder setze die Variablen direkt als Docker-
+bzw. Unraid-Environment-Variablen. `-e`-Werte haben Vorrang vor einer
+`.env`-Datei.
 
-1. Copy `.env.example` to `.env`.
-2. In Intervals.icu, open **Settings → Developer Settings** and create an API key. For personal API-key use, athlete ID `0` resolves to the authenticated athlete.
-3. Create an OpenAI API key and set `OPENAI_API_KEY`.
-4. Optional: set `GARMIN_EMAIL`, `GARMIN_PASSWORD` and `GARMINTOKENS=/data/garmin_tokens` for the direct Garmin read-only connector. The first Garmin login may require MFA; after a successful login the tokenstore is reused.
-5. Fill in the durable profile and target competitions from the Profile tab after first launch.
-
-API secrets remain on the server and are never sent to the browser. This build intentionally has no application password and must only be exposed on a trusted local network or private VPN. The SQLite database and persistent OpenAI Conversation ID live in `DATA_DIR`.
-
-## Run locally
-
-Python 3.11 or newer is sufficient for the base app. Garmin support is provided by the optional `garminconnect` dependency in the Docker image. For local UI/context tests, the app also supports a JSON fixture and therefore does not require a Garmin login or the optional package.
-
-```powershell
-Copy-Item .env.example .env
-# Load the values from .env into your environment, then:
-python server.py
-```
-
-Open `http://localhost:8090`.
-
-### Garmin lokal testen
-
-Setze in `.env`:
+Erforderlich:
 
 ```text
+OPENAI_API_KEY
+INTERVALS_API_KEY
+INTERVALS_ATHLETE_ID=0
+APP_PASSWORD=ein-langes-zufälliges-passwort
+```
+
+`APP_PASSWORD` schützt die Weboberfläche und alle API-Endpunkte außer
+`/api/health`, `/api/login` und `/api/auth/status`. Dasselbe Passwort ist der
+Schlüssel der SQLCipher-Datenbank. Es wird nicht gespeichert und kann nicht
+wiederhergestellt werden. Wird eine bestehende unverschlüsselte Datenbank zum
+ersten Mal mit `APP_PASSWORD` gestartet, wird sie automatisch verschlüsselt und
+eine Datei `*.plaintext-backup-*` im Datenverzeichnis zurückbehalten.
+
+Optional für Garmin:
+
+```text
+GARMIN_EMAIL
+GARMIN_PASSWORD
+GARMINTOKENS=/data/garmin_tokens
 GARMIN_FIXTURE_PATH=garmin-fixture.example.json
 ```
 
-Die mitgelieferte Beispieldatei kann kopiert und angepasst werden. Danach den lokalen Server neu starten und im Tab **Daten** auf **Garmin synchronisieren** klicken. Die Testdaten werden wie ein normaler Garmin-Abruf gespeichert und in den Coach-Kontext übernommen. Für echte Garmin-Daten entfernst du `GARMIN_FIXTURE_PATH`, installierst `garminconnect` in deiner lokalen Python-Umgebung und verwendest anschließend den normalen Login-/Tokenstore-Weg.
+Weitere Betriebsvariablen sind `DATA_RETENTION_DAYS` (`-1` = keine automatische
+Löschung, Standard), `OPENAI_DAILY_REQUEST_LIMIT` und
+`OPENAI_DAILY_TOKEN_LIMIT`.
 
-## Athlete context
+## Docker / Unraid
 
-SQLite is the source of truth for user-confirmed athlete facts and target competitions. The latest Intervals.icu snapshot is the source of truth for changing performance and recovery data. The OpenAI Conversation provides dialogue continuity only; the app sends the current structured context again on every response request so stale chat statements do not silently replace confirmed facts.
-
-The chat never changes durable profile or competition data automatically. Update and confirm those values in the Profile screen.
-
-## Run with Docker / Unraid
-
-The Unraid deployment uses Docker CLI with image and container name `ai-coach`. From `/mnt/user/appdata/ai-coach`:
+Das Image läuft als nicht-root Benutzer und erwartet den persistenten Mount
+`/data`. Der Unraid-Appdata-Ordner muss diesem Container Schreibzugriff geben.
 
 ```sh
-docker build -t ai-coach:local .
+docker pull ghcr.io/lukas-beike/ai-coach:latest
 docker stop ai-coach || true
 docker rm ai-coach || true
 docker run -d \
@@ -75,34 +75,57 @@ docker run -d \
   -v /mnt/user/appdata/ai-coach/data:/data \
   --env-file /mnt/user/appdata/ai-coach/.env \
   -e TZ=Europe/Berlin \
-  -e PORT=8090 \
-  ai-coach:local
+  ghcr.io/lukas-beike/ai-coach:latest
 ```
 
-The `/data` bind mount stores the SQLite database and logs. Never remove it or use `docker rm -v`. For phone access outside your home network, use a private VPN such as Tailscale. Do not expose this unauthenticated HTTP server directly to the public internet.
+Alternativ kann lokal mit `docker build -t ai-coach:local .` gebaut werden.
+Verwende niemals `docker rm -v`, damit `/data` erhalten bleibt. Für Zugriff
+außerhalb des Heimnetzes ausschließlich ein privates VPN verwenden. Das
+Projekt liefert bewusst kein HTTPS-Proxying; HTTP darf nicht direkt ins
+öffentliche Internet exponiert werden.
 
-For the one-time interactive Garmin login after building the image, run this before starting (or while the image is available):
+In der Unraid-UI die Variablen unter **Environment variables** setzen. Nach
+Änderungen an Variablen den Container neu erstellen. API-Schlüssel und
+Passwörter werden nicht in der UI der Anwendung eingegeben.
+
+Für den einmaligen Garmin-Login:
 
 ```sh
 docker run --rm -it --env-file /mnt/user/appdata/ai-coach/.env \
   -v /mnt/user/appdata/ai-coach/data:/data \
-  ai-coach:local python /app/garmin-login.py
+  ghcr.io/lukas-beike/ai-coach:latest python /app/garmin-login.py
 ```
 
-The command stores the Garmin refresh token in `/data/garmin_tokens`; keep that directory private.
+## Daten, Datenschutz und Logs
 
-## Diagnostics and error logs
+Die Anwendung schreibt die verschlüsselte Datenbank und rotierende JSONL-Logs
+nach `/data`. OpenAI erhält nur den strukturierten Coaching-Kontext; API-
+Schlüssel werden nie an den Browser oder den Coach-Kontext gegeben. Externe
+Texte werden als untrusted data behandelt. Logs enthalten Dienst, Operation,
+Pfad, Dauer und Ergebnisgrößen, aber keine Request-Payloads.
 
-The server writes rotating JSONL logs to `DATA_DIR/intervals-coach.log` (1 MB per file, three backups). Errors include an event name, operation, timestamp, request ID where applicable, upstream service/path, and traceback. API keys, bearer/basic credentials, and common OpenAI key formats are redacted before anything is written.
+Im Bereich **System** kann der Athlet seine lokalen Daten als JSON exportieren
+oder Chats, Snapshots, Entwürfe, Bibliothek, Wettkämpfe und Profil lokal
+löschen. Die Datenbankdatei bleibt dabei bestehen. Ein Chat-Reset und die
+lokale Löschung versuchen außerdem, die gespeicherte OpenAI-Konversation zu
+löschen; für externe API-Daten gelten die jeweiligen Anbieter-Richtlinien.
 
-From the Profile tab, choose **Download diagnostics** to export recent logs plus configuration flags, sync status, runtime information, and record counts. The export intentionally excludes secrets and athlete payloads, so it can be attached to an AI debugging request. The console log from `run-server.ps1` is kept separately at `DATA_DIR/server.log`.
-
-## Test
+## Entwicklung und Tests
 
 ```powershell
 python -m unittest discover -s tests -v
+python -m py_compile server.py tests/test_server.py
 ```
 
-## Safety and scope
+Der GitHub-Workflow führt diese Tests für Pull Requests aus und veröffentlicht
+erst nach einem erfolgreichen Testlauf auf `main` nach
+`ghcr.io/lukas-beike/ai-coach`. `main` ist PR-geschützt; Dependabot verwaltet
+Python-, Docker- und Action-Abhängigkeiten und darf erfolgreiche Updates
+automatisch zusammenführen.
 
-This app is a planning assistant, not a medical device. It sends selected profile, training, wellness, calendar, and workout-library fields to OpenAI. It deliberately does not send API keys or all unknown fields returned by Intervals.icu. Review every library workout before scheduling it on the calendar and consult a qualified professional for injury, illness, or concerning symptoms. Because the app has no login protection, keep it local or behind a private network.
+## Sicherheit und Grenzen
+
+Die App ist ein privater Planungsassistent und kein Medizinprodukt. Sie sollte
+nur im vertrauenswürdigen LAN oder hinter einem privaten VPN betrieben werden.
+Prüfe jeden Trainingsentwurf vor der Übertragung und hole bei Verletzungen,
+Krankheit oder Warnsymptomen professionellen Rat ein.
