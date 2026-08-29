@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=68">
+  <link rel="stylesheet" href="/styles.css?v=69">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -98,6 +98,10 @@
             <legend>Zielwettkämpfe</legend>
             <p>Speichere hier Termine und Ergebnisziele. Wettkämpfe aus Intervals.icu bleiben Teil des aktuellen Kalenderkontexts.</p>
             <div id="competitionList" class="competition-list"></div>
+            <div class="settings-inline-action competition-sync-actions">
+              <div><strong>Intervals.icu-Zielwettkämpfe</strong><span id="competitionSyncDetail">Noch nicht synchronisiert</span></div>
+              <button type="button" id="competitionSyncButton" class="secondary-button">Mit Intervals.icu synchronisieren</button>
+            </div>
             <button type="button" id="addCompetitionButton" class="secondary-button">Wettkampf hinzufügen</button>
           </fieldset>
 
@@ -189,6 +193,6 @@
       <button type="submit" id="loginButton">Anmelden</button>
     </form>
   </dialog>
-  <script src="/app.js?v=68" defer></script>
+  <script src="/app.js?v=69" defer></script>
 </body>
 </html>

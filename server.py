@@ -53,6 +53,7 @@ MAX_BODY_BYTES = 1_000_000
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
+COMPETITION_SYNC_LOCK = threading.Lock()
 PERFORMANCE_LOCK = threading.Lock()
 OPENAI_CONVERSATION_LOCK = threading.Lock()
 MORNING_CHECKIN_LOCK = threading.Lock()
@@ -65,6 +66,7 @@ PUSH_RE = re.compile(r"^/api/workouts/([0-9a-f-]+)/push$")
 DELETE_PLANNED_RE = re.compile(r"^/api/planned/([^/]+)$")
 DELETE_DRAFT_RE = re.compile(r"^/api/drafts/([0-9a-f-]+)$")
 PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
+COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 
 
 def load_local_env() -> None:
@@ -521,8 +523,18 @@ def initialise_database() -> None:
                 target TEXT NOT NULL,
                 course_profile TEXT NOT NULL,
                 notes TEXT NOT NULL,
+                intervals_event_id TEXT,
+                external_id TEXT,
+                sync_dirty INTEGER NOT NULL DEFAULT 1,
+                last_synced_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS competition_sync_tombstones (
+                id TEXT PRIMARY KEY,
+                intervals_event_id TEXT,
+                external_id TEXT,
+                created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS training_plans (
                 id TEXT PRIMARY KEY,
@@ -543,6 +555,17 @@ def initialise_database() -> None:
             );
             """
         )
+        # Additive migrations for databases created before bidirectional
+        # competition synchronization was introduced.
+        for column, definition in (
+            ("intervals_event_id", "TEXT"),
+            ("external_id", "TEXT"),
+            ("sync_dirty", "INTEGER NOT NULL DEFAULT 1"),
+            ("last_synced_at", "TEXT"),
+        ):
+            existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(competitions)").fetchall()}
+            if column not in existing_columns:
+                db.execute(f"ALTER TABLE competitions ADD COLUMN {column} {definition}")
         # Older databases do not have a plan identifier on drafts. Keeping it
         # in the JSON payload makes this migration additive and reversible.
         if get_kv("profile", db) is None:
@@ -1190,11 +1213,13 @@ def normalize_competition(value: Any) -> dict[str, str]:
     return result
 
 
-def list_competitions() -> list[dict[str, str]]:
+def list_competitions(include_sync: bool = False) -> list[dict[str, Any]]:
+    fields = "id, name, event_date, sport, priority, distance, target, course_profile, notes"
+    if include_sync:
+        fields += ", intervals_event_id, sync_dirty, last_synced_at"
     with DB_LOCK, database() as db:
         rows = db.execute(
-            "SELECT id, name, event_date, sport, priority, distance, target, course_profile, notes "
-            "FROM competitions ORDER BY event_date, priority, name"
+            f"SELECT {fields} FROM competitions ORDER BY event_date, priority, name"
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -1213,14 +1238,25 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
         raise AppError(400, "Wettkampf-IDs müssen eindeutig sein.")
     now = utc_now()
     with DB_LOCK, database() as db:
+        existing = {
+            row["id"]: row
+            for row in db.execute("SELECT id, intervals_event_id, external_id FROM competitions").fetchall()
+        }
+        retained_ids = set(competition_ids)
+        for removed_id, row in existing.items():
+            if removed_id not in retained_ids and (row.get("intervals_event_id") or row.get("external_id")):
+                db.execute(
+                    "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)",
+                    (str(uuid.uuid4()), row.get("intervals_event_id"), row.get("external_id"), now),
+                )
         set_kv("profile", json.dumps(normalized_profile, ensure_ascii=False), db)
         for competition in normalized_competitions:
             db.execute(
-                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, sync_dirty, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET name=excluded.name, event_date=excluded.event_date, sport=excluded.sport, "
                 "priority=excluded.priority, distance=excluded.distance, target=excluded.target, "
-                "course_profile=excluded.course_profile, notes=excluded.notes, updated_at=excluded.updated_at",
+                "course_profile=excluded.course_profile, notes=excluded.notes, sync_dirty=1, updated_at=excluded.updated_at",
                 (
                     competition["id"], competition["name"], competition["event_date"], competition["sport"],
                     competition["priority"], competition["distance"], competition["target"],
@@ -1233,6 +1269,195 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
         else:
             db.execute("DELETE FROM competitions")
     return {"profile": normalized_profile, "competitions": list_competitions()}
+
+
+COMPETITION_SPORTS = {
+    "cycling": "Ride",
+    "radfahren": "Ride",
+    "ride": "Ride",
+    "running": "Run",
+    "laufen": "Run",
+    "run": "Run",
+    "swimming": "Swim",
+    "schwimmen": "Swim",
+    "swim": "Swim",
+    "strength": "WeightTraining",
+    "krafttraining": "WeightTraining",
+    "weighttraining": "WeightTraining",
+}
+
+
+def intervals_competition_sport(value: Any) -> str:
+    raw = str(value or "Cycling").strip()
+    return COMPETITION_SPORTS.get(raw.casefold(), raw[:80] or "Ride")
+
+
+def competition_external_id(competition_id: str) -> str:
+    return f"{COMPETITION_EXTERNAL_PREFIX}{competition_id}"
+
+
+def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "category": f"RACE_{competition.get('priority') if competition.get('priority') in {'A', 'B', 'C'} else 'B'}",
+        "start_date_local": f"{competition['event_date']}T00:00:00",
+        "type": intervals_competition_sport(competition.get("sport")),
+        "name": str(competition.get("name") or "Zielwettkampf")[:200],
+        "description": str(competition.get("notes") or "")[:12000],
+        "external_id": str(competition.get("external_id") or competition_external_id(str(competition["id"]))),
+    }
+    if competition.get("intervals_event_id"):
+        remote_id = str(competition["intervals_event_id"])
+        payload["id"] = int(remote_id) if remote_id.isdigit() else remote_id
+    return payload
+
+
+def remote_competition_date(event: dict[str, Any]) -> str | None:
+    raw = first_present(event, ("start_date_local", "date", "start"))
+    if raw in (None, ""):
+        return None
+    try:
+        return date.fromisoformat(str(raw)[:10]).isoformat()
+    except ValueError:
+        return None
+
+
+def remote_competition_data(event: dict[str, Any]) -> dict[str, str] | None:
+    event_date = remote_competition_date(event)
+    name = str(event.get("name") or "").strip()[:COMPETITION_TEXT_LIMITS["name"]]
+    if not event_date or not name:
+        return None
+    category = str(event.get("category") or "RACE_B").upper()
+    priority = category.rsplit("_", 1)[-1] if category.rsplit("_", 1)[-1] in {"A", "B", "C"} else "B"
+    return {
+        "name": name,
+        "event_date": event_date,
+        "sport": str(event.get("type") or "Ride").strip()[:COMPETITION_TEXT_LIMITS["sport"]] or "Ride",
+        "priority": priority,
+        "notes": str(event.get("description") or "").strip()[:COMPETITION_TEXT_LIMITS["notes"]],
+    }
+
+
+def is_remote_competition_event(event: dict[str, Any], linked_event_ids: set[str]) -> bool:
+    category = str(event.get("category") or "").upper()
+    external_id = str(event.get("external_id") or "")
+    event_id = str(event.get("id") or "")
+    return category.startswith("RACE") or external_id.startswith(COMPETITION_EXTERNAL_PREFIX) or event_id in linked_event_ids
+
+
+def sync_competitions(reason: str = "manual") -> dict[str, Any]:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    if not COMPETITION_SYNC_LOCK.acquire(blocking=False):
+        return {"status": "already_running"}
+    try:
+        set_kv("competition_sync_running", "1")
+        set_kv("competition_sync_status", "Zielwettkämpfe werden synchronisiert…")
+        client = IntervalsClient()
+        with DB_LOCK, database() as db:
+            tombstones = [dict(row) for row in db.execute("SELECT * FROM competition_sync_tombstones ORDER BY created_at").fetchall()]
+            local_rows = [dict(row) for row in db.execute("SELECT * FROM competitions ORDER BY event_date, priority, name").fetchall()]
+        deleted_remote = 0
+        if tombstones:
+            identifiers = [
+                {"id": row["intervals_event_id"]} if row.get("intervals_event_id") else {"external_id": row["external_id"]}
+                for row in tombstones if row.get("intervals_event_id") or row.get("external_id")
+            ]
+            if identifiers:
+                client.bulk_delete_events(identifiers)
+                deleted_remote = len(identifiers)
+            with DB_LOCK, database() as db:
+                db.execute("DELETE FROM competition_sync_tombstones")
+
+        linked_ids = {str(row["intervals_event_id"]) for row in local_rows if row.get("intervals_event_id")}
+        remote_events = [
+            event for event in client.fetch_competition_events()
+            if is_remote_competition_event(event, linked_ids)
+        ]
+        outbound = [competition_event_payload(row) for row in local_rows if row.get("sync_dirty")]
+        pushed = client.upsert_competition_events(outbound)
+        pushed_by_external = {str(event.get("external_id")): event for event in pushed if event.get("external_id")}
+        pushed_by_id = {str(event.get("id")): event for event in pushed if event.get("id")}
+        remote_events.extend(pushed)
+        remote_by_external = {str(event.get("external_id")): event for event in remote_events if event.get("external_id")}
+        remote_by_id = {str(event.get("id")): event for event in remote_events if event.get("id")}
+        now = utc_now()
+        imported = 0
+        updated = 0
+        removed = 0
+        with DB_LOCK, database() as db:
+            for row in local_rows:
+                external_id = str(row.get("external_id") or competition_external_id(str(row["id"])))
+                remote = pushed_by_external.get(external_id) or remote_by_external.get(external_id)
+                if not remote and row.get("intervals_event_id"):
+                    remote = pushed_by_id.get(str(row["intervals_event_id"])) or remote_by_id.get(str(row["intervals_event_id"]))
+                if row.get("sync_dirty"):
+                    if remote:
+                        db.execute(
+                            "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0, last_synced_at=?, updated_at=? WHERE id=?",
+                            (str(remote.get("id") or row.get("intervals_event_id") or "") or None, external_id, now, now, row["id"]),
+                        )
+                    continue
+                if remote:
+                    data = remote_competition_data(remote)
+                    if data:
+                        db.execute(
+                            "UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, last_synced_at=?, updated_at=? WHERE id=?",
+                            (data["name"], data["event_date"], data["sport"], data["priority"], data["notes"], str(remote.get("id") or row.get("intervals_event_id") or "") or None, external_id, now, now, row["id"]),
+                        )
+                        updated += 1
+                elif row.get("intervals_event_id"):
+                    db.execute("DELETE FROM competitions WHERE id=?", (row["id"],))
+                    removed += 1
+
+            existing = {str(row["id"]): row for row in db.execute("SELECT * FROM competitions").fetchall()}
+            for remote in remote_events:
+                data = remote_competition_data(remote)
+                if not data:
+                    continue
+                external_id = str(remote.get("external_id") or "")
+                local_id = None
+                if external_id.startswith(COMPETITION_EXTERNAL_PREFIX):
+                    candidate = external_id[len(COMPETITION_EXTERNAL_PREFIX):]
+                    if candidate in existing:
+                        local_id = candidate
+                if local_id is None and remote.get("id") is not None:
+                    local_id = next((key for key, row in existing.items() if str(row.get("intervals_event_id") or "") == str(remote["id"])), None)
+                if local_id is None:
+                    local_id = next((key for key, row in existing.items() if (row["name"], row["event_date"], row["sport"]) == (data["name"], data["event_date"], data["sport"])), None)
+                if local_id is not None or len(existing) >= 20:
+                    continue
+                local_id = str(uuid.uuid4())
+                adopted_external_id = external_id or competition_external_id(local_id)
+                db.execute(
+                    "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, intervals_event_id, external_id, sync_dirty, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                    (local_id, data["name"], data["event_date"], data["sport"], data["priority"], "", "", "", data["notes"], str(remote.get("id") or "") or None, adopted_external_id, now, now, now),
+                )
+                existing[local_id] = {"id": local_id, "name": data["name"], "event_date": data["event_date"], "sport": data["sport"]}
+                imported += 1
+        set_kv("last_competition_sync_at", now)
+        set_kv("last_competition_sync_error", "")
+        add_message("event", f"Zielwettkämpfe synchronisiert ({reason}).")
+        return {
+            "status": "ok",
+            "synced_at": now,
+            "imported": imported,
+            "updated": updated,
+            "pushed": len(outbound),
+            "removed": removed,
+            "deleted_remote": deleted_remote,
+            "total": len(list_competitions()),
+        }
+    except Exception as exc:
+        error = redact_text(str(exc))[:1000]
+        set_kv("last_competition_sync_error", error)
+        LOGGER.error("Competition synchronization failed", extra={"event": "competition_sync_failed", "context": {"reason": reason}}, exc_info=True)
+        raise
+    finally:
+        try:
+            set_kv("competition_sync_running", "0")
+            set_kv("competition_sync_status", "")
+        finally:
+            COMPETITION_SYNC_LOCK.release()
 
 
 OPENAI_RATE_LIMIT_HEADERS = {
@@ -1372,6 +1597,10 @@ class IntervalsClient:
         query = "?" + urlencode(params, doseq=True) if params else ""
         return http_json("POST", self.base + path + query, payload, self.headers, service="intervals")
 
+    def put(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
+        query = "?" + urlencode(params, doseq=True) if params else ""
+        return http_json("PUT", self.base + path + query, payload, self.headers, service="intervals")
+
     def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
         query = "?" + urlencode(params, doseq=True) if params else ""
         return http_json("DELETE", self.base + path + query, headers=self.headers, service="intervals")
@@ -1450,6 +1679,34 @@ class IntervalsClient:
         merged["incremental"] = True
         merged["incremental_window_days"] = request_days
         return merged
+
+    def fetch_competition_events(self) -> list[dict[str, Any]]:
+        """Fetch a broad calendar range for target-event synchronization."""
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        today = local_now().date()
+        result = self.get(
+            f"/athlete/{athlete}/events",
+            {
+                "oldest": (today - timedelta(days=365)).isoformat(),
+                "newest": (today + timedelta(days=730)).isoformat(),
+            },
+        )
+        if not isinstance(result, list):
+            raise AppError(502, "Intervals.icu hat keine Kalenderevents zurückgegeben.")
+        return [event for event in result if isinstance(event, dict)]
+
+    def upsert_competition_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not events:
+            return []
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
+        if not isinstance(result, list):
+            raise AppError(502, "Intervals.icu hat keine Zielwettkämpfe zurückgegeben.")
+        return [event for event in result if isinstance(event, dict)]
+
+    def bulk_delete_events(self, identifiers: list[dict[str, str]]) -> Any:
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        return self.put(f"/athlete/{athlete}/events/bulk-delete", identifiers)
 
     def fetch_performance_snapshot(self, existing_snapshot: dict[str, Any] | None) -> dict[str, Any]:
         """Refresh athlete settings and wellness only; do not request activities or calendar events."""
@@ -3020,6 +3277,12 @@ def public_state() -> dict[str, Any]:
             "intervals_days": sync_period("intervals"),
             "garmin_days": sync_period("garmin"),
         },
+        "competition_sync": {
+            "last_sync_at": get_kv("last_competition_sync_at"),
+            "last_error": get_kv("last_competition_sync_error") or None,
+            "running": get_kv("competition_sync_running") == "1",
+            "status": get_kv("competition_sync_status") or None,
+        },
         "performance_refresh": {
             "last_refresh_at": get_kv("last_performance_refresh_at"),
             "last_error": get_kv("last_performance_error") or None,
@@ -3438,6 +3701,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))
                 self.send_json(200, sync_intervals("manuell", activity_days=days))
+            elif path == "/api/competitions/sync":
+                self.send_json(200, sync_competitions("manuell"))
             elif path == "/api/performance/refresh":
                 self.send_json(200, refresh_current_performance())
             elif path == "/api/garmin/sync":
@@ -3603,6 +3868,14 @@ def safe_sync(reason: str, activity_days: int | None = None) -> None:
         LOGGER.error(
             "Background synchronization failed",
             extra={"event": "background_sync_failed", "context": {"reason": reason}},
+            exc_info=True,
+        )
+    try:
+        sync_competitions(reason)
+    except Exception:
+        LOGGER.error(
+            "Background competition synchronization failed",
+            extra={"event": "background_competition_sync_failed", "context": {"reason": reason}},
             exc_info=True,
         )
 
