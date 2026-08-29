@@ -193,6 +193,41 @@ h2 {
   box-shadow: 0 14px 42px rgba(0, 0, 0, .35);
   backdrop-filter: blur(24px) saturate(145%);
 }
+.quick-message-templates {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 1px 0 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.quick-message-templates::-webkit-scrollbar { display: none; }
+.quick-message-templates[hidden] { display: none; }
+.quick-message-label {
+  flex: 0 0 auto;
+  color: var(--subtle);
+  font-size: .66rem;
+  font-weight: 750;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.composer .quick-message-templates button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, .06);
+  box-shadow: none;
+  font-size: .72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.composer .quick-message-templates button:hover { border-color: rgba(52, 207, 161, .65); background: var(--accent-soft); }
+.composer .quick-message-templates button:active { transform: scale(.97); }
 .composer textarea {
   max-height: 150px;
   resize: none;
