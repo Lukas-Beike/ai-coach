@@ -285,6 +285,11 @@ h2 {
 .parallel-cycling-options { display: grid; gap: 8px; margin-bottom: 11px; }
 .parallel-cycling-option { display: flex; align-items: flex-start; gap: 8px; color: var(--ink); font-size: .8rem; line-height: 1.35; }
 .parallel-cycling-option input { flex: 0 0 auto; margin-top: 2px; accent-color: var(--orange); }
+.activity-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: -3px 0 15px; }
+.activity-filters-label { margin-right: 2px; color: var(--subtle); font-size: .68rem; }
+.activity-filter-button { border: 1px solid var(--line-strong); border-radius: 999px; padding: 7px 10px; color: var(--muted); background: rgba(255, 255, 255, .035); font-size: .68rem; }
+.activity-filter-button:hover, .activity-filter-button.active { border-color: rgba(52, 207, 161, .65); color: var(--ink); background: var(--accent-soft); }
+.activity-filter-button.clear { border-color: rgba(255, 159, 10, .45); color: #ffcc80; background: transparent; }
 .activity-card, .planned-card { padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
 .activity-stats-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: -2px 0 15px; }
 .activity-stats-summary > div { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .025); }
@@ -294,6 +299,8 @@ h2 {
 .activity-top, .planned-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .activity-card h3, .planned-card h3 { margin: 0; color: var(--ink); font-size: .92rem; }
 .activity-meta, .planned-meta { margin-top: 4px; color: var(--subtle); font-size: .7rem; }
+.activity-type-button { width: fit-content; border: 0; padding: 0; color: var(--subtle); background: transparent; font-size: .7rem; text-align: left; }
+.activity-type-button:hover, .activity-type-button[aria-pressed="true"] { color: var(--accent-bright); text-decoration: underline; text-underline-offset: 3px; }
 .activity-stats { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; color: var(--muted); font-size: .73rem; }
 .activity-stats strong { color: var(--ink); }
 .planned-description { margin-top: 9px; color: var(--muted); font-size: .78rem; white-space: pre-wrap; }
