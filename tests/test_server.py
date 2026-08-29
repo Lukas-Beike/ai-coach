@@ -285,6 +285,25 @@ class CoachTests(unittest.TestCase):
         with self.assertRaises(server.AppError):
             server.save_model("not-a-model")
 
+    def test_thinking_level_is_persisted_and_validated(self):
+        self.assertEqual(server.selected_thinking_level(), "medium")
+        self.assertEqual(server.save_thinking_level("high"), {"thinking_level": "high"})
+        self.assertEqual(server.selected_thinking_level(), "high")
+        with self.assertRaises(server.AppError):
+            server.save_thinking_level("extreme")
+
+    def test_responses_request_uses_selected_thinking_level(self):
+        server.save_thinking_level("low")
+        captured = {}
+
+        def fake_openai(path, payload):
+            captured.update(payload)
+            return {"output_text": "ok", "output": []}
+
+        with patch.object(server, "openai_request", side_effect=fake_openai):
+            server.responses_request({"model": "gpt-5.6-sol", "input": "test"})
+        self.assertEqual(captured["reasoning"], {"effort": "low"})
+
     def test_sync_period_supports_all_available_data_marker(self):
         self.assertEqual(server.set_sync_period("intervals", -1), -1)
         self.assertEqual(server.sync_period("intervals"), -1)

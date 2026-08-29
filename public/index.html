@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=66">
+  <link rel="stylesheet" href="/styles.css?v=67">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -107,6 +107,10 @@
           <label for="modelSelect">Coach-Modell<select id="modelSelect"></select></label>
           <p id="modelDescription" class="fine-print">Wähle die Balance aus Qualität, Tempo und Kosten.</p>
         </div>
+        <div class="model-selector">
+          <label for="thinkingLevelSelect">Thinking Level<select id="thinkingLevelSelect"></select></label>
+          <p id="thinkingLevelDescription" class="fine-print">Thinking Level steuert, wie grÃ¼ndlich der Coach vor der Antwort Ã¼berlegt.</p>
+        </div>
         <div class="diagnostic-actions">
           <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
           <p class="fine-print">Enthält aktuelle bereinigte Fehler und Laufzeitstatus, niemals API-Schlüssel oder Trainingsdaten.</p>
@@ -176,6 +180,6 @@
       <button type="submit" id="loginButton">Anmelden</button>
     </form>
   </dialog>
-  <script src="/app.js?v=66" defer></script>
+  <script src="/app.js?v=67" defer></script>
 </body>
 </html>
