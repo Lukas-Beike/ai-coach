@@ -9,9 +9,12 @@ Profil, Snapshots und Trainingsentwürfe lokal.
 
 - Profil, Zielwettkämpfe, Leistungswerte und Trainingshistorie in SQLite.
 - Startup-Sync und manuelle bzw. angeforderte Aktualisierung von Intervals.icu.
-- Optionaler Garmin-Abruf mit Deduplizierung gegen Intervals.icu; Garmin-VO₂max
-  und Garmin-Laufprognosen werden in der Leistungsansicht ausdrücklich als
-  „Garmin Connect“ gekennzeichnet.
+- Optionaler Garmin-Abruf mit Deduplizierung gegen Intervals.icu; Garmin-VO₂max,
+  Garmin-Laufprognosen, Gewicht und sportartspezifische maximale Herzfrequenzen
+  werden in der Leistungsansicht ausdrücklich als „Garmin Connect“ gekennzeichnet.
+- FTP, Schwellenwerte, VO₂max, Laufprognosen, Readiness und Gewicht zeigen einen
+  Trend zum verfügbaren 30-Tage-Mittelwert. Historische Garmin-Performancewerte
+  werden bei den Synchronisierungen lokal als schlanke Verlaufspunkte gespeichert.
 - Coach-Chat mit GPT-5.6-Modellauswahl, einstellbarem Thinking Level,
   Kontextvorschau und bereinigten Logs.
 - KI erstellt nur lokale, datierte Trainingsentwürfe. Jede Übertragung in den
