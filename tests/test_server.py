@@ -24,6 +24,7 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM training_plans")
             db.execute("DELETE FROM workout_library")
             db.execute("DELETE FROM competitions")
+            db.execute("DELETE FROM competition_sync_tombstones")
             db.execute("DELETE FROM sessions")
             db.execute("DELETE FROM kv")
         server.save_profile({})
@@ -433,6 +434,103 @@ class CoachTests(unittest.TestCase):
         context = server.structured_athlete_context()
         self.assertEqual(context["target_competitions"][0]["name"], "Münsterland Giro")
         self.assertIn("bestätigte", context["source_policy"]["durable_profile"])
+
+    def test_competition_sync_pushes_local_events_idempotently(self):
+        event_date = (date.today() + timedelta(days=60)).isoformat()
+        saved = server.save_athlete_context({}, [{"name": "Test Race", "event_date": event_date, "priority": "A", "sport": "Cycling"}])
+        local_id = saved["competitions"][0]["id"]
+        calls = {}
+        remote = []
+
+        class FakeIntervalsClient:
+            def fetch_competition_events(self):
+                return list(remote)
+
+            def upsert_competition_events(self, events):
+                if not events:
+                    return []
+                calls["events"] = events
+                created = {**events[0], "id": 12345}
+                remote[:] = [created]
+                return [created]
+
+            def bulk_delete_events(self, identifiers):
+                return 0
+
+        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
+            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+        ):
+            result = server.sync_competitions("test")
+            second = server.sync_competitions("test")
+
+        self.assertEqual(result["pushed"], 1)
+        self.assertEqual(second["pushed"], 0)
+        self.assertEqual(calls["events"][0]["category"], "RACE_A")
+        self.assertEqual(calls["events"][0]["external_id"], server.competition_external_id(local_id))
+        synced = server.list_competitions(include_sync=True)[0]
+        self.assertEqual(synced["intervals_event_id"], "12345")
+        self.assertEqual(synced["sync_dirty"], 0)
+
+    def test_competition_sync_imports_remote_race_events(self):
+        event_date = (date.today() + timedelta(days=45)).isoformat()
+
+        class FakeIntervalsClient:
+            def fetch_competition_events(self):
+                return [{
+                    "id": 777,
+                    "category": "RACE_B",
+                    "start_date_local": event_date + "T08:00:00",
+                    "type": "Run",
+                    "name": "Remote Half Marathon",
+                    "description": "Ziel unter zwei Stunden",
+                }]
+
+            def upsert_competition_events(self, events):
+                return []
+
+            def bulk_delete_events(self, identifiers):
+                return 0
+
+        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
+            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+        ):
+            result = server.sync_competitions("test")
+
+        self.assertEqual(result["imported"], 1)
+        competition = server.list_competitions(include_sync=True)[0]
+        self.assertEqual(competition["name"], "Remote Half Marathon")
+        self.assertEqual(competition["event_date"], event_date)
+        self.assertEqual(competition["intervals_event_id"], "777")
+        self.assertEqual(competition["sync_dirty"], 0)
+
+    def test_competition_removal_creates_remote_delete_tombstone(self):
+        event_date = (date.today() + timedelta(days=60)).isoformat()
+        saved = server.save_athlete_context({}, [{"name": "Delete Race", "event_date": event_date}])
+        local_id = saved["competitions"][0]["id"]
+        deleted = []
+
+        class FakeIntervalsClient:
+            def fetch_competition_events(self):
+                return []
+
+            def upsert_competition_events(self, events):
+                return [{**events[0], "id": 888}] if events else []
+
+            def bulk_delete_events(self, identifiers):
+                deleted.extend(identifiers)
+                return len(identifiers)
+
+        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
+            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+        ):
+            server.sync_competitions("test")
+            server.save_athlete_context({}, [])
+            result = server.sync_competitions("test")
+
+        self.assertEqual(result["deleted_remote"], 1)
+        self.assertEqual(deleted, [{"id": "888"}])
+        self.assertEqual(server.list_competitions(), [])
+        self.assertNotEqual(local_id, "")
 
     def test_current_performance_is_derived_from_intervals_snapshot(self):
         today = date.today().isoformat()
