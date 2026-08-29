@@ -1,0 +1,48 @@
+{
+  "activities": [
+    {
+      "activityId": 900001,
+      "activityName": "Beispiel lockerer Lauf",
+      "activityType": "running",
+      "startTimeLocal": "2026-08-28T07:30:00",
+      "duration": 3600,
+      "distance": 9800,
+      "averageHR": 142,
+      "maxHR": 158,
+      "vO2MaxValue": 49
+    }
+  ],
+  "sleep": [
+    {
+      "calendarDate": "2026-08-29",
+      "sleepTimeSeconds": 27000,
+      "sleepScore": 82
+    }
+  ],
+  "hrv": [
+    {
+      "calendarDate": "2026-08-29",
+      "weeklyAvg": 54,
+      "lastNightAvg": 57
+    }
+  ],
+  "readiness": {
+    "calendarDate": "2026-08-29",
+    "score": 78,
+    "level": "GREEN"
+  },
+  "body_battery": [
+    {
+      "calendarDate": "2026-08-29",
+      "charged": 76,
+      "drained": 31
+    }
+  ],
+  "race_predictions": {
+    "5k": 1310,
+    "10k": 2740,
+    "halfMarathon": 6150,
+    "marathon": 12900
+  },
+  "errors": []
+}

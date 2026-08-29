@@ -1,0 +1,10 @@
+.env
+data/
+tests/
+__pycache__/
+.git/
+.gitignore
+README.md
+run-server.ps1
+compose.yaml
+AGENTS.md
