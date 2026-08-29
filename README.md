@@ -18,8 +18,12 @@ Profil, Snapshots und Trainingsentwürfe lokal.
 - Coach-Chat mit GPT-5.6-Modellauswahl, einstellbarem Thinking Level,
   Kontextvorschau und bereinigten Logs.
 - KI erstellt nur lokale, datierte Trainingsentwürfe. Jede Übertragung in den
-  Intervals.icu-Kalender benötigt eine ausdrückliche Freigabe und wird vorab
-  auf Kalenderkonflikte geprüft.
+- Vor jedem Entwurf wird die lokale Trainingsbibliothek auf gleiche oder
+  ähnliche Einheiten geprüft. Vorhandene Einheiten werden wiederverwendet;
+  neue Einheiten werden bei konfiguriertem Intervals-Zugang zuerst in der
+  Intervals.icu-Bibliothek angelegt. Die Übertragung in den Kalender benötigt
+  weiterhin eine ausdrückliche Freigabe und wird vorab auf Kalenderkonflikte
+  geprüft.
 - Mehrwöchige Entwürfe werden als Plan gruppiert und können schrittweise
   freigegeben werden.
 - Konfigurierbare Intervals.icu-Synchronisierung mit sichtbarem Zeitraum,

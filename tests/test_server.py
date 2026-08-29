@@ -304,6 +304,55 @@ class CoachTests(unittest.TestCase):
         create.assert_called_once()
         self.assertEqual(server.list_workout_library()[0]["name"], "Coach Tempo")
 
+    def test_draft_reuses_same_or_similar_library_workout(self):
+        server.upsert_workout_library([{
+            "id": 42, "name": "Locker Rad", "type": "Ride",
+            "description": "- 15m 55-70% Warmup\n- 30m 70%\n- 10m 50% Cooldown", "moving_time": 3300,
+        }])
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server, "create_library_workouts"
+        ) as create:
+            draft = server.save_workout_drafts([{
+                "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Cycling",
+                "name": "Lockere Grundlage", "description": "- 15m 55-70% Warmup\n- 30m 70%\n- 10m 50% Cooldown",
+                "duration_minutes": 55, "target": "POWER", "rationale": "Grundlage",
+            }])[0]
+        create.assert_not_called()
+        self.assertEqual(draft["library_workout_id"], "42")
+
+    def test_missing_library_workout_is_created_before_draft(self):
+        created = [{"id": 77, "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", "moving_time": 1800}]
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server, "create_library_workouts", return_value=created
+        ) as create:
+            draft = server.save_workout_drafts([{
+                "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
+                "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
+                "target": "POWER", "rationale": "Schwelle",
+            }])[0]
+        create.assert_called_once()
+        self.assertEqual(draft["library_workout_id"], "77")
+
+    def test_library_backed_draft_is_planned_from_library_on_approval(self):
+        server.upsert_workout_library([{
+            "id": 42, "name": "Locker Rad", "type": "Ride", "description": "- 30m 70%", "moving_time": 1800,
+        }])
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")):
+            draft = server.save_workout_drafts([{
+                "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
+                "name": "Locker Rad", "description": "- 30m 70%", "duration_minutes": 30,
+                "target": "POWER", "rationale": "Regeneration",
+            }])[0]
+        fake_event = {"id": "event-42"}
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server, "plan_library_workout_remote", return_value=fake_event
+        ) as plan:
+            result = server.push_draft(draft["id"])
+        self.assertEqual(result["status"], "pushed")
+        plan.assert_called_once_with("42", {
+            "id": "42", "name": "Locker Rad", "type": "Ride", "description": "- 30m 70%", "moving_time": 1800,
+        }, draft["date"])
+
     def test_planned_event_delete_updates_local_snapshot(self):
         test_config = server.Config(**{**server.CONFIG.__dict__, "intervals_api_key": "test-key"})
         with patch.object(server, "CONFIG", test_config), patch.object(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import difflib
 import hashlib
 import hmac
 import json
@@ -330,7 +331,7 @@ Priorities:
 WORKOUT_TOOL = {
     "type": "function",
     "name": "save_workout_draft_entries",
-    "description": "Create one or more dated workout drafts for athlete review. Never transfer anything to Intervals.icu automatically.",
+    "description": "Create one or more dated workout drafts for athlete review. The server automatically reuses a same or similar workout from the Intervals.icu library, or adds a new library workout before creating the draft. The workout is only scheduled after the athlete explicitly approves the draft.",
     "strict": True,
     "parameters": {
         "type": "object",
@@ -2065,6 +2066,7 @@ def save_workout_drafts(
     if not isinstance(workouts, list) or not workouts:
         raise AppError(400, "Mindestens eine Einheit ist erforderlich.")
     normalized_workouts = [normalize_workout_draft(item) for item in workouts]
+    normalized_workouts = ensure_workout_library_entries(normalized_workouts)
     plan_id = str(uuid.uuid4()) if plan_name.strip() else ""
     if plan_id:
         dates = sorted(item["date"] for item in normalized_workouts)
@@ -2136,6 +2138,104 @@ def normalize_library_workout(workout: Any) -> dict[str, Any]:
     result["description"] = str(result.get("description") or "")[:12000]
     result["type"] = str(result.get("type") or "Ride")[:80]
     return result
+
+
+def workout_library_type(value: Any) -> str:
+    """Return a stable activity type for matching coach drafts to library entries."""
+    raw = str(value or "").strip()
+    return supported_competition_sport(raw) or raw.casefold()
+
+
+def normalized_workout_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9%]+", " ", str(value or "").casefold()).strip()
+
+
+def library_workout_duration_minutes(workout: dict[str, Any]) -> float | None:
+    try:
+        moving_time = float(workout.get("moving_time"))
+    except (TypeError, ValueError):
+        return None
+    return moving_time / 60 if moving_time >= 0 else None
+
+
+def compatible_workout_duration(expected_minutes: int, library_minutes: float | None) -> bool:
+    if library_minutes is None:
+        return True
+    return abs(expected_minutes - library_minutes) <= max(10, expected_minutes * 0.2)
+
+
+def find_similar_library_workout(workout: dict[str, Any], library: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    """Find an exact or conservative near-match in the cached Intervals.icu library."""
+    expected_type = workout_library_type(workout.get("sport"))
+    expected_text = normalized_workout_text(workout.get("description"))
+    expected_name = normalized_workout_text(workout.get("name"))
+    try:
+        expected_duration = int(workout.get("duration_minutes"))
+    except (TypeError, ValueError):
+        return None
+    best: tuple[float, dict[str, Any]] | None = None
+    for candidate in library if library is not None else list_workout_library():
+        if not isinstance(candidate, dict) or workout_library_type(candidate.get("type") or candidate.get("sport")) != expected_type:
+            continue
+        candidate_text = normalized_workout_text(candidate.get("description"))
+        candidate_name = normalized_workout_text(candidate.get("name"))
+        if not candidate_text:
+            continue
+        if not compatible_workout_duration(expected_duration, library_workout_duration_minutes(candidate)):
+            continue
+        description_similarity = difflib.SequenceMatcher(None, expected_text, candidate_text).ratio()
+        name_similarity = difflib.SequenceMatcher(None, expected_name, candidate_name).ratio()
+        exact_description = expected_text == candidate_text
+        similar_description = description_similarity >= 0.82
+        similar_named_workout = name_similarity >= 0.9 and description_similarity >= 0.55
+        if not (exact_description or similar_description or similar_named_workout):
+            continue
+        score = 1.0 if exact_description else max(description_similarity, (name_similarity + description_similarity) / 2)
+        if best is None or score > best[0]:
+            best = (score, candidate)
+    return best[1] if best else None
+
+
+def ensure_workout_library_entries(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach library IDs, creating missing Intervals.icu library workouts when configured."""
+    library = list_workout_library()
+    prepared: list[dict[str, Any]] = []
+    for workout in workouts:
+        match = find_similar_library_workout(workout, library)
+        if match is not None:
+            match_duration = library_workout_duration_minutes(match)
+            prepared.append({
+                **workout,
+                "sport": match.get("type") or workout["sport"],
+                "name": match.get("name") or workout["name"],
+                "description": match.get("description") or workout["description"],
+                "duration_minutes": max(5, round(match_duration)) if match_duration is not None else workout["duration_minutes"],
+                "target": match.get("target") if match.get("target") in {"AUTO", "POWER", "HR", "PACE"} else workout["target"],
+                "library_workout_id": str(match["id"]),
+            })
+            LOGGER.info(
+                "Reusing matching workout library entry",
+                extra={"event": "workout_library_match", "context": {"library_workout_id": str(match["id"])}},
+            )
+            continue
+        if not CONFIG.intervals_api_key:
+            LOGGER.info(
+                "Workout library check deferred because Intervals.icu is not configured",
+                extra={"event": "workout_library_check_skipped", "context": {"reason": "missing_api_key"}},
+            )
+            prepared.append(workout)
+            continue
+        created = create_library_workouts([workout])
+        if not created:
+            raise AppError(502, "Die neue Einheit konnte nicht in der Intervals.icu-Bibliothek gespeichert werden.")
+        created_workout = created[0]
+        library.append(created_workout)
+        prepared.append({**workout, "library_workout_id": str(created_workout["id"])})
+        LOGGER.info(
+            "Added new workout to library before creating draft",
+            extra={"event": "workout_library_created", "context": {"library_workout_id": str(created_workout["id"])}},
+        )
+    return prepared
 
 
 def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool = False) -> list[dict[str, Any]]:
@@ -2218,9 +2318,13 @@ def plan_library_workout(workout_id: str, plan_date: str) -> dict[str, Any]:
     workout = json.loads(row["payload"])
     if calendar_conflicts({"date": str(plan_date)}):
         raise AppError(409, "Für dieses Datum existiert bereits eine Kalendereinheit. Bitte zuerst synchronisieren und den Konflikt prüfen.")
-    event = IntervalsClient().plan_library_workout(normalized_id, workout, str(plan_date))
+    event = plan_library_workout_remote(normalized_id, workout, str(plan_date))
     add_message("event", f"Bibliothekseinheit â€ž{workout.get('name', 'Einheit')}â€œ wurde fÃ¼r den {plan_date} eingeplant.")
     return {"status": "planned", "workout_id": normalized_id, "event": event}
+
+
+def plan_library_workout_remote(workout_id: str, workout: dict[str, Any], plan_date: str) -> dict[str, Any]:
+    return IntervalsClient().plan_library_workout(workout_id, workout, plan_date)
 
 
 def delete_workout_draft(draft_id: str) -> dict[str, Any]:
@@ -2290,7 +2394,16 @@ def push_draft(draft_id: str) -> dict[str, Any]:
     if conflicts:
         raise AppError(409, "Für dieses Datum existiert bereits eine Kalendereinheit. Bitte zuerst synchronisieren und den Konflikt prüfen.")
     try:
-        event = IntervalsClient().push_workout(draft_id, workout)
+        library_workout_id = str(workout.get("library_workout_id") or "").strip()
+        if library_workout_id:
+            with DB_LOCK, database() as db:
+                library_row = db.execute("SELECT payload FROM workout_library WHERE id = ?", (library_workout_id,)).fetchone()
+            if not library_row:
+                raise AppError(409, "Die zugeordnete Bibliothekseinheit ist nicht mehr vorhanden. Bitte die Bibliothek synchronisieren.")
+            library_workout = json.loads(library_row["payload"])
+            event = plan_library_workout_remote(library_workout_id, library_workout, workout["date"])
+        else:
+            event = IntervalsClient().push_workout(draft_id, workout)
     except Exception as exc:
         with DB_LOCK, database() as db:
             db.execute(
