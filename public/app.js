@@ -1020,6 +1020,26 @@ function renderModel(model) {
   $("#modelDescription").textContent = selected?.description || "Wähle die Balance aus Qualität, Tempo und Kosten.";
 }
 
+function renderThinkingLevel(thinkingLevel) {
+  if (!thinkingLevel) return;
+  const select = $("#thinkingLevelSelect");
+  const currentIds = [...select.options].map((option) => option.value).join(",");
+  const nextIds = (thinkingLevel.options || []).map((option) => option.id).join(",");
+  if (currentIds !== nextIds) {
+    select.replaceChildren();
+    for (const option of thinkingLevel.options || []) {
+      const element = document.createElement("option");
+      element.value = option.id;
+      element.textContent = option.label;
+      element.title = option.description || "";
+      select.append(element);
+    }
+  }
+  select.value = thinkingLevel.selected;
+  const selected = (thinkingLevel.options || []).find((option) => option.id === thinkingLevel.selected);
+  $("#thinkingLevelDescription").textContent = selected?.description || "Steuert die GrÃ¼ndlichkeit der Antwort.";
+}
+
 function renderSettings(data) {
   const configured = data.configured || {};
   const garmin = data.garmin || {};
@@ -1113,6 +1133,7 @@ function render(data) {
   renderCompetitions(data.competitions || []);
   renderPerformance(data.performance);
   renderModel(data.model);
+  renderThinkingLevel(data.thinking_level);
   renderSettings(data);
   updateHeaderAction();
 }
@@ -1261,6 +1282,19 @@ async function saveModel(event) {
   } finally { select.disabled = false; }
 }
 
+async function saveThinkingLevel(event) {
+  const select = event.currentTarget;
+  select.disabled = true;
+  try {
+    await api("/api/settings/thinking-level", { method: "PUT", body: JSON.stringify({ thinking_level: select.value }) });
+    toast(`Thinking Level: ${select.options[select.selectedIndex].text}`);
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    await load();
+  } finally { select.disabled = false; }
+}
+
 async function downloadDiagnostics() {
   const button = $("#diagnosticsButton");
   button.disabled = true;
@@ -1330,6 +1364,7 @@ $("#profileForm").addEventListener("submit", saveProfile);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; });
 $("#addCompetitionButton").addEventListener("click", addCompetition);
 $("#modelSelect").addEventListener("change", saveModel);
+$("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
 $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#chatResetButton").addEventListener("click", resetCoachChat);

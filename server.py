@@ -128,6 +128,11 @@ MODEL_OPTIONS = (
     {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "description": "Ausgewogen bei Qualität, Tempo und Kosten"},
     {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
 )
+THINKING_LEVEL_OPTIONS = (
+    {"id": "low", "label": "Niedrig", "description": "Schnellere Antworten mit weniger zusätzlicher Überlegung"},
+    {"id": "medium", "label": "Mittel", "description": "Ausgewogene Qualität, Geschwindigkeit und Kosten"},
+    {"id": "high", "label": "Hoch", "description": "Gründlichere Überlegung für komplexe Trainingsfragen"},
+)
 
 
 def available_model_options() -> list[dict[str, str]]:
@@ -149,6 +154,24 @@ def save_model(model: Any) -> dict[str, str]:
         raise AppError(400, "Nicht unterstützte Modellauswahl.")
     set_kv("selected_model", model_id)
     return {"model": model_id}
+
+
+def available_thinking_level_options() -> list[dict[str, str]]:
+    return list(THINKING_LEVEL_OPTIONS)
+
+
+def selected_thinking_level() -> str:
+    configured = {option["id"] for option in THINKING_LEVEL_OPTIONS}
+    stored = get_kv("selected_thinking_level")
+    return stored if stored in configured else "medium"
+
+
+def save_thinking_level(level: Any) -> dict[str, str]:
+    level_id = str(level or "").strip().lower()
+    if level_id not in {option["id"] for option in THINKING_LEVEL_OPTIONS}:
+        raise AppError(400, "Nicht unterstütztes Thinking Level.")
+    set_kv("selected_thinking_level", level_id)
+    return {"thinking_level": level_id}
 
 
 def redact_text(value: str) -> str:
@@ -2692,10 +2715,13 @@ def record_openai_usage(response: dict[str, Any], operation: str) -> None:
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+    request_payload = dict(payload)
+    if path == "/responses":
+        request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     result = http_json(
         "POST",
         "https://api.openai.com/v1" + path,
-        payload,
+        request_payload,
         {"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=90,
         service="openai",
@@ -2708,9 +2734,11 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     """Call Responses API and retry transient locks on the persistent conversation."""
+    request_payload = dict(payload)
+    request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     for attempt in range(3):
         try:
-            return openai_request("/responses", payload)
+            return openai_request("/responses", request_payload)
         except AppError as exc:
             if "conversation_locked" not in exc.message or attempt == 2:
                 raise
@@ -2993,6 +3021,7 @@ def public_state() -> dict[str, Any]:
             "last_error": get_kv("morning_checkin_error") or None,
         },
         "model": {"selected": selected_model(), "options": available_model_options()},
+        "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
         "configured": {
             "openai": bool(CONFIG.openai_api_key),
             "intervals": bool(CONFIG.intervals_api_key),
@@ -3089,6 +3118,7 @@ def diagnostic_report() -> dict[str, Any]:
             "garmin_configured": garmin_status["configured"],
             "garmin_fixture_configured": garmin_fixture_path() is not None,
             "model": selected_model(),
+            "thinking_level": selected_thinking_level(),
             "available_models": [option["id"] for option in available_model_options()],
         },
         "sync": {
@@ -3462,6 +3492,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             require_csrf(self, session)
             if path == "/api/settings/model":
                 self.send_json(200, save_model(self.read_json().get("model")))
+                return
+            if path == "/api/settings/thinking-level":
+                self.send_json(200, save_thinking_level(self.read_json().get("thinking_level")))
                 return
             if path == "/api/athlete-context":
                 payload = self.read_json()
