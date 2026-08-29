@@ -128,6 +128,11 @@ erst nach einem erfolgreichen Testlauf auf `main` nach
 Python-, Docker- und Action-Abhängigkeiten und darf erfolgreiche Updates
 automatisch zusammenführen.
 
+Alle manuellen Commits und Pull-Request-Titel folgen Conventional Commits, zum
+Beispiel `fix: Garmin-Konfiguration korrigieren` oder
+`feat(sync): Intervals-Zeitraum auswählbar machen`. Das wird durch einen
+eigenen GitHub-Workflow automatisch geprüft.
+
 ## Sicherheit und Grenzen
 
 Die App ist ein privater Planungsassistent und kein Medizinprodukt. Sie sollte
