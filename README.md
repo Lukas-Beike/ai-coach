@@ -64,6 +64,8 @@ Tokenlimits.
 Das Image läuft als nicht-root Benutzer und erwartet den persistenten Mount
 `/data`. Der Unraid-Appdata-Ordner muss diesem Container Schreibzugriff geben.
 
+Das Unraid-Logo liegt unter [`public/logo.png`](https://raw.githubusercontent.com/Lukas-Beike/ai-coach/main/public/logo.png).
+
 ```sh
 docker pull ghcr.io/lukas-beike/ai-coach:latest
 docker stop ai-coach || true
