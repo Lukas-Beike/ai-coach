@@ -1048,7 +1048,13 @@ function renderSettings(data) {
   }
   const usage = data.usage || {};
   const usageNode = $("#usageSummary");
-  if (usageNode) usageNode.textContent = `OpenAI heute: ${usage.requests || 0}/${usage.request_limit || "∞"} Anfragen · ${usage.total_tokens || 0}/${usage.token_limit || "∞"} Tokens`;
+  if (usageNode) {
+    const rateLimits = usage.rate_limits || {};
+    const remaining = rateLimits.remaining_requests != null || rateLimits.remaining_tokens != null
+      ? ` · Verfügbar im aktuellen OpenAI-Fenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
+      : " · OpenAI-Kontingent nach dem nächsten API-Aufruf verfügbar";
+    usageNode.textContent = `OpenAI heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}`;
+  }
 }
 
 function formatLogEntry(entry) {

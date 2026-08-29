@@ -119,8 +119,6 @@ class Config:
     app_password: str = os.environ.get("APP_PASSWORD", "")
     # -1 disables automatic deletion; this is the safe default for an athlete's history.
     data_retention_days: int = env_int("DATA_RETENTION_DAYS", -1)
-    openai_daily_request_limit: int = env_int("OPENAI_DAILY_REQUEST_LIMIT", 30)
-    openai_daily_token_limit: int = env_int("OPENAI_DAILY_TOKEN_LIMIT", 150000)
 
 
 CONFIG = Config()
@@ -1214,6 +1212,28 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
     return {"profile": normalized_profile, "competitions": list_competitions()}
 
 
+OPENAI_RATE_LIMIT_HEADERS = {
+    "x-ratelimit-limit-requests": "limit_requests",
+    "x-ratelimit-remaining-requests": "remaining_requests",
+    "x-ratelimit-reset-requests": "reset_requests",
+    "x-ratelimit-limit-tokens": "limit_tokens",
+    "x-ratelimit-remaining-tokens": "remaining_tokens",
+    "x-ratelimit-reset-tokens": "reset_tokens",
+}
+
+
+def record_openai_rate_limits(response_headers: Any) -> None:
+    if response_headers is None:
+        return
+    values: dict[str, str] = {}
+    for header_name, value_name in OPENAI_RATE_LIMIT_HEADERS.items():
+        value = response_headers.get(header_name)
+        if value not in (None, ""):
+            values[value_name] = str(value)
+    if values:
+        set_kv("openai_rate_limits", json.dumps({"updated_at": utc_now(), **values}, ensure_ascii=False))
+
+
 def http_json(
     method: str,
     url: str,
@@ -1250,6 +1270,8 @@ def http_json(
             if len(raw) > MAX_EXTERNAL_RESPONSE_BYTES:
                 raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.")
             result = json.loads(raw) if raw else None
+            if service == "openai":
+                record_openai_rate_limits(getattr(response, "headers", None))
             LOGGER.info(
                 "External HTTP request completed",
                 extra={
@@ -2632,19 +2654,16 @@ def openai_usage_summary() -> dict[str, Any]:
         usage = {}
     if not isinstance(usage, dict) or usage.get("date") != today:
         usage = {"date": today, "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    usage.pop("request_limit", None)
+    usage.pop("token_limit", None)
+    try:
+        rate_limits = json.loads(get_kv("openai_rate_limits") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        rate_limits = {}
     return {
         **usage,
-        "request_limit": max(0, CONFIG.openai_daily_request_limit),
-        "token_limit": max(0, CONFIG.openai_daily_token_limit),
+        "rate_limits": rate_limits if isinstance(rate_limits, dict) else {},
     }
-
-
-def check_openai_budget() -> None:
-    usage = openai_usage_summary()
-    if usage["request_limit"] and usage["requests"] >= usage["request_limit"]:
-        raise AppError(429, "Das tägliche OpenAI-Anfragelimit ist erreicht.")
-    if usage["token_limit"] and usage["total_tokens"] >= usage["token_limit"]:
-        raise AppError(429, "Das tägliche OpenAI-Tokenlimit ist erreicht.")
 
 
 def record_openai_usage(response: dict[str, Any], operation: str) -> None:
@@ -2673,7 +2692,6 @@ def record_openai_usage(response: dict[str, Any], operation: str) -> None:
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
-    check_openai_budget()
     result = http_json(
         "POST",
         "https://api.openai.com/v1" + path,
