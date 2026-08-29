@@ -1,0 +1,68 @@
+name: Weekly release
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Create weekly release with commit changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_sha="$(git rev-parse HEAD)"
+
+          latest_tag="$(gh release list --repo "$REPOSITORY" --limit 100 --json tagName,publishedAt,isDraft,isPrerelease \
+            --jq '[.[] | select(.isDraft == false and .isPrerelease == false) | select(.tagName | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(.publishedAt) | last | .tagName // empty')"
+          if [[ -n "$latest_tag" ]]; then
+            IFS=. read -r major minor patch <<< "$latest_tag"
+            next_tag="${major}.${minor}.$((patch + 1))"
+            if ! git rev-parse --verify --quiet "${latest_tag}^{commit}" >/dev/null; then
+              git fetch --no-tags origin "refs/tags/${latest_tag}:refs/tags/${latest_tag}"
+            fi
+            commit_range="${latest_tag}..${release_sha}"
+            compare_url="https://github.com/${REPOSITORY}/compare/${latest_tag}...${release_sha}"
+          else
+            next_tag="0.0.1"
+            commit_range="$release_sha"
+            compare_url="https://github.com/${REPOSITORY}/commits/${release_sha}"
+          fi
+
+          if gh release view "$next_tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $next_tag already exists; nothing to do."
+            exit 0
+          fi
+
+          notes_file="${RUNNER_TEMP}/weekly-release-notes.md"
+          {
+            echo "## Änderungen seit ${latest_tag:-Projektbeginn}"
+            echo
+            git log --format='- %s (%h)' "$commit_range"
+            echo
+            echo "[Vollständigen Commit-Vergleich ansehen](${compare_url})"
+          } > "$notes_file"
+
+          gh release create "$next_tag" \
+            --repo "$REPOSITORY" \
+            --target "$release_sha" \
+            --title "$next_tag" \
+            --notes-file "$notes_file"
