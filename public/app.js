@@ -1086,6 +1086,9 @@ function render(data) {
       : data.garmin_sync?.running || state.localSync.garmin
         ? (data.garmin_sync?.status || "Garmin wird synchronisiert…")
         : data.sync?.last_sync_at ? `Letzte Aktualisierung: ${formatTime(data.sync.last_sync_at)}` : "Noch nicht synchronisiert";
+    if (!data.sync?.running && !state.localSync.intervals && data.sync?.last_window_start && data.sync?.last_window_end) {
+      activitiesSyncDetail.textContent += ` · Zeitraum ${data.sync.last_window_start} bis ${data.sync.last_window_end}`;
+    }
   }
   renderPlanned(data.planned || []);
   renderDrafts(data.drafts || []);
