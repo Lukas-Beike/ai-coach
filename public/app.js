@@ -10,6 +10,7 @@ const state = {
   voiceStartedAt: 0,
   voiceTranscribing: false,
   localSync: { intervals: false, competitions: false, garmin: false, performance: false },
+  notificationKeys: new Set(),
 };
 const VOICE_MAX_DURATION_MS = 60_000;
 const VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
@@ -234,6 +235,115 @@ async function toggleVoiceInput() {
       : "Das Mikrofon konnte nicht aktiviert werden.";
     setVoiceStatus(message, true);
     toast(message, true);
+  }
+}
+
+function notificationPermission() {
+  return "Notification" in window ? Notification.permission : "unsupported";
+}
+
+function renderNotificationStatus() {
+  const node = $("#notificationStatus");
+  const button = $("#notificationEnableButton");
+  const permission = notificationPermission();
+  if (!node || !button) return;
+  node.textContent = permission === "granted" ? "Aktiv" : permission === "denied" ? "Im Browser blockiert" : permission === "unsupported" ? "Von diesem Browser nicht unterstützt" : "Noch nicht aktiviert";
+  button.disabled = permission === "granted" || permission === "unsupported";
+  button.textContent = permission === "granted" ? "Aktiviert" : "Benachrichtigungen aktivieren";
+}
+
+async function enableNotifications() {
+  if (!("Notification" in window)) { toast("Dieser Browser unterstützt keine PWA-Benachrichtigungen", true); return; }
+  const permission = await Notification.requestPermission();
+  renderNotificationStatus();
+  if (permission === "granted") toast("PWA-Benachrichtigungen aktiviert");
+}
+
+async function showPwaNotification(title, options, key) {
+  if (notificationPermission() !== "granted" || state.notificationKeys.has(key)) return;
+  state.notificationKeys.add(key);
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    await registration.showNotification(title, { icon: "/icon.svg", badge: "/icon.svg", ...options });
+  } catch (_) {}
+}
+
+function notifyState(data) {
+  const pendingDrafts = (data.drafts || []).filter(draft => draft.status !== "pushed").length;
+  if (pendingDrafts) showPwaNotification("Intervals Coach", { body: `${pendingDrafts} Trainingsentwurf/-entwürfe warten auf deine Freigabe.`, tag: "drafts" }, `drafts:${pendingDrafts}`);
+  const next = data.planning?.season?.next_event;
+  if (next && next.days_until >= 0 && next.days_until <= 3) showPwaNotification("Wettkampf steht bevor", { body: `${next.name} ist in ${next.days_until} Tag(en).`, tag: `competition:${next.id}` }, `competition:${next.id}:${next.event_date}`);
+  const error = data.sync?.last_error || data.garmin_sync?.status?.includes("Fehler") && data.garmin_sync.status;
+  if (error) showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
+}
+
+function todayIso() { return new Date().toISOString().slice(0, 10); }
+
+function setFormValue(form, name, value) {
+  const field = form?.elements?.namedItem(name);
+  if (field) field.value = value == null ? "" : value;
+}
+
+function renderLocalFeedback(data) {
+  const form = $("#feedbackForm");
+  const feedback = data.local_feedback || {};
+  const today = feedback.today || {};
+  if (form && !form.contains(document.activeElement)) {
+    setFormValue(form, "checkin_date", today.checkin_date || todayIso());
+    for (const field of ["available_minutes", "soreness", "stress", "motivation", "session_rpe", "illness", "pain", "availability_notes", "notes"]) setFormValue(form, field, today[field]);
+  }
+  const history = $("#feedbackHistory");
+  if (!history) return;
+  history.replaceChildren();
+  for (const entry of (feedback.recent || []).slice(0, 7)) {
+    const node = document.createElement("div");
+    node.className = "feedback-entry";
+    const scores = [entry.soreness == null ? "" : `Muskelkater ${entry.soreness}/10`, entry.stress == null ? "" : `Stress ${entry.stress}/10`, entry.motivation == null ? "" : `Motivation ${entry.motivation}/10`, entry.session_rpe == null ? "" : `RPE ${entry.session_rpe}/10`].filter(Boolean).join(" · ");
+    node.innerHTML = `<strong>${escapeHtml(entry.checkin_date)}</strong>${scores ? ` · ${escapeHtml(scores)}` : ""}${entry.available_minutes == null ? "" : ` · ${escapeHtml(String(entry.available_minutes))} Min.`}${entry.illness || entry.pain ? `<br>${escapeHtml([entry.illness, entry.pain].filter(Boolean).join(" · "))}` : ""}`;
+    history.append(node);
+  }
+}
+
+function renderPlanning(data) {
+  const planning = data.planning || {};
+  const next = planning.season?.next_event;
+  const summary = $("#planningSummary");
+  if (summary) summary.textContent = next ? `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${next.phase} · ${next.days_until} Tage` : "Noch kein zukünftiger Wettkampf gespeichert.";
+  const preview = planning.latest_replan;
+  const node = $("#replanPreview");
+  const apply = $("#applyReplanButton");
+  if (!node) return;
+  if (!preview || preview.status !== "preview") {
+    node.hidden = true;
+    if (apply) apply.hidden = true;
+    return;
+  }
+  node.hidden = false;
+  const signals = preview.signals?.length ? `Signale: ${preview.signals.map(escapeHtml).join(", ")}` : "Keine kritischen lokalen Signale erkannt.";
+  const changes = (preview.changes || []).map(change => `<div class="replan-change"><strong>${escapeHtml(change.date || "")}: ${escapeHtml(change.name || "Einheit")}</strong><br>${escapeHtml(change.before?.description || "")}<br>→ ${escapeHtml(change.after?.description || "")}</div>`).join("");
+  node.innerHTML = `<div><strong>${escapeHtml(preview.message || "Adaptive Prüfung")}</strong><br>${signals}</div>${changes || "<div>Es gibt keine lokalen Entwürfe, die angepasst werden müssen.</div>"}<small>${escapeHtml(preview.scope || "")}</small>`;
+  if (apply) { apply.hidden = !(preview.changes || []).length; apply.dataset.adjustmentId = preview.id || ""; }
+}
+
+function renderPublicCalendar(data) {
+  const root = $("#publicCalendarCandidates");
+  if (!root) return;
+  root.replaceChildren();
+  const candidates = data.public_calendar?.candidates || [];
+  if (!candidates.length) return;
+  for (const candidate of candidates.slice(0, 30)) {
+    const card = document.createElement("article");
+    card.className = "public-calendar-candidate";
+    const imported = Boolean(candidate.imported_competition_id);
+    card.innerHTML = `<div><strong>${escapeHtml(candidate.name)}</strong><span>${escapeHtml(candidate.event_date)} · ${escapeHtml(candidate.sport)}</span></div>${candidate.location ? `<span>${escapeHtml(candidate.location)}</span>` : ""}${candidate.description ? `<p>${escapeHtml(candidate.description)}</p>` : ""}`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button";
+    button.textContent = imported ? "Als Wettkampf übernommen" : "Als Wettkampf übernehmen";
+    button.disabled = imported;
+    button.addEventListener("click", () => importPublicCandidate(candidate.id, button));
+    card.append(button);
+    root.append(card);
   }
 }
 
@@ -1350,6 +1460,7 @@ function renderSettings(data) {
       : " · OpenAI-Kontingent nach dem nächsten API-Aufruf verfügbar";
     usageNode.textContent = `OpenAI heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}`;
   }
+  renderNotificationStatus();
 }
 
 function formatLogEntry(entry) {
@@ -1377,6 +1488,7 @@ async function loadLogs() {
 function render(data) {
   const firstRender = !state.data;
   state.data = data;
+  notifyState(data);
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
@@ -1395,6 +1507,9 @@ function render(data) {
   renderProfile(data.profile);
   renderGarmin(data.garmin);
   renderCompetitions(data.competitions || []);
+  renderLocalFeedback(data);
+  renderPlanning(data);
+  renderPublicCalendar(data);
   renderCompetitionSync(data);
   renderPerformance(data.performance);
   renderModel(data.model);
@@ -1558,6 +1673,100 @@ async function saveProfile(event) {
   } catch (error) { toast(error.message, true); }
 }
 
+async function saveFeedback(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  try {
+    await api("/api/feedback", { method: "POST", body: JSON.stringify(payload) });
+    toast("Lokales Feedback gespeichert");
+    await load();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function prepareReplan() {
+  const button = $("#replanButton");
+  if (!button) return;
+  button.disabled = true;
+  button.textContent = "Wird vorbereitet…";
+  try {
+    await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: false }) });
+    toast("Adaptive Anpassung vorbereitet");
+    await load();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; button.textContent = "Anpassung vorbereiten"; }
+}
+
+async function applyReplan() {
+  const button = $("#applyReplanButton");
+  const adjustmentId = button?.dataset.adjustmentId;
+  if (!button || !adjustmentId || !window.confirm("Die vorgeschlagenen Änderungen auf lokale zukünftige Entwürfe anwenden? Intervals.icu wird dabei nicht verändert.")) return;
+  button.disabled = true;
+  try {
+    await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: true, adjustment_id: adjustmentId }) });
+    toast("Adaptive Anpassung angewendet");
+    await load();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+}
+
+async function importPublicCalendar() {
+  const button = $("#publicCalendarImportButton");
+  const url = $("#publicCalendarUrl")?.value.trim();
+  const name = $("#publicCalendarName")?.value.trim();
+  if (!url) { toast("Bitte eine HTTPS-iCalendar-URL eintragen", true); return; }
+  button.disabled = true;
+  button.textContent = "Kalender wird geladen…";
+  try {
+    const result = await api("/api/calendar/import", { method: "POST", body: JSON.stringify({ url, name }) });
+    toast(`${result.events || 0} Veranstaltungen gefunden`);
+    await load();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; button.textContent = "Kalender durchsuchen"; }
+}
+
+async function importPublicCandidate(id, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/calendar/candidates/${encodeURIComponent(id)}/import`, { method: "POST", body: "{}" });
+    toast("Veranstaltung als Wettkampf übernommen");
+    await load();
+  } catch (error) { toast(error.message, true); button.disabled = false; }
+}
+
+async function downloadDatabaseBackup() {
+  const button = $("#backupDownloadButton");
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch("/api/privacy/backup", { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) throw new Error("Datenbank-Backup konnte nicht erstellt werden.");
+    const blob = await response.blob();
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `intervals-coach-database-${todayIso()}.backup`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    toast("Verschlüsseltes Backup heruntergeladen");
+  } catch (error) { toast(error.message, true); }
+  finally { if (button) button.disabled = false; }
+}
+
+async function restoreDatabaseBackup() {
+  const input = $("#backupFileInput");
+  const file = input?.files?.[0];
+  if (!file || !window.confirm("Das aktuelle Datenbank-Backup wird vorher gesichert und durch die ausgewählte Datei ersetzt. Fortfahren?")) return;
+  const button = $("#backupRestoreButton");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/privacy/restore", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") }, body: file });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Backup konnte nicht wiederhergestellt werden.");
+    toast("Backup wiederhergestellt. Bitte erneut anmelden.");
+    showLogin();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+}
+
 async function saveModel(event) {
   const select = event.currentTarget;
   select.disabled = true;
@@ -1663,8 +1872,12 @@ $("#systemIntervalsSyncButton").addEventListener("click", syncNow);
 $("#competitionSyncButton").addEventListener("click", syncCompetitions);
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 $("#profileForm").addEventListener("submit", saveProfile);
+$("#feedbackForm").addEventListener("submit", saveFeedback);
+$("#replanButton").addEventListener("click", prepareReplan);
+$("#applyReplanButton").addEventListener("click", applyReplan);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; });
 $("#addCompetitionButton").addEventListener("click", addCompetition);
+$("#publicCalendarImportButton").addEventListener("click", importPublicCalendar);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
@@ -1672,6 +1885,9 @@ $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#chatResetButton").addEventListener("click", resetCoachChat);
 $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);
 $("#privacyDeleteButton").addEventListener("click", deletePrivacyData);
+$("#notificationEnableButton").addEventListener("click", enableNotifications);
+$("#backupDownloadButton").addEventListener("click", downloadDatabaseBackup);
+$("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);
 $("#logoutButton").addEventListener("click", logout);
 $("#libraryLoadButton").addEventListener("click", loadLibrary);
 $("#systemContextPreviewButton").addEventListener("click", () => {
@@ -1692,4 +1908,8 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-wor
 setInterval(() => {
   if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.performance) load();
 }, 1500);
+setInterval(() => {
+  if (state.data && document.visibilityState === "visible") load();
+}, 60_000);
+renderNotificationStatus();
 bootstrapAuth();
