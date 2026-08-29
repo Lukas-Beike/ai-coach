@@ -201,7 +201,7 @@ class CoachTests(unittest.TestCase):
         ])
         self.assertEqual(groups, [])
 
-    def test_existing_snapshot_uses_incremental_intervals_window(self):
+    def test_existing_snapshot_uses_configured_intervals_window(self):
         server.save_snapshot({"synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_activities": [{"id": "old"}], "recent_wellness": [], "upcoming_calendar": []})
         client = server.IntervalsClient(server.Config(intervals_api_key="test-key"))
         calls = []
@@ -219,7 +219,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(client, "get", side_effect=fake_get):
             snapshot = client.fetch_snapshot(activity_days=90)
         activity_call = next(params for path, params in calls if path.endswith("/activities"))
-        self.assertLessEqual((date.fromisoformat(activity_call["newest"]) - date.fromisoformat(activity_call["oldest"])).days, 6)
+        self.assertEqual((date.fromisoformat(activity_call["newest"]) - date.fromisoformat(activity_call["oldest"])).days, 89)
         self.assertEqual({item["id"] for item in snapshot["recent_activities"]}, {"old", "new"})
 
     def test_library_is_cached_and_included_in_coach_context(self):
@@ -291,6 +291,18 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.set_sync_period("garmin", -1), -1)
         self.assertEqual(server.sync_period("garmin"), -1)
         self.assertGreater(len(server.sync_date_windows(-1, date(2026, 8, 29))), 1)
+
+    def test_sync_intervals_uses_saved_period_when_not_explicitly_given(self):
+        snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        server.set_sync_period("intervals", 65)
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", return_value=snapshot
+        ) as fetch_snapshot, patch.object(server, "sync_workout_library", return_value={"workouts": 0}):
+            result = server.sync_intervals("test")
+        fetch_snapshot.assert_called_once_with(activity_days=65)
+        self.assertEqual(result["activity_days"], 65)
+        self.assertEqual(result["window_end"], server.local_now().date().isoformat())
 
     def test_settings_persist_in_data_for_container_restart(self):
         with tempfile.TemporaryDirectory() as temp_root:
