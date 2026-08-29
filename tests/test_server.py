@@ -885,6 +885,18 @@ class CoachTests(unittest.TestCase):
 
         self.assertEqual(error.exception.status, 403)
 
+    def test_static_files_serve_allowlisted_asset(self):
+        handler = object.__new__(server.RequestHandler)
+        handler.send_response = Mock()
+        handler.send_header = Mock()
+        handler.end_headers = Mock()
+        handler.wfile = Mock()
+
+        server.RequestHandler.send_static(handler, "/app.js")
+
+        handler.send_response.assert_called_once_with(200)
+        handler.wfile.write.assert_called_once()
+
     def test_garmin_near_duplicate_is_skipped_in_favour_of_intervals_activity(self):
         garmin = {
             "activityId": 1, "activityType": "running", "activityName": "Morning Run",
