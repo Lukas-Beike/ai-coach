@@ -252,7 +252,7 @@ h2 {
 .performance-card > div:first-child strong { color: var(--ink); font-size: .88rem; }
 .performance-card > div:first-child .secondary-button { margin-left: auto; padding: 7px 10px; font-size: .7rem; }
 .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
-.metric-grid div { padding: 10px; border: 1px solid rgba(255, 255, 255, .06); border-radius: 12px; background: rgba(255, 255, 255, .035); }
+.metric-grid > div { padding: 10px; border: 1px solid rgba(255, 255, 255, .06); border-radius: 12px; background: rgba(255, 255, 255, .035); }
 .metric-grid .metric-editable { position: relative; }
 .metric-edit-button { position: absolute; top: 7px; right: 7px; display: grid; width: 23px; height: 23px; place-items: center; border: 1px solid transparent; border-radius: 7px; color: var(--subtle); background: transparent; font-size: .8rem; line-height: 1; }
 .metric-edit-button:hover { border-color: var(--line); color: var(--ink); background: rgba(255, 255, 255, .08); }
@@ -264,6 +264,15 @@ h2 {
 .metric-grid small { display: block; margin-top: 6px; color: var(--subtle); font-size: .61rem; line-height: 1.2; }
 .metric-grid small.metric-estimate { color: #79d9bf; }
 .metric-grid small.metric-garmin { color: #83c7ff; }
+.metric-grid .metric-value-row { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.metric-grid .metric-value-row strong { min-width: 0; }
+.metric-grid .metric-value-row .metric-comparison { flex: 0 0 auto; margin-top: 0; white-space: nowrap; }
+.metric-grid .metric-intervals strong, .metric-grid small.metric-intervals { color: #ff8f86; }
+.metric-grid .metric-garmin strong { color: #83c7ff; }
+.metric-grid .metric-manual strong, .metric-grid small.metric-manual { color: #72d7a8; }
+.metric-grid .metric-form-good strong { color: #72d7a8; }
+.metric-grid .metric-form-caution strong { color: #ffcc80; }
+.metric-grid .metric-form-bad strong { color: #ff6b63; }
 .metric-grid small.metric-comparison { display: inline-flex; align-items: center; gap: 3px; margin-top: 7px; padding: 3px 6px; border-radius: 999px; font-size: .62rem; font-weight: 700; }
 .metric-comparison.good { color: #72d7a8; background: rgba(52, 199, 89, .13); }
 .metric-comparison.bad { color: #ff9a93; background: rgba(255, 69, 58, .13); }

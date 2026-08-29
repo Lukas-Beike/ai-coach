@@ -791,7 +791,8 @@ GARMIN_CONTEXT_FIELDS = {
     "deepSleepSeconds", "lightSleepSeconds", "remSleepSeconds", "awakeSleepSeconds", "value", "score", "status",
     "hrvStatus", "hrvWeeklyAvg", "hrvLastNight", "bodyBattery", "body_battery", "charged", "drained", "qualifier",
     "racePredictionTime", "distance", "activityId", "activityName", "activityType", "startTimeLocal", "duration",
-    "averageHR", "maxHR", "calories", "trainingEffect", "vO2MaxValue", "trainingReadiness", "recoveryTime",
+    "averageHR", "maxHR", "maxHeartRate", "calories", "trainingEffect", "vO2MaxValue", "trainingReadiness", "recoveryTime",
+    "weight", "weightKg", "weight_kg", "summaryDate", "latestWeight", "calendarDate",
 }
 
 
@@ -851,6 +852,84 @@ def _garmin_race_time(record: Any) -> float | int | None:
     return _garmin_duration_seconds(record)
 
 
+def _garmin_weight_kg(value: Any, unit: Any = None) -> float | int | None:
+    if isinstance(value, dict):
+        unit = first_present(value, ("unitKey", "unit", "weightUnit")) or unit
+        value = first_present(value, ("weightKg", "weight_kg", "weight", "value"))
+    number = as_number(value)
+    if number is None:
+        return None
+    unit_key = _garmin_key(unit) if unit else ""
+    if "lb" in unit_key or "pound" in unit_key:
+        number *= 0.45359237
+    elif number > 300:
+        # Garmin's body-composition endpoint reports weight in grams.
+        number /= 1000
+    if not 30 <= float(number) <= 300:
+        return None
+    return round(number, 2)
+
+
+def _garmin_record_date(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)) and value > 100_000_000_000:
+        try:
+            return datetime.fromtimestamp(float(value) / 1000, timezone.utc).date().isoformat()
+        except (OverflowError, OSError, ValueError):
+            return None
+    try:
+        return str(value).replace("Z", "+00:00")[:10]
+    except (AttributeError, TypeError):
+        return None
+
+
+def garmin_weight_records(snapshot: dict[str, Any]) -> list[tuple[str | None, float]]:
+    records: list[tuple[str | None, float]] = []
+    roots = [snapshot.get(key) for key in ("weight", "weigh_ins", "body_composition", "bodyComposition")]
+
+    def visit(value: Any, inherited_date: str | None = None) -> None:
+        if isinstance(value, dict):
+            record_date = _garmin_record_date(first_present(value, ("calendarDate", "summaryDate", "date", "timestampGMT", "timestamp"))) or inherited_date
+            direct = first_present(value, ("weightKg", "weight_kg", "weight"))
+            if direct not in (None, ""):
+                weight = _garmin_weight_kg(direct, first_present(value, ("unitKey", "unit", "weightUnit")))
+                if weight is not None:
+                    records.append((record_date, float(weight)))
+            for key, item in value.items():
+                if _garmin_key(key) in {"minweight", "maxweight", "weightdelta"}:
+                    continue
+                visit(item, record_date)
+        elif isinstance(value, list):
+            for item in value[:500]:
+                visit(item, inherited_date)
+
+    for root in roots:
+        visit(root)
+    return list(dict.fromkeys(records))
+
+
+def garmin_weight_metric(snapshot: dict[str, Any]) -> dict[str, Any]:
+    records = garmin_weight_records(snapshot)
+    if not records:
+        return metric(None, "kg", None)
+    dated = sorted(records, key=lambda item: item[0] or "")
+    return metric(dated[-1][1], "kg", GARMIN_PERFORMANCE_SOURCE, "Garmin Connect Körpergewicht")
+
+
+def garmin_weight_average(snapshot: dict[str, Any], days: int, end_date: date) -> float | None:
+    cutoff = end_date - timedelta(days=days - 1)
+    values: list[float] = []
+    for record_date, weight in garmin_weight_records(snapshot):
+        try:
+            record_day = date.fromisoformat(str(record_date)[:10]) if record_date else None
+        except ValueError:
+            record_day = None
+        if record_day and cutoff <= record_day <= end_date:
+            values.append(weight)
+    return round(sum(values) / len(values), 2) if values else None
+
+
 def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Normalize Garmin's varying max-metric and race-prediction payloads."""
     max_metrics = snapshot.get("max_metrics") if isinstance(snapshot.get("max_metrics"), (dict, list)) else {}
@@ -903,7 +982,20 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                 visit_races(item, path)
 
     visit_races(race_predictions)
+    max_hr_values: dict[str, list[float | int]] = {"cycling": [], "running": []}
+    activities = snapshot.get("activities") if isinstance(snapshot.get("activities"), list) else []
+    for activity in activities:
+        if not isinstance(activity, dict):
+            continue
+        value = as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate")))
+        kind = activity_kind(activity)
+        if value is not None and 80 <= float(value) <= 260 and kind in max_hr_values:
+            max_hr_values[kind].append(value)
+    weight = garmin_weight_metric(snapshot)
     units = {
+        "weight_kg": (weight["value"], "kg", "Garmin Connect KÃ¶rpergewicht"),
+        "cycling_max_hr_bpm": (max(max_hr_values["cycling"], default=None), "bpm", "Garmin Connect RadaktivitÃ¤ten"),
+        "running_max_hr_bpm": (max(max_hr_values["running"], default=None), "bpm", "Garmin Connect LaufaktivitÃ¤ten"),
         "cycling_vo2max_ml_kg_min": (cycling_vo2, "ml/kg/min", "Garmin Connect max metrics"),
         "running_vo2max_ml_kg_min": (running_vo2, "ml/kg/min", "Garmin Connect max metrics"),
         "run_5k_seconds": (race_values["run_5k_seconds"], "s", "Garmin Connect Laufprognose"),
@@ -914,10 +1006,53 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
     return {key: metric(value, unit, GARMIN_PERFORMANCE_SOURCE, note) for key, (value, unit, note) in units.items()}
 
 
+def append_garmin_performance_history(payload: dict[str, Any], previous: dict[str, Any] | None) -> None:
+    history = payload.get("performance_history") if isinstance(payload.get("performance_history"), list) else []
+    if previous and previous.get("synced_at"):
+        previous_metrics = garmin_performance_metrics(previous)
+        values = {
+            key: data.get("value") for key, data in previous_metrics.items()
+            if isinstance(data, dict) and data.get("value") is not None
+        }
+        readiness = readiness_score_value(previous.get("readiness"))
+        if readiness is not None:
+            values["readiness"] = readiness
+        history.append({"date": str(previous.get("synced_at"))[:10], "metrics": values})
+    unique: dict[str, dict[str, Any]] = {}
+    for item in history:
+        if isinstance(item, dict) and item.get("date") and isinstance(item.get("metrics"), dict):
+            unique[str(item["date"])] = item
+    payload["performance_history"] = [unique[key] for key in sorted(unique)[-90:]]
+
+
+def garmin_history_average(snapshot: dict[str, Any], key: str, days: int, end_date: date) -> float | None:
+    cutoff = end_date - timedelta(days=days - 1)
+    values: list[float] = []
+    history = snapshot.get("performance_history") if isinstance(snapshot.get("performance_history"), list) else []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        try:
+            item_date = date.fromisoformat(str(item.get("date"))[:10])
+        except (TypeError, ValueError):
+            continue
+        if not cutoff <= item_date <= end_date:
+            continue
+        value = as_number((item.get("metrics") or {}).get(key))
+        if value is not None:
+            values.append(float(value))
+    return round(sum(values) / len(values), 2) if values else None
+
+
 def garmin_performance_context(snapshot: dict[str, Any]) -> dict[str, Any]:
     metrics = garmin_performance_metrics(snapshot)
     return {
         "source": GARMIN_PERFORMANCE_SOURCE,
+        "weight": metrics["weight_kg"],
+        "max_heart_rate": {
+            "cycling_bpm": metrics["cycling_max_hr_bpm"],
+            "running_bpm": metrics["running_max_hr_bpm"],
+        },
         "vo2max": {
             "cycling_ml_kg_min": metrics["cycling_vo2max_ml_kg_min"],
             "running_ml_kg_min": metrics["running_vo2max_ml_kg_min"],
@@ -984,9 +1119,11 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
             return {"status": "already_running"}
         try:
             set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
+            previous = garmin_snapshot()
             payload = load_garmin_fixture(days)
             canonical = latest_snapshot()
             payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
+            append_garmin_performance_history(payload, previous)
             set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             set_kv("last_garmin_sync_at", payload["synced_at"])
             set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
@@ -1009,6 +1146,7 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
         today = local_now().date()
         windows = sync_date_windows(days, today)
         start = windows[0][0]
+        previous = garmin_snapshot()
         client = Garmin(CONFIG.garmin_email or None, CONFIG.garmin_password or None)
         mfa_status, _ = external_call(
             "garmin",
@@ -1072,9 +1210,22 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
             except Exception as exc:
                 payload["errors"].append({"source": key, "message": redact_text(str(exc))[:500]})
                 LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": key}}, exc_info=True)
+        weight_fetch = getattr(client, "get_weigh_ins", None) or getattr(client, "get_body_composition", None)
+        if callable(weight_fetch):
+            try:
+                weight_start = today - timedelta(days=89)
+                payload["weight"] = external_call(
+                    "garmin", "weight",
+                    lambda: weight_fetch(weight_start.isoformat(), today.isoformat()),
+                    {"window_start": weight_start.isoformat(), "window_end": today.isoformat()},
+                )
+            except Exception as exc:
+                payload["errors"].append({"source": "weight", "message": redact_text(str(exc))[:500]})
+                LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": "weight"}}, exc_info=True)
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
         canonical = latest_snapshot()
         payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
+        append_garmin_performance_history(payload, previous)
         set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         set_kv("last_garmin_sync_at", payload["synced_at"])
         set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
@@ -1106,6 +1257,8 @@ def garmin_public_state() -> dict[str, Any]:
         "has_hrv": bool(snapshot.get("hrv")),
         "has_readiness": bool(snapshot.get("readiness")),
         "has_race_predictions": bool(snapshot.get("race_predictions")),
+        "has_weight": performance_metrics["weight_kg"]["value"] is not None,
+        "has_max_hr": any(performance_metrics[key]["value"] is not None for key in ("cycling_max_hr_bpm", "running_max_hr_bpm")),
         "has_vo2max": any(performance_metrics[key]["value"] is not None for key in ("cycling_vo2max_ml_kg_min", "running_vo2max_ml_kg_min")),
         "has_estimated_run_times": any(performance_metrics[key]["value"] is not None for key in ("run_5k_seconds", "run_10k_seconds", "run_half_marathon_seconds", "run_marathon_seconds")),
     }
@@ -2600,15 +2753,15 @@ def eftp_30_day_average(wellness_rows: list[dict[str, Any]], activities: list[An
     return round(sum(values) / len(values), 1) if values else None
 
 
-def comparison_value(current: Any, average: Any, unit: str, days: int, higher_is_better: bool = True, label: str | None = None) -> dict[str, Any] | None:
+def comparison_value(current: Any, average: Any, unit: str, days: int, higher_is_better: bool | None = True, label: str | None = None) -> dict[str, Any] | None:
     current_number = as_number(current)
     average_number = as_number(average)
     if current_number is None or average_number is None:
         return None
     delta = round(float(current_number) - float(average_number), 2)
     direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
-    good = (delta > 0) if higher_is_better else (delta < 0)
-    color = "good" if good else "bad" if delta else "neutral"
+    good = ((delta > 0) if higher_is_better else (delta < 0)) if higher_is_better is not None else False
+    color = "good" if good else "bad" if delta and higher_is_better is not None else "neutral"
     return {
         "current": current_number,
         "average": average_number,
@@ -2747,7 +2900,9 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
                                  if isinstance(activity, dict) and any(term in str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold() for term in ("ride", "rad", "bike", "cycling"))), {})
     generic_lthr = first_present(athlete, ("lthr",))
     profile = get_profile()
+    garmin_metrics = garmin_performance_metrics(garmin_snapshot())
     body_sources = (
+        (garmin_metrics["weight_kg"]["value"], GARMIN_PERFORMANCE_SOURCE),
         (first_present(latest_wellness, ("weight",)), "Intervals.icu Wellness"),
         (first_present(athlete, ("weight",)), "Intervals.icu"),
         (profile.get("weight_kg"), "Manuell"),
@@ -2762,7 +2917,6 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         (first_present(athlete, ("height_cm", "height")), "Intervals.icu"),
         (profile.get("height_cm"), "Manuell"),
     ) if as_number(value) is not None), (None, None))
-    garmin_metrics = garmin_performance_metrics(garmin_snapshot())
     return {
         "weight_kg": metric(weight_value, "kg", weight_source),
         "body_fat_pct": metric(body_fat_value, "%", body_fat_source),
@@ -2773,6 +2927,8 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         "run_threshold_pace_seconds_per_km": metric(threshold_pace_seconds(first_present(run, ("threshold_pace",)) or first_present(wellness_run, ("threshold_pace",))), "s/km", "Intervals.icu"),
         "bike_threshold_hr_bpm": metric(first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) or generic_lthr, "bpm", "Intervals.icu" if first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) else "Intervals.icu (allgemein)"),
         "run_threshold_hr_bpm": metric(first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) or generic_lthr, "bpm", "Intervals.icu" if first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) else "Intervals.icu (allgemein)"),
+        "cycling_max_hr_bpm": garmin_metrics["cycling_max_hr_bpm"],
+        "running_max_hr_bpm": garmin_metrics["running_max_hr_bpm"],
         "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
         "running_vo2max_ml_kg_min": garmin_metrics["running_vo2max_ml_kg_min"] if garmin_metrics["running_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(wellness_run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(athlete, ("running_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
         "run_5k_seconds": garmin_metrics["run_5k_seconds"] if garmin_metrics["run_5k_seconds"]["value"] is not None else metric(None, "s", None),
@@ -2826,13 +2982,31 @@ def current_performance_context(snapshot: dict[str, Any] | None = None, include_
     if sleep_average is None:
         sleep_average = wellness_average(wellness_rows, ("sleep_hours",), 7, today)
     readiness_current = readiness_score_value(first_present(latest_wellness, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness")))
+    readiness_source = "Intervals.icu Wellness" if readiness_current is not None else None
     if readiness_current is None:
         readiness_current = readiness_score_value(garmin_snapshot().get("readiness"))
+        readiness_source = GARMIN_PERFORMANCE_SOURCE if readiness_current is not None else None
     readiness_average = wellness_average(
         wellness_rows,
         ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness"),
         7,
         today,
+    )
+    def trend(key: str, unit: str = "", higher_is_better: bool | None = True) -> dict[str, Any] | None:
+        return comparison_value(
+            metrics.get(key, {}).get("value"),
+            performance_trend_average(snapshot, metrics, key, 30, today),
+            unit,
+            30,
+            higher_is_better,
+        )
+
+    weight_trend = trend("weight_kg", "kg", None)
+    readiness_trend = comparison_value(
+        readiness_current,
+        performance_trend_average(snapshot, {"readiness": {"source": readiness_source}}, "readiness", 30, today),
+        "",
+        30,
     )
     comparisons = {
         "sleep_hours": comparison_value(sleep_hours, sleep_average, "h", 7),
@@ -2849,6 +3023,19 @@ def current_performance_context(snapshot: dict[str, Any] | None = None, include_
             last_7["duration_hours"], previous_30["duration_hours"] * 7 / 30, "h", 30,
             label="Schnitt der 30 Tage davor",
         ),
+        "weight_kg_30d": weight_trend,
+        "readiness_30d": readiness_trend,
+        "cycling_ftp_watts_30d": trend("cycling_ftp_watts", "W"),
+        "bike_threshold_hr_bpm_30d": trend("bike_threshold_hr_bpm", "bpm"),
+        "run_threshold_watts_30d": trend("run_threshold_watts", "W"),
+        "run_threshold_pace_seconds_per_km_30d": trend("run_threshold_pace_seconds_per_km", "s/km", False),
+        "run_threshold_hr_bpm_30d": trend("run_threshold_hr_bpm", "bpm"),
+        "cycling_vo2max_ml_kg_min_30d": trend("cycling_vo2max_ml_kg_min", "ml/kg/min"),
+        "running_vo2max_ml_kg_min_30d": trend("running_vo2max_ml_kg_min", "ml/kg/min"),
+        "run_5k_seconds_30d": trend("run_5k_seconds", "s", False),
+        "run_10k_seconds_30d": trend("run_10k_seconds", "s", False),
+        "run_half_marathon_seconds_30d": trend("run_half_marathon_seconds", "s", False),
+        "run_marathon_seconds_30d": trend("run_marathon_seconds", "s", False),
     }
     return {
         "available": True,
@@ -2866,7 +3053,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None, include_
             "hrv": first_present(latest_wellness, ("hrv",)), "sleepScore": first_present(latest_wellness, ("sleepScore",)),
             "fatigue": first_present(latest_wellness, ("fatigue",)), "soreness": first_present(latest_wellness, ("soreness",)),
             "stress": first_present(latest_wellness, ("stress",)), "mood": first_present(latest_wellness, ("mood",)),
-            "readiness": readiness_current, "sleep_hours": sleep_hours,
+            "readiness": readiness_current, "readiness_source": readiness_source, "sleep_hours": sleep_hours,
         },
         "rolling_training": {"last_7_days": last_7, "previous_7_days": previous_7, "last_30_days": last_30, "previous_30_days": previous_30, "last_28_days": activity_rollup(activities, 28, today)},
         "comparisons": comparisons,
@@ -2953,6 +3140,48 @@ def context_preview() -> dict[str, Any]:
         "context_text": context_text,
         "local_training_library": list_workout_library(),
     }
+
+
+def intervals_performance_average(rows: list[dict[str, Any]], key: str, days: int, end_date: date) -> float | None:
+    cutoff = end_date - timedelta(days=days - 1)
+    values: list[float] = []
+    for row in rows:
+        try:
+            row_date = date.fromisoformat(str(row.get("id") or row.get("date") or "")[:10])
+        except (TypeError, ValueError):
+            continue
+        if not cutoff <= row_date <= end_date:
+            continue
+        ride = sport_info_setting(row, "ride")
+        run = sport_info_setting(row, "run")
+        candidates: dict[str, Any] = {
+            "cycling_ftp_watts": first_present(ride, ("ftp", "indoor_ftp", "eftp", "eFTP")),
+            "bike_threshold_hr_bpm": first_present(ride, ("lthr",)),
+            "cycling_vo2max_ml_kg_min": first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")),
+            "run_threshold_watts": first_present(run, ("ftp", "indoor_ftp", "eftp", "eFTP")),
+            "run_threshold_pace_seconds_per_km": threshold_pace_seconds(first_present(run, ("threshold_pace",))),
+            "run_threshold_hr_bpm": first_present(run, ("lthr",)),
+            "running_vo2max_ml_kg_min": first_present(run, ("vo2max", "vo2_max", "running_vo2max")),
+            "weight_kg": first_present(row, ("weight",)),
+            "readiness": readiness_score_value(first_present(row, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness"))),
+        }
+        value = as_number(candidates.get(key))
+        if value is not None:
+            values.append(float(value))
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def performance_trend_average(snapshot: dict[str, Any], metrics: dict[str, dict[str, Any]], key: str, days: int, end_date: date) -> float | None:
+    current_source = metrics.get(key, {}).get("source")
+    if current_source == GARMIN_PERFORMANCE_SOURCE:
+        if key == "weight_kg":
+            average = garmin_weight_average(garmin_snapshot(), days, end_date)
+        else:
+            average = garmin_history_average(garmin_snapshot(), key, days, end_date)
+        if average is not None:
+            return average
+    rows = snapshot.get("recent_wellness") if isinstance(snapshot.get("recent_wellness"), list) else []
+    return intervals_performance_average([row for row in rows if isinstance(row, dict)], key, days, end_date)
 
 
 def openai_usage_summary() -> dict[str, Any]:
