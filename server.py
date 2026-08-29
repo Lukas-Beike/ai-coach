@@ -9,7 +9,6 @@ import json
 import logging
 import math
 import mimetypes
-import ntpath
 import os
 import platform
 import re
@@ -53,6 +52,15 @@ PUBLIC_DIR = ROOT / "public"
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
+STATIC_TARGETS = {
+    "index.html": PUBLIC_DIR / "index.html",
+    "app.js": PUBLIC_DIR / "app.js",
+    "styles.css": PUBLIC_DIR / "styles.css",
+    "service-worker.js": PUBLIC_DIR / "service-worker.js",
+    "manifest.webmanifest": PUBLIC_DIR / "manifest.webmanifest",
+    "logo.png": PUBLIC_DIR / "logo.png",
+    "icon.svg": PUBLIC_DIR / "icon.svg",
+}
 APP_VERSION = "0.6.0"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -1638,6 +1646,9 @@ def import_public_calendar(value: Any) -> dict[str, Any]:
     url = public_calendar_url(value.get("url"))
     name = str(value.get("name") or "Öffentlicher Kalender").strip()[:200] or "Öffentlicher Kalender"
     try:
+        # public_calendar_url enforces HTTPS, rejects credentials and private/local
+        # DNS targets; redirects are disabled by NoRedirectCalendarHandler.
+        # lgtm [py/full-ssrf]
         response = build_opener(NoRedirectCalendarHandler()).open(
             Request(url, headers={"Accept": "text/calendar, text/plain;q=0.9", "User-Agent": f"IntervalsCoach/{APP_VERSION}"}),
             timeout=10,
@@ -4881,24 +4892,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.log_client_disconnect()
 
     def send_static(self, path: str) -> None:
-        relative = "index.html" if path in {"", "/"} else path.lstrip("/")
-        normalized = os.path.normpath(relative)
-        if (
-            os.path.isabs(normalized)
-            or ntpath.isabs(normalized)
-            or ntpath.splitdrive(normalized)[0]
-            or normalized == ".."
-            or normalized.startswith(".." + os.sep)
-            or "\\" in normalized
-        ):
-            raise AppError(403, "Forbidden.")
-        target = (PUBLIC_DIR / normalized).resolve()
-        try:
-            target.relative_to(PUBLIC_DIR.resolve())
-        except ValueError as exc:
-            raise AppError(403, "Forbidden.") from exc
+        asset_name = "index.html" if path in {"", "/"} else path.lstrip("/")
+        target = STATIC_TARGETS.get(asset_name, STATIC_TARGETS["index.html"])
         if not target.is_file():
-            target = PUBLIC_DIR / "index.html"
+            target = STATIC_TARGETS["index.html"]
         data = target.read_bytes()
         mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         self.send_response(200)
