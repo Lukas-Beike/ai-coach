@@ -1591,12 +1591,14 @@ def fetch_public_calendar(url: str) -> bytes:
         ).encode("ascii")
     except UnicodeError as exc:
         raise AppError(400, "The public calendar address contains invalid characters.") from exc
+    tls_context = ssl.create_default_context()
+    tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
     for address in addresses:
         raw_socket = None
         tls_socket = None
         try:
             raw_socket = socket.create_connection((str(address), port), timeout=10)
-            tls_socket = ssl.create_default_context().wrap_socket(raw_socket, server_hostname=hostname)
+            tls_socket = tls_context.wrap_socket(raw_socket, server_hostname=hostname)
             raw_socket = None
             tls_socket.sendall(request_bytes)
             response = HTTPResponse(tls_socket, method="GET")
