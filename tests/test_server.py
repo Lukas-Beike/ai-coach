@@ -644,6 +644,32 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(completed["context"]["status"], 200)
         self.assertEqual(completed["context"]["result_fields"], 1)
 
+    def test_openai_rate_limit_headers_are_exposed_without_local_limits(self):
+        class FakeResponse:
+            status = 200
+            headers = {
+                "x-ratelimit-remaining-requests": "19",
+                "x-ratelimit-remaining-tokens": "12000",
+                "x-ratelimit-reset-requests": "30s",
+            }
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, *args):
+                return b"{}"
+
+        with patch.object(server, "urlopen", return_value=FakeResponse()):
+            server.http_json("POST", "https://api.openai.com/v1/responses", payload={}, service="openai")
+        summary = server.openai_usage_summary()
+        self.assertNotIn("request_limit", summary)
+        self.assertNotIn("token_limit", summary)
+        self.assertEqual(summary["rate_limits"]["remaining_requests"], "19")
+        self.assertEqual(summary["rate_limits"]["remaining_tokens"], "12000")
+
     def test_garmin_sdk_calls_log_operation_and_result_summary(self):
         server.initialise_logging()
         result = server.external_call(

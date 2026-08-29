@@ -18,9 +18,11 @@ Profil, Snapshots und Trainingsentwürfe lokal.
   auf Kalenderkonflikte geprüft.
 - Mehrwöchige Entwürfe werden als Plan gruppiert und können schrittweise
   freigegeben werden.
-- Inkrementelle Intervals.icu-Synchronisierung mit kleinem Überlappungsfenster,
+- Konfigurierbare Intervals.icu-Synchronisierung mit sichtbarem Zeitraum,
   Datenexport, lokaler Löschung und konfigurierbarer Aufbewahrungsdauer.
-- Tägliche OpenAI-Anfrage-/Tokenlimits und Verbrauchsanzeige.
+- OpenAI-Verbrauchsanzeige mit den zuletzt von der API gemeldeten verbleibenden
+  Request-/Token-Kontingenten. Das Dollar-Guthaben ist nur im OpenAI-Billing
+  Dashboard bzw. über berechtigte Organisationszugriffe verfügbar.
 
 ## Konfiguration
 
@@ -54,8 +56,8 @@ GARMIN_FIXTURE_PATH=garmin-fixture.example.json
 ```
 
 Weitere Betriebsvariablen sind `DATA_RETENTION_DAYS` (`-1` = keine automatische
-Löschung, Standard), `OPENAI_DAILY_REQUEST_LIMIT` und
-`OPENAI_DAILY_TOKEN_LIMIT`.
+Löschung, Standard). Die App setzt keine eigenen OpenAI-Anfrage- oder
+Tokenlimits.
 
 ## Docker / Unraid
 
