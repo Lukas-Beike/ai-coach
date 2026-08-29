@@ -4,18 +4,22 @@ import base64
 import difflib
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import math
 import mimetypes
+import ntpath
 import os
 import platform
 import re
 import secrets
 import shutil
+import socket
 import sqlite3
 import sys
 import threading
+import tempfile
 import time
 import uuid
 from contextlib import contextmanager
@@ -29,7 +33,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 try:
     from garminconnect import Garmin
@@ -52,6 +56,8 @@ LOG_PATH = DATA_DIR / "intervals-coach.log"
 APP_VERSION = "0.6.0"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
+MAX_BACKUP_BYTES = 100_000_000
+MAX_PUBLIC_CALENDAR_BYTES = 5_000_000
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
@@ -68,6 +74,7 @@ PUSH_RE = re.compile(r"^/api/workouts/([0-9a-f-]+)/push$")
 DELETE_PLANNED_RE = re.compile(r"^/api/planned/([^/]+)$")
 DELETE_DRAFT_RE = re.compile(r"^/api/drafts/([0-9a-f-]+)$")
 PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
+PUBLIC_EVENT_CANDIDATE_RE = re.compile(r"^/api/calendar/candidates/([0-9a-f-]+)/import$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 
 
@@ -547,6 +554,53 @@ def initialise_database() -> None:
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS athlete_checkins (
+                checkin_date TEXT PRIMARY KEY,
+                soreness INTEGER,
+                stress INTEGER,
+                motivation INTEGER,
+                session_rpe INTEGER,
+                illness TEXT NOT NULL DEFAULT '',
+                pain TEXT NOT NULL DEFAULT '',
+                available_minutes INTEGER,
+                availability_notes TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS plan_adjustments (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                applied_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS public_event_sources (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                url TEXT NOT NULL UNIQUE,
+                last_sync_at TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS public_event_candidates (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                uid TEXT NOT NULL,
+                name TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                sport TEXT NOT NULL,
+                distance TEXT NOT NULL DEFAULT '',
+                location TEXT NOT NULL DEFAULT '',
+                url TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                imported_competition_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(source_id, uid),
+                FOREIGN KEY(source_id) REFERENCES public_event_sources(id)
             );
             CREATE TABLE IF NOT EXISTS sessions (
                 token_hash TEXT PRIMARY KEY,
@@ -1326,6 +1380,99 @@ def save_profile(profile: dict[str, Any]) -> dict[str, str]:
     return normalized
 
 
+CHECKIN_TEXT_LIMITS = {
+    "illness": 1000,
+    "pain": 1000,
+    "availability_notes": 2000,
+    "notes": 4000,
+}
+CHECKIN_SCORE_FIELDS = ("soreness", "stress", "motivation", "session_rpe")
+
+
+def bounded_score(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Lokale Feedback-Werte müssen ganze Zahlen sein.") from exc
+    if not 0 <= number <= 10:
+        raise AppError(400, "Lokale Feedback-Werte müssen zwischen 0 und 10 liegen.")
+    return number
+
+
+def bounded_minutes(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Die verfügbare Trainingszeit muss eine ganze Zahl sein.") from exc
+    if not 0 <= number <= 1440:
+        raise AppError(400, "Die verfügbare Trainingszeit muss zwischen 0 und 1440 Minuten liegen.")
+    return number
+
+
+def normalize_checkin(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise AppError(400, "Das lokale Feedback muss ein Objekt sein.")
+    raw_date = str(value.get("checkin_date") or date.today().isoformat()).strip()
+    try:
+        checkin_date = date.fromisoformat(raw_date).isoformat()
+    except ValueError as exc:
+        raise AppError(400, "Das Datum des lokalen Feedbacks ist ungültig.") from exc
+    result: dict[str, Any] = {"checkin_date": checkin_date}
+    for field in CHECKIN_SCORE_FIELDS:
+        result[field] = bounded_score(value.get(field))
+    result["available_minutes"] = bounded_minutes(value.get("available_minutes"))
+    for field, limit in CHECKIN_TEXT_LIMITS.items():
+        result[field] = str(value.get(field) or "").strip()[:limit]
+    return result
+
+
+def list_checkins(limit: int = 30) -> list[dict[str, Any]]:
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT checkin_date, soreness, stress, motivation, session_rpe, illness, pain, "
+            "available_minutes, availability_notes, notes, created_at, updated_at "
+            "FROM athlete_checkins ORDER BY checkin_date DESC LIMIT ?",
+            (max(1, min(int(limit), 365)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def save_checkin(value: Any) -> dict[str, Any]:
+    checkin = normalize_checkin(value)
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        db.execute(
+            "INSERT INTO athlete_checkins(checkin_date, soreness, stress, motivation, session_rpe, illness, pain, "
+            "available_minutes, availability_notes, notes, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(checkin_date) DO UPDATE SET soreness=excluded.soreness, stress=excluded.stress, "
+            "motivation=excluded.motivation, session_rpe=excluded.session_rpe, illness=excluded.illness, "
+            "pain=excluded.pain, available_minutes=excluded.available_minutes, "
+            "availability_notes=excluded.availability_notes, notes=excluded.notes, updated_at=excluded.updated_at",
+            (
+                checkin["checkin_date"], checkin["soreness"], checkin["stress"], checkin["motivation"],
+                checkin["session_rpe"], checkin["illness"], checkin["pain"], checkin["available_minutes"],
+                checkin["availability_notes"], checkin["notes"], now, now,
+            ),
+        )
+    saved = next((item for item in list_checkins(365) if item["checkin_date"] == checkin["checkin_date"]), checkin)
+    return {"status": "ok", "checkin": saved}
+
+
+def local_feedback_context() -> dict[str, Any]:
+    checkins = list_checkins()
+    today = date.today().isoformat()
+    return {
+        "today": next((item for item in checkins if item["checkin_date"] == today), None),
+        "recent": checkins[:14],
+        "scope": "Only athlete-entered subjective feedback and constraints; wearable/provider values remain in their source sections.",
+    }
+
+
 COMPETITION_TEXT_LIMITS = {
     "name": 200,
     "sport": 80,
@@ -1377,6 +1524,186 @@ def list_competitions(include_sync: bool = False) -> list[dict[str, Any]]:
             f"SELECT {fields} FROM competitions ORDER BY event_date, priority, name"
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def public_calendar_url(value: Any) -> str:
+    raw = str(value or "").strip()
+    parsed = urlparse(raw)
+    if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise AppError(400, "Öffentliche Kalender müssen über eine HTTPS-URL ohne Zugangsdaten erreichbar sein.")
+    hostname = parsed.hostname.rstrip(".").casefold()
+    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
+        raise AppError(400, "Lokale Kalenderadressen werden aus Sicherheitsgründen nicht abgerufen.")
+    try:
+        addresses = [ipaddress.ip_address(hostname)]
+    except ValueError:
+        try:
+            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
+        except OSError as exc:
+            raise AppError(400, "Die öffentliche Kalenderadresse konnte nicht aufgelöst werden.") from exc
+    if any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
+        raise AppError(400, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
+    return raw
+
+
+class NoRedirectCalendarHandler(HTTPRedirectHandler):
+    def redirect_request(self, request: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+        raise AppError(400, "Der öffentliche Kalender darf nicht auf eine andere Adresse weiterleiten.")
+
+
+def parse_ics_value(value: str) -> str:
+    return (
+        value.replace("\\N", "\n").replace("\\n", "\n")
+        .replace("\\,", ",").replace("\\;", ";").replace("\\\\", "\\")
+        .strip()
+    )
+
+
+def parse_ics_date(value: str) -> str | None:
+    raw = value.strip()
+    match = re.search(r"(\d{8})", raw)
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(f"{match.group(1)[:4]}-{match.group(1)[4:6]}-{match.group(1)[6:8]}").isoformat()
+    except ValueError:
+        return None
+
+
+def parse_public_calendar(payload: bytes) -> list[dict[str, str]]:
+    try:
+        text = payload.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise AppError(400, "Der öffentliche Kalender ist keine gültige UTF-8-iCalendar-Datei.") from exc
+    unfolded: list[str] = []
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if line.startswith((" ", "\t")) and unfolded:
+            unfolded[-1] += line[1:]
+        else:
+            unfolded.append(line)
+    events: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    for line in unfolded:
+        if line.upper() == "BEGIN:VEVENT":
+            current = {}
+            continue
+        if line.upper() == "END:VEVENT":
+            if current and current.get("uid") and current.get("name") and current.get("event_date"):
+                events.append(current)
+            current = None
+            continue
+        if current is None or ":" not in line:
+            continue
+        key_part, raw_value = line.split(":", 1)
+        key = key_part.split(";", 1)[0].upper()
+        value = parse_ics_value(raw_value)
+        if key == "UID": current["uid"] = value[:500]
+        elif key == "SUMMARY": current["name"] = value[:200]
+        elif key == "DTSTART": current["event_date"] = parse_ics_date(value) or ""
+        elif key == "CATEGORIES": current["sport"] = value[:120]
+        elif key == "LOCATION": current["location"] = value[:500]
+        elif key == "URL": current["url"] = value[:1000]
+        elif key == "DESCRIPTION": current["description"] = value[:2000]
+    return events[:500]
+
+
+def list_public_calendar_sources() -> list[dict[str, Any]]:
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT id, name, url, last_sync_at, last_error, created_at, updated_at "
+            "FROM public_event_sources ORDER BY updated_at DESC"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_public_event_candidates(limit: int = 100) -> list[dict[str, Any]]:
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT c.id, c.source_id, s.name AS source_name, c.uid, c.name, c.event_date, c.sport, "
+            "c.distance, c.location, c.url, c.description, c.imported_competition_id, c.created_at, c.updated_at "
+            "FROM public_event_candidates c JOIN public_event_sources s ON s.id = c.source_id "
+            "ORDER BY c.event_date, c.name LIMIT ?",
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def public_calendar_state() -> dict[str, Any]:
+    return {"sources": list_public_calendar_sources(), "candidates": list_public_event_candidates()}
+
+
+def import_public_calendar(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise AppError(400, "Der öffentliche Kalender muss als Objekt übergeben werden.")
+    url = public_calendar_url(value.get("url"))
+    name = str(value.get("name") or "Öffentlicher Kalender").strip()[:200] or "Öffentlicher Kalender"
+    try:
+        response = build_opener(NoRedirectCalendarHandler()).open(
+            Request(url, headers={"Accept": "text/calendar, text/plain;q=0.9", "User-Agent": f"IntervalsCoach/{APP_VERSION}"}),
+            timeout=10,
+        )
+        payload = response.read(MAX_PUBLIC_CALENDAR_BYTES + 1)
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError(502, f"Der öffentliche Kalender konnte nicht geladen werden: {redact_text(str(exc))[:300]}") from exc
+    if len(payload) > MAX_PUBLIC_CALENDAR_BYTES:
+        raise AppError(413, "Der öffentliche Kalender ist zu groß.")
+    events = parse_public_calendar(payload)
+    source_id = str(uuid.uuid5(uuid.NAMESPACE_URL, url))
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        db.execute(
+            "INSERT INTO public_event_sources(id, name, url, last_sync_at, last_error, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, '', ?, ?) ON CONFLICT(url) DO UPDATE SET name=excluded.name, "
+            "last_sync_at=excluded.last_sync_at, last_error='', updated_at=excluded.updated_at",
+            (source_id, name, url, now, now, now),
+        )
+        row = db.execute("SELECT id FROM public_event_sources WHERE url=?", (url,)).fetchone()
+        source_id = row["id"]
+        for event in events:
+            categories = event.get("sport") or event.get("name") or "Cycling"
+            sport = supported_competition_sport(categories) or "Cycling"
+            candidate_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{url}#{event['uid']}"))
+            details = event.get("description", "")
+            if event.get("location"):
+                details = f"{details}\nLocation: {event['location']}".strip()
+            if event.get("url"):
+                details = f"{details}\nEvent URL: {event['url']}".strip()
+            db.execute(
+                "INSERT INTO public_event_candidates(id, source_id, uid, name, event_date, sport, distance, location, url, description, imported_competition_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, NULL, ?, ?) ON CONFLICT(source_id, uid) DO UPDATE SET "
+                "name=excluded.name, event_date=excluded.event_date, sport=excluded.sport, location=excluded.location, "
+                "url=excluded.url, description=excluded.description, updated_at=excluded.updated_at",
+                (candidate_id, source_id, event["uid"], event["name"], event["event_date"], sport, event.get("location", "")[:500], event.get("url", "")[:1000], details[:2000], now, now),
+            )
+        db.execute("UPDATE public_event_sources SET last_error='' WHERE id=?", (source_id,))
+    return {"status": "ok", "source": next(item for item in list_public_calendar_sources() if item["id"] == source_id), "events": len(events), **public_calendar_state()}
+
+
+def import_public_event_candidate(candidate_id: str) -> dict[str, Any]:
+    try:
+        normalized_id = str(uuid.UUID(candidate_id))
+    except (ValueError, AttributeError) as exc:
+        raise AppError(400, "Ungültige Kalenderveranstaltung.") from exc
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT * FROM public_event_candidates WHERE id=?", (normalized_id,)).fetchone()
+        if not row:
+            raise AppError(404, "Kalenderveranstaltung nicht gefunden.")
+        if row["imported_competition_id"]:
+            return {"status": "already_imported", "competition_id": row["imported_competition_id"], **public_calendar_state()}
+        competition = normalize_competition({
+            "name": row["name"], "event_date": row["event_date"], "sport": row["sport"],
+            "notes": row["description"], "distance": row["distance"],
+        })
+        now = utc_now()
+        db.execute(
+            "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, sync_dirty, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'B', ?, '', '', ?, 1, ?, ?)",
+            (competition["id"], competition["name"], competition["event_date"], competition["sport"], competition["distance"], competition["notes"], now, now),
+        )
+        db.execute("UPDATE public_event_candidates SET imported_competition_id=?, updated_at=? WHERE id=?", (competition["id"], now, normalized_id))
+    return {"status": "ok", "competition": competition, **public_calendar_state()}
 
 
 def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
@@ -2123,6 +2450,137 @@ def list_workout_drafts(limit: int = 50) -> list[dict[str, Any]]:
             **json.loads(row["payload"]),
         })
     return drafts
+
+
+def draft_is_hard(workout: dict[str, Any]) -> bool:
+    text = f"{workout.get('name', '')} {workout.get('description', '')}".casefold()
+    return any(term in text for term in ("interval", "vo2", "threshold", "tempo", "sprint", "race", "105%", "110%", "115%"))
+
+
+def adaptive_recovery_replacement(workout: dict[str, Any], reason: str, available_minutes: int | None = None) -> dict[str, Any]:
+    sport = workout.get("sport", "Ride")
+    duration = max(15, min(int(available_minutes or workout.get("duration_minutes") or 30), 90))
+    if str(sport).casefold() in {"run", "running", "laufen", "lauf"}:
+        description = f"- {duration}m Easy aerobic run at conversational effort"
+    elif str(sport).casefold() in {"weighttraining", "strength", "kraft", "krafttraining"}:
+        description = f"- {duration}m Mobility and easy strength; stop if pain increases"
+    else:
+        description = f"- {duration}m 50-65% Easy endurance ride"
+    return {
+        **workout,
+        "duration_minutes": duration,
+        "description": description,
+        "rationale": f"Adaptive adjustment: {reason}. The original workout remains available in the draft history.",
+    }
+
+
+def latest_replan_preview() -> dict[str, Any] | None:
+    with DB_LOCK, database() as db:
+        row = db.execute(
+            "SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        payload = json.loads(row["payload"])
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    return {"id": row["id"], "status": row["status"], "created_at": row["created_at"], "applied_at": row["applied_at"], **payload}
+
+
+def adaptive_replan_preview() -> dict[str, Any]:
+    today = date.today().isoformat()
+    feedback = local_feedback_context().get("today") or {}
+    signals: list[str] = []
+    if feedback.get("illness"):
+        signals.append("illness reported")
+    if feedback.get("pain"):
+        signals.append("pain/injury reported")
+    if feedback.get("soreness") is not None and feedback["soreness"] >= 8:
+        signals.append("high soreness")
+    if feedback.get("stress") is not None and feedback["stress"] >= 8:
+        signals.append("high subjective stress")
+    if feedback.get("motivation") is not None and feedback["motivation"] <= 2:
+        signals.append("low motivation")
+    severe = bool(feedback.get("illness") or feedback.get("pain") or (feedback.get("soreness") or 0) >= 8)
+    high_load = bool((feedback.get("stress") or 0) >= 8 or (feedback.get("motivation") is not None and feedback.get("motivation") <= 2))
+    available_minutes = feedback.get("available_minutes")
+    changes: list[dict[str, Any]] = []
+    for draft in list_workout_drafts(200):
+        if draft.get("status") != "draft" or str(draft.get("date") or "") < today:
+            continue
+        duration = as_number(draft.get("duration_minutes"))
+        limited = available_minutes is not None and duration is not None and duration > available_minutes
+        if severe or (high_load and draft_is_hard(draft)) or limited:
+            reason = "illness or pain reported" if severe else "recovery signal suggests reducing intensity"
+            if limited and not severe:
+                reason = f"only {available_minutes} minutes are available"
+            replacement = adaptive_recovery_replacement(draft, reason, available_minutes if limited else None)
+            changes.append({
+                "draft_id": draft["id"], "date": draft.get("date"), "name": draft.get("name"),
+                "before": {"duration_minutes": draft.get("duration_minutes"), "description": draft.get("description")},
+                "after": {"duration_minutes": replacement["duration_minutes"], "description": replacement["description"], "rationale": replacement["rationale"]},
+                "payload": replacement,
+            })
+    preview = {
+        "generated_at": utc_now(), "checkin_date": feedback.get("checkin_date") or today,
+        "signals": signals, "changes": changes,
+        "message": "No future local drafts require an adaptive change." if not changes else f"{len(changes)} future local draft(s) require review.",
+        "scope": "Only local future drafts are changed. Remote Intervals.icu events are never modified by this preview.",
+    }
+    adjustment_id = str(uuid.uuid4())
+    with DB_LOCK, database() as db:
+        db.execute(
+            "INSERT INTO plan_adjustments(id, payload, status, created_at) VALUES (?, ?, 'preview', ?)",
+            (adjustment_id, json.dumps(preview, ensure_ascii=False), preview["generated_at"]),
+        )
+    return {"id": adjustment_id, "status": "preview", **preview}
+
+
+def apply_adaptive_replan(adjustment_id: Any) -> dict[str, Any]:
+    try:
+        normalized_id = str(uuid.UUID(str(adjustment_id)))
+    except (ValueError, AttributeError) as exc:
+        raise AppError(400, "Ungültige Plananpassung.") from exc
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT payload, status FROM plan_adjustments WHERE id=?", (normalized_id,)).fetchone()
+        if not row:
+            raise AppError(404, "Plananpassung nicht gefunden.")
+        if row["status"] == "applied":
+            return {"status": "already_applied", "id": normalized_id}
+        payload = json.loads(row["payload"])
+        updated = 0
+        now = utc_now()
+        for change in payload.get("changes", []):
+            draft_id = str(change.get("draft_id") or "")
+            replacement = change.get("payload")
+            if not draft_id or not isinstance(replacement, dict):
+                continue
+            draft = db.execute("SELECT status FROM workout_drafts WHERE id=?", (draft_id,)).fetchone()
+            if draft and draft["status"] == "draft":
+                db.execute("UPDATE workout_drafts SET payload=?, updated_at=? WHERE id=?", (json.dumps(replacement, ensure_ascii=False), now, draft_id))
+                updated += 1
+        db.execute("UPDATE plan_adjustments SET status='applied', applied_at=? WHERE id=?", (now, normalized_id))
+    return {"status": "ok", "id": normalized_id, "updated": updated, "planning": planning_state()}
+
+
+def season_plan_summary() -> dict[str, Any]:
+    today = date.today()
+    events: list[dict[str, Any]] = []
+    for competition in list_competitions():
+        try:
+            event_date = date.fromisoformat(competition["event_date"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        days = (event_date - today).days
+        phase = "completed" if days < 0 else "taper" if days <= 14 else "peak" if days <= 42 else "build" if days <= 84 else "base"
+        events.append({**competition, "days_until": days, "phase": phase})
+    events.sort(key=lambda item: (item["event_date"], item["priority"], item["name"]))
+    return {"as_of": today.isoformat(), "events": events, "next_event": next((event for event in events if event["days_until"] >= 0), None)}
+
+
+def planning_state() -> dict[str, Any]:
+    return {"season": season_plan_summary(), "latest_replan": latest_replan_preview()}
 
 
 def normalize_library_workout(workout: Any) -> dict[str, Any]:
@@ -3189,9 +3647,13 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
     return {
         "durable_profile": get_profile(),
         "target_competitions": list_competitions(),
+        "local_feedback": local_feedback_context(),
+        "planning": planning_state(),
         "current_performance": current_performance_context(snapshot),
         "garmin": garmin_coach_context(),
         "source_policy": {
+            "local_feedback": "Athlete-entered subjective signals and availability; not copied from Garmin or Intervals.icu",
+            "planning": "Locally calculated suggestions; changes to remote calendar events still require explicit approval",
             "durable_profile": "Vom Athleten bestätigte Werte, lokal in SQLite gespeichert",
             "target_competitions": "Vom Athleten bestätigte Wettkämpfe, lokal in SQLite gespeichert",
             "current_performance": "Aus dem letzten gespeicherten Intervals.icu-Snapshot abgeleitet; KI-Schätzungen sind separat gekennzeichnet",
@@ -3238,6 +3700,8 @@ def context_preview() -> dict[str, Any]:
         "assembly": [
             "COACH_PROMPT: feste Coaching-Regeln und Sicherheitsvorgaben",
             "STRUCTURED ATHLETE CONTEXT: Profil, Zielwettkämpfe, Leistungsdaten und Garmin",
+            "LOCAL FEEDBACK: subjective athlete signals and availability not copied from external services",
+            "LOCAL PLANNING: season overview and review-required adaptive suggestions",
             "LATEST INTERVALS.ICU SNAPSHOT: letzter gespeicherter Trainings-/Wellness-Snapshot",
             "LOCAL TRAINING LIBRARY: lokal zwischengespeicherte und mit Intervals.icu synchronisierte Workout-Vorlagen",
             "OpenAI Conversation: Dialogkontinuität; nicht autoritativ für dauerhafte Athletenfakten",
@@ -3702,6 +4166,9 @@ def public_state() -> dict[str, Any]:
         "parallel_cycling": parallel_cycling_event_groups(planned),
         "profile": get_profile(),
         "competitions": list_competitions(),
+        "local_feedback": local_feedback_context(),
+        "planning": planning_state(),
+        "public_calendar": public_calendar_state(),
         "performance": current_performance_context(snapshot),
         "garmin": garmin_public_state(),
         "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
@@ -3822,6 +4289,8 @@ def diagnostic_report() -> dict[str, Any]:
         draft_count = db.execute("SELECT COUNT(*) AS count FROM workout_drafts").fetchone()["count"]
         library_count = db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"]
         competition_count = db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()["count"]
+        checkin_count = db.execute("SELECT COUNT(*) AS count FROM athlete_checkins").fetchone()["count"]
+        calendar_candidate_count = db.execute("SELECT COUNT(*) AS count FROM public_event_candidates").fetchone()["count"]
     return {
         "generated_at": utc_now(),
         "app": {"name": "Intervals Coach", "version": APP_VERSION},
@@ -3862,7 +4331,7 @@ def diagnostic_report() -> dict[str, Any]:
             "date": get_kv("morning_checkin_date"),
             "last_error": redact_text(get_kv("morning_checkin_error") or "") or None,
         },
-        "database": {"messages": message_count, "workout_drafts_legacy": draft_count, "workout_library": library_count, "competitions": competition_count},
+        "database": {"messages": message_count, "workout_drafts_legacy": draft_count, "workout_library": library_count, "competitions": competition_count, "athlete_checkins": checkin_count, "public_event_candidates": calendar_candidate_count},
         "logs": recent_log_entries(),
         "note": "Zugangsdaten und Athleteninhalte sind bewusst ausgeschlossen. Diese JSON-Datei kann zur Fehlersuche bereitgestellt werden.",
     }
@@ -3884,7 +4353,66 @@ def privacy_export() -> dict[str, Any]:
         "workout_drafts": drafts,
         "workout_library": library,
         "training_plans": list_training_plans(),
+        "local_feedback": local_feedback_context(),
+        "planning": planning_state(),
+        "public_calendar": public_calendar_state(),
     }
+
+
+def database_backup_bytes() -> bytes:
+    with DB_LOCK, database() as db:
+        try:
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            LOGGER.warning("Database WAL checkpoint failed before backup", extra={"event": "database_backup_checkpoint_failed"}, exc_info=True)
+    try:
+        return DB_PATH.read_bytes()
+    except OSError as exc:
+        raise AppError(500, "Die Datenbank konnte nicht als Backup gelesen werden.") from exc
+
+
+def restore_database_backup(payload: bytes) -> dict[str, Any]:
+    if not payload or len(payload) > MAX_BACKUP_BYTES:
+        raise AppError(413, "Das Datenbank-Backup ist leer oder zu groß.")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    temporary_path = DATA_DIR / f".intervals-coach-restore-{uuid.uuid4().hex}.db"
+    previous_backup_name: str | None = None
+    try:
+        temporary_path.write_bytes(payload)
+        backend = sqlite_backend if SQLCIPHER_AVAILABLE else sqlite3
+        if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
+            raise AppError(503, "SQLCipher ist für die Wiederherstellung nicht verfügbar.")
+        connection = backend.connect(temporary_path, timeout=20)
+        try:
+            if CONFIG.app_password:
+                _configure_cipher(connection, CONFIG.app_password)
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            if not {"kv", "messages", "snapshots"}.issubset(tables):
+                raise AppError(400, "Das Backup ist keine gültige Intervals-Coach-Datenbank.")
+            connection.execute("SELECT count(*) FROM kv").fetchone()
+        finally:
+            connection.close()
+        with DB_LOCK:
+            backup_path = DATA_DIR / f"{DB_PATH.name}.pre-restore-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+            if DB_PATH.exists():
+                shutil.copy2(DB_PATH, backup_path)
+                previous_backup_name = backup_path.name
+            for sidecar in (Path(f"{DB_PATH}-wal"), Path(f"{DB_PATH}-shm")):
+                try:
+                    sidecar.unlink()
+                except FileNotFoundError:
+                    pass
+            os.replace(temporary_path, DB_PATH)
+        return {"status": "ok", "restored": True, "previous_database_backup": previous_backup_name}
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError(400, f"Das Datenbank-Backup konnte nicht validiert werden: {redact_text(str(exc))[:300]}") from exc
+    finally:
+        try:
+            temporary_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def delete_remote_conversation(conversation_id: str) -> bool:
@@ -3909,7 +4437,10 @@ def delete_local_data() -> dict[str, Any]:
         except Exception:
             LOGGER.warning("Remote OpenAI conversation could not be deleted", extra={"event": "privacy_remote_delete_failed"}, exc_info=True)
     with DB_LOCK, database() as db:
-        for table in ("messages", "snapshots", "workout_drafts", "workout_library", "competitions", "training_plans", "sessions"):
+        for table in (
+            "messages", "snapshots", "workout_drafts", "workout_library", "competitions", "training_plans",
+            "athlete_checkins", "plan_adjustments", "public_event_candidates", "public_event_sources", "sessions",
+        ):
             db.execute(f"DELETE FROM {table}")
         db.execute("DELETE FROM kv")
         set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
@@ -4083,6 +4614,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/privacy/export":
                 require_auth(self)
                 self.send_json(200, privacy_export(), {"Content-Disposition": "attachment; filename=intervals-coach-export.json"})
+            elif path == "/api/privacy/backup":
+                require_auth(self)
+                self.send_bytes(200, database_backup_bytes(), "application/octet-stream", {"Content-Disposition": "attachment; filename=intervals-coach-database.backup"})
+            elif path == "/api/calendar":
+                require_auth(self)
+                self.send_json(200, public_calendar_state())
             elif path == "/api/library":
                 require_auth(self)
                 self.send_json(200, {"workouts": get_workout_library()})
@@ -4122,6 +4659,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                         f"{CSRF_COOKIE}={csrf}; Path=/; SameSite=Strict; Max-Age={SESSION_TTL_SECONDS}",
                     ],
                 })
+            elif path == "/api/privacy/restore":
+                session = require_auth(self)
+                require_csrf(self, session)
+                self.send_json(200, restore_database_backup(self.read_body(MAX_BACKUP_BYTES)))
             elif path == "/api/logout":
                 session = require_auth(self)
                 require_csrf(self, session)
@@ -4177,6 +4718,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if payload.get("confirm") != "DELETE":
                     raise AppError(400, "Zum Löschen muss DELETE bestätigt werden.")
                 self.send_json(200, delete_local_data())
+            elif path == "/api/feedback":
+                self.send_json(200, save_checkin(self.read_json()))
+            elif path == "/api/planning/replan":
+                payload = self.read_json()
+                self.send_json(200, apply_adaptive_replan(payload.get("adjustment_id")) if payload.get("apply") else adaptive_replan_preview())
+            elif path == "/api/calendar/import":
+                self.send_json(200, import_public_calendar(self.read_json()))
+            elif match := PUBLIC_EVENT_CANDIDATE_RE.match(path):
+                self.send_json(200, import_public_event_candidate(match.group(1)))
             elif path == "/api/library/sync":
                 self.send_json(200, sync_workout_library(reason="manuell"))
             elif match := PLAN_LIBRARY_RE.match(path):
@@ -4256,12 +4806,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
             self.send_json(500, {"error": "Interner Serverfehler."})
 
-    def read_body(self) -> bytes:
+    def read_body(self, max_bytes: int = MAX_BODY_BYTES) -> bytes:
         try:
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError as exc:
             raise AppError(400, "Ungültige Content-Length.") from exc
-        if size <= 0 or size > MAX_BODY_BYTES:
+        if size <= 0 or size > max_bytes:
             raise AppError(413 if size > MAX_BODY_BYTES else 400, "Ungültige Größe des Anfrageinhalts.")
         return self.rfile.read(size)
 
@@ -4311,9 +4861,38 @@ class RequestHandler(BaseHTTPRequestHandler):
         except self.client_disconnect_errors:
             self.log_client_disconnect()
 
+    def send_bytes(self, status: int, data: bytes, content_type: str, headers: dict[str, str | list[str]] | None = None) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        for key, value in (headers or {}).items():
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    self.send_header(key, str(item))
+            else:
+                self.send_header(key, value)
+        try:
+            self.end_headers()
+            self.wfile.write(data)
+        except self.client_disconnect_errors:
+            self.log_client_disconnect()
+
     def send_static(self, path: str) -> None:
         relative = "index.html" if path in {"", "/"} else path.lstrip("/")
-        target = (PUBLIC_DIR / relative).resolve()
+        normalized = os.path.normpath(relative)
+        if (
+            os.path.isabs(normalized)
+            or ntpath.isabs(normalized)
+            or ntpath.splitdrive(normalized)[0]
+            or normalized == ".."
+            or normalized.startswith(".." + os.sep)
+            or "\\" in normalized
+        ):
+            raise AppError(403, "Forbidden.")
+        target = (PUBLIC_DIR / normalized).resolve()
         try:
             target.relative_to(PUBLIC_DIR.resolve())
         except ValueError as exc:
