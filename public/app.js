@@ -1,5 +1,18 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { data: null, busy: false, profileDirty: false, activityTypes: new Set(), localSync: { intervals: false, competitions: false, garmin: false, performance: false } };
+const state = {
+  data: null,
+  busy: false,
+  profileDirty: false,
+  activityTypes: new Set(),
+  voiceRecorder: null,
+  voiceStream: null,
+  voiceTimer: null,
+  voiceStartedAt: 0,
+  voiceTranscribing: false,
+  localSync: { intervals: false, competitions: false, garmin: false, performance: false },
+};
+const VOICE_MAX_DURATION_MS = 60_000;
+const VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
 function cookie(name) {
   return document.cookie.split("; ").find((part) => part.startsWith(`${name}=`))?.split("=").slice(1).join("=") || "";
@@ -18,6 +31,22 @@ async function api(path, options = {}) {
     credentials: "same-origin",
     ...options,
     headers: { "Content-Type": "application/json", ...(options.method && options.method !== "GET" ? { "X-CSRF-Token": cookie("ic_csrf") } : {}), ...(options.headers || {}) },
+  });
+  let payload = {};
+  try { payload = await response.json(); } catch (_) {}
+  if (!response.ok) {
+    if (response.status === 401) showLogin();
+    throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
+  }
+  return payload;
+}
+
+async function apiAudio(path, blob) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    body: blob,
+    headers: { "Content-Type": blob.type || "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") },
   });
   let payload = {};
   try { payload = await response.json(); } catch (_) {}
@@ -68,6 +97,144 @@ function toast(message, error = false) {
   node.className = `toast show${error ? " error" : ""}`;
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => { node.className = "toast"; }, 3000);
+}
+
+function setVoiceStatus(message = "", error = false) {
+  const node = $("#voiceStatus");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.toggle("error", error);
+  node.hidden = !message;
+}
+
+function voiceIsRecording() {
+  return state.voiceRecorder?.state === "recording";
+}
+
+function formatVoiceDuration() {
+  const elapsed = Math.min(Date.now() - state.voiceStartedAt, VOICE_MAX_DURATION_MS);
+  return `${String(Math.floor(elapsed / 1000)).padStart(2, "0")} s / 60 s`;
+}
+
+function updateVoiceButton() {
+  const button = $("#voiceButton");
+  if (!button) return;
+  const recording = voiceIsRecording();
+  const transcribing = state.voiceTranscribing;
+  button.disabled = state.busy || transcribing;
+  button.classList.toggle("recording", recording);
+  button.classList.toggle("transcribing", transcribing);
+  button.setAttribute("aria-pressed", recording ? "true" : "false");
+  if (recording) {
+    button.textContent = "■";
+    button.setAttribute("aria-label", "Spracheingabe beenden");
+    button.title = "Spracheingabe beenden";
+  } else if (transcribing) {
+    button.textContent = "…";
+    button.setAttribute("aria-label", "Audio wird transkribiert");
+    button.title = "Audio wird transkribiert";
+  } else {
+    button.textContent = "🎙";
+    button.setAttribute("aria-label", "Spracheingabe starten");
+    button.title = "Spracheingabe starten";
+  }
+}
+
+function stopVoiceCapture(recorder = state.voiceRecorder) {
+  if (state.voiceTimer) clearInterval(state.voiceTimer);
+  state.voiceTimer = null;
+  if (state.voiceStream) {
+    state.voiceStream.getTracks().forEach((track) => track.stop());
+    state.voiceStream = null;
+  }
+  if (state.voiceRecorder === recorder) state.voiceRecorder = null;
+  updateVoiceButton();
+}
+
+function stopVoiceRecording() {
+  const recorder = state.voiceRecorder;
+  if (recorder?.state === "recording") recorder.stop();
+}
+
+async function transcribeVoice(blob) {
+  state.voiceTranscribing = true;
+  setVoiceStatus("Aufnahme wird transkribiert …");
+  updateVoiceButton();
+  try {
+    const result = await apiAudio("/api/transcribe", blob);
+    const transcript = String(result.transcript || "").trim();
+    if (!transcript) throw new Error("OpenAI hat kein Transkript zurückgegeben.");
+    const input = $("#messageInput");
+    const current = input.value.trim();
+    input.value = current ? `${current}\n${transcript}` : transcript;
+    input.dispatchEvent(new Event("input"));
+    updateVoiceButton();
+    input.focus();
+    setVoiceStatus("Transkript eingefügt. Bitte prüfen und anschließend senden.");
+  } catch (error) {
+    setVoiceStatus(error.message, true);
+    toast(error.message, true);
+  } finally {
+    state.voiceTranscribing = false;
+    updateVoiceButton();
+  }
+}
+
+async function toggleVoiceInput() {
+  if (state.busy || state.voiceTranscribing) return;
+  if (voiceIsRecording()) {
+    stopVoiceRecording();
+    return;
+  }
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    const message = "Spracheingabe benötigt eine HTTPS-Verbindung und einen unterstützten Browser.";
+    setVoiceStatus(message, true);
+    toast(message, true);
+    return;
+  }
+  setVoiceStatus("Mikrofon wird aktiviert …");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    const mimeType = typeof MediaRecorder.isTypeSupported === "function"
+      ? VOICE_MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) || ""
+      : "";
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    const chunks = [];
+    state.voiceStream = stream;
+    state.voiceRecorder = recorder;
+    state.voiceStartedAt = Date.now();
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data?.size) chunks.push(event.data);
+    });
+    recorder.addEventListener("error", () => {
+      stopVoiceCapture(recorder);
+      setVoiceStatus("Die Audioaufnahme ist fehlgeschlagen.", true);
+    });
+    recorder.addEventListener("stop", () => {
+      const recordedType = recorder.mimeType || mimeType || "audio/webm";
+      const blob = new Blob(chunks, { type: recordedType });
+      stopVoiceCapture(recorder);
+      if (blob.size) transcribeVoice(blob);
+      else setVoiceStatus("Es wurde keine Sprache aufgenommen.", true);
+    }, { once: true });
+    recorder.start();
+    setVoiceStatus(`Aufnahme läuft · ${formatVoiceDuration()}`);
+    updateVoiceButton();
+    state.voiceTimer = setInterval(() => {
+      if (!voiceIsRecording()) return;
+      setVoiceStatus(`Aufnahme läuft · ${formatVoiceDuration()}`);
+      if (Date.now() - state.voiceStartedAt >= VOICE_MAX_DURATION_MS) stopVoiceRecording();
+    }, 250);
+  } catch (error) {
+    stopVoiceCapture();
+    const message = error.name === "NotAllowedError"
+      ? "Der Mikrofonzugriff wurde nicht erlaubt."
+      : "Das Mikrofon konnte nicht aktiviert werden.";
+    setVoiceStatus(message, true);
+    toast(message, true);
+  }
 }
 
 function formatTime(value) {
@@ -1245,11 +1412,12 @@ async function sendMessage(event) {
   event.preventDefault();
   const input = $("#messageInput");
   const message = input.value.trim();
-  if (!message || state.busy) return;
+  if (!message || state.busy || voiceIsRecording() || state.voiceTranscribing) return;
   state.busy = true;
   const sendButton = $("#sendButton");
   const working = $("#coachWorking");
   sendButton.disabled = true;
+  updateVoiceButton();
   sendButton.textContent = "Coach arbeitet…";
   if (working) working.hidden = false;
   input.value = "";
@@ -1271,6 +1439,7 @@ async function sendMessage(event) {
     sendButton.disabled = false;
     sendButton.textContent = "Senden";
     if (working) working.hidden = true;
+    updateVoiceButton();
     input.focus();
   }
 }
@@ -1485,6 +1654,7 @@ function moveModelSettingsToSystemTab() {
 moveModelSettingsToSystemTab();
 $("#loginForm").addEventListener("submit", login);
 $("#chatForm").addEventListener("submit", sendMessage);
+$("#voiceButton").addEventListener("click", toggleVoiceInput);
 $("#headerActionButton").addEventListener("click", (event) => {
   if (event.currentTarget.dataset.action === "performance") refreshPerformance();
   else if (event.currentTarget.dataset.action === "activities") syncNow(event);

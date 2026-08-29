@@ -51,6 +51,7 @@ DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
 APP_VERSION = "0.6.0"
 MAX_BODY_BYTES = 1_000_000
+MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
@@ -1661,11 +1662,15 @@ def http_json(
     headers: dict[str, str] | None = None,
     timeout: int = 45,
     service: str | None = None,
+    raw_body: bytes | None = None,
+    content_type: str | None = None,
 ) -> Any:
-    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    if raw_body is not None and payload is not None:
+        raise ValueError("payload and raw_body are mutually exclusive")
+    body = raw_body if raw_body is not None else (None if payload is None else json.dumps(payload).encode("utf-8"))
     request_headers = {"Accept": "application/json", "User-Agent": f"IntervalsCoach/{APP_VERSION}"}
     if body is not None:
-        request_headers["Content-Type"] = "application/json"
+        request_headers["Content-Type"] = content_type or "application/json"
     request_headers.update(headers or {})
     request = Request(url, data=body, headers=request_headers, method=method)
     parsed_url = urlparse(url)
@@ -3360,6 +3365,85 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def multipart_form_data(
+    fields: list[tuple[str, str]],
+    file_field: str,
+    filename: str,
+    file_content_type: str,
+    file_data: bytes,
+) -> tuple[bytes, str]:
+    """Build a bounded multipart request without persisting the uploaded audio."""
+    boundary = "----IntervalsCoach" + secrets.token_hex(16)
+    boundary_bytes = boundary.encode("ascii")
+    parts: list[bytes] = []
+    for name, value in fields:
+        parts.extend((b"--" + boundary_bytes + b"\r\n",))
+        parts.extend((f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),))
+        parts.extend((value.encode("utf-8"), b"\r\n"))
+    parts.extend((b"--" + boundary_bytes + b"\r\n",))
+    parts.extend((
+        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode("ascii"),
+        f"Content-Type: {file_content_type}\r\n\r\n".encode("ascii"),
+        file_data,
+        b"\r\n--" + boundary_bytes + b"--\r\n",
+    ))
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+VOICE_AUDIO_TYPES = {
+    "audio/webm": ".webm",
+    "audio/mp4": ".mp4",
+    "audio/ogg": ".ogg",
+    "audio/mpeg": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mpga": ".mpga",
+    "audio/m4a": ".m4a",
+}
+
+
+def normalized_audio_type(content_type: str) -> str:
+    return str(content_type or "").split(";", 1)[0].strip().casefold()
+
+
+def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
+    """Transcribe one short voice note; audio is intentionally never persisted."""
+    if not CONFIG.openai_api_key:
+        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+    if not isinstance(audio, bytes) or not audio:
+        raise AppError(400, "Die Audioaufnahme ist leer.")
+    if len(audio) > MAX_AUDIO_BODY_BYTES:
+        raise AppError(413, "Die Audioaufnahme ist zu groß.")
+    audio_type = normalized_audio_type(content_type)
+    suffix = VOICE_AUDIO_TYPES.get(audio_type)
+    if not suffix:
+        raise AppError(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
+    body, multipart_type = multipart_form_data(
+        [
+            ("model", "gpt-transcribe"),
+            ("languages[]", "de"),
+            ("prompt", "Deutsche Trainingsfrage an einen Ausdauercoach. Fachbegriffe: Intervals.icu, Garmin, FTP, HRV, TSB, ATL, CTL, VO2max, Watt, Pace, Laktat, Radfahren, Laufen."),
+        ],
+        "file",
+        "voice" + suffix,
+        audio_type,
+        audio,
+    )
+    result = http_json(
+        "POST",
+        "https://api.openai.com/v1/audio/transcriptions",
+        headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
+        timeout=90,
+        service="openai",
+        raw_body=body,
+        content_type=multipart_type,
+    )
+    text = result.get("text") if isinstance(result, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        raise AppError(502, "OpenAI hat kein Transkript zurückgegeben.")
+    return {"transcript": text.strip()}
+
+
 def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     """Call Responses API and retry transient locks on the persistent conversation."""
     request_payload = dict(payload)
@@ -4068,7 +4152,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(500, {"error": "Interner Serverfehler."})
 
     def handle_authenticated_post(self, path: str) -> None:
-            if path == "/api/chat":
+            if path == "/api/transcribe":
+                content_type = self.headers.get("Content-Type", "")
+                self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
+            elif path == "/api/chat":
                 payload = self.read_json()
                 self.send_json(200, chat_with_coach(str(payload.get("message", ""))))
             elif path == "/api/sync":
@@ -4177,6 +4264,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         if size <= 0 or size > MAX_BODY_BYTES:
             raise AppError(413 if size > MAX_BODY_BYTES else 400, "Ungültige Größe des Anfrageinhalts.")
         return self.rfile.read(size)
+
+    def read_audio_body(self) -> bytes:
+        content_type = normalized_audio_type(self.headers.get("Content-Type", ""))
+        if content_type not in VOICE_AUDIO_TYPES:
+            raise AppError(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+        except ValueError as exc:
+            raise AppError(400, "Ungültige Content-Length.") from exc
+        if size <= 0 or size > MAX_AUDIO_BODY_BYTES:
+            raise AppError(413 if size > MAX_AUDIO_BODY_BYTES else 400, "Ungültige Größe der Audioaufnahme.")
+        audio = self.rfile.read(size)
+        if len(audio) != size:
+            raise AppError(400, "Die Audioaufnahme wurde unvollständig übertragen.")
+        return audio
 
     def read_json(self) -> dict[str, Any]:
         if "application/json" not in self.headers.get("Content-Type", ""):

@@ -23,6 +23,8 @@ It is not intended to be exposed directly to the public internet.
 - Thirty-day trends for FTP, thresholds, VO2 max, running predictions,
   readiness, and body weight. Garmin performance values are stored locally as
   compact historical points during synchronization.
+- Push-to-talk voice input in the chat: short recordings are transcribed
+  server-side and inserted into the editable message field; audio is not stored.
 - Coach chat with selectable GPT-5.6 models, configurable thinking level,
   context preview, and structured logs.
 - The coach creates dated local workout drafts only. Each draft requires an
@@ -162,6 +164,12 @@ keys and passwords are not entered in the application UI.
 For access outside the home network, use a private VPN. The project does not
 provide HTTPS proxying; do not expose its HTTP port directly to the public
 internet.
+
+The chat voice-input feature requires the PWA to be opened through a trusted
+HTTPS reverse proxy so the browser can request microphone permission. The
+recording is limited to short voice notes, transcribed server-side, and is not
+persisted locally. The resulting transcript is placed in the message field
+for review before it is sent to the coach.
 
 ## Data, privacy, and logs
 

@@ -371,6 +371,44 @@ class CoachTests(unittest.TestCase):
         response = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Hello"}]}]}
         self.assertEqual(server.output_text(response), "Hello")
 
+    def test_transcribe_audio_sends_bounded_multipart_request(self):
+        captured = {}
+
+        def fake_http_json(method, url, payload=None, headers=None, timeout=45, service=None, raw_body=None, content_type=None):
+            captured.update({
+                "method": method, "url": url, "payload": payload, "headers": headers,
+                "timeout": timeout, "service": service, "raw_body": raw_body, "content_type": content_type,
+            })
+            return {"text": "Wie soll ich morgen trainieren?"}
+
+        audio = b"fake-webm-audio"
+        with patch.object(server, "CONFIG", server.Config(openai_api_key="test-key")), patch.object(
+            server, "http_json", side_effect=fake_http_json
+        ):
+            result = server.transcribe_audio(audio, "audio/webm;codecs=opus")
+
+        self.assertEqual(result, {"transcript": "Wie soll ich morgen trainieren?"})
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["url"], "https://api.openai.com/v1/audio/transcriptions")
+        self.assertEqual(captured["service"], "openai")
+        self.assertEqual(captured["timeout"], 90)
+        self.assertIsNone(captured["payload"])
+        self.assertIn("multipart/form-data; boundary=", captured["content_type"])
+        self.assertIn(b'name="model"', captured["raw_body"])
+        self.assertIn(b"gpt-transcribe", captured["raw_body"])
+        self.assertIn(audio, captured["raw_body"])
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer test-key")
+
+    def test_transcribe_audio_rejects_unknown_format_and_oversized_audio(self):
+        config = server.Config(openai_api_key="test-key")
+        with patch.object(server, "CONFIG", config):
+            with self.assertRaises(server.AppError) as unsupported:
+                server.transcribe_audio(b"audio", "audio/flac")
+            with self.assertRaises(server.AppError) as oversized:
+                server.transcribe_audio(b"x" * (server.MAX_AUDIO_BODY_BYTES + 1), "audio/webm")
+        self.assertEqual(unsupported.exception.status, 415)
+        self.assertEqual(oversized.exception.status, 413)
+
     def test_chat_can_request_a_fresh_training_snapshot(self):
         self.assertTrue(server.prompt_requests_fresh_data("Lade bitte meine letzten Einheiten und analysiere sie."))
         self.assertTrue(server.prompt_requests_fresh_data("Please load my latest workouts and review them."))
