@@ -46,6 +46,18 @@ that require explicit approval before being pushed to Intervals.icu.
 - When changing frontend assets, update the asset query/cache version so that
   installed PWAs receive the new JavaScript/CSS.
 
+## Git conventions
+
+- Every commit must use the Conventional Commits format:
+  `<type>(<optional-scope>): <description>`.
+- Every pull request title must use the same format. Allowed types are
+  `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`,
+  `style`, and `test`; breaking changes use `!` before the colon.
+- Pull requests must be created with squash auto-merge enabled when repository
+  permissions and required checks allow it.
+- The `Conventional commits and PR titles` workflow validates commit subjects
+  and pull request titles for manually created pull requests.
+
 ## Validation
 
 Run before handing off changes:
