@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import hmac
 import json
 import logging
@@ -512,6 +513,13 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS sessions (
+                token_hash TEXT PRIMARY KEY,
+                csrf_hash TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                last_seen TEXT NOT NULL
+            );
             """
         )
         # Older databases do not have a plan identifier on drafts. Keeping it
@@ -748,7 +756,7 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
     """Normalize Garmin's varying max-metric and race-prediction payloads."""
     max_metrics = snapshot.get("max_metrics") if isinstance(snapshot.get("max_metrics"), (dict, list)) else {}
     race_predictions = snapshot.get("race_predictions") if isinstance(snapshot.get("race_predictions"), (dict, list)) else {}
-    vo2_values: dict[str, float | int | None] = {"cycling": None, "running": None, "generic": None}
+    vo2_values: dict[str, list[float | int]] = {"cycling": [], "running": [], "generic": []}
 
     def visit_vo2(value: Any, path: tuple[str, ...] = ()) -> None:
         if isinstance(value, dict):
@@ -759,16 +767,15 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                     if number is not None:
                         context = _garmin_key(" ".join((*path, str(key))))
                         category = "cycling" if any(term in context for term in ("cycling", "cycl", "bike", "ride")) else "running" if any(term in context for term in ("running", "run")) else "generic"
-                        if vo2_values[category] is None:
-                            vo2_values[category] = number
+                        vo2_values[category].append(number)
                 visit_vo2(item, (*path, str(key)))
         elif isinstance(value, list):
             for item in value[:100]:
                 visit_vo2(item, path)
 
     visit_vo2(max_metrics)
-    if vo2_values["running"] is None:
-        vo2_values["running"] = vo2_values["generic"]
+    running_vo2 = vo2_values["running"][-1] if vo2_values["running"] else (vo2_values["generic"][-1] if vo2_values["generic"] else None)
+    cycling_vo2 = vo2_values["cycling"][-1] if vo2_values["cycling"] else None
 
     race_values: dict[str, float | int | None] = {
         "run_5k_seconds": None,
@@ -798,8 +805,8 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
 
     visit_races(race_predictions)
     units = {
-        "cycling_vo2max_ml_kg_min": (vo2_values["cycling"], "ml/kg/min", "Garmin Connect max metrics"),
-        "running_vo2max_ml_kg_min": (vo2_values["running"], "ml/kg/min", "Garmin Connect max metrics"),
+        "cycling_vo2max_ml_kg_min": (cycling_vo2, "ml/kg/min", "Garmin Connect max metrics"),
+        "running_vo2max_ml_kg_min": (running_vo2, "ml/kg/min", "Garmin Connect max metrics"),
         "run_5k_seconds": (race_values["run_5k_seconds"], "s", "Garmin Connect Laufprognose"),
         "run_10k_seconds": (race_values["run_10k_seconds"], "s", "Garmin Connect Laufprognose"),
         "run_half_marathon_seconds": (race_values["run_half_marathon_seconds"], "s", "Garmin Connect Laufprognose"),
@@ -944,13 +951,25 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
             fetch_range("hrv", client.get_hrv_data_range, window_start, window_end)
             fetch_range("body_battery", client.get_body_battery, window_start, window_end)
             fetch_range("activities", client.get_activities_by_date, window_start, window_end)
-        for key, fetch in {
-            "readiness": lambda: client.get_training_readiness(today.isoformat()),
-            "race_predictions": client.get_race_predictions,
-            "max_metrics": lambda: client.get_max_metrics(today.isoformat()),
-        }.items():
+        max_metrics_start = today - timedelta(days=89)
+        max_metrics_range = getattr(client, "get_max_metrics_range", None)
+        max_metrics_fetch = (
+            (lambda: max_metrics_range(max_metrics_start.isoformat(), today.isoformat()))
+            if callable(max_metrics_range)
+            else (lambda: client.get_max_metrics(today.isoformat()))
+        )
+        max_metrics_context = {
+            "window_start": max_metrics_start.isoformat(),
+            "window_end": today.isoformat(),
+            "range_supported": callable(max_metrics_range),
+        }
+        for key, fetch, details in (
+            ("readiness", lambda: client.get_training_readiness(today.isoformat()), {"date": today.isoformat()}),
+            ("race_predictions", client.get_race_predictions, None),
+            ("max_metrics", max_metrics_fetch, max_metrics_context),
+        ):
             try:
-                payload[key] = external_call("garmin", key, fetch, {"date": today.isoformat()} if key == "readiness" else None)
+                payload[key] = external_call("garmin", key, fetch, details)
             except Exception as exc:
                 payload["errors"].append({"source": key, "message": redact_text(str(exc))[:500]})
                 LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": key}}, exc_info=True)
@@ -3059,7 +3078,7 @@ def delete_local_data() -> dict[str, Any]:
         except Exception:
             LOGGER.warning("Remote OpenAI conversation could not be deleted", extra={"event": "privacy_remote_delete_failed"}, exc_info=True)
     with DB_LOCK, database() as db:
-        for table in ("messages", "snapshots", "workout_drafts", "workout_library", "competitions", "training_plans"):
+        for table in ("messages", "snapshots", "workout_drafts", "workout_library", "competitions", "training_plans", "sessions"):
             db.execute(f"DELETE FROM {table}")
         db.execute("DELETE FROM kv")
         set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
@@ -3068,7 +3087,7 @@ def delete_local_data() -> dict[str, Any]:
 
 SESSION_COOKIE = "ic_session"
 CSRF_COOKIE = "ic_csrf"
-SESSION_TTL_SECONDS = 12 * 60 * 60
+SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 
 
 def client_ip(handler: BaseHTTPRequestHandler) -> str:
@@ -3096,17 +3115,32 @@ def cookie_value(handler: BaseHTTPRequestHandler, name: str) -> str:
     return cookie[name].value if name in cookie else ""
 
 
+def session_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def authenticated_session(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
     token = cookie_value(handler, SESSION_COOKIE)
     if not token:
         return None
-    with SESSION_LOCK:
-        session = SESSIONS.get(token)
-        if not session or session["expires_at"] <= time.time():
-            SESSIONS.pop(token, None)
+    now = time.time()
+    token_hash = session_token_hash(token)
+    with SESSION_LOCK, DB_LOCK, database() as db:
+        row = db.execute(
+            "SELECT csrf_hash, expires_at FROM sessions WHERE token_hash = ?",
+            (token_hash,),
+        ).fetchone()
+        if not row:
             return None
-        session["expires_at"] = time.time() + SESSION_TTL_SECONDS
-        return session
+        if float(row["expires_at"]) <= now:
+            db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+            return None
+        expires_at = now + SESSION_TTL_SECONDS
+        db.execute(
+            "UPDATE sessions SET expires_at = ?, last_seen = ? WHERE token_hash = ?",
+            (expires_at, utc_now(), token_hash),
+        )
+        return {"csrf_hash": row["csrf_hash"], "expires_at": expires_at}
 
 
 def login_user(handler: BaseHTTPRequestHandler, password: str) -> dict[str, Any]:
@@ -3119,15 +3153,21 @@ def login_user(handler: BaseHTTPRequestHandler, password: str) -> dict[str, Any]
         raise AppError(401, "Ungültiges Passwort.")
     token = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(32)
-    with SESSION_LOCK:
-        SESSIONS[token] = {"csrf": csrf, "expires_at": time.time() + SESSION_TTL_SECONDS}
+    now = time.time()
+    with SESSION_LOCK, DB_LOCK, database() as db:
+        db.execute(
+            "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+            (session_token_hash(token), session_token_hash(csrf), now + SESSION_TTL_SECONDS, utc_now(), utc_now()),
+        )
     return {"status": "ok", "authenticated": True, "csrf": csrf, "session_token": token}
 
 
 def logout_user(handler: BaseHTTPRequestHandler) -> None:
     token = cookie_value(handler, SESSION_COOKIE)
-    with SESSION_LOCK:
-        SESSIONS.pop(token, None)
+    if not token:
+        return
+    with SESSION_LOCK, DB_LOCK, database() as db:
+        db.execute("DELETE FROM sessions WHERE token_hash = ?", (session_token_hash(token),))
 
 
 def require_auth(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
@@ -3144,7 +3184,7 @@ def require_auth(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 def require_csrf(handler: BaseHTTPRequestHandler, session: dict[str, Any]) -> None:
     token = handler.headers.get("X-CSRF-Token", "")
-    if not token or not hmac.compare_digest(token, str(session.get("csrf", ""))):
+    if not token or not hmac.compare_digest(session_token_hash(token), str(session.get("csrf_hash", ""))):
         raise AppError(403, "Ungültiges CSRF-Token.")
 
 
@@ -3172,7 +3212,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, {"status": "ok"})
             elif path == "/api/auth/status":
                 session = authenticated_session(self)
-                self.send_json(200, {"authenticated": bool(session), "csrf": session.get("csrf") if session else None})
+                result = {"authenticated": bool(session)}
+                if session:
+                    schedule_morning_checkin()
+                    result["state"] = public_state()
+                self.send_json(200, result)
             elif path == "/api/state":
                 require_auth(self)
                 schedule_morning_checkin()
@@ -3225,6 +3269,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 result = login_user(self, str(self.read_json().get("password") or ""))
                 token = result.pop("session_token")
                 csrf = result["csrf"]
+                schedule_morning_checkin()
+                result["state"] = public_state()
                 self.send_json(200, result, {
                     "Set-Cookie": [
                         f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_TTL_SECONDS}",
