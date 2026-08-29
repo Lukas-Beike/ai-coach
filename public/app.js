@@ -1,16 +1,63 @@
 const $ = (selector) => document.querySelector(selector);
 const state = { data: null, busy: false, profileDirty: false, localSync: { intervals: false, garmin: false, performance: false } };
 
+function cookie(name) {
+  return document.cookie.split("; ").find((part) => part.startsWith(`${name}=`))?.split("=").slice(1).join("=") || "";
+}
+
+function showLogin() {
+  state.data = null;
+  $("#appShell").hidden = true;
+  const dialog = $("#loginDialog");
+  if (!dialog.open) dialog.showModal();
+  $("#loginPassword").focus();
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: "same-origin",
     ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: { "Content-Type": "application/json", ...(options.method && options.method !== "GET" ? { "X-CSRF-Token": cookie("ic_csrf") } : {}), ...(options.headers || {}) },
   });
   let payload = {};
   try { payload = await response.json(); } catch (_) {}
-  if (!response.ok) throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
+  if (!response.ok) {
+    if (response.status === 401) showLogin();
+    throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
+  }
   return payload;
+}
+
+async function bootstrapAuth() {
+  try {
+    const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" });
+    const status = await response.json();
+    if (status.authenticated) {
+      $("#loginDialog").close();
+      $("#appShell").hidden = false;
+      await load();
+    } else showLogin();
+  } catch (_) {
+    $("#loginError").textContent = "Server nicht erreichbar.";
+    showLogin();
+  }
+}
+
+async function login(event) {
+  event.preventDefault();
+  const button = $("#loginButton");
+  const error = $("#loginError");
+  button.disabled = true;
+  error.textContent = "";
+  try {
+    await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#loginPassword").value }) });
+    $("#loginPassword").value = "";
+    $("#loginDialog").close();
+    $("#appShell").hidden = false;
+    await load();
+  } catch (exception) {
+    error.textContent = exception.message;
+  } finally { button.disabled = false; }
 }
 
 function toast(message, error = false) {
@@ -711,6 +758,7 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   source.textContent = metricData?.source || "Nicht verfügbar";
   source.title = metricData?.note || metricData?.source || "";
   if (metricData?.source === "KI-Schätzung" || metricData?.source === "Berechnete Schätzung") source.className = "metric-estimate";
+  if (metricData?.source === "Garmin Connect") source.className = "metric-garmin";
   if (editable?.key) {
     item.classList.add("metric-editable");
     const edit = document.createElement("button");
@@ -851,7 +899,7 @@ function renderPerformance(performance) {
   ]);
   const explanation = document.createElement("p");
   explanation.className = "fine-print";
-  explanation.textContent = "Intervals.icu-Werte haben Vorrang. Fehlende Werte werden beim Aktualisieren vorsichtig aus den letzten fünf Einheiten je Sportart geschätzt und als KI-Schätzung markiert.";
+  explanation.textContent = "Garmin-Connect-Werte werden als solche markiert und haben bei VO₂max sowie Laufprognosen Vorrang. Fehlen Garmin-Werte, werden Intervals.icu-Werte bzw. vorsichtige KI-Schätzungen verwendet.";
   root.append(explanation);
   const estimationError = state.data?.performance_refresh?.last_error;
   if (estimationError) {
@@ -940,6 +988,9 @@ function renderSettings(data) {
     garminSyncButton.disabled = Boolean(data.garmin_sync?.running || state.localSync.garmin);
     garminSyncButton.textContent = data.garmin_sync?.running || state.localSync.garmin ? "Synchronisierung läuft…" : "Garmin synchronisieren";
   }
+  const usage = data.usage || {};
+  const usageNode = $("#usageSummary");
+  if (usageNode) usageNode.textContent = `OpenAI heute: ${usage.requests || 0}/${usage.request_limit || "∞"} Anfragen · ${usage.total_tokens || 0}/${usage.token_limit || "∞"} Tokens`;
 }
 
 function formatLogEntry(entry) {
@@ -964,58 +1015,6 @@ async function loadLogs() {
   finally { button.disabled = false; }
 }
 
-async function saveCredentials(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const values = Object.fromEntries(new FormData(form));
-  const submitted = Object.fromEntries(Object.entries(values).filter(([, value]) => String(value || "").trim()));
-  const status = $("#credentialsStatus");
-  if (!Object.keys(submitted).length) {
-    status.textContent = "Bitte mindestens einen neuen Wert eingeben.";
-    status.className = "error settings-message";
-    return;
-  }
-  const button = form.querySelector("button[type=submit]");
-  button.disabled = true;
-  status.textContent = "Wird gespeichert…";
-  status.className = "fine-print settings-message";
-  try {
-    const result = await api("/api/settings/credentials", { method: "PUT", body: JSON.stringify(submitted) });
-    form.reset();
-    status.textContent = `${result.updated.length} Einstellung(en) gespeichert. Bitte anschließend neu starten.`;
-    toast("Einstellungen gespeichert");
-  } catch (error) {
-    status.textContent = error.message;
-    status.className = "error settings-message";
-  } finally { button.disabled = false; }
-}
-
-async function restartApp() {
-  const button = $("#restartButton");
-  const status = $("#restartStatus");
-  if (!button || !status) return;
-  if (!window.confirm("Anwendung jetzt neu starten?")) return;
-  button.disabled = true;
-  status.textContent = "Neustart wird vorbereitet…";
-  try {
-    await api("/api/restart", { method: "POST", body: "{}" });
-    status.textContent = "Anwendung startet neu. Verbindung wird wiederhergestellt…";
-    const check = async (attempt = 0) => {
-      try {
-        const response = await fetch("/api/health", { cache: "no-store" });
-        if (response.ok) { window.location.reload(); return; }
-      } catch (_) {}
-      if (attempt < 20) setTimeout(() => check(attempt + 1), 500);
-      else { status.textContent = "Neustart läuft länger als erwartet. Bitte Seite manuell neu laden."; button.disabled = false; }
-    };
-    setTimeout(() => check(), 700);
-  } catch (error) {
-    status.textContent = error.message;
-    status.className = "error settings-message";
-    button.disabled = false;
-  }
-}
-
 function render(data) {
   state.data = data;
   renderStatus(data);
@@ -1030,6 +1029,7 @@ function render(data) {
         : data.sync?.last_sync_at ? `Letzte Aktualisierung: ${formatTime(data.sync.last_sync_at)}` : "Noch nicht synchronisiert";
   }
   renderPlanned(data.planned || []);
+  renderDrafts(data.drafts || []);
   renderLibrary(data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
@@ -1211,6 +1211,33 @@ async function downloadDiagnostics() {
   finally { button.disabled = false; button.textContent = "Diagnose herunterladen"; }
 }
 
+async function downloadPrivacyExport() {
+  try {
+    const payload = await api("/api/privacy/export");
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "intervals-coach-export.json";
+    link.click();
+    URL.revokeObjectURL(link.href);
+    toast("Datenexport erstellt");
+  } catch (error) { toast(error.message, true); }
+}
+
+async function deletePrivacyData() {
+  if (!window.confirm("Alle lokalen Chats, Snapshots, Entwürfe und Profile löschen? Dieser Schritt kann nicht rückgängig gemacht werden.")) return;
+  try {
+    await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: "DELETE" }) });
+    toast("Lokale Daten gelöscht");
+    await load();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function logout() {
+  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
+  showLogin();
+}
+
 document.querySelectorAll(".nav-item").forEach((button) => button.addEventListener("click", () => {
   document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
   button.classList.add("active");
@@ -1223,6 +1250,7 @@ document.querySelectorAll(".nav-item").forEach((button) => button.addEventListen
   window.scrollTo({ top: 0, behavior: "smooth" });
 }));
 
+$("#loginForm").addEventListener("submit", login);
 $("#chatForm").addEventListener("submit", sendMessage);
 $("#headerActionButton").addEventListener("click", (event) => {
   if (event.currentTarget.dataset.action === "performance") refreshPerformance();
@@ -1235,10 +1263,11 @@ $("#profileForm").addEventListener("input", () => { state.profileDirty = true; }
 $("#addCompetitionButton").addEventListener("click", addCompetition);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
-$("#credentialsForm").addEventListener("submit", saveCredentials);
-$("#restartButton").addEventListener("click", restartApp);
 $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#chatResetButton").addEventListener("click", resetCoachChat);
+$("#privacyExportButton").addEventListener("click", downloadPrivacyExport);
+$("#privacyDeleteButton").addEventListener("click", deletePrivacyData);
+$("#logoutButton").addEventListener("click", logout);
 $("#libraryLoadButton").addEventListener("click", loadLibrary);
 $("#contextPreviewButton").addEventListener("click", () => {
   $("#contextPreviewButton").dataset.loaded = "false";
@@ -1258,4 +1287,4 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-wor
 setInterval(() => {
   if (state.localSync.intervals || state.localSync.garmin || state.localSync.performance) load();
 }, 1500);
-load();
+bootstrapAuth();
