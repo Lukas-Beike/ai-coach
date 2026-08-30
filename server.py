@@ -2360,6 +2360,7 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
         distance = competition_distance(distance)
     description = str(event.get("description") or "").strip()[:COMPETITION_TEXT_LIMITS["description"]]
     return {
+        "intervals_event_id": str(event.get("id") or "").strip() or None,
         "name": name,
         "event_date": event_date,
         "start_date_local": start_date_local,
@@ -2381,6 +2382,16 @@ def is_remote_competition_event(event: dict[str, Any], linked_event_ids: set[str
     return bool(supported_competition_sport(event.get("type") or "Ride")) and (
         category.startswith("RACE") or external_id.startswith(COMPETITION_EXTERNAL_PREFIX) or event_id in linked_event_ids
     )
+
+
+def competition_sync_key(value: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Return a conservative identity for matching a local and remote race."""
+    name = " ".join(str(value.get("name") or "").split()).casefold()
+    event_date = str(value.get("event_date") or remote_competition_date(value) or "")[:10]
+    sport = supported_competition_sport(value.get("sport") or value.get("type") or "Ride")
+    if not name or not event_date or not sport:
+        return None
+    return name, event_date, sport
 
 
 @intervals_operation
@@ -2415,8 +2426,31 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
         ]
         # A full local reset must import the cloud state without exporting
         # anything that may have been entered locally while the import runs.
+        remote_by_external = {str(event.get("external_id")): event for event in remote_events if event.get("external_id")}
+        remote_by_id = {str(event.get("id")): event for event in remote_events if event.get("id")}
+        remote_by_identity = {
+            key: event
+            for event in remote_events
+            if (key := competition_sync_key(event)) is not None
+        }
         dirty_rows = [row for row in local_rows if row.get("sync_dirty")] if push_local else []
-        outbound = [competition_event_payload(row) for row in dirty_rows if supported_competition_sport(row.get("sport"))]
+        outbound = []
+        for row in dirty_rows:
+            if not supported_competition_sport(row.get("sport")):
+                continue
+            # A local event without a known provider ID may be the same event
+            # that was entered in Intervals.icu first. Adopt it before sending
+            # anything so an ordinary save cannot create a duplicate.
+            remote = None
+            if row.get("intervals_event_id"):
+                remote = remote_by_id.get(str(row["intervals_event_id"]))
+            if remote is None and row.get("external_id"):
+                remote = remote_by_external.get(str(row["external_id"]))
+            if remote is None and not row.get("intervals_event_id"):
+                remote = remote_by_identity.get(competition_sync_key(row))
+            if remote is not None and remote.get("id") is not None:
+                continue
+            outbound.append(competition_event_payload(row))
         skipped = len(dirty_rows) - len(outbound)
         pushed = client.upsert_competition_events(outbound)
         pushed_by_external = {str(event.get("external_id")): event for event in pushed if event.get("external_id")}
@@ -2434,6 +2468,8 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
                 remote = pushed_by_external.get(external_id) or remote_by_external.get(external_id)
                 if not remote and row.get("intervals_event_id"):
                     remote = pushed_by_id.get(str(row["intervals_event_id"])) or remote_by_id.get(str(row["intervals_event_id"]))
+                if not remote and not row.get("intervals_event_id"):
+                    remote = remote_by_identity.get(competition_sync_key(row))
                 if row.get("sync_dirty"):
                     if remote:
                         db.execute(
@@ -2449,7 +2485,7 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
                             (
                                 data["name"], data["event_date"], data["start_date_local"], data["sport"], data["priority"],
                                 data["category"], data["distance"], data["target"], data["description"], data["moving_time"],
-                                data["notes"], str(remote.get("id") or row.get("intervals_event_id") or "") or None,
+                                data["notes"], data["intervals_event_id"] or str(row.get("intervals_event_id") or "") or None,
                                 external_id, now, now, row["id"],
                             ),
                         )
@@ -2472,7 +2508,8 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
                 if local_id is None and remote.get("id") is not None:
                     local_id = next((key for key, row in existing.items() if str(row.get("intervals_event_id") or "") == str(remote["id"])), None)
                 if local_id is None:
-                    local_id = next((key for key, row in existing.items() if (row["name"], row["event_date"], row["sport"]) == (data["name"], data["event_date"], data["sport"])), None)
+                    remote_key = competition_sync_key(data)
+                    local_id = next((key for key, row in existing.items() if competition_sync_key(row) == remote_key), None)
                 if local_id is not None or len(existing) >= 20:
                     continue
                 local_id = str(uuid.uuid4())
@@ -2482,7 +2519,7 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
                     (
                         local_id, data["name"], data["event_date"], data["sport"], data["priority"], data["distance"],
                         data["target"], "", data["notes"], data["category"], data["start_date_local"], data["description"],
-                        data["moving_time"], str(remote.get("id") or "") or None, adopted_external_id, now, now, now,
+                        data["moving_time"], data["intervals_event_id"], adopted_external_id, now, now, now,
                     ),
                 )
                 existing[local_id] = {"id": local_id, "name": data["name"], "event_date": data["event_date"], "sport": data["sport"]}

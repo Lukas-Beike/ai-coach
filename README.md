@@ -105,6 +105,9 @@ cycling (`Ride`), and indoor/virtual cycling (`VirtualRide`). Other sports are
 skipped. Remote events that were previously linked but no longer exist are
 removed locally, and local deletions are propagated to Intervals.icu during the
 next synchronization.
+The Intervals.icu event ID is stored locally after import or a successful push.
+Before creating a new event, synchronization also checks for an existing race
+with the same name, date, and sport to avoid creating duplicates.
 
 ## Configuration
 
