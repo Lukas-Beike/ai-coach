@@ -2339,7 +2339,7 @@ def compact_sport_settings(athlete: Any) -> list[dict[str, Any]]:
         return []
     fields = (
         "id", "types", "ftp", "indoor_ftp", "eftp", "eFTP", "w_prime", "p_max",
-        "lthr", "max_hr", "threshold_pace", "pace_units", "vo2max", "vo2_max",
+        "lthr", "max_hr", "maxHR", "maxHeartRate", "threshold_pace", "pace_units", "vo2max", "vo2_max",
         "running_vo2max", "cycling_vo2max",
     )
     return [selected(item, fields) for item in raw_settings if isinstance(item, dict)][:30]
@@ -2350,7 +2350,7 @@ def compact_wellness_sport_info(value: Any) -> list[dict[str, Any]]:
         return []
     fields = (
         "id", "type", "types", "sport", "sport_type", "ftp", "eftp", "eFTP", "wPrime", "w_prime", "pMax", "p_max",
-        "lthr", "threshold_pace", "pace_units", "vo2max", "vo2_max", "running_vo2max", "cycling_vo2max",
+        "lthr", "max_hr", "maxHR", "maxHeartRate", "threshold_pace", "pace_units", "vo2max", "vo2_max", "running_vo2max", "cycling_vo2max",
     )
     return [selected(item, fields) for item in value if isinstance(item, dict)][:30]
 
@@ -2373,7 +2373,7 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
     )
     athlete_fields = (
         "id", "name", "sex", "weight", "height", "height_cm", "bodyFat", "body_fat", "dob",
-        "icu_ftp", "icu_w_prime", "max_hr", "lthr", "vo2max", "vo2_max", "running_vo2max", "cycling_vo2max",
+        "icu_ftp", "icu_w_prime", "max_hr", "maxHR", "maxHeartRate", "lthr", "vo2max", "vo2_max", "running_vo2max", "cycling_vo2max",
     )
     compact_activities = [selected(x, activity_fields) for x in (activities or [])]
     compact_wellness = [
@@ -3508,6 +3508,38 @@ def metric(value: Any, unit: str, source: str | None, note: str = "") -> dict[st
     return {"value": number, "unit": unit, "source": source if number is not None else None, "note": note if number is not None else ""}
 
 
+def intervals_max_hr_metric(
+    sport: str,
+    setting: dict[str, Any],
+    wellness_setting: dict[str, Any],
+    activities: list[Any],
+    athlete: dict[str, Any],
+) -> dict[str, Any]:
+    """Return sport-specific max heart rate with an explicit source."""
+    max_hr_keys = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
+    candidates: list[tuple[Any, str]] = [
+        (first_present(setting, max_hr_keys), "Intervals.icu"),
+        (first_present(wellness_setting, max_hr_keys), "Intervals.icu Wellness"),
+    ]
+    activity_values: list[float | int] = []
+    for activity in activities:
+        if activity_kind(activity) != sport:
+            continue
+        value = as_number(first_present(activity, max_hr_keys))
+        if value is not None and 80 <= float(value) <= 260:
+            activity_values.append(value)
+    if activity_values:
+        candidates.append((max(activity_values), "Intervals.icu"))
+    candidates.extend([
+        (first_present(athlete, max_hr_keys), "Intervals.icu"),
+    ])
+    for value, source in candidates:
+        number = as_number(value)
+        if number is not None and 80 <= float(number) <= 260:
+            return metric(number, "bpm", source)
+    return metric(None, "bpm", None)
+
+
 def threshold_pace_seconds(value: Any) -> float | int | None:
     number = as_number(value)
     if number is None or number <= 0:
@@ -3538,6 +3570,12 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
     generic_lthr = first_present(athlete, ("lthr",))
     profile = get_profile()
     garmin_metrics = garmin_performance_metrics(garmin_snapshot())
+    cycling_max_hr = intervals_max_hr_metric("cycling", ride, wellness_ride, activities, athlete)
+    running_max_hr = intervals_max_hr_metric("running", run, wellness_run, activities, athlete)
+    if garmin_metrics["cycling_max_hr_bpm"]["value"] is not None:
+        cycling_max_hr = garmin_metrics["cycling_max_hr_bpm"]
+    if garmin_metrics["running_max_hr_bpm"]["value"] is not None:
+        running_max_hr = garmin_metrics["running_max_hr_bpm"]
     body_sources = (
         (garmin_metrics["weight_kg"]["value"], GARMIN_PERFORMANCE_SOURCE),
         (first_present(latest_wellness, ("weight",)), "Intervals.icu Wellness"),
@@ -3564,8 +3602,8 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         "run_threshold_pace_seconds_per_km": metric(threshold_pace_seconds(first_present(run, ("threshold_pace",)) or first_present(wellness_run, ("threshold_pace",))), "s/km", "Intervals.icu"),
         "bike_threshold_hr_bpm": metric(first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) or generic_lthr, "bpm", "Intervals.icu" if first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) else "Intervals.icu (allgemein)"),
         "run_threshold_hr_bpm": metric(first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) or generic_lthr, "bpm", "Intervals.icu" if first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) else "Intervals.icu (allgemein)"),
-        "cycling_max_hr_bpm": garmin_metrics["cycling_max_hr_bpm"],
-        "running_max_hr_bpm": garmin_metrics["running_max_hr_bpm"],
+        "cycling_max_hr_bpm": cycling_max_hr,
+        "running_max_hr_bpm": running_max_hr,
         "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
         "running_vo2max_ml_kg_min": garmin_metrics["running_vo2max_ml_kg_min"] if garmin_metrics["running_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(wellness_run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(athlete, ("running_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
         "run_5k_seconds": garmin_metrics["run_5k_seconds"] if garmin_metrics["run_5k_seconds"]["value"] is not None else metric(None, "s", None),

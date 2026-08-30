@@ -323,9 +323,8 @@ h2 {
 .metric-grid .metric-value-row { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
 .metric-grid .metric-value-row strong { min-width: 0; }
 .metric-grid .metric-value-row .metric-comparison { flex: 0 0 auto; margin-top: 0; white-space: nowrap; }
-.metric-grid .metric-intervals strong, .metric-grid small.metric-intervals { color: #ff8f86; }
-.metric-grid .metric-garmin strong { color: #83c7ff; }
-.metric-grid .metric-manual strong, .metric-grid small.metric-manual { color: #72d7a8; }
+.metric-grid small.metric-intervals { color: #ff8f86; }
+.metric-grid small.metric-manual { color: #72d7a8; }
 .metric-grid .metric-form-good strong { color: #72d7a8; }
 .metric-grid .metric-form-caution strong { color: #ffcc80; }
 .metric-grid .metric-form-bad strong { color: #ff6b63; }

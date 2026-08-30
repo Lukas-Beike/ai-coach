@@ -196,6 +196,19 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["running_vo2max_ml_kg_min"]["source"], "Garmin Connect")
         self.assertEqual(metrics["run_5k_seconds"]["value"], 1320)
 
+    def test_max_heart_rate_uses_intervals_fallback_for_both_sports(self):
+        metrics = server.api_performance_metrics({
+            "athlete": {"sport_settings": [
+                {"types": ["Ride"], "max_hr": 188},
+                {"types": ["Run"], "max_hr": 193},
+            ]},
+            "recent_activities": [], "recent_wellness": [],
+        })
+        self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
+        self.assertEqual(metrics["cycling_max_hr_bpm"]["source"], "Intervals.icu")
+        self.assertEqual(metrics["running_max_hr_bpm"]["value"], 193)
+        self.assertEqual(metrics["running_max_hr_bpm"]["source"], "Intervals.icu")
+
     def test_garmin_uses_latest_vo2max_value_from_range_payload(self):
         result = server.garmin_performance_metrics({
             "max_metrics": [
