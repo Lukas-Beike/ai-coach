@@ -377,6 +377,13 @@ protection so that `develop` requires the normal CI checks and `main` disallows
 force pushes and direct human pushes while allowing the required pull request
 checks.
 
+The release workflow uses a repository-installed GitHub App so that automated
+branch, pull-request, release, and workflow-dispatch events can start the next
+workflow stage. Configure the App with Actions read/write, Contents read/write,
+Pull requests read/write, and Checks read permission, and install it only on
+this repository. Store its Client ID as the `RELEASE_APP_CLIENT_ID` Actions
+secret and its private key as the `RELEASE_APP_PRIVATE_KEY` Actions secret.
+
 Use Conventional Commits for manual commits and pull-request titles, for
 example:
 
