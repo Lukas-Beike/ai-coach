@@ -64,7 +64,7 @@ STATIC_TARGETS = {
     "logo.png": PUBLIC_DIR / "logo.png",
     "icon.svg": PUBLIC_DIR / "icon.svg",
 }
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
