@@ -309,7 +309,6 @@ jobs:
       github.event.pull_request.base.ref == 'main' &&
       startsWith(github.event.pull_request.head.ref, 'chore/release-promotion-')) ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Test and publish container image' &&
-      github.event.workflow_run.event == 'workflow_dispatch' &&
       github.event.workflow_run.conclusion == 'success' &&
       startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-'))
     runs-on: ubuntu-latest
