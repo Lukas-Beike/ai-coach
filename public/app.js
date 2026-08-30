@@ -362,115 +362,10 @@ async function showPwaNotification(title, options, key) {
 }
 
 function notifyState(data) {
-  const pendingDrafts = (data.drafts || []).filter(draft => draft.status !== "pushed").length;
-  if (pendingDrafts) showPwaNotification("Intervals Coach", { body: `${pendingDrafts} Trainingsentwurf/-entwürfe warten auf deine Freigabe.`, tag: "drafts" }, `drafts:${pendingDrafts}`);
   const next = data.planning?.season?.next_event;
   if (next && next.days_until >= 0 && next.days_until <= 3) showPwaNotification("Wettkampf steht bevor", { body: `${next.name} ist in ${next.days_until} Tag(en).`, tag: `competition:${next.id}` }, `competition:${next.id}:${next.event_date}`);
   const error = data.sync?.last_error || data.garmin_sync?.status?.includes("Fehler") && data.garmin_sync.status;
   if (error) showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
-}
-
-function renderDrafts(drafts) {
-  const root = $("#workoutDrafts");
-  const summary = $("#draftsSummary");
-  if (!root) return;
-  const list = Array.isArray(drafts) ? drafts : [];
-  const pending = list.filter((draft) => draft.status !== "pushed");
-  if (summary) summary.textContent = pending.length ? `${pending.length} offen` : "Keine offenen Entwürfe";
-  root.replaceChildren();
-  if (!list.length) {
-    const empty = document.createElement("p");
-    empty.className = "context-empty";
-    empty.textContent = "Noch keine lokalen Trainingsentwürfe vorhanden.";
-    root.append(empty);
-    return;
-  }
-  for (const draft of list) {
-    const card = document.createElement("article");
-    card.className = `workout-draft workout-draft-status-${draft.status || "draft"}`;
-    const heading = document.createElement("div");
-    heading.className = "workout-draft-heading";
-    const title = document.createElement("strong");
-    title.textContent = draft.name || "Coach-Einheit";
-    const status = document.createElement("span");
-    status.className = "workout-draft-status";
-    status.textContent = draft.status === "pushed" ? "Übertragen" : draft.status === "error" ? "Fehler" : "Wartet auf Freigabe";
-    heading.append(title, status);
-    card.append(heading);
-
-    const meta = document.createElement("div");
-    meta.className = "workout-draft-meta";
-    meta.textContent = [draft.date ? dateLabel(draft.date) : null, draft.sport, draft.duration_minutes ? `${draft.duration_minutes} Min.` : null].filter(Boolean).join(" · ");
-    card.append(meta);
-
-    if (draft.description) {
-      const description = document.createElement("p");
-      description.className = "workout-draft-description";
-      description.textContent = draft.description;
-      card.append(description);
-    }
-    if (draft.rationale) {
-      const rationale = document.createElement("p");
-      rationale.className = "workout-draft-rationale";
-      rationale.textContent = `Begründung: ${draft.rationale}`;
-      card.append(rationale);
-    }
-    if (draft.error) {
-      const error = document.createElement("p");
-      error.className = "workout-draft-error-message";
-      error.textContent = draft.error;
-      card.append(error);
-    }
-    if (draft.status !== "pushed") {
-      const actions = document.createElement("div");
-      actions.className = "workout-draft-actions";
-      const approve = document.createElement("button");
-      approve.type = "button";
-      approve.className = "secondary-button";
-      approve.textContent = "Freigeben";
-      approve.addEventListener("click", () => pushDraft(draft.id, approve, draft.name));
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "secondary-button danger-button";
-      remove.textContent = "Löschen";
-      remove.addEventListener("click", () => deleteDraft(draft.id, remove, draft.name));
-      actions.append(approve, remove);
-      card.append(actions);
-    }
-    root.append(card);
-  }
-}
-
-async function pushDraft(draftId, button, name) {
-  if (!window.confirm(`„${name || "Einheit"}“ wirklich zu Intervals.icu übertragen?`)) return;
-  button.disabled = true;
-  button.textContent = "Wird übertragen…";
-  try {
-    await api(`/api/workouts/${encodeURIComponent(draftId)}/push`, { method: "POST", body: "{}" });
-    toast("Einheit zu Intervals.icu übertragen");
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    await load();
-  } finally {
-    button.disabled = false;
-    button.textContent = "Freigeben";
-  }
-}
-
-async function deleteDraft(draftId, button, name) {
-  if (!window.confirm(`„${name || "Entwurf"}“ wirklich lokal löschen?`)) return;
-  button.disabled = true;
-  button.textContent = "Wird gelöscht…";
-  try {
-    await api(`/api/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
-    toast("Lokaler Entwurf gelöscht");
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    button.disabled = false;
-    button.textContent = "Löschen";
-  }
 }
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
@@ -1452,9 +1347,9 @@ function renderLibrary(workouts) {
         cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
         const meta = document.createElement("span");
         const syncLabel = workout.sync_status === "remote_missing"
-          ? "Remote nicht gefunden - wird bei Freigabe neu abgeglichen"
+          ? "Remote nicht gefunden - wird beim nächsten Sync neu abgeglichen"
           : workout.sync_status === "sync_error"
-            ? "Synchronisationsfehler - erneut freigeben"
+            ? "Synchronisationsfehler - beim nächsten Sync erneut versuchen"
             : workout.sync_status === "syncing"
               ? "Synchronisierung läuft"
               : workout.sync_status === "local"
@@ -1462,7 +1357,7 @@ function renderLibrary(workouts) {
                 : workout.external_id
                   ? "Mit Intervals.icu synchronisiert"
                   : "Lokal";
-        meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, syncLabel].filter(Boolean).join(" - ");
+        meta.textContent = [workout.date ? `Geplant: ${dateLabel(workout.date)}` : null, workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, syncLabel].filter(Boolean).join(" - ");
         heading.append(cardTitle, meta);
         const description = document.createElement("p");
         description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
@@ -1477,7 +1372,7 @@ function renderLibrary(workouts) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "secondary-button";
-        button.textContent = "Als lokalen Entwurf speichern";
+        button.textContent = "Als lokale Einheit einplanen";
         button.addEventListener("click", () => planLibraryWorkout(workout.id, dateInput, button));
         controls.append(dateLabelNode, button);
         card.append(heading, description, controls);
@@ -1516,13 +1411,13 @@ async function loadLibrary() {
 async function planLibraryWorkout(workoutId, dateInput, button) {
   if (!dateInput.value) { toast("Bitte ein Datum auswählen", true); return; }
   button.disabled = true;
-  button.textContent = "Lokaler Entwurf wird gespeichert…";
+  button.textContent = "Lokale Einheit wird gespeichert…";
   try {
     await api("/api/library/" + encodeURIComponent(workoutId) + "/plan", { method: "POST", body: JSON.stringify({ date: dateInput.value }) });
-    toast("Lokaler Entwurf erstellt");
+    toast("Lokale Bibliothekseinheit gespeichert");
     await load();
   } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Als lokalen Entwurf speichern"; }
+  finally { button.disabled = false; button.textContent = "Als lokale Einheit einplanen"; }
 }
 
 function renderProfile(profile) {
@@ -2180,7 +2075,6 @@ function render(data) {
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
-  renderDrafts(data.drafts || []);
   renderPlanned(data.planned || []);
   renderLibrary(data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
@@ -2189,7 +2083,7 @@ function render(data) {
     const pending = Number(libraryState.local || 0) + Number(libraryState.sync_error || 0);
     const missing = Number(libraryState.remote_missing || 0);
     const stateHint = [
-      pending ? `${pending} lokale Einheit${pending === 1 ? "" : "en"} offen` : null,
+      pending ? `${pending} lokale Einheit${pending === 1 ? "" : "en"} noch nicht synchronisiert` : null,
       missing ? `${missing} Remote-Einheit${missing === 1 ? "" : "en"} nicht gefunden` : null,
     ].filter(Boolean).join(" · ");
     librarySyncDetail.textContent = data.library_sync?.last_error
@@ -2391,7 +2285,7 @@ async function syncExternalCalendar() {
   try {
     const result = await api("/api/external-calendar/sync", { method: "POST", body: "{}" });
     toast(result.status === "ok" ? `Kalender synchronisiert · ${result.events || 0} Einträge` : "Kalender wird bereits synchronisiert");
-    if (result.replan_changes) toast(`${result.replan_changes} Trainingsentwurf/-entwürfe als Anpassung vorgeschlagen`);
+    if (result.replan_changes) toast(`${result.replan_changes} lokale Bibliothekseinheit(en) als Anpassung vorgeschlagen`);
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
