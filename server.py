@@ -2589,6 +2589,72 @@ OPENAI_RATE_LIMIT_HEADERS = {
     "x-ratelimit-remaining-tokens": "remaining_tokens",
     "x-ratelimit-reset-tokens": "reset_tokens",
 }
+OPENAI_STATUS_KEY = "openai_status"
+
+
+def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
+    """Classify an OpenAI error without exposing the provider's raw message."""
+    payload: Any = None
+    try:
+        payload = json.loads(raw_body) if raw_body else None
+    except (TypeError, json.JSONDecodeError):
+        payload = None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    error = error if isinstance(error, dict) else {}
+    code = str(error.get("code") or "").strip().casefold()
+    error_type = str(error.get("type") or "").strip().casefold()
+    provider_message = str(error.get("message") or "").strip().casefold()
+    searchable = " ".join((code, error_type, provider_message))
+
+    if code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(
+        marker in searchable for marker in ("insufficient_quota", "quota", "billing_hard_limit", "credits")
+    ):
+        reason = "insufficient_quota"
+        message = "Das OpenAI-Guthaben bzw. Kontingent ist aufgebraucht. Bitte Guthaben und Abrechnung im OpenAI-Konto prüfen."
+    elif status == 429 or code == "rate_limit_exceeded" or error_type == "rate_limit_exceeded":
+        reason = "rate_limit_exceeded"
+        message = "OpenAI hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
+    elif status in {401, 403} or code in {"invalid_api_key", "invalid_organization", "permission_denied"}:
+        reason = "authentication_or_permission"
+        message = "Der OpenAI-Zugang wurde abgelehnt. Bitte API-Schlüssel und Projektberechtigungen prüfen."
+    elif status == 404 or code in {"model_not_found", "not_found"}:
+        reason = "not_found"
+        message = "Das konfigurierte OpenAI-Modell oder der angeforderte Dienst wurde nicht gefunden."
+    elif status >= 500:
+        reason = "provider_unavailable"
+        message = "OpenAI ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
+    else:
+        reason = "http_error"
+        message = f"OpenAI konnte die Anfrage nicht verarbeiten (HTTP {status})."
+    return {
+        "state": "error",
+        "reason": reason,
+        "message": message,
+        "http_status": status,
+        "updated_at": utc_now(),
+    }
+
+
+def record_openai_status(status: dict[str, Any]) -> None:
+    """Persist only a safe, user-facing OpenAI connection status."""
+    safe_status = {
+        "state": str(status.get("state") or "unknown"),
+        "reason": str(status.get("reason") or "unknown"),
+        "message": str(status.get("message") or "")[:300],
+        "http_status": status.get("http_status"),
+        "updated_at": str(status.get("updated_at") or utc_now()),
+    }
+    set_kv(OPENAI_STATUS_KEY, json.dumps(safe_status, ensure_ascii=False))
+
+
+def record_openai_success(status: int = 200) -> None:
+    record_openai_status({
+        "state": "ok",
+        "reason": "ok",
+        "message": "OpenAI ist verfügbar.",
+        "http_status": status,
+        "updated_at": utc_now(),
+    })
 
 
 def record_openai_rate_limits(response_headers: Any) -> None:
@@ -2645,6 +2711,7 @@ def http_json(
             result = json.loads(raw) if raw else None
             if service == "openai":
                 record_openai_rate_limits(getattr(response, "headers", None))
+                record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
             LOGGER.info(
                 "External HTTP request completed",
                 extra={
@@ -2660,7 +2727,16 @@ def http_json(
             )
             return result
     except HTTPError as exc:
-        exc.read(MAX_EXTERNAL_RESPONSE_BYTES)
+        try:
+            raw_error = exc.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
+        except TypeError:
+            raw_error = exc.read()
+        if service == "openai":
+            record_openai_rate_limits(getattr(exc, "headers", None))
+            error_details = openai_error_details(exc.code, raw_error)
+            record_openai_status(error_details)
+        else:
+            error_details = None
         LOGGER.error(
             "Upstream HTTP request failed",
             extra={
@@ -2670,12 +2746,23 @@ def http_json(
                     "status": exc.code,
                     "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                     "error_type": type(exc).__name__,
+                    **({"reason": error_details["reason"]} if error_details else {}),
                 },
             },
             exc_info=True,
         )
+        if error_details:
+            raise AppError(exc.code if exc.code == 429 else 502, error_details["message"]) from exc
         raise AppError(502, f"Anfrage an externen Dienst fehlgeschlagen ({exc.code}).") from exc
     except (URLError, TimeoutError) as exc:
+        if service == "openai":
+            record_openai_status({
+                "state": "error",
+                "reason": "network_error",
+                "message": "OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung prüfen und später erneut versuchen.",
+                "http_status": None,
+                "updated_at": utc_now(),
+            })
         LOGGER.error(
             "Upstream service is unavailable",
             extra={
@@ -2691,6 +2778,14 @@ def http_json(
         )
         raise AppError(502, "Externer Dienst ist nicht erreichbar.") from exc
     except Exception as exc:
+        if service == "openai":
+            record_openai_status({
+                "state": "error",
+                "reason": "client_error",
+                "message": "Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte später erneut versuchen.",
+                "http_status": None,
+                "updated_at": utc_now(),
+            })
         LOGGER.error(
             "External HTTP request failed while processing response",
             extra={
@@ -5218,9 +5313,14 @@ def openai_usage_summary() -> dict[str, Any]:
         rate_limits = json.loads(get_kv("openai_rate_limits") or "{}")
     except (TypeError, json.JSONDecodeError):
         rate_limits = {}
+    try:
+        status = json.loads(get_kv(OPENAI_STATUS_KEY) or "{}")
+    except (TypeError, json.JSONDecodeError):
+        status = {}
     return {
         **usage,
         "rate_limits": rate_limits if isinstance(rate_limits, dict) else {},
+        "status": status if isinstance(status, dict) else {},
     }
 
 

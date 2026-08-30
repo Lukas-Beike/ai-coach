@@ -562,7 +562,9 @@ function renderStatus(data) {
   if (!configured.openai) missing.push("OpenAI-API-Schlüssel");
   if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
   const performanceRefresh = data.performance_refresh || {};
-  const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error || performanceRefresh.last_error;
+  const openaiStatus = data.usage?.status || {};
+  const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error || performanceRefresh.last_error
+    || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const statusCard = $("#statusCard");
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   const hasProblem = Boolean(missing.length || error);
@@ -1898,13 +1900,30 @@ function renderSettings(data) {
   const configured = data.configured || {};
   const garmin = data.garmin || {};
   const weather = data.weather || {};
+  const openaiStatus = data.usage?.status || {};
   const setStatus = (selector, ok, text) => {
     const node = $(selector);
     if (!node) return;
     node.textContent = text;
     node.className = ok ? "configured" : "not-configured";
   };
-  setStatus("#openaiConnectionStatus", configured.openai, configured.openai ? "Konfiguriert" : "Nicht konfiguriert");
+  const openaiHealthy = configured.openai && openaiStatus.state !== "error";
+  setStatus(
+    "#openaiConnectionStatus",
+    openaiHealthy,
+    !configured.openai ? "Nicht konfiguriert" : openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
+  );
+  const openaiDetail = $("#openaiConnectionDetail");
+  if (openaiDetail) {
+    openaiDetail.classList.toggle("error", Boolean(configured.openai && openaiStatus.state === "error"));
+    openaiDetail.textContent = !configured.openai
+      ? "API-Schlüssel nicht konfiguriert"
+      : openaiStatus.state === "error"
+        ? `${openaiStatus.message || "OpenAI-Anfrage fehlgeschlagen."}${openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : ""}`
+        : openaiStatus.state === "ok"
+          ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
+          : "Noch kein API-Aufruf geprüft";
+  }
   setStatus("#intervalsConnectionStatus", configured.intervals, configured.intervals ? "Konfiguriert" : "Nicht konfiguriert");
   setStatus("#garminConnectionStatus", garmin.configured, garmin.configured ? (garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert") : "Nicht konfiguriert");
   const weatherLocation = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
@@ -1917,7 +1936,7 @@ function renderSettings(data) {
   }
   const connectionsSummary = $("#connectionsSummary");
   if (connectionsSummary) {
-    connectionsSummary.textContent = [["OpenAI", configured.openai], ["Intervals", configured.intervals], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
+    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Intervals", configured.intervals], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
       .map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
   }
   const intervalsDays = $("#intervalsSyncDays");
@@ -1957,9 +1976,10 @@ function renderSettings(data) {
   if (usageNode) {
     const rateLimits = usage.rate_limits || {};
     const remaining = rateLimits.remaining_requests != null || rateLimits.remaining_tokens != null
-      ? ` · Verfügbar im aktuellen OpenAI-Fenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
-      : " · OpenAI-Kontingent nach dem nächsten API-Aufruf verfügbar";
-    usageNode.textContent = `OpenAI heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}`;
+      ? ` · Restkontingent im aktuellen OpenAI-Fenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
+      : " · Restkontingent wird nach einem API-Aufruf angezeigt";
+    const openaiError = usage.status?.state === "error" ? ` · Status: ${usage.status.message || "Fehler bei letzter Anfrage"}` : "";
+    usageNode.textContent = `OpenAI heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}${openaiError}`;
   }
   const privacySummary = $("#privacySummary");
   if (privacySummary) privacySummary.textContent = `${usage.requests || 0} OpenAI-Anfragen heute`;

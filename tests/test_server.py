@@ -6,6 +6,7 @@ import unittest
 import json
 from dataclasses import replace
 from datetime import date, timedelta
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -1522,6 +1523,37 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("token_limit", summary)
         self.assertEqual(summary["rate_limits"]["remaining_requests"], "19")
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "12000")
+        self.assertEqual(summary["status"]["state"], "ok")
+
+    def test_openai_insufficient_quota_error_is_classified_and_persisted(self):
+        error_body = json.dumps({
+            "error": {
+                "message": "You exceeded your current quota, please check your plan and billing details.",
+                "type": "insufficient_quota",
+                "code": "insufficient_quota",
+            }
+        }).encode("utf-8")
+        upstream_error = server.HTTPError(
+            "https://api.openai.com/v1/responses",
+            429,
+            "Too Many Requests",
+            {
+                "x-ratelimit-remaining-requests": "0",
+                "x-ratelimit-remaining-tokens": "0",
+            },
+            BytesIO(error_body),
+        )
+        with patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError) as raised:
+                server.http_json("POST", "https://api.openai.com/v1/responses", payload={}, service="openai")
+        self.assertEqual(raised.exception.status, 429)
+        self.assertIn("Guthaben", raised.exception.message)
+        summary = server.openai_usage_summary()
+        self.assertEqual(summary["status"]["reason"], "insufficient_quota")
+        self.assertEqual(summary["status"]["http_status"], 429)
+        self.assertEqual(summary["rate_limits"]["remaining_requests"], "0")
+        self.assertEqual(summary["rate_limits"]["remaining_tokens"], "0")
+        self.assertNotIn("current quota", json.dumps(summary))
 
     def test_garmin_sdk_calls_log_operation_and_result_summary(self):
         server.initialise_logging()
