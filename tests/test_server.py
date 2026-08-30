@@ -29,6 +29,7 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM plan_adjustments")
             db.execute("DELETE FROM public_event_candidates")
             db.execute("DELETE FROM public_event_sources")
+            db.execute("DELETE FROM google_calendar_events")
             db.execute("DELETE FROM sessions")
             db.execute("DELETE FROM kv")
         server.save_profile({})
@@ -64,6 +65,69 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(events[0]["name"], "Muensterland Giro")
         self.assertEqual(events[0]["location"], "Muenster")
         self.assertEqual(events[0]["description"], "Gran fondo, long route")
+
+    def test_google_calendar_parser_extracts_timing_and_duration(self):
+        events = server.parse_google_calendar(
+            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:family-1\r\n"
+            b"DTSTART;TZID=Europe/Berlin:20260902T100000\r\n"
+            b"DTEND;TZID=Europe/Berlin:20260902T130000\r\nSUMMARY:Family appointment\r\n"
+            b"END:VEVENT\r\nBEGIN:VEVENT\r\nUID:all-day\r\nDTSTART;VALUE=DATE:20260903\r\n"
+            b"DTEND;VALUE=DATE:20260904\r\nSUMMARY:Travel\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+        self.assertEqual(events[0]["duration_minutes"], 180)
+        self.assertEqual(events[0]["event_date"], "2026-09-02")
+        self.assertFalse(events[0]["all_day"])
+        self.assertEqual(events[1]["duration_minutes"], 1440)
+        self.assertTrue(events[1]["all_day"])
+
+    def test_google_calendar_sync_keeps_url_server_side_and_replaces_events(self):
+        payload = (
+            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:family-2\r\nDTSTART:20260902T100000Z\r\n"
+            b"DTEND:20260902T120000Z\r\nSUMMARY:School meeting\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+        config = replace(server.CONFIG, google_calendar_ical_url="https://calendar.google.com/calendar/ical/private")
+        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_public_calendar", return_value=payload):
+            result = server.sync_google_calendar("test")
+        self.assertEqual(result["events"], 1)
+        state = server.google_calendar_state()
+        self.assertTrue(state["configured"])
+        self.assertNotIn("url", state)
+        self.assertEqual(state["events"][0]["duration_minutes"], 120)
+
+    def test_google_calendar_sync_keeps_last_successful_events_on_failure(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO google_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("event-old", "family-old", "Existing appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T11:00:00+02:00", 60, 0, server.utc_now()),
+            )
+        config = replace(server.CONFIG, google_calendar_ical_url="https://calendar.google.com/calendar/ical/private")
+        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_public_calendar", side_effect=server.AppError(502, "upstream unavailable")):
+            with self.assertRaises(server.AppError):
+                server.sync_google_calendar("test")
+        self.assertEqual(server.list_google_calendar_events()[0]["id"], "event-old")
+
+    def test_google_calendar_url_rejects_non_google_or_non_https_urls(self):
+        with self.assertRaises(server.AppError):
+            server.google_calendar_url("http://calendar.google.com/calendar/ical/private")
+        with self.assertRaises(server.AppError):
+            server.google_calendar_url("https://example.com/calendar.ics")
+
+    def test_google_calendar_event_reduces_hard_or_long_local_draft_only_in_preview(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        draft = server.save_workout_drafts([{
+            "date": tomorrow, "sport": "Ride", "name": "Threshold intervals",
+            "description": "- 5m 110%", "duration_minutes": 120, "target": "POWER",
+        }])[0]
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO google_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("event-1", "family-3", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, server.utc_now()),
+            )
+        preview = server.adaptive_replan_preview()
+        self.assertEqual(preview["changes"][0]["draft_id"], draft["id"])
+        self.assertEqual(preview["changes"][0]["after"]["duration_minutes"], 60)
+        self.assertEqual(server.list_workout_drafts()[0]["duration_minutes"], 120)
 
     def test_adaptive_replan_only_changes_future_local_drafts_after_preview(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
