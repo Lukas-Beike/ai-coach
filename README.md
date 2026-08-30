@@ -21,6 +21,8 @@ It is not intended to be exposed directly to the public internet.
   maximum heart rates can fall back to Intervals.icu data.
 - Activity synchronization for strength training, running, outdoor cycling,
   and indoor/virtual cycling.
+- Mobile-first profile and system sections can be collapsed; the planned
+  calendar is grouped into collapsible full weeks with compact volume summaries.
 - Optional weather integration via Open-Meteo: a city or postal code in the
   profile enables a cached 14-day forecast in the planned calendar. For
   outdoor runs and rides, the app suggests a weather-aware time window for

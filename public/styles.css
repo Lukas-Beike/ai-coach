@@ -332,6 +332,15 @@ h2 {
 .subsection-title { margin: 22px 0 10px; color: var(--ink); font-size: .95rem; }
 .activities { display: grid; gap: 10px; }
 .planned-calendar { display: grid; gap: 8px; }
+.planned-week { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.planned-week > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; color: var(--ink); list-style-position: inside; }
+.planned-week > summary::marker { color: var(--accent-bright); }
+.planned-week > summary:hover, .planned-week[open] > summary { background: rgba(255, 255, 255, .035); }
+.planned-week[open] > summary { border-bottom: 1px solid var(--line); }
+.planned-week-title { display: grid; min-width: 0; gap: 4px; font-size: .9rem; font-weight: 700; }
+.planned-week-title small { color: var(--accent-bright); font-size: .66rem; font-weight: 650; }
+.planned-week-summary { flex: 0 1 auto; color: var(--subtle); font-size: .68rem; text-align: right; }
+.planned-week-days { display: grid; gap: 8px; padding: 8px; }
 .planned-day { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .planned-day-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 14px; }
 .planned-day-heading h3 { margin: 0; color: var(--ink); font-size: .9rem; }
@@ -429,6 +438,15 @@ h2 {
 .context-preview-content summary::marker { color: var(--accent-bright); }
 .context-preview-content pre { max-height: 360px; margin: 0; overflow: auto; padding: 0 13px 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; font: .68rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .settings-section { display: grid; gap: 12px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 18px; padding: 17px; background: rgba(28, 28, 30, .68); }
+.collapsible-section > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -17px -17px 0; padding: 17px; color: var(--ink); list-style-position: inside; }
+.profile-section.collapsible-section > summary { margin: -16px -16px 0; padding: 16px; }
+.collapsible-section > summary::marker { color: var(--accent-bright); }
+.collapsible-section > summary:hover, .collapsible-section[open] > summary { background: rgba(255, 255, 255, .035); }
+.collapsible-section[open] > summary { border-bottom: 1px solid var(--line); }
+.collapsible-summary-title { min-width: 0; font-size: 1.02rem; font-weight: 700; }
+.collapsible-summary-meta { flex: 0 1 auto; max-width: 58%; overflow: hidden; color: var(--subtle); font-size: .68rem; font-weight: 500; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.collapsible-section > summary + p { margin-top: 0; }
+.collapsible-section > summary + .context-preview-heading { margin-top: 0; }
 .settings-section h3 { margin: 0; color: var(--ink); font-size: 1.02rem; }
 .settings-section > p, .settings-section-heading p { margin: 0; color: var(--muted); font-size: .75rem; line-height: 1.45; }
 .connection-cards { display: grid; grid-template-columns: 1fr; gap: 9px; }
@@ -529,6 +547,9 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   h2 { font-size: 1.35rem; }
   .section-heading { margin-right: 0; margin-left: 0; }
   .settings-section { gap: 10px; padding: 14px; border-radius: 16px; }
+  .collapsible-section > summary { margin: -14px -14px 0; padding: 14px; }
+  .planned-week > summary { align-items: flex-start; }
+  .planned-week-summary { max-width: 52%; line-height: 1.35; }
   .settings-section-heading,
   .context-preview-heading { display: grid; gap: 10px; }
   .settings-section-heading > div,
