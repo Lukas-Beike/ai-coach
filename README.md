@@ -12,7 +12,7 @@ It is not intended to be exposed directly to the public internet.
 ## Features
 
 - Athlete profile, target competitions, performance metrics, training history,
-  chat history, and workout drafts stored locally in SQLite.
+  chat history, and a growing local workout library stored in SQLite.
 - One Intervals.icu synchronization at startup, plus user-requested refreshes.
 - Optional Garmin Connect synchronization with deduplication against
   Intervals.icu. Garmin-sourced VO2 max, running predictions, body weight, and
@@ -23,6 +23,7 @@ It is not intended to be exposed directly to the public internet.
   and indoor/virtual cycling.
 - Mobile-first profile and system sections can be collapsed; the planned
   calendar is grouped into collapsible full weeks with compact volume summaries.
+  The System tab controls how many past and future weeks are displayed.
   Intervals.icu planned workouts are matched to completed activities through
   their pairing (with a conservative same-day/sport fallback) and show
   workout and weekly compliance percentages. The comparison uses training
@@ -53,31 +54,28 @@ It is not intended to be exposed directly to the public internet.
 - Coach chat with selectable GPT-5.6 models, configurable thinking level,
   context preview, structured logs, and prioritized steering/FIFO message
   queueing while the coach is responding.
-- The coach creates dated local workout drafts only. Each draft requires an
-  explicit athlete approval before it can be transferred to the Intervals.icu
-  calendar.
-- Before a draft is created, the local workout library is checked for an exact
-  or similar workout. Every library entry has its own local UUID. Imported
-  Intervals.icu templates additionally retain their provider ID as
-  `external_id`; new coach templates remain local until the athlete explicitly
-  approves transfer. Approval first synchronizes the local template, stores
-  the returned external ID, and then plans the calendar event.
+- The coach stores every dated planned workout directly in the local training
+  library. Similar workouts are not deduplicated, so the library can grow into
+  a complete local training history. Every library entry has its own local
+  UUID. Imported Intervals.icu templates additionally retain their provider ID
+  as `external_id`; local entries remain local until the library is explicitly
+  synchronized.
 - If a provider response no longer contains an imported template, it is kept
-  locally and marked as missing remotely. A later approval reconciles it before
-  creating or planning it again; local templates are never removed by a full
-  Intervals.icu resync.
-- Multi-week plans are grouped and can be approved incrementally.
+  locally and marked as missing remotely. A later library synchronization
+  reconciles it before creating it again; local templates are never removed by
+  a full Intervals.icu resync.
+- Multi-week plans are grouped in the local library.
 - Bidirectional synchronization of target competitions with Intervals.icu.
 - Local athlete check-ins for subjective soreness, stress, motivation, session
   RPE, pain/illness notes, available training time, and day-specific constraints.
 - Read-only shared iCalendar integration for the next 8 weeks. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
-  long local drafts on busy days can be proposed as short easy sessions.
-- Adaptive plan review that proposes changes to future local drafts after a
-  check-in. Changes are shown as a preview and require explicit local approval;
+  long local library entries on busy days can be proposed as short easy sessions.
+- Adaptive plan review that proposes changes to future local library entries
+  after a check-in. Changes are shown as a preview and require explicit local approval;
   remote Intervals.icu calendar events are never changed by this process.
 - Annual event overview with base, build, peak, taper, and completed phases.
-- Optional PWA notifications for pending draft approvals, upcoming events, and
+- Optional PWA notifications for upcoming events and
   synchronization errors. Notifications are opt-in and are delivered by the
   browser/service worker while the PWA can run; device workout delivery remains
   delegated to Intervals.icu.
@@ -104,7 +102,8 @@ The browser refreshes the local/remote view every minute while the PWA is
 visible and polls more frequently while a manual synchronization is running.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
-visible view also refreshes it when the cache has expired.
+visible view also refreshes it when the cache has expired. The current forecast
+can be forced manually from the Open-Meteo card in the System tab.
 GitHub release information is checked at most every 15 minutes. The morning
 check-in is generated at most once per local calendar day when its required
 integrations are configured.
@@ -186,7 +185,7 @@ The feed is read at startup, once per day, or on demand with **Synchronisieren**
 in the System tab. A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
-settings or bypass workout approval.
+settings or bypass explicit library synchronization or planning approvals.
 
 Other supported operational variables are:
 
@@ -231,19 +230,21 @@ without asking for the login code on every startup.
 
 ## Local planning data and target competitions
 
-The **Profile** tab stores athlete-entered feedback separately from imported
-Garmin and Intervals.icu values. This includes subjective stress, soreness,
-motivation, session RPE, pain or illness, available time, and other daily
-constraints. These values are included in the AI context as local athlete data.
+The **Activities** tab allows you to add local notes after a completed activity,
+for example about pain, unusual fatigue, conditions, or anything that went
+particularly well. These activity-specific notes are stored separately from
+imported Garmin and Intervals.icu values and included in the AI context as
+local athlete data.
 
-The adaptive planning action reviews future local workout drafts and produces a
-change preview. Only after explicit approval are eligible local drafts updated.
+The adaptive planning action reviews future dated local library entries and
+produces a change preview. Only after explicit approval are eligible local
+library entries updated.
 It does not overwrite, delete, or reschedule remote Intervals.icu calendar
 events.
 
 External calendar events are only planning signals. The heuristic uses the event
-date, start/end time, duration, and all-day status to identify drafts that are
-hard or long. It does not infer or diagnose an infection from a family event;
+date, start/end time, duration, and all-day status to identify library entries
+that are hard or long. It does not infer or diagnose an infection from a family event;
 illness must still be entered in the athlete check-in. Every suggested change
 remains a local preview and requires **Anpassung freigeben**.
 
@@ -308,7 +309,7 @@ browser connection are handled as normal aborted requests rather than internal
 server failures.
 
 The **System** tab allows the athlete to export local data as JSON or delete
-local chats, snapshots, drafts, library entries, competitions, and profile
+local chats, snapshots, legacy drafts, library entries, competitions, and profile
 data. The database file itself remains in place. Chat reset and local cleanup
 also attempt to delete the stored OpenAI conversation; data held by external
 providers remains subject to their own policies.
@@ -332,6 +333,80 @@ and `SameSite=Strict` attributes.
 The backend is a Python standard-library HTTP server. The frontend is served
 from `public/` as a browser PWA. Runtime state belongs in `data/` and is not
 included in Docker builds.
+
+### Local Docker development on Windows
+
+Use the local Docker image as the development runtime. The pinned
+`sqlcipher3-binary` package does not provide the required Windows wheel, and
+the application requires SQLCipher for secure startup. Do not remove the
+dependency or bypass the secure-startup check to run the application natively
+on Windows.
+
+From PowerShell in the repository root, create the ignored local configuration
+and persistent data directory:
+
+```powershell
+Copy-Item .env.example .env
+New-Item -ItemType Directory -Force .\data
+```
+
+Set the required API values and a stable `APP_PASSWORD` of at least 12
+characters in `.env`. For Docker, use `DATA_DIR=/data` and
+`GARMINTOKENS=/data/garmin_tokens`. Keep `.env`, `data/`, Garmin credentials,
+tokens, encrypted databases, and recovery backups private; never commit or
+print them.
+
+Build the image after application, frontend, dependency, Dockerfile, or
+startup changes:
+
+```powershell
+docker build -t ai-coach:local .
+```
+
+For real Garmin data, complete the one-time login interactively. Enter the
+Garmin email, password, and MFA code in the local terminal; they do not need to
+be stored in `.env` after the token store exists:
+
+```powershell
+docker run --rm -it `
+  --env-file .env `
+  -v "${PWD}\data:/data" `
+  ai-coach:local `
+  python /app/garmin-login.py
+```
+
+Start the local application with the persistent data mount:
+
+```powershell
+docker run -d --name ai-coach `
+  --restart unless-stopped `
+  --read-only `
+  --security-opt no-new-privileges:true `
+  -p 8090:8090 `
+  -v "${PWD}\data:/data" `
+  --env-file .env `
+  ai-coach:local
+```
+
+After code changes, rebuild the image, then recreate only the container while
+retaining the same `data` mount:
+
+```powershell
+docker stop ai-coach
+docker rm ai-coach
+```
+
+Never use `docker rm -v`, and never delete or replace the `data` directory.
+Open [http://localhost:8090](http://localhost:8090) for browser verification.
+Use `docker logs -f ai-coach` and
+`Invoke-WebRequest http://localhost:8090/api/health` for local diagnostics.
+Do not expose port 8090 directly to the public internet.
+
+For UI work that does not need a live Garmin account, use the checked-in
+fixture instead. Mount it into the container and set
+`GARMIN_FIXTURE_PATH=/app/garmin-fixture.example.json`; no Garmin email,
+password, or token store is then required. The fixture is test data and must
+not contain credentials.
 
 Run the test suite and syntax checks from the project root:
 
@@ -377,6 +452,13 @@ protection so that `develop` requires the normal CI checks and `main` disallows
 force pushes and direct human pushes while allowing the required pull request
 checks.
 
+The release workflow uses a repository-installed GitHub App so that automated
+branch, pull-request, release, and workflow-dispatch events can start the next
+workflow stage. Configure the App with Actions read/write, Contents read/write,
+Pull requests read/write, and Checks read permission, and install it only on
+this repository. Store its Client ID as the `RELEASE_APP_CLIENT_ID` Actions
+secret and its private key as the `RELEASE_APP_PRIVATE_KEY` Actions secret.
+
 Use Conventional Commits for manual commits and pull-request titles, for
 example:
 
@@ -389,8 +471,8 @@ docs: rewrite the README in English
 ## Security and limitations
 
 Intervals Coach is a private planning assistant, not a medical device. Keep it
-on a trusted LAN or behind a private VPN. Review every workout draft before
-transferring it to Intervals.icu, and seek professional advice for injuries,
+on a trusted LAN or behind a private VPN. Review local library entries before
+synchronizing them to Intervals.icu, and seek professional advice for injuries,
 illness, or warning symptoms.
 
 ## License

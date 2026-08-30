@@ -6,8 +6,8 @@ Intervals Coach is a private, mobile-first PWA for one athlete. The backend is
 a Python `http.server` application with SQLite/SQLCipher persistence. It reads
 Intervals.icu data and, optionally, Garmin Connect data, sends a sanitised
 training context to the OpenAI Responses API, stores local application state,
-and creates local workout drafts that require explicit approval before being
-pushed to the Intervals.icu calendar.
+and stores planned workouts directly in the local training library for later
+synchronization to Intervals.icu.
 
 The application is intentionally standalone. Keep it on a trusted LAN or
 private VPN; it must not be exposed directly to the public internet.
@@ -29,10 +29,10 @@ private VPN; it must not be exposed directly to the public internet.
 - An existing plaintext SQLite database may be migrated to SQLCipher. The
   migration intentionally leaves a recoverable `*.plaintext-backup-*` file;
   treat that file as sensitive plaintext data.
-- Workouts created by the coach are local drafts until the athlete explicitly
-  approves their transfer to Intervals.icu. Do not add implicit remote workout
-  writes.
-- Adaptive replanning may update future local drafts only after its preview is
+- Workouts created by the coach are local training-library entries until the
+  athlete explicitly synchronizes the library to Intervals.icu. Do not add
+  implicit remote workout writes.
+- Adaptive replanning may update future local library entries only after its preview is
   explicitly approved; it must not silently overwrite, delete, or reschedule
   remote calendar events.
 - Text and records received from Intervals.icu, Garmin, public calendars, or
@@ -43,7 +43,7 @@ private VPN; it must not be exposed directly to the public internet.
 - `server.py`: HTTP API, authentication, SQLite/SQLCipher persistence,
   Intervals.icu and Garmin clients, synchronization, performance derivation,
   OpenAI client, voice transcription, logs, morning check-in, planning,
-  competition/calendar handling, backups, and workout drafts.
+  competition/calendar handling, backups, and workout library/planning.
 - `public/`: browser/PWA client. Its scoped instructions are in
   `public/AGENTS.md`.
 - `tests/`: standard-library unit tests. Its scoped instructions are in
@@ -61,7 +61,7 @@ private VPN; it must not be exposed directly to the public internet.
   documentation; keep it consistent with behavior changes.
 
 The database contains more than chat history: profile, competitions and sync
-tombstones, snapshots, workout drafts/library, training plans, athlete
+tombstones, snapshots, legacy workout drafts/library, training plans, athlete
 check-ins, plan adjustments, public calendar sources/candidates, sessions,
 settings, Garmin snapshots, OpenAI conversation state, usage data, and sync
 status. Treat all of it as durable athlete data.
@@ -125,6 +125,82 @@ There is no frontend test runner in this repository. For browser-facing
 changes, manually verify login, PWA asset refresh, safe Markdown rendering,
 Enter-to-send versus Shift+Enter, microphone permissions, notifications, and
 the affected UI flow when a browser is available.
+
+### Local Docker workflow (Windows)
+
+- Use the local Docker image as the canonical runtime for UI development and
+  integration debugging. The pinned `sqlcipher3-binary` dependency does not
+  provide the required Windows wheel, and the application must refuse to start
+  without SQLCipher; do not remove the dependency or bypass the secure-startup
+  check to make native Windows execution work.
+- Create the local environment from the template and keep the real file
+  uncommitted:
+
+  ```powershell
+  Copy-Item .env.example .env
+  New-Item -ItemType Directory -Force .\data
+  ```
+
+  Set the required API values and a development `APP_PASSWORD` of at least 12
+  characters in `.env`. For the Docker runtime use
+  `GARMINTOKENS=/data/garmin_tokens`. Garmin email and password may remain
+  unset after a token store has been created. Never print or commit `.env`,
+  Garmin credentials, tokens, or database contents.
+- Build the image from the repository root after backend, frontend, dependency,
+  Dockerfile, or startup changes:
+
+  ```powershell
+  docker build -t ai-coach:local .
+  ```
+
+- Complete the one-time Garmin login interactively so the credentials and MFA
+  code are entered locally, not through chat or source files. The bind mount
+  makes the token store persistent:
+
+  ```powershell
+  docker run --rm -it `
+    --env-file .env `
+    -v "${PWD}\data:/data" `
+    ai-coach:local `
+    python /app/garmin-login.py
+  ```
+
+- Start or recreate the local container with the same bind mount. Rebuild the
+  image first when code changes; stop and remove only the container before
+  recreating it. Never use `docker rm -v`, and never remove or replace the
+  `data` directory, encrypted database, Garmin token store, or recovery
+  backups:
+
+  ```powershell
+  docker stop ai-coach
+  docker rm ai-coach
+  docker run -d --name ai-coach `
+    --restart unless-stopped `
+    --read-only `
+    --security-opt no-new-privileges:true `
+    -p 8090:8090 `
+    -v "${PWD}\data:/data" `
+    --env-file .env `
+    ai-coach:local
+  ```
+
+- Open `http://localhost:8090` for browser verification. Use
+  `docker logs -f ai-coach` and `Invoke-WebRequest http://localhost:8090/api/health`
+  for local diagnostics. Do not expose port 8090 publicly.
+- For UI work that does not need live Garmin data, prefer the fixture path so
+  no Garmin login is required. Mount the fixture into the container and set
+  `GARMIN_FIXTURE_PATH=/app/garmin-fixture.example.json`; the fixture remains
+  untrusted test data and must not contain credentials.
+- Keep the native Python unit tests and syntax checks separate from the browser
+  loop. Run them from the repository root with temporary data and mocked
+  providers; use the Docker build and local browser for the SQLCipher-backed
+  application and provider/UI integration:
+
+  ```powershell
+  python -m unittest discover -s tests -v
+  python -m py_compile server.py tests/test_server.py
+  docker build -t ai-coach:local .
+  ```
 
 ## Git conventions
 

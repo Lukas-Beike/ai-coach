@@ -299,6 +299,7 @@ h2 {
 .composer button:active, .profile-form > button:active, .push-button:active { transform: scale(.97); }
 .composer button:disabled, .push-button:disabled { cursor: wait; opacity: .55; }
 .login-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
+.auth-loading { min-height: 100dvh; display: grid; place-items: center; padding: 24px; color: var(--subtle); font-size: .9rem; }
 .button-spinner { display: none; width: 15px; height: 15px; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff; border-radius: 50%; }
 .login-button.is-loading .button-spinner { display: inline-block; animation: spin .7s linear infinite; }
 .voice-status { margin: 9px 4px 0; color: var(--muted); text-align: center; font-size: .72rem; }
@@ -335,7 +336,6 @@ h2 {
 .metric-grid strong { color: var(--ink); font-size: 1rem; }
 .metric-grid span { margin-top: 2px; color: var(--subtle); font-size: .67rem; }
 .metric-grid small { display: block; margin-top: 6px; color: var(--subtle); font-size: .61rem; line-height: 1.2; }
-.metric-grid small.metric-estimate { color: #79d9bf; }
 .metric-grid small.metric-garmin { color: #83c7ff; }
 .metric-grid .metric-value-row { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
 .metric-grid .metric-value-row strong { min-width: 0; }
@@ -434,22 +434,20 @@ h2 {
 .activity-type-button:hover, .activity-type-button[aria-pressed="true"] { color: var(--accent-bright); text-decoration: underline; text-underline-offset: 3px; }
 .activity-stats { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; color: var(--muted); font-size: .73rem; }
 .activity-stats strong { color: var(--ink); }
+.activity-feedback { margin-top: 14px; border-top: 1px solid var(--line); }
+.activity-feedback-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-top: 11px; color: var(--ink); cursor: pointer; font-size: .76rem; list-style: none; }
+.activity-feedback-summary::-webkit-details-marker { display: none; }
+.activity-feedback-summary::before { content: "+"; width: 1em; color: var(--accent-bright); font-size: 1rem; }
+.activity-feedback[open] .activity-feedback-summary::before { content: "−"; }
+.activity-feedback-hint { margin-left: auto; color: var(--subtle); font-size: .67rem; }
+.activity-feedback-form { display: grid; gap: 9px; margin-top: 10px; }
+.activity-feedback-form label { color: var(--muted); font-size: .72rem; }
+.activity-feedback-form textarea { margin-top: 5px; }
+.activity-feedback-form button { justify-self: start; }
 .planned-description { color: var(--muted); font-size: .78rem; white-space: pre-wrap; }
 .card-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 .danger-button { border-color: rgba(255, 69, 58, .35); color: #ff9a93; }
 .danger-button:hover { border-color: rgba(255, 69, 58, .65); background: rgba(255, 69, 58, .1); }
-.workout-drafts { display: grid; gap: 10px; }
-.workout-draft { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255, 255, 255, .025); }
-.workout-draft-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.workout-draft-heading strong { color: var(--ink); font-size: .88rem; }
-.workout-draft-status { color: var(--accent-bright); font-size: .68rem; white-space: nowrap; }
-.workout-draft-status-error .workout-draft-status { color: #ff9a93; }
-.workout-draft-status-pushed .workout-draft-status { color: var(--muted); }
-.workout-draft-meta { color: var(--subtle); font-size: .7rem; }
-.workout-draft-description, .workout-draft-rationale { margin: 0; color: var(--muted); font-size: .76rem; line-height: 1.45; white-space: pre-wrap; }
-.workout-draft-rationale { color: var(--subtle); }
-.workout-draft-error-message { margin: 0; padding: 9px 10px; border-left: 3px solid var(--danger); color: #ff9a93; background: rgba(255, 69, 58, .08); font-size: .73rem; line-height: 1.4; }
-.workout-draft-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 3px; }
 .library-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; }
 .library-heading > div { display: grid; gap: 4px; }
 .library-heading .subsection-title { margin: 0; }
@@ -483,6 +481,12 @@ h2 {
 .context-empty { margin: 0; padding: 16px; border: 1px dashed var(--line-strong); border-radius: 13px; color: var(--subtle); text-align: center; font-size: .78rem; }
 
 .model-selector, .diagnostic-actions { padding: 18px 0 10px; border-top: 1px solid var(--line); }
+.calendar-display-form { display: grid; gap: 14px; padding: 18px 0 10px; }
+.calendar-display-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.calendar-display-fields label { display: grid; gap: 6px; color: var(--subtle); font-size: .73rem; font-weight: 500; }
+.calendar-display-fields input { width: 100%; padding: 9px 10px; font-size: .8rem; }
+.calendar-display-fields small { color: var(--subtle); font-size: .64rem; font-weight: 400; }
+.calendar-display-form > .secondary-button { justify-self: start; }
 .context-preview { margin-top: 8px; padding: 18px 0 90px; border-top: 1px solid var(--line); }
 .context-preview-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .context-preview-heading h3 { margin: 3px 0 0; color: var(--ink); font-size: 1.05rem; letter-spacing: -.02em; }
@@ -502,6 +506,10 @@ h2 {
 #settingsPanel .collapsible-section.context-preview:not([open]) { margin-top: 0; }
 #settingsPanel .collapsible-section:last-child { margin-bottom: 0; }
 .profile-section.collapsible-section > summary { margin: -16px -16px 0; padding: 16px; }
+.profile-section .collapsible-summary-title,
+.local-feedback-section .collapsible-summary-title { font-size: 1.1rem; line-height: 1.3; }
+.profile-section.collapsible-section > summary + p,
+.local-feedback-section > summary + p { margin-top: 4px; }
 .collapsible-section > summary::marker { color: var(--accent-bright); }
 .collapsible-section > summary:hover, .collapsible-section[open] > summary { background: rgba(255, 255, 255, .035); }
 .collapsible-section[open] > summary { border-bottom: 1px solid var(--line); }
@@ -535,10 +543,6 @@ h2 {
 .settings-inline-action span { color: var(--subtle); font-size: .68rem; }
 .backup-actions label { flex: 1; }
 .backup-actions input[type="file"] { padding: 8px; font-size: .7rem; }
-.feedback-history { display: grid; gap: 7px; }
-.feedback-history:empty { display: none; }
-.feedback-entry { padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: rgba(255, 255, 255, .025); font-size: .7rem; line-height: 1.45; }
-.feedback-entry strong { color: var(--ink); }
 .replan-preview { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: rgba(255, 255, 255, .025); font-size: .72rem; line-height: 1.45; }
 .external-calendar-events { display: grid; gap: 7px; }
 .external-calendar-heading { display: flex; justify-content: space-between; gap: 10px; color: var(--subtle); font-size: .68rem; }
@@ -620,9 +624,15 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .settings-section { gap: 10px; min-width: 0; padding: 14px; border-radius: 16px; }
   .collapsible-section > summary { margin: -14px -14px 0; padding: 14px; }
   #settingsPanel .collapsible-section:not([open]) > summary { padding: 10px 14px; }
-  .profile-section { gap: 17px; padding: 14px; border-radius: 16px; }
-  .profile-section.collapsible-section > summary { margin: -14px -14px 0; padding: 14px; }
+  .profile-section { gap: 19px; padding: 14px; border-radius: 16px; }
+  .profile-section.collapsible-section > summary,
+  .local-feedback-section > summary { margin: -14px -14px 0; padding: 16px 14px; }
+  .profile-section.collapsible-section > summary,
+  .local-feedback-section > summary { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .profile-section .collapsible-summary-meta,
+  .local-feedback-section .collapsible-summary-meta { flex: none; max-width: none; text-align: left; }
   .profile-section > p { line-height: 1.55; }
+  .profile-section > label { margin-top: 7px; }
   .profile-form > button { width: 100%; }
   .collapsible-section > summary { align-items: flex-start; }
   .collapsible-summary-title { flex: 1 1 auto; }
@@ -635,6 +645,8 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .context-preview-heading > div { min-width: 0; }
   .settings-section-heading .secondary-button,
   .context-preview-heading .secondary-button { width: 100%; }
+  .calendar-display-fields { grid-template-columns: 1fr; }
+  .calendar-display-form > .secondary-button { width: 100%; }
   .connection-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
   .connection-card > .connection-card-info { grid-column: 1; grid-row: 1; }
   .connection-card .connection-actions { grid-column: 1 / -1; grid-row: 3; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }

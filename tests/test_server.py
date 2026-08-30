@@ -30,6 +30,7 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM competitions")
             db.execute("DELETE FROM competition_sync_tombstones")
             db.execute("DELETE FROM athlete_checkins")
+            db.execute("DELETE FROM activity_feedback")
             db.execute("DELETE FROM plan_adjustments")
             db.execute("DELETE FROM public_event_candidates")
             db.execute("DELETE FROM public_event_sources")
@@ -59,6 +60,12 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(state["weather"]["loading"])
         self.assertEqual(state["app"]["github_release"]["status"], "loading")
 
+    def test_local_public_state_reuses_request_database_connections(self):
+        real_connect = sqlite3.connect
+        with patch.object(server.sqlite3, "connect", wraps=real_connect) as connect:
+            server.public_state(local_only=True)
+        self.assertEqual(connect.call_count, 2)
+
     def test_weather_background_sync_refreshes_and_reuses_three_hour_cache(self):
         server.save_profile({"weather_location": "Berlin"})
         forecast = {
@@ -71,9 +78,12 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "_fetch_weather_forecast", return_value=forecast) as fetch:
             first = server.sync_weather("test")
             second = server.sync_weather("test")
+            manual = server.sync_weather("manuell", force=True)
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
-        fetch.assert_called_once_with("Berlin")
+        self.assertEqual(manual["status"], "ok")
+        self.assertEqual(fetch.call_count, 2)
+        fetch.assert_called_with("Berlin")
 
     def test_local_feedback_is_persisted_without_provider_values(self):
         result = server.save_checkin({
@@ -84,6 +94,37 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.local_feedback_context()["today"]["pain"], "left knee")
         with self.assertRaises(server.AppError):
             server.save_checkin({"soreness": 11})
+
+    def test_activity_feedback_is_persisted_and_attached_to_activity(self):
+        server.save_snapshot({
+            "synced_at": "2026-08-30T08:00:00+00:00",
+            "athlete": {},
+            "recent_activities": [{"id": "activity-1", "name": "Morgenlauf", "start_date_local": "2026-08-30T07:00:00"}],
+            "recent_wellness": [],
+            "upcoming_calendar": [],
+        })
+        result = server.save_activity_feedback("activity-1", {
+            "activity_name": "Morgenlauf", "activity_date": "2026-08-30T07:00:00", "notes": "Linkes Knie ungewohnt empfindlich",
+        })
+        self.assertEqual(result["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
+        activity = server.public_state(local_only=True)["activities"][0]
+        self.assertEqual(activity["activity_feedback"]["activity_id"], "activity-1")
+        self.assertEqual(activity["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
+        context = server.structured_athlete_context()
+        self.assertEqual(context["activity_feedback"]["recent"][0]["activity_name"], "Morgenlauf")
+        self.assertIn("Linkes Knie", context["activity_feedback"]["recent"][0]["notes"])
+
+    def test_empty_activity_feedback_removes_entry_and_input_is_bounded(self):
+        result = server.save_activity_feedback("activity-2", {"notes": "x" * 5000})
+        self.assertEqual(len(result["activity_feedback"]["notes"]), 4000)
+        server.save_activity_feedback("activity-2", {"notes": "   "})
+        self.assertEqual(server.list_activity_feedback(), [])
+
+    def test_feedback_form_is_not_rendered_in_profile_markup(self):
+        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn('id="feedbackForm"', markup)
+        self.assertNotIn("Lokales Athleten-Feedback", markup)
+        self.assertIn('id="activitiesPanel"', markup)
 
     def test_public_calendar_parser_extracts_supported_event_fields(self):
         events = server.parse_public_calendar(
@@ -132,7 +173,7 @@ class CoachTests(unittest.TestCase):
 
     def test_ical_no_intensity_marker_requires_easy_replacement(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        draft = server.save_workout_drafts([{
+        draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "Short threshold",
             "description": "- 5m 110%", "duration_minutes": 45, "target": "POWER",
         }])[0]
@@ -142,7 +183,7 @@ class CoachTests(unittest.TestCase):
                 ("no-intensity", "family-no-intensity", "Evening event", tomorrow, tomorrow + "T18:00:00+02:00", tomorrow + "T18:30:00+02:00", 30, 0, 1, 1, server.utc_now()),
             )
         preview = server.adaptive_replan_preview()
-        self.assertEqual(preview["changes"][0]["draft_id"], draft["id"])
+        self.assertEqual(preview["changes"][0]["library_workout_id"], draft["id"])
         self.assertIn("NO_INTENSITY", preview["changes"][0]["after"]["rationale"])
         self.assertTrue(preview["changes"][0]["payload"]["private_calendar_adjustment"]["no_intensity_requested"])
 
@@ -199,7 +240,7 @@ class CoachTests(unittest.TestCase):
 
     def test_external_calendar_event_reduces_hard_or_long_local_draft_only_in_preview(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        draft = server.save_workout_drafts([{
+        draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "Threshold intervals",
             "description": "- 5m 110%", "duration_minutes": 120, "target": "POWER",
         }])[0]
@@ -209,28 +250,28 @@ class CoachTests(unittest.TestCase):
                 ("event-1", "family-3", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, server.utc_now()),
             )
         preview = server.adaptive_replan_preview()
-        self.assertEqual(preview["changes"][0]["draft_id"], draft["id"])
+        self.assertEqual(preview["changes"][0]["library_workout_id"], draft["id"])
         self.assertEqual(preview["changes"][0]["after"]["duration_minutes"], 60)
         adjustment = preview["changes"][0]["payload"]["private_calendar_adjustment"]
         self.assertEqual(adjustment["label"], "Aufgrund privater Termine angepasst")
         self.assertEqual(adjustment["original_duration_minutes"], 120)
         self.assertEqual(adjustment["adjusted_duration_minutes"], 60)
-        self.assertEqual(server.list_workout_drafts()[0]["duration_minutes"], 120)
+        self.assertEqual(server.list_workout_library()[0]["moving_time"], 120 * 60)
 
     def test_adaptive_replan_only_changes_future_local_drafts_after_preview(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        draft = server.save_workout_drafts([{
+        draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "VO2 intervals",
             "description": "- 5m 115%", "duration_minutes": 45, "target": "POWER",
         }])[0]
         server.save_checkin({"illness": "Fever", "soreness": 8})
         preview = server.adaptive_replan_preview()
         self.assertEqual(len(preview["changes"]), 1)
-        self.assertEqual(server.list_workout_drafts()[0]["description"], "- 5m 115%")
+        self.assertEqual(server.list_workout_library()[0]["description"], "- 5m 115%")
         result = server.apply_adaptive_replan(preview["id"])
         self.assertEqual(result["updated"], 1)
-        self.assertNotEqual(server.list_workout_drafts()[0]["description"], "- 5m 115%")
-        self.assertEqual(server.list_workout_drafts()[0]["id"], draft["id"])
+        self.assertNotEqual(server.list_workout_library()[0]["description"], "- 5m 115%")
+        self.assertEqual(server.list_workout_library()[0]["id"], draft["id"])
 
     def test_planned_event_exposes_private_calendar_adjustment_from_linked_draft(self):
         context = {
@@ -248,7 +289,7 @@ class CoachTests(unittest.TestCase):
 
     def test_adaptive_replan_persists_private_calendar_context_after_apply(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        draft = server.save_workout_drafts([{
+        draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "Threshold intervals",
             "description": "- 5m 110%", "duration_minutes": 120, "target": "POWER",
         }])[0]
@@ -259,10 +300,10 @@ class CoachTests(unittest.TestCase):
             )
         preview = server.adaptive_replan_preview()
         server.apply_adaptive_replan(preview["id"])
-        persisted = server.list_workout_drafts()[0]["private_calendar_adjustment"]
+        persisted = server.list_workout_library()[0]["private_calendar_adjustment"]
         self.assertEqual(persisted["label"], "Aufgrund privater Termine angepasst")
         self.assertEqual(persisted["events"][0]["name"], "Family appointment")
-        self.assertEqual(server.list_workout_drafts()[0]["id"], draft["id"])
+        self.assertEqual(server.list_workout_library()[0]["id"], draft["id"])
 
     def test_unlimited_retention_does_not_delete_history(self):
         with server.DB_LOCK, server.database() as db:
@@ -640,6 +681,31 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(row["sync_state"], "synced")
             self.assertEqual(json.loads(draft_row["payload"])["library_workout_id"], migrated["id"])
 
+    def test_dated_legacy_draft_is_copied_to_local_library_on_upgrade(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        with tempfile.TemporaryDirectory() as temp_root:
+            data_dir = Path(temp_root)
+            db_path = data_dir / "intervals-coach.db"
+            connection = sqlite3.connect(db_path)
+            connection.execute("CREATE TABLE workout_drafts(id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL)")
+            connection.execute(
+                "INSERT INTO workout_drafts(id, payload, updated_at) VALUES (?, ?, ?)",
+                ("legacy-draft", json.dumps({
+                    "date": tomorrow, "sport": "Ride", "name": "Legacy Tempo",
+                    "description": "- 30m 85%", "duration_minutes": 30,
+                    "target": "POWER", "rationale": "Legacy plan",
+                }), "old"),
+            )
+            connection.commit()
+            connection.close()
+            config = replace(server.CONFIG, app_password="")
+            with patch.object(server, "DATA_DIR", data_dir), patch.object(server, "DB_PATH", db_path), patch.object(server, "CONFIG", config):
+                server.initialise_database()
+                library = server.list_workout_library()
+            self.assertEqual(len(library), 1)
+            self.assertEqual(library[0]["date"], tomorrow)
+            self.assertEqual(library[0]["source"], "legacy-draft")
+
     def test_library_workout_can_be_planned_from_local_cache(self):
         server.upsert_workout_library([{
             "id": 42, "name": "Locker Rad", "type": "Ride",
@@ -649,8 +715,9 @@ class CoachTests(unittest.TestCase):
         library = server.list_workout_library()[0]
         with patch.object(server, "plan_library_workout_remote", return_value=fake_event) as plan:
             result = server.create_local_library_draft(library["id"], (date.today() + timedelta(days=1)).isoformat())
-        self.assertEqual(result["status"], "draft")
-        self.assertEqual(result["draft"]["library_workout_id"], library["id"])
+        self.assertEqual(result["status"], "local")
+        self.assertNotEqual(result["library_entry"]["id"], library["id"])
+        self.assertEqual(result["library_entry"]["date"], (date.today() + timedelta(days=1)).isoformat())
         plan.assert_not_called()
 
     def test_direct_library_creation_path_is_disabled(self):
@@ -734,6 +801,80 @@ class CoachTests(unittest.TestCase):
         create.assert_not_called()
         self.assertEqual(server.list_workout_library()[0]["sync_status"], "synced")
 
+    def test_library_sync_pushes_new_local_planned_entry_without_calendar_write(self):
+        future_date = (date.today() + timedelta(days=1)).isoformat()
+        entry = server.save_workout_library_entries([{
+            "date": future_date, "sport": "Ride", "name": "Coach Tempo",
+            "description": "- 30m 85%", "duration_minutes": 30,
+            "target": "POWER", "rationale": "Schwelle",
+        }])[0]
+        remote = {"id": "remote-77", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", "moving_time": 1800}
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server.IntervalsClient, "get_workout_library", return_value=[]
+        ), patch.object(server.IntervalsClient, "create_library_workouts", return_value=[remote]) as create, patch.object(
+            server, "plan_library_workout_remote"
+        ) as plan:
+            result = server.sync_workout_library("test")
+        self.assertEqual(result["local_synced"], 1)
+        self.assertEqual(server.list_workout_library()[0]["external_id"], "remote-77")
+        self.assertEqual(server.list_workout_library()[0]["date"], future_date)
+        self.assertEqual(server.list_workout_library()[0]["id"], entry["id"])
+        create.assert_called_once()
+        plan.assert_not_called()
+
+    def test_combined_library_sync_persists_local_error_for_retry(self):
+        entry = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
+            "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
+            "target": "POWER", "rationale": "Schwelle",
+        }])[0]
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server.IntervalsClient, "get_workout_library", return_value=[]
+        ), patch.object(
+            server.IntervalsClient, "create_library_workouts", side_effect=server.AppError(502, "upstream unavailable")
+        ) as create:
+            first = server.sync_workout_library("test")
+            second = server.sync_workout_library("test")
+        self.assertEqual(first["status"], "partial")
+        self.assertEqual(second["status"], "partial")
+        self.assertEqual(create.call_count, 2)
+        self.assertEqual(server.list_workout_library()[0]["id"], entry["id"])
+        self.assertEqual(server.list_workout_library()[0]["sync_status"], "sync_error")
+        self.assertEqual(server.workout_library_sync_summary()["syncing"], 0)
+
+    def test_library_sync_updates_locally_adapted_synced_entry(self):
+        future_date = (date.today() + timedelta(days=1)).isoformat()
+        entry = server.save_workout_library_entries([{
+            "date": future_date, "sport": "Ride", "name": "Coach Intervals",
+            "description": "- 5m 115%", "duration_minutes": 45,
+            "target": "POWER", "rationale": "Schwelle",
+        }])[0]
+        remote = {"id": "remote-77", "name": "Coach Intervals", "type": "Ride", "description": "- 5m 115%", "moving_time": 2700}
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server.IntervalsClient, "get_workout_library", return_value=[]
+        ), patch.object(server.IntervalsClient, "create_library_workouts", return_value=[remote]):
+            server.sync_workout_library("initial")
+
+        server.save_checkin({"illness": "Fever", "soreness": 8})
+        preview = server.adaptive_replan_preview()
+        server.apply_adaptive_replan(preview["id"])
+        adapted_description = server.list_workout_library()[0]["description"]
+        self.assertNotEqual(adapted_description, remote["description"])
+
+        updated_remote = {**remote, "description": adapted_description, "moving_time": 2700}
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server.IntervalsClient, "get_workout_library", return_value=[remote]
+        ), patch.object(server.IntervalsClient, "update_library_workout", return_value=updated_remote) as update:
+            result = server.sync_workout_library("adapted")
+
+        self.assertEqual(result["local_synced"], 1)
+        update.assert_called_once()
+        library = server.list_workout_library()[0]
+        self.assertEqual(library["id"], entry["id"])
+        self.assertEqual(library["external_id"], "remote-77")
+        self.assertEqual(library["description"], adapted_description)
+        self.assertEqual(library["sync_status"], "synced")
+
     def test_library_sync_error_is_persisted_for_retry(self):
         draft = server.save_workout_drafts([{
             "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
@@ -764,7 +905,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(library["external_id"], "remote-missing")
         self.assertEqual(library["sync_status"], "remote_missing")
 
-    def test_chat_creation_request_uses_local_draft_tool(self):
+    def test_chat_creation_request_stores_directly_in_local_library(self):
         future_date = (date.today() + timedelta(days=1)).isoformat()
         calls = []
 
@@ -776,7 +917,7 @@ class CoachTests(unittest.TestCase):
                 return {
                     "output": [{
                         "type": "function_call",
-                        "name": "save_workout_draft_entries",
+                        "name": "save_workout_library_entries",
                         "call_id": "call_workout",
                         "arguments": json.dumps({
                             "plan_name": "Morgen",
@@ -797,9 +938,10 @@ class CoachTests(unittest.TestCase):
             result = server.chat_with_coach("Erstelle mir für morgen eine Einheit.")
 
         response_calls = [payload for path, payload in calls if path == "/responses"]
-        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "save_workout_draft_entries"})
-        self.assertEqual(len(result["drafts"]), 1)
-        self.assertEqual(result["drafts"][0]["status"], "draft")
+        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "save_workout_library_entries"})
+        self.assertEqual(len(result["library_entries"]), 1)
+        self.assertEqual(result["library_entries"][0]["sync_status"], "local")
+        self.assertEqual(server.list_workout_drafts(), [])
         create.assert_not_called()
 
     def test_library_backed_draft_is_planned_from_library_on_approval(self):
@@ -907,6 +1049,20 @@ class CoachTests(unittest.TestCase):
         with self.assertRaises(server.AppError):
             server.save_thinking_level("extreme")
 
+    def test_calendar_display_settings_are_persisted_and_validated(self):
+        self.assertEqual(server.calendar_display_settings(), {"past_weeks": 1, "future_weeks": 4})
+        self.assertEqual(
+            server.save_calendar_display_settings({"past_weeks": 3, "future_weeks": 12}),
+            {"status": "ok", "past_weeks": 3, "future_weeks": 12},
+        )
+        self.assertEqual(server.calendar_display_settings(), {"past_weeks": 3, "future_weeks": 12})
+        with self.assertRaises(server.AppError):
+            server.save_calendar_display_settings({"past_weeks": -1})
+        with self.assertRaises(server.AppError):
+            server.save_calendar_display_settings({"future_weeks": 53})
+        server.set_kv("calendar_display_past_weeks", "invalid")
+        self.assertEqual(server.calendar_display_settings()["past_weeks"], 1)
+
     def test_responses_request_uses_selected_thinking_level(self):
         server.save_thinking_level("low")
         captured = {}
@@ -932,11 +1088,24 @@ class CoachTests(unittest.TestCase):
         server.set_sync_period("intervals", 65)
         with patch.object(server, "CONFIG", config), patch.object(
             server.IntervalsClient, "fetch_snapshot", return_value=snapshot
-        ) as fetch_snapshot, patch.object(server, "sync_workout_library", return_value={"workouts": 0}):
+        ) as fetch_snapshot, patch.object(server, "sync_workout_library", return_value={"workouts": 0}), patch.object(server, "openai_request") as openai_request:
             result = server.sync_intervals("test")
         fetch_snapshot.assert_called_once_with(activity_days=65)
+        openai_request.assert_not_called()
         self.assertEqual(result["activity_days"], 65)
         self.assertEqual(result["window_end"], server.local_now().date().isoformat())
+
+    def test_sync_intervals_surfaces_partial_library_sync(self):
+        snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", return_value=snapshot
+        ), patch.object(
+            server, "sync_workout_library", return_value={"status": "partial", "workouts": 1, "local_errors": ["upload failed"]}
+        ):
+            result = server.sync_intervals("test", activity_days=42)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["library_error"], "upload failed")
 
     def test_full_intervals_resync_preserves_local_library_and_never_remote_data(self):
         server.save_athlete_context({}, [{"name": "Old local race", "event_date": (date.today() + timedelta(days=30)).isoformat()}])
@@ -976,9 +1145,7 @@ class CoachTests(unittest.TestCase):
 
         with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-        ), patch.object(server, "sync_workout_library", return_value={"workouts": 0}), patch.object(
-            server, "estimate_performance_from_activities", return_value={"estimates": []}
-        ):
+        ), patch.object(server, "sync_workout_library", return_value={"workouts": 0}):
             result = server.full_provider_resync("intervals")
 
         self.assertEqual(result["status"], "ok")
@@ -1309,6 +1476,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(performance["current_load"]["tsb"], -6)
         self.assertEqual(performance["recovery"]["sleep_hours"], 7.5)
         self.assertEqual(performance["rolling_training"]["last_7_days"]["training_load"], 110.0)
+        self.assertNotIn("ai_estimates", performance)
 
     def test_form_is_derived_from_ctl_and_atl_when_intervals_omits_tsb(self):
         today = date.today().isoformat()
@@ -1397,7 +1565,7 @@ class CoachTests(unittest.TestCase):
         metric = server.current_performance_context({"synced_at": "now", "athlete": {"height": 1.83}, "recent_wellness": [], "recent_activities": []})["metrics"]["height_cm"]
         self.assertEqual(metric["value"], 183)
 
-    def test_performance_refresh_does_not_request_activities(self):
+    def test_performance_refresh_only_requests_provider_data(self):
         calls = []
 
         class FakeIntervalsClient:
@@ -1405,39 +1573,12 @@ class CoachTests(unittest.TestCase):
                 calls.append(existing)
                 return {"synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_wellness": [], "recent_activities": [], "upcoming_calendar": []}
 
-        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(server, "estimate_performance_from_activities", return_value={"estimates": []}):
+        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(server, "openai_request") as openai_request:
             with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")):
                 result = server.refresh_current_performance()
         self.assertEqual(result["status"], "ok")
         self.assertEqual(len(calls), 1)
-
-    def test_ai_estimate_accepts_structured_json_and_is_used_for_missing_metrics(self):
-        snapshot = {
-            "synced_at": "2026-08-28T08:00:00+00:00",
-            "athlete": {},
-            "recent_wellness": [],
-            "recent_activities": [
-                {"type": "Run", "start_date_local": "2026-08-27T07:00:00", "moving_time": 1800, "distance": 5000}
-            ],
-        }
-        response = {"output_text": '```json\n{"estimates":[{"key":"run_5k_seconds","value":1500,"unit":"s","confidence":"mittel","basis":"5-km-Lauf"}]}\n```'}
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="test-key")), patch.object(server, "openai_request", return_value=response):
-            result = server.estimate_performance_from_activities(snapshot)
-            performance = server.current_performance_context(snapshot)
-        self.assertEqual(len(result["estimates"]), 1)
-        self.assertEqual(performance["metrics"]["run_5k_seconds"]["value"], 1500)
-        self.assertEqual(performance["metrics"]["run_5k_seconds"]["source"], "KI-Schätzung")
-
-    def test_ai_estimate_fills_missing_run_race_times_from_recent_runs(self):
-        snapshot = {
-            "synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_wellness": [],
-            "recent_activities": [{"type": "Run", "start_date_local": "2026-08-27T07:00:00", "moving_time": 1800, "distance": 5000}],
-        }
-        response = {"output_text": '{"estimates":[{"key":"run_threshold_pace_seconds_per_km","value":360,"unit":"s/km","confidence":"mittel","basis":"Laufdaten"}]}' }
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="test-key")), patch.object(server, "openai_request", return_value=response):
-            result = server.estimate_performance_from_activities(snapshot)
-        self.assertTrue(any(item["key"] == "run_10k_seconds" for item in result["estimates"]))
-        self.assertEqual(next(item for item in result["estimates"] if item["key"] == "run_10k_seconds")["source"], "Berechnete Schätzung")
+        openai_request.assert_not_called()
 
     def test_public_state_exposes_completed_and_planned_activity_tabs(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [{"name": "Morgenlauf"}], "recent_wellness": [], "upcoming_calendar": [{"name": "Intervalle"}]}
@@ -1448,6 +1589,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["app"]["version"], server.APP_VERSION)
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
         self.assertEqual(state["planned"][0]["name"], "Intervalle")
+        self.assertEqual(state["calendar_display"], {"past_weeks": 1, "future_weeks": 4})
 
     def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
         today = server.local_now().date()

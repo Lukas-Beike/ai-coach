@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=90">
+  <link rel="stylesheet" href="/styles.css?v=93">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -62,11 +62,6 @@
         <div id="parallelCyclingWarning" class="parallel-warning" hidden></div>
         <div id="weatherNotice" class="weather-notice" hidden></div>
         <div id="plannedCalendar" class="planned-calendar"></div>
-        <details id="draftsSection" class="settings-section collapsible-section" open>
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Lokale Trainingsentwürfe</span><span id="draftsSummary" class="collapsible-summary-meta">Keine offenen Entwürfe</span></summary>
-          <p>Diese Einheiten liegen zunächst nur lokal. Erst mit „Freigeben“ werden sie nach Intervals.icu übertragen.</p>
-          <div id="workoutDrafts" class="workout-drafts" aria-live="polite"></div>
-        </details>
         <details id="plannedCompetitionsSection" class="settings-section collapsible-section">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Zielwettkämpfe</span><span id="plannedCompetitionsSummary" class="collapsible-summary-meta">Noch keine Wettkämpfe</span></summary>
           <p>Trage Wettkämpfe manuell mit den Intervals.icu-Feldern ein. Änderungen werden mit Intervals.icu bidirektional synchronisiert.</p>
@@ -79,11 +74,11 @@
           <button type="submit" form="profileForm">Wettkämpfe speichern</button>
         </details>
         <details id="plannedPlanningSection" class="settings-section collapsible-section">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Adaptive Planung</span><span id="planningSummaryCompact" class="collapsible-summary-meta">Lokale Entwürfe prüfen</span></summary>
-          <p id="planningSummary">Lokale zukünftige Entwürfe können anhand deines Feedbacks überprüft werden.</p>
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Adaptive Planung</span><span id="planningSummaryCompact" class="collapsible-summary-meta">Lokale Bibliothek prüfen</span></summary>
+          <p id="planningSummary">Lokale zukünftige Bibliothekseinheiten können anhand deines Feedbacks überprüft werden.</p>
           <div id="externalCalendarEvents" class="external-calendar-events" aria-live="polite"></div>
           <div class="settings-section-heading">
-            <div><p class="fine-print">Die Vorschau verändert noch keine Einheiten. Erst die Freigabe wendet Änderungen auf lokale zukünftige Entwürfe an.</p></div>
+            <div><p class="fine-print">Die Vorschau verändert noch keine Einheiten. Erst die Freigabe wendet Änderungen auf lokale zukünftige Bibliothekseinheiten an.</p></div>
             <button type="button" id="replanButton" class="secondary-button">Anpassung vorbereiten</button>
           </div>
           <div id="replanPreview" class="replan-preview" hidden></div>
@@ -130,26 +125,6 @@
 
           <button type="submit">Athletenkontext speichern</button>
         </form>
-        <details class="settings-section local-feedback-section collapsible-section">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Lokales Athleten-Feedback</span><span id="feedbackSummary" class="collapsible-summary-meta">Noch kein Eintrag</span></summary>
-          <p>Hier werden nur eigene subjektive Angaben und Verfügbarkeiten gespeichert, die nicht aus Garmin oder Intervals.icu stammen.</p>
-          <form id="feedbackForm" class="profile-form">
-            <div class="form-grid">
-              <label>Datum<input id="feedbackDate" name="checkin_date" type="date" required></label>
-              <label>Verfügbare Trainingszeit (Min.)<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
-              <label>Muskelkater (0–10)<input name="soreness" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
-              <label>Subjektiver Stress (0–10)<input name="stress" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
-              <label>Motivation (0–10)<input name="motivation" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
-              <label>RPE der letzten Einheit (0–10)<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
-            </div>
-            <label>Krankheit / Beschwerden<textarea name="illness" rows="2" placeholder="Nur eintragen, wenn relevant"></textarea></label>
-            <label>Schmerz- oder Verletzungshinweise<textarea name="pain" rows="2" placeholder="Ort, Einschränkung oder Warnzeichen"></textarea></label>
-            <label>Verfügbarkeit / Rahmenbedingungen<textarea name="availability_notes" rows="2" placeholder="Reise, Zeitfenster, Equipment oder andere Einschränkungen"></textarea></label>
-            <label>Notizen<textarea name="notes" rows="2" placeholder="Zusätzliche subjektive Rückmeldung"></textarea></label>
-            <button type="submit">Feedback speichern</button>
-          </form>
-          <div id="feedbackHistory" class="feedback-history"></div>
-        </details>
         <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
           <div class="context-preview-heading">
             <div><span class="eyebrow">TRANSPARENZ</span><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>
@@ -168,7 +143,7 @@
         <details class="settings-section collapsible-section">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
           <div class="connection-cards">
-            <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="chatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="90"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="30"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small></article>
@@ -177,6 +152,17 @@
           <p class="fine-print settings-message">Zugangsdaten und die Athlete ID müssen über Container-Umgebungsvariablen gesetzt werden (Unraid: Docker-Template &rarr; Environment variables). Erforderlich: <code>OPENAI_API_KEY</code>, <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code>; für Garmin zusätzlich <code>GARMIN_EMAIL</code>, <code>GARMIN_PASSWORD</code> und <code>GARMINTOKENS</code> (z. B. <code>/data/garmin_tokens</code>). Nach Änderungen den Container in Unraid neu erstellen.</p>
           <p id="garminDetail" class="fine-print settings-message"></p>
           <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend.</p>
+        </details>
+        <details class="settings-section collapsible-section">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Kalenderansicht</span><span id="calendarDisplaySummary" class="collapsible-summary-meta">Einstellungen werden geladen...</span></summary>
+          <form id="calendarDisplayForm" class="calendar-display-form">
+            <div class="calendar-display-fields">
+              <label for="calendarDisplayPastWeeks">Wochen zurück<input id="calendarDisplayPastWeeks" type="number" min="0" max="52" step="1" value="1"><small>0 = keine vergangene Woche</small></label>
+              <label for="calendarDisplayFutureWeeks">Wochen voraus<input id="calendarDisplayFutureWeeks" type="number" min="0" max="52" step="1" value="4"><small>0 = nur die aktuelle Woche</small></label>
+            </div>
+            <button id="calendarDisplaySaveButton" class="secondary-button" type="submit">Kalenderansicht speichern</button>
+            <p class="fine-print settings-message">Steuert nur, wie viele Kalenderwochen in der Oberfläche angezeigt werden. Synchronisations- und Trainingsdaten bleiben unverändert.</p>
+          </form>
         </details>
         <details class="settings-section collapsible-section">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Coach-Modell &amp; Thinking</span><span id="modelSettingsSummary" class="collapsible-summary-meta">Auswahl wird geladen…</span></summary>
@@ -259,7 +245,8 @@
   </div>
 
   <div id="toast" class="toast" role="status"></div>
-  <dialog id="loginDialog" open aria-labelledby="loginTitle">
+  <div id="authLoading" class="auth-loading" role="status" aria-live="polite">Trainingsbereich wird gepr&uuml;ft&hellip;</div>
+  <dialog id="loginDialog" aria-labelledby="loginTitle">
     <form id="loginForm" method="dialog">
       <span class="eyebrow">PRIVATER TRAININGSBEREICH</span>
       <h2 id="loginTitle">Anmelden</h2>
@@ -272,6 +259,6 @@
       </button>
     </form>
   </dialog>
-  <script src="/app.js?v=90" defer></script>
+  <script src="/app.js?v=93" defer></script>
 </body>
 </html>

@@ -13,7 +13,7 @@ const state = {
   voiceTimer: null,
   voiceStartedAt: 0,
   voiceTranscribing: false,
-  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, performance: false, intervalsFull: false, garminFull: false },
+  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, weather: false, performance: false, intervalsFull: false, garminFull: false },
   notificationKeys: new Set(),
   quickTemplatesVisible: false,
   activityTracked: false,
@@ -71,6 +71,7 @@ function cookie(name) {
 function showLogin() {
   state.data = null;
   $("#appShell").hidden = true;
+  $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
   if (!dialog.open) dialog.showModal();
   $("#loginPassword").focus();
@@ -131,6 +132,7 @@ async function bootstrapAuth() {
     const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" });
     const status = await response.json();
     if (status.authenticated) {
+      $("#authLoading").hidden = true;
       $("#loginDialog").close();
       showAppShellLoading();
       notePwaActivity();
@@ -362,145 +364,13 @@ async function showPwaNotification(title, options, key) {
 }
 
 function notifyState(data) {
-  const pendingDrafts = (data.drafts || []).filter(draft => draft.status !== "pushed").length;
-  if (pendingDrafts) showPwaNotification("Intervals Coach", { body: `${pendingDrafts} Trainingsentwurf/-entwürfe warten auf deine Freigabe.`, tag: "drafts" }, `drafts:${pendingDrafts}`);
   const next = data.planning?.season?.next_event;
   if (next && next.days_until >= 0 && next.days_until <= 3) showPwaNotification("Wettkampf steht bevor", { body: `${next.name} ist in ${next.days_until} Tag(en).`, tag: `competition:${next.id}` }, `competition:${next.id}:${next.event_date}`);
   const error = data.sync?.last_error || data.garmin_sync?.status?.includes("Fehler") && data.garmin_sync.status;
   if (error) showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
 }
 
-function renderDrafts(drafts) {
-  const root = $("#workoutDrafts");
-  const summary = $("#draftsSummary");
-  if (!root) return;
-  const list = Array.isArray(drafts) ? drafts : [];
-  const pending = list.filter((draft) => draft.status !== "pushed");
-  if (summary) summary.textContent = pending.length ? `${pending.length} offen` : "Keine offenen Entwürfe";
-  root.replaceChildren();
-  if (!list.length) {
-    const empty = document.createElement("p");
-    empty.className = "context-empty";
-    empty.textContent = "Noch keine lokalen Trainingsentwürfe vorhanden.";
-    root.append(empty);
-    return;
-  }
-  for (const draft of list) {
-    const card = document.createElement("article");
-    card.className = `workout-draft workout-draft-status-${draft.status || "draft"}`;
-    const heading = document.createElement("div");
-    heading.className = "workout-draft-heading";
-    const title = document.createElement("strong");
-    title.textContent = draft.name || "Coach-Einheit";
-    const status = document.createElement("span");
-    status.className = "workout-draft-status";
-    status.textContent = draft.status === "pushed" ? "Übertragen" : draft.status === "error" ? "Fehler" : "Wartet auf Freigabe";
-    heading.append(title, status);
-    card.append(heading);
-
-    const meta = document.createElement("div");
-    meta.className = "workout-draft-meta";
-    meta.textContent = [draft.date ? dateLabel(draft.date) : null, draft.sport, draft.duration_minutes ? `${draft.duration_minutes} Min.` : null].filter(Boolean).join(" · ");
-    card.append(meta);
-
-    if (draft.description) {
-      const description = document.createElement("p");
-      description.className = "workout-draft-description";
-      description.textContent = draft.description;
-      card.append(description);
-    }
-    if (draft.rationale) {
-      const rationale = document.createElement("p");
-      rationale.className = "workout-draft-rationale";
-      rationale.textContent = `Begründung: ${draft.rationale}`;
-      card.append(rationale);
-    }
-    if (draft.error) {
-      const error = document.createElement("p");
-      error.className = "workout-draft-error-message";
-      error.textContent = draft.error;
-      card.append(error);
-    }
-    if (draft.status !== "pushed") {
-      const actions = document.createElement("div");
-      actions.className = "workout-draft-actions";
-      const approve = document.createElement("button");
-      approve.type = "button";
-      approve.className = "secondary-button";
-      approve.textContent = "Freigeben";
-      approve.addEventListener("click", () => pushDraft(draft.id, approve, draft.name));
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "secondary-button danger-button";
-      remove.textContent = "Löschen";
-      remove.addEventListener("click", () => deleteDraft(draft.id, remove, draft.name));
-      actions.append(approve, remove);
-      card.append(actions);
-    }
-    root.append(card);
-  }
-}
-
-async function pushDraft(draftId, button, name) {
-  if (!window.confirm(`„${name || "Einheit"}“ wirklich zu Intervals.icu übertragen?`)) return;
-  button.disabled = true;
-  button.textContent = "Wird übertragen…";
-  try {
-    await api(`/api/workouts/${encodeURIComponent(draftId)}/push`, { method: "POST", body: "{}" });
-    toast("Einheit zu Intervals.icu übertragen");
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    await load();
-  } finally {
-    button.disabled = false;
-    button.textContent = "Freigeben";
-  }
-}
-
-async function deleteDraft(draftId, button, name) {
-  if (!window.confirm(`„${name || "Entwurf"}“ wirklich lokal löschen?`)) return;
-  button.disabled = true;
-  button.textContent = "Wird gelöscht…";
-  try {
-    await api(`/api/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
-    toast("Lokaler Entwurf gelöscht");
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    button.disabled = false;
-    button.textContent = "Löschen";
-  }
-}
-
 function todayIso() { return new Date().toISOString().slice(0, 10); }
-
-function setFormValue(form, name, value) {
-  const field = form?.elements?.namedItem(name);
-  if (field) field.value = value == null ? "" : value;
-}
-
-function renderLocalFeedback(data) {
-  const form = $("#feedbackForm");
-  const feedback = data.local_feedback || {};
-  const today = feedback.today || {};
-  if (form && !form.contains(document.activeElement)) {
-    setFormValue(form, "checkin_date", today.checkin_date || todayIso());
-    for (const field of ["available_minutes", "soreness", "stress", "motivation", "session_rpe", "illness", "pain", "availability_notes", "notes"]) setFormValue(form, field, today[field]);
-  }
-  const history = $("#feedbackHistory");
-  const summary = $("#feedbackSummary");
-  if (summary) summary.textContent = today.checkin_date ? `Letzter Check-in: ${dateLabel(today.checkin_date)}` : "Noch kein Eintrag";
-  if (!history) return;
-  history.replaceChildren();
-  for (const entry of (feedback.recent || []).slice(0, 7)) {
-    const node = document.createElement("div");
-    node.className = "feedback-entry";
-    const scores = [entry.soreness == null ? "" : `Muskelkater ${entry.soreness}/10`, entry.stress == null ? "" : `Stress ${entry.stress}/10`, entry.motivation == null ? "" : `Motivation ${entry.motivation}/10`, entry.session_rpe == null ? "" : `RPE ${entry.session_rpe}/10`].filter(Boolean).join(" · ");
-    node.innerHTML = `<strong>${escapeHtml(entry.checkin_date)}</strong>${scores ? ` · ${escapeHtml(scores)}` : ""}${entry.available_minutes == null ? "" : ` · ${escapeHtml(String(entry.available_minutes))} Min.`}${entry.illness || entry.pain ? `<br>${escapeHtml([entry.illness, entry.pain].filter(Boolean).join(" · "))}` : ""}`;
-    history.append(node);
-  }
-}
 
 function renderPlanning(data) {
   const planning = data.planning || {};
@@ -688,8 +558,13 @@ function dateLabel(value) {
   return Number.isNaN(parsed.valueOf()) ? String(value).slice(0, 10) : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
 }
 
-const PLANNED_HISTORY_WEEKS = 4;
-const PLANNED_CALENDAR_WEEKS = 9;
+const CALENDAR_DISPLAY_DEFAULTS = { past_weeks: 1, future_weeks: 4 };
+const CALENDAR_DISPLAY_MAX_WEEKS = 52;
+
+function calendarDisplayValue(value, fallback) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 && number <= CALENDAR_DISPLAY_MAX_WEEKS ? number : fallback;
+}
 
 function localDateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -964,6 +839,40 @@ function renderActivities(activities) {
     addStat("Ø Puls", activity.average_heartrate ? `${Math.round(activity.average_heartrate)} bpm` : null);
     addStat("Ø Leistung", activity.average_watts ? `${Math.round(activity.average_watts)} W` : null);
     card.append(top, meta, stats);
+
+    const activityId = activity.id ?? activity.activityId ?? activity.external_id;
+    if (activityId != null && String(activityId).trim()) {
+      const feedback = activity.activity_feedback || {};
+      const feedbackDetails = document.createElement("details");
+      feedbackDetails.className = "activity-feedback";
+      feedbackDetails.open = Boolean(feedback.notes);
+      const feedbackSummary = document.createElement("summary");
+      feedbackSummary.className = "activity-feedback-summary";
+      const feedbackTitle = document.createElement("span");
+      feedbackTitle.textContent = "Besonderheiten";
+      const feedbackHint = document.createElement("span");
+      feedbackHint.className = "activity-feedback-hint";
+      feedbackHint.textContent = feedback.notes ? "Eintrag vorhanden" : "Nach Abschluss notieren";
+      feedbackSummary.append(feedbackTitle, feedbackHint);
+      const feedbackForm = document.createElement("form");
+      feedbackForm.className = "activity-feedback-form";
+      const feedbackLabel = document.createElement("label");
+      feedbackLabel.textContent = "Gab es bei dieser Einheit Besonderheiten?";
+      const feedbackInput = document.createElement("textarea");
+      feedbackInput.name = "notes";
+      feedbackInput.rows = 3;
+      feedbackInput.maxLength = 4000;
+      feedbackInput.placeholder = "Zum Beispiel Schmerzen, ungewohnte Müdigkeit oder etwas, das besonders gut lief …";
+      feedbackInput.value = feedback.notes || "";
+      feedbackLabel.append(feedbackInput);
+      const feedbackButton = document.createElement("button");
+      feedbackButton.type = "submit";
+      feedbackButton.textContent = "Besonderheiten speichern";
+      feedbackForm.append(feedbackLabel, feedbackButton);
+      feedbackForm.addEventListener("submit", (event) => saveActivityFeedback(event, activity, feedbackButton));
+      feedbackDetails.append(feedbackSummary, feedbackForm);
+      card.append(feedbackDetails);
+    }
     root.append(card);
   });
   if (filteredActivities.length > 250) {
@@ -1034,11 +943,15 @@ function renderPlanned(planned) {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const calendarDisplay = state.data?.calendar_display || {};
+  const pastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
+  const futureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
   const historyStart = new Date(today);
-  historyStart.setDate(today.getDate() - PLANNED_HISTORY_WEEKS * 7);
+  historyStart.setDate(today.getDate() - pastWeeks * 7);
   const firstWeek = plannedWeekStart(historyStart);
-  const currentWeekIndex = PLANNED_HISTORY_WEEKS;
-  for (let weekIndex = 0; weekIndex < PLANNED_CALENDAR_WEEKS; weekIndex += 1) {
+  const currentWeekIndex = pastWeeks;
+  const calendarWeeks = pastWeeks + 1 + futureWeeks;
+  for (let weekIndex = 0; weekIndex < calendarWeeks; weekIndex += 1) {
     const weekStart = new Date(firstWeek);
     weekStart.setDate(firstWeek.getDate() + weekIndex * 7);
     const weekKey = localDateKey(weekStart);
@@ -1436,9 +1349,9 @@ function renderLibrary(workouts) {
         cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
         const meta = document.createElement("span");
         const syncLabel = workout.sync_status === "remote_missing"
-          ? "Remote nicht gefunden - wird bei Freigabe neu abgeglichen"
+          ? "Remote nicht gefunden - wird beim nächsten Sync neu abgeglichen"
           : workout.sync_status === "sync_error"
-            ? "Synchronisationsfehler - erneut freigeben"
+            ? "Synchronisationsfehler - beim nächsten Sync erneut versuchen"
             : workout.sync_status === "syncing"
               ? "Synchronisierung läuft"
               : workout.sync_status === "local"
@@ -1446,7 +1359,7 @@ function renderLibrary(workouts) {
                 : workout.external_id
                   ? "Mit Intervals.icu synchronisiert"
                   : "Lokal";
-        meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, syncLabel].filter(Boolean).join(" - ");
+        meta.textContent = [workout.date ? `Geplant: ${dateLabel(workout.date)}` : null, workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, syncLabel].filter(Boolean).join(" - ");
         heading.append(cardTitle, meta);
         const description = document.createElement("p");
         description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
@@ -1461,7 +1374,7 @@ function renderLibrary(workouts) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "secondary-button";
-        button.textContent = "Als lokalen Entwurf speichern";
+        button.textContent = "Als lokale Einheit einplanen";
         button.addEventListener("click", () => planLibraryWorkout(workout.id, dateInput, button));
         controls.append(dateLabelNode, button);
         card.append(heading, description, controls);
@@ -1500,13 +1413,13 @@ async function loadLibrary() {
 async function planLibraryWorkout(workoutId, dateInput, button) {
   if (!dateInput.value) { toast("Bitte ein Datum auswählen", true); return; }
   button.disabled = true;
-  button.textContent = "Lokaler Entwurf wird gespeichert…";
+  button.textContent = "Lokale Einheit wird gespeichert…";
   try {
     await api("/api/library/" + encodeURIComponent(workoutId) + "/plan", { method: "POST", body: JSON.stringify({ date: dateInput.value }) });
-    toast("Lokaler Entwurf erstellt");
+    toast("Lokale Bibliothekseinheit gespeichert");
     await load();
   } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Als lokalen Entwurf speichern"; }
+  finally { button.disabled = false; button.textContent = "Als lokale Einheit einplanen"; }
 }
 
 function renderProfile(profile) {
@@ -1732,7 +1645,6 @@ function metricSourceClass(source) {
   if (source === "Garmin Connect") return "metric-garmin";
   if (source === "Manuell") return "metric-manual";
   if (source && (source.startsWith("Intervals.icu") || source === "Aus Aktivitäten")) return "metric-intervals";
-  if (source === "KI-Schätzung" || source === "Berechnete Schätzung") return "metric-estimate";
   return "";
 }
 
@@ -1759,7 +1671,6 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
     if (className) item.classList.add(className);
   }
   source.className = metricSourceClass(metricData?.source);
-  if (metricData?.source === "KI-Schätzung" || metricData?.source === "Berechnete Schätzung") source.className = "metric-estimate";
   if (metricData?.source === "Garmin Connect") source.className = "metric-garmin";
   const valueRow = document.createElement("div");
   valueRow.className = "metric-value-row";
@@ -1904,24 +1815,6 @@ function renderPerformance(performance) {
     ["Halbmarathon (geschätzt)", compared(values.run_half_marathon_seconds, "run_half_marathon_seconds_30d"), formatDuration],
     ["Marathon (geschätzt)", compared(values.run_marathon_seconds, "run_marathon_seconds_30d"), formatDuration],
   ]);
-  const explanation = document.createElement("p");
-  explanation.className = "fine-print";
-  explanation.textContent = "Garmin-Connect-Werte werden als solche markiert und haben bei VO₂max sowie Laufprognosen Vorrang. Fehlen Garmin-Werte, werden Intervals.icu-Werte bzw. vorsichtige KI-Schätzungen verwendet.";
-  root.append(explanation);
-  const estimationError = state.data?.performance_refresh?.last_error;
-  if (estimationError) {
-    const error = document.createElement("p");
-    error.className = "error";
-    error.textContent = `KI-Schätzung fehlgeschlagen: ${estimationError}`;
-    root.append(error);
-  }
-  const estimationReason = performance.ai_estimates?.reason;
-  if (estimationReason && !estimationError) {
-    const note = document.createElement("p");
-    note.className = "fine-print estimate-note";
-    note.textContent = estimationReason;
-    root.append(note);
-  }
 }
 
 function updateHeaderAction() {
@@ -1931,7 +1824,7 @@ function updateHeaderAction() {
   if (panel === "dataPanel") {
     button.hidden = false;
     button.dataset.action = "performance";
-    button.title = "Aktuelle Leistungsdaten von Intervals.icu und KI aktualisieren";
+    button.title = "Aktuelle Leistungsdaten von Intervals.icu aktualisieren";
     button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
     button.textContent = state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin
       ? "Synchronisierung läuft…"
@@ -2085,6 +1978,12 @@ function renderSettings(data) {
       ? `${weatherLocation ? `Standort: ${weatherLocation} · ` : ""}${weather.fetched_at ? `letzte Abfrage: ${formatTime(weather.fetched_at)}` : "Standort im Profil hinterlegen"}`
       : "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
   }
+  const weatherSyncButton = $("#weatherSyncButton");
+  if (weatherSyncButton) {
+    const weatherSyncRunning = Boolean(state.localSync.weather);
+    weatherSyncButton.disabled = !weather.configured || weatherSyncRunning;
+    weatherSyncButton.textContent = weatherSyncRunning ? "Wetter wird aktualisiert…" : "Wetter aktualisieren";
+  }
   const connectionsSummary = $("#connectionsSummary");
   if (connectionsSummary) {
     connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Intervals", configured.intervals], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
@@ -2094,6 +1993,15 @@ function renderSettings(data) {
   const garminDays = $("#garminSyncDays");
   if (intervalsDays && document.activeElement !== intervalsDays) intervalsDays.value = data.sync_settings?.intervals_days || 90;
   if (garminDays && document.activeElement !== garminDays) garminDays.value = data.sync_settings?.garmin_days || 30;
+  const calendarDisplay = data.calendar_display || CALENDAR_DISPLAY_DEFAULTS;
+  const calendarPastWeeks = $("#calendarDisplayPastWeeks");
+  const calendarFutureWeeks = $("#calendarDisplayFutureWeeks");
+  const pastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
+  const futureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
+  if (calendarPastWeeks && document.activeElement !== calendarPastWeeks) calendarPastWeeks.value = pastWeeks;
+  if (calendarFutureWeeks && document.activeElement !== calendarFutureWeeks) calendarFutureWeeks.value = futureWeeks;
+  const calendarDisplaySummary = $("#calendarDisplaySummary");
+  if (calendarDisplaySummary) calendarDisplaySummary.textContent = `${pastWeeks} zurück · ${futureWeeks} voraus`;
   const intervalsSyncButton = $("#systemIntervalsSyncButton");
   const intervalsFullButton = $("#systemIntervalsFullResyncButton");
   const intervalsFullStatus = $("#intervalsFullResyncStatus");
@@ -2169,7 +2077,6 @@ function render(data) {
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
-  renderDrafts(data.drafts || []);
   renderPlanned(data.planned || []);
   renderLibrary(data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
@@ -2178,7 +2085,7 @@ function render(data) {
     const pending = Number(libraryState.local || 0) + Number(libraryState.sync_error || 0);
     const missing = Number(libraryState.remote_missing || 0);
     const stateHint = [
-      pending ? `${pending} lokale Einheit${pending === 1 ? "" : "en"} offen` : null,
+      pending ? `${pending} lokale Einheit${pending === 1 ? "" : "en"} noch nicht synchronisiert` : null,
       missing ? `${missing} Remote-Einheit${missing === 1 ? "" : "en"} nicht gefunden` : null,
     ].filter(Boolean).join(" · ");
     librarySyncDetail.textContent = data.library_sync?.last_error
@@ -2191,7 +2098,6 @@ function render(data) {
   renderProfile(data.profile);
   renderGarmin(data.garmin);
   renderCompetitions(data.competitions || []);
-  renderLocalFeedback(data);
   renderPlanning(data);
   renderExternalCalendar(data);
   renderCompetitionSync(data);
@@ -2311,8 +2217,7 @@ async function syncNow(event) {
   try {
     const result = await api("/api/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
     const periodLabel = result.activity_days === -1 ? "aller verfügbaren Daten" : `der letzten ${result.activity_days} Tage`;
-    toast(result.status === "ok" ? `${result.activities} Aktivitäten ${periodLabel} aktualisiert${result.estimates ? ` · ${result.estimates} KI-Schätzungen ergänzt` : ""}` : "Aktualisierung läuft bereits");
-    if (result.estimate_error) toast(`Trainingsdaten aktualisiert, KI-Schätzung fehlgeschlagen: ${result.estimate_error}`, true);
+    toast(result.status === "ok" ? `${result.activities} Aktivitäten ${periodLabel} aktualisiert` : "Aktualisierung läuft bereits");
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
@@ -2347,8 +2252,7 @@ async function refreshPerformance() {
   button.textContent = "Aktualisierung läuft…";
   try {
     const result = await api("/api/performance/refresh", { method: "POST", body: "{}" });
-    toast(result.status === "ok" ? `Leistungsdaten aktualisiert${result.estimates ? ` · ${result.estimates} KI-Schätzungen ergänzt` : ""}` : "Aktualisierung läuft bereits");
-    if (result.estimate_error) toast(`Leistungsdaten aktualisiert, KI-Schätzung fehlgeschlagen: ${result.estimate_error}`, true);
+    toast(result.status === "ok" ? "Leistungsdaten aktualisiert" : "Aktualisierung läuft bereits");
     invalidateContextPreview();
     await load();
   } catch (error) {
@@ -2383,11 +2287,31 @@ async function syncExternalCalendar() {
   try {
     const result = await api("/api/external-calendar/sync", { method: "POST", body: "{}" });
     toast(result.status === "ok" ? `Kalender synchronisiert · ${result.events || 0} Einträge` : "Kalender wird bereits synchronisiert");
-    if (result.replan_changes) toast(`${result.replan_changes} Trainingsentwurf/-entwürfe als Anpassung vorgeschlagen`);
+    if (result.replan_changes) toast(`${result.replan_changes} lokale Bibliothekseinheit(en) als Anpassung vorgeschlagen`);
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
   finally { state.localSync.externalCalendar = false; button.disabled = false; button.textContent = "Synchronisieren"; }
+}
+
+async function syncWeather() {
+  const button = $("#weatherSyncButton");
+  if (!button) return;
+  state.localSync.weather = true;
+  button.disabled = true;
+  button.classList.add("busy");
+  button.textContent = "Wetter wird aktualisiert…";
+  try {
+    const result = await api("/api/weather/sync", { method: "POST", body: "{}" });
+    toast(result.status === "ok" ? "Open-Meteo-Wetter aktualisiert" : result.status === "stale" ? "Open-Meteo nicht erreichbar · letzte Daten bleiben sichtbar" : "Bitte zuerst einen Wetterort im Profil hinterlegen", result.status === "stale");
+    invalidateContextPreview();
+    await load();
+  } catch (error) { toast(error.message, true); await load(); }
+  finally {
+    state.localSync.weather = false;
+    button.classList.remove("busy");
+    renderSettings(state.data || {});
+  }
 }
 
 async function fullResync(source) {
@@ -2449,15 +2373,24 @@ async function saveProfile(event) {
   } catch (error) { toast(error.message, true); }
 }
 
-async function saveFeedback(event) {
+async function saveActivityFeedback(event, activity, button) {
   event.preventDefault();
   const form = event.currentTarget;
-  const payload = Object.fromEntries(new FormData(form).entries());
+  const activityId = activity.id ?? activity.activityId ?? activity.external_id;
+  const payload = {
+    activity_name: activity.name || activity.type || "",
+    activity_date: activity.start_date_local || "",
+    notes: String(new FormData(form).get("notes") || ""),
+  };
+  button.disabled = true;
   try {
-    await api("/api/feedback", { method: "POST", body: JSON.stringify(payload) });
-    toast("Lokales Feedback gespeichert");
+    await api(`/api/activities/${encodeURIComponent(String(activityId))}/feedback`, { method: "POST", body: JSON.stringify(payload) });
+    toast(payload.notes.trim() ? "Besonderheiten gespeichert" : "Besonderheiten entfernt");
     await load();
-  } catch (error) { toast(error.message, true); }
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
+  }
 }
 
 async function prepareReplan() {
@@ -2569,6 +2502,33 @@ async function saveThinkingLevel(event) {
   } finally { select.disabled = false; }
 }
 
+async function saveCalendarDisplaySettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = $("#calendarDisplaySaveButton");
+  if (!button) return;
+  button.disabled = true;
+  button.textContent = "Wird gespeichert...";
+  try {
+    await api("/api/settings/calendar-display", {
+      method: "PUT",
+      body: JSON.stringify({
+        past_weeks: $("#calendarDisplayPastWeeks")?.value,
+        future_weeks: $("#calendarDisplayFutureWeeks")?.value,
+      }),
+    });
+    toast("Kalenderansicht gespeichert");
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    renderSettings(state.data || {});
+  } finally {
+    button.disabled = false;
+    button.textContent = "Kalenderansicht speichern";
+    form.querySelectorAll("input").forEach((input) => { input.disabled = false; });
+  }
+}
+
 async function downloadDiagnostics() {
   const button = $("#diagnosticsButton");
   button.disabled = true;
@@ -2647,9 +2607,9 @@ $("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync
 $("#competitionSyncButton").addEventListener("click", syncCompetitions);
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 $("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar);
+$("#weatherSyncButton").addEventListener("click", syncWeather);
 $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
 $("#profileForm").addEventListener("submit", saveProfile);
-$("#feedbackForm").addEventListener("submit", saveFeedback);
 $("#replanButton").addEventListener("click", prepareReplan);
 $("#applyReplanButton").addEventListener("click", applyReplan);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; });
@@ -2657,6 +2617,7 @@ $("#competitionList").addEventListener("input", () => { state.profileDirty = tru
 $("#addCompetitionButton").addEventListener("click", addCompetition);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
+$("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
 $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#chatResetButton").addEventListener("click", resetCoachChat);
@@ -2691,7 +2652,7 @@ window.addEventListener("resize", updateChatComposerVisibility);
 window.addEventListener("pagehide", savePwaActivity);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js");
 setInterval(() => {
-  if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.performance || state.localSync.intervalsFull || state.localSync.garminFull) load();
+  if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.weather || state.localSync.performance || state.localSync.intervalsFull || state.localSync.garminFull) load();
 }, 1500);
 setInterval(() => {
   if (state.data && document.visibilityState === "visible") load();
