@@ -71,6 +71,7 @@ function cookie(name) {
 function showLogin() {
   state.data = null;
   $("#appShell").hidden = true;
+  $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
   if (!dialog.open) dialog.showModal();
   $("#loginPassword").focus();
@@ -131,6 +132,7 @@ async function bootstrapAuth() {
     const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" });
     const status = await response.json();
     if (status.authenticated) {
+      $("#authLoading").hidden = true;
       $("#loginDialog").close();
       showAppShellLoading();
       notePwaActivity();
