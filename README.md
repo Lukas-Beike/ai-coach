@@ -30,6 +30,10 @@ It is not intended to be exposed directly to the public internet.
 - If adaptive planning shortens a local workout or reduces its intensity due
   to a read-only iCalendar appointment, the linked planned workout records
   that reason and the original versus adjusted duration after approval.
+- Google Calendar has no editable iCalendar category field. Add
+  `[NO_TRAINING]` to the event description for informational appointments;
+  the event remains visible in the external-calendar list but is excluded
+  from coaching and adaptive planning.
 - Optional weather integration via Open-Meteo: a city or postal code in the
   profile enables a cached 14-day forecast in the planned calendar. For
   outdoor runs and rides, the app suggests a weather-aware time window for

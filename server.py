@@ -752,6 +752,7 @@ def initialise_database() -> None:
                 end_local TEXT NOT NULL,
                 duration_minutes INTEGER NOT NULL,
                 all_day INTEGER NOT NULL DEFAULT 0,
+                training_relevant INTEGER NOT NULL DEFAULT 1,
                 updated_at TEXT NOT NULL,
                 UNIQUE(uid, start_local)
             );
@@ -779,6 +780,9 @@ def initialise_database() -> None:
             existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(competitions)").fetchall()}
             if column not in existing_columns:
                 db.execute(f"ALTER TABLE competitions ADD COLUMN {column} {definition}")
+        external_columns = {row["name"] for row in db.execute("PRAGMA table_info(external_calendar_events)").fetchall()}
+        if "training_relevant" not in external_columns:
+            db.execute("ALTER TABLE external_calendar_events ADD COLUMN training_relevant INTEGER NOT NULL DEFAULT 1")
         db.execute(
             "UPDATE competitions SET category=CASE WHEN priority IN ('A','B','C') THEN 'RACE_' || priority ELSE 'RACE_B' END "
             "WHERE category IS NULL OR category=''"
@@ -1967,6 +1971,14 @@ def _ical_duration(raw: str) -> timedelta | None:
     return duration if duration.total_seconds() > 0 else None
 
 
+ICAL_NO_TRAINING_MARKER = re.compile(r"(?<![A-Z0-9_])\[NO_TRAINING\](?![A-Z0-9_])", re.IGNORECASE)
+
+
+def ical_training_relevant(name: Any, description: Any) -> bool:
+    """Ignore only events explicitly marked as informational in their description."""
+    return not bool(ICAL_NO_TRAINING_MARKER.search(f"{name or ''}\n{description or ''}"))
+
+
 def parse_ical_calendar(payload: bytes) -> list[dict[str, Any]]:
     """Parse only bounded, scheduling-relevant fields from an iCalendar feed."""
     events: list[dict[str, Any]] = []
@@ -1995,6 +2007,7 @@ def parse_ical_calendar(payload: bytes) -> list[dict[str, Any]]:
                         "end_local": end.isoformat(),
                         "duration_minutes": duration,
                         "all_day": bool(current.get("all_day")),
+                        "training_relevant": ical_training_relevant(current.get("name"), current.get("description")),
                     })
             current = None
             continue
@@ -2021,6 +2034,8 @@ def parse_ical_calendar(payload: bytes) -> list[dict[str, Any]]:
             duration = _ical_duration(raw_value)
             if duration:
                 current["duration"] = duration
+        elif key == "DESCRIPTION":
+            current["description"] = parse_ics_value(raw_value)[:2000]
         elif key == "STATUS":
             current["status"] = parse_ics_value(raw_value)[:30]
     events.sort(key=lambda item: (item["start_local"], item["name"]))
@@ -2051,11 +2066,12 @@ def external_calendar_url(value: Any) -> str:
     return raw
 
 
-def list_external_calendar_events(limit: int = 300) -> list[dict[str, Any]]:
+def list_external_calendar_events(limit: int = 300, training_relevant_only: bool = False) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
+        relevance_filter = " AND training_relevant = 1" if training_relevant_only else ""
         rows = db.execute(
-            "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at "
-            "FROM external_calendar_events WHERE event_date >= ? ORDER BY start_local LIMIT ?",
+            "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at "
+            f"FROM external_calendar_events WHERE event_date >= ?{relevance_filter} ORDER BY start_local LIMIT ?",
             (local_now().date().isoformat(), max(1, min(int(limit), 1000))),
         ).fetchall()
     return [dict(row) for row in rows]
@@ -2094,9 +2110,9 @@ def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
             db.execute("DELETE FROM external_calendar_events")
             for event in events:
                 db.execute(
-                    "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (event["id"], event["uid"], event["name"], event["event_date"], event["start_local"], event["end_local"], event["duration_minutes"], int(event["all_day"]), now),
+                    "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (event["id"], event["uid"], event["name"], event["event_date"], event["start_local"], event["end_local"], event["duration_minutes"], int(event["all_day"]), int(event.get("training_relevant", True)), now),
                 )
         set_kv("last_external_calendar_sync_at", now)
         set_kv("last_external_calendar_sync_error", "")
@@ -3713,6 +3729,8 @@ def adaptive_replan_preview() -> dict[str, Any]:
     external_events = list_external_calendar_events(1000)
     events_by_date: dict[str, list[dict[str, Any]]] = {}
     for event in external_events:
+        if not bool(event.get("training_relevant", True)):
+            continue
         events_by_date.setdefault(str(event.get("event_date") or ""), []).append(event)
     for event_date, events in events_by_date.items():
         if event_date >= today:
@@ -5048,7 +5066,7 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
         "external_calendar": {
             "provider": "iCalendar",
             "read_only": True,
-            "events": list_external_calendar_events(),
+            "events": list_external_calendar_events(training_relevant_only=True),
         },
         "current_performance": current_performance_context(snapshot),
         "garmin": garmin_coach_context(),

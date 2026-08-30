@@ -99,13 +99,25 @@ class CoachTests(unittest.TestCase):
             b"DTSTART;TZID=Europe/Berlin:20260902T100000\r\n"
             b"DTEND;TZID=Europe/Berlin:20260902T130000\r\nSUMMARY:Family appointment\r\n"
             b"END:VEVENT\r\nBEGIN:VEVENT\r\nUID:all-day\r\nDTSTART;VALUE=DATE:20260903\r\n"
-            b"DTEND;VALUE=DATE:20260904\r\nSUMMARY:Travel\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            b"DTEND;VALUE=DATE:20260904\r\nSUMMARY:Travel\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:info-only\r\nDTSTART;VALUE=DATE:20260904\r\n"
+            b"SUMMARY:Team info\r\nDESCRIPTION: [NO_TRAINING] Nur zur Information\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
         self.assertEqual(events[0]["duration_minutes"], 180)
         self.assertEqual(events[0]["event_date"], "2026-09-02")
         self.assertFalse(events[0]["all_day"])
         self.assertEqual(events[1]["duration_minutes"], 1440)
         self.assertTrue(events[1]["all_day"])
+        self.assertFalse(events[2]["training_relevant"])
+
+    def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("info-only", "info-only", "Informational event", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, 0, server.utc_now()),
+            )
+        self.assertEqual(server.list_external_calendar_events(1000, training_relevant_only=True), [])
 
     def test_external_calendar_sync_keeps_url_server_side_and_replaces_events(self):
         payload = (
