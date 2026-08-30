@@ -83,10 +83,13 @@ jobs:
               echo "Cannot validate the merged version bump without a previous release tag."
               exit 1
             fi
-            IFS=. read -r latest_major latest_minor latest_patch <<< "$latest_tag"
-            expected_version="${latest_major}.${latest_minor}.$((latest_patch + 1))"
-            if [[ "$app_version" != "$expected_version" ]]; then
-              echo "Merged APP_VERSION $app_version is not the next patch version after $latest_tag (expected $expected_version)."
+            merged_version="${PR_HEAD#chore/release-version-}"
+            if [[ ! "$merged_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || "$app_version" != "$merged_version" ]]; then
+              echo "Merged APP_VERSION $app_version does not match the version bump branch $PR_HEAD."
+              exit 1
+            fi
+            if ! version_is_greater "$app_version" "$latest_tag"; then
+              echo "Merged APP_VERSION $app_version must be greater than the latest release $latest_tag."
               exit 1
             fi
           elif [[ -n "$latest_tag" && "$latest_tag" != "$app_version" ]]; then
