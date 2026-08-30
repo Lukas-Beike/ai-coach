@@ -479,6 +479,10 @@ h2 {
 .context-preview-content pre { max-height: 360px; margin: 0; overflow: auto; padding: 0 13px 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; font: .68rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .settings-section { display: grid; gap: 12px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 18px; padding: 17px; background: rgba(28, 28, 30, .68); }
 .collapsible-section > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -17px -17px 0; padding: 17px; color: var(--ink); list-style-position: inside; }
+#settingsPanel .collapsible-section:not([open]) { gap: 0; margin-bottom: 10px; padding: 0; }
+#settingsPanel .collapsible-section:not([open]) > summary { margin: 0; padding: 12px 17px; }
+#settingsPanel .collapsible-section.context-preview:not([open]) { margin-top: 0; }
+#settingsPanel .collapsible-section:last-child { margin-bottom: 0; }
 .profile-section.collapsible-section > summary { margin: -16px -16px 0; padding: 16px; }
 .collapsible-section > summary::marker { color: var(--accent-bright); }
 .collapsible-section > summary:hover, .collapsible-section[open] > summary { background: rgba(255, 255, 255, .035); }
@@ -596,6 +600,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .section-heading { margin-right: 0; margin-left: 0; }
   .settings-section { gap: 10px; padding: 14px; border-radius: 16px; }
   .collapsible-section > summary { margin: -14px -14px 0; padding: 14px; }
+  #settingsPanel .collapsible-section:not([open]) > summary { padding: 10px 14px; }
   .planned-week > summary { align-items: flex-start; }
   .planned-week-summary { max-width: 52%; line-height: 1.35; }
   .settings-section-heading,
