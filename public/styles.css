@@ -402,17 +402,6 @@ h2 {
 .competition-editor-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .remove-context-button { border: 1px solid rgba(255, 69, 58, .35) !important; padding: 7px 10px !important; color: #ff9a93 !important; background: transparent !important; box-shadow: none !important; font-size: .72rem; }
 .context-empty { margin: 0; padding: 16px; border: 1px dashed var(--line-strong); border-radius: 13px; color: var(--subtle); text-align: center; font-size: .78rem; }
-.public-calendar-import { display: grid; gap: 10px; padding: 14px; border: 1px dashed var(--line-strong); border-radius: 15px; background: rgba(255, 255, 255, .018); }
-.public-calendar-import h3 { margin: 0; color: var(--ink); font-size: .92rem; }
-.public-calendar-import p { margin: 0; color: var(--muted); font-size: .73rem; line-height: 1.45; }
-.public-calendar-import .secondary-button { justify-self: start; }
-.public-calendar-candidates { display: grid; gap: 8px; }
-.public-calendar-candidate { display: grid; gap: 8px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .025); }
-.public-calendar-candidate > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.public-calendar-candidate strong { color: var(--ink); font-size: .78rem; }
-.public-calendar-candidate span, .public-calendar-candidate p { color: var(--subtle); font-size: .68rem; }
-.public-calendar-candidate p { margin: 0; white-space: pre-wrap; }
-.public-calendar-candidate .secondary-button { justify-self: start; padding: 7px 10px; font-size: .68rem; }
 
 .model-selector, .diagnostic-actions { padding: 18px 0 10px; border-top: 1px solid var(--line); }
 .context-preview { margin-top: 8px; padding: 18px 0 90px; border-top: 1px solid var(--line); }

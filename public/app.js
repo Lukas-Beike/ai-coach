@@ -382,6 +382,7 @@ function renderPlanning(data) {
 }
 
 function renderPublicCalendar(data) {
+  return;
   const root = $("#publicCalendarCandidates");
   if (!root) return;
   root.replaceChildren();
@@ -1130,15 +1131,19 @@ function competitionEditor(competition = {}, index = 0) {
   mainGrid.append(
     contextField("Name", "name", competition.name, { placeholder: "Münsterland Giro" }),
     contextField("Datum", "event_date", competition.event_date, { type: "date" }),
+    contextField("Startzeit (lokal)", "start_date_local", (competition.start_date_local || "").slice(0, 16), { type: "datetime-local" }),
     contextField("Sportart", "sport", competition.sport || "Radfahren", { placeholder: "Radfahren, Rad indoor, Laufen oder Krafttraining" }),
-    contextField("Priorität", "priority", competition.priority || "B", { choices: ["A", "B", "C"] }),
-    contextField("Distanz", "distance", competition.distance, { placeholder: "125 km" })
+    contextField("Kategorie", "category", competition.category || `RACE_${competition.priority || "B"}`, { choices: ["RACE_A", "RACE_B", "RACE_C"] }),
+    contextField("Dauer (Sekunden)", "moving_time", competition.moving_time, { type: "number", placeholder: "14400" }),
+    contextField("Distanz (Meter)", "distance", competition.distance, { placeholder: "125000" }),
+    contextField("Externe ID", "external_id", competition.external_id, { placeholder: "Wird automatisch vergeben" })
   );
   card.append(
     top,
     mainGrid,
     contextField("Ergebnisziel", "target", competition.target, { multiline: true, placeholder: "Zielzeit, Platzierung, Finish-Ziel…" }),
     contextField("Streckenprofil", "course_profile", competition.course_profile, { multiline: true, placeholder: "Höhenmeter, Technik, erwartete Dauer…" }),
+    contextField("Beschreibung", "description", competition.description, { multiline: true, placeholder: "Beschreibung des Intervals.icu-Events…" }),
     contextField("Notizen", "notes", competition.notes, { multiline: true })
   );
   return card;
@@ -1571,7 +1576,6 @@ function render(data) {
   renderCompetitions(data.competitions || []);
   renderLocalFeedback(data);
   renderPlanning(data);
-  renderPublicCalendar(data);
   renderCompetitionSync(data);
   renderPerformance(data.performance);
   renderModel(data.model);
@@ -1949,7 +1953,6 @@ $("#replanButton").addEventListener("click", prepareReplan);
 $("#applyReplanButton").addEventListener("click", applyReplan);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; });
 $("#addCompetitionButton").addEventListener("click", addCompetition);
-$("#publicCalendarImportButton").addEventListener("click", importPublicCalendar);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
