@@ -333,6 +333,80 @@ The backend is a Python standard-library HTTP server. The frontend is served
 from `public/` as a browser PWA. Runtime state belongs in `data/` and is not
 included in Docker builds.
 
+### Local Docker development on Windows
+
+Use the local Docker image as the development runtime. The pinned
+`sqlcipher3-binary` package does not provide the required Windows wheel, and
+the application requires SQLCipher for secure startup. Do not remove the
+dependency or bypass the secure-startup check to run the application natively
+on Windows.
+
+From PowerShell in the repository root, create the ignored local configuration
+and persistent data directory:
+
+```powershell
+Copy-Item .env.example .env
+New-Item -ItemType Directory -Force .\data
+```
+
+Set the required API values and a stable `APP_PASSWORD` of at least 12
+characters in `.env`. For Docker, use `DATA_DIR=/data` and
+`GARMINTOKENS=/data/garmin_tokens`. Keep `.env`, `data/`, Garmin credentials,
+tokens, encrypted databases, and recovery backups private; never commit or
+print them.
+
+Build the image after application, frontend, dependency, Dockerfile, or
+startup changes:
+
+```powershell
+docker build -t ai-coach:local .
+```
+
+For real Garmin data, complete the one-time login interactively. Enter the
+Garmin email, password, and MFA code in the local terminal; they do not need to
+be stored in `.env` after the token store exists:
+
+```powershell
+docker run --rm -it `
+  --env-file .env `
+  -v "${PWD}\data:/data" `
+  ai-coach:local `
+  python /app/garmin-login.py
+```
+
+Start the local application with the persistent data mount:
+
+```powershell
+docker run -d --name ai-coach `
+  --restart unless-stopped `
+  --read-only `
+  --security-opt no-new-privileges:true `
+  -p 8090:8090 `
+  -v "${PWD}\data:/data" `
+  --env-file .env `
+  ai-coach:local
+```
+
+After code changes, rebuild the image, then recreate only the container while
+retaining the same `data` mount:
+
+```powershell
+docker stop ai-coach
+docker rm ai-coach
+```
+
+Never use `docker rm -v`, and never delete or replace the `data` directory.
+Open [http://localhost:8090](http://localhost:8090) for browser verification.
+Use `docker logs -f ai-coach` and
+`Invoke-WebRequest http://localhost:8090/api/health` for local diagnostics.
+Do not expose port 8090 directly to the public internet.
+
+For UI work that does not need a live Garmin account, use the checked-in
+fixture instead. Mount it into the container and set
+`GARMIN_FIXTURE_PATH=/app/garmin-fixture.example.json`; no Garmin email,
+password, or token store is then required. The fixture is test data and must
+not contain credentials.
+
 Run the test suite and syntax checks from the project root:
 
 ```powershell
