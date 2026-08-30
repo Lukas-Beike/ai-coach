@@ -75,6 +75,25 @@ function showLogin() {
   $("#loginPassword").focus();
 }
 
+function showAppShellLoading() {
+  const shell = $("#appShell");
+  const statusCard = $("#statusCard");
+  shell.hidden = false;
+  shell.classList.add("is-loading");
+  shell.setAttribute("aria-busy", "true");
+  statusCard.hidden = false;
+  statusCard.classList.remove("warning");
+  statusCard.classList.add("working");
+  $("#statusTitle").textContent = "Trainingsbereich wird geladenâ€¦";
+  $("#statusDetail").textContent = "Deine Trainingsdaten werden im Hintergrund geladen";
+}
+
+function finishAppShellLoading() {
+  const shell = $("#appShell");
+  shell.classList.remove("is-loading");
+  shell.removeAttribute("aria-busy");
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: "same-origin",
@@ -112,10 +131,9 @@ async function bootstrapAuth() {
     const status = await response.json();
     if (status.authenticated) {
       $("#loginDialog").close();
-      $("#appShell").hidden = false;
+      showAppShellLoading();
       notePwaActivity();
-      if (status.state) render(status.state);
-      else await load();
+      await load();
     } else showLogin();
   } catch (_) {
     $("#loginError").textContent = "Server nicht erreichbar.";
@@ -134,13 +152,12 @@ async function login(event) {
   buttonLabel.textContent = "Anmelden …";
   error.textContent = "";
   try {
-    const result = await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#loginPassword").value }) });
+    await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#loginPassword").value }) });
     $("#loginPassword").value = "";
     $("#loginDialog").close();
-    $("#appShell").hidden = false;
+    showAppShellLoading();
     notePwaActivity();
-    if (result.state) render(result.state);
-    else await load();
+    await load();
   } catch (exception) {
     error.textContent = exception.message;
   } finally {
@@ -1914,8 +1931,19 @@ function render(data) {
 }
 
 async function load() {
-  try { render(await api("/api/state")); }
-  catch (error) { if (!/Authentication/.test(error.message)) toast(error.message, true); }
+  try {
+    render(await api("/api/state"));
+  } catch (error) {
+    if (/Authentication/.test(error.message)) return;
+    const statusCard = $("#statusCard");
+    statusCard.hidden = false;
+    statusCard.classList.add("warning");
+    $("#statusTitle").textContent = "Trainingsdaten konnten nicht geladen werden";
+    $("#statusDetail").textContent = error.message;
+    toast(error.message, true);
+  } finally {
+    if (!$("#appShell").hidden) finishAppShellLoading();
+  }
 }
 
 function queueChatMessage(message, mode) {
