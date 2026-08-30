@@ -46,6 +46,32 @@ class CoachTests(unittest.TestCase):
         server.save_profile({"weather_location": "Köln"})
         self.assertEqual(server.get_kv(server.WEATHER_CACHE_KEY), "")
 
+    def test_local_public_state_does_not_fetch_weather_or_github(self):
+        server.save_profile({"weather_location": "Berlin"})
+        with patch.object(server, "_fetch_weather_forecast", side_effect=AssertionError("weather must stay local")), patch.object(
+            server, "fetch_github_latest_release", side_effect=AssertionError("github must stay local")
+        ):
+            state = server.public_state(local_only=True)
+        self.assertTrue(state["configured"]["weather"])
+        self.assertTrue(state["weather"]["loading"])
+        self.assertEqual(state["app"]["github_release"]["status"], "loading")
+
+    def test_weather_background_sync_refreshes_and_reuses_three_hour_cache(self):
+        server.save_profile({"weather_location": "Berlin"})
+        forecast = {
+            "query": "Berlin",
+            "location": {"name": "Berlin", "country": "Deutschland"},
+            "model": "ECMWF",
+            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
+            "fetched_at": server.utc_now(),
+        }
+        with patch.object(server, "_fetch_weather_forecast", return_value=forecast) as fetch:
+            first = server.sync_weather("test")
+            second = server.sync_weather("test")
+        self.assertEqual(first["status"], "ok")
+        self.assertEqual(second["status"], "ok")
+        fetch.assert_called_once_with("Berlin")
+
     def test_local_feedback_is_persisted_without_provider_values(self):
         result = server.save_checkin({
             "checkin_date": date.today().isoformat(), "soreness": "7", "stress": "4", "motivation": "8",

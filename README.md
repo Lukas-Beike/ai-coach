@@ -67,6 +67,30 @@ It is not intended to be exposed directly to the public internet.
   API. Account dollar balances are available through the OpenAI billing
   dashboard or authorized organization access, not through this application.
 
+## Loading and synchronization
+
+After login, the chat and all data already stored locally are rendered first.
+The browser then loads the current remote-enriched view in the background. The
+authentication request itself does not force a new Intervals.icu, Garmin, or
+calendar synchronization: those providers are synchronized at server
+startup, once per calendar day in the background, or on demand from the System
+tab. The selected activity windows (Intervals.icu and Garmin) are retained
+locally and can be changed in that tab.
+
+The browser refreshes the local/remote view every minute while the PWA is
+visible and polls more frequently while a manual synchronization is running.
+Open-Meteo uses the profile location, keeps a three-hour server-side forecast
+cache, and refreshes that location in the background every three hours. A
+visible view also refreshes it when the cache has expired.
+GitHub release information is checked at most every 15 minutes. The morning
+check-in is generated at most once per local calendar day when its required
+integrations are configured.
+
+New activities become available to the coach after the startup/daily
+Intervals.icu sync, a manual synchronization, or a chat request that
+explicitly asks for current/latest training data. The browser's regular state
+poll only reads the local snapshot; it does not contact Intervals.icu.
+
 ## Target competitions and Intervals.icu
 
 Target competitions are entered manually in the profile with the Intervals.icu

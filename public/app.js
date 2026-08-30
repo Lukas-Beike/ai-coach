@@ -1,6 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 const state = {
   data: null,
+  loadSequence: 0,
   busy: false,
   chatQueue: [],
   chatQueueSequence: 0,
@@ -133,7 +134,7 @@ async function bootstrapAuth() {
       $("#loginDialog").close();
       showAppShellLoading();
       notePwaActivity();
-      await load();
+      await loadInitialState();
     } else showLogin();
   } catch (_) {
     $("#loginError").textContent = "Server nicht erreichbar.";
@@ -157,7 +158,7 @@ async function login(event) {
     $("#loginDialog").close();
     showAppShellLoading();
     notePwaActivity();
-    await load();
+    await loadInitialState();
   } catch (exception) {
     error.textContent = exception.message;
   } finally {
@@ -647,6 +648,10 @@ function renderWeatherNotice(weather) {
   notice.className = "weather-notice";
   if (!weather?.configured) {
     notice.textContent = "Wetterhinweise: Hinterlege im Profil einen Wetterort (Stadt oder PLZ).";
+    return;
+  }
+  if (weather.loading) {
+    notice.textContent = weather.message || "Wetterdaten werden nachgeladen.";
     return;
   }
   if (weather.error && !weather.days?.length) {
@@ -1795,6 +1800,15 @@ function renderGithubRelease(app = {}) {
   const available = release.status === "ok";
   statusNode.classList.toggle("error", !available && release.status === "unavailable");
   if (!available) {
+    if (release.status === "loading") {
+      statusNode.classList.remove("error");
+      statusNode.textContent = release.message || "GitHub-Release wird nachgeladen.";
+      if (summaryNode) summaryNode.textContent = "Wird geladen";
+      changelogNode.textContent = "Release-Informationen werden nachgeladen.";
+      linkNode.hidden = true;
+      linkNode.removeAttribute("href");
+      return;
+    }
     statusNode.textContent = release.status === "disabled"
       ? "GitHub-Release-Prüfung ist nicht konfiguriert."
       : (release.message || "GitHub-Release konnte nicht geladen werden.");
@@ -1816,6 +1830,7 @@ function renderGithubRelease(app = {}) {
 function renderSettings(data) {
   const configured = data.configured || {};
   const garmin = data.garmin || {};
+  const weather = data.weather || {};
   const setStatus = (selector, ok, text) => {
     const node = $(selector);
     if (!node) return;
@@ -1825,9 +1840,17 @@ function renderSettings(data) {
   setStatus("#openaiConnectionStatus", configured.openai, configured.openai ? "Konfiguriert" : "Nicht konfiguriert");
   setStatus("#intervalsConnectionStatus", configured.intervals, configured.intervals ? "Konfiguriert" : "Nicht konfiguriert");
   setStatus("#garminConnectionStatus", garmin.configured, garmin.configured ? (garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert") : "Nicht konfiguriert");
+  const weatherLocation = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
+  setStatus("#weatherConnectionStatus", weather.configured, weather.configured ? (weather.loading ? "Wird geladen" : "Konfiguriert") : "Nicht konfiguriert");
+  const weatherDetail = $("#weatherConnectionDetail");
+  if (weatherDetail) {
+    weatherDetail.textContent = weather.configured
+      ? `${weatherLocation ? `Standort: ${weatherLocation} · ` : ""}${weather.fetched_at ? `letzte Abfrage: ${formatTime(weather.fetched_at)}` : "Standort im Profil hinterlegen"}`
+      : "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
+  }
   const connectionsSummary = $("#connectionsSummary");
   if (connectionsSummary) {
-    connectionsSummary.textContent = [["OpenAI", configured.openai], ["Intervals", configured.intervals], ["Garmin", garmin.configured]]
+    connectionsSummary.textContent = [["OpenAI", configured.openai], ["Intervals", configured.intervals], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
       .map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
   }
   const intervalsDays = $("#intervalsSyncDays");
@@ -1933,9 +1956,11 @@ function render(data) {
   updateHeaderAction();
 }
 
-async function load() {
+async function load(path = "/api/state") {
+  const requestSequence = ++state.loadSequence;
   try {
-    render(await api("/api/state"));
+    const payload = await api(path);
+    if (requestSequence === state.loadSequence) render(payload);
   } catch (error) {
     if (/Authentication/.test(error.message)) return;
     const statusCard = $("#statusCard");
@@ -1947,6 +1972,11 @@ async function load() {
   } finally {
     if (!$("#appShell").hidden) finishAppShellLoading();
   }
+}
+
+async function loadInitialState() {
+  await load("/api/state/local");
+  if (state.data) load();
 }
 
 function queueChatMessage(message, mode) {
