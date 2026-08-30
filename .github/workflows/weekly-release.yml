@@ -78,6 +78,15 @@ jobs:
             return 1
           }
 
+          enable_auto_merge() {
+            local pull_request_number="$1"
+            local auto_merge_enabled
+            auto_merge_enabled="$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json autoMergeRequest --jq 'if .autoMergeRequest == null then "false" else "true" end')"
+            if [[ "$auto_merge_enabled" != "true" ]]; then
+              gh pr merge "$pull_request_number" --repo "$REPOSITORY" --auto --squash
+            fi
+          }
+
           version_merge=false
           if [[ "$EVENT_NAME" == "pull_request" && "$PR_MERGED" == "true" && "$PR_BASE" == "develop" && "$PR_HEAD" == chore/release-version-* ]]; then
             version_merge=true
@@ -141,14 +150,16 @@ jobs:
             existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head develop --state open --json number --jq '.[0].number // empty')"
             if [[ -n "$existing_pr" ]]; then
               echo "Release promotion PR #$existing_pr is already open."
+              enable_auto_merge "$existing_pr"
               exit 0
             fi
-            gh pr create \
+            promotion_pr_url="$(gh pr create \
               --repo "$REPOSITORY" \
               --base main \
               --head develop \
               --title "chore(release): promote $app_version to main" \
-              --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container."
+              --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container.")"
+            enable_auto_merge "$promotion_pr_url"
             exit 0
           fi
 
@@ -195,12 +206,13 @@ jobs:
           git add server.py
           git commit -m "chore(release): set application version to $next_tag"
           git push --set-upstream origin "$version_branch"
-          gh pr create \
+          version_pr_url="$(gh pr create \
             --repo "$REPOSITORY" \
             --base develop \
             --head "$version_branch" \
             --title "chore(release): set application version to $next_tag" \
-            --body "Synchronize APP_VERSION with the upcoming GitHub release $next_tag. Merge this PR to promote the release to main."
+            --body "Synchronize APP_VERSION with the upcoming GitHub release $next_tag. Merge this PR to promote the release to main.")"
+          enable_auto_merge "$version_pr_url"
 
   create-release:
     if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'develop'
