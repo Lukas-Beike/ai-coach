@@ -6,8 +6,8 @@ Intervals Coach is a private, mobile-first PWA for one athlete. The backend is
 a Python `http.server` application with SQLite/SQLCipher persistence. It reads
 Intervals.icu data and, optionally, Garmin Connect data, sends a sanitised
 training context to the OpenAI Responses API, stores local application state,
-and creates local workout drafts that require explicit approval before being
-pushed to the Intervals.icu calendar.
+and stores planned workouts directly in the local training library for later
+synchronization to Intervals.icu.
 
 The application is intentionally standalone. Keep it on a trusted LAN or
 private VPN; it must not be exposed directly to the public internet.
@@ -29,10 +29,10 @@ private VPN; it must not be exposed directly to the public internet.
 - An existing plaintext SQLite database may be migrated to SQLCipher. The
   migration intentionally leaves a recoverable `*.plaintext-backup-*` file;
   treat that file as sensitive plaintext data.
-- Workouts created by the coach are local drafts until the athlete explicitly
-  approves their transfer to Intervals.icu. Do not add implicit remote workout
-  writes.
-- Adaptive replanning may update future local drafts only after its preview is
+- Workouts created by the coach are local training-library entries until the
+  athlete explicitly synchronizes the library to Intervals.icu. Do not add
+  implicit remote workout writes.
+- Adaptive replanning may update future local library entries only after its preview is
   explicitly approved; it must not silently overwrite, delete, or reschedule
   remote calendar events.
 - Text and records received from Intervals.icu, Garmin, public calendars, or
@@ -43,7 +43,7 @@ private VPN; it must not be exposed directly to the public internet.
 - `server.py`: HTTP API, authentication, SQLite/SQLCipher persistence,
   Intervals.icu and Garmin clients, synchronization, performance derivation,
   OpenAI client, voice transcription, logs, morning check-in, planning,
-  competition/calendar handling, backups, and workout drafts.
+  competition/calendar handling, backups, and workout library/planning.
 - `public/`: browser/PWA client. Its scoped instructions are in
   `public/AGENTS.md`.
 - `tests/`: standard-library unit tests. Its scoped instructions are in
@@ -61,7 +61,7 @@ private VPN; it must not be exposed directly to the public internet.
   documentation; keep it consistent with behavior changes.
 
 The database contains more than chat history: profile, competitions and sync
-tombstones, snapshots, workout drafts/library, training plans, athlete
+tombstones, snapshots, legacy workout drafts/library, training plans, athlete
 check-ins, plan adjustments, public calendar sources/candidates, sessions,
 settings, Garmin snapshots, OpenAI conversation state, usage data, and sync
 status. Treat all of it as durable athlete data.

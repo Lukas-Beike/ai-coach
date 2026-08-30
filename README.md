@@ -12,7 +12,7 @@ It is not intended to be exposed directly to the public internet.
 ## Features
 
 - Athlete profile, target competitions, performance metrics, training history,
-  chat history, and workout drafts stored locally in SQLite.
+  chat history, and a growing local workout library stored in SQLite.
 - One Intervals.icu synchronization at startup, plus user-requested refreshes.
 - Optional Garmin Connect synchronization with deduplication against
   Intervals.icu. Garmin-sourced VO2 max, running predictions, body weight, and
@@ -54,31 +54,28 @@ It is not intended to be exposed directly to the public internet.
 - Coach chat with selectable GPT-5.6 models, configurable thinking level,
   context preview, structured logs, and prioritized steering/FIFO message
   queueing while the coach is responding.
-- The coach creates dated local workout drafts only. Each draft requires an
-  explicit athlete approval before it can be transferred to the Intervals.icu
-  calendar.
-- Before a draft is created, the local workout library is checked for an exact
-  or similar workout. Every library entry has its own local UUID. Imported
-  Intervals.icu templates additionally retain their provider ID as
-  `external_id`; new coach templates remain local until the athlete explicitly
-  approves transfer. Approval first synchronizes the local template, stores
-  the returned external ID, and then plans the calendar event.
+- The coach stores every dated planned workout directly in the local training
+  library. Similar workouts are not deduplicated, so the library can grow into
+  a complete local training history. Every library entry has its own local
+  UUID. Imported Intervals.icu templates additionally retain their provider ID
+  as `external_id`; local entries remain local until the library is explicitly
+  synchronized.
 - If a provider response no longer contains an imported template, it is kept
-  locally and marked as missing remotely. A later approval reconciles it before
-  creating or planning it again; local templates are never removed by a full
-  Intervals.icu resync.
-- Multi-week plans are grouped and can be approved incrementally.
+  locally and marked as missing remotely. A later library synchronization
+  reconciles it before creating it again; local templates are never removed by
+  a full Intervals.icu resync.
+- Multi-week plans are grouped in the local library.
 - Bidirectional synchronization of target competitions with Intervals.icu.
 - Local athlete check-ins for subjective soreness, stress, motivation, session
   RPE, pain/illness notes, available training time, and day-specific constraints.
 - Read-only shared iCalendar integration for the next 8 weeks. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
-  long local drafts on busy days can be proposed as short easy sessions.
-- Adaptive plan review that proposes changes to future local drafts after a
-  check-in. Changes are shown as a preview and require explicit local approval;
+  long local library entries on busy days can be proposed as short easy sessions.
+- Adaptive plan review that proposes changes to future local library entries
+  after a check-in. Changes are shown as a preview and require explicit local approval;
   remote Intervals.icu calendar events are never changed by this process.
 - Annual event overview with base, build, peak, taper, and completed phases.
-- Optional PWA notifications for pending draft approvals, upcoming events, and
+- Optional PWA notifications for upcoming events and
   synchronization errors. Notifications are opt-in and are delivered by the
   browser/service worker while the PWA can run; device workout delivery remains
   delegated to Intervals.icu.
@@ -188,7 +185,7 @@ The feed is read at startup, once per day, or on demand with **Synchronisieren**
 in the System tab. A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
-settings or bypass workout approval.
+settings or bypass explicit library synchronization or planning approvals.
 
 Other supported operational variables are:
 
@@ -239,16 +236,17 @@ particularly well. These activity-specific notes are stored separately from
 imported Garmin and Intervals.icu values and included in the AI context as
 local athlete data.
 
-The adaptive planning action reviews future local workout drafts and produces a
-change preview. Only after explicit approval are eligible local drafts updated.
+The adaptive planning action reviews future dated local library entries and
+produces a change preview. Only after explicit approval are eligible local
+library entries updated.
 It does not overwrite, delete, or reschedule remote Intervals.icu calendar
 events.
 
 External calendar events are only planning signals. The heuristic uses the event
-date, start/end time, duration, and all-day status to identify drafts that are
-hard or long. It does not infer or diagnose an infection from a family event.
-Every suggested change remains a local preview and requires **Anpassung
-freigeben**.
+date, start/end time, duration, and all-day status to identify library entries
+that are hard or long. It does not infer or diagnose an infection from a family event;
+illness must still be entered in the athlete check-in. Every suggested change
+remains a local preview and requires **Anpassung freigeben**.
 
 
 ## Docker and Unraid
@@ -311,7 +309,7 @@ browser connection are handled as normal aborted requests rather than internal
 server failures.
 
 The **System** tab allows the athlete to export local data as JSON or delete
-local chats, snapshots, drafts, library entries, competitions, and profile
+local chats, snapshots, legacy drafts, library entries, competitions, and profile
 data. The database file itself remains in place. Chat reset and local cleanup
 also attempt to delete the stored OpenAI conversation; data held by external
 providers remains subject to their own policies.
@@ -473,8 +471,8 @@ docs: rewrite the README in English
 ## Security and limitations
 
 Intervals Coach is a private planning assistant, not a medical device. Keep it
-on a trusted LAN or behind a private VPN. Review every workout draft before
-transferring it to Intervals.icu, and seek professional advice for injuries,
+on a trusted LAN or behind a private VPN. Review local library entries before
+synchronizing them to Intervals.icu, and seek professional advice for injuries,
 illness, or warning symptoms.
 
 ## License

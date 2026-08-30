@@ -11,8 +11,9 @@
   instructions or markup without sanitisation.
 - Preserve chat keyboard behavior: Enter sends; Shift+Enter inserts a newline.
   Keep voice transcripts editable before they are sent.
-- Workouts remain drafts until the athlete explicitly approves transfer.
-  Adaptive replan previews require a separate explicit apply action.
+- Workouts are stored directly in the local training library; the athlete can
+  explicitly synchronize them to Intervals.icu later. Adaptive replan previews
+  still require a separate explicit apply action.
 - The service worker is part of the release cache contract. Whenever
   `index.html`, `app.js`, `styles.css`, or service-worker assets change, bump
   the asset query version in `index.html` and the cache name/asset URLs in
