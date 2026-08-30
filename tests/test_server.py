@@ -1078,7 +1078,10 @@ class CoachTests(unittest.TestCase):
     def test_public_state_exposes_completed_and_planned_activity_tabs(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [{"name": "Morgenlauf"}], "recent_wellness": [], "upcoming_calendar": [{"name": "Intervalle"}]}
         server.save_snapshot(snapshot)
-        state = server.public_state()
+        with patch.object(server, "github_release_status", return_value={"status": "unavailable"}):
+            state = server.public_state()
+        self.assertEqual(state["app"]["name"], "Intervals Coach")
+        self.assertEqual(state["app"]["version"], server.APP_VERSION)
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
         self.assertEqual(state["planned"][0]["name"], "Intervalle")
 
@@ -1149,6 +1152,30 @@ class CoachTests(unittest.TestCase):
         self.assertIn("weather_recommendation", enriched[0])
         self.assertNotIn("weather_recommendation", enriched[1])
         self.assertNotIn("weather_recommendation", enriched[2])
+    def test_github_latest_release_is_normalized_and_compared_without_exposing_token(self):
+        captured = {}
+
+        def fake_http_json(method, url, payload=None, headers=None, timeout=45, service=None, raw_body=None, content_type=None):
+            captured.update({"method": method, "url": url, "headers": headers, "timeout": timeout, "service": service})
+            return {
+                "tag_name": "v1.0.4", "name": "1.0.4", "body": "## Änderungen\n- Neue Anzeige",
+                "published_at": "2026-08-30T08:00:00Z", "draft": False, "prerelease": False,
+            }
+
+        config = replace(server.CONFIG, github_repository="Lukas-Beike/ai-coach", github_token="gh-secret-value")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            result = server.fetch_github_latest_release("Lukas-Beike/ai-coach")
+            redacted = server.redact_text("Authorization: Bearer gh-secret-value")
+
+        self.assertEqual(result["version"], "1.0.4")
+        self.assertTrue(result["is_newer"])
+        self.assertEqual(result["changelog"], "## Änderungen\n- Neue Anzeige")
+        self.assertEqual(captured["method"], "GET")
+        self.assertEqual(captured["service"], "github")
+        self.assertEqual(captured["timeout"], 10)
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer gh-secret-value")
+        self.assertNotIn("gh-secret-value", redacted)
+        self.assertNotIn("gh-secret-value", json.dumps(result))
 
     def test_json_response_ignores_client_disconnect(self):
         handler = object.__new__(server.RequestHandler)

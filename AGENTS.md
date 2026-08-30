@@ -88,6 +88,10 @@ status. Treat all of it as durable athlete data.
 - The selector contains the GPT-5.6 options `gpt-5.6-sol`, `gpt-5.6-terra`, and
   `gpt-5.6-luna`. A configured `OPENAI_MODEL` is also surfaced by the current
   implementation; do not silently change or hardcode a different model policy.
+- `APP_VERSION` in `server.py` must match the GitHub release tag. If a release
+  needs a version update, the weekly release workflow opens a PR; it must not
+  push directly to protected `main`. The container publishing workflow must
+  reject mismatches.
 - OpenAI credentials and external request payloads must remain out of logs.
   Keep structured logs redacted and diagnostics free of athlete content and
   credentials.

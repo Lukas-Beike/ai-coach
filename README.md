@@ -146,11 +146,20 @@ DATA_RETENTION_DAYS=-1
 PORT=8090
 DATA_DIR=/data
 TZ=Europe/Berlin
+GITHUB_REPOSITORY=Lukas-Beike/ai-coach
+GITHUB_TOKEN=
+GITHUB_RELEASE_CHECK_SECONDS=900
 ```
 
 `DATA_RETENTION_DAYS=-1` is the default and disables automatic deletion. The
 application does not impose its own OpenAI request or token limits; it displays
 remaining quotas when the API reports them.
+
+The application checks the latest non-draft, non-prerelease GitHub release on
+the server and caches the result for 15 minutes by default. A newer release is
+shown next to the application version and its release notes are available in
+the **System** tab. Set `GITHUB_TOKEN` only when the configured repository is
+private; the token remains server-side and is never returned to the browser.
 
 ## Garmin authentication
 
@@ -294,10 +303,13 @@ started manual publish workflow. Ordinary pushes and pull requests run tests
 but do not publish an image.
 
 The `Weekly release` workflow creates the next patch release every Monday at
-03:00 UTC from the current `main` branch. Its release notes contain all commits
-since the previous release. It can also be started manually through **Actions
--> Weekly release -> Run workflow**. The resulting release starts the test and
-container-publish workflow.
+03:00 UTC from the current `main` branch. If the server-reported
+`APP_VERSION` does not match the next release tag, it opens a version-bump PR
+instead of pushing to `main`. After that PR is merged, the workflow creates the
+release automatically. Its release notes contain all commits since the previous
+release. It can also be started manually through **Actions -> Weekly release ->
+Run workflow**. The resulting release starts the test and container-publish
+workflow, which rejects any release where the tag and `APP_VERSION` differ.
 
 Use Conventional Commits for manual commits and pull-request titles, for
 example:

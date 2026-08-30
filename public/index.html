@@ -15,7 +15,7 @@
     <header class="topbar">
       <div>
         <span class="eyebrow">PRIVATER TRAININGSBEREICH</span>
-        <h1>Intervals Coach</h1>
+        <h1>Intervals Coach <small id="appVersion" class="app-version" aria-label="Version"></small><a id="appUpdateIndicator" class="app-update-indicator" href="#" target="_blank" rel="noopener noreferrer" hidden aria-label="Neuere Version verfügbar" title="Neuere Version verfügbar"><span aria-hidden="true">↗</span></a></h1>
       </div>
       <button id="headerActionButton" class="secondary-button top-action" type="button" hidden></button>
     </header>
@@ -185,10 +185,17 @@
             </div>
           </div>
         </details>
+        <section class="settings-section release-section" aria-labelledby="releaseTitle">
+          <div class="settings-section-heading">
+            <div><span class="eyebrow">RELEASE</span><h3 id="releaseTitle">GitHub-Versionen</h3><p id="releaseStatus">GitHub-Release wird geprüft…</p></div>
+            <a id="releaseLink" class="secondary-button" href="#" target="_blank" rel="noopener noreferrer" hidden>Release öffnen</a>
+          </div>
+          <pre id="releaseChangelog" class="release-changelog">Changelog wird geladen…</pre>
+        </section>
         <details class="settings-section context-preview collapsible-section" aria-label="Chat-Kontext und Prompt">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Chat-Kontext und Prompt</span><span class="collapsible-summary-meta">Transparenz</span></summary>
           <div class="context-preview-heading">
-            <span class="eyebrow">TRANSPARENZ</span>
+            <div><span class="eyebrow">TRANSPARENZ</span><h3 id="systemContextPreviewTitle">Chat-Kontext und Prompt</h3></div>
             <button type="button" id="systemContextPreviewButton" class="secondary-button">Kontext laden</button>
           </div>
           <p class="fine-print context-preview-intro">Hier siehst du den Kontext, der als <code>instructions</code> gesendet wird, und die letzte Chat-Eingabe, die als <code>input</code> an OpenAI übergeben wurde.</p>
