@@ -507,7 +507,7 @@ Priorities:
 WORKOUT_TOOL = {
     "type": "function",
     "name": "save_workout_draft_entries",
-    "description": "Create one or more dated workout drafts for athlete review. The server automatically reuses a same or similar workout from the Intervals.icu library, or adds a new library workout before creating the draft. The workout is only scheduled after the athlete explicitly approves the draft.",
+    "description": "Create one or more dated workout drafts in the local athlete database for review. This tool never writes to Intervals.icu. Existing cached library templates may be linked, but new workouts remain local until the athlete explicitly approves transfer.",
     "strict": True,
     "parameters": {
         "type": "object",
@@ -3764,7 +3764,7 @@ def save_workout_drafts(
     if not isinstance(workouts, list) or not workouts:
         raise AppError(400, "Mindestens eine Einheit ist erforderlich.")
     normalized_workouts = [normalize_workout_draft(item) for item in workouts]
-    normalized_workouts = ensure_workout_library_entries(normalized_workouts)
+    normalized_workouts = attach_cached_library_entries(normalized_workouts)
     plan_id = str(uuid.uuid4()) if plan_name.strip() else ""
     if plan_id:
         dates = sorted(item["date"] for item in normalized_workouts)
@@ -4106,8 +4106,8 @@ def find_similar_library_workout(workout: dict[str, Any], library: list[dict[str
     return best[1] if best else None
 
 
-def ensure_workout_library_entries(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Attach library IDs, creating missing Intervals.icu library workouts when configured."""
+def attach_cached_library_entries(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach matching cached library IDs without making any remote request."""
     library = list_workout_library()
     prepared: list[dict[str, Any]] = []
     for workout in workouts:
@@ -4128,23 +4128,7 @@ def ensure_workout_library_entries(workouts: list[dict[str, Any]]) -> list[dict[
                 extra={"event": "workout_library_match", "context": {"library_workout_id": str(match["id"])}},
             )
             continue
-        if not CONFIG.intervals_api_key:
-            LOGGER.info(
-                "Workout library check deferred because Intervals.icu is not configured",
-                extra={"event": "workout_library_check_skipped", "context": {"reason": "missing_api_key"}},
-            )
-            prepared.append(workout)
-            continue
-        created = create_library_workouts([workout])
-        if not created:
-            raise AppError(502, "Die neue Einheit konnte nicht in der Intervals.icu-Bibliothek gespeichert werden.")
-        created_workout = created[0]
-        library.append(created_workout)
-        prepared.append({**workout, "library_workout_id": str(created_workout["id"])})
-        LOGGER.info(
-            "Added new workout to library before creating draft",
-            extra={"event": "workout_library_created", "context": {"library_workout_id": str(created_workout["id"])}},
-        )
+        prepared.append(workout)
     return prepared
 
 
@@ -5614,6 +5598,17 @@ def prompt_requests_fresh_data(message: str) -> bool:
     return asks_for_training and ((asks_for_timeframe and (asks_to_load or asks_to_analyse)) or asks_to_load)
 
 
+def prompt_requests_workout_creation(message: str) -> bool:
+    """Recognise explicit requests to create or schedule a workout draft."""
+    text = message.casefold()
+    asks_for_workout = bool(re.search(r"\b(einheit\w*|workout\w*|training\w*|trainingsplan\w*|session\w*)\b", text))
+    asks_to_create = bool(
+        re.search(r"\b(erstell\w*|plan\w*|anleg\w*|generier\w*|entwerf\w*|mach\w*|schreib\w*)\b", text)
+        or re.search(r"\bleg\w*\b.*\ban\b", text)
+    )
+    return asks_for_workout and asks_to_create
+
+
 @serialise_conversation
 def chat_with_coach(message: str) -> dict[str, Any]:
     message = message.strip()
@@ -5637,6 +5632,11 @@ def chat_with_coach(message: str) -> dict[str, Any]:
             "\n\n[Systemhinweis: Die angeforderte Intervals.icu-Aktualisierung ist fehlgeschlagen. Nutze den letzten "
             "verfügbaren Snapshot, weise auf dessen möglichen veralteten Stand hin und stelle ihn nicht als aktuell dar.]"
         )
+    tool_choice = (
+        {"type": "function", "name": "save_workout_draft_entries"}
+        if prompt_requests_workout_creation(message)
+        else "auto"
+    )
     response = responses_request(
         {
             "model": selected_model(),
@@ -5644,7 +5644,7 @@ def chat_with_coach(message: str) -> dict[str, Any]:
             "instructions": build_training_context(),
             "input": model_message,
             "tools": [WORKOUT_TOOL],
-            "tool_choice": "auto",
+            "tool_choice": tool_choice,
             "parallel_tool_calls": False,
             "max_output_tokens": 6000,
             "truncation": "auto",
@@ -5653,7 +5653,7 @@ def chat_with_coach(message: str) -> dict[str, Any]:
     created_drafts: list[dict[str, Any]] = []
     tool_outputs = []
     for item in response.get("output", []):
-        if item.get("type") != "function_call" or item.get("name") != "save_workout_draft_entries":
+        if not isinstance(item, dict) or item.get("type") != "function_call" or item.get("name") != "save_workout_draft_entries":
             continue
         try:
             arguments = json.loads(item.get("arguments") or "{}")

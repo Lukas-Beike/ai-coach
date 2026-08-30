@@ -370,6 +370,109 @@ function notifyState(data) {
   if (error) showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
 }
 
+function renderDrafts(drafts) {
+  const root = $("#workoutDrafts");
+  const summary = $("#draftsSummary");
+  if (!root) return;
+  const list = Array.isArray(drafts) ? drafts : [];
+  const pending = list.filter((draft) => draft.status !== "pushed");
+  if (summary) summary.textContent = pending.length ? `${pending.length} offen` : "Keine offenen Entwürfe";
+  root.replaceChildren();
+  if (!list.length) {
+    const empty = document.createElement("p");
+    empty.className = "context-empty";
+    empty.textContent = "Noch keine lokalen Trainingsentwürfe vorhanden.";
+    root.append(empty);
+    return;
+  }
+  for (const draft of list) {
+    const card = document.createElement("article");
+    card.className = `workout-draft workout-draft-status-${draft.status || "draft"}`;
+    const heading = document.createElement("div");
+    heading.className = "workout-draft-heading";
+    const title = document.createElement("strong");
+    title.textContent = draft.name || "Coach-Einheit";
+    const status = document.createElement("span");
+    status.className = "workout-draft-status";
+    status.textContent = draft.status === "pushed" ? "Übertragen" : draft.status === "error" ? "Fehler" : "Wartet auf Freigabe";
+    heading.append(title, status);
+    card.append(heading);
+
+    const meta = document.createElement("div");
+    meta.className = "workout-draft-meta";
+    meta.textContent = [draft.date ? dateLabel(draft.date) : null, draft.sport, draft.duration_minutes ? `${draft.duration_minutes} Min.` : null].filter(Boolean).join(" · ");
+    card.append(meta);
+
+    if (draft.description) {
+      const description = document.createElement("p");
+      description.className = "workout-draft-description";
+      description.textContent = draft.description;
+      card.append(description);
+    }
+    if (draft.rationale) {
+      const rationale = document.createElement("p");
+      rationale.className = "workout-draft-rationale";
+      rationale.textContent = `Begründung: ${draft.rationale}`;
+      card.append(rationale);
+    }
+    if (draft.error) {
+      const error = document.createElement("p");
+      error.className = "workout-draft-error-message";
+      error.textContent = draft.error;
+      card.append(error);
+    }
+    if (draft.status !== "pushed") {
+      const actions = document.createElement("div");
+      actions.className = "workout-draft-actions";
+      const approve = document.createElement("button");
+      approve.type = "button";
+      approve.className = "secondary-button";
+      approve.textContent = "Freigeben";
+      approve.addEventListener("click", () => pushDraft(draft.id, approve, draft.name));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary-button danger-button";
+      remove.textContent = "Löschen";
+      remove.addEventListener("click", () => deleteDraft(draft.id, remove, draft.name));
+      actions.append(approve, remove);
+      card.append(actions);
+    }
+    root.append(card);
+  }
+}
+
+async function pushDraft(draftId, button, name) {
+  if (!window.confirm(`„${name || "Einheit"}“ wirklich zu Intervals.icu übertragen?`)) return;
+  button.disabled = true;
+  button.textContent = "Wird übertragen…";
+  try {
+    await api(`/api/workouts/${encodeURIComponent(draftId)}/push`, { method: "POST", body: "{}" });
+    toast("Einheit zu Intervals.icu übertragen");
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    await load();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Freigeben";
+  }
+}
+
+async function deleteDraft(draftId, button, name) {
+  if (!window.confirm(`„${name || "Entwurf"}“ wirklich lokal löschen?`)) return;
+  button.disabled = true;
+  button.textContent = "Wird gelöscht…";
+  try {
+    await api(`/api/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
+    toast("Lokaler Entwurf gelöscht");
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
+    button.textContent = "Löschen";
+  }
+}
+
 function todayIso() { return new Date().toISOString().slice(0, 10); }
 
 function setFormValue(form, name, value) {
@@ -2055,6 +2158,7 @@ function render(data) {
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
+  renderDrafts(data.drafts || []);
   renderPlanned(data.planned || []);
   renderLibrary(data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");

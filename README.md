@@ -57,8 +57,8 @@ It is not intended to be exposed directly to the public internet.
   explicit athlete approval before it can be transferred to the Intervals.icu
   calendar.
 - Before a draft is created, the local workout library is checked for an exact
-  or similar workout. Existing templates are reused; missing templates are
-  added to the Intervals.icu library when the integration is configured.
+  or similar workout. Existing cached templates can be reused after approval;
+  new workouts remain fully local until the athlete explicitly approves them.
 - Multi-week plans are grouped and can be approved incrementally.
 - Bidirectional synchronization of target competitions with Intervals.icu.
 - Local athlete check-ins for subjective soreness, stress, motivation, session

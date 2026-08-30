@@ -640,18 +640,71 @@ class CoachTests(unittest.TestCase):
         create.assert_not_called()
         self.assertEqual(draft["library_workout_id"], "42")
 
-    def test_missing_library_workout_is_created_before_draft(self):
-        created = [{"id": 77, "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", "moving_time": 1800}]
+    def test_missing_library_workout_stays_local_until_approval(self):
         with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
-            server, "create_library_workouts", return_value=created
+            server, "create_library_workouts"
         ) as create:
             draft = server.save_workout_drafts([{
                 "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
                 "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
                 "target": "POWER", "rationale": "Schwelle",
             }])[0]
-        create.assert_called_once()
-        self.assertEqual(draft["library_workout_id"], "77")
+        create.assert_not_called()
+        self.assertNotIn("library_workout_id", draft)
+        self.assertEqual(server.list_workout_drafts()[0]["id"], draft["id"])
+
+    def test_new_draft_is_transferred_directly_on_explicit_approval(self):
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")):
+            draft = server.save_workout_drafts([{
+                "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
+                "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
+                "target": "POWER", "rationale": "Schwelle",
+            }])[0]
+        fake_event = {"id": "event-direct"}
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server.IntervalsClient, "push_workout", return_value=fake_event
+        ) as push:
+            result = server.push_draft(draft["id"])
+        self.assertEqual(result["status"], "pushed")
+        push.assert_called_once_with(draft["id"], {key: value for key, value in draft.items() if key not in {"id", "status", "created_at", "updated_at"}})
+
+    def test_chat_creation_request_uses_local_draft_tool(self):
+        future_date = (date.today() + timedelta(days=1)).isoformat()
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_workout"}
+            if len([call for call in calls if call[0] == "/responses"]) == 1:
+                return {
+                    "output": [{
+                        "type": "function_call",
+                        "name": "save_workout_draft_entries",
+                        "call_id": "call_workout",
+                        "arguments": json.dumps({
+                            "plan_name": "Morgen",
+                            "goal": "Grundlage",
+                            "workouts": [{
+                                "date": future_date, "sport": "Ride", "name": "Locker",
+                                "description": "- 30m 70%", "duration_minutes": 30,
+                                "target": "POWER", "rationale": "Grundlage",
+                            }],
+                        }),
+                    }],
+                }
+            return {"output_text": "Lokaler Entwurf erstellt.", "output": []}
+
+        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test", intervals_api_key="intervals-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ), patch.object(server, "create_library_workouts") as create:
+            result = server.chat_with_coach("Erstelle mir für morgen eine Einheit.")
+
+        response_calls = [payload for path, payload in calls if path == "/responses"]
+        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "save_workout_draft_entries"})
+        self.assertEqual(len(result["drafts"]), 1)
+        self.assertEqual(result["drafts"][0]["status"], "draft")
+        create.assert_not_called()
 
     def test_library_backed_draft_is_planned_from_library_on_approval(self):
         server.upsert_workout_library([{
