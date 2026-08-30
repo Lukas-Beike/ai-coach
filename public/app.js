@@ -448,7 +448,7 @@ function renderExternalCalendar(data) {
   const items = events.slice(0, 12).map((event) => {
     const time = event.all_day ? "Ganztägig" : `${formatTime(event.start_local)} – ${formatTime(event.end_local)}`;
     const duration = `${event.duration_minutes || 0} Min.`;
-    const impact = event.training_relevant === 0 ? "nur Info" : "Trainingssignal";
+    const impact = event.training_relevant === 0 ? "nur Info" : event.no_intensity === 1 ? "keine Intensität" : "Trainingssignal";
     return `<div class="external-calendar-event"><strong>${escapeHtml(String(event.name || "Kalendereintrag"))}</strong><span>${escapeHtml(String(event.event_date || ""))} · ${escapeHtml(time)} · ${escapeHtml(duration)} · ${escapeHtml(impact)}</span></div>`;
   }).join("");
   root.innerHTML = `<div class="external-calendar-heading"><strong>Externe Termine</strong><span>nächste 90 Tage · ${events.length} Einträge</span></div>${items}`;

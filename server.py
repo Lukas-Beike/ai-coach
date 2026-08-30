@@ -753,6 +753,7 @@ def initialise_database() -> None:
                 duration_minutes INTEGER NOT NULL,
                 all_day INTEGER NOT NULL DEFAULT 0,
                 training_relevant INTEGER NOT NULL DEFAULT 1,
+                no_intensity INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL,
                 UNIQUE(uid, start_local)
             );
@@ -783,6 +784,8 @@ def initialise_database() -> None:
         external_columns = {row["name"] for row in db.execute("PRAGMA table_info(external_calendar_events)").fetchall()}
         if "training_relevant" not in external_columns:
             db.execute("ALTER TABLE external_calendar_events ADD COLUMN training_relevant INTEGER NOT NULL DEFAULT 1")
+        if "no_intensity" not in external_columns:
+            db.execute("ALTER TABLE external_calendar_events ADD COLUMN no_intensity INTEGER NOT NULL DEFAULT 0")
         db.execute(
             "UPDATE competitions SET category=CASE WHEN priority IN ('A','B','C') THEN 'RACE_' || priority ELSE 'RACE_B' END "
             "WHERE category IS NULL OR category=''"
@@ -1972,11 +1975,17 @@ def _ical_duration(raw: str) -> timedelta | None:
 
 
 ICAL_NO_TRAINING_MARKER = re.compile(r"(?<![A-Z0-9_])\[NO_TRAINING\](?![A-Z0-9_])", re.IGNORECASE)
+ICAL_NO_INTENSITY_MARKER = re.compile(r"(?<![A-Z0-9_])\[NO_INTENSITY\](?![A-Z0-9_])", re.IGNORECASE)
 
 
 def ical_training_relevant(name: Any, description: Any) -> bool:
     """Ignore only events explicitly marked as informational in their description."""
     return not bool(ICAL_NO_TRAINING_MARKER.search(f"{name or ''}\n{description or ''}"))
+
+
+def ical_no_intensity(name: Any, description: Any) -> bool:
+    """Treat only the explicit marker as a no-intensity training constraint."""
+    return bool(ICAL_NO_INTENSITY_MARKER.search(f"{name or ''}\n{description or ''}"))
 
 
 def parse_ical_calendar(payload: bytes) -> list[dict[str, Any]]:
@@ -2008,6 +2017,7 @@ def parse_ical_calendar(payload: bytes) -> list[dict[str, Any]]:
                         "duration_minutes": duration,
                         "all_day": bool(current.get("all_day")),
                         "training_relevant": ical_training_relevant(current.get("name"), current.get("description")),
+                        "no_intensity": ical_no_intensity(current.get("name"), current.get("description")),
                     })
             current = None
             continue
@@ -2070,7 +2080,7 @@ def list_external_calendar_events(limit: int = 300, training_relevant_only: bool
     with DB_LOCK, database() as db:
         relevance_filter = " AND training_relevant = 1" if training_relevant_only else ""
         rows = db.execute(
-            "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at "
+            "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at "
             f"FROM external_calendar_events WHERE event_date >= ?{relevance_filter} ORDER BY start_local LIMIT ?",
             (local_now().date().isoformat(), max(1, min(int(limit), 1000))),
         ).fetchall()
@@ -2110,9 +2120,9 @@ def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
             db.execute("DELETE FROM external_calendar_events")
             for event in events:
                 db.execute(
-                    "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (event["id"], event["uid"], event["name"], event["event_date"], event["start_local"], event["end_local"], event["duration_minutes"], int(event["all_day"]), int(event.get("training_relevant", True)), now),
+                    "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (event["id"], event["uid"], event["name"], event["event_date"], event["start_local"], event["end_local"], event["duration_minutes"], int(event["all_day"]), int(event.get("training_relevant", True)), int(event.get("no_intensity", False)), now),
                 )
         set_kv("last_external_calendar_sync_at", now)
         set_kv("last_external_calendar_sync_error", "")
@@ -3688,6 +3698,7 @@ def private_calendar_adjustment_context(
                 "name": str(event.get("name") or "Privater Termin")[:200],
                 "event_date": str(event.get("event_date") or "")[:10],
                 "duration_minutes": int(event.get("duration_minutes") or 0),
+                "no_intensity": bool(event.get("no_intensity")),
             }
             for event in calendar_events[:10]
             if isinstance(event, dict)
@@ -3695,6 +3706,7 @@ def private_calendar_adjustment_context(
         "original_duration_minutes": draft.get("duration_minutes"),
         "adjusted_duration_minutes": adjusted.get("duration_minutes"),
         "intensity_adjusted": True,
+        "no_intensity_requested": any(bool(event.get("no_intensity")) for event in calendar_events),
     }
 
 
@@ -3756,10 +3768,12 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 f"family calendar has {len(calendar_events)} event(s), including "
                 f"'{longest_event.get('name') or 'calendar event'}' for about {total_event_minutes} minutes"
             )
+        no_intensity_events = [event for event in calendar_events if bool(event.get("no_intensity"))]
+        no_intensity_limited = bool(no_intensity_events) and draft_is_hard(draft)
         calendar_limited = bool(calendar_events) and (
             draft_is_hard(draft) or (duration is not None and calendar_limit is not None and duration > calendar_limit)
         )
-        if severe or (high_load and draft_is_hard(draft)) or limited or calendar_limited:
+        if severe or (high_load and draft_is_hard(draft)) or limited or calendar_limited or no_intensity_limited:
             reasons: list[str] = []
             if severe:
                 reasons.append("illness or pain reported")
@@ -3769,6 +3783,8 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 reasons.append(f"only {available_minutes} minutes are available")
             if calendar_limited:
                 reasons.append(calendar_reason)
+            if no_intensity_limited:
+                reasons.append("calendar marker [NO_INTENSITY] requests an easy session")
             reason = "; ".join(reasons)
             replacement = adaptive_recovery_replacement(
                 draft,

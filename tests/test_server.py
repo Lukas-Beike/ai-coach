@@ -101,7 +101,11 @@ class CoachTests(unittest.TestCase):
             b"END:VEVENT\r\nBEGIN:VEVENT\r\nUID:all-day\r\nDTSTART;VALUE=DATE:20260903\r\n"
             b"DTEND;VALUE=DATE:20260904\r\nSUMMARY:Travel\r\nEND:VEVENT\r\n"
             b"BEGIN:VEVENT\r\nUID:info-only\r\nDTSTART;VALUE=DATE:20260904\r\n"
-            b"SUMMARY:Team info\r\nDESCRIPTION: [NO_TRAINING] Nur zur Information\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            b"SUMMARY:Team info\r\nDESCRIPTION: [NO_TRAINING] Nur zur Information\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:no-intensity\r\nDTSTART;VALUE=DATE:20260905\r\n"
+            b"SUMMARY:Evening event\r\nDESCRIPTION: [NO_INTENSITY] Training remains possible, but easy\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:other-marker\r\nDTSTART;VALUE=DATE:20260906\r\n"
+            b"SUMMARY:Other marker\r\nDESCRIPTION: [OTHER_TAG] Keine besondere Wirkung\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
         self.assertEqual(events[0]["duration_minutes"], 180)
         self.assertEqual(events[0]["event_date"], "2026-09-02")
@@ -109,6 +113,10 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(events[1]["duration_minutes"], 1440)
         self.assertTrue(events[1]["all_day"])
         self.assertFalse(events[2]["training_relevant"])
+        self.assertTrue(events[3]["no_intensity"])
+        self.assertTrue(events[3]["training_relevant"])
+        self.assertFalse(events[4]["no_intensity"])
+        self.assertTrue(events[4]["training_relevant"])
 
     def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -118,6 +126,22 @@ class CoachTests(unittest.TestCase):
                 ("info-only", "info-only", "Informational event", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, 0, server.utc_now()),
             )
         self.assertEqual(server.list_external_calendar_events(1000, training_relevant_only=True), [])
+
+    def test_ical_no_intensity_marker_requires_easy_replacement(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        draft = server.save_workout_drafts([{
+            "date": tomorrow, "sport": "Ride", "name": "Short threshold",
+            "description": "- 5m 110%", "duration_minutes": 45, "target": "POWER",
+        }])[0]
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("no-intensity", "family-no-intensity", "Evening event", tomorrow, tomorrow + "T18:00:00+02:00", tomorrow + "T18:30:00+02:00", 30, 0, 1, 1, server.utc_now()),
+            )
+        preview = server.adaptive_replan_preview()
+        self.assertEqual(preview["changes"][0]["draft_id"], draft["id"])
+        self.assertIn("NO_INTENSITY", preview["changes"][0]["after"]["rationale"])
+        self.assertTrue(preview["changes"][0]["payload"]["private_calendar_adjustment"]["no_intensity_requested"])
 
     def test_external_calendar_sync_keeps_url_server_side_and_replaces_events(self):
         payload = (

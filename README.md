@@ -34,6 +34,8 @@ It is not intended to be exposed directly to the public internet.
   `[NO_TRAINING]` to the event description for informational appointments;
   the event remains visible in the external-calendar list but is excluded
   from coaching and adaptive planning.
+- Add `[NO_INTENSITY]` to the description when a calendar event should allow
+  training but prevent hard sessions; other description tags have no effect.
 - Optional weather integration via Open-Meteo: a city or postal code in the
   profile enables a cached 14-day forecast in the planned calendar. For
   outdoor runs and rides, the app suggests a weather-aware time window for
