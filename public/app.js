@@ -13,7 +13,7 @@ const state = {
   voiceTimer: null,
   voiceStartedAt: 0,
   voiceTranscribing: false,
-  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, weather: false, performance: false, intervalsFull: false, garminFull: false },
+  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, weather: false, performance: false, intervalsFull: false, garminFull: false, adaptivePlanning: false },
   notificationKeys: new Set(),
   quickTemplatesVisible: false,
   activityTracked: false,
@@ -372,27 +372,56 @@ function notifyState(data) {
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
 
-function renderPlanning(data) {
+function adaptivePreviewMarkup(preview) {
+  const signals = preview.signals?.length
+    ? `Signale: ${preview.signals.map((signal) => escapeHtml(String(signal))).join(", ")}`
+    : "Keine kritischen lokalen Signale erkannt.";
+  const changes = (preview.changes || []).map((change) => `<div class="replan-change"><strong>${escapeHtml(String(change.date || ""))}: ${escapeHtml(String(change.name || "Einheit"))}</strong><br>${escapeHtml(String(change.before?.description || ""))}<br>→ ${escapeHtml(String(change.after?.description || ""))}</div>`).join("");
+  return `<div><strong>${escapeHtml(String(preview.message || "Adaptive Prüfung"))}</strong><br>${signals}</div>${changes || "<div>Es gibt keine lokalen Entwürfe, die angepasst werden müssen.</div>"}<small>${escapeHtml(String(preview.scope || ""))}</small>`;
+}
+
+function openAdaptivePlanningDialog(preview) {
+  const dialog = $("#adaptivePlanningDialog");
+  const node = $("#adaptivePlanningPreview");
+  const apply = $("#applyAdaptivePlanningButton");
+  if (!dialog || !node || !preview) return;
+  node.innerHTML = adaptivePreviewMarkup(preview);
+  if (apply) {
+    apply.hidden = !(preview.changes || []).length;
+    apply.dataset.adjustmentId = preview.id || "";
+  }
+  if (!dialog.open) dialog.showModal();
+}
+
+function renderAdaptivePlanning(data) {
   const planning = data.planning || {};
   const next = planning.season?.next_event;
   const summary = $("#planningSummary");
-  if (summary) summary.textContent = next ? `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${next.phase} · ${next.days_until} Tage` : "Noch kein zukünftiger Wettkampf gespeichert.";
-  const compact = $("#planningSummaryCompact");
-  if (compact) compact.textContent = next ? `${next.name} · ${next.days_until} Tage` : "Kein zukünftiger Wettkampf";
-  const preview = planning.latest_replan;
-  const node = $("#replanPreview");
-  const apply = $("#applyReplanButton");
-  if (!node) return;
-  if (!preview || preview.status !== "preview") {
-    node.hidden = true;
-    if (apply) apply.hidden = true;
-    return;
+  if (summary) {
+    summary.textContent = next
+      ? `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${next.phase} · ${next.days_until} Tage`
+      : "Noch kein zukünftiger Wettkampf gespeichert.";
   }
-  node.hidden = false;
-  const signals = preview.signals?.length ? `Signale: ${preview.signals.map(escapeHtml).join(", ")}` : "Keine kritischen lokalen Signale erkannt.";
-  const changes = (preview.changes || []).map(change => `<div class="replan-change"><strong>${escapeHtml(change.date || "")}: ${escapeHtml(change.name || "Einheit")}</strong><br>${escapeHtml(change.before?.description || "")}<br>→ ${escapeHtml(change.after?.description || "")}</div>`).join("");
-  node.innerHTML = `<div><strong>${escapeHtml(preview.message || "Adaptive Prüfung")}</strong><br>${signals}</div>${changes || "<div>Es gibt keine lokalen Entwürfe, die angepasst werden müssen.</div>"}<small>${escapeHtml(preview.scope || "")}</small>`;
-  if (apply) { apply.hidden = !(preview.changes || []).length; apply.dataset.adjustmentId = preview.id || ""; }
+  const preview = planning.latest_replan;
+  const changes = Array.isArray(preview?.changes) ? preview.changes : [];
+  const required = planning.needs_replan ?? Boolean(preview?.status === "preview" && changes.length);
+  const count = Number(planning.replan_changes || changes.length);
+  const caption = count === 1
+    ? "Ein zukünftiger Entwurf braucht eine Anpassung."
+    : `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
+  const notice = $("#adaptivePlanningNotice");
+  const coachNotice = $("#coachAdaptivePlanningNotice");
+  if (notice) {
+    notice.hidden = !required;
+    const captionNode = $("#adaptivePlanningCaption");
+    if (captionNode) captionNode.textContent = required ? caption : "";
+    const button = $("#adaptivePlanningButton");
+    if (button) {
+      button.disabled = Boolean(state.localSync.adaptivePlanning);
+      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : "Planung aktualisieren";
+    }
+  }
+  if (coachNotice) coachNotice.hidden = !required;
 }
 
 function renderExternalCalendar(data) {
@@ -927,7 +956,26 @@ function renderParallelCyclingWarning(groups) {
   });
 }
 
-function renderPlanned(planned) {
+function renderExternalCalendarMarker(event) {
+  const root = document.createElement("div");
+  root.className = "planned-calendar-marker";
+  root.setAttribute("role", "note");
+  const title = document.createElement("strong");
+  title.textContent = event.name || "Kalendereintrag";
+  const markers = [
+    Number(event.training_relevant) === 0 ? "Kein Training" : null,
+    Number(event.no_intensity) === 1 ? "Keine Intensität" : null,
+  ].filter(Boolean);
+  const label = document.createElement("span");
+  label.textContent = markers.join(" · ") || "Kalenderhinweis";
+  const time = event.all_day ? "Ganztägig" : `${formatTime(event.start_local)} – ${formatTime(event.end_local)}`;
+  const meta = document.createElement("small");
+  meta.textContent = `${time} · ${event.duration_minutes || 0} Min.`;
+  root.append(title, label, meta);
+  return root;
+}
+
+function renderPlanned(planned, externalCalendarEvents = []) {
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   renderWeatherNotice(state.data?.weather);
   const root = $("#plannedCalendar");
@@ -940,6 +988,15 @@ function renderPlanned(planned) {
     if (!eventsByDate.has(date)) eventsByDate.set(date, []);
     eventsByDate.get(date).push(event);
   });
+  const calendarEventsByDate = new Map();
+  (externalCalendarEvents || [])
+    .filter((event) => event && (Number(event.training_relevant) === 0 || Number(event.no_intensity) === 1))
+    .forEach((event) => {
+      const date = String(event.event_date || "").slice(0, 10);
+      if (!date) return;
+      if (!calendarEventsByDate.has(date)) calendarEventsByDate.set(date, []);
+      calendarEventsByDate.get(date).push(event);
+    });
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -990,6 +1047,7 @@ function renderPlanned(planned) {
       day.setDate(weekStart.getDate() + dayIndex);
       const date = localDateKey(day);
       const events = eventsByDate.get(date) || [];
+      const calendarEvents = calendarEventsByDate.get(date) || [];
       const dayRoot = document.createElement("section");
       dayRoot.className = "planned-day";
 
@@ -1021,12 +1079,12 @@ function renderPlanned(planned) {
         dayRoot.append(weatherRoot);
       }
 
-      if (!events.length) {
+      if (!events.length && !calendarEvents.length) {
         const empty = document.createElement("p");
         empty.className = "planned-day-empty";
         empty.textContent = "Keine Einheit geplant";
         dayRoot.append(empty);
-      } else {
+      } else if (events.length) {
         const entries = document.createElement("div");
         entries.className = "planned-day-entries";
         events.forEach((event) => {
@@ -1126,6 +1184,12 @@ function renderPlanned(planned) {
           entries.append(details);
         });
         dayRoot.append(entries);
+      }
+      if (calendarEvents.length) {
+        const calendarRoot = document.createElement("div");
+        calendarRoot.className = "planned-calendar-markers";
+        calendarEvents.forEach((event) => calendarRoot.append(renderExternalCalendarMarker(event)));
+        dayRoot.append(calendarRoot);
       }
       weekDays.append(dayRoot);
     }
@@ -2077,7 +2141,7 @@ function render(data) {
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
-  renderPlanned(data.planned || []);
+  renderPlanned(data.planned || [], data.external_calendar?.events || []);
   renderLibrary(data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
@@ -2098,7 +2162,7 @@ function render(data) {
   renderProfile(data.profile);
   renderGarmin(data.garmin);
   renderCompetitions(data.competitions || []);
-  renderPlanning(data);
+  renderAdaptivePlanning(data);
   renderExternalCalendar(data);
   renderCompetitionSync(data);
   renderPerformance(data.performance);
@@ -2394,25 +2458,31 @@ async function saveActivityFeedback(event, activity, button) {
 }
 
 async function prepareReplan() {
-  const button = $("#replanButton");
+  const button = $("#adaptivePlanningButton");
   if (!button) return;
+  state.localSync.adaptivePlanning = true;
   button.disabled = true;
-  button.textContent = "Wird vorbereitet…";
+  button.textContent = "Prüfung läuft…";
   try {
-    await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: false }) });
-    toast("Adaptive Anpassung vorbereitet");
+    const result = await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: false }) });
     await load();
+    if (result.changes?.length) openAdaptivePlanningDialog(result);
+    else toast("Keine Planungsanpassung nötig");
   } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Anpassung vorbereiten"; }
+  finally {
+    state.localSync.adaptivePlanning = false;
+    renderAdaptivePlanning(state.data || {});
+  }
 }
 
 async function applyReplan() {
-  const button = $("#applyReplanButton");
+  const button = $("#applyAdaptivePlanningButton");
   const adjustmentId = button?.dataset.adjustmentId;
-  if (!button || !adjustmentId || !window.confirm("Die vorgeschlagenen Änderungen auf lokale zukünftige Entwürfe anwenden? Intervals.icu wird dabei nicht verändert.")) return;
+  if (!button || !adjustmentId || !window.confirm("Die vorgeschlagenen Änderungen auf lokale zukünftige Einheiten anwenden? Intervals.icu wird dabei nicht verändert.")) return;
   button.disabled = true;
   try {
     await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: true, adjustment_id: adjustmentId }) });
+    $("#adaptivePlanningDialog")?.close();
     toast("Adaptive Anpassung angewendet");
     await load();
   } catch (error) { toast(error.message, true); }
@@ -2610,8 +2680,10 @@ $("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar)
 $("#weatherSyncButton").addEventListener("click", syncWeather);
 $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
 $("#profileForm").addEventListener("submit", saveProfile);
-$("#replanButton").addEventListener("click", prepareReplan);
-$("#applyReplanButton").addEventListener("click", applyReplan);
+$("#adaptivePlanningButton").addEventListener("click", prepareReplan);
+$("#applyAdaptivePlanningButton").addEventListener("click", applyReplan);
+$("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptivePlanningDialog")?.close());
+$("#coachAdaptivePlanningButton").addEventListener("click", () => document.querySelector('.nav-item[data-panel="workoutsPanel"]')?.click());
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; });
 $("#competitionList").addEventListener("input", () => { state.profileDirty = true; });
 $("#addCompetitionButton").addEventListener("click", addCompetition);

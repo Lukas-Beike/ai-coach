@@ -33,10 +33,12 @@ It is not intended to be exposed directly to the public internet.
   that reason and the original versus adjusted duration after approval.
 - Google Calendar has no editable iCalendar category field. Add
   `[NO_TRAINING]` to the event description for informational appointments;
-  the event remains visible in the external-calendar list but is excluded
-  from coaching and adaptive planning.
+  the event remains visible in the external-calendar list and as a red marker
+  on its day in the planned calendar, but is excluded from coaching and
+  adaptive planning.
 - Add `[NO_INTENSITY]` to the description when a calendar event should allow
-  training but prevent hard sessions; other description tags have no effect.
+  training but prevent hard sessions; it is shown as a red marker on its day;
+  other description tags have no effect.
 - Optional weather integration via Open-Meteo: a city or postal code in the
   profile enables a cached 14-day forecast in the planned calendar. For
   outdoor runs and rides, the app suggests a weather-aware time window for
@@ -71,9 +73,13 @@ It is not intended to be exposed directly to the public internet.
 - Read-only shared iCalendar integration for the next 8 weeks. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local library entries on busy days can be proposed as short easy sessions.
-- Adaptive plan review that proposes changes to future local library entries
-  after a check-in. Changes are shown as a preview and require explicit local approval;
-  remote Intervals.icu calendar events are never changed by this process.
+- Adaptive plan review that checks after a weather or shared-calendar refresh
+  whether future local library entries need adjustment. In the next two days,
+  persistent rain or snow can trigger a shorter easy replacement for a long
+  outdoor ride. A red update notice appears in the planned calendar and as a
+  compact hint on the Coach tab. Changes are shown as a preview and require
+  explicit local approval; remote Intervals.icu calendar events are never
+  changed by this process.
 - Annual event overview with base, build, peak, taper, and completed phases.
 - Optional PWA notifications for upcoming events and
   synchronization errors. Notifications are opt-in and are delivered by the
@@ -236,8 +242,10 @@ particularly well. These activity-specific notes are stored separately from
 imported Garmin and Intervals.icu values and included in the AI context as
 local athlete data.
 
-The adaptive planning action reviews future dated local library entries and
-produces a change preview. Only after explicit approval are eligible local
+The adaptive planning action is surfaced as a red update notice in the planned
+calendar (and as a compact hint on the Coach tab) when a weather or shared
+calendar refresh finds future local library entries that need adjustment. It
+produces a change preview; only after explicit approval are eligible local
 library entries updated.
 It does not overwrite, delete, or reschedule remote Intervals.icu calendar
 events.
@@ -246,7 +254,7 @@ External calendar events are only planning signals. The heuristic uses the event
 date, start/end time, duration, and all-day status to identify library entries
 that are hard or long. It does not infer or diagnose an infection from a family event;
 illness must still be entered in the athlete check-in. Every suggested change
-remains a local preview and requires **Anpassung freigeben**.
+remains a local preview and requires **Anpassung anwenden**.
 
 
 ## Docker and Unraid
