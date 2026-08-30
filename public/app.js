@@ -1017,6 +1017,27 @@ function renderPlanned(planned) {
             }
             body.append(complianceRoot);
           }
+          const privateAdjustment = event.private_calendar_adjustment;
+          if (privateAdjustment) {
+            const originRoot = document.createElement("div");
+            originRoot.className = "planned-origin";
+            const originTitle = document.createElement("strong");
+            originTitle.textContent = privateAdjustment.label || "Aufgrund privater Termine angepasst";
+            originRoot.append(originTitle);
+            const durationChange = document.createElement("span");
+            const originalMinutes = Number(privateAdjustment.original_duration_minutes);
+            const adjustedMinutes = Number(privateAdjustment.adjusted_duration_minutes);
+            if (Number.isFinite(originalMinutes) && Number.isFinite(adjustedMinutes)) {
+              durationChange.textContent = `Dauer: ${originalMinutes} Min. → ${adjustedMinutes} Min. · Intensität reduziert`;
+              originRoot.append(durationChange);
+            }
+            if (privateAdjustment.reason) {
+              const reason = document.createElement("span");
+              reason.textContent = privateAdjustment.reason;
+              originRoot.append(reason);
+            }
+            body.append(originRoot);
+          }
           if (event.description) {
             const description = document.createElement("div");
             description.className = "planned-description";

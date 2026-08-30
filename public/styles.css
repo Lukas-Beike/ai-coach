@@ -400,6 +400,8 @@ h2 {
 .planned-compliance-missed .planned-compliance { border-left-color: #ff453a; background: rgba(255, 69, 58, .08); }
 .planned-compliance-completed .planned-meta { color: var(--accent-bright); }
 .planned-compliance-planned .planned-compliance { border-left-color: var(--subtle); background: rgba(255, 255, 255, .035); }
+.planned-origin { display: grid; gap: 3px; margin-bottom: 12px; padding: 10px 11px; border-left: 3px solid var(--orange); border-radius: 8px; color: var(--muted); background: rgba(255, 159, 10, .08); font-size: .73rem; line-height: 1.4; }
+.planned-origin strong { color: #ffcc80; }
 .parallel-warning { margin: 0 0 16px; padding: 15px; border: 1px solid rgba(255, 159, 10, .45); border-radius: 17px; color: var(--ink); background: rgba(255, 159, 10, .09); }
 .parallel-warning[hidden] { display: none; }
 .parallel-warning > strong { display: block; margin-bottom: 5px; }

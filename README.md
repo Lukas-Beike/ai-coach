@@ -27,6 +27,9 @@ It is not intended to be exposed directly to the public internet.
   their pairing (with a conservative same-day/sport fallback) and show
   workout and weekly compliance percentages. The comparison uses training
   load when available, otherwise moving/elapsed time.
+- If adaptive planning shortens a local workout or reduces its intensity due
+  to a read-only iCalendar appointment, the linked planned workout records
+  that reason and the original versus adjusted duration after approval.
 - Optional weather integration via Open-Meteo: a city or postal code in the
   profile enables a cached 14-day forecast in the planned calendar. For
   outdoor runs and rides, the app suggests a weather-aware time window for

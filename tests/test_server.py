@@ -154,6 +154,10 @@ class CoachTests(unittest.TestCase):
         preview = server.adaptive_replan_preview()
         self.assertEqual(preview["changes"][0]["draft_id"], draft["id"])
         self.assertEqual(preview["changes"][0]["after"]["duration_minutes"], 60)
+        adjustment = preview["changes"][0]["payload"]["private_calendar_adjustment"]
+        self.assertEqual(adjustment["label"], "Aufgrund privater Termine angepasst")
+        self.assertEqual(adjustment["original_duration_minutes"], 120)
+        self.assertEqual(adjustment["adjusted_duration_minutes"], 60)
         self.assertEqual(server.list_workout_drafts()[0]["duration_minutes"], 120)
 
     def test_adaptive_replan_only_changes_future_local_drafts_after_preview(self):
@@ -169,6 +173,38 @@ class CoachTests(unittest.TestCase):
         result = server.apply_adaptive_replan(preview["id"])
         self.assertEqual(result["updated"], 1)
         self.assertNotEqual(server.list_workout_drafts()[0]["description"], "- 5m 115%")
+        self.assertEqual(server.list_workout_drafts()[0]["id"], draft["id"])
+
+    def test_planned_event_exposes_private_calendar_adjustment_from_linked_draft(self):
+        context = {
+            "label": "Aufgrund privater Termine angepasst",
+            "reason": "family calendar has one event",
+            "original_duration_minutes": 120,
+            "adjusted_duration_minutes": 60,
+            "intensity_adjusted": True,
+        }
+        planned = server.add_private_calendar_context_to_planned(
+            [{"id": "event-1", "category": "WORKOUT", "name": "Locker"}],
+            [{"id": "draft-1", "intervals_event_id": "event-1", "private_calendar_adjustment": context}],
+        )
+        self.assertEqual(planned[0]["private_calendar_adjustment"], context)
+
+    def test_adaptive_replan_persists_private_calendar_context_after_apply(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        draft = server.save_workout_drafts([{
+            "date": tomorrow, "sport": "Ride", "name": "Threshold intervals",
+            "description": "- 5m 110%", "duration_minutes": 120, "target": "POWER",
+        }])[0]
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("event-2", "family-4", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, server.utc_now()),
+            )
+        preview = server.adaptive_replan_preview()
+        server.apply_adaptive_replan(preview["id"])
+        persisted = server.list_workout_drafts()[0]["private_calendar_adjustment"]
+        self.assertEqual(persisted["label"], "Aufgrund privater Termine angepasst")
+        self.assertEqual(persisted["events"][0]["name"], "Family appointment")
         self.assertEqual(server.list_workout_drafts()[0]["id"], draft["id"])
 
     def test_unlimited_retention_does_not_delete_history(self):

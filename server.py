@@ -3657,6 +3657,31 @@ def adaptive_recovery_replacement(
     }
 
 
+def private_calendar_adjustment_context(
+    draft: dict[str, Any],
+    calendar_events: list[dict[str, Any]],
+    adjusted: dict[str, Any],
+    reason: str,
+) -> dict[str, Any]:
+    """Create bounded provenance for a draft changed because of iCalendar events."""
+    return {
+        "label": "Aufgrund privater Termine angepasst",
+        "reason": str(reason or "Private Termine erforderten eine Anpassung")[:1000],
+        "events": [
+            {
+                "name": str(event.get("name") or "Privater Termin")[:200],
+                "event_date": str(event.get("event_date") or "")[:10],
+                "duration_minutes": int(event.get("duration_minutes") or 0),
+            }
+            for event in calendar_events[:10]
+            if isinstance(event, dict)
+        ],
+        "original_duration_minutes": draft.get("duration_minutes"),
+        "adjusted_duration_minutes": adjusted.get("duration_minutes"),
+        "intensity_adjusted": True,
+    }
+
+
 def latest_replan_preview() -> dict[str, Any] | None:
     with DB_LOCK, database() as db:
         row = db.execute(
@@ -3733,6 +3758,10 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 available_minutes if limited else None,
                 calendar_limit if calendar_limited else None,
             )
+            if calendar_limited:
+                replacement["private_calendar_adjustment"] = private_calendar_adjustment_context(
+                    draft, calendar_events, replacement, calendar_reason,
+                )
             changes.append({
                 "draft_id": draft["id"], "date": draft.get("date"), "name": draft.get("name"),
                 "external_events": calendar_events,
@@ -5527,11 +5556,38 @@ def schedule_morning_checkin() -> None:
     threading.Thread(target=run_morning_checkin, args=(checkin_date,), daemon=True).start()
 
 
+def add_private_calendar_context_to_planned(
+    planned: list[dict[str, Any]], drafts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Expose only recorded iCalendar-driven adjustments on linked events."""
+    by_event_id = {
+        str(draft.get("intervals_event_id")): draft
+        for draft in drafts
+        if draft.get("intervals_event_id")
+    }
+    by_external_id = {
+        f"intervals-coach-{draft.get('id')}": draft
+        for draft in drafts
+        if draft.get("id")
+    }
+    enriched: list[dict[str, Any]] = []
+    for event in planned:
+        draft = by_event_id.get(str(event.get("id"))) or by_external_id.get(str(event.get("external_id") or ""))
+        context = draft.get("private_calendar_adjustment") if isinstance(draft, dict) else None
+        copy = dict(event)
+        if isinstance(context, dict):
+            copy["private_calendar_adjustment"] = context
+        enriched.append(copy)
+    return enriched
+
+
 def public_state(local_only: bool = False) -> dict[str, Any]:
     snapshot = latest_snapshot()
     activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
     planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
+    drafts = list_workout_drafts()
     planned, planning_compliance = planning_compliance_state(planned, activities)
+    planned = add_private_calendar_context_to_planned(planned, drafts)
     weather = weather_state(planned, refresh=not local_only)
     return {
         "app": {
@@ -5540,7 +5596,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "github_release": github_release_status(refresh=not local_only),
         },
         "messages": list_messages(),
-        "drafts": list_workout_drafts(),
+        "drafts": drafts,
         "plans": list_training_plans(),
         "library": list_workout_library(),
         "activities": activities,
