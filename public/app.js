@@ -370,6 +370,109 @@ function notifyState(data) {
   if (error) showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
 }
 
+function renderDrafts(drafts) {
+  const root = $("#workoutDrafts");
+  const summary = $("#draftsSummary");
+  if (!root) return;
+  const list = Array.isArray(drafts) ? drafts : [];
+  const pending = list.filter((draft) => draft.status !== "pushed");
+  if (summary) summary.textContent = pending.length ? `${pending.length} offen` : "Keine offenen Entwürfe";
+  root.replaceChildren();
+  if (!list.length) {
+    const empty = document.createElement("p");
+    empty.className = "context-empty";
+    empty.textContent = "Noch keine lokalen Trainingsentwürfe vorhanden.";
+    root.append(empty);
+    return;
+  }
+  for (const draft of list) {
+    const card = document.createElement("article");
+    card.className = `workout-draft workout-draft-status-${draft.status || "draft"}`;
+    const heading = document.createElement("div");
+    heading.className = "workout-draft-heading";
+    const title = document.createElement("strong");
+    title.textContent = draft.name || "Coach-Einheit";
+    const status = document.createElement("span");
+    status.className = "workout-draft-status";
+    status.textContent = draft.status === "pushed" ? "Übertragen" : draft.status === "error" ? "Fehler" : "Wartet auf Freigabe";
+    heading.append(title, status);
+    card.append(heading);
+
+    const meta = document.createElement("div");
+    meta.className = "workout-draft-meta";
+    meta.textContent = [draft.date ? dateLabel(draft.date) : null, draft.sport, draft.duration_minutes ? `${draft.duration_minutes} Min.` : null].filter(Boolean).join(" · ");
+    card.append(meta);
+
+    if (draft.description) {
+      const description = document.createElement("p");
+      description.className = "workout-draft-description";
+      description.textContent = draft.description;
+      card.append(description);
+    }
+    if (draft.rationale) {
+      const rationale = document.createElement("p");
+      rationale.className = "workout-draft-rationale";
+      rationale.textContent = `Begründung: ${draft.rationale}`;
+      card.append(rationale);
+    }
+    if (draft.error) {
+      const error = document.createElement("p");
+      error.className = "workout-draft-error-message";
+      error.textContent = draft.error;
+      card.append(error);
+    }
+    if (draft.status !== "pushed") {
+      const actions = document.createElement("div");
+      actions.className = "workout-draft-actions";
+      const approve = document.createElement("button");
+      approve.type = "button";
+      approve.className = "secondary-button";
+      approve.textContent = "Freigeben";
+      approve.addEventListener("click", () => pushDraft(draft.id, approve, draft.name));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary-button danger-button";
+      remove.textContent = "Löschen";
+      remove.addEventListener("click", () => deleteDraft(draft.id, remove, draft.name));
+      actions.append(approve, remove);
+      card.append(actions);
+    }
+    root.append(card);
+  }
+}
+
+async function pushDraft(draftId, button, name) {
+  if (!window.confirm(`„${name || "Einheit"}“ wirklich zu Intervals.icu übertragen?`)) return;
+  button.disabled = true;
+  button.textContent = "Wird übertragen…";
+  try {
+    await api(`/api/workouts/${encodeURIComponent(draftId)}/push`, { method: "POST", body: "{}" });
+    toast("Einheit zu Intervals.icu übertragen");
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    await load();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Freigeben";
+  }
+}
+
+async function deleteDraft(draftId, button, name) {
+  if (!window.confirm(`„${name || "Entwurf"}“ wirklich lokal löschen?`)) return;
+  button.disabled = true;
+  button.textContent = "Wird gelöscht…";
+  try {
+    await api(`/api/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
+    toast("Lokaler Entwurf gelöscht");
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
+    button.textContent = "Löschen";
+  }
+}
+
 function todayIso() { return new Date().toISOString().slice(0, 10); }
 
 function setFormValue(form, name, value) {
@@ -442,7 +545,7 @@ function renderExternalCalendar(data) {
     return;
   }
   if (!events.length) {
-    root.textContent = calendar.last_error ? `Kalender: ${calendar.last_error}` : "Keine externen Termine in den nächsten 90 Tagen.";
+    root.textContent = calendar.last_error ? `Kalender: ${calendar.last_error}` : "Keine externen Termine in den nächsten 8 Wochen.";
     return;
   }
   const items = events.slice(0, 12).map((event) => {
@@ -451,7 +554,7 @@ function renderExternalCalendar(data) {
     const impact = event.training_relevant === 0 ? "nur Info" : event.no_intensity === 1 ? "keine Intensität" : "Trainingssignal";
     return `<div class="external-calendar-event"><strong>${escapeHtml(String(event.name || "Kalendereintrag"))}</strong><span>${escapeHtml(String(event.event_date || ""))} · ${escapeHtml(time)} · ${escapeHtml(duration)} · ${escapeHtml(impact)}</span></div>`;
   }).join("");
-  root.innerHTML = `<div class="external-calendar-heading"><strong>Externe Termine</strong><span>nächste 90 Tage · ${events.length} Einträge</span></div>${items}`;
+  root.innerHTML = `<div class="external-calendar-heading"><strong>Externe Termine</strong><span>nächste 8 Wochen · ${events.length} Einträge</span></div>${items}`;
 }
 
 function renderPublicCalendar(data) {
@@ -562,7 +665,9 @@ function renderStatus(data) {
   if (!configured.openai) missing.push("OpenAI-API-Schlüssel");
   if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
   const performanceRefresh = data.performance_refresh || {};
-  const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error || performanceRefresh.last_error;
+  const openaiStatus = data.usage?.status || {};
+  const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error || performanceRefresh.last_error
+    || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const statusCard = $("#statusCard");
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   const hasProblem = Boolean(missing.length || error);
@@ -655,6 +760,27 @@ function plannedWeekSummary(events, weekKey) {
 
 function weatherForDate(date) {
   return (state.data?.weather?.days || []).find((item) => item.date === date) || null;
+}
+
+function weatherIcon(code) {
+  const number = Number(code);
+  if (!Number.isFinite(number)) return "🌡️";
+  if (number === 0) return "☀️";
+  if (number === 1) return "🌤️";
+  if (number === 2) return "⛅";
+  if (number === 3) return "☁️";
+  if ([45, 48].includes(number)) return "🌫️";
+  if (number >= 51 && number <= 57) return "🌦️";
+  if (number >= 61 && number <= 67) return "🌧️";
+  if (number >= 71 && number <= 77) return number === 75 ? "❄️" : "🌨️";
+  if (number >= 80 && number <= 82) return number === 80 ? "🌦️" : "🌧️";
+  if (number >= 85 && number <= 86) return "🌨️";
+  if (number >= 95) return "⛈️";
+  return "🌤️";
+}
+
+function weatherIconFor(item) {
+  return item?.icon || weatherIcon(item?.weather_code);
 }
 
 function weatherNumber(value, suffix = "") {
@@ -968,12 +1094,17 @@ function renderPlanned(planned) {
       if (weather) {
         const weatherRoot = document.createElement("div");
         weatherRoot.className = "planned-weather";
+        const icon = document.createElement("span");
+        icon.className = "weather-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = weatherIconFor(weather);
         const condition = document.createElement("strong");
         condition.textContent = weather.condition || "Wetter";
+        condition.title = weather.condition || "Wetter";
         const summary = document.createElement("span");
         const direction = weatherDirection(weather.wind_direction_dominant);
         summary.textContent = `${weatherNumber(weather.temperature_min, " °C")} bis ${weatherNumber(weather.temperature_max, " °C")} · Regenrisiko ${weatherNumber(weather.precipitation_probability_max, " %")} · Wind bis ${weatherNumber(weather.wind_speed_max, " km/h")} / Böen ${weatherNumber(weather.wind_gusts_max, " km/h")}${direction ? ` aus ${direction}` : ""}`;
-        weatherRoot.append(condition, summary);
+        weatherRoot.append(icon, condition, summary);
         dayRoot.append(weatherRoot);
       }
 
@@ -999,6 +1130,13 @@ function renderPlanned(planned) {
           const complianceSummary = compliance?.percentage != null ? `Umsetzung ${compliance.percentage}%` : compliance?.status === "missed" ? "Nicht umgesetzt" : compliance?.status === "completed" ? "Absolviert" : null;
           meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null, complianceSummary].filter(Boolean).join(" · ");
           summaryMain.append(eventTitle, meta);
+          const recommendation = event.weather_recommendation;
+          if (recommendation) {
+            const weatherSlot = document.createElement("span");
+            weatherSlot.className = "planned-weather-slot";
+            weatherSlot.textContent = `${weatherIconFor(recommendation)} Beste Zeit ${recommendation.suggested_time}${recommendation.availability ? ` · ${recommendation.availability}` : ""}`;
+            summaryMain.append(weatherSlot);
+          }
           summary.append(summaryMain);
           if (compliance) details.classList.add(`planned-compliance-${compliance.status}`);
           details.append(summary);
@@ -1045,15 +1183,19 @@ function renderPlanned(planned) {
             description.textContent = event.description;
             body.append(description);
           }
-          if (event.weather_recommendation) {
+          if (recommendation) {
             const recommendation = document.createElement("div");
             recommendation.className = "planned-weather-recommendation";
+            const icon = document.createElement("span");
+            icon.className = "weather-icon";
+            icon.setAttribute("aria-hidden", "true");
+            icon.textContent = weatherIconFor(event.weather_recommendation);
             const recommendationTitle = document.createElement("strong");
-            recommendationTitle.textContent = `Beste Wetterzeit: ${event.weather_recommendation.suggested_time}`;
+            recommendationTitle.textContent = `Beste Wetterzeit: ${event.weather_recommendation.suggested_time}${event.weather_recommendation.availability ? ` · ${event.weather_recommendation.availability}` : ""}`;
             const recommendationReason = document.createElement("span");
             const direction = weatherDirection(event.weather_recommendation.wind_direction);
             recommendationReason.textContent = `${event.weather_recommendation.reason || "Günstigstes verfügbares Zeitfenster laut Vorhersage."}${direction ? ` Windrichtung: ${direction}.` : ""}`;
-            recommendation.append(recommendationTitle, recommendationReason);
+            recommendation.append(icon, recommendationTitle, recommendationReason);
             body.append(recommendation);
           }
           if (event.id != null) {
@@ -1264,7 +1406,7 @@ function renderLibrary(workouts) {
   if (!Array.isArray(workouts) || !workouts.length) {
     const empty = document.createElement("p");
     empty.className = "context-empty";
-    empty.textContent = "Keine Einheiten in der Intervals.icu-Trainingsbibliothek gefunden.";
+    empty.textContent = "Keine Einheiten in der lokalen Trainingsbibliothek gefunden.";
     root.append(empty);
     return;
   }
@@ -1293,7 +1435,18 @@ function renderLibrary(workouts) {
         const cardTitle = document.createElement("h4");
         cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
         const meta = document.createElement("span");
-        meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null].filter(Boolean).join(" · ");
+        const syncLabel = workout.sync_status === "remote_missing"
+          ? "Remote nicht gefunden - wird bei Freigabe neu abgeglichen"
+          : workout.sync_status === "sync_error"
+            ? "Synchronisationsfehler - erneut freigeben"
+            : workout.sync_status === "syncing"
+              ? "Synchronisierung läuft"
+              : workout.sync_status === "local"
+                ? "Lokal - noch nicht synchronisiert"
+                : workout.external_id
+                  ? "Mit Intervals.icu synchronisiert"
+                  : "Lokal";
+        meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, syncLabel].filter(Boolean).join(" - ");
         heading.append(cardTitle, meta);
         const description = document.createElement("p");
         description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
@@ -1308,7 +1461,7 @@ function renderLibrary(workouts) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "secondary-button";
-        button.textContent = "Als geplant übernehmen";
+        button.textContent = "Als lokalen Entwurf speichern";
         button.addEventListener("click", () => planLibraryWorkout(workout.id, dateInput, button));
         controls.append(dateLabelNode, button);
         card.append(heading, description, controls);
@@ -1347,13 +1500,13 @@ async function loadLibrary() {
 async function planLibraryWorkout(workoutId, dateInput, button) {
   if (!dateInput.value) { toast("Bitte ein Datum auswählen", true); return; }
   button.disabled = true;
-  button.textContent = "Wird eingeplant…";
+  button.textContent = "Lokaler Entwurf wird gespeichert…";
   try {
     await api("/api/library/" + encodeURIComponent(workoutId) + "/plan", { method: "POST", body: JSON.stringify({ date: dateInput.value }) });
-    toast("Einheit eingeplant");
+    toast("Lokaler Entwurf erstellt");
     await load();
   } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Als geplant übernehmen"; }
+  finally { button.disabled = false; button.textContent = "Als lokalen Entwurf speichern"; }
 }
 
 function renderProfile(profile) {
@@ -1898,13 +2051,30 @@ function renderSettings(data) {
   const configured = data.configured || {};
   const garmin = data.garmin || {};
   const weather = data.weather || {};
+  const openaiStatus = data.usage?.status || {};
   const setStatus = (selector, ok, text) => {
     const node = $(selector);
     if (!node) return;
     node.textContent = text;
     node.className = ok ? "configured" : "not-configured";
   };
-  setStatus("#openaiConnectionStatus", configured.openai, configured.openai ? "Konfiguriert" : "Nicht konfiguriert");
+  const openaiHealthy = configured.openai && openaiStatus.state !== "error";
+  setStatus(
+    "#openaiConnectionStatus",
+    openaiHealthy,
+    !configured.openai ? "Nicht konfiguriert" : openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
+  );
+  const openaiDetail = $("#openaiConnectionDetail");
+  if (openaiDetail) {
+    openaiDetail.classList.toggle("error", Boolean(configured.openai && openaiStatus.state === "error"));
+    openaiDetail.textContent = !configured.openai
+      ? "API-Schlüssel nicht konfiguriert"
+      : openaiStatus.state === "error"
+        ? `${openaiStatus.message || "OpenAI-Anfrage fehlgeschlagen."}${openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : ""}`
+        : openaiStatus.state === "ok"
+          ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
+          : "Noch kein API-Aufruf geprüft";
+  }
   setStatus("#intervalsConnectionStatus", configured.intervals, configured.intervals ? "Konfiguriert" : "Nicht konfiguriert");
   setStatus("#garminConnectionStatus", garmin.configured, garmin.configured ? (garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert") : "Nicht konfiguriert");
   const weatherLocation = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
@@ -1917,7 +2087,7 @@ function renderSettings(data) {
   }
   const connectionsSummary = $("#connectionsSummary");
   if (connectionsSummary) {
-    connectionsSummary.textContent = [["OpenAI", configured.openai], ["Intervals", configured.intervals], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
+    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Intervals", configured.intervals], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
       .map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
   }
   const intervalsDays = $("#intervalsSyncDays");
@@ -1957,9 +2127,10 @@ function renderSettings(data) {
   if (usageNode) {
     const rateLimits = usage.rate_limits || {};
     const remaining = rateLimits.remaining_requests != null || rateLimits.remaining_tokens != null
-      ? ` · Verfügbar im aktuellen OpenAI-Fenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
-      : " · OpenAI-Kontingent nach dem nächsten API-Aufruf verfügbar";
-    usageNode.textContent = `OpenAI heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}`;
+      ? ` · Restkontingent im aktuellen OpenAI-Fenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
+      : " · Restkontingent wird nach einem API-Aufruf angezeigt";
+    const openaiError = usage.status?.state === "error" ? ` · Status: ${usage.status.message || "Fehler bei letzter Anfrage"}` : "";
+    usageNode.textContent = `OpenAI heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}${openaiError}`;
   }
   const privacySummary = $("#privacySummary");
   if (privacySummary) privacySummary.textContent = `${usage.requests || 0} OpenAI-Anfragen heute`;
@@ -1998,16 +2169,24 @@ function render(data) {
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
+  renderDrafts(data.drafts || []);
   renderPlanned(data.planned || []);
   renderLibrary(data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
+    const libraryState = data.library_sync?.state || {};
+    const pending = Number(libraryState.local || 0) + Number(libraryState.sync_error || 0);
+    const missing = Number(libraryState.remote_missing || 0);
+    const stateHint = [
+      pending ? `${pending} lokale Einheit${pending === 1 ? "" : "en"} offen` : null,
+      missing ? `${missing} Remote-Einheit${missing === 1 ? "" : "en"} nicht gefunden` : null,
+    ].filter(Boolean).join(" · ");
     librarySyncDetail.textContent = data.library_sync?.last_error
       ? data.library_sync.last_error
       : data.library_sync?.last_sync_at
-        ? "Letzte Aktualisierung: " + formatTime(data.library_sync.last_sync_at)
-        : "Noch nicht synchronisiert";
-    librarySyncDetail.classList.toggle("error", Boolean(data.library_sync?.last_error));
+        ? ["Letzte Aktualisierung: " + formatTime(data.library_sync.last_sync_at), stateHint].filter(Boolean).join(" · ")
+        : stateHint || "Noch nicht synchronisiert";
+    librarySyncDetail.classList.toggle("error", Boolean(data.library_sync?.last_error || libraryState.sync_error));
   }
   renderProfile(data.profile);
   renderGarmin(data.garmin);

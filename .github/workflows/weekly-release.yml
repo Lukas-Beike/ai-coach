@@ -27,7 +27,16 @@ permissions:
 
 jobs:
   prepare-version:
-    if: github.event_name != 'pull_request' || (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'develop' && startsWith(github.event.pull_request.head.ref, 'chore/release-version-'))
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'develop' &&
+      startsWith(github.event.pull_request.head.ref, 'chore/release-version-')) ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'chore/release-version-'))
     runs-on: ubuntu-latest
     steps:
       - name: Check out develop
@@ -45,9 +54,28 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.ref }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
           REQUESTED_VERSION: ${{ inputs.release_version }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         shell: bash
         run: |
           set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_run" && "$WORKFLOW_RUN_BRANCH" == chore/release-version-* ]]; then
+            merged_version_pr=""
+            for attempt in {1..60}; do
+              merged_version_pr="$(gh pr list --repo "$REPOSITORY" --base develop --head "$WORKFLOW_RUN_BRANCH" --state merged --json number --jq '.[0].number // empty')"
+              if [[ -n "$merged_version_pr" ]]; then
+                break
+              fi
+              echo "Waiting for version PR $WORKFLOW_RUN_BRANCH to merge (attempt $attempt/60)."
+              sleep 10
+            done
+            if [[ -z "$merged_version_pr" ]]; then
+              echo "Version PR $WORKFLOW_RUN_BRANCH was not merged after the test completed."
+              exit 1
+            fi
+            git fetch --no-tags origin refs/heads/develop:refs/remotes/origin/develop
+            git reset --hard origin/develop
+          fi
 
           app_version="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
           if [[ -z "$app_version" ]]; then
@@ -106,10 +134,23 @@ jobs:
             local source_ref="$2"
             local release_tag="$3"
             local test_check_count
+            local test_run_count
+            local source_sha
             test_check_count="$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name == "test")] | length')"
-            if [[ "$test_check_count" -eq 0 ]]; then
+            source_sha="$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json headRefOid --jq '.headRefOid')"
+            test_run_count="$(gh run list \
+              --repo "$REPOSITORY" \
+              --workflow publish-container.yml \
+              --event workflow_dispatch \
+              --branch "$source_ref" \
+              --limit 100 \
+              --json headSha,status,conclusion \
+              --jq "[.[] | select(.headSha == \"$source_sha\") | select(.status != \"completed\" or .conclusion == \"success\")] | length")"
+            if [[ "$test_check_count" -eq 0 && "$test_run_count" -eq 0 ]]; then
               echo "Starting an explicit test run for PR #$pull_request_number."
               trigger_release_test "$source_ref" "$release_tag"
+            elif [[ "$test_check_count" -eq 0 ]]; then
+              echo "An explicit test run for PR #$pull_request_number is already queued or completed."
             fi
           }
 
@@ -268,7 +309,6 @@ jobs:
       github.event.pull_request.base.ref == 'main' &&
       startsWith(github.event.pull_request.head.ref, 'chore/release-promotion-')) ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Test and publish container image' &&
-      github.event.workflow_run.event == 'workflow_dispatch' &&
       github.event.workflow_run.conclusion == 'success' &&
       startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-'))
     runs-on: ubuntu-latest

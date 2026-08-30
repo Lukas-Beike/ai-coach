@@ -39,10 +39,12 @@ It is not intended to be exposed directly to the public internet.
 - Optional weather integration via Open-Meteo: a city or postal code in the
   profile enables a cached 14-day forecast in the planned calendar. For
   outdoor runs and rides, the app suggests a weather-aware time window for
-  the next five days, including wind speed, gusts, and direction. In NRW the
-  short range uses DWD ICON-D2 and the longer range uses ECMWF IFS HRES. The
-  free Open-Meteo tier is intended for non-commercial use and requires
-  attribution.
+  the next five days, including a small weather symbol, wind speed, gusts,
+  and direction. Weekday suggestions account for work from 06:00–15:30
+  (Monday–Thursday), work until 14:00 on Friday, and the usable 12:00–13:00
+  lunch break. In NRW the short range uses DWD ICON-D2 and the longer range
+  uses ECMWF IFS HRES. The free Open-Meteo tier is intended for non-commercial
+  use and requires attribution.
 - Thirty-day trends for FTP, thresholds, VO2 max, running predictions,
   readiness, and body weight. Garmin performance values are stored locally as
   compact historical points during synchronization.
@@ -55,13 +57,20 @@ It is not intended to be exposed directly to the public internet.
   explicit athlete approval before it can be transferred to the Intervals.icu
   calendar.
 - Before a draft is created, the local workout library is checked for an exact
-  or similar workout. Existing templates are reused; missing templates are
-  added to the Intervals.icu library when the integration is configured.
+  or similar workout. Every library entry has its own local UUID. Imported
+  Intervals.icu templates additionally retain their provider ID as
+  `external_id`; new coach templates remain local until the athlete explicitly
+  approves transfer. Approval first synchronizes the local template, stores
+  the returned external ID, and then plans the calendar event.
+- If a provider response no longer contains an imported template, it is kept
+  locally and marked as missing remotely. A later approval reconciles it before
+  creating or planning it again; local templates are never removed by a full
+  Intervals.icu resync.
 - Multi-week plans are grouped and can be approved incrementally.
 - Bidirectional synchronization of target competitions with Intervals.icu.
 - Local athlete check-ins for subjective soreness, stress, motivation, session
   RPE, pain/illness notes, available training time, and day-specific constraints.
-- Read-only shared iCalendar integration for the next 90 days. Event
+- Read-only shared iCalendar integration for the next 8 weeks. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local drafts on busy days can be proposed as short easy sessions.
 - Adaptive plan review that proposes changes to future local drafts after a
@@ -76,9 +85,10 @@ It is not intended to be exposed directly to the public internet.
   local cleanup, and retention policy.
 - Encrypted database backup download and validated restore with an automatic
   pre-restore copy of the previous database.
-- OpenAI usage display for the latest request and token quotas reported by the
-  API. Account dollar balances are available through the OpenAI billing
-  dashboard or authorized organization access, not through this application.
+- OpenAI usage display for the latest request, remaining request/token quotas,
+  and the classified status of the last API call. Account dollar balances are
+  available through the OpenAI billing dashboard or authorized organization
+  access, not through this application.
 
 ## Loading and synchronization
 
@@ -174,7 +184,7 @@ exports, and logs.
 
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
 in the System tab. A successful sync keeps events from today through the next
-90 days. A failed refresh leaves the last successful event set in place and
+8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
 settings or bypass workout approval.
 

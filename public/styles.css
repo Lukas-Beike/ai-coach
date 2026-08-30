@@ -307,6 +307,9 @@ h2 {
 .fine-print { margin: 10px 4px 0; color: var(--subtle); text-align: center; font-size: .69rem; }
 
 .section-heading { display: flex; justify-content: space-between; margin: 18px 2px 20px; }
+.section-heading > div { display: grid; gap: 5px; min-width: 0; }
+.section-heading h2 { margin: 0; line-height: 1.12; }
+.section-heading .tab-sync-detail { margin-top: 0; }
 .tab-sync-detail { display: block; margin-top: 5px; color: var(--subtle); font-size: .68rem; font-weight: 400; }
 .data-sync-only { margin: 18px 2px 0; }
 .section-heading > .secondary-button { padding: 8px 11px; font-size: .7rem; }
@@ -371,12 +374,15 @@ h2 {
 .planned-day-count { flex: 0 0 auto; color: var(--subtle); font-size: .68rem; }
 .weather-notice { margin: 0 0 12px; padding: 11px 13px; border: 1px solid rgba(52, 207, 161, .25); border-radius: 13px; color: var(--muted); background: rgba(52, 207, 161, .07); font-size: .72rem; line-height: 1.4; }
 .weather-notice.error { border-color: rgba(255, 159, 10, .45); background: rgba(255, 159, 10, .08); }
-.planned-weather { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 9px; padding: 0 14px 12px; color: var(--muted); font-size: .7rem; }
+.planned-weather { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; padding: 0 14px 12px; color: var(--muted); font-size: .7rem; }
 .planned-weather strong { color: var(--ink); font-size: .75rem; }
-.planned-weather-recommendation { display: grid; gap: 3px; margin-top: 12px; padding: 10px 11px; border-left: 3px solid var(--accent-bright); border-radius: 8px; color: var(--muted); background: rgba(52, 207, 161, .07); font-size: .73rem; line-height: 1.4; }
+.weather-icon { flex: 0 0 auto; font-size: 1rem; line-height: 1; }
+.planned-weather-slot { overflow: hidden; color: var(--accent-bright); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.planned-weather-recommendation { display: grid; grid-template-columns: auto 1fr; gap: 3px 7px; margin-top: 12px; padding: 10px 11px; border-left: 3px solid var(--accent-bright); border-radius: 8px; color: var(--muted); background: rgba(52, 207, 161, .07); font-size: .73rem; line-height: 1.4; }
+.planned-weather-recommendation .weather-icon { grid-row: span 2; align-self: start; margin-top: 2px; }
 .planned-weather-recommendation strong { color: var(--ink); }
 .profile-help {
-  margin: -9px 0 0 !important;
+  margin: 0 !important;
   color: var(--muted);
   font-size: .75rem;
   line-height: 1.45;
@@ -432,6 +438,18 @@ h2 {
 .card-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 .danger-button { border-color: rgba(255, 69, 58, .35); color: #ff9a93; }
 .danger-button:hover { border-color: rgba(255, 69, 58, .65); background: rgba(255, 69, 58, .1); }
+.workout-drafts { display: grid; gap: 10px; }
+.workout-draft { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255, 255, 255, .025); }
+.workout-draft-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.workout-draft-heading strong { color: var(--ink); font-size: .88rem; }
+.workout-draft-status { color: var(--accent-bright); font-size: .68rem; white-space: nowrap; }
+.workout-draft-status-error .workout-draft-status { color: #ff9a93; }
+.workout-draft-status-pushed .workout-draft-status { color: var(--muted); }
+.workout-draft-meta { color: var(--subtle); font-size: .7rem; }
+.workout-draft-description, .workout-draft-rationale { margin: 0; color: var(--muted); font-size: .76rem; line-height: 1.45; white-space: pre-wrap; }
+.workout-draft-rationale { color: var(--subtle); }
+.workout-draft-error-message { margin: 0; padding: 9px 10px; border-left: 3px solid var(--danger); color: #ff9a93; background: rgba(255, 69, 58, .08); font-size: .73rem; line-height: 1.4; }
+.workout-draft-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 3px; }
 .library-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; }
 .library-heading > div { display: grid; gap: 4px; }
 .library-heading .subsection-title { margin: 0; }
@@ -452,10 +470,10 @@ h2 {
 .library-controls label { flex: 1; font-size: .68rem; }
 .library-controls .secondary-button { white-space: nowrap; }
 
-.profile-form { display: grid; gap: 18px; padding-bottom: 24px; }
-.profile-section { display: grid; gap: 15px; margin: 0; border: 1px solid var(--line); border-radius: 18px; padding: 16px; background: rgba(28, 28, 30, .68); }
+.profile-form { display: grid; gap: 18px; min-width: 0; padding-bottom: 24px; }
+.profile-section { display: grid; gap: 15px; min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: 18px; padding: 16px; background: rgba(28, 28, 30, .68); }
 .profile-section legend { padding: 0 8px; color: var(--ink); font-size: 1.08rem; font-weight: 700; letter-spacing: -.02em; }
-.profile-section > p { margin: -4px 0 2px; color: var(--muted); font-size: .75rem; line-height: 1.45; }
+.profile-section > p { margin: 0; color: var(--muted); font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
 .form-grid { display: grid; gap: 12px; }
 .form-grid > label { min-width: 0; }
 .competition-list { display: grid; gap: 12px; }
@@ -479,12 +497,16 @@ h2 {
 .context-preview-content pre { max-height: 360px; margin: 0; overflow: auto; padding: 0 13px 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; font: .68rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .settings-section { display: grid; gap: 12px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 18px; padding: 17px; background: rgba(28, 28, 30, .68); }
 .collapsible-section > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -17px -17px 0; padding: 17px; color: var(--ink); list-style-position: inside; }
+#settingsPanel .collapsible-section:not([open]) { gap: 0; margin-bottom: 10px; padding: 0; }
+#settingsPanel .collapsible-section:not([open]) > summary { margin: 0; padding: 12px 17px; }
+#settingsPanel .collapsible-section.context-preview:not([open]) { margin-top: 0; }
+#settingsPanel .collapsible-section:last-child { margin-bottom: 0; }
 .profile-section.collapsible-section > summary { margin: -16px -16px 0; padding: 16px; }
 .collapsible-section > summary::marker { color: var(--accent-bright); }
 .collapsible-section > summary:hover, .collapsible-section[open] > summary { background: rgba(255, 255, 255, .035); }
 .collapsible-section[open] > summary { border-bottom: 1px solid var(--line); }
-.collapsible-summary-title { min-width: 0; font-size: 1.02rem; font-weight: 700; }
-.collapsible-summary-meta { flex: 0 1 auto; max-width: 58%; overflow: hidden; color: var(--subtle); font-size: .68rem; font-weight: 500; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.collapsible-summary-title { min-width: 0; color: var(--ink); font-size: 1.02rem; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.collapsible-summary-meta { flex: 0 1 58%; min-width: 0; overflow: hidden; color: var(--subtle); font-size: .68rem; font-weight: 500; line-height: 1.35; text-align: right; text-overflow: ellipsis; white-space: normal; overflow-wrap: anywhere; }
 .collapsible-section > summary + p { margin-top: 0; }
 .collapsible-section > summary + .context-preview-heading { margin-top: 0; }
 .settings-section h3 { margin: 0; color: var(--ink); font-size: 1.02rem; }
@@ -540,7 +562,7 @@ h2 {
 .secondary-button.busy { animation: pulse-button 1.4s ease-in-out infinite; }
 @keyframes pulse-button { 50% { opacity: .65; } }
 
-label { display: grid; gap: 7px; color: var(--muted); font-size: .76rem; font-weight: 650; }
+label { display: grid; min-width: 0; gap: 7px; color: var(--muted); font-size: .76rem; font-weight: 650; }
 input, textarea, select {
   width: 100%;
   border: 1px solid var(--line);
@@ -552,7 +574,7 @@ input, textarea, select {
   font-weight: 400;
   transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
 }
-textarea { line-height: 1.45; }
+textarea { line-height: 1.45; overflow-wrap: anywhere; }
 input::placeholder, textarea::placeholder { color: var(--subtle); }
 input:focus, textarea:focus, select:focus { border-color: rgba(52, 207, 161, .72); background: #313134; box-shadow: 0 0 0 3px rgba(16, 163, 127, .16); }
 
@@ -593,9 +615,18 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .composer { width: calc(100% - 24px); }
   .topbar { padding-right: 2px; padding-left: 2px; }
   h2 { font-size: 1.35rem; }
-  .section-heading { margin-right: 0; margin-left: 0; }
-  .settings-section { gap: 10px; padding: 14px; border-radius: 16px; }
+  .section-heading { align-items: flex-start; margin: 16px 0 18px; }
+  .section-heading h2 { margin-top: 0; }
+  .settings-section { gap: 10px; min-width: 0; padding: 14px; border-radius: 16px; }
   .collapsible-section > summary { margin: -14px -14px 0; padding: 14px; }
+  #settingsPanel .collapsible-section:not([open]) > summary { padding: 10px 14px; }
+  .profile-section { gap: 17px; padding: 14px; border-radius: 16px; }
+  .profile-section.collapsible-section > summary { margin: -14px -14px 0; padding: 14px; }
+  .profile-section > p { line-height: 1.55; }
+  .profile-form > button { width: 100%; }
+  .collapsible-section > summary { align-items: flex-start; }
+  .collapsible-summary-title { flex: 1 1 auto; }
+  .collapsible-summary-meta { flex-basis: 42%; }
   .planned-week > summary { align-items: flex-start; }
   .planned-week-summary { max-width: 52%; line-height: 1.35; }
   .settings-section-heading,
