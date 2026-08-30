@@ -124,14 +124,17 @@ the affected UI flow when a browser is available.
 
 ## Git conventions
 
+- Always work in a dedicated Git worktree and task branch. Create the worktree
+  before editing, and keep the primary checkout unchanged while the task is in
+  progress.
 - Every commit must use Conventional Commits:
   `<type>(<optional-scope>): <description>`.
 - Every pull request title must use the same format. Allowed types are
   `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`,
   `style`, and `test`; breaking changes use `!` before the colon.
-- Use squash auto-merge when repository permissions, required checks, and the
-  PR type allow it. The current automatic workflow is specifically for
-  Dependabot pull requests.
+- When creating a pull request, enable squash auto-merge (`--auto --squash`)
+  when repository permissions and required checks allow it. Do not merge it
+  immediately unless explicitly requested.
 - Keep local worktrees and runtime files out of commits.
 
 ## Docker / Unraid deployment
