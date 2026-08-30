@@ -474,6 +474,10 @@ h2 {
 .feedback-entry { padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: rgba(255, 255, 255, .025); font-size: .7rem; line-height: 1.45; }
 .feedback-entry strong { color: var(--ink); }
 .replan-preview { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: rgba(255, 255, 255, .025); font-size: .72rem; line-height: 1.45; }
+.external-calendar-events { display: grid; gap: 7px; }
+.external-calendar-heading { display: flex; justify-content: space-between; gap: 10px; color: var(--subtle); font-size: .68rem; }
+.external-calendar-event { display: grid; gap: 3px; padding: 9px 11px; border: 1px solid rgba(255, 159, 10, .25); border-radius: 11px; color: var(--muted); background: rgba(255, 159, 10, .06); font-size: .7rem; }
+.external-calendar-event strong { overflow: hidden; color: var(--ink); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
 .replan-change { padding-top: 8px; border-top: 1px solid var(--line); }
 .replan-change strong { color: var(--ink); }
 .logs-output { max-height: 420px; min-height: 160px; margin: 0; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: #171719; white-space: pre-wrap; overflow-wrap: anywhere; font: .67rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }

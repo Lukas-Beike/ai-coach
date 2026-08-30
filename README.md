@@ -48,6 +48,9 @@ It is not intended to be exposed directly to the public internet.
 - Bidirectional synchronization of target competitions with Intervals.icu.
 - Local athlete check-ins for subjective soreness, stress, motivation, session
   RPE, pain/illness notes, available training time, and day-specific constraints.
+- Read-only shared iCalendar integration for the next 90 days. Event
+  timing and duration are used as schedule/recovery signals; high-intensity or
+  long local drafts on busy days can be proposed as short easy sessions.
 - Adaptive plan review that proposes changes to future local drafts after a
   check-in. Changes are shown as a preview and require explicit local approval;
   remote Intervals.icu calendar events are never changed by this process.
@@ -117,6 +120,24 @@ GARMIN_FIXTURE_PATH=garmin-fixture.example.json
 `GARMIN_FIXTURE_PATH` is intended for local development and tests. A persistent
 Garmin token store is preferred after the first login and MFA setup.
 
+Optional shared calendar configuration:
+
+```text
+CALENDAR_ICAL_URL=https://calendar.example/household.ics
+```
+
+Use the private iCalendar/ICS feed supplied by the calendar provider. Treat a
+private feed URL like a password. The application only fetches this feed,
+stores bounded event metadata locally, and never writes to the calendar. The
+URL stays in the server environment and is excluded from browser state,
+exports, and logs.
+
+The feed is read at startup, once per day, or on demand with **Synchronisieren**
+in the System tab. A successful sync keeps events from today through the next
+90 days. A failed refresh leaves the last successful event set in place and
+shows the error. Calendar text is untrusted data; it cannot change application
+settings or bypass workout approval.
+
 Other supported operational variables are:
 
 ```text
@@ -160,6 +181,12 @@ The adaptive planning action reviews future local workout drafts and produces a
 change preview. Only after explicit approval are eligible local drafts updated.
 It does not overwrite, delete, or reschedule remote Intervals.icu calendar
 events.
+
+External calendar events are only planning signals. The heuristic uses the event
+date, start/end time, duration, and all-day status to identify drafts that are
+hard or long. It does not infer or diagnose an infection from a family event;
+illness must still be entered in the athlete check-in. Every suggested change
+remains a local preview and requires **Anpassung freigeben**.
 
 
 ## Docker and Unraid
