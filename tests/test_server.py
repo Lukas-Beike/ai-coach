@@ -932,6 +932,74 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
         self.assertEqual(state["planned"][0]["name"], "Intervalle")
 
+    def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
+        today = server.local_now().date()
+        daily_dates = [(today + timedelta(days=offset)).isoformat() for offset in range(14)]
+        hourly_times = []
+        hourly_precipitation = []
+        for day_offset, day in enumerate(daily_dates):
+            for hour in range(24):
+                hourly_times.append(f"{day}T{hour:02d}:00")
+                hourly_precipitation.append(5 if day_offset == 1 and hour in (8, 9) else 70)
+        forecast = {
+            "daily": {
+                "time": daily_dates,
+                "weather_code": [1] * 14,
+                "temperature_2m_min": [10] * 14,
+                "temperature_2m_max": [20] * 14,
+                "apparent_temperature_min": [9] * 14,
+                "apparent_temperature_max": [19] * 14,
+                "precipitation_probability_max": [70] * 14,
+                "rain_sum": [1] * 14,
+                "showers_sum": [0] * 14,
+                "snowfall_sum": [0] * 14,
+                "wind_speed_10m_max": [15] * 14,
+                "wind_gusts_10m_max": [25] * 14,
+                "wind_direction_10m_dominant": [225] * 14,
+                "sunrise": [f"{day}T06:00" for day in daily_dates],
+                "sunset": [f"{day}T20:00" for day in daily_dates],
+            },
+            "hourly": {
+                "time": hourly_times,
+                "temperature_2m": [18] * len(hourly_times),
+                "apparent_temperature": [18] * len(hourly_times),
+                "precipitation_probability": hourly_precipitation,
+                "rain": [0] * len(hourly_times),
+                "showers": [0] * len(hourly_times),
+                "snowfall": [0] * len(hourly_times),
+                "weather_code": [1] * len(hourly_times),
+                "wind_speed_10m": [15] * len(hourly_times),
+                "wind_direction_10m": [225] * len(hourly_times),
+                "wind_gusts_10m": [25] * len(hourly_times),
+            },
+        }
+        tomorrow = (today + timedelta(days=1)).isoformat()
+        day_six = (today + timedelta(days=6)).isoformat()
+        planned = [
+            {"id": "ride-1", "name": "Lange Ausfahrt", "type": "Ride", "start_date_local": tomorrow + "T09:00:00", "moving_time": 7200},
+            {"id": "indoor-1", "name": "Trainer", "type": "VirtualRide", "start_date_local": tomorrow + "T18:00:00", "moving_time": 3600},
+            {"id": "ride-2", "name": "Spätere Ausfahrt", "type": "Ride", "start_date_local": day_six + "T09:00:00", "moving_time": 3600},
+        ]
+        server.save_profile({"weather_location": "Münster"})
+        with patch.object(server, "http_json", side_effect=[
+            {"results": [{"name": "Münster", "country": "Deutschland", "country_code": "DE", "latitude": 51.96, "longitude": 7.63, "timezone": "Europe/Berlin"}]},
+            forecast,
+            forecast,
+        ]) as weather_request:
+            weather = server.weather_state(planned)
+        self.assertEqual(len(weather["days"]), 14)
+        self.assertEqual(weather["model"], "ICON-D2 (0–2 Tage) + ECMWF IFS HRES (3–14 Tage)")
+        self.assertIn("models=ecmwf_ifs", weather_request.call_args_list[1].args[1])
+        self.assertIn("models=icon_d2", weather_request.call_args_list[2].args[1])
+        self.assertEqual(weather["days"][0]["wind_direction_dominant"], 225)
+        self.assertEqual(len(weather["recommendations"]), 1)
+        self.assertEqual(weather["recommendations"][0]["event_id"], "ride-1")
+        self.assertTrue(weather["recommendations"][0]["suggested_time"].startswith("08:00"))
+        enriched = server.add_weather_to_planned(planned, weather)
+        self.assertIn("weather_recommendation", enriched[0])
+        self.assertNotIn("weather_recommendation", enriched[1])
+        self.assertNotIn("weather_recommendation", enriched[2])
+
     def test_json_response_ignores_client_disconnect(self):
         handler = object.__new__(server.RequestHandler)
         handler.request_id = "request-1"

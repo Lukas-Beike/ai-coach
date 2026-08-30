@@ -21,6 +21,13 @@ It is not intended to be exposed directly to the public internet.
   maximum heart rates can fall back to Intervals.icu data.
 - Activity synchronization for strength training, running, outdoor cycling,
   and indoor/virtual cycling.
+- Optional weather integration via Open-Meteo: a city or postal code in the
+  profile enables a cached 14-day forecast in the planned calendar. For
+  outdoor runs and rides, the app suggests a weather-aware time window for
+  the next five days, including wind speed, gusts, and direction. In NRW the
+  short range uses DWD ICON-D2 and the longer range uses ECMWF IFS HRES. The
+  free Open-Meteo tier is intended for non-commercial use and requires
+  attribution.
 - Thirty-day trends for FTP, thresholds, VO2 max, running predictions,
   readiness, and body weight. Garmin performance values are stored locally as
   compact historical points during synchronization.

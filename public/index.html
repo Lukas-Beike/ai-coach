@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=81">
+  <link rel="stylesheet" href="/styles.css?v=82">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -62,6 +62,7 @@
           <div><span class="eyebrow">KALENDER</span><h2>Geplant</h2></div>
         </div>
         <div id="parallelCyclingWarning" class="parallel-warning" hidden></div>
+        <div id="weatherNotice" class="weather-notice" hidden></div>
         <div id="plannedCalendar" class="planned-calendar"></div>
         <div class="library-heading">
           <div><h3 class="subsection-title">Trainingsbibliothek</h3><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
@@ -98,6 +99,8 @@
               <label>Coaching-Stil<input name="coaching_style"></label>
               <label>Zeitzone<input name="timezone"></label>
             </div>
+            <label>Wetterort<input name="weather_location" placeholder="Stadt oder PLZ, z. B. Münster"></label>
+            <p class="fine-print profile-help">Der Wetterort wird für die 14-Tage-Vorhersage verwendet. Eine Stadt oder PLZ reicht; konkrete Zeitvorschläge gibt es nur für die nächsten 5 Tage.</p>
           </fieldset>
 
           <fieldset class="profile-section">
@@ -239,6 +242,6 @@
       </button>
     </form>
   </dialog>
-  <script src="/app.js?v=81" defer></script>
+  <script src="/app.js?v=82" defer></script>
 </body>
 </html>
