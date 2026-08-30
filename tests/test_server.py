@@ -158,6 +158,24 @@ class CoachTests(unittest.TestCase):
             self.assertNotIn("url", state)
             self.assertEqual(state["events"][0]["duration_minutes"], 120)
 
+    def test_external_calendar_sync_limits_events_to_eight_weeks(self):
+        today = server.local_now().date()
+        in_window = today + timedelta(days=server.EXTERNAL_CALENDAR_WINDOW_DAYS)
+        outside_window = in_window + timedelta(days=1)
+        payload = (
+            "BEGIN:VCALENDAR\r\n"
+            f"BEGIN:VEVENT\r\nUID:in-window\r\nDTSTART;VALUE=DATE:{in_window.strftime('%Y%m%d')}\r\nSUMMARY:Within window\r\nEND:VEVENT\r\n"
+            f"BEGIN:VEVENT\r\nUID:outside-window\r\nDTSTART;VALUE=DATE:{outside_window.strftime('%Y%m%d')}\r\nSUMMARY:Outside window\r\nEND:VEVENT\r\n"
+            "END:VCALENDAR\r\n"
+        ).encode()
+        config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
+        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_public_calendar", return_value=payload):
+            result = server.sync_external_calendar("test")
+
+        self.assertEqual(result["window_days"], 56)
+        self.assertEqual(result["events"], 1)
+        self.assertEqual(server.list_external_calendar_events()[0]["uid"], "in-window")
+
     def test_external_calendar_sync_keeps_last_successful_events_on_failure(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         with server.DB_LOCK, server.database() as db:
