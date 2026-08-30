@@ -5734,7 +5734,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 result = {"authenticated": bool(session)}
                 if session:
                     schedule_morning_checkin()
-                    result["state"] = public_state()
                 self.send_json(200, result)
             elif path == "/api/state":
                 require_auth(self)
@@ -5792,7 +5791,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 token = result.pop("session_token")
                 csrf = result["csrf"]
                 schedule_morning_checkin()
-                result["state"] = public_state()
                 self.send_json(200, result, {
                     "Set-Cookie": [
                         f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_TTL_SECONDS}",
