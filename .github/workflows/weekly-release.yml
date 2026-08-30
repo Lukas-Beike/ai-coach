@@ -147,16 +147,29 @@ jobs:
               echo "Cannot choose $REQUESTED_VERSION while APP_VERSION $app_version is waiting for promotion."
               exit 1
             fi
-            existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head develop --state open --json number --jq '.[0].number // empty')"
+            promotion_branch="chore/release-promotion-$app_version"
+            existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$promotion_branch" --state open --json number --jq '.[0].number // empty')"
             if [[ -n "$existing_pr" ]]; then
               echo "Release promotion PR #$existing_pr is already open."
               enable_auto_merge "$existing_pr"
               exit 0
             fi
+            if git ls-remote --exit-code --heads origin "$promotion_branch" >/dev/null 2>&1; then
+              echo "Remote branch $promotion_branch exists without an open PR; refusing to overwrite it."
+              exit 1
+            fi
+
+            git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+            git switch --create "$promotion_branch"
+            if ! git merge-base --is-ancestor origin/main HEAD; then
+              git merge --no-edit --strategy=ours origin/main \
+                -m "chore(release): synchronize promotion branch with main"
+            fi
+            git push --set-upstream origin "$promotion_branch"
             promotion_pr_url="$(gh pr create \
               --repo "$REPOSITORY" \
               --base main \
-              --head develop \
+              --head "$promotion_branch" \
               --title "chore(release): promote $app_version to main" \
               --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container.")"
             enable_auto_merge "$promotion_pr_url"
@@ -215,7 +228,7 @@ jobs:
           enable_auto_merge "$version_pr_url"
 
   create-release:
-    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'develop'
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && startsWith(github.event.pull_request.head.ref, 'chore/release-promotion-')
     runs-on: ubuntu-latest
     steps:
       - name: Check out main
