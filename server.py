@@ -1443,8 +1443,13 @@ def get_profile() -> dict[str, str]:
 
 
 def save_profile(profile: dict[str, Any]) -> dict[str, str]:
+    previous = get_profile()
     normalized = normalize_profile(profile)
     set_kv("profile", json.dumps(normalized, ensure_ascii=False))
+    if previous.get("weather_location", "") != normalized.get("weather_location", ""):
+        # A changed holiday/training location must never keep showing the
+        # forecast for the previous place until the normal cache expires.
+        set_kv(WEATHER_CACHE_KEY, "")
     return normalized
 
 

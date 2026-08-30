@@ -38,6 +38,12 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(profile["name"], "Ada")
         self.assertNotIn("admin", profile)
 
+    def test_changing_weather_location_invalidates_previous_forecast(self):
+        server.save_profile({"weather_location": "Münster"})
+        server.set_kv(server.WEATHER_CACHE_KEY, json.dumps({"query": "Münster", "forecast": {}}))
+        server.save_profile({"weather_location": "Köln"})
+        self.assertEqual(server.get_kv(server.WEATHER_CACHE_KEY), "")
+
     def test_local_feedback_is_persisted_without_provider_values(self):
         result = server.save_checkin({
             "checkin_date": date.today().isoformat(), "soreness": "7", "stress": "4", "motivation": "8",
