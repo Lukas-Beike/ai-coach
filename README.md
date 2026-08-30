@@ -46,7 +46,7 @@ It is not intended to be exposed directly to the public internet.
 - Bidirectional synchronization of target competitions with Intervals.icu.
 - Local athlete check-ins for subjective soreness, stress, motivation, session
   RPE, pain/illness notes, available training time, and day-specific constraints.
-- Read-only shared Google Calendar integration for the next 90 days. Event
+- Read-only shared iCalendar integration for the next 90 days. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local drafts on busy days can be proposed as short easy sessions.
 - Adaptive plan review that proposes changes to future local drafts after a
@@ -118,18 +118,21 @@ GARMIN_FIXTURE_PATH=garmin-fixture.example.json
 `GARMIN_FIXTURE_PATH` is intended for local development and tests. A persistent
 Garmin token store is preferred after the first login and MFA setup.
 
-Optional Google Calendar configuration:
+Optional shared calendar configuration:
 
 ```text
-GOOGLE_CALENDAR_ICAL_URL=https://calendar.google.com/calendar/ical/...
+CALENDAR_ICAL_URL=https://calendar.example/household.ics
 ```
 
-In Google Calendar, open the shared calendar's settings, choose **Integrate
-calendar**, and copy **Secret address in iCal format**. Google describes this
-address as private: treat it like a password and reset it in Google Calendar if
-it is ever exposed. The application only fetches this feed, stores bounded
-event metadata locally, and never writes to Google Calendar. The URL stays in
-the server environment and is excluded from browser state, exports, and logs.
+Use the private iCalendar/ICS feed supplied by the calendar provider. In Google
+Calendar, open the shared calendar's settings, choose **Integrate calendar**,
+and copy **Secret address in iCal format**. Treat a private feed URL like a
+password. The application only fetches this feed, stores bounded event metadata
+locally, and never writes to the calendar. The URL stays in the server
+environment and is excluded from browser state, exports, and logs.
+
+For compatibility, `GOOGLE_CALENDAR_ICAL_URL` is still accepted when
+`CALENDAR_ICAL_URL` is not set; new installations should use the neutral name.
 
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
 in the System tab. A successful sync keeps events from today through the next
@@ -181,7 +184,7 @@ change preview. Only after explicit approval are eligible local drafts updated.
 It does not overwrite, delete, or reschedule remote Intervals.icu calendar
 events.
 
-Google Calendar events are only planning signals. The heuristic uses the event
+External calendar events are only planning signals. The heuristic uses the event
 date, start/end time, duration, and all-day status to identify drafts that are
 hard or long. It does not infer or diagnose an infection from a family event;
 illness must still be entered in the athlete check-in. Every suggested change

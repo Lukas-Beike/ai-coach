@@ -11,7 +11,7 @@ const state = {
   voiceTimer: null,
   voiceStartedAt: 0,
   voiceTranscribing: false,
-  localSync: { intervals: false, competitions: false, garmin: false, googleCalendar: false, performance: false },
+  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, performance: false },
   notificationKeys: new Set(),
   quickTemplatesVisible: false,
   activityTracked: false,
@@ -399,27 +399,27 @@ function renderPlanning(data) {
   if (apply) { apply.hidden = !(preview.changes || []).length; apply.dataset.adjustmentId = preview.id || ""; }
 }
 
-function renderGoogleCalendar(data) {
-  const calendar = data.google_calendar || {};
-  const status = $("#googleCalendarConnectionStatus");
-  const syncButton = $("#googleCalendarSyncButton");
+function renderExternalCalendar(data) {
+  const calendar = data.external_calendar || {};
+  const status = $("#externalCalendarConnectionStatus");
+  const syncButton = $("#externalCalendarSyncButton");
   if (status) {
     status.textContent = calendar.configured ? (calendar.last_error ? "Fehler bei letzter Aktualisierung" : "Konfiguriert · nur lesend") : "Nicht konfiguriert";
     status.className = calendar.configured && !calendar.last_error ? "configured" : "not-configured";
   }
   if (syncButton) {
-    syncButton.disabled = Boolean(calendar.running || state.localSync.googleCalendar);
-    syncButton.textContent = calendar.running || state.localSync.googleCalendar ? "Synchronisierung läuft…" : "Synchronisieren";
+    syncButton.disabled = Boolean(calendar.running || state.localSync.externalCalendar);
+    syncButton.textContent = calendar.running || state.localSync.externalCalendar ? "Synchronisierung läuft…" : "Synchronisieren";
   }
-  const root = $("#googleCalendarEvents");
+  const root = $("#externalCalendarEvents");
   if (!root) return;
   const events = calendar.events || [];
   if (!calendar.configured) {
-    root.textContent = "Kein Google-Kalender konfiguriert.";
+    root.textContent = "Kein externer Kalender konfiguriert.";
     return;
   }
   if (!events.length) {
-    root.textContent = calendar.last_error ? `Google-Kalender: ${calendar.last_error}` : "Keine externen Termine in den nächsten 90 Tagen.";
+    root.textContent = calendar.last_error ? `Kalender: ${calendar.last_error}` : "Keine externen Termine in den nächsten 90 Tagen.";
     return;
   }
   const items = events.slice(0, 12).map((event) => {
@@ -1722,7 +1722,7 @@ function render(data) {
   renderCompetitions(data.competitions || []);
   renderLocalFeedback(data);
   renderPlanning(data);
-  renderGoogleCalendar(data);
+  renderExternalCalendar(data);
   renderCompetitionSync(data);
   renderPerformance(data.performance);
   renderModel(data.model);
@@ -1885,20 +1885,20 @@ async function syncGarmin() {
   finally { state.localSync.garmin = false; button.disabled = false; button.textContent = "Garmin synchronisieren"; updateHeaderAction(); }
 }
 
-async function syncGoogleCalendar() {
-  const button = $("#googleCalendarSyncButton");
+async function syncExternalCalendar() {
+  const button = $("#externalCalendarSyncButton");
   if (!button) return;
-  state.localSync.googleCalendar = true;
+  state.localSync.externalCalendar = true;
   button.disabled = true;
   button.textContent = "Synchronisierung läuft…";
   try {
-    const result = await api("/api/google-calendar/sync", { method: "POST", body: "{}" });
-    toast(result.status === "ok" ? `Google-Kalender synchronisiert · ${result.events || 0} Einträge` : "Google-Kalender wird bereits synchronisiert");
+    const result = await api("/api/external-calendar/sync", { method: "POST", body: "{}" });
+    toast(result.status === "ok" ? `Kalender synchronisiert · ${result.events || 0} Einträge` : "Kalender wird bereits synchronisiert");
     if (result.replan_changes) toast(`${result.replan_changes} Trainingsentwurf/-entwürfe als Anpassung vorgeschlagen`);
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
-  finally { state.localSync.googleCalendar = false; button.disabled = false; button.textContent = "Synchronisieren"; }
+  finally { state.localSync.externalCalendar = false; button.disabled = false; button.textContent = "Synchronisieren"; }
 }
 
 async function resetCoachChat() {
@@ -2141,7 +2141,7 @@ $("#headerActionButton").addEventListener("click", (event) => {
 $("#systemIntervalsSyncButton").addEventListener("click", syncNow);
 $("#competitionSyncButton").addEventListener("click", syncCompetitions);
 $("#garminSyncButton").addEventListener("click", syncGarmin);
-$("#googleCalendarSyncButton").addEventListener("click", syncGoogleCalendar);
+$("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar);
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#feedbackForm").addEventListener("submit", saveFeedback);
 $("#replanButton").addEventListener("click", prepareReplan);
