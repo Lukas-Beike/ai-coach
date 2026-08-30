@@ -27,7 +27,16 @@ permissions:
 
 jobs:
   prepare-version:
-    if: github.event_name != 'pull_request' || (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'develop' && startsWith(github.event.pull_request.head.ref, 'chore/release-version-'))
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'develop' &&
+      startsWith(github.event.pull_request.head.ref, 'chore/release-version-')) ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'chore/release-version-'))
     runs-on: ubuntu-latest
     steps:
       - name: Check out develop
