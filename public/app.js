@@ -1787,6 +1787,7 @@ function renderAppVersion(app = {}) {
 
 function renderGithubRelease(app = {}) {
   const statusNode = $("#releaseStatus");
+  const summaryNode = $("#releaseSummary");
   const changelogNode = $("#releaseChangelog");
   const linkNode = $("#releaseLink");
   if (!statusNode || !changelogNode || !linkNode) return;
@@ -1797,6 +1798,7 @@ function renderGithubRelease(app = {}) {
     statusNode.textContent = release.status === "disabled"
       ? "GitHub-Release-Prüfung ist nicht konfiguriert."
       : (release.message || "GitHub-Release konnte nicht geladen werden.");
+    if (summaryNode) summaryNode.textContent = release.status === "disabled" ? "Nicht konfiguriert" : "Nicht verfügbar";
     changelogNode.textContent = "Kein Changelog verfügbar.";
     linkNode.hidden = true;
     linkNode.removeAttribute("href");
@@ -1805,6 +1807,7 @@ function renderGithubRelease(app = {}) {
   const publication = release.published_at ? ` · veröffentlicht ${formatTime(release.published_at)}` : "";
   statusNode.classList.remove("error");
   statusNode.textContent = `Neuestes Release: v${release.version}${publication}${release.is_newer ? " · Neuere Version verfügbar" : " · Aktuelle Version"}`;
+  if (summaryNode) summaryNode.textContent = release.is_newer ? `v${release.version} verfügbar` : `v${release.version} · aktuell`;
   changelogNode.textContent = release.changelog || "Für dieses Release ist kein Changelog hinterlegt.";
   linkNode.hidden = false;
   linkNode.href = release.url;
