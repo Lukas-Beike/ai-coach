@@ -205,6 +205,54 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("private_note", result["recent_activities"][0])
         self.assertEqual(result["recent_wellness"][0]["ctl"], 42)
 
+    def test_planned_workouts_match_activities_and_roll_up_weekly_compliance(self):
+        today = server.local_now().date()
+        events = [
+            {
+                "id": "event-done", "category": "WORKOUT", "type": "Ride",
+                "name": "Tempo", "start_date_local": f"{today.isoformat()}T00:00:00",
+                "moving_time": 3600, "icu_training_load": 50,
+            },
+            {
+                "id": "event-missed", "category": "WORKOUT", "type": "Ride",
+                "name": "Grundlage", "start_date_local": f"{(today - timedelta(days=1)).isoformat()}T00:00:00",
+                "moving_time": 3600, "icu_training_load": 50,
+            },
+            {
+                "id": "race", "category": "RACE", "type": "Ride",
+                "name": "Wettkampf", "start_date_local": f"{(today - timedelta(days=1)).isoformat()}T00:00:00",
+                "moving_time": 7200, "icu_training_load": 100,
+            },
+        ]
+        activities = [{
+            "id": "activity-1", "paired_event_id": "event-done", "type": "Ride",
+            "name": "Tempo gefahren", "start_date_local": f"{today.isoformat()}T07:00:00",
+            "moving_time": 3300, "icu_training_load": 40,
+        }]
+
+        enriched, weekly = server.planning_compliance_state(events, activities)
+
+        self.assertEqual(enriched[0]["compliance"]["status"], "completed")
+        self.assertEqual(enriched[0]["compliance"]["percentage"], 80)
+        self.assertEqual(enriched[1]["compliance"]["status"], "missed")
+        self.assertEqual(enriched[1]["compliance"]["percentage"], 0)
+        self.assertNotIn("compliance", enriched[2])
+        current_week = next(item for item in weekly if item["week_start"] == (today - timedelta(days=today.weekday())).isoformat())
+        self.assertEqual(current_week["planned_units"], 2)
+        self.assertEqual(current_week["completed_units"], 1)
+        self.assertEqual(current_week["unit_percentage"], 50)
+        self.assertEqual(current_week["percentage"], 40)
+        self.assertEqual(current_week["basis"], "training_load")
+
+    def test_planned_workout_fallback_matches_unpaired_same_day_sport(self):
+        today = server.local_now().date().isoformat()
+        enriched, _ = server.planning_compliance_state(
+            [{"id": "event-1", "category": "WORKOUT", "type": "Run", "start_date_local": f"{today}T00:00:00", "moving_time": 1800}],
+            [{"id": "activity-1", "type": "Run", "start_date_local": f"{today}T08:00:00", "moving_time": 1500}],
+        )
+        self.assertEqual(enriched[0]["compliance"]["status"], "completed")
+        self.assertEqual(enriched[0]["compliance"]["percentage"], 83)
+
     def test_workout_payload_is_an_idempotent_calendar_event(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         payload = server.workout_event_payload("abc", {
@@ -447,6 +495,9 @@ class CoachTests(unittest.TestCase):
             snapshot = client.fetch_snapshot(activity_days=90)
         activity_call = next(params for path, params in calls if path.endswith("/activities"))
         self.assertEqual((date.fromisoformat(activity_call["newest"]) - date.fromisoformat(activity_call["oldest"])).days, 89)
+        event_call = next(params for path, params in calls if path.endswith("/events"))
+        self.assertEqual(date.fromisoformat(event_call["oldest"]), server.local_now().date() - timedelta(days=server.PLANNED_CALENDAR_HISTORY_DAYS))
+        self.assertEqual(date.fromisoformat(event_call["newest"]), server.local_now().date() + timedelta(days=server.PLANNED_CALENDAR_FUTURE_DAYS))
         self.assertEqual({item["id"] for item in snapshot["recent_activities"]}, {"old", "new"})
 
     def test_library_is_cached_and_included_in_coach_context(self):

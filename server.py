@@ -819,6 +819,10 @@ SYNC_PERIOD_DEFAULTS = {"intervals": 90, "garmin": 30}
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = date(2000, 1, 1)
+# Keep enough calendar history to show whether recently planned workouts were
+# completed, while retaining the existing five-week forward planning horizon.
+PLANNED_CALENDAR_HISTORY_DAYS = 35
+PLANNED_CALENDAR_FUTURE_DAYS = 35
 
 
 def sync_period(source: str) -> int:
@@ -2998,6 +3002,187 @@ def add_weather_to_planned(planned: list[dict[str, Any]], weather: dict[str, Any
             copy["weather_recommendation"] = recommendation
         enriched.append(copy)
     return enriched
+def is_planned_workout_event(event: Any) -> bool:
+    """Return whether a calendar record represents a workout to execute."""
+    if not isinstance(event, dict):
+        return False
+    category = str(event.get("category") or "").strip().upper()
+    if category:
+        return category == "WORKOUT"
+    # Older cached event records may not contain category. Only infer a
+    # workout when the record has a duration, so races and calendar notes are
+    # not counted as missed training.
+    return as_number(first_present(event, ("moving_time", "elapsed_time"))) is not None
+
+
+def _record_date(value: Any) -> str:
+    parsed = activity_datetime(value)
+    return parsed.date().isoformat() if parsed else str(value or "")[:10]
+
+
+def _activity_metric(record: Any, keys: tuple[str, ...]) -> float | int | None:
+    number = as_number(first_present(record, keys))
+    return number if number is not None and number >= 0 else None
+
+
+def _workout_duration(record: Any) -> float | int | None:
+    return _activity_metric(record, ("moving_time", "elapsed_time"))
+
+
+def _workout_load(record: Any) -> float | int | None:
+    return _activity_metric(record, ("icu_training_load", "training_load", "tss"))
+
+
+def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[int, dict[str, Any]]:
+    """Match completed activities to planned workouts without reusing one activity."""
+    activity_rows = [item for item in activities if isinstance(item, dict)]
+    unused = set(range(len(activity_rows)))
+    matches: dict[int, dict[str, Any]] = {}
+    workout_rows = [(index, event) for index, event in enumerate(planned) if is_planned_workout_event(event)]
+    by_paired_id: dict[str, list[int]] = {}
+    for activity_index, activity in enumerate(activity_rows):
+        paired_id = first_present(activity, ("paired_event_id", "pairedEventId"))
+        if paired_id not in (None, ""):
+            by_paired_id.setdefault(str(paired_id), []).append(activity_index)
+
+    # paired_event_id is the reliable Intervals.icu association.
+    for event_index, event in workout_rows:
+        event_id = first_present(event, ("id", "event_id"))
+        candidates = [index for index in by_paired_id.get(str(event_id), []) if index in unused] if event_id not in (None, "") else []
+        if candidates:
+            candidates.sort(key=lambda index: str(activity_rows[index].get("start_date_local") or ""))
+            selected_index = candidates[0]
+            matches[event_index] = activity_rows[selected_index]
+            unused.remove(selected_index)
+
+    # Handle manually logged workouts conservatively, without stealing an
+    # activity that is explicitly paired with another event.
+    for event_index, event in workout_rows:
+        if event_index in matches:
+            continue
+        event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
+        event_kind = activity_kind(event)
+        if event_kind == "other":
+            continue
+        event_start = activity_datetime(first_present(event, ("start_date_local", "date", "start")))
+        candidates = []
+        for activity_index in unused:
+            activity = activity_rows[activity_index]
+            if first_present(activity, ("paired_event_id", "pairedEventId")) not in (None, ""):
+                continue
+            if _record_date(first_present(activity, ("start_date_local", "start_date", "start"))) != event_date:
+                continue
+            if activity_kind(activity) != event_kind:
+                continue
+            activity_start = activity_datetime(first_present(activity, ("start_date_local", "start_date", "start")))
+            distance = abs((activity_start - event_start).total_seconds()) if activity_start and event_start else 0
+            candidates.append((distance, activity_index))
+        if candidates:
+            candidates.sort()
+            selected_index = candidates[0][1]
+            matches[event_index] = activity_rows[selected_index]
+            unused.remove(selected_index)
+    return matches
+
+
+def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, today: date) -> dict[str, Any]:
+    event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
+    status = "completed" if activity is not None else "missed" if event_date < today.isoformat() else "planned"
+    planned_load = _workout_load(event)
+    actual_load = _workout_load(activity)
+    planned_duration = _workout_duration(event)
+    actual_duration = _workout_duration(activity)
+    basis = None
+    planned_value = None
+    actual_value = None
+    if planned_load is not None and planned_load > 0 and activity is not None and actual_load is not None:
+        basis, planned_value, actual_value = "training_load", planned_load, actual_load
+    elif planned_duration is not None and planned_duration > 0 and activity is not None and actual_duration is not None:
+        basis, planned_value, actual_value = "duration", planned_duration, actual_duration
+    elif activity is not None and planned_load is None and planned_duration is None:
+        basis = "unavailable"
+
+    percentage = 0 if status == "missed" else None
+    if activity is not None and basis == "unavailable":
+        percentage = 100
+    elif planned_value is not None and actual_value is not None and planned_value > 0:
+        # Intervals.icu also allows values above 100% when more was completed.
+        percentage = round(float(actual_value) * 100 / float(planned_value))
+    result: dict[str, Any] = {
+        "status": status,
+        "percentage": percentage,
+        "basis": basis,
+        "planned_value": planned_value,
+        "actual_value": actual_value,
+        "planned_duration": planned_duration,
+        "actual_duration": actual_duration,
+        "planned_load": planned_load,
+        "actual_load": actual_load,
+    }
+    if activity is not None:
+        result.update({
+            "activity_id": first_present(activity, ("id", "activityId")),
+            "activity_name": str(activity.get("name") or "Absolvierte Einheit")[:200],
+            "activity_start": first_present(activity, ("start_date_local", "start_date", "start")),
+        })
+    return result
+
+
+def planning_compliance_state(planned: list[Any], activities: list[Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Add unit compliance and return aggregate weekly compliance metrics."""
+    normalized_planned = [dict(item) for item in planned if isinstance(item, dict)]
+    matches = match_planned_workouts(normalized_planned, activities)
+    today = local_now().date()
+    enriched: list[dict[str, Any]] = []
+    week_rows: dict[str, list[dict[str, Any]]] = {}
+    for index, event in enumerate(normalized_planned):
+        if not is_planned_workout_event(event):
+            enriched.append(event)
+            continue
+        compliance = workout_compliance(event, matches.get(index), today)
+        enriched.append({**event, "compliance": compliance})
+        event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
+        try:
+            event_day = date.fromisoformat(event_date)
+        except ValueError:
+            continue
+        week_start = event_day - timedelta(days=event_day.weekday())
+        week_rows.setdefault(week_start.isoformat(), []).append(compliance)
+
+    weekly: list[dict[str, Any]] = []
+    for week_start, rows in sorted(week_rows.items()):
+        planned_count = len(rows)
+        completed_count = sum(1 for compliance in rows if compliance["status"] == "completed")
+        all_have_load = all(compliance.get("planned_load") is not None and compliance["planned_load"] > 0 for compliance in rows)
+        load_available = all(compliance["status"] != "completed" or compliance.get("actual_load") is not None for compliance in rows)
+        if all_have_load and load_available:
+            basis = "training_load"
+            planned_value = sum(float(compliance["planned_load"]) for compliance in rows)
+            actual_value = sum(float(compliance.get("actual_load") or 0) for compliance in rows)
+        else:
+            all_have_duration = all(compliance.get("planned_duration") is not None and compliance["planned_duration"] > 0 for compliance in rows)
+            duration_available = all(compliance["status"] != "completed" or compliance.get("actual_duration") is not None for compliance in rows)
+            if not all_have_duration or not duration_available:
+                basis, planned_value, actual_value = None, None, None
+            else:
+                basis = "duration"
+                planned_value = sum(float(compliance["planned_duration"]) for compliance in rows)
+                actual_value = sum(float(compliance.get("actual_duration") or 0) for compliance in rows)
+        percentage = round(actual_value * 100 / planned_value) if planned_value else None
+        weekly.append({
+            "week_start": week_start,
+            "week_end": (date.fromisoformat(week_start) + timedelta(days=6)).isoformat(),
+            "planned_units": planned_count,
+            "completed_units": completed_count,
+            "unit_percentage": round(completed_count * 100 / planned_count) if planned_count else None,
+            "percentage": percentage,
+            "basis": basis,
+            "planned_value": round(planned_value, 2) if planned_value is not None else None,
+            "actual_value": round(actual_value, 2) if actual_value is not None else None,
+        })
+    return enriched, weekly
+
+
 def version_tuple(value: Any) -> tuple[int, int, int] | None:
     match = GITHUB_VERSION_RE.fullmatch(str(value or "").strip())
     if not match:
@@ -3141,7 +3326,8 @@ class IntervalsClient:
     def fetch_snapshot(self, activity_days: int = 42) -> dict[str, Any]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         today = local_now().date()
-        future_end = today + timedelta(days=28)
+        calendar_start = today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)
+        calendar_end = today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)
         existing = latest_snapshot() or {}
         incremental = bool(existing) and activity_days != ALL_SYNC_DAYS
         request_days = activity_days
@@ -3159,7 +3345,7 @@ class IntervalsClient:
         wellness = deduplicate_api_records(wellness)
         events = self.get(
             f"/athlete/{athlete}/events",
-            {"oldest": today.isoformat(), "newest": future_end.isoformat()},
+            {"oldest": calendar_start.isoformat(), "newest": calendar_end.isoformat()},
         )
         athlete_data = self.get(f"/athlete/{athlete}")
         incoming = compact_snapshot(athlete_data, activities, wellness, events, history_days=request_days)
@@ -3284,7 +3470,7 @@ def compact_wellness_sport_info(value: Any) -> list[dict[str, Any]]:
 
 def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, history_days: int = 42) -> dict[str, Any]:
     activity_fields = (
-        "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain",
+        "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain", "elapsed_time",
         "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "average_heartrate",
         "max_heartrate", "average_watts", "weighted_average_watts", "average_speed", "max_speed",
         "icu_weighted_avg_speed", "icu_pace", "feel", "icu_rpe", "paired_event_id",
@@ -3295,7 +3481,7 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
         "mood", "readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness",
     )
     event_fields = (
-        "id", "start_date_local", "category", "name", "description", "type", "moving_time",
+        "id", "start_date_local", "category", "name", "description", "type", "moving_time", "elapsed_time",
         "distance", "icu_training_load", "icu_intensity", "target", "external_id",
     )
     athlete_fields = (
@@ -5345,6 +5531,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
     snapshot = latest_snapshot()
     activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
     planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
+    planned, planning_compliance = planning_compliance_state(planned, activities)
     weather = weather_state(planned, refresh=not local_only)
     return {
         "app": {
@@ -5358,6 +5545,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         "library": list_workout_library(),
         "activities": activities,
         "planned": add_weather_to_planned(planned, weather),
+        "planning_compliance": planning_compliance,
         "weather": weather,
         "parallel_cycling": parallel_cycling_event_groups(planned),
         "profile": get_profile(),

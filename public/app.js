@@ -582,7 +582,8 @@ function dateLabel(value) {
   return Number.isNaN(parsed.valueOf()) ? String(value).slice(0, 10) : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
 }
 
-const PLANNED_CALENDAR_WEEKS = 5;
+const PLANNED_HISTORY_WEEKS = 4;
+const PLANNED_CALENDAR_WEEKS = 9;
 
 function localDateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -608,6 +609,22 @@ function plannedWeekStart(date) {
   return start;
 }
 
+function complianceMetricLabel(compliance) {
+  if (!compliance || compliance.planned_value == null || compliance.actual_value == null) return "";
+  if (compliance.basis === "training_load") return `Belastung ${formatWhole(compliance.actual_value)} / ${formatWhole(compliance.planned_value)}`;
+  if (compliance.basis === "duration") return `${formatDuration(compliance.actual_value)} / ${formatDuration(compliance.planned_value)}`;
+  return "";
+}
+
+function complianceLabel(compliance) {
+  if (!compliance) return "";
+  if (compliance.status === "planned") return "Noch nicht absolviert";
+  if (compliance.status === "missed") return "Nicht umgesetzt · 0%";
+  if (compliance.percentage == null) return "Absolviert · Vergleich nicht verfügbar";
+  const metric = complianceMetricLabel(compliance);
+  return `Umsetzung ${compliance.percentage}%${metric ? ` · ${metric}` : ""}`;
+}
+
 function plannedWeekLabel(start) {
   const end = new Date(start);
   end.setDate(end.getDate() + 6);
@@ -615,11 +632,20 @@ function plannedWeekLabel(start) {
   return `${format.format(start)} – ${format.format(end)} ${end.getFullYear()}`;
 }
 
-function plannedWeekSummary(events) {
+function plannedComplianceForWeek(weekKey) {
+  return (state.data?.planning_compliance || []).find((item) => item.week_start === weekKey) || null;
+}
+
+function plannedWeekSummary(events, weekKey) {
   const duration = events.reduce((total, event) => total + (Number(event.moving_time) || 0), 0);
   const distance = events.reduce((total, event) => total + (Number(event.distance) || 0), 0);
   const load = events.reduce((total, event) => total + (Number(event.icu_training_load) || 0), 0);
+  const compliance = plannedComplianceForWeek(weekKey);
   const values = [`${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}`];
+  if (compliance) {
+    values.push(`${compliance.completed_units}/${compliance.planned_units} umgesetzt (${compliance.unit_percentage}%)`);
+    if (compliance.percentage != null) values.push(`Umsetzung ${compliance.percentage}%`);
+  }
   if (duration > 0) values.push(`${(duration / 3600).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} h`);
   if (distance > 0) values.push(`${(distance / 1000).toLocaleString("de-DE", { maximumFractionDigits: 0 })} km`);
   if (load > 0) values.push(`Belastung ${Math.round(load).toLocaleString("de-DE")}`);
@@ -881,7 +907,10 @@ function renderPlanned(planned) {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const firstWeek = plannedWeekStart(today);
+  const historyStart = new Date(today);
+  historyStart.setDate(today.getDate() - PLANNED_HISTORY_WEEKS * 7);
+  const firstWeek = plannedWeekStart(historyStart);
+  const currentWeekIndex = PLANNED_HISTORY_WEEKS;
   for (let weekIndex = 0; weekIndex < PLANNED_CALENDAR_WEEKS; weekIndex += 1) {
     const weekStart = new Date(firstWeek);
     weekStart.setDate(firstWeek.getDate() + weekIndex * 7);
@@ -896,21 +925,21 @@ function renderPlanned(planned) {
     const weekRoot = document.createElement("details");
     weekRoot.className = "planned-week";
     weekRoot.dataset.week = weekKey;
-    weekRoot.open = state.plannedWeekOpen.has(weekKey) ? state.plannedWeekOpen.get(weekKey) : weekIndex === 0;
+    weekRoot.open = state.plannedWeekOpen.has(weekKey) ? state.plannedWeekOpen.get(weekKey) : weekIndex === currentWeekIndex;
     weekRoot.addEventListener("toggle", () => state.plannedWeekOpen.set(weekKey, weekRoot.open));
     const weekHeading = document.createElement("summary");
     weekHeading.className = "planned-week-heading";
     const weekTitle = document.createElement("span");
     weekTitle.className = "planned-week-title";
     weekTitle.textContent = plannedWeekLabel(weekStart);
-    if (weekIndex === 0) {
+    if (weekIndex === currentWeekIndex) {
       const current = document.createElement("small");
       current.textContent = "Diese Woche";
       weekTitle.append(current);
     }
     const weekSummary = document.createElement("span");
     weekSummary.className = "planned-week-summary";
-    weekSummary.textContent = plannedWeekSummary(weekEvents);
+    weekSummary.textContent = plannedWeekSummary(weekEvents, weekKey);
     weekHeading.append(weekTitle, weekSummary);
     weekRoot.append(weekHeading);
 
@@ -965,13 +994,29 @@ function renderPlanned(planned) {
           eventTitle.textContent = event.name || "Geplante Einheit";
           const meta = document.createElement("span");
           meta.className = "planned-meta";
-          meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null].filter(Boolean).join(" · ");
+          const compliance = event.compliance;
+          const complianceSummary = compliance?.percentage != null ? `Umsetzung ${compliance.percentage}%` : compliance?.status === "missed" ? "Nicht umgesetzt" : compliance?.status === "completed" ? "Absolviert" : null;
+          meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null, complianceSummary].filter(Boolean).join(" · ");
           summaryMain.append(eventTitle, meta);
           summary.append(summaryMain);
+          if (compliance) details.classList.add(`planned-compliance-${compliance.status}`);
           details.append(summary);
 
           const body = document.createElement("div");
           body.className = "planned-entry-body";
+          if (compliance) {
+            const complianceRoot = document.createElement("div");
+            complianceRoot.className = "planned-compliance";
+            const complianceTitle = document.createElement("strong");
+            complianceTitle.textContent = complianceLabel(compliance);
+            complianceRoot.append(complianceTitle);
+            if (compliance.status === "completed" && compliance.activity_name) {
+              const completed = document.createElement("span");
+              completed.textContent = `Absolviert: ${compliance.activity_name}`;
+              complianceRoot.append(completed);
+            }
+            body.append(complianceRoot);
+          }
           if (event.description) {
             const description = document.createElement("div");
             description.className = "planned-description";
