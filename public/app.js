@@ -661,8 +661,13 @@ function dateLabel(value) {
   return Number.isNaN(parsed.valueOf()) ? String(value).slice(0, 10) : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
 }
 
-const PLANNED_HISTORY_WEEKS = 4;
-const PLANNED_CALENDAR_WEEKS = 9;
+const CALENDAR_DISPLAY_DEFAULTS = { past_weeks: 1, future_weeks: 4 };
+const CALENDAR_DISPLAY_MAX_WEEKS = 52;
+
+function calendarDisplayValue(value, fallback) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 && number <= CALENDAR_DISPLAY_MAX_WEEKS ? number : fallback;
+}
 
 function localDateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -1041,11 +1046,15 @@ function renderPlanned(planned) {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const calendarDisplay = state.data?.calendar_display || {};
+  const pastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
+  const futureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
   const historyStart = new Date(today);
-  historyStart.setDate(today.getDate() - PLANNED_HISTORY_WEEKS * 7);
+  historyStart.setDate(today.getDate() - pastWeeks * 7);
   const firstWeek = plannedWeekStart(historyStart);
-  const currentWeekIndex = PLANNED_HISTORY_WEEKS;
-  for (let weekIndex = 0; weekIndex < PLANNED_CALENDAR_WEEKS; weekIndex += 1) {
+  const currentWeekIndex = pastWeeks;
+  const calendarWeeks = pastWeeks + 1 + futureWeeks;
+  for (let weekIndex = 0; weekIndex < calendarWeeks; weekIndex += 1) {
     const weekStart = new Date(firstWeek);
     weekStart.setDate(firstWeek.getDate() + weekIndex * 7);
     const weekKey = localDateKey(weekStart);
@@ -2087,6 +2096,15 @@ function renderSettings(data) {
   const garminDays = $("#garminSyncDays");
   if (intervalsDays && document.activeElement !== intervalsDays) intervalsDays.value = data.sync_settings?.intervals_days || 90;
   if (garminDays && document.activeElement !== garminDays) garminDays.value = data.sync_settings?.garmin_days || 30;
+  const calendarDisplay = data.calendar_display || CALENDAR_DISPLAY_DEFAULTS;
+  const calendarPastWeeks = $("#calendarDisplayPastWeeks");
+  const calendarFutureWeeks = $("#calendarDisplayFutureWeeks");
+  const pastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
+  const futureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
+  if (calendarPastWeeks && document.activeElement !== calendarPastWeeks) calendarPastWeeks.value = pastWeeks;
+  if (calendarFutureWeeks && document.activeElement !== calendarFutureWeeks) calendarFutureWeeks.value = futureWeeks;
+  const calendarDisplaySummary = $("#calendarDisplaySummary");
+  if (calendarDisplaySummary) calendarDisplaySummary.textContent = `${pastWeeks} zurück · ${futureWeeks} voraus`;
   const intervalsSyncButton = $("#systemIntervalsSyncButton");
   const intervalsFullButton = $("#systemIntervalsFullResyncButton");
   const intervalsFullStatus = $("#intervalsFullResyncStatus");
@@ -2588,6 +2606,33 @@ async function saveThinkingLevel(event) {
   } finally { select.disabled = false; }
 }
 
+async function saveCalendarDisplaySettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = $("#calendarDisplaySaveButton");
+  if (!button) return;
+  button.disabled = true;
+  button.textContent = "Wird gespeichert...";
+  try {
+    await api("/api/settings/calendar-display", {
+      method: "PUT",
+      body: JSON.stringify({
+        past_weeks: $("#calendarDisplayPastWeeks")?.value,
+        future_weeks: $("#calendarDisplayFutureWeeks")?.value,
+      }),
+    });
+    toast("Kalenderansicht gespeichert");
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    renderSettings(state.data || {});
+  } finally {
+    button.disabled = false;
+    button.textContent = "Kalenderansicht speichern";
+    form.querySelectorAll("input").forEach((input) => { input.disabled = false; });
+  }
+}
+
 async function downloadDiagnostics() {
   const button = $("#diagnosticsButton");
   button.disabled = true;
@@ -2676,6 +2721,7 @@ $("#competitionList").addEventListener("input", () => { state.profileDirty = tru
 $("#addCompetitionButton").addEventListener("click", addCompetition);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
+$("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
 $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#chatResetButton").addEventListener("click", resetCoachChat);

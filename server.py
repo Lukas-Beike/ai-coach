@@ -241,6 +241,8 @@ THINKING_LEVEL_OPTIONS = (
     {"id": "medium", "label": "Mittel", "description": "Ausgewogene Qualität, Geschwindigkeit und Kosten"},
     {"id": "high", "label": "Hoch", "description": "Gründlichere Überlegung für komplexe Trainingsfragen"},
 )
+CALENDAR_DISPLAY_DEFAULTS = {"past_weeks": 1, "future_weeks": 4}
+CALENDAR_DISPLAY_MAX_WEEKS = 52
 
 
 def available_model_options() -> list[dict[str, str]]:
@@ -280,6 +282,38 @@ def save_thinking_level(level: Any) -> dict[str, str]:
         raise AppError(400, "Nicht unterstütztes Thinking Level.")
     set_kv("selected_thinking_level", level_id)
     return {"thinking_level": level_id}
+
+
+def calendar_display_settings() -> dict[str, int]:
+    settings: dict[str, int] = {}
+    for key, default in CALENDAR_DISPLAY_DEFAULTS.items():
+        try:
+            value = int(get_kv(f"calendar_display_{key}") or default)
+        except (TypeError, ValueError):
+            value = default
+        settings[key] = max(0, min(value, CALENDAR_DISPLAY_MAX_WEEKS))
+    return settings
+
+
+def save_calendar_display_settings(values: Any) -> dict[str, Any]:
+    if not isinstance(values, dict):
+        raise AppError(400, "Die Kalenderansicht muss als Objekt gesendet werden.")
+    updates: dict[str, int] = {}
+    for key, label in (("past_weeks", "zur\u00fcck"), ("future_weeks", "voraus")):
+        if key not in values:
+            continue
+        try:
+            value = int(values[key])
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, f"Wochen {label} muss eine ganze Zahl sein.") from exc
+        if not 0 <= value <= CALENDAR_DISPLAY_MAX_WEEKS:
+            raise AppError(400, f"Wochen {label} muss zwischen 0 und {CALENDAR_DISPLAY_MAX_WEEKS} liegen.")
+        updates[key] = value
+    if not updates:
+        raise AppError(400, "Keine Kalenderansicht-Einstellungen eingegeben.")
+    for key, value in updates.items():
+        set_kv(f"calendar_display_{key}", str(value))
+    return {"status": "ok", **calendar_display_settings()}
 
 
 def redact_text(value: str) -> str:
@@ -6022,6 +6056,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "intervals_days": sync_period("intervals"),
             "garmin_days": sync_period("garmin"),
         },
+        "calendar_display": calendar_display_settings(),
         "competition_sync": {
             "last_sync_at": get_kv("last_competition_sync_at"),
             "last_error": get_kv("last_competition_sync_error") or None,
@@ -6636,6 +6671,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/settings/thinking-level":
                 self.send_json(200, save_thinking_level(self.read_json().get("thinking_level")))
+                return
+            if path == "/api/settings/calendar-display":
+                self.send_json(200, save_calendar_display_settings(self.read_json()))
                 return
             if path == "/api/athlete-context":
                 payload = self.read_json()
