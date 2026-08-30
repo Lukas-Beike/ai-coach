@@ -62,6 +62,28 @@
         <div id="parallelCyclingWarning" class="parallel-warning" hidden></div>
         <div id="weatherNotice" class="weather-notice" hidden></div>
         <div id="plannedCalendar" class="planned-calendar"></div>
+        <details id="plannedCompetitionsSection" class="settings-section collapsible-section">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Zielwettkämpfe</span><span id="plannedCompetitionsSummary" class="collapsible-summary-meta">Noch keine Wettkämpfe</span></summary>
+          <p>Trage Wettkämpfe manuell mit den Intervals.icu-Feldern ein. Änderungen werden mit Intervals.icu bidirektional synchronisiert.</p>
+          <div id="competitionList" class="competition-list"></div>
+          <div class="settings-inline-action competition-sync-actions">
+            <div><strong>Intervals.icu-Zielwettkämpfe</strong><span id="competitionSyncDetail">Noch nicht synchronisiert</span></div>
+            <button type="button" id="competitionSyncButton" class="secondary-button">Mit Intervals.icu synchronisieren</button>
+          </div>
+          <button type="button" id="addCompetitionButton" class="secondary-button">Wettkampf hinzufügen</button>
+          <button type="submit" form="profileForm">Wettkämpfe speichern</button>
+        </details>
+        <details id="plannedPlanningSection" class="settings-section collapsible-section">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Adaptive Planung</span><span id="planningSummaryCompact" class="collapsible-summary-meta">Lokale Entwürfe prüfen</span></summary>
+          <p id="planningSummary">Lokale zukünftige Entwürfe können anhand deines Feedbacks überprüft werden.</p>
+          <div id="externalCalendarEvents" class="external-calendar-events" aria-live="polite"></div>
+          <div class="settings-section-heading">
+            <div><p class="fine-print">Die Vorschau verändert noch keine Einheiten. Erst die Freigabe wendet Änderungen auf lokale zukünftige Entwürfe an.</p></div>
+            <button type="button" id="replanButton" class="secondary-button">Anpassung vorbereiten</button>
+          </div>
+          <div id="replanPreview" class="replan-preview" hidden></div>
+          <button type="button" id="applyReplanButton" class="secondary-button" hidden>Anpassung freigeben</button>
+        </details>
         <div class="library-heading">
           <div><h3 class="subsection-title">Trainingsbibliothek</h3><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
           <button id="libraryLoadButton" class="secondary-button" type="button">Bibliothek synchronisieren</button>
@@ -78,8 +100,8 @@
           <div><span class="eyebrow">COACHING-PROFIL</span><h2>Athletenkontext</h2></div>
         </div>
         <form id="profileForm" class="profile-form">
-          <fieldset class="profile-section">
-            <legend>Dauerhaftes Profil</legend>
+          <details class="profile-section collapsible-section" open>
+            <summary class="collapsible-summary"><span class="collapsible-summary-title">Dauerhaftes Profil</span><span id="profileSummary" class="collapsible-summary-meta">Noch nicht ausgefüllt</span></summary>
             <p>Diese bestätigten Angaben werden lokal gespeichert und bei jeder Coach-Anfrage berücksichtigt.</p>
             <div class="form-grid">
               <label>Name<input name="name" autocomplete="name"></label>
@@ -99,23 +121,12 @@
             </div>
             <label>Wetter-/Urlaubsstandort<input name="weather_location" placeholder="Stadt oder PLZ, z. B. Münster"></label>
             <p class="fine-print profile-help">Diesen Standort kannst du jederzeit ändern, zum Beispiel für einen Urlaub. Eine Stadt oder PLZ reicht; konkrete Zeitvorschläge gibt es nur für die nächsten 5 Tage.</p>
-          </fieldset>
-
-          <fieldset class="profile-section">
-            <legend>Zielwettkämpfe</legend>
-            <p>Trage Wettkämpfe manuell mit den Intervals.icu-Feldern ein. Änderungen werden mit Intervals.icu bidirektional synchronisiert.</p>
-            <div id="competitionList" class="competition-list"></div>
-            <div class="settings-inline-action competition-sync-actions">
-              <div><strong>Intervals.icu-Zielwettkämpfe</strong><span id="competitionSyncDetail">Noch nicht synchronisiert</span></div>
-              <button type="button" id="competitionSyncButton" class="secondary-button">Mit Intervals.icu synchronisieren</button>
-            </div>
-            <button type="button" id="addCompetitionButton" class="secondary-button">Wettkampf hinzufügen</button>
-          </fieldset>
+          </details>
 
           <button type="submit">Athletenkontext speichern</button>
         </form>
-        <section class="settings-section local-feedback-section" aria-labelledby="localFeedbackTitle">
-          <h3 id="localFeedbackTitle">Lokales Athleten-Feedback</h3>
+        <details class="settings-section local-feedback-section collapsible-section">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Lokales Athleten-Feedback</span><span id="feedbackSummary" class="collapsible-summary-meta">Noch kein Eintrag</span></summary>
           <p>Hier werden nur eigene subjektive Angaben und Verfügbarkeiten gespeichert, die nicht aus Garmin oder Intervals.icu stammen.</p>
           <form id="feedbackForm" class="profile-form">
             <div class="form-grid">
@@ -133,25 +144,7 @@
             <button type="submit">Feedback speichern</button>
           </form>
           <div id="feedbackHistory" class="feedback-history"></div>
-        </section>
-        <section class="settings-section planning-section" aria-labelledby="planningTitle">
-          <div class="settings-section-heading"><div><h3 id="planningTitle">Adaptive Planung</h3><p id="planningSummary">Lokale zukünftige Entwürfe können anhand deines Feedbacks überprüft werden.</p></div><button type="button" id="replanButton" class="secondary-button">Anpassung vorbereiten</button></div>
-          <div id="externalCalendarEvents" class="external-calendar-events" aria-live="polite"></div>
-          <div id="replanPreview" class="replan-preview" hidden></div>
-          <button type="button" id="applyReplanButton" class="secondary-button" hidden>Anpassung freigeben</button>
-        </section>
-        <div class="model-selector">
-          <label for="modelSelect">Coach-Modell<select id="modelSelect"></select></label>
-          <p id="modelDescription" class="fine-print">Wähle die Balance aus Qualität, Tempo und Kosten.</p>
-        </div>
-        <div class="model-selector">
-          <label for="thinkingLevelSelect">Thinking Level<select id="thinkingLevelSelect"></select></label>
-          <p id="thinkingLevelDescription" class="fine-print">Thinking Level steuert, wie grÃ¼ndlich der Coach vor der Antwort Ã¼berlegt.</p>
-        </div>
-        <div class="diagnostic-actions">
-          <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
-          <p class="fine-print">Enthält aktuelle bereinigte Fehler und Laufzeitstatus, niemals API-Schlüssel oder Trainingsdaten.</p>
-        </div>
+        </details>
         <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
           <div class="context-preview-heading">
             <div><span class="eyebrow">TRANSPARENZ</span><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>
@@ -167,8 +160,8 @@
         <div class="section-heading">
           <div><span class="eyebrow">SYSTEM</span><h2>Anbindungen &amp; Server</h2></div>
         </div>
-        <section class="settings-section">
-          <h3>Anbindungen</h3>
+        <details class="settings-section collapsible-section" open>
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
           <div class="connection-cards">
             <article class="connection-card"><div><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span></div><button id="chatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
             <article class="connection-card"><div><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="90"><small>-1 = alle verfügbaren Daten</small></label><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
@@ -178,22 +171,37 @@
           <p class="fine-print settings-message">Zugangsdaten und die Athlete ID müssen über Container-Umgebungsvariablen gesetzt werden (Unraid: Docker-Template &rarr; Environment variables). Erforderlich: <code>OPENAI_API_KEY</code>, <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code>; für Garmin zusätzlich <code>GARMIN_EMAIL</code>, <code>GARMIN_PASSWORD</code> und <code>GARMINTOKENS</code> (z. B. <code>/data/garmin_tokens</code>). Nach Änderungen den Container in Unraid neu erstellen.</p>
           <p id="garminDetail" class="fine-print settings-message"></p>
           <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend.</p>
-        </section>
-        <section class="settings-section context-preview" aria-labelledby="systemContextPreviewTitle">
+        </details>
+        <details class="settings-section collapsible-section" open>
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Coach-Modell &amp; Thinking</span><span id="modelSettingsSummary" class="collapsible-summary-meta">Auswahl wird geladen…</span></summary>
+          <div id="modelSettingsTarget">
+            <div class="model-selector">
+              <label for="modelSelect">Coach-Modell<select id="modelSelect"></select></label>
+              <p id="modelDescription" class="fine-print">Wähle die Balance aus Qualität, Tempo und Kosten.</p>
+            </div>
+            <div class="model-selector">
+              <label for="thinkingLevelSelect">Thinking Level<select id="thinkingLevelSelect"></select></label>
+              <p id="thinkingLevelDescription" class="fine-print">Thinking Level steuert, wie gründlich der Coach vor der Antwort überlegt.</p>
+            </div>
+          </div>
+        </details>
+        <details class="settings-section context-preview collapsible-section" aria-label="Chat-Kontext und Prompt">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Chat-Kontext und Prompt</span><span class="collapsible-summary-meta">Transparenz</span></summary>
           <div class="context-preview-heading">
-            <div><span class="eyebrow">TRANSPARENZ</span><h3 id="systemContextPreviewTitle">Chat-Kontext und Prompt</h3></div>
+            <span class="eyebrow">TRANSPARENZ</span>
             <button type="button" id="systemContextPreviewButton" class="secondary-button">Kontext laden</button>
           </div>
           <p class="fine-print context-preview-intro">Hier siehst du den Kontext, der als <code>instructions</code> gesendet wird, und die letzte Chat-Eingabe, die als <code>input</code> an OpenAI übergeben wurde.</p>
           <div id="systemContextPreviewStatus" class="context-preview-status">Noch nicht geladen.</div>
           <div id="systemContextPreviewContent" class="context-preview-content" hidden></div>
-        </section>
-        <section class="settings-section logs-section">
+        </details>
+        <details class="settings-section logs-section collapsible-section">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Server-Logs</span><span class="collapsible-summary-meta">Bereinigte Laufzeitdaten</span></summary>
           <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die letzten bereinigten Einträge aus dem Fehler- und Laufzeitprotokoll.</p></div><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button></div>
           <pre id="logsOutput" class="logs-output">Logs werden beim Öffnen geladen…</pre>
-        </section>
-        <section class="settings-section">
-          <h3>Datenschutz &amp; Verbrauch</h3>
+        </details>
+        <details class="settings-section collapsible-section">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Datenschutz &amp; Verbrauch</span><span id="privacySummary" class="collapsible-summary-meta">OpenAI-Verbrauch wird geladen…</span></summary>
           <p id="usageSummary" class="fine-print">OpenAI-Verbrauch wird geladen…</p>
           <div class="settings-inline-action notification-actions">
             <div><strong>PWA-Benachrichtigungen</strong><span id="notificationStatus">Noch nicht aktiviert</span></div>
@@ -215,7 +223,14 @@
             <span>Die Datenbank bleibt als verschlüsselte Datei bestehen; ihr Inhalt wird geleert.</span>
             <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
           </div>
-        </section>
+        </details>
+        <details class="settings-section collapsible-section">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span><span class="collapsible-summary-meta">Bereinigten Status herunterladen</span></summary>
+          <div class="diagnostic-actions">
+            <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
+            <p class="fine-print">Enthält aktuelle bereinigte Fehler und Laufzeitstatus, niemals API-Schlüssel oder Trainingsdaten.</p>
+          </div>
+        </details>
       </section>
     </main>
 

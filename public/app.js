@@ -6,6 +6,7 @@ const state = {
   chatQueueSequence: 0,
   profileDirty: false,
   activityTypes: new Set(),
+  plannedWeekOpen: new Map(),
   voiceRecorder: null,
   voiceStream: null,
   voiceTimer: null,
@@ -367,6 +368,8 @@ function renderLocalFeedback(data) {
     for (const field of ["available_minutes", "soreness", "stress", "motivation", "session_rpe", "illness", "pain", "availability_notes", "notes"]) setFormValue(form, field, today[field]);
   }
   const history = $("#feedbackHistory");
+  const summary = $("#feedbackSummary");
+  if (summary) summary.textContent = today.checkin_date ? `Letzter Check-in: ${dateLabel(today.checkin_date)}` : "Noch kein Eintrag";
   if (!history) return;
   history.replaceChildren();
   for (const entry of (feedback.recent || []).slice(0, 7)) {
@@ -383,6 +386,8 @@ function renderPlanning(data) {
   const next = planning.season?.next_event;
   const summary = $("#planningSummary");
   if (summary) summary.textContent = next ? `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${next.phase} · ${next.days_until} Tage` : "Noch kein zukünftiger Wettkampf gespeichert.";
+  const compact = $("#planningSummaryCompact");
+  if (compact) compact.textContent = next ? `${next.name} · ${next.days_until} Tage` : "Kein zukünftiger Wettkampf";
   const preview = planning.latest_replan;
   const node = $("#replanPreview");
   const apply = $("#applyReplanButton");
@@ -559,7 +564,7 @@ function dateLabel(value) {
   return Number.isNaN(parsed.valueOf()) ? String(value).slice(0, 10) : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
 }
 
-const PLANNED_CALENDAR_DAYS = 28;
+const PLANNED_CALENDAR_WEEKS = 5;
 
 function localDateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -575,6 +580,32 @@ function plannedDayLabel(date, offset) {
   if (offset === 0) return `Heute · ${formatted}`;
   if (offset === 1) return `Morgen · ${formatted}`;
   return formatted;
+}
+
+function plannedWeekStart(date) {
+  const start = new Date(date);
+  const day = start.getDay();
+  start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function plannedWeekLabel(start) {
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const format = new Intl.DateTimeFormat("de-DE", { day: "numeric", month: "short" });
+  return `${format.format(start)} – ${format.format(end)} ${end.getFullYear()}`;
+}
+
+function plannedWeekSummary(events) {
+  const duration = events.reduce((total, event) => total + (Number(event.moving_time) || 0), 0);
+  const distance = events.reduce((total, event) => total + (Number(event.distance) || 0), 0);
+  const load = events.reduce((total, event) => total + (Number(event.icu_training_load) || 0), 0);
+  const values = [`${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}`];
+  if (duration > 0) values.push(`${(duration / 3600).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} h`);
+  if (distance > 0) values.push(`${(distance / 1000).toLocaleString("de-DE", { maximumFractionDigits: 0 })} km`);
+  if (load > 0) values.push(`Belastung ${Math.round(load).toLocaleString("de-DE")}`);
+  return values.join(" · ");
 }
 
 function weatherForDate(date) {
@@ -814,6 +845,7 @@ function renderPlanned(planned) {
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   renderWeatherNotice(state.data?.weather);
   const root = $("#plannedCalendar");
+  root.querySelectorAll("details.planned-week").forEach((week) => state.plannedWeekOpen.set(week.dataset.week, week.open));
   root.replaceChildren();
   const eventsByDate = new Map();
   (planned || []).forEach((event) => {
@@ -825,96 +857,134 @@ function renderPlanned(planned) {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  for (let offset = 0; offset < PLANNED_CALENDAR_DAYS; offset += 1) {
-    const day = new Date(today);
-    day.setDate(today.getDate() + offset);
-    const date = localDateKey(day);
-    const dayRoot = document.createElement("section");
-    dayRoot.className = "planned-day";
-
-    const heading = document.createElement("div");
-    heading.className = "planned-day-heading";
-    const title = document.createElement("h3");
-    title.textContent = plannedDayLabel(day, offset);
-    const events = eventsByDate.get(date) || [];
-    const count = document.createElement("span");
-    count.className = "planned-day-count";
-    count.textContent = events.length ? `${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
-    heading.append(title, count);
-    dayRoot.append(heading);
-
-    const weather = weatherForDate(date);
-    if (weather) {
-      const weatherRoot = document.createElement("div");
-      weatherRoot.className = "planned-weather";
-      const condition = document.createElement("strong");
-      condition.textContent = weather.condition || "Wetter";
-      const summary = document.createElement("span");
-      const direction = weatherDirection(weather.wind_direction_dominant);
-      summary.textContent = `${weatherNumber(weather.temperature_min, " °C")} bis ${weatherNumber(weather.temperature_max, " °C")} · Regenrisiko ${weatherNumber(weather.precipitation_probability_max, " %")} · Wind bis ${weatherNumber(weather.wind_speed_max, " km/h")} / Böen ${weatherNumber(weather.wind_gusts_max, " km/h")}${direction ? ` aus ${direction}` : ""}`;
-      weatherRoot.append(condition, summary);
-      dayRoot.append(weatherRoot);
+  const firstWeek = plannedWeekStart(today);
+  for (let weekIndex = 0; weekIndex < PLANNED_CALENDAR_WEEKS; weekIndex += 1) {
+    const weekStart = new Date(firstWeek);
+    weekStart.setDate(firstWeek.getDate() + weekIndex * 7);
+    const weekKey = localDateKey(weekStart);
+    const weekEvents = [];
+    for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + dayIndex);
+      weekEvents.push(...(eventsByDate.get(localDateKey(date)) || []));
     }
 
-    if (!events.length) {
-      const empty = document.createElement("p");
-      empty.className = "planned-day-empty";
-      empty.textContent = "Keine Einheit geplant";
-      dayRoot.append(empty);
-    } else {
-      const entries = document.createElement("div");
-      entries.className = "planned-day-entries";
-      events.forEach((event) => {
-        const details = document.createElement("details");
-        details.className = "planned-entry";
-        const summary = document.createElement("summary");
-        const summaryMain = document.createElement("span");
-        summaryMain.className = "planned-summary-main";
-        const eventTitle = document.createElement("strong");
-        eventTitle.textContent = event.name || "Geplante Einheit";
-        const meta = document.createElement("span");
-        meta.className = "planned-meta";
-        meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null].filter(Boolean).join(" · ");
-        summaryMain.append(eventTitle, meta);
-        summary.append(summaryMain);
-        details.append(summary);
-
-        const body = document.createElement("div");
-        body.className = "planned-entry-body";
-        if (event.description) {
-          const description = document.createElement("div");
-          description.className = "planned-description";
-          description.textContent = event.description;
-          body.append(description);
-        }
-        if (event.weather_recommendation) {
-          const recommendation = document.createElement("div");
-          recommendation.className = "planned-weather-recommendation";
-          const recommendationTitle = document.createElement("strong");
-          recommendationTitle.textContent = `Beste Wetterzeit: ${event.weather_recommendation.suggested_time}`;
-          const recommendationReason = document.createElement("span");
-          const direction = weatherDirection(event.weather_recommendation.wind_direction);
-          recommendationReason.textContent = `${event.weather_recommendation.reason || "Günstigstes verfügbares Zeitfenster laut Vorhersage."}${direction ? ` Windrichtung: ${direction}.` : ""}`;
-          recommendation.append(recommendationTitle, recommendationReason);
-          body.append(recommendation);
-        }
-        if (event.id != null) {
-          const actions = document.createElement("div");
-          actions.className = "card-actions";
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "secondary-button danger-button";
-          button.textContent = "Einheit löschen";
-          button.addEventListener("click", () => deletePlanned(event.id, button, event.name));
-          actions.append(button);
-          body.append(actions);
-        }
-        details.append(body);
-        entries.append(details);
-      });
-      dayRoot.append(entries);
+    const weekRoot = document.createElement("details");
+    weekRoot.className = "planned-week";
+    weekRoot.dataset.week = weekKey;
+    weekRoot.open = state.plannedWeekOpen.has(weekKey) ? state.plannedWeekOpen.get(weekKey) : weekIndex === 0;
+    weekRoot.addEventListener("toggle", () => state.plannedWeekOpen.set(weekKey, weekRoot.open));
+    const weekHeading = document.createElement("summary");
+    weekHeading.className = "planned-week-heading";
+    const weekTitle = document.createElement("span");
+    weekTitle.className = "planned-week-title";
+    weekTitle.textContent = plannedWeekLabel(weekStart);
+    if (weekIndex === 0) {
+      const current = document.createElement("small");
+      current.textContent = "Diese Woche";
+      weekTitle.append(current);
     }
-    root.append(dayRoot);
+    const weekSummary = document.createElement("span");
+    weekSummary.className = "planned-week-summary";
+    weekSummary.textContent = plannedWeekSummary(weekEvents);
+    weekHeading.append(weekTitle, weekSummary);
+    weekRoot.append(weekHeading);
+
+    const weekDays = document.createElement("div");
+    weekDays.className = "planned-week-days";
+    for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+      const day = new Date(weekStart);
+      day.setDate(weekStart.getDate() + dayIndex);
+      const date = localDateKey(day);
+      const events = eventsByDate.get(date) || [];
+      const dayRoot = document.createElement("section");
+      dayRoot.className = "planned-day";
+
+      const heading = document.createElement("div");
+      heading.className = "planned-day-heading";
+      const title = document.createElement("h3");
+      title.textContent = plannedDayLabel(day, Math.round((day - today) / 86400000));
+      const count = document.createElement("span");
+      count.className = "planned-day-count";
+      count.textContent = events.length ? `${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
+      heading.append(title, count);
+      dayRoot.append(heading);
+
+      const weather = weatherForDate(date);
+      if (weather) {
+        const weatherRoot = document.createElement("div");
+        weatherRoot.className = "planned-weather";
+        const condition = document.createElement("strong");
+        condition.textContent = weather.condition || "Wetter";
+        const summary = document.createElement("span");
+        const direction = weatherDirection(weather.wind_direction_dominant);
+        summary.textContent = `${weatherNumber(weather.temperature_min, " °C")} bis ${weatherNumber(weather.temperature_max, " °C")} · Regenrisiko ${weatherNumber(weather.precipitation_probability_max, " %")} · Wind bis ${weatherNumber(weather.wind_speed_max, " km/h")} / Böen ${weatherNumber(weather.wind_gusts_max, " km/h")}${direction ? ` aus ${direction}` : ""}`;
+        weatherRoot.append(condition, summary);
+        dayRoot.append(weatherRoot);
+      }
+
+      if (!events.length) {
+        const empty = document.createElement("p");
+        empty.className = "planned-day-empty";
+        empty.textContent = "Keine Einheit geplant";
+        dayRoot.append(empty);
+      } else {
+        const entries = document.createElement("div");
+        entries.className = "planned-day-entries";
+        events.forEach((event) => {
+          const details = document.createElement("details");
+          details.className = "planned-entry";
+          const summary = document.createElement("summary");
+          const summaryMain = document.createElement("span");
+          summaryMain.className = "planned-summary-main";
+          const eventTitle = document.createElement("strong");
+          eventTitle.textContent = event.name || "Geplante Einheit";
+          const meta = document.createElement("span");
+          meta.className = "planned-meta";
+          meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null].filter(Boolean).join(" · ");
+          summaryMain.append(eventTitle, meta);
+          summary.append(summaryMain);
+          details.append(summary);
+
+          const body = document.createElement("div");
+          body.className = "planned-entry-body";
+          if (event.description) {
+            const description = document.createElement("div");
+            description.className = "planned-description";
+            description.textContent = event.description;
+            body.append(description);
+          }
+          if (event.weather_recommendation) {
+            const recommendation = document.createElement("div");
+            recommendation.className = "planned-weather-recommendation";
+            const recommendationTitle = document.createElement("strong");
+            recommendationTitle.textContent = `Beste Wetterzeit: ${event.weather_recommendation.suggested_time}`;
+            const recommendationReason = document.createElement("span");
+            const direction = weatherDirection(event.weather_recommendation.wind_direction);
+            recommendationReason.textContent = `${event.weather_recommendation.reason || "Günstigstes verfügbares Zeitfenster laut Vorhersage."}${direction ? ` Windrichtung: ${direction}.` : ""}`;
+            recommendation.append(recommendationTitle, recommendationReason);
+            body.append(recommendation);
+          }
+          if (event.id != null) {
+            const actions = document.createElement("div");
+            actions.className = "card-actions";
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "secondary-button danger-button";
+            button.textContent = "Einheit löschen";
+            button.addEventListener("click", () => deletePlanned(event.id, button, event.name));
+            actions.append(button);
+            body.append(actions);
+          }
+          details.append(body);
+          entries.append(details);
+        });
+        dayRoot.append(entries);
+      }
+      weekDays.append(dayRoot);
+    }
+    weekRoot.append(weekDays);
+    root.append(weekRoot);
   }
 }
 
@@ -1197,6 +1267,11 @@ function renderProfile(profile) {
   for (const [key, value] of Object.entries(profile)) {
     if (form.elements[key]) form.elements[key].value = value || "";
   }
+  const summary = $("#profileSummary");
+  if (summary) {
+    const values = [profile.name, profile.sports, profile.typical_weekly_volume].filter(Boolean);
+    summary.textContent = values.length ? values.join(" · ") : "Noch nicht ausgefüllt";
+  }
 }
 
 function renderGarmin(garmin) {
@@ -1299,6 +1374,13 @@ function competitionEditor(competition = {}, index = 0) {
 function renderCompetitions(competitions) {
   if (state.profileDirty) return;
   const root = $("#competitionList");
+  const summary = $("#plannedCompetitionsSummary");
+  if (summary) {
+    const next = competitions.filter((competition) => competition.event_date).sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)))[0];
+    summary.textContent = competitions.length
+      ? `${competitions.length} ${competitions.length === 1 ? "Wettkampf" : "Wettkämpfe"}${next ? ` · nächster ${dateLabel(next.event_date)}` : ""}`
+      : "Noch keine Wettkämpfe";
+  }
   root.replaceChildren();
   if (!competitions.length) {
     const empty = document.createElement("p");
@@ -1636,6 +1718,9 @@ function renderThinkingLevel(thinkingLevel) {
   select.value = thinkingLevel.selected;
   const selected = (thinkingLevel.options || []).find((option) => option.id === thinkingLevel.selected);
   $("#thinkingLevelDescription").textContent = selected?.description || "Steuert die GrÃ¼ndlichkeit der Antwort.";
+  const modelSelect = $("#modelSelect");
+  const modelSummary = $("#modelSettingsSummary");
+  if (modelSummary) modelSummary.textContent = [modelSelect?.selectedOptions?.[0]?.textContent, selected?.label || select.selectedOptions?.[0]?.textContent].filter(Boolean).join(" · ");
 }
 
 function renderSettings(data) {
@@ -1650,6 +1735,11 @@ function renderSettings(data) {
   setStatus("#openaiConnectionStatus", configured.openai, configured.openai ? "Konfiguriert" : "Nicht konfiguriert");
   setStatus("#intervalsConnectionStatus", configured.intervals, configured.intervals ? "Konfiguriert" : "Nicht konfiguriert");
   setStatus("#garminConnectionStatus", garmin.configured, garmin.configured ? (garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert") : "Nicht konfiguriert");
+  const connectionsSummary = $("#connectionsSummary");
+  if (connectionsSummary) {
+    connectionsSummary.textContent = [["OpenAI", configured.openai], ["Intervals", configured.intervals], ["Garmin", garmin.configured]]
+      .map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
+  }
   const intervalsDays = $("#intervalsSyncDays");
   const garminDays = $("#garminSyncDays");
   if (intervalsDays && document.activeElement !== intervalsDays) intervalsDays.value = data.sync_settings?.intervals_days || 90;
@@ -1673,6 +1763,8 @@ function renderSettings(data) {
       : " · OpenAI-Kontingent nach dem nächsten API-Aufruf verfügbar";
     usageNode.textContent = `OpenAI heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}`;
   }
+  const privacySummary = $("#privacySummary");
+  if (privacySummary) privacySummary.textContent = `${usage.requests || 0} OpenAI-Anfragen heute`;
   renderNotificationStatus();
 }
 
@@ -2111,17 +2203,6 @@ document.querySelectorAll(".nav-item").forEach((button) => button.addEventListen
   if (button.dataset.panel === "chatPanel") scrollChatToLatest(true);
 }));
 
-function moveModelSettingsToSystemTab() {
-  const target = document.querySelector("#settingsPanel .context-preview");
-  if (!target) return;
-  for (const id of ["modelSelect", "thinkingLevelSelect"]) {
-    const control = document.getElementById(id);
-    const block = control?.closest(".model-selector");
-    if (block && block.parentElement !== target.parentElement) target.before(block);
-  }
-}
-
-moveModelSettingsToSystemTab();
 $("#loginForm").addEventListener("submit", login);
 $("#chatForm").addEventListener("submit", sendMessage);
 $("#steerButton").addEventListener("click", steerCurrentChat);
@@ -2147,6 +2228,7 @@ $("#feedbackForm").addEventListener("submit", saveFeedback);
 $("#replanButton").addEventListener("click", prepareReplan);
 $("#applyReplanButton").addEventListener("click", applyReplan);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; });
+$("#competitionList").addEventListener("input", () => { state.profileDirty = true; });
 $("#addCompetitionButton").addEventListener("click", addCompetition);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
