@@ -60,6 +60,12 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(state["weather"]["loading"])
         self.assertEqual(state["app"]["github_release"]["status"], "loading")
 
+    def test_local_public_state_reuses_request_database_connections(self):
+        real_connect = sqlite3.connect
+        with patch.object(server.sqlite3, "connect", wraps=real_connect) as connect:
+            server.public_state(local_only=True)
+        self.assertEqual(connect.call_count, 2)
+
     def test_weather_background_sync_refreshes_and_reuses_three_hour_cache(self):
         server.save_profile({"weather_location": "Berlin"})
         forecast = {

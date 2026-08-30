@@ -22,6 +22,7 @@ import threading
 import tempfile
 import time
 import uuid
+from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -671,8 +672,17 @@ def database_row_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
     return {description[0]: row[index] for index, description in enumerate(cursor.description)}
 
 
+# A request-scoped connection lets composite reads reuse one SQLCipher setup.
+# The outer caller still owns DB_LOCK; nested database() calls only reuse it.
+DATABASE_CONTEXT: ContextVar[Any | None] = ContextVar("database_context", default=None)
+
+
 @contextmanager
 def database():
+    existing = DATABASE_CONTEXT.get()
+    if existing is not None:
+        yield existing
+        return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if CONFIG.app_password:
         if not SQLCIPHER_AVAILABLE:
@@ -683,10 +693,12 @@ def database():
     else:
         db = sqlite3.connect(DB_PATH, timeout=20)
     db.row_factory = database_row_factory
+    context_token = DATABASE_CONTEXT.set(db)
     try:
         yield db
         db.commit()
     finally:
+        DATABASE_CONTEXT.reset(context_token)
         db.close()
 
 
@@ -6165,85 +6177,98 @@ def add_private_calendar_context_to_planned(
 
 
 def public_state(local_only: bool = False) -> dict[str, Any]:
-    snapshot = latest_snapshot()
-    activities = activities_with_feedback(snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else [])
-    planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
-    legacy_drafts = list_workout_drafts()
-    planned, planning_compliance = planning_compliance_state(planned, activities)
-    planned = add_private_calendar_context_to_planned(planned, legacy_drafts)
-    weather = weather_state(planned, refresh=not local_only)
-    return {
-        "app": {
-            "name": "Intervals Coach",
-            "version": APP_VERSION,
-            "github_release": github_release_status(refresh=not local_only),
-        },
-        "messages": list_messages(),
-        "plans": list_training_plans(),
-        "library": list_workout_library(),
-        "activities": activities,
-        "planned": add_weather_to_planned(planned, weather),
-        "planning_compliance": planning_compliance,
-        "weather": weather,
-        "parallel_cycling": parallel_cycling_event_groups(planned),
-        "profile": get_profile(),
-        "competitions": list_competitions(),
-        "local_feedback": local_feedback_context(),
-        "activity_feedback": activity_feedback_context(),
-        "planning": planning_state(),
-        "external_calendar": external_calendar_state(),
-        "performance": current_performance_context(snapshot),
-        "garmin": garmin_public_state(),
-        "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
-        "provider_resync": {
-            "intervals": provider_resync_state("intervals"),
-            "garmin": provider_resync_state("garmin"),
-        },
-        "sync": {
-            "last_sync_at": get_kv("last_sync_at"),
-            "last_error": get_kv("last_sync_error") or None,
-            "running": get_kv("sync_running") == "1",
-            "status": get_kv("sync_status") or None,
-            "last_window_start": get_kv("last_sync_window_start"),
-            "last_window_end": get_kv("last_sync_window_end"),
-        },
-        "library_sync": {
-            "last_sync_at": get_kv("last_library_sync_at"),
-            "last_error": get_kv("last_library_sync_error") or None,
-            "state": workout_library_sync_summary(),
-        },
-        "sync_settings": {
-            "intervals_days": sync_period("intervals"),
-            "garmin_days": sync_period("garmin"),
-        },
-        "calendar_display": calendar_display_settings(),
-        "competition_sync": {
-            "last_sync_at": get_kv("last_competition_sync_at"),
-            "last_error": get_kv("last_competition_sync_error") or None,
-            "running": get_kv("competition_sync_running") == "1",
-            "status": get_kv("competition_sync_status") or None,
-        },
-        "performance_refresh": {
-            "last_refresh_at": get_kv("last_performance_refresh_at"),
-            "last_error": get_kv("last_performance_error") or None,
-            "running": get_kv("performance_refresh_running") == "1",
-        },
-        "morning_checkin": {
-            "status": get_kv("morning_checkin_status") or "waiting",
-            "running": get_kv("morning_checkin_running") == "1",
-            "date": get_kv("morning_checkin_date"),
-            "last_error": get_kv("morning_checkin_error") or None,
-        },
-        "model": {"selected": selected_model(), "options": available_model_options()},
-        "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
-        "configured": {
-            "openai": bool(CONFIG.openai_api_key),
-            "intervals": bool(CONFIG.intervals_api_key),
-            "weather": bool(weather.get("configured")),
-            "external_calendar": bool(CONFIG.calendar_ical_url),
+    # Build the local part under one connection. SQLCipher setup is relatively
+    # expensive, and the composite state otherwise opened the encrypted DB for
+    # every card and status field on each page load.
+    with DB_LOCK, database():
+        snapshot = latest_snapshot()
+        activities = activities_with_feedback(snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else [])
+        planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
+        legacy_drafts = list_workout_drafts()
+        planned, planning_compliance = planning_compliance_state(planned, activities)
+        planned = add_private_calendar_context_to_planned(planned, legacy_drafts)
+        if local_only:
+            weather = weather_state(planned, refresh=False)
+
+    # Provider refreshes must not happen while the composite local read holds
+    # DB_LOCK. The local bootstrap path above remains completely offline.
+    if not local_only:
+        weather = weather_state(planned, refresh=True)
+    github_release = github_release_status(refresh=not local_only)
+
+    with DB_LOCK, database():
+        return {
+            "app": {
+                "name": "Intervals Coach",
+                "version": APP_VERSION,
+                "github_release": github_release,
             },
-        "usage": openai_usage_summary(),
-    }
+            "messages": list_messages(),
+            "plans": list_training_plans(),
+            "library": list_workout_library(),
+            "activities": activities,
+            "planned": add_weather_to_planned(planned, weather),
+            "planning_compliance": planning_compliance,
+            "weather": weather,
+            "parallel_cycling": parallel_cycling_event_groups(planned),
+            "profile": get_profile(),
+            "competitions": list_competitions(),
+            "local_feedback": local_feedback_context(),
+            "activity_feedback": activity_feedback_context(),
+            "planning": planning_state(),
+            "external_calendar": external_calendar_state(),
+            "performance": current_performance_context(snapshot),
+            "garmin": garmin_public_state(),
+            "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
+            "provider_resync": {
+                "intervals": provider_resync_state("intervals"),
+                "garmin": provider_resync_state("garmin"),
+            },
+            "sync": {
+                "last_sync_at": get_kv("last_sync_at"),
+                "last_error": get_kv("last_sync_error") or None,
+                "running": get_kv("sync_running") == "1",
+                "status": get_kv("sync_status") or None,
+                "last_window_start": get_kv("last_sync_window_start"),
+                "last_window_end": get_kv("last_sync_window_end"),
+            },
+            "library_sync": {
+                "last_sync_at": get_kv("last_library_sync_at"),
+                "last_error": get_kv("last_library_sync_error") or None,
+                "state": workout_library_sync_summary(),
+            },
+            "sync_settings": {
+                "intervals_days": sync_period("intervals"),
+                "garmin_days": sync_period("garmin"),
+            },
+            "calendar_display": calendar_display_settings(),
+            "competition_sync": {
+                "last_sync_at": get_kv("last_competition_sync_at"),
+                "last_error": get_kv("last_competition_sync_error") or None,
+                "running": get_kv("competition_sync_running") == "1",
+                "status": get_kv("competition_sync_status") or None,
+            },
+            "performance_refresh": {
+                "last_refresh_at": get_kv("last_performance_refresh_at"),
+                "last_error": get_kv("last_performance_error") or None,
+                "running": get_kv("performance_refresh_running") == "1",
+            },
+            "morning_checkin": {
+                "status": get_kv("morning_checkin_status") or "waiting",
+                "running": get_kv("morning_checkin_running") == "1",
+                "date": get_kv("morning_checkin_date"),
+                "last_error": get_kv("morning_checkin_error") or None,
+            },
+            "model": {"selected": selected_model(), "options": available_model_options()},
+            "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
+            "configured": {
+                "openai": bool(CONFIG.openai_api_key),
+                "intervals": bool(CONFIG.intervals_api_key),
+                "weather": bool(weather.get("configured")),
+                "external_calendar": bool(CONFIG.calendar_ical_url),
+            },
+            "usage": openai_usage_summary(),
+        }
 
 
 def recent_log_entries(limit: int = 200) -> list[dict[str, Any]]:
