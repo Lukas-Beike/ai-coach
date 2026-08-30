@@ -377,7 +377,14 @@ h2 {
 .planned-weather strong { color: var(--ink); font-size: .75rem; }
 .planned-weather-recommendation { display: grid; gap: 3px; margin-top: 12px; padding: 10px 11px; border-left: 3px solid var(--accent-bright); border-radius: 8px; color: var(--muted); background: rgba(52, 207, 161, .07); font-size: .73rem; line-height: 1.4; }
 .planned-weather-recommendation strong { color: var(--ink); }
-.profile-help { margin: -9px 0 0 !important; text-align: left !important; }
+.profile-help {
+  margin: -9px 0 0 !important;
+  color: var(--muted);
+  font-size: .75rem;
+  line-height: 1.45;
+  text-align: left !important;
+  text-wrap: pretty;
+}
 .planned-day-empty { margin: -4px 14px 14px; color: var(--subtle); font-size: .75rem; }
 .planned-day-entries { border-top: 1px solid var(--line); }
 .planned-entry + .planned-entry { border-top: 1px solid var(--line); }
@@ -444,6 +451,7 @@ h2 {
 .profile-section legend { padding: 0 8px; color: var(--ink); font-size: 1.08rem; font-weight: 700; letter-spacing: -.02em; }
 .profile-section > p { margin: -4px 0 2px; color: var(--muted); font-size: .75rem; line-height: 1.45; }
 .form-grid { display: grid; gap: 12px; }
+.form-grid > label { min-width: 0; }
 .competition-list { display: grid; gap: 12px; }
 .competition-editor { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255, 255, 255, .035); }
 .competition-editor-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
