@@ -1,8 +1,8 @@
-name: Weekly release
+name: Daily release
 
 on:
   schedule:
-    - cron: "0 3 * * 1"
+    - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
       release_version:
@@ -14,7 +14,7 @@ on:
     branches: [develop, main]
 
 concurrency:
-  group: weekly-release
+  group: daily-release
   cancel-in-progress: false
 
 permissions:
@@ -66,9 +66,25 @@ jobs:
             local left_major left_minor left_patch right_major right_minor right_patch
             IFS=. read -r left_major left_minor left_patch <<< "$1"
             IFS=. read -r right_major right_minor right_patch <<< "$2"
-            (( left_major > right_major )) ||
-              { (( left_major == right_major && left_minor > right_minor )) ||
-                (( left_major == right_major && left_minor == right_minor && left_patch > right_patch )); }
+            if (( left_major != right_major )); then
+              if (( left_major > right_major )); then return 0; fi
+              return 1
+            fi
+            if (( left_minor != right_minor )); then
+              if (( left_minor > right_minor )); then return 0; fi
+              return 1
+            fi
+            if (( left_patch > right_patch )); then return 0; fi
+            return 1
+          }
+
+          enable_auto_merge() {
+            local pull_request_number="$1"
+            local auto_merge_enabled
+            auto_merge_enabled="$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json autoMergeRequest --jq 'if .autoMergeRequest == null then "false" else "true" end')"
+            if [[ "$auto_merge_enabled" != "true" ]]; then
+              gh pr merge "$pull_request_number" --repo "$REPOSITORY" --auto --squash
+            fi
           }
 
           version_merge=false
@@ -78,6 +94,30 @@ jobs:
 
           latest_tag="$(gh release list --repo "$REPOSITORY" --limit 100 --json tagName,publishedAt,isDraft,isPrerelease \
             --jq '[.[] | select(.isDraft == false and .isPrerelease == false) | select(.tagName | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(.publishedAt) | last | .tagName // empty')"
+          if [[ -n "$latest_tag" ]]; then
+            if ! git rev-parse --verify --quiet "refs/tags/$latest_tag" >/dev/null; then
+              git fetch --no-tags origin "refs/tags/$latest_tag:refs/tags/$latest_tag"
+            fi
+            release_base="$(git merge-base "$latest_tag" HEAD 2>/dev/null || true)"
+            if [[ -z "$release_base" ]]; then
+              release_tree="$(git show -s --format='%T' "$latest_tag")"
+              while read -r candidate_commit candidate_tree; do
+                if [[ "$candidate_tree" == "$release_tree" ]]; then
+                  release_base="$candidate_commit"
+                  break
+                fi
+              done < <(git log HEAD --format='%H %T')
+            fi
+            if [[ -z "$release_base" ]]; then
+              echo "Could not find the latest release tree in develop; refusing to guess the commit count."
+              exit 1
+            fi
+            commit_count="$(git rev-list --count "${release_base}..HEAD")"
+          else
+            commit_count="$(git rev-list --count HEAD)"
+          fi
+          echo "Commits since latest release: $commit_count"
+
           if [[ "$version_merge" == "true" ]]; then
             if [[ -z "$latest_tag" ]]; then
               echo "Cannot validate the merged version bump without a previous release tag."
@@ -92,29 +132,45 @@ jobs:
               echo "Merged APP_VERSION $app_version must be greater than the latest release $latest_tag."
               exit 1
             fi
-          elif [[ -n "$latest_tag" && "$latest_tag" != "$app_version" ]]; then
-            echo "APP_VERSION $app_version does not match the latest release tag $latest_tag."
+          elif [[ -n "$latest_tag" && "$latest_tag" != "$app_version" ]] && ! version_is_greater "$app_version" "$latest_tag"; then
+            echo "APP_VERSION $app_version is older than the latest release tag $latest_tag."
             exit 1
+          fi
+
+          pending_promotion=false
+          if [[ -n "$latest_tag" && "$app_version" != "$latest_tag" ]]; then
+            pending_promotion=true
+          fi
+
+          if [[ "$pending_promotion" == "true" ]]; then
+            if [[ "$version_merge" != "true" && -n "$REQUESTED_VERSION" ]]; then
+              echo "Cannot choose $REQUESTED_VERSION while APP_VERSION $app_version is waiting for promotion."
+              exit 1
+            fi
+            existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head develop --state open --json number --jq '.[0].number // empty')"
+            if [[ -n "$existing_pr" ]]; then
+              echo "Release promotion PR #$existing_pr is already open."
+              enable_auto_merge "$existing_pr"
+              exit 0
+            fi
+            promotion_pr_url="$(gh pr create \
+              --repo "$REPOSITORY" \
+              --base main \
+              --head develop \
+              --title "chore(release): promote $app_version to main" \
+              --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container.")"
+            enable_auto_merge "$promotion_pr_url"
+            exit 0
+          fi
+
+          if [[ "$commit_count" -eq 0 && -z "$REQUESTED_VERSION" ]]; then
+            echo "No commits since the latest release; nothing to do."
+            exit 0
           fi
 
           if ! version_is_greater "$next_tag" "$app_version"; then
             echo "Release version $next_tag must be greater than APP_VERSION $app_version."
             exit 1
-          fi
-
-          if [[ "$version_merge" == "true" ]]; then
-            existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head develop --state open --json number --jq '.[0].number // empty')"
-            if [[ -n "$existing_pr" ]]; then
-              echo "Release promotion PR #$existing_pr is already open."
-              exit 0
-            fi
-            gh pr create \
-              --repo "$REPOSITORY" \
-              --base main \
-              --head develop \
-              --title "chore(release): promote $app_version to main" \
-              --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container."
-            exit 0
           fi
 
           if gh release view "$next_tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
@@ -150,12 +206,13 @@ jobs:
           git add server.py
           git commit -m "chore(release): set application version to $next_tag"
           git push --set-upstream origin "$version_branch"
-          gh pr create \
+          version_pr_url="$(gh pr create \
             --repo "$REPOSITORY" \
             --base develop \
             --head "$version_branch" \
             --title "chore(release): set application version to $next_tag" \
-            --body "Synchronize APP_VERSION with the upcoming GitHub release $next_tag. Merge this PR to promote the release to main."
+            --body "Synchronize APP_VERSION with the upcoming GitHub release $next_tag. Merge this PR to promote the release to main.")"
+          enable_auto_merge "$version_pr_url"
 
   create-release:
     if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'develop'
@@ -183,28 +240,64 @@ jobs:
 
           latest_tag="$(gh release list --repo "$REPOSITORY" --limit 100 --json tagName,publishedAt,isDraft,isPrerelease \
             --jq '[.[] | select(.isDraft == false and .isPrerelease == false) | select(.tagName | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(.publishedAt) | last | .tagName // empty')"
-          if [[ -n "$latest_tag" ]]; then
-            version_is_greater() {
-              local left_major left_minor left_patch right_major right_minor right_patch
-              IFS=. read -r left_major left_minor left_patch <<< "$1"
-              IFS=. read -r right_major right_minor right_patch <<< "$2"
-              (( left_major > right_major )) ||
-                { (( left_major == right_major && left_minor > right_minor )) ||
-                  (( left_major == right_major && left_minor == right_minor && left_patch > right_patch )); }
-            }
-            if ! version_is_greater "$release_tag" "$latest_tag"; then
-              echo "APP_VERSION $release_tag must be greater than the latest release $latest_tag."
-              exit 1
-            fi
-            if ! git rev-parse --verify --quiet "${latest_tag}^{commit}" >/dev/null; then
-              git fetch --no-tags origin "refs/tags/${latest_tag}:refs/tags/${latest_tag}"
-            fi
-            commit_range="${latest_tag}..HEAD"
-            compare_url="https://github.com/${REPOSITORY}/compare/${latest_tag}...HEAD"
-          else
-            commit_range="HEAD"
-            compare_url="https://github.com/${REPOSITORY}/commits/HEAD"
-          fi
+           if [[ -n "$latest_tag" ]]; then
+             version_is_greater() {
+               local left_major left_minor left_patch right_major right_minor right_patch
+               IFS=. read -r left_major left_minor left_patch <<< "$1"
+               IFS=. read -r right_major right_minor right_patch <<< "$2"
+               if (( left_major != right_major )); then
+                 if (( left_major > right_major )); then return 0; fi
+                 return 1
+               fi
+               if (( left_minor != right_minor )); then
+                 if (( left_minor > right_minor )); then return 0; fi
+                 return 1
+               fi
+               if (( left_patch > right_patch )); then return 0; fi
+               return 1
+             }
+             if ! version_is_greater "$release_tag" "$latest_tag"; then
+               echo "APP_VERSION $release_tag must be greater than the latest release $latest_tag."
+               exit 1
+             fi
+             if ! git rev-parse --verify --quiet "${latest_tag}^0" >/dev/null; then
+               git fetch --no-tags origin "refs/tags/${latest_tag}:refs/tags/${latest_tag}"
+             fi
+           fi
+
+           git fetch --no-tags origin refs/heads/develop:refs/remotes/origin/develop
+           develop_release_tree="$(git show -s --format='%T' HEAD)"
+           develop_release_base=""
+           while read -r candidate_commit candidate_tree; do
+             if [[ "$candidate_tree" == "$develop_release_tree" ]]; then
+               develop_release_base="$candidate_commit"
+               break
+             fi
+           done < <(git log origin/develop --format='%H %T')
+           if [[ -z "$develop_release_base" ]]; then
+             echo "Could not map the release commit to develop; refusing to create an incomplete changelog."
+             exit 1
+           fi
+
+           if [[ -n "$latest_tag" ]]; then
+             latest_release_tree="$(git show -s --format='%T' "$latest_tag")"
+             latest_release_base=""
+             while read -r candidate_commit candidate_tree; do
+               if [[ "$candidate_tree" == "$latest_release_tree" ]]; then
+                 latest_release_base="$candidate_commit"
+                 break
+               fi
+             done < <(git log origin/develop --format='%H %T')
+             if [[ -z "$latest_release_base" ]]; then
+               echo "Could not map the previous release to develop; refusing to create an incomplete changelog."
+               exit 1
+             fi
+             commit_range="${latest_release_base}..${develop_release_base}"
+             compare_url="https://github.com/${REPOSITORY}/compare/${latest_tag}...${develop_release_base}"
+           else
+             commit_range="$develop_release_base"
+             compare_url="https://github.com/${REPOSITORY}/commits/${develop_release_base}"
+           fi
 
           if gh release view "$release_tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
             echo "Release $release_tag already exists; nothing to do."

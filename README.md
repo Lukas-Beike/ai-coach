@@ -346,16 +346,18 @@ The repository uses `develop` as its integration branch and keeps `main`
 protected as the release branch. Feature pull requests should target `develop`;
 `main` should only be updated through the release promotion pull request.
 
-The `Weekly release` workflow creates the next patch release every Monday at
-03:00 UTC, starting from `develop`. It opens a version-bump PR that increments
-`APP_VERSION` in `server.py`. After that PR is merged into `develop`, the
-workflow opens a promotion PR from `develop` to protected `main`. When that PR
-is merged, the workflow creates a release tag matching `APP_VERSION` on the
-resulting `main` commit. Its release notes contain all commits since the
-previous release. It can also be started manually through **Actions -> Weekly
-release -> Run workflow**. Manual runs may optionally provide a target
-`MAJOR.MINOR.PATCH` version such as `1.2.0` or `2.0.0`; when omitted, the next
-patch version is selected automatically.
+The `Daily release` workflow checks every day at 03:00 UTC for commits since
+the latest release tag. If there is at least one commit, it opens a
+version-bump PR that increments `APP_VERSION` in `server.py`. After that PR is
+merged into `develop`, the workflow automatically enables squash auto-merge
+and opens a promotion PR from `develop` to protected `main`. The promotion PR
+also uses squash auto-merge. When it is merged, the workflow creates a release
+tag matching `APP_VERSION` on the resulting `main` commit. Its release notes
+contain all commits since the previous release. It can also be started
+manually through **Actions -> Daily release -> Run workflow**. Manual runs may
+optionally provide a target `MAJOR.MINOR.PATCH` version such as `1.2.0` or
+`2.0.0`; when omitted, the next patch version is selected automatically. An
+explicit manual version is allowed even when there are no new commits.
 
 The resulting release starts the test and container-publish workflow, which
 rejects any release where the tag and `APP_VERSION` differ. Configure branch
