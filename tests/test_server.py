@@ -552,6 +552,47 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["sleepScore"], 82)
         self.assertNotIn("instruction", result)
 
+    def test_garmin_coach_context_keeps_only_latest_recovery_records(self):
+        server.set_kv("garmin_snapshot", json.dumps({
+            "synced_at": "now",
+            "sleep": [
+                {"calendarDate": "2026-08-28", "sleepTimeSeconds": 25200, "sleepScore": 70},
+                {"calendarDate": "2026-08-29", "sleepTimeSeconds": 27000, "sleepScore": 82},
+            ],
+            "hrv": [
+                {"calendarDate": "2026-08-28", "weeklyAvg": 51},
+                {"calendarDate": "2026-08-29", "weeklyAvg": 54, "lastNightAvg": 57},
+            ],
+            "readiness": {"calendarDate": "2026-08-29", "score": 78, "level": "GREEN"},
+            "body_battery": [{"calendarDate": "2026-08-29", "charged": 76, "drained": 31}],
+            "activities": [{"activityId": 1, "activityName": "Should not be sent"}],
+            "race_predictions": {"5k": 1310},
+        }))
+        result = server.garmin_coach_context()
+        self.assertEqual(result["recovery"]["sleep"]["calendarDate"], "2026-08-29")
+        self.assertEqual(result["recovery"]["hrv"]["lastNightAvg"], 57)
+        self.assertEqual(result["recovery"]["readiness"]["score"], 78)
+        self.assertNotIn("activities", result)
+        self.assertNotIn("performance", result)
+        self.assertNotIn("race_predictions", result)
+
+    def test_structured_context_keeps_garmin_value_in_performance_only(self):
+        server.set_kv("garmin_snapshot", json.dumps({
+            "max_metrics": {"running": {"vo2MaxValue": 55}},
+            "race_predictions": {"5k": 1320},
+            "activities": [{"activityId": 1, "activityName": "Duplicate raw activity"}],
+        }))
+        context = server.structured_athlete_context({
+            "synced_at": "now", "athlete": {}, "recent_activities": [],
+            "recent_wellness": [], "upcoming_calendar": [],
+        })
+
+        self.assertNotIn("performance", context["garmin"])
+        self.assertNotIn("activities", context["garmin"])
+        self.assertEqual(context["current_performance"]["metrics"]["running_vo2max_ml_kg_min"]["value"], 55)
+        self.assertEqual(context["current_performance"]["metrics"]["running_vo2max_ml_kg_min"]["source"], "Garmin Connect")
+        self.assertEqual(context["current_performance"]["metrics"]["run_5k_seconds"]["value"], 1320)
+
     def test_garmin_performance_metrics_are_normalized_and_source_marked(self):
         result = server.garmin_performance_metrics({
             "max_metrics": {
@@ -1119,6 +1160,81 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(preview["chat_prompt"]["field"], "input")
         self.assertEqual(preview["chat_prompt"]["content"], "Wie soll ich morgen trainieren?")
         self.assertIn("instructions", preview["chat_prompt"]["note"])
+
+    def test_coach_intervals_context_limits_activities_and_excludes_past_calendar(self):
+        today = server.local_now().date()
+        activities = [
+            {"id": f"ride-{index}", "type": "Ride", "name": f"Ride {index}", "start_date_local": (today - timedelta(days=index)).isoformat(), "moving_time": 3600, "icu_training_load": 50}
+            for index in range(7)
+        ] + [
+            {"id": f"run-{index}", "type": "Run", "name": f"Run {index}", "start_date_local": (today - timedelta(days=index)).isoformat(), "moving_time": 1800, "icu_training_load": 25}
+            for index in range(6)
+        ]
+        snapshot = {
+            "synced_at": "now",
+            "athlete": {},
+            "recent_activities": activities,
+            "recent_wellness": [],
+            "upcoming_calendar": [
+                {"id": "past", "name": "Past workout", "start_date_local": (today - timedelta(days=1)).isoformat()},
+                {"id": "future", "name": "Future workout", "start_date_local": (today + timedelta(days=1)).isoformat(), "description": "- 60m 65%"},
+            ],
+        }
+        result = server.coach_intervals_context(snapshot)
+        self.assertEqual([item["name"] for item in result["recent_activities_by_sport"]["Radfahren"]], [f"Ride {index}" for index in range(5)])
+        self.assertEqual([item["name"] for item in result["recent_activities_by_sport"]["Laufen"]], [f"Run {index}" for index in range(5)])
+        self.assertEqual([item["name"] for item in result["planned_workouts"]], ["Future workout"])
+        self.assertEqual(result["activity_rollups_by_sport"]["Radfahren"]["last_7_days"]["sessions"], 7)
+
+    def test_build_training_context_uses_compact_intervals_projection(self):
+        today = server.local_now().date()
+        snapshot = {
+            "synced_at": "now",
+            "athlete": {},
+            "recent_activities": [
+                {"id": f"ride-{index}", "type": "Ride", "name": f"Ride {index}", "start_date_local": (today - timedelta(days=index)).isoformat()}
+                for index in range(6)
+            ],
+            "recent_wellness": [],
+            "upcoming_calendar": [],
+        }
+        server.save_snapshot(snapshot)
+        context = server.build_training_context()
+        self.assertIn("Ride 0", context)
+        self.assertNotIn("Ride 5", context)
+        self.assertNotIn("LATEST INTERVALS.ICU SNAPSHOT", context)
+        preview = server.context_preview()
+        self.assertTrue(preview["snapshot_compacted"])
+        self.assertFalse(preview["snapshot_truncated"])
+
+    def test_coach_projection_does_not_change_provider_snapshots(self):
+        today = server.local_now().date()
+        intervals_snapshot = {
+            "synced_at": "now",
+            "athlete": {"provider_detail": "kept in the full snapshot"},
+            "recent_activities": [{
+                "id": f"ride-{index}", "type": "Ride", "name": f"Ride {index}",
+                "start_date_local": (today - timedelta(days=index)).isoformat(),
+                "provider_detail": "kept in the full snapshot",
+            } for index in range(6)],
+            "recent_wellness": [],
+            "upcoming_calendar": [],
+        }
+        garmin_snapshot = {
+            "synced_at": "now",
+            "activities": [{"activityId": 7, "vendor_payload": "kept in the full snapshot"}],
+            "sleep": [{"calendarDate": today.isoformat(), "sleepScore": 82}],
+            "vendor_payload": "kept in the full snapshot",
+        }
+        server.save_snapshot(intervals_snapshot)
+        server.set_kv("garmin_snapshot", json.dumps(garmin_snapshot))
+
+        context = server.build_training_context()
+
+        self.assertEqual(server.latest_snapshot(), intervals_snapshot)
+        self.assertEqual(server.garmin_snapshot(), garmin_snapshot)
+        self.assertNotIn("provider_detail", context)
+        self.assertNotIn("vendor_payload", context)
 
     def test_model_selection_is_persisted_and_validated(self):
         self.assertEqual(server.selected_model(), "gpt-5.6-sol")

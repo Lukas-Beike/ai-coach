@@ -1345,7 +1345,7 @@ function renderContextPreview(preview) {
     content.append(details);
   });
   status.classList.remove("error");
-  status.textContent = `Zuletzt erstellt: ${formatTime(preview.generated_at)}${preview.snapshot_truncated ? " (Snapshot im Coach-Kontext gekürzt)" : ""}`;
+  status.textContent = `Zuletzt erstellt: ${formatTime(preview.generated_at)}${preview.snapshot_compacted ? " (Snapshot für den Coach kompakt aufbereitet)" : preview.snapshot_truncated ? " (Snapshot im Coach-Kontext gekürzt)" : ""}`;
   content.hidden = false;
 }
 
