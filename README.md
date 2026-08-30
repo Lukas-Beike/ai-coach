@@ -353,7 +353,8 @@ merged into `develop`, the workflow automatically enables squash auto-merge,
 creates a synchronized promotion branch, and opens a promotion PR to protected
 `main`. The promotion PR also uses squash auto-merge. When it is merged, the
 workflow creates a release tag matching `APP_VERSION` on the resulting `main`
-commit. Its release notes
+commit. The workflow explicitly starts the test check for its generated PRs
+and publishes the release after the promotion merge. Its release notes
 contain all commits since the previous release. It can also be started
 manually through **Actions -> Daily release -> Run workflow**. Manual runs may
 optionally provide a target `MAJOR.MINOR.PATCH` version such as `1.2.0` or
