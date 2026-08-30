@@ -475,33 +475,6 @@ async function deleteDraft(draftId, button, name) {
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
 
-function setFormValue(form, name, value) {
-  const field = form?.elements?.namedItem(name);
-  if (field) field.value = value == null ? "" : value;
-}
-
-function renderLocalFeedback(data) {
-  const form = $("#feedbackForm");
-  const feedback = data.local_feedback || {};
-  const today = feedback.today || {};
-  if (form && !form.contains(document.activeElement)) {
-    setFormValue(form, "checkin_date", today.checkin_date || todayIso());
-    for (const field of ["available_minutes", "soreness", "stress", "motivation", "session_rpe", "illness", "pain", "availability_notes", "notes"]) setFormValue(form, field, today[field]);
-  }
-  const history = $("#feedbackHistory");
-  const summary = $("#feedbackSummary");
-  if (summary) summary.textContent = today.checkin_date ? `Letzter Check-in: ${dateLabel(today.checkin_date)}` : "Noch kein Eintrag";
-  if (!history) return;
-  history.replaceChildren();
-  for (const entry of (feedback.recent || []).slice(0, 7)) {
-    const node = document.createElement("div");
-    node.className = "feedback-entry";
-    const scores = [entry.soreness == null ? "" : `Muskelkater ${entry.soreness}/10`, entry.stress == null ? "" : `Stress ${entry.stress}/10`, entry.motivation == null ? "" : `Motivation ${entry.motivation}/10`, entry.session_rpe == null ? "" : `RPE ${entry.session_rpe}/10`].filter(Boolean).join(" · ");
-    node.innerHTML = `<strong>${escapeHtml(entry.checkin_date)}</strong>${scores ? ` · ${escapeHtml(scores)}` : ""}${entry.available_minutes == null ? "" : ` · ${escapeHtml(String(entry.available_minutes))} Min.`}${entry.illness || entry.pain ? `<br>${escapeHtml([entry.illness, entry.pain].filter(Boolean).join(" · "))}` : ""}`;
-    history.append(node);
-  }
-}
-
 function renderPlanning(data) {
   const planning = data.planning || {};
   const next = planning.season?.next_event;
@@ -964,6 +937,40 @@ function renderActivities(activities) {
     addStat("Ø Puls", activity.average_heartrate ? `${Math.round(activity.average_heartrate)} bpm` : null);
     addStat("Ø Leistung", activity.average_watts ? `${Math.round(activity.average_watts)} W` : null);
     card.append(top, meta, stats);
+
+    const activityId = activity.id ?? activity.activityId ?? activity.external_id;
+    if (activityId != null && String(activityId).trim()) {
+      const feedback = activity.activity_feedback || {};
+      const feedbackDetails = document.createElement("details");
+      feedbackDetails.className = "activity-feedback";
+      feedbackDetails.open = Boolean(feedback.notes);
+      const feedbackSummary = document.createElement("summary");
+      feedbackSummary.className = "activity-feedback-summary";
+      const feedbackTitle = document.createElement("span");
+      feedbackTitle.textContent = "Besonderheiten";
+      const feedbackHint = document.createElement("span");
+      feedbackHint.className = "activity-feedback-hint";
+      feedbackHint.textContent = feedback.notes ? "Eintrag vorhanden" : "Nach Abschluss notieren";
+      feedbackSummary.append(feedbackTitle, feedbackHint);
+      const feedbackForm = document.createElement("form");
+      feedbackForm.className = "activity-feedback-form";
+      const feedbackLabel = document.createElement("label");
+      feedbackLabel.textContent = "Gab es bei dieser Einheit Besonderheiten?";
+      const feedbackInput = document.createElement("textarea");
+      feedbackInput.name = "notes";
+      feedbackInput.rows = 3;
+      feedbackInput.maxLength = 4000;
+      feedbackInput.placeholder = "Zum Beispiel Schmerzen, ungewohnte Müdigkeit oder etwas, das besonders gut lief …";
+      feedbackInput.value = feedback.notes || "";
+      feedbackLabel.append(feedbackInput);
+      const feedbackButton = document.createElement("button");
+      feedbackButton.type = "submit";
+      feedbackButton.textContent = "Besonderheiten speichern";
+      feedbackForm.append(feedbackLabel, feedbackButton);
+      feedbackForm.addEventListener("submit", (event) => saveActivityFeedback(event, activity, feedbackButton));
+      feedbackDetails.append(feedbackSummary, feedbackForm);
+      card.append(feedbackDetails);
+    }
     root.append(card);
   });
   if (filteredActivities.length > 250) {
@@ -2171,7 +2178,6 @@ function render(data) {
   renderProfile(data.profile);
   renderGarmin(data.garmin);
   renderCompetitions(data.competitions || []);
-  renderLocalFeedback(data);
   renderPlanning(data);
   renderExternalCalendar(data);
   renderCompetitionSync(data);
@@ -2427,15 +2433,24 @@ async function saveProfile(event) {
   } catch (error) { toast(error.message, true); }
 }
 
-async function saveFeedback(event) {
+async function saveActivityFeedback(event, activity, button) {
   event.preventDefault();
   const form = event.currentTarget;
-  const payload = Object.fromEntries(new FormData(form).entries());
+  const activityId = activity.id ?? activity.activityId ?? activity.external_id;
+  const payload = {
+    activity_name: activity.name || activity.type || "",
+    activity_date: activity.start_date_local || "",
+    notes: String(new FormData(form).get("notes") || ""),
+  };
+  button.disabled = true;
   try {
-    await api("/api/feedback", { method: "POST", body: JSON.stringify(payload) });
-    toast("Lokales Feedback gespeichert");
+    await api(`/api/activities/${encodeURIComponent(String(activityId))}/feedback`, { method: "POST", body: JSON.stringify(payload) });
+    toast(payload.notes.trim() ? "Besonderheiten gespeichert" : "Besonderheiten entfernt");
     await load();
-  } catch (error) { toast(error.message, true); }
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
+  }
 }
 
 async function prepareReplan() {
@@ -2627,7 +2642,6 @@ $("#garminSyncButton").addEventListener("click", syncGarmin);
 $("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar);
 $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
 $("#profileForm").addEventListener("submit", saveProfile);
-$("#feedbackForm").addEventListener("submit", saveFeedback);
 $("#replanButton").addEventListener("click", prepareReplan);
 $("#applyReplanButton").addEventListener("click", applyReplan);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; });

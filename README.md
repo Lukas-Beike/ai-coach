@@ -231,10 +231,11 @@ without asking for the login code on every startup.
 
 ## Local planning data and target competitions
 
-The **Profile** tab stores athlete-entered feedback separately from imported
-Garmin and Intervals.icu values. This includes subjective stress, soreness,
-motivation, session RPE, pain or illness, available time, and other daily
-constraints. These values are included in the AI context as local athlete data.
+The **Activities** tab allows you to add local notes after a completed activity,
+for example about pain, unusual fatigue, conditions, or anything that went
+particularly well. These activity-specific notes are stored separately from
+imported Garmin and Intervals.icu values and included in the AI context as
+local athlete data.
 
 The adaptive planning action reviews future local workout drafts and produces a
 change preview. Only after explicit approval are eligible local drafts updated.
@@ -243,9 +244,9 @@ events.
 
 External calendar events are only planning signals. The heuristic uses the event
 date, start/end time, duration, and all-day status to identify drafts that are
-hard or long. It does not infer or diagnose an infection from a family event;
-illness must still be entered in the athlete check-in. Every suggested change
-remains a local preview and requires **Anpassung freigeben**.
+hard or long. It does not infer or diagnose an infection from a family event.
+Every suggested change remains a local preview and requires **Anpassung
+freigeben**.
 
 
 ## Docker and Unraid
