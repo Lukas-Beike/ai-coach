@@ -62,6 +62,10 @@ It is not intended to be exposed directly to the public internet.
   `external_id`; new coach templates remain local until the athlete explicitly
   approves transfer. Approval first synchronizes the local template, stores
   the returned external ID, and then plans the calendar event.
+- If a provider response no longer contains an imported template, it is kept
+  locally and marked as missing remotely. A later approval reconciles it before
+  creating or planning it again; local templates are never removed by a full
+  Intervals.icu resync.
 - Multi-week plans are grouped and can be approved incrementally.
 - Bidirectional synchronization of target competitions with Intervals.icu.
 - Local athlete check-ins for subjective soreness, stress, motivation, session

@@ -1435,11 +1435,17 @@ function renderLibrary(workouts) {
         const cardTitle = document.createElement("h4");
         cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
         const meta = document.createElement("span");
-        const syncLabel = workout.sync_status === "local"
-          ? "Lokal - noch nicht synchronisiert"
-          : workout.external_id
-            ? "Mit Intervals.icu synchronisiert"
-            : "Lokal";
+        const syncLabel = workout.sync_status === "remote_missing"
+          ? "Remote nicht gefunden - wird bei Freigabe neu abgeglichen"
+          : workout.sync_status === "sync_error"
+            ? "Synchronisationsfehler - erneut freigeben"
+            : workout.sync_status === "syncing"
+              ? "Synchronisierung läuft"
+              : workout.sync_status === "local"
+                ? "Lokal - noch nicht synchronisiert"
+                : workout.external_id
+                  ? "Mit Intervals.icu synchronisiert"
+                  : "Lokal";
         meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, syncLabel].filter(Boolean).join(" - ");
         heading.append(cardTitle, meta);
         const description = document.createElement("p");
@@ -1494,7 +1500,7 @@ async function loadLibrary() {
 async function planLibraryWorkout(workoutId, dateInput, button) {
   if (!dateInput.value) { toast("Bitte ein Datum auswählen", true); return; }
   button.disabled = true;
-  button.textContent = "Wird eingeplant…";
+  button.textContent = "Lokaler Entwurf wird gespeichert…";
   try {
     await api("/api/library/" + encodeURIComponent(workoutId) + "/plan", { method: "POST", body: JSON.stringify({ date: dateInput.value }) });
     toast("Lokaler Entwurf erstellt");
@@ -2168,12 +2174,19 @@ function render(data) {
   renderLibrary(data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
+    const libraryState = data.library_sync?.state || {};
+    const pending = Number(libraryState.local || 0) + Number(libraryState.sync_error || 0);
+    const missing = Number(libraryState.remote_missing || 0);
+    const stateHint = [
+      pending ? `${pending} lokale Einheit${pending === 1 ? "" : "en"} offen` : null,
+      missing ? `${missing} Remote-Einheit${missing === 1 ? "" : "en"} nicht gefunden` : null,
+    ].filter(Boolean).join(" · ");
     librarySyncDetail.textContent = data.library_sync?.last_error
       ? data.library_sync.last_error
       : data.library_sync?.last_sync_at
-        ? "Letzte Aktualisierung: " + formatTime(data.library_sync.last_sync_at)
-        : "Noch nicht synchronisiert";
-    librarySyncDetail.classList.toggle("error", Boolean(data.library_sync?.last_error));
+        ? ["Letzte Aktualisierung: " + formatTime(data.library_sync.last_sync_at), stateHint].filter(Boolean).join(" · ")
+        : stateHint || "Noch nicht synchronisiert";
+    librarySyncDetail.classList.toggle("error", Boolean(data.library_sync?.last_error || libraryState.sync_error));
   }
   renderProfile(data.profile);
   renderGarmin(data.garmin);

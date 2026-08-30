@@ -5,6 +5,7 @@ import threading
 import unittest
 import json
 import uuid
+import sqlite3
 from dataclasses import replace
 from datetime import date, timedelta
 from io import BytesIO
@@ -607,6 +608,38 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.list_workout_library()[0]["name"], "Locker Rad aktualisiert")
         self.assertIn("LOCAL TRAINING LIBRARY", server.build_training_context())
 
+    def test_legacy_library_rows_migrate_to_local_uuid_and_external_id(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            data_dir = Path(temp_root)
+            db_path = data_dir / "intervals-coach.db"
+            connection = sqlite3.connect(db_path)
+            connection.execute("CREATE TABLE workout_library(id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL)")
+            connection.execute("CREATE TABLE workout_drafts(id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL)")
+            connection.execute(
+                "INSERT INTO workout_library(id, payload, updated_at) VALUES (?, ?, ?)",
+                ("remote-old", json.dumps({"id": "remote-old", "name": "Alt", "type": "Ride", "description": "- 30m Z2", "moving_time": 1800}), "old"),
+            )
+            connection.execute(
+                "INSERT INTO workout_drafts(id, payload, updated_at) VALUES (?, ?, ?)",
+                ("draft-old", json.dumps({"library_workout_id": "remote-old"}), "old"),
+            )
+            connection.commit()
+            connection.close()
+            config = replace(server.CONFIG, app_password="")
+            with patch.object(server, "DATA_DIR", data_dir), patch.object(server, "DB_PATH", db_path), patch.object(server, "CONFIG", config):
+                server.initialise_database()
+                migrated = server.list_workout_library()[0]
+                with server.DB_LOCK, server.database() as db:
+                    row = db.execute("SELECT id, local_id, external_id, sync_state FROM workout_library").fetchone()
+                    draft_row = db.execute("SELECT payload FROM workout_drafts WHERE id = ?", ("draft-old",)).fetchone()
+            self.assertEqual(uuid.UUID(migrated["id"]).version, 4)
+            self.assertEqual(migrated["external_id"], "remote-old")
+            self.assertEqual(row["id"], migrated["id"])
+            self.assertEqual(row["local_id"], migrated["id"])
+            self.assertEqual(row["external_id"], "remote-old")
+            self.assertEqual(row["sync_state"], "synced")
+            self.assertEqual(json.loads(draft_row["payload"])["library_workout_id"], migrated["id"])
+
     def test_library_workout_can_be_planned_from_local_cache(self):
         server.upsert_workout_library([{
             "id": 42, "name": "Locker Rad", "type": "Ride",
@@ -620,19 +653,14 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["draft"]["library_workout_id"], library["id"])
         plan.assert_not_called()
 
-    def test_coach_library_creation_is_cached(self):
-        created = [{"id": 77, "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%"}]
+    def test_direct_library_creation_path_is_disabled(self):
         with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
-            server.IntervalsClient, "create_library_workouts", return_value=created
+            server.IntervalsClient, "create_library_workouts"
         ) as create:
-            result = server.create_library_workouts([{
-                "name": "Coach Tempo", "sport": "Ride", "description": "- 30m 85%",
-            }])
-        self.assertEqual(uuid.UUID(result[0]["id"]).version, 4)
-        self.assertEqual(result[0]["external_id"], "77")
-        self.assertEqual(result[0]["sync_status"], "synced")
-        create.assert_called_once()
-        self.assertEqual(server.list_workout_library()[0]["name"], "Coach Tempo")
+            with self.assertRaises(server.AppError) as raised:
+                server.create_library_workouts([{"name": "Nicht direkt", "description": "- 30m Z2"}])
+        self.assertEqual(raised.exception.status, 410)
+        create.assert_not_called()
 
     def test_draft_reuses_same_or_similar_library_workout(self):
         server.upsert_workout_library([{
@@ -680,7 +708,9 @@ class CoachTests(unittest.TestCase):
         remote_library = {"id": "remote-77", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", "moving_time": 1800}
         with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "create_library_workouts", return_value=[remote_library]
-        ) as create, patch.object(server, "plan_library_workout_remote", return_value=fake_event) as plan:
+        ) as create, patch.object(server.IntervalsClient, "get_workout_library", return_value=[]), patch.object(
+            server, "plan_library_workout_remote", return_value=fake_event
+        ) as plan:
             result = server.push_draft(draft["id"])
         self.assertEqual(result["status"], "pushed")
         library = server.list_workout_library()[0]
@@ -688,6 +718,51 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(library["id"], draft["library_workout_id"])
         create.assert_called_once()
         plan.assert_called_once_with("remote-77", library, draft["date"])
+
+    def test_library_sync_reconciles_remote_template_before_creating(self):
+        draft = server.save_workout_drafts([{
+            "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
+            "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
+            "target": "POWER", "rationale": "Schwelle",
+        }])[0]
+        remote = {"id": "remote-recovered", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", "moving_time": 1800}
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server.IntervalsClient, "get_workout_library", return_value=[remote]
+        ), patch.object(server.IntervalsClient, "create_library_workouts") as create:
+            synced = server.sync_local_workout_library_entry(draft["library_workout_id"])
+        self.assertEqual(synced["external_id"], "remote-recovered")
+        create.assert_not_called()
+        self.assertEqual(server.list_workout_library()[0]["sync_status"], "synced")
+
+    def test_library_sync_error_is_persisted_for_retry(self):
+        draft = server.save_workout_drafts([{
+            "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
+            "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
+            "target": "POWER", "rationale": "Schwelle",
+        }])[0]
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server.IntervalsClient, "get_workout_library", side_effect=server.AppError(502, "upstream unavailable")
+        ):
+            with self.assertRaises(server.AppError):
+                server.sync_local_workout_library_entry(draft["library_workout_id"])
+        library = server.list_workout_library()[0]
+        self.assertEqual(library["sync_status"], "sync_error")
+        self.assertEqual(server.workout_library_sync_summary()["sync_error"], 1)
+
+    def test_library_pull_marks_missing_remote_templates_without_deleting_them(self):
+        imported = server.upsert_workout_library([{
+            "id": "remote-missing", "name": "Remote template", "type": "Ride",
+            "description": "- 30m Z2", "moving_time": 1800,
+        }])[0]
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server.IntervalsClient, "get_workout_library", return_value=[]
+        ):
+            result = server.sync_workout_library("test")
+        self.assertEqual(result["workouts"], 0)
+        library = server.list_workout_library()[0]
+        self.assertEqual(library["id"], imported["id"])
+        self.assertEqual(library["external_id"], "remote-missing")
+        self.assertEqual(library["sync_status"], "remote_missing")
 
     def test_chat_creation_request_uses_local_draft_tool(self):
         future_date = (date.today() + timedelta(days=1)).isoformat()
