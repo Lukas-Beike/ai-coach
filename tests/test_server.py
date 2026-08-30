@@ -99,13 +99,49 @@ class CoachTests(unittest.TestCase):
             b"DTSTART;TZID=Europe/Berlin:20260902T100000\r\n"
             b"DTEND;TZID=Europe/Berlin:20260902T130000\r\nSUMMARY:Family appointment\r\n"
             b"END:VEVENT\r\nBEGIN:VEVENT\r\nUID:all-day\r\nDTSTART;VALUE=DATE:20260903\r\n"
-            b"DTEND;VALUE=DATE:20260904\r\nSUMMARY:Travel\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            b"DTEND;VALUE=DATE:20260904\r\nSUMMARY:Travel\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:info-only\r\nDTSTART;VALUE=DATE:20260904\r\n"
+            b"SUMMARY:Team info\r\nDESCRIPTION: [NO_TRAINING] Nur zur Information\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:no-intensity\r\nDTSTART;VALUE=DATE:20260905\r\n"
+            b"SUMMARY:Evening event\r\nDESCRIPTION: [NO_INTENSITY] Training remains possible, but easy\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:other-marker\r\nDTSTART;VALUE=DATE:20260906\r\n"
+            b"SUMMARY:Other marker\r\nDESCRIPTION: [OTHER_TAG] Keine besondere Wirkung\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
         self.assertEqual(events[0]["duration_minutes"], 180)
         self.assertEqual(events[0]["event_date"], "2026-09-02")
         self.assertFalse(events[0]["all_day"])
         self.assertEqual(events[1]["duration_minutes"], 1440)
         self.assertTrue(events[1]["all_day"])
+        self.assertFalse(events[2]["training_relevant"])
+        self.assertTrue(events[3]["no_intensity"])
+        self.assertTrue(events[3]["training_relevant"])
+        self.assertFalse(events[4]["no_intensity"])
+        self.assertTrue(events[4]["training_relevant"])
+
+    def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("info-only", "info-only", "Informational event", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, 0, server.utc_now()),
+            )
+        self.assertEqual(server.list_external_calendar_events(1000, training_relevant_only=True), [])
+
+    def test_ical_no_intensity_marker_requires_easy_replacement(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        draft = server.save_workout_drafts([{
+            "date": tomorrow, "sport": "Ride", "name": "Short threshold",
+            "description": "- 5m 110%", "duration_minutes": 45, "target": "POWER",
+        }])[0]
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("no-intensity", "family-no-intensity", "Evening event", tomorrow, tomorrow + "T18:00:00+02:00", tomorrow + "T18:30:00+02:00", 30, 0, 1, 1, server.utc_now()),
+            )
+        preview = server.adaptive_replan_preview()
+        self.assertEqual(preview["changes"][0]["draft_id"], draft["id"])
+        self.assertIn("NO_INTENSITY", preview["changes"][0]["after"]["rationale"])
+        self.assertTrue(preview["changes"][0]["payload"]["private_calendar_adjustment"]["no_intensity_requested"])
 
     def test_external_calendar_sync_keeps_url_server_side_and_replaces_events(self):
         payload = (
@@ -154,6 +190,10 @@ class CoachTests(unittest.TestCase):
         preview = server.adaptive_replan_preview()
         self.assertEqual(preview["changes"][0]["draft_id"], draft["id"])
         self.assertEqual(preview["changes"][0]["after"]["duration_minutes"], 60)
+        adjustment = preview["changes"][0]["payload"]["private_calendar_adjustment"]
+        self.assertEqual(adjustment["label"], "Aufgrund privater Termine angepasst")
+        self.assertEqual(adjustment["original_duration_minutes"], 120)
+        self.assertEqual(adjustment["adjusted_duration_minutes"], 60)
         self.assertEqual(server.list_workout_drafts()[0]["duration_minutes"], 120)
 
     def test_adaptive_replan_only_changes_future_local_drafts_after_preview(self):
@@ -169,6 +209,38 @@ class CoachTests(unittest.TestCase):
         result = server.apply_adaptive_replan(preview["id"])
         self.assertEqual(result["updated"], 1)
         self.assertNotEqual(server.list_workout_drafts()[0]["description"], "- 5m 115%")
+        self.assertEqual(server.list_workout_drafts()[0]["id"], draft["id"])
+
+    def test_planned_event_exposes_private_calendar_adjustment_from_linked_draft(self):
+        context = {
+            "label": "Aufgrund privater Termine angepasst",
+            "reason": "family calendar has one event",
+            "original_duration_minutes": 120,
+            "adjusted_duration_minutes": 60,
+            "intensity_adjusted": True,
+        }
+        planned = server.add_private_calendar_context_to_planned(
+            [{"id": "event-1", "category": "WORKOUT", "name": "Locker"}],
+            [{"id": "draft-1", "intervals_event_id": "event-1", "private_calendar_adjustment": context}],
+        )
+        self.assertEqual(planned[0]["private_calendar_adjustment"], context)
+
+    def test_adaptive_replan_persists_private_calendar_context_after_apply(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        draft = server.save_workout_drafts([{
+            "date": tomorrow, "sport": "Ride", "name": "Threshold intervals",
+            "description": "- 5m 110%", "duration_minutes": 120, "target": "POWER",
+        }])[0]
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("event-2", "family-4", "Family appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T13:00:00+02:00", 180, 0, server.utc_now()),
+            )
+        preview = server.adaptive_replan_preview()
+        server.apply_adaptive_replan(preview["id"])
+        persisted = server.list_workout_drafts()[0]["private_calendar_adjustment"]
+        self.assertEqual(persisted["label"], "Aufgrund privater Termine angepasst")
+        self.assertEqual(persisted["events"][0]["name"], "Family appointment")
         self.assertEqual(server.list_workout_drafts()[0]["id"], draft["id"])
 
     def test_unlimited_retention_does_not_delete_history(self):
@@ -204,6 +276,54 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("secret", result["athlete"])
         self.assertNotIn("private_note", result["recent_activities"][0])
         self.assertEqual(result["recent_wellness"][0]["ctl"], 42)
+
+    def test_planned_workouts_match_activities_and_roll_up_weekly_compliance(self):
+        today = server.local_now().date()
+        events = [
+            {
+                "id": "event-done", "category": "WORKOUT", "type": "Ride",
+                "name": "Tempo", "start_date_local": f"{today.isoformat()}T00:00:00",
+                "moving_time": 3600, "icu_training_load": 50,
+            },
+            {
+                "id": "event-missed", "category": "WORKOUT", "type": "Ride",
+                "name": "Grundlage", "start_date_local": f"{(today - timedelta(days=1)).isoformat()}T00:00:00",
+                "moving_time": 3600, "icu_training_load": 50,
+            },
+            {
+                "id": "race", "category": "RACE", "type": "Ride",
+                "name": "Wettkampf", "start_date_local": f"{(today - timedelta(days=1)).isoformat()}T00:00:00",
+                "moving_time": 7200, "icu_training_load": 100,
+            },
+        ]
+        activities = [{
+            "id": "activity-1", "paired_event_id": "event-done", "type": "Ride",
+            "name": "Tempo gefahren", "start_date_local": f"{today.isoformat()}T07:00:00",
+            "moving_time": 3300, "icu_training_load": 40,
+        }]
+
+        enriched, weekly = server.planning_compliance_state(events, activities)
+
+        self.assertEqual(enriched[0]["compliance"]["status"], "completed")
+        self.assertEqual(enriched[0]["compliance"]["percentage"], 80)
+        self.assertEqual(enriched[1]["compliance"]["status"], "missed")
+        self.assertEqual(enriched[1]["compliance"]["percentage"], 0)
+        self.assertNotIn("compliance", enriched[2])
+        current_week = next(item for item in weekly if item["week_start"] == (today - timedelta(days=today.weekday())).isoformat())
+        self.assertEqual(current_week["planned_units"], 2)
+        self.assertEqual(current_week["completed_units"], 1)
+        self.assertEqual(current_week["unit_percentage"], 50)
+        self.assertEqual(current_week["percentage"], 40)
+        self.assertEqual(current_week["basis"], "training_load")
+
+    def test_planned_workout_fallback_matches_unpaired_same_day_sport(self):
+        today = server.local_now().date().isoformat()
+        enriched, _ = server.planning_compliance_state(
+            [{"id": "event-1", "category": "WORKOUT", "type": "Run", "start_date_local": f"{today}T00:00:00", "moving_time": 1800}],
+            [{"id": "activity-1", "type": "Run", "start_date_local": f"{today}T08:00:00", "moving_time": 1500}],
+        )
+        self.assertEqual(enriched[0]["compliance"]["status"], "completed")
+        self.assertEqual(enriched[0]["compliance"]["percentage"], 83)
 
     def test_workout_payload_is_an_idempotent_calendar_event(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -447,6 +567,9 @@ class CoachTests(unittest.TestCase):
             snapshot = client.fetch_snapshot(activity_days=90)
         activity_call = next(params for path, params in calls if path.endswith("/activities"))
         self.assertEqual((date.fromisoformat(activity_call["newest"]) - date.fromisoformat(activity_call["oldest"])).days, 89)
+        event_call = next(params for path, params in calls if path.endswith("/events"))
+        self.assertEqual(date.fromisoformat(event_call["oldest"]), server.local_now().date() - timedelta(days=server.PLANNED_CALENDAR_HISTORY_DAYS))
+        self.assertEqual(date.fromisoformat(event_call["newest"]), server.local_now().date() + timedelta(days=server.PLANNED_CALENDAR_FUTURE_DAYS))
         self.assertEqual({item["id"] for item in snapshot["recent_activities"]}, {"old", "new"})
 
     def test_library_is_cached_and_included_in_coach_context(self):

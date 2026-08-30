@@ -752,6 +752,8 @@ def initialise_database() -> None:
                 end_local TEXT NOT NULL,
                 duration_minutes INTEGER NOT NULL,
                 all_day INTEGER NOT NULL DEFAULT 0,
+                training_relevant INTEGER NOT NULL DEFAULT 1,
+                no_intensity INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL,
                 UNIQUE(uid, start_local)
             );
@@ -779,6 +781,11 @@ def initialise_database() -> None:
             existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(competitions)").fetchall()}
             if column not in existing_columns:
                 db.execute(f"ALTER TABLE competitions ADD COLUMN {column} {definition}")
+        external_columns = {row["name"] for row in db.execute("PRAGMA table_info(external_calendar_events)").fetchall()}
+        if "training_relevant" not in external_columns:
+            db.execute("ALTER TABLE external_calendar_events ADD COLUMN training_relevant INTEGER NOT NULL DEFAULT 1")
+        if "no_intensity" not in external_columns:
+            db.execute("ALTER TABLE external_calendar_events ADD COLUMN no_intensity INTEGER NOT NULL DEFAULT 0")
         db.execute(
             "UPDATE competitions SET category=CASE WHEN priority IN ('A','B','C') THEN 'RACE_' || priority ELSE 'RACE_B' END "
             "WHERE category IS NULL OR category=''"
@@ -819,6 +826,10 @@ SYNC_PERIOD_DEFAULTS = {"intervals": 90, "garmin": 30}
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = date(2000, 1, 1)
+# Keep enough calendar history to show whether recently planned workouts were
+# completed, while retaining the existing five-week forward planning horizon.
+PLANNED_CALENDAR_HISTORY_DAYS = 35
+PLANNED_CALENDAR_FUTURE_DAYS = 35
 
 
 def sync_period(source: str) -> int:
@@ -1963,6 +1974,20 @@ def _ical_duration(raw: str) -> timedelta | None:
     return duration if duration.total_seconds() > 0 else None
 
 
+ICAL_NO_TRAINING_MARKER = re.compile(r"(?<![A-Z0-9_])\[NO_TRAINING\](?![A-Z0-9_])", re.IGNORECASE)
+ICAL_NO_INTENSITY_MARKER = re.compile(r"(?<![A-Z0-9_])\[NO_INTENSITY\](?![A-Z0-9_])", re.IGNORECASE)
+
+
+def ical_training_relevant(name: Any, description: Any) -> bool:
+    """Ignore only events explicitly marked as informational in their description."""
+    return not bool(ICAL_NO_TRAINING_MARKER.search(f"{name or ''}\n{description or ''}"))
+
+
+def ical_no_intensity(name: Any, description: Any) -> bool:
+    """Treat only the explicit marker as a no-intensity training constraint."""
+    return bool(ICAL_NO_INTENSITY_MARKER.search(f"{name or ''}\n{description or ''}"))
+
+
 def parse_ical_calendar(payload: bytes) -> list[dict[str, Any]]:
     """Parse only bounded, scheduling-relevant fields from an iCalendar feed."""
     events: list[dict[str, Any]] = []
@@ -1991,6 +2016,8 @@ def parse_ical_calendar(payload: bytes) -> list[dict[str, Any]]:
                         "end_local": end.isoformat(),
                         "duration_minutes": duration,
                         "all_day": bool(current.get("all_day")),
+                        "training_relevant": ical_training_relevant(current.get("name"), current.get("description")),
+                        "no_intensity": ical_no_intensity(current.get("name"), current.get("description")),
                     })
             current = None
             continue
@@ -2017,6 +2044,8 @@ def parse_ical_calendar(payload: bytes) -> list[dict[str, Any]]:
             duration = _ical_duration(raw_value)
             if duration:
                 current["duration"] = duration
+        elif key == "DESCRIPTION":
+            current["description"] = parse_ics_value(raw_value)[:2000]
         elif key == "STATUS":
             current["status"] = parse_ics_value(raw_value)[:30]
     events.sort(key=lambda item: (item["start_local"], item["name"]))
@@ -2047,11 +2076,12 @@ def external_calendar_url(value: Any) -> str:
     return raw
 
 
-def list_external_calendar_events(limit: int = 300) -> list[dict[str, Any]]:
+def list_external_calendar_events(limit: int = 300, training_relevant_only: bool = False) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
+        relevance_filter = " AND training_relevant = 1" if training_relevant_only else ""
         rows = db.execute(
-            "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at "
-            "FROM external_calendar_events WHERE event_date >= ? ORDER BY start_local LIMIT ?",
+            "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at "
+            f"FROM external_calendar_events WHERE event_date >= ?{relevance_filter} ORDER BY start_local LIMIT ?",
             (local_now().date().isoformat(), max(1, min(int(limit), 1000))),
         ).fetchall()
     return [dict(row) for row in rows]
@@ -2090,9 +2120,9 @@ def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
             db.execute("DELETE FROM external_calendar_events")
             for event in events:
                 db.execute(
-                    "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (event["id"], event["uid"], event["name"], event["event_date"], event["start_local"], event["end_local"], event["duration_minutes"], int(event["all_day"]), now),
+                    "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (event["id"], event["uid"], event["name"], event["event_date"], event["start_local"], event["end_local"], event["duration_minutes"], int(event["all_day"]), int(event.get("training_relevant", True)), int(event.get("no_intensity", False)), now),
                 )
         set_kv("last_external_calendar_sync_at", now)
         set_kv("last_external_calendar_sync_error", "")
@@ -2998,6 +3028,187 @@ def add_weather_to_planned(planned: list[dict[str, Any]], weather: dict[str, Any
             copy["weather_recommendation"] = recommendation
         enriched.append(copy)
     return enriched
+def is_planned_workout_event(event: Any) -> bool:
+    """Return whether a calendar record represents a workout to execute."""
+    if not isinstance(event, dict):
+        return False
+    category = str(event.get("category") or "").strip().upper()
+    if category:
+        return category == "WORKOUT"
+    # Older cached event records may not contain category. Only infer a
+    # workout when the record has a duration, so races and calendar notes are
+    # not counted as missed training.
+    return as_number(first_present(event, ("moving_time", "elapsed_time"))) is not None
+
+
+def _record_date(value: Any) -> str:
+    parsed = activity_datetime(value)
+    return parsed.date().isoformat() if parsed else str(value or "")[:10]
+
+
+def _activity_metric(record: Any, keys: tuple[str, ...]) -> float | int | None:
+    number = as_number(first_present(record, keys))
+    return number if number is not None and number >= 0 else None
+
+
+def _workout_duration(record: Any) -> float | int | None:
+    return _activity_metric(record, ("moving_time", "elapsed_time"))
+
+
+def _workout_load(record: Any) -> float | int | None:
+    return _activity_metric(record, ("icu_training_load", "training_load", "tss"))
+
+
+def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[int, dict[str, Any]]:
+    """Match completed activities to planned workouts without reusing one activity."""
+    activity_rows = [item for item in activities if isinstance(item, dict)]
+    unused = set(range(len(activity_rows)))
+    matches: dict[int, dict[str, Any]] = {}
+    workout_rows = [(index, event) for index, event in enumerate(planned) if is_planned_workout_event(event)]
+    by_paired_id: dict[str, list[int]] = {}
+    for activity_index, activity in enumerate(activity_rows):
+        paired_id = first_present(activity, ("paired_event_id", "pairedEventId"))
+        if paired_id not in (None, ""):
+            by_paired_id.setdefault(str(paired_id), []).append(activity_index)
+
+    # paired_event_id is the reliable Intervals.icu association.
+    for event_index, event in workout_rows:
+        event_id = first_present(event, ("id", "event_id"))
+        candidates = [index for index in by_paired_id.get(str(event_id), []) if index in unused] if event_id not in (None, "") else []
+        if candidates:
+            candidates.sort(key=lambda index: str(activity_rows[index].get("start_date_local") or ""))
+            selected_index = candidates[0]
+            matches[event_index] = activity_rows[selected_index]
+            unused.remove(selected_index)
+
+    # Handle manually logged workouts conservatively, without stealing an
+    # activity that is explicitly paired with another event.
+    for event_index, event in workout_rows:
+        if event_index in matches:
+            continue
+        event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
+        event_kind = activity_kind(event)
+        if event_kind == "other":
+            continue
+        event_start = activity_datetime(first_present(event, ("start_date_local", "date", "start")))
+        candidates = []
+        for activity_index in unused:
+            activity = activity_rows[activity_index]
+            if first_present(activity, ("paired_event_id", "pairedEventId")) not in (None, ""):
+                continue
+            if _record_date(first_present(activity, ("start_date_local", "start_date", "start"))) != event_date:
+                continue
+            if activity_kind(activity) != event_kind:
+                continue
+            activity_start = activity_datetime(first_present(activity, ("start_date_local", "start_date", "start")))
+            distance = abs((activity_start - event_start).total_seconds()) if activity_start and event_start else 0
+            candidates.append((distance, activity_index))
+        if candidates:
+            candidates.sort()
+            selected_index = candidates[0][1]
+            matches[event_index] = activity_rows[selected_index]
+            unused.remove(selected_index)
+    return matches
+
+
+def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, today: date) -> dict[str, Any]:
+    event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
+    status = "completed" if activity is not None else "missed" if event_date < today.isoformat() else "planned"
+    planned_load = _workout_load(event)
+    actual_load = _workout_load(activity)
+    planned_duration = _workout_duration(event)
+    actual_duration = _workout_duration(activity)
+    basis = None
+    planned_value = None
+    actual_value = None
+    if planned_load is not None and planned_load > 0 and activity is not None and actual_load is not None:
+        basis, planned_value, actual_value = "training_load", planned_load, actual_load
+    elif planned_duration is not None and planned_duration > 0 and activity is not None and actual_duration is not None:
+        basis, planned_value, actual_value = "duration", planned_duration, actual_duration
+    elif activity is not None and planned_load is None and planned_duration is None:
+        basis = "unavailable"
+
+    percentage = 0 if status == "missed" else None
+    if activity is not None and basis == "unavailable":
+        percentage = 100
+    elif planned_value is not None and actual_value is not None and planned_value > 0:
+        # Intervals.icu also allows values above 100% when more was completed.
+        percentage = round(float(actual_value) * 100 / float(planned_value))
+    result: dict[str, Any] = {
+        "status": status,
+        "percentage": percentage,
+        "basis": basis,
+        "planned_value": planned_value,
+        "actual_value": actual_value,
+        "planned_duration": planned_duration,
+        "actual_duration": actual_duration,
+        "planned_load": planned_load,
+        "actual_load": actual_load,
+    }
+    if activity is not None:
+        result.update({
+            "activity_id": first_present(activity, ("id", "activityId")),
+            "activity_name": str(activity.get("name") or "Absolvierte Einheit")[:200],
+            "activity_start": first_present(activity, ("start_date_local", "start_date", "start")),
+        })
+    return result
+
+
+def planning_compliance_state(planned: list[Any], activities: list[Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Add unit compliance and return aggregate weekly compliance metrics."""
+    normalized_planned = [dict(item) for item in planned if isinstance(item, dict)]
+    matches = match_planned_workouts(normalized_planned, activities)
+    today = local_now().date()
+    enriched: list[dict[str, Any]] = []
+    week_rows: dict[str, list[dict[str, Any]]] = {}
+    for index, event in enumerate(normalized_planned):
+        if not is_planned_workout_event(event):
+            enriched.append(event)
+            continue
+        compliance = workout_compliance(event, matches.get(index), today)
+        enriched.append({**event, "compliance": compliance})
+        event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
+        try:
+            event_day = date.fromisoformat(event_date)
+        except ValueError:
+            continue
+        week_start = event_day - timedelta(days=event_day.weekday())
+        week_rows.setdefault(week_start.isoformat(), []).append(compliance)
+
+    weekly: list[dict[str, Any]] = []
+    for week_start, rows in sorted(week_rows.items()):
+        planned_count = len(rows)
+        completed_count = sum(1 for compliance in rows if compliance["status"] == "completed")
+        all_have_load = all(compliance.get("planned_load") is not None and compliance["planned_load"] > 0 for compliance in rows)
+        load_available = all(compliance["status"] != "completed" or compliance.get("actual_load") is not None for compliance in rows)
+        if all_have_load and load_available:
+            basis = "training_load"
+            planned_value = sum(float(compliance["planned_load"]) for compliance in rows)
+            actual_value = sum(float(compliance.get("actual_load") or 0) for compliance in rows)
+        else:
+            all_have_duration = all(compliance.get("planned_duration") is not None and compliance["planned_duration"] > 0 for compliance in rows)
+            duration_available = all(compliance["status"] != "completed" or compliance.get("actual_duration") is not None for compliance in rows)
+            if not all_have_duration or not duration_available:
+                basis, planned_value, actual_value = None, None, None
+            else:
+                basis = "duration"
+                planned_value = sum(float(compliance["planned_duration"]) for compliance in rows)
+                actual_value = sum(float(compliance.get("actual_duration") or 0) for compliance in rows)
+        percentage = round(actual_value * 100 / planned_value) if planned_value else None
+        weekly.append({
+            "week_start": week_start,
+            "week_end": (date.fromisoformat(week_start) + timedelta(days=6)).isoformat(),
+            "planned_units": planned_count,
+            "completed_units": completed_count,
+            "unit_percentage": round(completed_count * 100 / planned_count) if planned_count else None,
+            "percentage": percentage,
+            "basis": basis,
+            "planned_value": round(planned_value, 2) if planned_value is not None else None,
+            "actual_value": round(actual_value, 2) if actual_value is not None else None,
+        })
+    return enriched, weekly
+
+
 def version_tuple(value: Any) -> tuple[int, int, int] | None:
     match = GITHUB_VERSION_RE.fullmatch(str(value or "").strip())
     if not match:
@@ -3141,7 +3352,8 @@ class IntervalsClient:
     def fetch_snapshot(self, activity_days: int = 42) -> dict[str, Any]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         today = local_now().date()
-        future_end = today + timedelta(days=28)
+        calendar_start = today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)
+        calendar_end = today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)
         existing = latest_snapshot() or {}
         incremental = bool(existing) and activity_days != ALL_SYNC_DAYS
         request_days = activity_days
@@ -3159,7 +3371,7 @@ class IntervalsClient:
         wellness = deduplicate_api_records(wellness)
         events = self.get(
             f"/athlete/{athlete}/events",
-            {"oldest": today.isoformat(), "newest": future_end.isoformat()},
+            {"oldest": calendar_start.isoformat(), "newest": calendar_end.isoformat()},
         )
         athlete_data = self.get(f"/athlete/{athlete}")
         incoming = compact_snapshot(athlete_data, activities, wellness, events, history_days=request_days)
@@ -3284,7 +3496,7 @@ def compact_wellness_sport_info(value: Any) -> list[dict[str, Any]]:
 
 def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, history_days: int = 42) -> dict[str, Any]:
     activity_fields = (
-        "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain",
+        "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain", "elapsed_time",
         "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "average_heartrate",
         "max_heartrate", "average_watts", "weighted_average_watts", "average_speed", "max_speed",
         "icu_weighted_avg_speed", "icu_pace", "feel", "icu_rpe", "paired_event_id",
@@ -3295,7 +3507,7 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
         "mood", "readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness",
     )
     event_fields = (
-        "id", "start_date_local", "category", "name", "description", "type", "moving_time",
+        "id", "start_date_local", "category", "name", "description", "type", "moving_time", "elapsed_time",
         "distance", "icu_training_load", "icu_intensity", "target", "external_id",
     )
     athlete_fields = (
@@ -3471,6 +3683,33 @@ def adaptive_recovery_replacement(
     }
 
 
+def private_calendar_adjustment_context(
+    draft: dict[str, Any],
+    calendar_events: list[dict[str, Any]],
+    adjusted: dict[str, Any],
+    reason: str,
+) -> dict[str, Any]:
+    """Create bounded provenance for a draft changed because of iCalendar events."""
+    return {
+        "label": "Aufgrund privater Termine angepasst",
+        "reason": str(reason or "Private Termine erforderten eine Anpassung")[:1000],
+        "events": [
+            {
+                "name": str(event.get("name") or "Privater Termin")[:200],
+                "event_date": str(event.get("event_date") or "")[:10],
+                "duration_minutes": int(event.get("duration_minutes") or 0),
+                "no_intensity": bool(event.get("no_intensity")),
+            }
+            for event in calendar_events[:10]
+            if isinstance(event, dict)
+        ],
+        "original_duration_minutes": draft.get("duration_minutes"),
+        "adjusted_duration_minutes": adjusted.get("duration_minutes"),
+        "intensity_adjusted": True,
+        "no_intensity_requested": any(bool(event.get("no_intensity")) for event in calendar_events),
+    }
+
+
 def latest_replan_preview() -> dict[str, Any] | None:
     with DB_LOCK, database() as db:
         row = db.execute(
@@ -3502,6 +3741,8 @@ def adaptive_replan_preview() -> dict[str, Any]:
     external_events = list_external_calendar_events(1000)
     events_by_date: dict[str, list[dict[str, Any]]] = {}
     for event in external_events:
+        if not bool(event.get("training_relevant", True)):
+            continue
         events_by_date.setdefault(str(event.get("event_date") or ""), []).append(event)
     for event_date, events in events_by_date.items():
         if event_date >= today:
@@ -3527,10 +3768,12 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 f"family calendar has {len(calendar_events)} event(s), including "
                 f"'{longest_event.get('name') or 'calendar event'}' for about {total_event_minutes} minutes"
             )
+        no_intensity_events = [event for event in calendar_events if bool(event.get("no_intensity"))]
+        no_intensity_limited = bool(no_intensity_events) and draft_is_hard(draft)
         calendar_limited = bool(calendar_events) and (
             draft_is_hard(draft) or (duration is not None and calendar_limit is not None and duration > calendar_limit)
         )
-        if severe or (high_load and draft_is_hard(draft)) or limited or calendar_limited:
+        if severe or (high_load and draft_is_hard(draft)) or limited or calendar_limited or no_intensity_limited:
             reasons: list[str] = []
             if severe:
                 reasons.append("illness or pain reported")
@@ -3540,6 +3783,8 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 reasons.append(f"only {available_minutes} minutes are available")
             if calendar_limited:
                 reasons.append(calendar_reason)
+            if no_intensity_limited:
+                reasons.append("calendar marker [NO_INTENSITY] requests an easy session")
             reason = "; ".join(reasons)
             replacement = adaptive_recovery_replacement(
                 draft,
@@ -3547,6 +3792,10 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 available_minutes if limited else None,
                 calendar_limit if calendar_limited else None,
             )
+            if calendar_limited:
+                replacement["private_calendar_adjustment"] = private_calendar_adjustment_context(
+                    draft, calendar_events, replacement, calendar_reason,
+                )
             changes.append({
                 "draft_id": draft["id"], "date": draft.get("date"), "name": draft.get("name"),
                 "external_events": calendar_events,
@@ -4833,7 +5082,7 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
         "external_calendar": {
             "provider": "iCalendar",
             "read_only": True,
-            "events": list_external_calendar_events(),
+            "events": list_external_calendar_events(training_relevant_only=True),
         },
         "current_performance": current_performance_context(snapshot),
         "garmin": garmin_coach_context(),
@@ -5341,10 +5590,38 @@ def schedule_morning_checkin() -> None:
     threading.Thread(target=run_morning_checkin, args=(checkin_date,), daemon=True).start()
 
 
+def add_private_calendar_context_to_planned(
+    planned: list[dict[str, Any]], drafts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Expose only recorded iCalendar-driven adjustments on linked events."""
+    by_event_id = {
+        str(draft.get("intervals_event_id")): draft
+        for draft in drafts
+        if draft.get("intervals_event_id")
+    }
+    by_external_id = {
+        f"intervals-coach-{draft.get('id')}": draft
+        for draft in drafts
+        if draft.get("id")
+    }
+    enriched: list[dict[str, Any]] = []
+    for event in planned:
+        draft = by_event_id.get(str(event.get("id"))) or by_external_id.get(str(event.get("external_id") or ""))
+        context = draft.get("private_calendar_adjustment") if isinstance(draft, dict) else None
+        copy = dict(event)
+        if isinstance(context, dict):
+            copy["private_calendar_adjustment"] = context
+        enriched.append(copy)
+    return enriched
+
+
 def public_state(local_only: bool = False) -> dict[str, Any]:
     snapshot = latest_snapshot()
     activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
     planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
+    drafts = list_workout_drafts()
+    planned, planning_compliance = planning_compliance_state(planned, activities)
+    planned = add_private_calendar_context_to_planned(planned, drafts)
     weather = weather_state(planned, refresh=not local_only)
     return {
         "app": {
@@ -5353,11 +5630,12 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "github_release": github_release_status(refresh=not local_only),
         },
         "messages": list_messages(),
-        "drafts": list_workout_drafts(),
+        "drafts": drafts,
         "plans": list_training_plans(),
         "library": list_workout_library(),
         "activities": activities,
         "planned": add_weather_to_planned(planned, weather),
+        "planning_compliance": planning_compliance,
         "weather": weather,
         "parallel_cycling": parallel_cycling_event_groups(planned),
         "profile": get_profile(),

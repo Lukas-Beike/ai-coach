@@ -23,6 +23,19 @@ It is not intended to be exposed directly to the public internet.
   and indoor/virtual cycling.
 - Mobile-first profile and system sections can be collapsed; the planned
   calendar is grouped into collapsible full weeks with compact volume summaries.
+  Intervals.icu planned workouts are matched to completed activities through
+  their pairing (with a conservative same-day/sport fallback) and show
+  workout and weekly compliance percentages. The comparison uses training
+  load when available, otherwise moving/elapsed time.
+- If adaptive planning shortens a local workout or reduces its intensity due
+  to a read-only iCalendar appointment, the linked planned workout records
+  that reason and the original versus adjusted duration after approval.
+- Google Calendar has no editable iCalendar category field. Add
+  `[NO_TRAINING]` to the event description for informational appointments;
+  the event remains visible in the external-calendar list but is excluded
+  from coaching and adaptive planning.
+- Add `[NO_INTENSITY]` to the description when a calendar event should allow
+  training but prevent hard sessions; other description tags have no effect.
 - Optional weather integration via Open-Meteo: a city or postal code in the
   profile enables a cached 14-day forecast in the planned calendar. For
   outdoor runs and rides, the app suggests a weather-aware time window for
