@@ -63,7 +63,7 @@ It is not intended to be exposed directly to the public internet.
 - Bidirectional synchronization of target competitions with Intervals.icu.
 - Local athlete check-ins for subjective soreness, stress, motivation, session
   RPE, pain/illness notes, available training time, and day-specific constraints.
-- Read-only shared iCalendar integration for the next 90 days. Event
+- Read-only shared iCalendar integration for the next 8 weeks. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local drafts on busy days can be proposed as short easy sessions.
 - Adaptive plan review that proposes changes to future local drafts after a
@@ -177,7 +177,7 @@ exports, and logs.
 
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
 in the System tab. A successful sync keeps events from today through the next
-90 days. A failed refresh leaves the last successful event set in place and
+8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
 settings or bypass workout approval.
 

@@ -857,6 +857,7 @@ SYNC_PERIOD_DEFAULTS = {"intervals": 90, "garmin": 30}
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = date(2000, 1, 1)
+EXTERNAL_CALENDAR_WINDOW_DAYS = 56
 # Keep enough calendar history to show whether recently planned workouts were
 # completed, while retaining the existing five-week forward planning horizon.
 PLANNED_CALENDAR_HISTORY_DAYS = 35
@@ -2127,7 +2128,7 @@ def external_calendar_state() -> dict[str, Any]:
         "last_sync_at": get_kv("last_external_calendar_sync_at"),
         "last_error": get_kv("last_external_calendar_sync_error") or None,
         "events": list_external_calendar_events(),
-        "window_days": 90,
+        "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS,
     }
 
 
@@ -2144,7 +2145,7 @@ def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
             raise AppError(413, "Der Kalender-Feed ist zu groß.")
         events = parse_ical_calendar(payload)
         today = local_now().date()
-        latest = today + timedelta(days=90)
+        latest = today + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS)
         events = [event for event in events if today <= date.fromisoformat(event["event_date"]) <= latest]
         now = utc_now()
         with DB_LOCK, database() as db:
@@ -2163,7 +2164,7 @@ def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
             replan_changes = len(adaptive_replan_preview().get("changes", []))
         except Exception:
             LOGGER.warning("Adaptive preview after calendar sync failed", extra={"event": "external_calendar_replan_preview_failed"}, exc_info=True)
-        return {"status": "ok", "synced_at": now, "events": len(events), "window_days": 90, "replan_changes": replan_changes}
+        return {"status": "ok", "synced_at": now, "events": len(events), "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS, "replan_changes": replan_changes}
     except Exception as exc:
         set_kv("last_external_calendar_sync_error", redact_text(str(exc))[:1000])
         LOGGER.error("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
