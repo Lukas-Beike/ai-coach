@@ -76,9 +76,10 @@ It is not intended to be exposed directly to the public internet.
   local cleanup, and retention policy.
 - Encrypted database backup download and validated restore with an automatic
   pre-restore copy of the previous database.
-- OpenAI usage display for the latest request and token quotas reported by the
-  API. Account dollar balances are available through the OpenAI billing
-  dashboard or authorized organization access, not through this application.
+- OpenAI usage display for the latest request, remaining request/token quotas,
+  and the classified status of the last API call. Account dollar balances are
+  available through the OpenAI billing dashboard or authorized organization
+  access, not through this application.
 
 ## Loading and synchronization
 
