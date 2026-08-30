@@ -247,6 +247,7 @@ class CoachTests(unittest.TestCase):
             "type": "Run", "name": "Remote Race", "description": "Remote description",
             "moving_time": 7200, "distance": 21097, "target": "Sub 2:00",
         })
+        self.assertEqual(data["intervals_event_id"], "42")
         self.assertEqual(data["category"], "RACE_C")
         self.assertEqual(data["priority"], "C")
         self.assertEqual(data["start_date_local"], "2026-09-20T07:15:00")
@@ -862,6 +863,42 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(synced["intervals_event_id"], "12345")
         self.assertEqual(synced["sync_dirty"], 0)
 
+    def test_competition_sync_adopts_existing_remote_event_before_push(self):
+        event_date = (date.today() + timedelta(days=60)).isoformat()
+        server.save_athlete_context({}, [{
+            "name": "Existing Race", "event_date": event_date, "priority": "A", "sport": "Cycling",
+        }])
+        pushed = []
+
+        class FakeIntervalsClient:
+            def fetch_competition_events(self):
+                return [{
+                    "id": 54321,
+                    "category": "RACE_A",
+                    "start_date_local": event_date + "T08:00:00",
+                    "type": "Ride",
+                    "name": "Existing Race",
+                }]
+
+            def upsert_competition_events(self, events):
+                pushed.extend(events)
+                return []
+
+            def bulk_delete_events(self, identifiers):
+                return 0
+
+        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
+            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+        ):
+            result = server.sync_competitions("test")
+
+        self.assertEqual(result["pushed"], 0)
+        self.assertEqual(result["imported"], 0)
+        self.assertEqual(pushed, [])
+        competition = server.list_competitions(include_sync=True)[0]
+        self.assertEqual(competition["intervals_event_id"], "54321")
+        self.assertEqual(competition["sync_dirty"], 0)
+
     def test_competition_sync_imports_remote_race_events(self):
         event_date = (date.today() + timedelta(days=45)).isoformat()
 
@@ -902,6 +939,11 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(competition["event_date"], event_date)
         self.assertEqual(competition["intervals_event_id"], "777")
         self.assertEqual(competition["sync_dirty"], 0)
+
+        # Saving the profile after an import must retain the provider link.
+        server.save_athlete_context({}, [competition])
+        saved_again = server.list_competitions(include_sync=True)[0]
+        self.assertEqual(saved_again["intervals_event_id"], "777")
 
     def test_competition_sync_skips_unsupported_local_sports(self):
         event_date = (date.today() + timedelta(days=30)).isoformat()
