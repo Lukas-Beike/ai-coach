@@ -579,11 +579,7 @@ function renderActivityStats(activities) {
   const list = Array.isArray(activities) ? activities : [];
   const counts = new Map();
   list.forEach((activity) => counts.set(activitySportLabel(activity), (counts.get(activitySportLabel(activity)) || 0) + 1));
-  const dates = list.map((activity) => activity.start_date_local || activity.start_date).filter(Boolean).map((value) => new Date(value)).filter((value) => !Number.isNaN(value.valueOf()));
-  const range = dates.length
-    ? `${new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(Math.min(...dates)))} – ${new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(Math.max(...dates)))}`
-    : "Keine Einheiten";
-  const entries = [["Einheiten gesamt", list.length], ...[...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([sport, count]) => [`${sport}`, count]), ["Datenbereich", range]];
+  const entries = [["Einheiten gesamt", list.length], ...[...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([sport, count]) => [`${sport}`, count])];
   entries.forEach(([label, value]) => {
     const card = document.createElement("div");
     const number = document.createElement("strong");
@@ -597,6 +593,15 @@ function renderActivityStats(activities) {
 
 function renderActivities(activities) {
   const list = Array.isArray(activities) ? activities : [];
+  const syncDetail = $("#activitySyncDetail");
+  const syncNotices = [];
+  if (state.data?.sync?.running || state.localSync.intervals) syncNotices.push(state.data?.sync?.status || "Intervals.icu wird synchronisiert…");
+  if (syncDetail) {
+    const refreshedAt = state.data?.sync?.last_sync_at;
+    syncDetail.textContent = syncNotices.length
+      ? syncNotices.join(" · ")
+      : refreshedAt ? `Letzte Aktualisierung: ${formatTime(refreshedAt)}` : "Noch nicht aktualisiert";
+  }
   renderActivityFilters(list);
   const filteredActivities = state.activityTypes.size
     ? list.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))

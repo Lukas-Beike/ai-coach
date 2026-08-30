@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=79">
+  <link rel="stylesheet" href="/styles.css?v=80">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -48,11 +48,11 @@
         <p class="fine-print">Trainingsempfehlungen dienen zur Orientierung und ersetzen keinen medizinischen Rat. Jede Kalenderänderung gibst du selbst frei.</p>
       </section>
 
-      <section id="activitiesPanel" class="panel" aria-label="Absolvierte Einheiten">
+      <section id="activitiesPanel" class="panel" aria-label="Aktivitäten">
         <div class="section-heading">
-          <div><span class="eyebrow">TRAININGSVERLAUF</span><h2>Absolviert</h2></div>
+          <div><span class="eyebrow">TRAININGSVERLAUF</span><h2>Aktivitäten</h2><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
         </div>
-        <div id="activityStats" class="activity-stats-summary" aria-label="Statistik der absolvierten Einheiten"></div>
+        <div id="activityStats" class="activity-stats-summary" aria-label="Aktivitätsstatistik"></div>
         <div id="activityFilters" class="activity-filters" aria-label="Aktivitätstypen filtern"></div>
         <div id="activities" class="activities"></div>
       </section>
@@ -231,7 +231,7 @@
 
     <nav class="bottom-nav" aria-label="Hauptnavigation">
       <button class="nav-item active" data-panel="chatPanel"><span>●</span>Coach</button>
-      <button class="nav-item" data-panel="activitiesPanel"><span>✓</span>Absolviert</button>
+      <button class="nav-item" data-panel="activitiesPanel"><span>✓</span>Aktivitäten</button>
       <button class="nav-item" data-panel="workoutsPanel"><span>◇</span>Geplant</button>
       <button class="nav-item" data-panel="dataPanel"><span>◌</span>Daten</button>
       <button class="nav-item" data-panel="profilePanel"><span>○</span>Profil</button>
@@ -253,6 +253,6 @@
       </button>
     </form>
   </dialog>
-  <script src="/app.js?v=79" defer></script>
+  <script src="/app.js?v=80" defer></script>
 </body>
 </html>
