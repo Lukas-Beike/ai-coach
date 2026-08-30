@@ -942,6 +942,20 @@ class CoachTests(unittest.TestCase):
         with self.assertRaises(server.AppError):
             server.save_thinking_level("extreme")
 
+    def test_calendar_display_settings_are_persisted_and_validated(self):
+        self.assertEqual(server.calendar_display_settings(), {"past_weeks": 1, "future_weeks": 4})
+        self.assertEqual(
+            server.save_calendar_display_settings({"past_weeks": 3, "future_weeks": 12}),
+            {"status": "ok", "past_weeks": 3, "future_weeks": 12},
+        )
+        self.assertEqual(server.calendar_display_settings(), {"past_weeks": 3, "future_weeks": 12})
+        with self.assertRaises(server.AppError):
+            server.save_calendar_display_settings({"past_weeks": -1})
+        with self.assertRaises(server.AppError):
+            server.save_calendar_display_settings({"future_weeks": 53})
+        server.set_kv("calendar_display_past_weeks", "invalid")
+        self.assertEqual(server.calendar_display_settings()["past_weeks"], 1)
+
     def test_responses_request_uses_selected_thinking_level(self):
         server.save_thinking_level("low")
         captured = {}
@@ -1456,6 +1470,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["app"]["version"], server.APP_VERSION)
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
         self.assertEqual(state["planned"][0]["name"], "Intervalle")
+        self.assertEqual(state["calendar_display"], {"past_weeks": 1, "future_weeks": 4})
 
     def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
         today = server.local_now().date()

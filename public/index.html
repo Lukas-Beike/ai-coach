@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=92">
+  <link rel="stylesheet" href="/styles.css?v=93">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -159,6 +159,17 @@
           <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend.</p>
         </details>
         <details class="settings-section collapsible-section">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Kalenderansicht</span><span id="calendarDisplaySummary" class="collapsible-summary-meta">Einstellungen werden geladen...</span></summary>
+          <form id="calendarDisplayForm" class="calendar-display-form">
+            <div class="calendar-display-fields">
+              <label for="calendarDisplayPastWeeks">Wochen zurück<input id="calendarDisplayPastWeeks" type="number" min="0" max="52" step="1" value="1"><small>0 = keine vergangene Woche</small></label>
+              <label for="calendarDisplayFutureWeeks">Wochen voraus<input id="calendarDisplayFutureWeeks" type="number" min="0" max="52" step="1" value="4"><small>0 = nur die aktuelle Woche</small></label>
+            </div>
+            <button id="calendarDisplaySaveButton" class="secondary-button" type="submit">Kalenderansicht speichern</button>
+            <p class="fine-print settings-message">Steuert nur, wie viele Kalenderwochen in der Oberfläche angezeigt werden. Synchronisations- und Trainingsdaten bleiben unverändert.</p>
+          </form>
+        </details>
+        <details class="settings-section collapsible-section">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Coach-Modell &amp; Thinking</span><span id="modelSettingsSummary" class="collapsible-summary-meta">Auswahl wird geladen…</span></summary>
           <div id="modelSettingsTarget">
             <div class="model-selector">
@@ -252,6 +263,6 @@
       </button>
     </form>
   </dialog>
-  <script src="/app.js?v=92" defer></script>
+  <script src="/app.js?v=93" defer></script>
 </body>
 </html>

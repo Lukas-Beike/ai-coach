@@ -492,6 +492,12 @@ h2 {
 .context-empty { margin: 0; padding: 16px; border: 1px dashed var(--line-strong); border-radius: 13px; color: var(--subtle); text-align: center; font-size: .78rem; }
 
 .model-selector, .diagnostic-actions { padding: 18px 0 10px; border-top: 1px solid var(--line); }
+.calendar-display-form { display: grid; gap: 14px; padding: 18px 0 10px; }
+.calendar-display-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.calendar-display-fields label { display: grid; gap: 6px; color: var(--subtle); font-size: .73rem; font-weight: 500; }
+.calendar-display-fields input { width: 100%; padding: 9px 10px; font-size: .8rem; }
+.calendar-display-fields small { color: var(--subtle); font-size: .64rem; font-weight: 400; }
+.calendar-display-form > .secondary-button { justify-self: start; }
 .context-preview { margin-top: 8px; padding: 18px 0 90px; border-top: 1px solid var(--line); }
 .context-preview-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .context-preview-heading h3 { margin: 3px 0 0; color: var(--ink); font-size: 1.05rem; letter-spacing: -.02em; }
@@ -650,6 +656,8 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .context-preview-heading > div { min-width: 0; }
   .settings-section-heading .secondary-button,
   .context-preview-heading .secondary-button { width: 100%; }
+  .calendar-display-fields { grid-template-columns: 1fr; }
+  .calendar-display-form > .secondary-button { width: 100%; }
   .connection-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
   .connection-card > .connection-card-info { grid-column: 1; grid-row: 1; }
   .connection-card .connection-actions { grid-column: 1 / -1; grid-row: 3; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
