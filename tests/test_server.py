@@ -1339,11 +1339,48 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(weather["days"][0]["wind_direction_dominant"], 225)
         self.assertEqual(len(weather["recommendations"]), 1)
         self.assertEqual(weather["recommendations"][0]["event_id"], "ride-1")
-        self.assertTrue(weather["recommendations"][0]["suggested_time"].startswith("08:00"))
+        self.assertTrue(weather["recommendations"][0]["suggested_time"].startswith("16:00"))
+        self.assertEqual(weather["recommendations"][0]["availability"], "nach der Arbeit")
+        self.assertEqual(weather["days"][0]["icon"], server.WEATHER_ICONS[1])
         enriched = server.add_weather_to_planned(planned, weather)
         self.assertIn("weather_recommendation", enriched[0])
         self.assertNotIn("weather_recommendation", enriched[1])
         self.assertNotIn("weather_recommendation", enriched[2])
+
+    def test_weather_recommendation_respects_weekday_work_and_friday_hours(self):
+        monday = date(2026, 8, 31)
+        friday = date(2026, 9, 4)
+
+        def forecast_for(target, low_hours):
+            times = [f"{target.isoformat()}T{hour:02d}:00" for hour in range(24)]
+            precipitation = [5 if hour in low_hours else 80 for hour in range(24)]
+            return {
+                "hourly": {
+                    "time": times,
+                    "apparent_temperature": [18] * 24,
+                    "precipitation_probability": precipitation,
+                    "rain": [0] * 24,
+                    "showers": [0] * 24,
+                    "wind_speed_10m": [12] * 24,
+                    "wind_gusts_10m": [20] * 24,
+                    "wind_direction_10m": [180] * 24,
+                    "weather_code": [1] * 24,
+                }
+            }
+
+        monday_result = server._weather_recommendation(
+            {"id": "monday", "type": "Ride", "start_date_local": f"{monday}T08:00:00", "moving_time": 7200},
+            forecast_for(monday, {8, 9, 16, 17}),
+        )
+        self.assertEqual(monday_result["suggested_time"], "16:00–18:00 Uhr")
+        self.assertEqual(monday_result["availability"], "nach der Arbeit")
+
+        friday_result = server._weather_recommendation(
+            {"id": "friday", "type": "Run", "start_date_local": f"{friday}T08:00:00", "moving_time": 3600},
+            forecast_for(friday, {8, 14}),
+        )
+        self.assertEqual(friday_result["suggested_time"], "14:00–15:00 Uhr")
+        self.assertEqual(friday_result["availability"], "nach der Arbeit")
     def test_github_latest_release_is_normalized_and_compared_without_exposing_token(self):
         captured = {}
         current_major, current_minor, current_patch = server.version_tuple(server.APP_VERSION)

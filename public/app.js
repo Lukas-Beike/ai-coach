@@ -659,6 +659,27 @@ function weatherForDate(date) {
   return (state.data?.weather?.days || []).find((item) => item.date === date) || null;
 }
 
+function weatherIcon(code) {
+  const number = Number(code);
+  if (!Number.isFinite(number)) return "🌡️";
+  if (number === 0) return "☀️";
+  if (number === 1) return "🌤️";
+  if (number === 2) return "⛅";
+  if (number === 3) return "☁️";
+  if ([45, 48].includes(number)) return "🌫️";
+  if (number >= 51 && number <= 57) return "🌦️";
+  if (number >= 61 && number <= 67) return "🌧️";
+  if (number >= 71 && number <= 77) return number === 75 ? "❄️" : "🌨️";
+  if (number >= 80 && number <= 82) return number === 80 ? "🌦️" : "🌧️";
+  if (number >= 85 && number <= 86) return "🌨️";
+  if (number >= 95) return "⛈️";
+  return "🌤️";
+}
+
+function weatherIconFor(item) {
+  return item?.icon || weatherIcon(item?.weather_code);
+}
+
 function weatherNumber(value, suffix = "") {
   const number = Number(value);
   return Number.isFinite(number) ? `${Math.round(number)}${suffix}` : "–";
@@ -970,12 +991,17 @@ function renderPlanned(planned) {
       if (weather) {
         const weatherRoot = document.createElement("div");
         weatherRoot.className = "planned-weather";
+        const icon = document.createElement("span");
+        icon.className = "weather-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = weatherIconFor(weather);
         const condition = document.createElement("strong");
         condition.textContent = weather.condition || "Wetter";
+        condition.title = weather.condition || "Wetter";
         const summary = document.createElement("span");
         const direction = weatherDirection(weather.wind_direction_dominant);
         summary.textContent = `${weatherNumber(weather.temperature_min, " °C")} bis ${weatherNumber(weather.temperature_max, " °C")} · Regenrisiko ${weatherNumber(weather.precipitation_probability_max, " %")} · Wind bis ${weatherNumber(weather.wind_speed_max, " km/h")} / Böen ${weatherNumber(weather.wind_gusts_max, " km/h")}${direction ? ` aus ${direction}` : ""}`;
-        weatherRoot.append(condition, summary);
+        weatherRoot.append(icon, condition, summary);
         dayRoot.append(weatherRoot);
       }
 
@@ -1001,6 +1027,13 @@ function renderPlanned(planned) {
           const complianceSummary = compliance?.percentage != null ? `Umsetzung ${compliance.percentage}%` : compliance?.status === "missed" ? "Nicht umgesetzt" : compliance?.status === "completed" ? "Absolviert" : null;
           meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null, complianceSummary].filter(Boolean).join(" · ");
           summaryMain.append(eventTitle, meta);
+          const recommendation = event.weather_recommendation;
+          if (recommendation) {
+            const weatherSlot = document.createElement("span");
+            weatherSlot.className = "planned-weather-slot";
+            weatherSlot.textContent = `${weatherIconFor(recommendation)} Beste Zeit ${recommendation.suggested_time}${recommendation.availability ? ` · ${recommendation.availability}` : ""}`;
+            summaryMain.append(weatherSlot);
+          }
           summary.append(summaryMain);
           if (compliance) details.classList.add(`planned-compliance-${compliance.status}`);
           details.append(summary);
@@ -1047,15 +1080,19 @@ function renderPlanned(planned) {
             description.textContent = event.description;
             body.append(description);
           }
-          if (event.weather_recommendation) {
+          if (recommendation) {
             const recommendation = document.createElement("div");
             recommendation.className = "planned-weather-recommendation";
+            const icon = document.createElement("span");
+            icon.className = "weather-icon";
+            icon.setAttribute("aria-hidden", "true");
+            icon.textContent = weatherIconFor(event.weather_recommendation);
             const recommendationTitle = document.createElement("strong");
-            recommendationTitle.textContent = `Beste Wetterzeit: ${event.weather_recommendation.suggested_time}`;
+            recommendationTitle.textContent = `Beste Wetterzeit: ${event.weather_recommendation.suggested_time}${event.weather_recommendation.availability ? ` · ${event.weather_recommendation.availability}` : ""}`;
             const recommendationReason = document.createElement("span");
             const direction = weatherDirection(event.weather_recommendation.wind_direction);
             recommendationReason.textContent = `${event.weather_recommendation.reason || "Günstigstes verfügbares Zeitfenster laut Vorhersage."}${direction ? ` Windrichtung: ${direction}.` : ""}`;
-            recommendation.append(recommendationTitle, recommendationReason);
+            recommendation.append(icon, recommendationTitle, recommendationReason);
             body.append(recommendation);
           }
           if (event.id != null) {

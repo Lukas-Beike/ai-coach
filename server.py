@@ -449,6 +449,36 @@ WEATHER_CONDITIONS = {
     96: "Gewitter mit Hagel",
     99: "Starkes Gewitter mit Hagel",
 }
+WEATHER_ICONS = {
+    0: "☀️",
+    1: "🌤️",
+    2: "⛅",
+    3: "☁️",
+    45: "🌫️",
+    48: "🌫️",
+    51: "🌦️",
+    53: "🌦️",
+    55: "🌧️",
+    56: "🌧️",
+    57: "🌧️",
+    61: "🌧️",
+    63: "🌧️",
+    65: "🌧️",
+    66: "🌧️",
+    67: "🌧️",
+    71: "🌨️",
+    73: "🌨️",
+    75: "❄️",
+    77: "❄️",
+    80: "🌦️",
+    81: "🌧️",
+    82: "🌧️",
+    85: "🌨️",
+    86: "🌨️",
+    95: "⛈️",
+    96: "⛈️",
+    99: "⛈️",
+}
 
 
 COACH_PROMPT = """You are the athlete's long-term endurance coach. You are operating inside a private coaching app and receive a fresh structured training snapshot on every turn.
@@ -467,6 +497,7 @@ Priorities:
 7. Keep normal chat answers concise and practical.
 8. When the athlete asks for the latest/recent units or explicitly asks to load and analyse current training, use the freshly loaded snapshot supplied by the app and say when the refresh failed or data may be stale.
 8a. For outdoor running and outdoor cycling, use the supplied weather forecast when choosing advice or a planned time. Concrete time-window recommendations are only available for the next five days; treat them as forecasts, not guarantees. Indoor, swimming, and strength sessions do not need weather adjustments.
+8b. When suggesting a weekday training time, assume normal work from 06:00–15:30 Monday–Thursday and until 14:00 on Friday. The 12:00–13:00 lunch break is available for training; otherwise use time before work or after work unless the athlete states different availability.
 9. Never silently change durable athlete facts, target events, constraints, or preferences based only on chat. Explain the proposed change and ask the athlete to confirm it in the Profile screen.
 10. Reply in German unless the athlete explicitly asks for another language. Use metric units and German date conventions.
 11. Treat values labelled as AI estimates as uncertain performance inferences, never as measured facts. Do not present them as medical assessments.
@@ -2822,6 +2853,10 @@ def _weather_number(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _weather_icon(code: int | None) -> str:
+    return WEATHER_ICONS.get(code, "🌤️") if code is not None else "🌡️"
+
+
 def _weather_array_value(values: Any, index: int) -> float | None:
     if not isinstance(values, list) or index >= len(values):
         return None
@@ -2840,6 +2875,7 @@ def _weather_daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:
             "date": str(raw_date),
             "weather_code": int(code) if code is not None else None,
             "condition": WEATHER_CONDITIONS.get(int(code), "Unbekannte Wetterlage") if code is not None else "Keine Angabe",
+            "icon": _weather_icon(int(code)) if code is not None else _weather_icon(None),
             "temperature_min": _weather_array_value(daily.get("temperature_2m_min"), index),
             "temperature_max": _weather_array_value(daily.get("temperature_2m_max"), index),
             "apparent_temperature_min": _weather_array_value(daily.get("apparent_temperature_min"), index),
@@ -2881,44 +2917,74 @@ def _weather_hourly_rows(forecast: dict[str, Any], target_date: str) -> list[dic
     return rows
 
 
+def _weather_training_windows(target_date: date) -> list[tuple[int, int, str]]:
+    """Return preferred hourly training windows for a local calendar date.
+
+    Weekday work hours are unavailable except for the athlete's lunch break.
+    The half-hour end of the normal workday is rounded up to the next forecast
+    hour, so a suggested hourly block never overlaps working time.
+    """
+    weekday = target_date.weekday()
+    if weekday <= 3:  # Monday–Thursday: 06:00–15:30
+        return [(5, 6, "vor der Arbeit"), (12, 13, "Mittagspause"), (16, 22, "nach der Arbeit")]
+    if weekday == 4:  # Friday: 06:00–14:00
+        return [(5, 6, "vor der Arbeit"), (12, 13, "Mittagspause"), (14, 22, "nach der Arbeit")]
+    return [(6, 21, "Wochenende")]
+
+
 def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> dict[str, Any] | None:
     event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", event_date):
         return None
-    rows = [row for row in _weather_hourly_rows(forecast, event_date) if 6 <= int(row["hour"]) <= 20]
+    try:
+        target_date = date.fromisoformat(event_date)
+    except ValueError:
+        return None
+    rows = _weather_hourly_rows(forecast, event_date)
     if not rows:
         return None
     duration_minutes = max(5, min(600, round((_weather_number(event.get("moving_time")) or 3600) / 60)))
     duration_hours = max(1, math.ceil(duration_minutes / 60))
-    candidates: list[tuple[float, list[dict[str, float | int | str]]]] = []
-    for start in range(0, len(rows)):
-        interval = rows[start:start + duration_hours]
-        if len(interval) < duration_hours:
-            continue
-        precipitation = [_weather_number(item.get("precipitation_probability")) for item in interval]
-        rain = [(_weather_number(item.get("rain")) or 0) + (_weather_number(item.get("showers")) or 0) for item in interval]
-        temperatures = [_weather_number(item.get("apparent_temperature")) for item in interval]
-        gusts = [_weather_number(item.get("wind_gusts_10m")) for item in interval]
-        wind_speeds = [_weather_number(item.get("wind_speed_10m")) for item in interval]
-        codes = [int(item["weather_code"]) for item in interval if item.get("weather_code") is not None]
-        precipitation_avg = sum(value for value in precipitation if value is not None) / max(1, len([value for value in precipitation if value is not None]))
-        temperature_avg = sum(value for value in temperatures if value is not None) / max(1, len([value for value in temperatures if value is not None]))
-        gust_max = max(gusts) if gusts else 0
-        wind_speed_avg = sum(value for value in wind_speeds if value is not None) / max(1, len([value for value in wind_speeds if value is not None]))
-        severe_weather = sum(25 for code in codes if code >= 95) + sum(8 for code in codes if 61 <= code <= 86)
-        score = (
-            precipitation_avg * 0.8
-            + sum(rain) * 8
-            + max(0, wind_speed_avg - 20) * (1.4 if "run" not in str(event.get("type") or "").casefold() else 0.5)
-            + max(0, gust_max - 30) * (1.0 if is_outdoor_activity(event) and "run" not in str(event.get("type") or "").casefold() else 0.5)
-            + max(0, 4 - temperature_avg) * 1.5
-            + max(0, temperature_avg - 27) * 1.2
-            + severe_weather
-        )
-        candidates.append((score, interval))
+    candidates: list[tuple[float, int, list[dict[str, float | int | str]], str]] = []
+    windows = _weather_training_windows(target_date)
+    for window_start, window_end, availability in windows:
+        for start in range(0, len(rows)):
+            interval = rows[start:start + duration_hours]
+            if len(interval) < duration_hours:
+                continue
+            start_hour = int(interval[0]["hour"])
+            end_hour = start_hour + duration_hours
+            if start_hour < window_start or end_hour > window_end:
+                continue
+            if any(int(item["hour"]) != start_hour + offset for offset, item in enumerate(interval)):
+                continue
+            precipitation = [_weather_number(item.get("precipitation_probability")) for item in interval]
+            rain = [(_weather_number(item.get("rain")) or 0) + (_weather_number(item.get("showers")) or 0) for item in interval]
+            temperatures = [_weather_number(item.get("apparent_temperature")) for item in interval]
+            gusts = [_weather_number(item.get("wind_gusts_10m")) for item in interval]
+            wind_speeds = [_weather_number(item.get("wind_speed_10m")) for item in interval]
+            codes = [int(item["weather_code"]) for item in interval if item.get("weather_code") is not None]
+            precipitation_avg = sum(value for value in precipitation if value is not None) / max(1, len([value for value in precipitation if value is not None]))
+            temperature_avg = sum(value for value in temperatures if value is not None) / max(1, len([value for value in temperatures if value is not None]))
+            gust_max = max(gusts) if gusts else 0
+            wind_speed_avg = sum(value for value in wind_speeds if value is not None) / max(1, len([value for value in wind_speeds if value is not None]))
+            severe_weather = sum(25 for code in codes if code >= 95) + sum(8 for code in codes if 61 <= code <= 86)
+            score = (
+                precipitation_avg * 0.8
+                + sum(rain) * 8
+                + max(0, wind_speed_avg - 20) * (1.4 if "run" not in str(event.get("type") or "").casefold() else 0.5)
+                + max(0, gust_max - 30) * (1.0 if is_outdoor_activity(event) and "run" not in str(event.get("type") or "").casefold() else 0.5)
+                + max(0, 4 - temperature_avg) * 1.5
+                + max(0, temperature_avg - 27) * 1.2
+                + severe_weather
+            )
+            # When the forecast is equally good, prefer a practical daytime slot
+            # over the narrow pre-work window. Weather remains the dominant factor.
+            convenience_penalty = 2 if availability == "vor der Arbeit" else 0
+            candidates.append((score + convenience_penalty, start_hour, interval, availability))
     if not candidates:
         return None
-    _, best = min(candidates, key=lambda item: item[0])
+    _, start_hour, best, availability = min(candidates, key=lambda item: (item[0], item[1]))
     best_precipitation = [_weather_number(item.get("precipitation_probability")) for item in best]
     precipitation_avg = round(sum(value for value in best_precipitation if value is not None) / max(1, len([value for value in best_precipitation if value is not None])))
     temperatures = [_weather_number(item.get("apparent_temperature")) for item in best]
@@ -2929,13 +2995,17 @@ def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> 
     wind_speed_avg = round(sum(value for value in wind_speeds if value is not None) / max(1, len([value for value in wind_speeds if value is not None])))
     directions = [_weather_number(item.get("wind_direction_10m")) for item in best]
     wind_direction = round(sum(value for value in directions if value is not None) / max(1, len([value for value in directions if value is not None]))) if any(value is not None for value in directions) else None
-    start_hour = int(best[0]["hour"])
     end_hour = start_hour + duration_hours
+    best_codes = [int(item["weather_code"]) for item in best if item.get("weather_code") is not None]
+    best_code = best_codes[0] if best_codes else None
     recommendation = {
         "date": event_date,
         "event_id": str(event.get("id")) if event.get("id") is not None else None,
         "event_name": str(event.get("name") or "Geplante Einheit")[:200],
         "suggested_time": f"{start_hour:02d}:00–{min(23, end_hour):02d}:00 Uhr",
+        "availability": availability,
+        "weather_code": best_code,
+        "icon": _weather_icon(best_code),
         "duration_minutes": duration_minutes,
         "precipitation_probability": precipitation_avg,
         "apparent_temperature": temperature_avg,
