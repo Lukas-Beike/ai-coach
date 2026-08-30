@@ -510,6 +510,24 @@ function dateLabel(value) {
   return Number.isNaN(parsed.valueOf()) ? String(value).slice(0, 10) : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
 }
 
+const PLANNED_CALENDAR_DAYS = 28;
+
+function localDateKey(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function plannedEventDate(event) {
+  return String(event?.start_date_local || event?.date || "").slice(0, 10);
+}
+
+function plannedDayLabel(date, offset) {
+  const formatted = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(date);
+  if (offset === 0) return `Heute · ${formatted}`;
+  if (offset === 1) return `Morgen · ${formatted}`;
+  return formatted;
+}
+
 function distanceLabel(value) {
   const distance = Number(value);
   if (!Number.isFinite(distance) || distance <= 0) return null;
@@ -714,48 +732,83 @@ function renderPlanned(planned) {
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   const root = $("#plannedCalendar");
   root.replaceChildren();
-  if (!planned?.length) {
-    const empty = document.createElement("p");
-    empty.className = "context-empty";
-    empty.textContent = "Keine geplanten Intervals.icu-Einheiten im Zeitraum.";
-    root.append(empty);
-    return;
-  }
-  planned.forEach((event) => {
-    const card = document.createElement("article");
-    card.className = "planned-card";
-    const top = document.createElement("div");
-    top.className = "planned-top";
-    const title = document.createElement("h3");
-    title.textContent = event.name || "Geplante Einheit";
-    const date = document.createElement("span");
-    date.className = "eyebrow";
-    date.textContent = dateLabel(event.start_date_local);
-    top.append(title, date);
-    const meta = document.createElement("div");
-    meta.className = "planned-meta";
-    const parts = [event.type, event.category, event.moving_time ? formatDuration(event.moving_time) : null].filter(Boolean);
-    meta.textContent = parts.join(" · ");
-    card.append(top, meta);
-    if (event.description) {
-      const description = document.createElement("div");
-      description.className = "planned-description";
-      description.textContent = event.description;
-      card.append(description);
-    }
-    if (event.id != null) {
-      const actions = document.createElement("div");
-      actions.className = "card-actions";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "secondary-button danger-button";
-      button.textContent = "Einheit löschen";
-      button.addEventListener("click", () => deletePlanned(event.id, button, event.name));
-      actions.append(button);
-      card.append(actions);
-    }
-    root.append(card);
+  const eventsByDate = new Map();
+  (planned || []).forEach((event) => {
+    const date = plannedEventDate(event);
+    if (!date) return;
+    if (!eventsByDate.has(date)) eventsByDate.set(date, []);
+    eventsByDate.get(date).push(event);
   });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  for (let offset = 0; offset < PLANNED_CALENDAR_DAYS; offset += 1) {
+    const day = new Date(today);
+    day.setDate(today.getDate() + offset);
+    const date = localDateKey(day);
+    const dayRoot = document.createElement("section");
+    dayRoot.className = "planned-day";
+
+    const heading = document.createElement("div");
+    heading.className = "planned-day-heading";
+    const title = document.createElement("h3");
+    title.textContent = plannedDayLabel(day, offset);
+    const events = eventsByDate.get(date) || [];
+    const count = document.createElement("span");
+    count.className = "planned-day-count";
+    count.textContent = events.length ? `${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
+    heading.append(title, count);
+    dayRoot.append(heading);
+
+    if (!events.length) {
+      const empty = document.createElement("p");
+      empty.className = "planned-day-empty";
+      empty.textContent = "Keine Einheit geplant";
+      dayRoot.append(empty);
+    } else {
+      const entries = document.createElement("div");
+      entries.className = "planned-day-entries";
+      events.forEach((event) => {
+        const details = document.createElement("details");
+        details.className = "planned-entry";
+        const summary = document.createElement("summary");
+        const summaryMain = document.createElement("span");
+        summaryMain.className = "planned-summary-main";
+        const eventTitle = document.createElement("strong");
+        eventTitle.textContent = event.name || "Geplante Einheit";
+        const meta = document.createElement("span");
+        meta.className = "planned-meta";
+        meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null].filter(Boolean).join(" · ");
+        summaryMain.append(eventTitle, meta);
+        summary.append(summaryMain);
+        details.append(summary);
+
+        const body = document.createElement("div");
+        body.className = "planned-entry-body";
+        if (event.description) {
+          const description = document.createElement("div");
+          description.className = "planned-description";
+          description.textContent = event.description;
+          body.append(description);
+        }
+        if (event.id != null) {
+          const actions = document.createElement("div");
+          actions.className = "card-actions";
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "secondary-button danger-button";
+          button.textContent = "Einheit löschen";
+          button.addEventListener("click", () => deletePlanned(event.id, button, event.name));
+          actions.append(button);
+          body.append(actions);
+        }
+        details.append(body);
+        entries.append(details);
+      });
+      dayRoot.append(entries);
+    }
+    root.append(dayRoot);
+  }
 }
 
 async function deletePlanned(eventId, button, name) {
@@ -883,70 +936,6 @@ async function loadContextPreview() {
     status.textContent = error.message;
     button.textContent = "Kontext laden";
   } finally { button.disabled = false; }
-}
-
-function renderDrafts(drafts) {
-  const root = $("#drafts");
-  root.replaceChildren();
-  const pending = drafts.filter((draft) => draft.status !== "pushed").length;
-  $("#draftCount").textContent = pending ? String(pending) : "";
-  if (!drafts.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    const title = document.createElement("strong");
-    title.textContent = "Noch keine Entwürfe";
-    empty.append(title, document.createTextNode("Bitte deinen Coach um die morgige Einheit oder eine ganze Woche."));
-    root.append(empty);
-    return;
-  }
-  for (const draft of drafts) {
-    const card = document.createElement("article");
-    card.className = "draft";
-    const top = document.createElement("div"); top.className = "draft-top";
-    const heading = document.createElement("div");
-    const date = document.createElement("span"); date.className = "eyebrow"; date.textContent = draft.date;
-    const title = document.createElement("h3"); title.textContent = draft.name;
-    const meta = document.createElement("div"); meta.className = "draft-meta"; meta.textContent = `${draft.sport} · ${draft.duration_minutes} Min. · ${draft.target}`;
-    heading.append(date, title, meta);
-    const badge = document.createElement("span"); badge.className = `badge ${draft.status}`; badge.textContent = draft.status === "pushed" ? "übertragen" : draft.status === "error" ? "Fehler" : "Entwurf";
-    top.append(heading, badge);
-    const workout = document.createElement("div"); workout.className = "workout-text"; workout.textContent = draft.description;
-    const rationale = document.createElement("p"); rationale.className = "rationale"; rationale.textContent = draft.rationale;
-    card.append(top, workout, rationale);
-    if (draft.error) {
-      const error = document.createElement("p"); error.className = "error"; error.textContent = draft.error; card.append(error);
-    }
-    const button = document.createElement("button");
-    button.className = "push-button";
-    button.textContent = draft.status === "pushed" ? "Zu Intervals.icu übertragen" : "Zu Intervals.icu übertragen";
-    button.disabled = draft.status === "pushed";
-    button.addEventListener("click", () => pushDraft(draft.id, button));
-    card.append(button);
-    if (draft.status !== "pushed") {
-      const deleteButton = document.createElement("button");
-      deleteButton.type = "button";
-      deleteButton.className = "secondary-button danger-button";
-      deleteButton.textContent = "Entwurf löschen";
-      deleteButton.addEventListener("click", () => deleteDraft(draft.id, deleteButton, draft.name));
-      card.append(deleteButton);
-    }
-    root.append(card);
-  }
-}
-
-async function deleteDraft(id, button, name) {
-  if (!window.confirm(`„${name || "Entwurf"}“ wirklich löschen?`)) return;
-  button.disabled = true;
-  button.textContent = "Wird gelöscht…";
-  try {
-    await api(`/api/drafts/${encodeURIComponent(id)}`, { method: "DELETE" });
-    toast("Entwurf gelöscht");
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    button.disabled = false;
-    button.textContent = "Entwurf löschen";
-  }
 }
 
 function renderLibrary(workouts) {
@@ -1560,7 +1549,6 @@ function render(data) {
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
   renderPlanned(data.planned || []);
-  renderDrafts(data.drafts || []);
   renderLibrary(data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
@@ -1714,15 +1702,6 @@ async function resetCoachChat() {
     toast("Neuer Coach-Chat gestartet");
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; button.textContent = "Chat zurücksetzen"; }
-}
-
-async function pushDraft(id, button) {
-  button.disabled = true; button.textContent = "Wird übertragen…";
-  try {
-    await api(`/api/workouts/${id}/push`, { method: "POST", body: "{}" });
-    toast("Training zu Intervals.icu übertragen");
-  } catch (error) { toast(error.message, true); }
-  finally { await load(); }
 }
 
 async function saveProfile(event) {
