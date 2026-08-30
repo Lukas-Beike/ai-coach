@@ -39,10 +39,12 @@ It is not intended to be exposed directly to the public internet.
 - Optional weather integration via Open-Meteo: a city or postal code in the
   profile enables a cached 14-day forecast in the planned calendar. For
   outdoor runs and rides, the app suggests a weather-aware time window for
-  the next five days, including wind speed, gusts, and direction. In NRW the
-  short range uses DWD ICON-D2 and the longer range uses ECMWF IFS HRES. The
-  free Open-Meteo tier is intended for non-commercial use and requires
-  attribution.
+  the next five days, including a small weather symbol, wind speed, gusts,
+  and direction. Weekday suggestions account for work from 06:00–15:30
+  (Monday–Thursday), work until 14:00 on Friday, and the usable 12:00–13:00
+  lunch break. In NRW the short range uses DWD ICON-D2 and the longer range
+  uses ECMWF IFS HRES. The free Open-Meteo tier is intended for non-commercial
+  use and requires attribution.
 - Thirty-day trends for FTP, thresholds, VO2 max, running predictions,
   readiness, and body weight. Garmin performance values are stored locally as
   compact historical points during synchronization.
