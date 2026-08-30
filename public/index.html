@@ -130,26 +130,6 @@
 
           <button type="submit">Athletenkontext speichern</button>
         </form>
-        <details class="settings-section local-feedback-section collapsible-section">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Lokales Athleten-Feedback</span><span id="feedbackSummary" class="collapsible-summary-meta">Noch kein Eintrag</span></summary>
-          <p>Hier werden nur eigene subjektive Angaben und Verfügbarkeiten gespeichert, die nicht aus Garmin oder Intervals.icu stammen.</p>
-          <form id="feedbackForm" class="profile-form">
-            <div class="form-grid">
-              <label>Datum<input id="feedbackDate" name="checkin_date" type="date" required></label>
-              <label>Verfügbare Trainingszeit (Min.)<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
-              <label>Muskelkater (0–10)<input name="soreness" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
-              <label>Subjektiver Stress (0–10)<input name="stress" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
-              <label>Motivation (0–10)<input name="motivation" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
-              <label>RPE der letzten Einheit (0–10)<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="Optional"></label>
-            </div>
-            <label>Krankheit / Beschwerden<textarea name="illness" rows="2" placeholder="Nur eintragen, wenn relevant"></textarea></label>
-            <label>Schmerz- oder Verletzungshinweise<textarea name="pain" rows="2" placeholder="Ort, Einschränkung oder Warnzeichen"></textarea></label>
-            <label>Verfügbarkeit / Rahmenbedingungen<textarea name="availability_notes" rows="2" placeholder="Reise, Zeitfenster, Equipment oder andere Einschränkungen"></textarea></label>
-            <label>Notizen<textarea name="notes" rows="2" placeholder="Zusätzliche subjektive Rückmeldung"></textarea></label>
-            <button type="submit">Feedback speichern</button>
-          </form>
-          <div id="feedbackHistory" class="feedback-history"></div>
-        </details>
         <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
           <div class="context-preview-heading">
             <div><span class="eyebrow">TRANSPARENZ</span><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>

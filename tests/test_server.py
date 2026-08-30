@@ -30,6 +30,7 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM competitions")
             db.execute("DELETE FROM competition_sync_tombstones")
             db.execute("DELETE FROM athlete_checkins")
+            db.execute("DELETE FROM activity_feedback")
             db.execute("DELETE FROM plan_adjustments")
             db.execute("DELETE FROM public_event_candidates")
             db.execute("DELETE FROM public_event_sources")
@@ -84,6 +85,37 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.local_feedback_context()["today"]["pain"], "left knee")
         with self.assertRaises(server.AppError):
             server.save_checkin({"soreness": 11})
+
+    def test_activity_feedback_is_persisted_and_attached_to_activity(self):
+        server.save_snapshot({
+            "synced_at": "2026-08-30T08:00:00+00:00",
+            "athlete": {},
+            "recent_activities": [{"id": "activity-1", "name": "Morgenlauf", "start_date_local": "2026-08-30T07:00:00"}],
+            "recent_wellness": [],
+            "upcoming_calendar": [],
+        })
+        result = server.save_activity_feedback("activity-1", {
+            "activity_name": "Morgenlauf", "activity_date": "2026-08-30T07:00:00", "notes": "Linkes Knie ungewohnt empfindlich",
+        })
+        self.assertEqual(result["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
+        activity = server.public_state(local_only=True)["activities"][0]
+        self.assertEqual(activity["activity_feedback"]["activity_id"], "activity-1")
+        self.assertEqual(activity["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
+        context = server.structured_athlete_context()
+        self.assertEqual(context["activity_feedback"]["recent"][0]["activity_name"], "Morgenlauf")
+        self.assertIn("Linkes Knie", context["activity_feedback"]["recent"][0]["notes"])
+
+    def test_empty_activity_feedback_removes_entry_and_input_is_bounded(self):
+        result = server.save_activity_feedback("activity-2", {"notes": "x" * 5000})
+        self.assertEqual(len(result["activity_feedback"]["notes"]), 4000)
+        server.save_activity_feedback("activity-2", {"notes": "   "})
+        self.assertEqual(server.list_activity_feedback(), [])
+
+    def test_feedback_form_is_not_rendered_in_profile_markup(self):
+        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn('id="feedbackForm"', markup)
+        self.assertNotIn("Lokales Athleten-Feedback", markup)
+        self.assertIn('id="activitiesPanel"', markup)
 
     def test_public_calendar_parser_extracts_supported_event_fields(self):
         events = server.parse_public_calendar(
