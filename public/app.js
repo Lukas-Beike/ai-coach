@@ -370,6 +370,109 @@ function notifyState(data) {
   if (error) showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
 }
 
+function renderDrafts(drafts) {
+  const root = $("#workoutDrafts");
+  const summary = $("#draftsSummary");
+  if (!root) return;
+  const list = Array.isArray(drafts) ? drafts : [];
+  const pending = list.filter((draft) => draft.status !== "pushed");
+  if (summary) summary.textContent = pending.length ? `${pending.length} offen` : "Keine offenen Entwürfe";
+  root.replaceChildren();
+  if (!list.length) {
+    const empty = document.createElement("p");
+    empty.className = "context-empty";
+    empty.textContent = "Noch keine lokalen Trainingsentwürfe vorhanden.";
+    root.append(empty);
+    return;
+  }
+  for (const draft of list) {
+    const card = document.createElement("article");
+    card.className = `workout-draft workout-draft-status-${draft.status || "draft"}`;
+    const heading = document.createElement("div");
+    heading.className = "workout-draft-heading";
+    const title = document.createElement("strong");
+    title.textContent = draft.name || "Coach-Einheit";
+    const status = document.createElement("span");
+    status.className = "workout-draft-status";
+    status.textContent = draft.status === "pushed" ? "Übertragen" : draft.status === "error" ? "Fehler" : "Wartet auf Freigabe";
+    heading.append(title, status);
+    card.append(heading);
+
+    const meta = document.createElement("div");
+    meta.className = "workout-draft-meta";
+    meta.textContent = [draft.date ? dateLabel(draft.date) : null, draft.sport, draft.duration_minutes ? `${draft.duration_minutes} Min.` : null].filter(Boolean).join(" · ");
+    card.append(meta);
+
+    if (draft.description) {
+      const description = document.createElement("p");
+      description.className = "workout-draft-description";
+      description.textContent = draft.description;
+      card.append(description);
+    }
+    if (draft.rationale) {
+      const rationale = document.createElement("p");
+      rationale.className = "workout-draft-rationale";
+      rationale.textContent = `Begründung: ${draft.rationale}`;
+      card.append(rationale);
+    }
+    if (draft.error) {
+      const error = document.createElement("p");
+      error.className = "workout-draft-error-message";
+      error.textContent = draft.error;
+      card.append(error);
+    }
+    if (draft.status !== "pushed") {
+      const actions = document.createElement("div");
+      actions.className = "workout-draft-actions";
+      const approve = document.createElement("button");
+      approve.type = "button";
+      approve.className = "secondary-button";
+      approve.textContent = "Freigeben";
+      approve.addEventListener("click", () => pushDraft(draft.id, approve, draft.name));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary-button danger-button";
+      remove.textContent = "Löschen";
+      remove.addEventListener("click", () => deleteDraft(draft.id, remove, draft.name));
+      actions.append(approve, remove);
+      card.append(actions);
+    }
+    root.append(card);
+  }
+}
+
+async function pushDraft(draftId, button, name) {
+  if (!window.confirm(`„${name || "Einheit"}“ wirklich zu Intervals.icu übertragen?`)) return;
+  button.disabled = true;
+  button.textContent = "Wird übertragen…";
+  try {
+    await api(`/api/workouts/${encodeURIComponent(draftId)}/push`, { method: "POST", body: "{}" });
+    toast("Einheit zu Intervals.icu übertragen");
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    await load();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Freigeben";
+  }
+}
+
+async function deleteDraft(draftId, button, name) {
+  if (!window.confirm(`„${name || "Entwurf"}“ wirklich lokal löschen?`)) return;
+  button.disabled = true;
+  button.textContent = "Wird gelöscht…";
+  try {
+    await api(`/api/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
+    toast("Lokaler Entwurf gelöscht");
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
+    button.textContent = "Löschen";
+  }
+}
+
 function todayIso() { return new Date().toISOString().slice(0, 10); }
 
 function setFormValue(form, name, value) {
@@ -1303,7 +1406,7 @@ function renderLibrary(workouts) {
   if (!Array.isArray(workouts) || !workouts.length) {
     const empty = document.createElement("p");
     empty.className = "context-empty";
-    empty.textContent = "Keine Einheiten in der Intervals.icu-Trainingsbibliothek gefunden.";
+    empty.textContent = "Keine Einheiten in der lokalen Trainingsbibliothek gefunden.";
     root.append(empty);
     return;
   }
@@ -1332,7 +1435,18 @@ function renderLibrary(workouts) {
         const cardTitle = document.createElement("h4");
         cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
         const meta = document.createElement("span");
-        meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null].filter(Boolean).join(" · ");
+        const syncLabel = workout.sync_status === "remote_missing"
+          ? "Remote nicht gefunden - wird bei Freigabe neu abgeglichen"
+          : workout.sync_status === "sync_error"
+            ? "Synchronisationsfehler - erneut freigeben"
+            : workout.sync_status === "syncing"
+              ? "Synchronisierung läuft"
+              : workout.sync_status === "local"
+                ? "Lokal - noch nicht synchronisiert"
+                : workout.external_id
+                  ? "Mit Intervals.icu synchronisiert"
+                  : "Lokal";
+        meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, syncLabel].filter(Boolean).join(" - ");
         heading.append(cardTitle, meta);
         const description = document.createElement("p");
         description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
@@ -1347,7 +1461,7 @@ function renderLibrary(workouts) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "secondary-button";
-        button.textContent = "Als geplant übernehmen";
+        button.textContent = "Als lokalen Entwurf speichern";
         button.addEventListener("click", () => planLibraryWorkout(workout.id, dateInput, button));
         controls.append(dateLabelNode, button);
         card.append(heading, description, controls);
@@ -1386,13 +1500,13 @@ async function loadLibrary() {
 async function planLibraryWorkout(workoutId, dateInput, button) {
   if (!dateInput.value) { toast("Bitte ein Datum auswählen", true); return; }
   button.disabled = true;
-  button.textContent = "Wird eingeplant…";
+  button.textContent = "Lokaler Entwurf wird gespeichert…";
   try {
     await api("/api/library/" + encodeURIComponent(workoutId) + "/plan", { method: "POST", body: JSON.stringify({ date: dateInput.value }) });
-    toast("Einheit eingeplant");
+    toast("Lokaler Entwurf erstellt");
     await load();
   } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Als geplant übernehmen"; }
+  finally { button.disabled = false; button.textContent = "Als lokalen Entwurf speichern"; }
 }
 
 function renderProfile(profile) {
@@ -2055,16 +2169,24 @@ function render(data) {
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
+  renderDrafts(data.drafts || []);
   renderPlanned(data.planned || []);
   renderLibrary(data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
+    const libraryState = data.library_sync?.state || {};
+    const pending = Number(libraryState.local || 0) + Number(libraryState.sync_error || 0);
+    const missing = Number(libraryState.remote_missing || 0);
+    const stateHint = [
+      pending ? `${pending} lokale Einheit${pending === 1 ? "" : "en"} offen` : null,
+      missing ? `${missing} Remote-Einheit${missing === 1 ? "" : "en"} nicht gefunden` : null,
+    ].filter(Boolean).join(" · ");
     librarySyncDetail.textContent = data.library_sync?.last_error
       ? data.library_sync.last_error
       : data.library_sync?.last_sync_at
-        ? "Letzte Aktualisierung: " + formatTime(data.library_sync.last_sync_at)
-        : "Noch nicht synchronisiert";
-    librarySyncDetail.classList.toggle("error", Boolean(data.library_sync?.last_error));
+        ? ["Letzte Aktualisierung: " + formatTime(data.library_sync.last_sync_at), stateHint].filter(Boolean).join(" · ")
+        : stateHint || "Noch nicht synchronisiert";
+    librarySyncDetail.classList.toggle("error", Boolean(data.library_sync?.last_error || libraryState.sync_error));
   }
   renderProfile(data.profile);
   renderGarmin(data.garmin);

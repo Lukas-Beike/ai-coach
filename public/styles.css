@@ -438,6 +438,18 @@ h2 {
 .card-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 .danger-button { border-color: rgba(255, 69, 58, .35); color: #ff9a93; }
 .danger-button:hover { border-color: rgba(255, 69, 58, .65); background: rgba(255, 69, 58, .1); }
+.workout-drafts { display: grid; gap: 10px; }
+.workout-draft { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255, 255, 255, .025); }
+.workout-draft-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.workout-draft-heading strong { color: var(--ink); font-size: .88rem; }
+.workout-draft-status { color: var(--accent-bright); font-size: .68rem; white-space: nowrap; }
+.workout-draft-status-error .workout-draft-status { color: #ff9a93; }
+.workout-draft-status-pushed .workout-draft-status { color: var(--muted); }
+.workout-draft-meta { color: var(--subtle); font-size: .7rem; }
+.workout-draft-description, .workout-draft-rationale { margin: 0; color: var(--muted); font-size: .76rem; line-height: 1.45; white-space: pre-wrap; }
+.workout-draft-rationale { color: var(--subtle); }
+.workout-draft-error-message { margin: 0; padding: 9px 10px; border-left: 3px solid var(--danger); color: #ff9a93; background: rgba(255, 69, 58, .08); font-size: .73rem; line-height: 1.4; }
+.workout-draft-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 3px; }
 .library-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; }
 .library-heading > div { display: grid; gap: 4px; }
 .library-heading .subsection-title { margin: 0; }

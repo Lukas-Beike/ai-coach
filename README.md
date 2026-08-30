@@ -57,8 +57,15 @@ It is not intended to be exposed directly to the public internet.
   explicit athlete approval before it can be transferred to the Intervals.icu
   calendar.
 - Before a draft is created, the local workout library is checked for an exact
-  or similar workout. Existing templates are reused; missing templates are
-  added to the Intervals.icu library when the integration is configured.
+  or similar workout. Every library entry has its own local UUID. Imported
+  Intervals.icu templates additionally retain their provider ID as
+  `external_id`; new coach templates remain local until the athlete explicitly
+  approves transfer. Approval first synchronizes the local template, stores
+  the returned external ID, and then plans the calendar event.
+- If a provider response no longer contains an imported template, it is kept
+  locally and marked as missing remotely. A later approval reconciles it before
+  creating or planning it again; local templates are never removed by a full
+  Intervals.icu resync.
 - Multi-week plans are grouped and can be approved incrementally.
 - Bidirectional synchronization of target competitions with Intervals.icu.
 - Local athlete check-ins for subjective soreness, stress, motivation, session
