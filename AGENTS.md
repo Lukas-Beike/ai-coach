@@ -133,6 +133,10 @@ the affected UI flow when a browser is available.
   progress.
 - Every commit must use Conventional Commits:
   `<type>(<optional-scope>): <description>`.
+- Before creating a pull request, fetch the latest target branch and check
+  whether it contains commits that are missing from the task branch. Rebase the
+  task branch onto that target branch when needed, resolve and verify all merge
+  conflicts, and confirm that the pull request is mergeable before creating it.
 - Every pull request title must use the same format. Allowed types are
   `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`,
   `style`, and `test`; breaking changes use `!` before the colon.
