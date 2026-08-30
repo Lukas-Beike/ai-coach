@@ -89,6 +89,78 @@ PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 
 
+class ProviderResyncGate:
+    """Coordinate local provider resets with all provider operations."""
+
+    def __init__(self, provider: str):
+        self.provider = provider
+        self.condition = threading.Condition()
+        self.active = 0
+        self.resetting = False
+        self.owner_thread_id: int | None = None
+
+    @contextmanager
+    def operation(self):
+        current_thread_id = threading.get_ident()
+        with self.condition:
+            if self.resetting and self.owner_thread_id != current_thread_id:
+                raise AppError(409, f"Der vollständige {self.provider}-Resync läuft bereits. Bitte warten.")
+            if not self.resetting:
+                self.active += 1
+        try:
+            yield
+        finally:
+            with self.condition:
+                if not self.resetting or self.owner_thread_id != current_thread_id:
+                    self.active -= 1
+                    self.condition.notify_all()
+
+    def begin_reset(self) -> bool:
+        with self.condition:
+            if self.resetting:
+                return False
+            self.resetting = True
+            self.owner_thread_id = threading.get_ident()
+            while self.active:
+                self.condition.wait()
+            return True
+
+    def end_reset(self) -> None:
+        with self.condition:
+            self.resetting = False
+            self.owner_thread_id = None
+            self.condition.notify_all()
+
+    def is_resetting(self) -> bool:
+        with self.condition:
+            return self.resetting
+
+
+INTERVALS_RESYNC_GATE = ProviderResyncGate("Intervals.icu")
+GARMIN_RESYNC_GATE = ProviderResyncGate("Garmin")
+
+
+def provider_operation(provider: str):
+    gate = INTERVALS_RESYNC_GATE if provider == "intervals" else GARMIN_RESYNC_GATE
+    return gate.operation()
+
+
+def intervals_operation(function: Any) -> Any:
+    @wraps(function)
+    def guarded(*args: Any, **kwargs: Any) -> Any:
+        with provider_operation("intervals"):
+            return function(*args, **kwargs)
+    return guarded
+
+
+def garmin_operation(function: Any) -> Any:
+    @wraps(function)
+    def guarded(*args: Any, **kwargs: Any) -> Any:
+        with provider_operation("garmin"):
+            return function(*args, **kwargs)
+    return guarded
+
+
 def load_local_env() -> None:
     """Load local and persistent settings while preserving non-empty process env values."""
     for env_path in (ROOT / ".env", DATA_DIR / ".env"):
@@ -712,6 +784,11 @@ def initialise_database() -> None:
         # in the JSON payload makes this migration additive and reversible.
         if get_kv("profile", db) is None:
             set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
+        # A process cannot continue a reset after a restart. Clear only the
+        # transient marker; the last result/error remains useful to the UI.
+        for provider_keys in PROVIDER_RESYNC_KEYS.values():
+            set_kv(provider_keys["running"], "0", db)
+            set_kv(provider_keys["status"], "", db)
         retention_setting = int(getattr(CONFIG, "data_retention_days", -1))
         if retention_setting != ALL_SYNC_DAYS:
             retention_days = max(30, min(retention_setting, 3650))
@@ -1248,6 +1325,7 @@ def load_garmin_fixture(days: int) -> dict[str, Any]:
     return payload
 
 
+@garmin_operation
 def sync_garmin(days: int = 30) -> dict[str, Any]:
     fixture = garmin_fixture_path()
     if Garmin is None and fixture is None:
@@ -2295,7 +2373,8 @@ def is_remote_competition_event(event: dict[str, Any], linked_event_ids: set[str
     )
 
 
-def sync_competitions(reason: str = "manual") -> dict[str, Any]:
+@intervals_operation
+def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
     if not COMPETITION_SYNC_LOCK.acquire(blocking=False):
@@ -2324,7 +2403,9 @@ def sync_competitions(reason: str = "manual") -> dict[str, Any]:
             event for event in client.fetch_competition_events()
             if is_remote_competition_event(event, linked_ids)
         ]
-        dirty_rows = [row for row in local_rows if row.get("sync_dirty")]
+        # A full local reset must import the cloud state without exporting
+        # anything that may have been entered locally while the import runs.
+        dirty_rows = [row for row in local_rows if row.get("sync_dirty")] if push_local else []
         outbound = [competition_event_payload(row) for row in dirty_rows if supported_competition_sport(row.get("sport"))]
         skipped = len(dirty_rows) - len(outbound)
         pushed = client.upsert_competition_events(outbound)
@@ -2859,14 +2940,17 @@ class IntervalsClient:
         query = "?" + urlencode(params, doseq=True) if params else ""
         return http_json("GET", self.base + path + query, headers=self.headers, service="intervals")
 
+    @intervals_operation
     def post(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
         query = "?" + urlencode(params, doseq=True) if params else ""
         return http_json("POST", self.base + path + query, payload, self.headers, service="intervals")
 
+    @intervals_operation
     def put(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
         query = "?" + urlencode(params, doseq=True) if params else ""
         return http_json("PUT", self.base + path + query, payload, self.headers, service="intervals")
 
+    @intervals_operation
     def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
         query = "?" + urlencode(params, doseq=True) if params else ""
         return http_json("DELETE", self.base + path + query, headers=self.headers, service="intervals")
@@ -3542,6 +3626,7 @@ def list_workout_library(limit: int = 500) -> list[dict[str, Any]]:
     return result
 
 
+@intervals_operation
 def sync_workout_library(reason: str = "manual") -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
@@ -3553,6 +3638,7 @@ def sync_workout_library(reason: str = "manual") -> dict[str, Any]:
     return {"status": "ok", "workouts": len(normalized), "synced_at": get_kv("last_library_sync_at")}
 
 
+@intervals_operation
 def create_library_workouts(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
@@ -3570,6 +3656,7 @@ def create_library_workouts(workouts: list[dict[str, Any]]) -> list[dict[str, An
     return normalized
 
 
+@intervals_operation
 def plan_library_workout(workout_id: str, plan_date: str) -> dict[str, Any]:
     normalized_id = str(workout_id or "").strip()
     if not normalized_id or len(normalized_id) > 120 or "/" in normalized_id:
@@ -3592,6 +3679,7 @@ def plan_library_workout(workout_id: str, plan_date: str) -> dict[str, Any]:
     return {"status": "planned", "workout_id": normalized_id, "event": event}
 
 
+@intervals_operation
 def plan_library_workout_remote(workout_id: str, workout: dict[str, Any], plan_date: str) -> dict[str, Any]:
     return IntervalsClient().plan_library_workout(workout_id, workout, plan_date)
 
@@ -3625,6 +3713,7 @@ def save_snapshot_view(snapshot: dict[str, Any]) -> None:
         db.execute("DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT 12)")
 
 
+@intervals_operation
 def delete_planned_event(event_id: str) -> dict[str, Any]:
     normalized_id = str(event_id or "").strip()
     if not normalized_id or len(normalized_id) > 120 or "/" in normalized_id:
@@ -3649,6 +3738,7 @@ def get_workout_library() -> list[dict[str, Any]]:
     return list_workout_library()
 
 
+@intervals_operation
 def push_draft(draft_id: str) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
@@ -3710,6 +3800,109 @@ def save_snapshot(snapshot: dict[str, Any], update_full_sync: bool = True) -> No
             set_kv("last_performance_refresh_at", snapshot["synced_at"], db)
 
 
+PROVIDER_RESYNC_KEYS = {
+    "intervals": {
+        "running": "intervals_full_resync_running",
+        "status": "intervals_full_resync_status",
+        "last_at": "intervals_full_resync_at",
+        "error": "intervals_full_resync_error",
+    },
+    "garmin": {
+        "running": "garmin_full_resync_running",
+        "status": "garmin_full_resync_status",
+        "last_at": "garmin_full_resync_at",
+        "error": "garmin_full_resync_error",
+    },
+}
+
+
+def provider_resync_state(provider: str) -> dict[str, Any]:
+    keys = PROVIDER_RESYNC_KEYS[provider]
+    gate = INTERVALS_RESYNC_GATE if provider == "intervals" else GARMIN_RESYNC_GATE
+    running = gate.is_resetting() or get_kv(keys["running"]) == "1"
+    return {
+        "running": running,
+        "status": get_kv(keys["status"]) if running else None,
+        "last_resync_at": get_kv(keys["last_at"]),
+        "last_error": get_kv(keys["error"]) or None,
+    }
+
+
+def reset_local_provider_data(provider: str) -> None:
+    """Delete only cached provider data; never issue a provider API request."""
+    if provider == "intervals":
+        tables = ("snapshots", "workout_library", "competitions", "competition_sync_tombstones")
+        keys = (
+            "last_sync_at", "last_sync_error", "last_sync_window_start", "last_sync_window_end",
+            "last_library_sync_at", "last_library_sync_error",
+            "last_competition_sync_at", "last_competition_sync_error",
+            "competition_sync_running", "competition_sync_status",
+            "ai_performance_estimates", "last_performance_refresh_at", "last_performance_error",
+        )
+    elif provider == "garmin":
+        tables = ()
+        keys = ("garmin_snapshot", "last_garmin_sync_at", "last_garmin_error", "garmin_sync_status")
+    else:
+        raise AppError(400, "Unbekannte Anbindung.")
+    with DB_LOCK, database() as db:
+        for table in tables:
+            db.execute(f"DELETE FROM {table}")
+        for key in keys:
+            db.execute("DELETE FROM kv WHERE key = ?", (key,))
+
+
+def full_provider_resync(provider: str) -> dict[str, Any]:
+    if provider not in PROVIDER_RESYNC_KEYS:
+        raise AppError(400, "Unbekannte Anbindung.")
+    if provider == "intervals" and not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    if provider == "garmin" and not (
+        garmin_fixture_path() is not None
+        or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
+    ):
+        raise AppError(503, "Garmin ist nicht konfiguriert oder nicht verfügbar.")
+
+    gate = INTERVALS_RESYNC_GATE if provider == "intervals" else GARMIN_RESYNC_GATE
+    if not gate.begin_reset():
+        return {"status": "already_running", "source": provider}
+    keys = PROVIDER_RESYNC_KEYS[provider]
+    label = "Intervals.icu" if provider == "intervals" else "Garmin"
+    try:
+        set_kv(keys["running"], "1")
+        set_kv(keys["status"], f"{label}: lokale Daten werden zurückgesetzt…")
+        set_kv(keys["error"], "")
+        reset_local_provider_data(provider)
+        set_kv(keys["status"], f"{label}: vollständiger Resync läuft…")
+        if provider == "intervals":
+            result = sync_intervals("Vollständiger Resync", activity_days=ALL_SYNC_DAYS)
+            competition_result = sync_competitions("Vollständiger Resync", push_local=False)
+            result = {
+                **result,
+                "competitions": competition_result,
+            }
+        else:
+            result = sync_garmin(days=ALL_SYNC_DAYS)
+        finished_at = utc_now()
+        set_kv(keys["last_at"], finished_at)
+        set_kv(keys["error"], "")
+        return {"status": "ok", "source": provider, "resynced_at": finished_at, **result}
+    except Exception as exc:
+        set_kv(keys["error"], redact_text(str(exc))[:1000])
+        LOGGER.error(
+            "Full provider resynchronization failed",
+            extra={"event": "provider_full_resync_failed", "context": {"provider": provider}},
+            exc_info=True,
+        )
+        raise
+    finally:
+        try:
+            set_kv(keys["running"], "0")
+            set_kv(keys["status"], "")
+        finally:
+            gate.end_reset()
+
+
+@intervals_operation
 def sync_intervals(reason: str = "manual", activity_days: int | None = None) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
@@ -3972,6 +4165,7 @@ def estimate_performance_from_activities(snapshot: dict[str, Any]) -> dict[str, 
     return result
 
 
+@intervals_operation
 def refresh_current_performance() -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
@@ -5027,6 +5221,10 @@ def public_state() -> dict[str, Any]:
         "performance": current_performance_context(snapshot),
         "garmin": garmin_public_state(),
         "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
+        "provider_resync": {
+            "intervals": provider_resync_state("intervals"),
+            "garmin": provider_resync_state("garmin"),
+        },
         "sync": {
             "last_sync_at": get_kv("last_sync_at"),
             "last_error": get_kv("last_sync_error") or None,
@@ -5562,6 +5760,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))
                 self.send_json(200, sync_intervals("manuell", activity_days=days))
+            elif path == "/api/intervals/full-resync":
+                payload = self.read_json()
+                if payload.get("confirm") != "FULL_RESYNC":
+                    raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
+                self.send_json(200, full_provider_resync("intervals"))
             elif path == "/api/competitions/sync":
                 self.send_json(200, sync_competitions("manuell"))
             elif path == "/api/performance/refresh":
@@ -5572,6 +5775,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, sync_garmin(days=days))
             elif path == "/api/external-calendar/sync":
                 self.send_json(200, sync_external_calendar(reason="manuell"))
+            elif path == "/api/garmin/full-resync":
+                payload = self.read_json()
+                if payload.get("confirm") != "FULL_RESYNC":
+                    raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
+                self.send_json(200, full_provider_resync("garmin"))
             elif path == "/api/chat/reset":
                 self.send_json(200, reset_coach_chat())
             elif path == "/api/privacy/delete":
@@ -5799,7 +6007,7 @@ def daily_sync_loop() -> None:
         if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
             if (get_kv("last_garmin_sync_at") or "")[:10] != today:
                 safe_garmin_sync("tägliche automatische Aktualisierung")
-        if not CONFIG.intervals_api_key or last_sync[:10] == today or get_kv("sync_running") == "1":
+        if not CONFIG.intervals_api_key or last_sync[:10] == today or get_kv("sync_running") == "1" or INTERVALS_RESYNC_GATE.is_resetting():
             continue
         safe_sync("tägliche automatische Aktualisierung", activity_days=sync_period("intervals"))
 

@@ -254,6 +254,12 @@ data. The database file itself remains in place. Chat reset and local cleanup
 also attempt to delete the stored OpenAI conversation; data held by external
 providers remains subject to their own policies.
 
+For Intervals.icu and Garmin, the System tab also offers a full local
+resynchronization. It removes only the locally cached data for that provider
+and then fetches it again; cloud data, credentials, and Garmin tokens are not
+deleted. While this operation runs, syncs for the affected provider and
+Intervals.icu write operations are blocked.
+
 The **System** tab also provides an encrypted database backup download and a
 validated restore action. Restoring requires the same `APP_PASSWORD` used by
 the backup database. Before replacement, the current database is retained as a

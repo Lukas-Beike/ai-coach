@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import threading
 import unittest
 import json
 from dataclasses import replace
@@ -617,6 +618,85 @@ class CoachTests(unittest.TestCase):
         fetch_snapshot.assert_called_once_with(activity_days=65)
         self.assertEqual(result["activity_days"], 65)
         self.assertEqual(result["window_end"], server.local_now().date().isoformat())
+
+    def test_full_intervals_resync_deletes_only_local_cache_and_never_remote_data(self):
+        server.save_athlete_context({}, [{"name": "Old local race", "event_date": (date.today() + timedelta(days=30)).isoformat()}])
+        with server.DB_LOCK, server.database() as db:
+            db.execute("INSERT INTO snapshots(payload, created_at) VALUES (?, ?)", (json.dumps({"synced_at": "old"}), "old"))
+            db.execute("INSERT INTO workout_library(id, payload, updated_at) VALUES (?, ?, ?)", ("old-workout", "{}", "old"))
+            db.execute(
+                "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)",
+                ("tombstone", "remote-event", "remote-external", "old"),
+            )
+        remote_race = {
+            "id": "remote-event",
+            "category": "RACE_A",
+            "start_date_local": (date.today() + timedelta(days=45)).isoformat() + "T08:00:00",
+            "type": "Ride",
+            "name": "Cloud race",
+        }
+        deleted = []
+
+        class FakeIntervalsClient:
+            def fetch_snapshot(self, activity_days):
+                return {"synced_at": "new", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+
+            def fetch_competition_events(self):
+                return [remote_race]
+
+            def upsert_competition_events(self, events):
+                if events:
+                    raise AssertionError("A full resync must not push local competition data.")
+                return []
+
+            def bulk_delete_events(self, identifiers):
+                deleted.extend(identifiers)
+
+        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
+            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+        ), patch.object(server, "sync_workout_library", return_value={"workouts": 0}), patch.object(
+            server, "estimate_performance_from_activities", return_value={"estimates": []}
+        ):
+            result = server.full_provider_resync("intervals")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(deleted, [])
+        self.assertEqual(server.latest_snapshot()["synced_at"], "new")
+        self.assertEqual(server.list_competitions()[0]["name"], "Cloud race")
+        with server.DB_LOCK, server.database() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM competition_sync_tombstones").fetchone()["count"], 0)
+
+    def test_full_resync_blocks_intervals_operations(self):
+        self.assertTrue(server.INTERVALS_RESYNC_GATE.begin_reset())
+        errors = []
+        try:
+            with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
+                def attempt_sync():
+                    try:
+                        server.sync_competitions("test")
+                    except server.AppError as error:
+                        errors.append(error)
+                thread = threading.Thread(target=attempt_sync)
+                thread.start()
+                thread.join()
+            self.assertEqual(len(errors), 1)
+            self.assertEqual(errors[0].status, 409)
+        finally:
+            server.INTERVALS_RESYNC_GATE.end_reset()
+
+    def test_full_garmin_resync_replaces_local_snapshot_without_touching_tokens(self):
+        server.set_kv("garmin_snapshot", json.dumps({"old": True}))
+        server.set_kv("last_garmin_sync_at", "old")
+        with tempfile.TemporaryDirectory() as temp_root:
+            fixture = Path(temp_root) / "garmin.json"
+            fixture.write_text(json.dumps({"activities": [], "errors": []}), encoding="utf-8")
+            config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
+            with patch.object(server, "CONFIG", config):
+                result = server.full_provider_resync("garmin")
+        self.assertEqual(result["status"], "ok")
+        self.assertNotEqual(server.get_kv("garmin_snapshot"), json.dumps({"old": True}))
+        self.assertEqual(server.garmin_snapshot().get("source"), "fixture")
 
     def test_settings_persist_in_data_for_container_restart(self):
         with tempfile.TemporaryDirectory() as temp_root:
