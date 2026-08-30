@@ -1210,6 +1210,12 @@ class CoachTests(unittest.TestCase):
 
         self.assertEqual(error.exception.status, 403)
 
+    def test_app_loading_status_uses_a_real_unicode_ellipsis(self):
+        app_source = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn('"Trainingsbereich wird geladen…"', app_source)
+        self.assertNotIn("geladenâ€¦", app_source)
+
     def test_garmin_near_duplicate_is_skipped_in_favour_of_intervals_activity(self):
         garmin = {
             "activityId": 1, "activityType": "running", "activityName": "Morning Run",

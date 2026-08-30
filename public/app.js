@@ -84,7 +84,7 @@ function showAppShellLoading() {
   statusCard.hidden = false;
   statusCard.classList.remove("warning");
   statusCard.classList.add("working");
-  $("#statusTitle").textContent = "Trainingsbereich wird geladenâ€¦";
+  $("#statusTitle").textContent = "Trainingsbereich wird geladen…";
   $("#statusDetail").textContent = "Deine Trainingsdaten werden im Hintergrund geladen";
 }
 
