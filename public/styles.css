@@ -637,6 +637,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .profile-section .collapsible-summary-meta,
   .local-feedback-section .collapsible-summary-meta { flex: none; max-width: none; text-align: left; }
   .profile-section > p { line-height: 1.55; }
+  .profile-section > label { margin-top: 7px; }
   .profile-form > button { width: 100%; }
   .collapsible-section > summary { align-items: flex-start; }
   .collapsible-summary-title { flex: 1 1 auto; }
