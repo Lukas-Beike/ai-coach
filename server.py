@@ -140,7 +140,7 @@ class Config:
     garmin_fixture_path: str = os.environ.get("GARMIN_FIXTURE_PATH", "")
     # Read-only access via a shared calendar's private iCal address.
     # The address is a credential and must remain server-side.
-    calendar_ical_url: str = os.environ.get("CALENDAR_ICAL_URL") or os.environ.get("GOOGLE_CALENDAR_ICAL_URL", "")
+    calendar_ical_url: str = os.environ.get("CALENDAR_ICAL_URL", "")
     app_password: str = os.environ.get("APP_PASSWORD", "")
     # -1 disables automatic deletion; this is the safe default for an athlete's history.
     data_retention_days: int = env_int("DATA_RETENTION_DAYS", -1)
@@ -682,26 +682,6 @@ def initialise_database() -> None:
             );
             """
         )
-        # The first 1.1.0 preview used a Google-specific table name. Keep its
-        # data when upgrading to the provider-neutral calendar integration.
-        legacy_calendar_table = db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='google_calendar_events'"
-        ).fetchone()
-        if legacy_calendar_table:
-            db.execute(
-                "INSERT OR IGNORE INTO external_calendar_events "
-                "(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) "
-                "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at "
-                "FROM google_calendar_events"
-            )
-        for old_key, new_key in (
-            ("last_google_calendar_sync_at", "last_external_calendar_sync_at"),
-            ("last_google_calendar_sync_error", "last_external_calendar_sync_error"),
-            ("google_calendar_sync_status", "external_calendar_sync_status"),
-        ):
-            old_value = get_kv(old_key, db)
-            if old_value is not None and get_kv(new_key, db) is None:
-                set_kv(new_key, old_value, db)
         # Additive migrations for databases created before bidirectional
         # competition synchronization was introduced.
         for column, definition in (
@@ -5321,7 +5301,7 @@ def delete_local_data() -> dict[str, Any]:
     with DB_LOCK, database() as db:
         for table in (
             "messages", "snapshots", "workout_drafts", "workout_library", "competitions", "training_plans",
-            "athlete_checkins", "plan_adjustments", "public_event_candidates", "public_event_sources", "external_calendar_events", "google_calendar_events", "sessions",
+            "athlete_checkins", "plan_adjustments", "public_event_candidates", "public_event_sources", "external_calendar_events", "sessions",
         ):
             db.execute(f"DELETE FROM {table}")
         db.execute("DELETE FROM kv")
@@ -5590,7 +5570,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 days = set_sync_period("garmin", payload.get("days", sync_period("garmin")))
                 self.send_json(200, sync_garmin(days=days))
-            elif path in {"/api/external-calendar/sync", "/api/google-calendar/sync"}:
+            elif path == "/api/external-calendar/sync":
                 self.send_json(200, sync_external_calendar(reason="manuell"))
             elif path == "/api/chat/reset":
                 self.send_json(200, reset_coach_chat())

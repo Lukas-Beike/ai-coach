@@ -124,15 +124,11 @@ Optional shared calendar configuration:
 CALENDAR_ICAL_URL=https://calendar.example/household.ics
 ```
 
-Use the private iCalendar/ICS feed supplied by the calendar provider. In Google
-Calendar, open the shared calendar's settings, choose **Integrate calendar**,
-and copy **Secret address in iCal format**. Treat a private feed URL like a
-password. The application only fetches this feed, stores bounded event metadata
-locally, and never writes to the calendar. The URL stays in the server
-environment and is excluded from browser state, exports, and logs.
-
-For compatibility, `GOOGLE_CALENDAR_ICAL_URL` is still accepted when
-`CALENDAR_ICAL_URL` is not set; new installations should use the neutral name.
+Use the private iCalendar/ICS feed supplied by the calendar provider. Treat a
+private feed URL like a password. The application only fetches this feed,
+stores bounded event metadata locally, and never writes to the calendar. The
+URL stays in the server environment and is excluded from browser state,
+exports, and logs.
 
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
 in the System tab. A successful sync keeps events from today through the next
