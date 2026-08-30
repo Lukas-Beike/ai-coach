@@ -34,6 +34,22 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
+      - name: Verify release and application versions match
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_version="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
+          if [[ -z "$app_version" ]]; then
+            echo "Could not read APP_VERSION from server.py."
+            exit 1
+          fi
+          if [[ "$app_version" != "$EXPECTED_RELEASE_TAG" ]]; then
+            echo "Release tag $EXPECTED_RELEASE_TAG does not match APP_VERSION $app_version."
+            exit 1
+          fi
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Run unit tests and syntax checks

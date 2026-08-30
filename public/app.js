@@ -1750,6 +1750,49 @@ function renderThinkingLevel(thinkingLevel) {
   if (modelSummary) modelSummary.textContent = [modelSelect?.selectedOptions?.[0]?.textContent, selected?.label || select.selectedOptions?.[0]?.textContent].filter(Boolean).join(" · ");
 }
 
+function renderAppVersion(app = {}) {
+  const versionNode = $("#appVersion");
+  const updateNode = $("#appUpdateIndicator");
+  if (versionNode) versionNode.textContent = app.version ? `v${app.version}` : "";
+  if (!updateNode) return;
+  const release = app.github_release || {};
+  const hasNewerVersion = release.status === "ok" && release.is_newer;
+  updateNode.hidden = !hasNewerVersion;
+  if (hasNewerVersion) {
+    updateNode.href = release.url;
+    updateNode.title = `Neuere Version verfügbar: v${release.version}`;
+    updateNode.setAttribute("aria-label", `Neuere Version verfügbar: v${release.version}`);
+  } else {
+    updateNode.removeAttribute("href");
+    updateNode.removeAttribute("title");
+  }
+}
+
+function renderGithubRelease(app = {}) {
+  const statusNode = $("#releaseStatus");
+  const changelogNode = $("#releaseChangelog");
+  const linkNode = $("#releaseLink");
+  if (!statusNode || !changelogNode || !linkNode) return;
+  const release = app.github_release || {};
+  const available = release.status === "ok";
+  statusNode.classList.toggle("error", !available && release.status === "unavailable");
+  if (!available) {
+    statusNode.textContent = release.status === "disabled"
+      ? "GitHub-Release-Prüfung ist nicht konfiguriert."
+      : (release.message || "GitHub-Release konnte nicht geladen werden.");
+    changelogNode.textContent = "Kein Changelog verfügbar.";
+    linkNode.hidden = true;
+    linkNode.removeAttribute("href");
+    return;
+  }
+  const publication = release.published_at ? ` · veröffentlicht ${formatTime(release.published_at)}` : "";
+  statusNode.classList.remove("error");
+  statusNode.textContent = `Neuestes Release: v${release.version}${publication}${release.is_newer ? " · Neuere Version verfügbar" : " · Aktuelle Version"}`;
+  changelogNode.textContent = release.changelog || "Für dieses Release ist kein Changelog hinterlegt.";
+  linkNode.hidden = false;
+  linkNode.href = release.url;
+}
+
 function renderSettings(data) {
   const configured = data.configured || {};
   const garmin = data.garmin || {};
@@ -1810,6 +1853,7 @@ function renderSettings(data) {
   }
   const privacySummary = $("#privacySummary");
   if (privacySummary) privacySummary.textContent = `${usage.requests || 0} OpenAI-Anfragen heute`;
+  renderGithubRelease(data.app);
   renderNotificationStatus();
 }
 
@@ -1838,6 +1882,7 @@ async function loadLogs() {
 function render(data) {
   const firstRender = !state.data;
   state.data = data;
+  renderAppVersion(data.app);
   renderQuickMessageTemplates();
   notifyState(data);
   renderStatus(data);

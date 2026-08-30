@@ -61,6 +61,31 @@ h1 {
   letter-spacing: -.045em;
   line-height: 1.03;
 }
+.app-version {
+  color: var(--muted);
+  font-size: .32em;
+  font-weight: 600;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+.app-update-indicator {
+  display: inline-grid;
+  width: 1.4em;
+  height: 1.4em;
+  margin-left: .12em;
+  place-items: center;
+  border: 1px solid var(--accent-bright);
+  border-radius: 999px;
+  color: var(--accent-bright);
+  font-size: .34em;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: .42em;
+}
+.app-update-indicator:hover { color: var(--ink); background: var(--accent-soft); }
+.app-update-indicator[hidden] { display: none; }
 h2 {
   margin: 4px 0 0;
   font-size: 1.55rem;
@@ -463,6 +488,8 @@ h2 {
 .connection-card .sync-period input { width: 76px; padding: 7px 8px; text-align: center; font-size: .76rem; }
 .connection-resync-status { display: block; line-height: 1.4; }
 .settings-message { margin: 0; text-align: left; }
+.release-section .settings-section-heading .secondary-button { flex: 0 0 auto; padding: 8px 11px; font-size: .7rem; }
+.release-changelog { max-height: 420px; min-height: 90px; margin: 0; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: #171719; white-space: pre-wrap; overflow-wrap: anywhere; font: .72rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .settings-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .settings-section-heading > div { display: grid; gap: 6px; }
 .settings-inline-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 4px; }

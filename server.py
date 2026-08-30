@@ -64,6 +64,11 @@ STATIC_TARGETS = {
     "icon.svg": PUBLIC_DIR / "icon.svg",
 }
 APP_VERSION = "1.1.0"
+GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
+GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+GITHUB_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+GITHUB_RELEASE_CACHE_LOCK = threading.Lock()
+GITHUB_RELEASE_CACHE: dict[str, Any] = {"repository": "", "checked_at": 0.0, "status": None}
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -213,6 +218,9 @@ class Config:
     # Read-only access via a shared calendar's private iCal address.
     # The address is a credential and must remain server-side.
     calendar_ical_url: str = os.environ.get("CALENDAR_ICAL_URL", "")
+    github_repository: str = os.environ.get("GITHUB_REPOSITORY", "Lukas-Beike/ai-coach")
+    github_token: str = os.environ.get("GITHUB_TOKEN", "")
+    github_release_check_seconds: int = env_int("GITHUB_RELEASE_CHECK_SECONDS", GITHUB_RELEASE_CACHE_SECONDS)
     app_password: str = os.environ.get("APP_PASSWORD", "")
     # -1 disables automatic deletion; this is the safe default for an athlete's history.
     data_retention_days: int = env_int("DATA_RETENTION_DAYS", -1)
@@ -277,6 +285,7 @@ def redact_text(value: str) -> str:
         CONFIG.openai_api_key,
         CONFIG.intervals_api_key,
         getattr(CONFIG, "garmin_password", ""),
+        getattr(CONFIG, "github_token", ""),
         getattr(CONFIG, "app_password", ""),
     )
     for secret_value in secret_values:
@@ -2927,6 +2936,75 @@ def add_weather_to_planned(planned: list[dict[str, Any]], weather: dict[str, Any
             copy["weather_recommendation"] = recommendation
         enriched.append(copy)
     return enriched
+def version_tuple(value: Any) -> tuple[int, int, int] | None:
+    match = GITHUB_VERSION_RE.fullmatch(str(value or "").strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def fetch_github_latest_release(repository: str) -> dict[str, Any]:
+    owner, name = repository.split("/", 1)
+    url = f"https://api.github.com/repos/{quote(owner, safe='')}/{quote(name, safe='')}/releases/latest"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if CONFIG.github_token:
+        headers["Authorization"] = f"Bearer {CONFIG.github_token}"
+    payload = http_json("GET", url, headers=headers, timeout=10, service="github")
+    if not isinstance(payload, dict):
+        raise ValueError("GitHub returned an invalid release response")
+    tag = str(payload.get("tag_name") or "").strip()
+    release_version = version_tuple(tag)
+    current_version = version_tuple(APP_VERSION)
+    if release_version is None or current_version is None:
+        raise ValueError("GitHub release does not use a supported semantic version")
+    changelog = str(payload.get("body") or "")
+    return {
+        "status": "ok",
+        "repository": repository,
+        "tag": tag,
+        "version": ".".join(str(part) for part in release_version),
+        "name": str(payload.get("name") or tag)[:200],
+        "changelog": changelog[:50_000],
+        "published_at": str(payload.get("published_at") or ""),
+        "url": f"https://github.com/{repository}/releases/tag/{quote(tag, safe='')}",
+        "is_newer": release_version > current_version,
+    }
+
+
+def github_release_status() -> dict[str, Any]:
+    repository = CONFIG.github_repository.strip()
+    if not GITHUB_REPOSITORY_RE.fullmatch(repository):
+        return {"status": "disabled", "message": "GitHub-Repository ist nicht konfiguriert."}
+    now = time.monotonic()
+    cache_seconds = max(60, CONFIG.github_release_check_seconds)
+    with GITHUB_RELEASE_CACHE_LOCK:
+        cached_status = GITHUB_RELEASE_CACHE.get("status")
+        if (
+            GITHUB_RELEASE_CACHE.get("repository") == repository
+            and cached_status is not None
+            and now - float(GITHUB_RELEASE_CACHE.get("checked_at") or 0) < cache_seconds
+        ):
+            return dict(cached_status)
+        try:
+            status = fetch_github_latest_release(repository)
+        except Exception as exc:
+            LOGGER.warning(
+                "GitHub release check failed",
+                extra={
+                    "event": "github_release_check_failed",
+                    "context": {"repository": repository, "error_type": type(exc).__name__},
+                },
+            )
+            status = {
+                "status": "unavailable",
+                "repository": repository,
+                "message": "GitHub-Release konnte nicht geladen werden.",
+            }
+        GITHUB_RELEASE_CACHE.update({"repository": repository, "checked_at": now, "status": status})
+        return dict(status)
 
 
 class IntervalsClient:
@@ -5205,6 +5283,11 @@ def public_state() -> dict[str, Any]:
     planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
     weather = weather_state(planned)
     return {
+        "app": {
+            "name": "Intervals Coach",
+            "version": APP_VERSION,
+            "github_release": github_release_status(),
+        },
         "messages": list_messages(),
         "drafts": list_workout_drafts(),
         "plans": list_training_plans(),
