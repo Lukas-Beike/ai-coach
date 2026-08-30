@@ -2,6 +2,8 @@ const $ = (selector) => document.querySelector(selector);
 const state = {
   data: null,
   busy: false,
+  chatQueue: [],
+  chatQueueSequence: 0,
   profileDirty: false,
   activityTypes: new Set(),
   voiceRecorder: null,
@@ -195,6 +197,22 @@ function updateVoiceButton() {
     button.setAttribute("aria-label", "Spracheingabe starten");
     button.title = "Spracheingabe starten";
   }
+  updateChatControls();
+}
+
+function updateChatControls() {
+  const sendButton = $("#sendButton");
+  const steerButton = $("#steerButton");
+  const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
+  if (sendButton) {
+    sendButton.disabled = !inputAvailable;
+    sendButton.textContent = state.busy ? "Einreihen" : "Senden";
+  }
+  if (steerButton) {
+    steerButton.hidden = !state.busy;
+    steerButton.disabled = !inputAvailable;
+  }
+  updateChatQueueStatus();
 }
 
 function stopVoiceCapture(recorder = state.voiceRecorder) {
@@ -885,7 +903,51 @@ async function deletePlanned(eventId, button, name) {
 }
 
 function chatIsNearBottom() {
-  return document.documentElement.scrollHeight - (window.scrollY + window.innerHeight) <= 140;
+  return document.documentElement.scrollHeight - (window.scrollY + window.innerHeight) <= 48;
+}
+
+function updateChatComposerVisibility() {
+  const panel = $("#chatPanel");
+  if (!panel) return;
+  panel.classList.toggle("chat-composer-hidden", !chatIsNearBottom());
+}
+
+function updateChatQueueStatus() {
+  const status = $("#chatQueueStatus");
+  if (!status) return;
+  const count = state.chatQueue.length;
+  if (!state.busy || !count) {
+    status.hidden = true;
+    status.textContent = "";
+    return;
+  }
+  const steering = state.chatQueue.filter((entry) => entry.mode === "steer").length;
+  const queued = count - steering;
+  const details = [];
+  if (steering) details.push(`${steering} Steuerung${steering === 1 ? "" : "en"}`);
+  if (queued) details.push(`${queued} Nachricht${queued === 1 ? "" : "en"} in der Warteschlange`);
+  status.hidden = false;
+  status.textContent = `${details.join(" · ")} · wird nach der aktuellen Antwort verarbeitet`;
+}
+
+function createCoachWorkingIndicator() {
+  const node = document.createElement("div");
+  node.id = "coachWorking";
+  node.className = "coach-working";
+  node.setAttribute("aria-live", "polite");
+  node.innerHTML = '<span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Coach arbeitet an deiner Antwort…</span>';
+  return node;
+}
+
+function createPendingMessage(entry) {
+  const node = document.createElement("div");
+  node.className = "message user pending";
+  node.textContent = entry.message;
+  const label = document.createElement("span");
+  label.className = "pending-label";
+  label.textContent = entry.mode === "steer" ? "Steuerung · als Nächstes" : "Warteschlange · danach";
+  node.append(label);
+  return node;
 }
 
 function renderMessages(messages, forceScroll = false) {
@@ -893,7 +955,11 @@ function renderMessages(messages, forceScroll = false) {
   // Synchronisation and refresh notices belong to their respective tabs,
   // not to the personal conversation history.
   const visibleMessages = (messages || []).filter((message) => message.role !== "event");
-  const signature = JSON.stringify(visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content]));
+  const signature = JSON.stringify([
+    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content]),
+    state.busy,
+    state.chatQueue.map((entry) => [entry.id, entry.mode, entry.message]),
+  ]);
   if (root.dataset.signature === signature) return;
   const shouldScroll = forceScroll || chatIsNearBottom();
   root.dataset.signature = signature;
@@ -905,7 +971,6 @@ function renderMessages(messages, forceScroll = false) {
     title.textContent = "Dein Coach ist bereit";
     empty.append(title, document.createTextNode("Lege deine Ziele im Profil fest. Bitte den Coach jederzeit, deine letzten Einheiten neu zu analysieren."));
     root.append(empty);
-    return;
   }
   for (const message of visibleMessages) {
     const node = document.createElement("div");
@@ -914,6 +979,10 @@ function renderMessages(messages, forceScroll = false) {
     else node.textContent = message.content;
     root.append(node);
   }
+  for (const entry of state.chatQueue) root.append(createPendingMessage(entry));
+  if (state.busy) root.append(createCoachWorkingIndicator());
+  updateChatQueueStatus();
+  updateChatComposerVisibility();
   if (shouldScroll) scrollChatToLatest();
 }
 
@@ -925,7 +994,7 @@ function scrollChatToLatest() {
     const target = root.lastElementChild;
     if (!target) return;
     const composer = $("#chatForm");
-    const bottomOffset = (composer?.offsetHeight || 70) + 105 + window.visualViewport?.offsetTop || 175;
+    const bottomOffset = (composer?.offsetHeight || 70) + 94 + (window.visualViewport?.offsetTop || 0);
     const targetBottom = target.getBoundingClientRect().bottom + window.scrollY;
     window.scrollTo({ top: Math.max(0, targetBottom - window.innerHeight + bottomOffset), behavior: "auto" });
   });
@@ -1635,21 +1704,20 @@ async function load() {
   catch (error) { if (!/Authentication/.test(error.message)) toast(error.message, true); }
 }
 
-async function sendMessage(event) {
-  event.preventDefault();
+function queueChatMessage(message, mode) {
+  state.chatQueue[mode === "steer" ? "unshift" : "push"]({
+    id: ++state.chatQueueSequence,
+    message,
+    mode,
+  });
   const input = $("#messageInput");
-  const message = input.value.trim();
-  if (!message || state.busy || voiceIsRecording() || state.voiceTranscribing) return;
-  state.busy = true;
-  const sendButton = $("#sendButton");
-  const working = $("#coachWorking");
-  sendButton.disabled = true;
-  state.quickTemplatesVisible = false;
-  renderQuickMessageTemplates();
-  updateVoiceButton();
-  sendButton.textContent = "Coach arbeitet…";
-  if (working) working.hidden = false;
   input.value = "";
+  input.style.height = "auto";
+  renderMessages(state.data?.messages || [], true);
+  updateChatControls();
+}
+
+async function requestCoachResponse(message, restoreInputOnError = false) {
   if (state.data) {
     state.data.messages.push({ role: "user", content: message });
     renderMessages(state.data.messages, true);
@@ -1658,19 +1726,58 @@ async function sendMessage(event) {
     await api("/api/chat", { method: "POST", body: JSON.stringify({ message }) });
     await load();
     invalidateContextPreview();
+    return true;
   } catch (error) {
     toast(error.message, true);
-    input.value = message;
+    if (restoreInputOnError) $("#messageInput").value = message;
     await load();
     invalidateContextPreview();
+    return false;
+  }
+}
+
+async function drainChatQueue(firstMessage) {
+  await requestCoachResponse(firstMessage, true);
+  while (state.chatQueue.length) {
+    const next = state.chatQueue.shift();
+    renderMessages(state.data?.messages || [], true);
+    await requestCoachResponse(next.message);
+  }
+}
+
+async function sendMessage(event) {
+  event.preventDefault();
+  const input = $("#messageInput");
+  const message = input.value.trim();
+  if (!message || voiceIsRecording() || state.voiceTranscribing) return;
+  if (state.busy) {
+    queueChatMessage(message, "queue");
+    return;
+  }
+  state.busy = true;
+  state.quickTemplatesVisible = false;
+  renderQuickMessageTemplates();
+  input.value = "";
+  input.style.height = "auto";
+  updateChatControls();
+  updateVoiceButton();
+  try {
+    await drainChatQueue(message);
   } finally {
     state.busy = false;
-    sendButton.disabled = false;
-    sendButton.textContent = "Senden";
-    if (working) working.hidden = true;
+    updateChatControls();
+    renderMessages(state.data?.messages || [], true);
     updateVoiceButton();
     input.focus();
   }
+}
+
+function steerCurrentChat(event) {
+  event.preventDefault();
+  const input = $("#messageInput");
+  const message = input.value.trim();
+  if (!message || !state.busy || voiceIsRecording() || state.voiceTranscribing) return;
+  queueChatMessage(message, "steer");
 }
 
 async function syncNow(event) {
@@ -1755,6 +1862,7 @@ async function resetCoachChat() {
     await api("/api/chat/reset", { method: "POST", body: "{}" });
     if (state.data) {
       state.data.messages = [];
+      state.chatQueue = [];
       renderMessages([], true);
     }
     toast("Neuer Coach-Chat gestartet");
@@ -1968,6 +2076,7 @@ function moveModelSettingsToSystemTab() {
 moveModelSettingsToSystemTab();
 $("#loginForm").addEventListener("submit", login);
 $("#chatForm").addEventListener("submit", sendMessage);
+$("#steerButton").addEventListener("click", steerCurrentChat);
 $("#quickMessageTemplates").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-message]");
   if (!button || state.busy) return;
@@ -2021,6 +2130,8 @@ document.addEventListener("visibilitychange", () => {
   else checkPwaReturn();
 });
 document.addEventListener("pointerdown", handlePwaInteraction, { passive: true });
+window.addEventListener("scroll", updateChatComposerVisibility, { passive: true });
+window.addEventListener("resize", updateChatComposerVisibility);
 window.addEventListener("pagehide", savePwaActivity);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js");
 setInterval(() => {

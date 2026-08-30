@@ -34,7 +34,8 @@ It is not intended to be exposed directly to the public internet.
 - Push-to-talk voice input in the chat: short recordings are transcribed
   server-side and inserted into the editable message field; audio is not stored.
 - Coach chat with selectable GPT-5.6 models, configurable thinking level,
-  context preview, and structured logs.
+  context preview, structured logs, and prioritized steering/FIFO message
+  queueing while the coach is responding.
 - The coach creates dated local workout drafts only. Each draft requires an
   explicit athlete approval before it can be transferred to the Intervals.icu
   calendar.

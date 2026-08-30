@@ -28,19 +28,17 @@
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
         <div id="messages" class="messages"></div>
-        <div id="coachWorking" class="coach-working" hidden aria-live="polite">
-          <span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span>Coach arbeitet an deiner Antwort…</span>
-        </div>
         <form id="chatForm" class="composer">
           <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
             <span class="quick-message-label">Schnellstart</span>
             <button type="button" data-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
             <button type="button" data-message="Analysiere meine letzte absolvierte Einheit anhand der aktuellen Intervals.icu-Daten. Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit?">Letzte Einheit analysieren</button>
           </div>
+          <div id="chatQueueStatus" class="chat-queue-status" hidden aria-live="polite"></div>
           <textarea id="messageInput" rows="1" maxlength="12000" placeholder="Frage deinen Coach…" aria-label="Nachricht an deinen Coach"></textarea>
           <div class="composer-actions">
             <button type="button" id="voiceButton" class="voice-button" aria-label="Spracheingabe starten" title="Spracheingabe starten">🎙</button>
+            <button type="button" id="steerButton" class="secondary-button steer-button" hidden>Steuern</button>
             <button type="submit" id="sendButton">Senden</button>
           </div>
         </form>
