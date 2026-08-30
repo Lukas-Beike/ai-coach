@@ -1345,11 +1345,13 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("weather_recommendation", enriched[2])
     def test_github_latest_release_is_normalized_and_compared_without_exposing_token(self):
         captured = {}
+        current_major, current_minor, current_patch = server.version_tuple(server.APP_VERSION)
+        future_version = f"{current_major}.{current_minor}.{current_patch + 1}"
 
         def fake_http_json(method, url, payload=None, headers=None, timeout=45, service=None, raw_body=None, content_type=None):
             captured.update({"method": method, "url": url, "headers": headers, "timeout": timeout, "service": service})
             return {
-                "tag_name": "v1.1.2", "name": "1.1.2", "body": "## Änderungen\n- Neue Anzeige",
+                "tag_name": f"v{future_version}", "name": future_version, "body": "## Änderungen\n- Neue Anzeige",
                 "published_at": "2026-08-30T08:00:00Z", "draft": False, "prerelease": False,
             }
 
@@ -1358,7 +1360,7 @@ class CoachTests(unittest.TestCase):
             result = server.fetch_github_latest_release("Lukas-Beike/ai-coach")
             redacted = server.redact_text("Authorization: Bearer gh-secret-value")
 
-        self.assertEqual(result["version"], "1.1.2")
+        self.assertEqual(result["version"], future_version)
         self.assertTrue(result["is_newer"])
         self.assertEqual(result["changelog"], "## Änderungen\n- Neue Anzeige")
         self.assertEqual(captured["method"], "GET")
