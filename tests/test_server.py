@@ -932,9 +932,10 @@ class CoachTests(unittest.TestCase):
         server.set_sync_period("intervals", 65)
         with patch.object(server, "CONFIG", config), patch.object(
             server.IntervalsClient, "fetch_snapshot", return_value=snapshot
-        ) as fetch_snapshot, patch.object(server, "sync_workout_library", return_value={"workouts": 0}):
+        ) as fetch_snapshot, patch.object(server, "sync_workout_library", return_value={"workouts": 0}), patch.object(server, "openai_request") as openai_request:
             result = server.sync_intervals("test")
         fetch_snapshot.assert_called_once_with(activity_days=65)
+        openai_request.assert_not_called()
         self.assertEqual(result["activity_days"], 65)
         self.assertEqual(result["window_end"], server.local_now().date().isoformat())
 
@@ -976,9 +977,7 @@ class CoachTests(unittest.TestCase):
 
         with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-        ), patch.object(server, "sync_workout_library", return_value={"workouts": 0}), patch.object(
-            server, "estimate_performance_from_activities", return_value={"estimates": []}
-        ):
+        ), patch.object(server, "sync_workout_library", return_value={"workouts": 0}):
             result = server.full_provider_resync("intervals")
 
         self.assertEqual(result["status"], "ok")
@@ -1309,6 +1308,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(performance["current_load"]["tsb"], -6)
         self.assertEqual(performance["recovery"]["sleep_hours"], 7.5)
         self.assertEqual(performance["rolling_training"]["last_7_days"]["training_load"], 110.0)
+        self.assertNotIn("ai_estimates", performance)
 
     def test_form_is_derived_from_ctl_and_atl_when_intervals_omits_tsb(self):
         today = date.today().isoformat()
@@ -1397,7 +1397,7 @@ class CoachTests(unittest.TestCase):
         metric = server.current_performance_context({"synced_at": "now", "athlete": {"height": 1.83}, "recent_wellness": [], "recent_activities": []})["metrics"]["height_cm"]
         self.assertEqual(metric["value"], 183)
 
-    def test_performance_refresh_does_not_request_activities(self):
+    def test_performance_refresh_only_requests_provider_data(self):
         calls = []
 
         class FakeIntervalsClient:
@@ -1405,39 +1405,12 @@ class CoachTests(unittest.TestCase):
                 calls.append(existing)
                 return {"synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_wellness": [], "recent_activities": [], "upcoming_calendar": []}
 
-        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(server, "estimate_performance_from_activities", return_value={"estimates": []}):
+        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(server, "openai_request") as openai_request:
             with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")):
                 result = server.refresh_current_performance()
         self.assertEqual(result["status"], "ok")
         self.assertEqual(len(calls), 1)
-
-    def test_ai_estimate_accepts_structured_json_and_is_used_for_missing_metrics(self):
-        snapshot = {
-            "synced_at": "2026-08-28T08:00:00+00:00",
-            "athlete": {},
-            "recent_wellness": [],
-            "recent_activities": [
-                {"type": "Run", "start_date_local": "2026-08-27T07:00:00", "moving_time": 1800, "distance": 5000}
-            ],
-        }
-        response = {"output_text": '```json\n{"estimates":[{"key":"run_5k_seconds","value":1500,"unit":"s","confidence":"mittel","basis":"5-km-Lauf"}]}\n```'}
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="test-key")), patch.object(server, "openai_request", return_value=response):
-            result = server.estimate_performance_from_activities(snapshot)
-            performance = server.current_performance_context(snapshot)
-        self.assertEqual(len(result["estimates"]), 1)
-        self.assertEqual(performance["metrics"]["run_5k_seconds"]["value"], 1500)
-        self.assertEqual(performance["metrics"]["run_5k_seconds"]["source"], "KI-Schätzung")
-
-    def test_ai_estimate_fills_missing_run_race_times_from_recent_runs(self):
-        snapshot = {
-            "synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_wellness": [],
-            "recent_activities": [{"type": "Run", "start_date_local": "2026-08-27T07:00:00", "moving_time": 1800, "distance": 5000}],
-        }
-        response = {"output_text": '{"estimates":[{"key":"run_threshold_pace_seconds_per_km","value":360,"unit":"s/km","confidence":"mittel","basis":"Laufdaten"}]}' }
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="test-key")), patch.object(server, "openai_request", return_value=response):
-            result = server.estimate_performance_from_activities(snapshot)
-        self.assertTrue(any(item["key"] == "run_10k_seconds" for item in result["estimates"]))
-        self.assertEqual(next(item for item in result["estimates"] if item["key"] == "run_10k_seconds")["source"], "Berechnete Schätzung")
+        openai_request.assert_not_called()
 
     def test_public_state_exposes_completed_and_planned_activity_tabs(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [{"name": "Morgenlauf"}], "recent_wellness": [], "upcoming_calendar": [{"name": "Intervalle"}]}

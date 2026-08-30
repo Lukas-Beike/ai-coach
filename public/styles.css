@@ -335,7 +335,6 @@ h2 {
 .metric-grid strong { color: var(--ink); font-size: 1rem; }
 .metric-grid span { margin-top: 2px; color: var(--subtle); font-size: .67rem; }
 .metric-grid small { display: block; margin-top: 6px; color: var(--subtle); font-size: .61rem; line-height: 1.2; }
-.metric-grid small.metric-estimate { color: #79d9bf; }
 .metric-grid small.metric-garmin { color: #83c7ff; }
 .metric-grid .metric-value-row { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
 .metric-grid .metric-value-row strong { min-width: 0; }

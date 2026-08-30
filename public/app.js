@@ -1732,7 +1732,6 @@ function metricSourceClass(source) {
   if (source === "Garmin Connect") return "metric-garmin";
   if (source === "Manuell") return "metric-manual";
   if (source && (source.startsWith("Intervals.icu") || source === "Aus Aktivitäten")) return "metric-intervals";
-  if (source === "KI-Schätzung" || source === "Berechnete Schätzung") return "metric-estimate";
   return "";
 }
 
@@ -1759,7 +1758,6 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
     if (className) item.classList.add(className);
   }
   source.className = metricSourceClass(metricData?.source);
-  if (metricData?.source === "KI-Schätzung" || metricData?.source === "Berechnete Schätzung") source.className = "metric-estimate";
   if (metricData?.source === "Garmin Connect") source.className = "metric-garmin";
   const valueRow = document.createElement("div");
   valueRow.className = "metric-value-row";
@@ -1904,24 +1902,6 @@ function renderPerformance(performance) {
     ["Halbmarathon (geschätzt)", compared(values.run_half_marathon_seconds, "run_half_marathon_seconds_30d"), formatDuration],
     ["Marathon (geschätzt)", compared(values.run_marathon_seconds, "run_marathon_seconds_30d"), formatDuration],
   ]);
-  const explanation = document.createElement("p");
-  explanation.className = "fine-print";
-  explanation.textContent = "Garmin-Connect-Werte werden als solche markiert und haben bei VO₂max sowie Laufprognosen Vorrang. Fehlen Garmin-Werte, werden Intervals.icu-Werte bzw. vorsichtige KI-Schätzungen verwendet.";
-  root.append(explanation);
-  const estimationError = state.data?.performance_refresh?.last_error;
-  if (estimationError) {
-    const error = document.createElement("p");
-    error.className = "error";
-    error.textContent = `KI-Schätzung fehlgeschlagen: ${estimationError}`;
-    root.append(error);
-  }
-  const estimationReason = performance.ai_estimates?.reason;
-  if (estimationReason && !estimationError) {
-    const note = document.createElement("p");
-    note.className = "fine-print estimate-note";
-    note.textContent = estimationReason;
-    root.append(note);
-  }
 }
 
 function updateHeaderAction() {
@@ -1931,7 +1911,7 @@ function updateHeaderAction() {
   if (panel === "dataPanel") {
     button.hidden = false;
     button.dataset.action = "performance";
-    button.title = "Aktuelle Leistungsdaten von Intervals.icu und KI aktualisieren";
+    button.title = "Aktuelle Leistungsdaten von Intervals.icu aktualisieren";
     button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
     button.textContent = state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin
       ? "Synchronisierung läuft…"
@@ -2311,8 +2291,7 @@ async function syncNow(event) {
   try {
     const result = await api("/api/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
     const periodLabel = result.activity_days === -1 ? "aller verfügbaren Daten" : `der letzten ${result.activity_days} Tage`;
-    toast(result.status === "ok" ? `${result.activities} Aktivitäten ${periodLabel} aktualisiert${result.estimates ? ` · ${result.estimates} KI-Schätzungen ergänzt` : ""}` : "Aktualisierung läuft bereits");
-    if (result.estimate_error) toast(`Trainingsdaten aktualisiert, KI-Schätzung fehlgeschlagen: ${result.estimate_error}`, true);
+    toast(result.status === "ok" ? `${result.activities} Aktivitäten ${periodLabel} aktualisiert` : "Aktualisierung läuft bereits");
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
@@ -2347,8 +2326,7 @@ async function refreshPerformance() {
   button.textContent = "Aktualisierung läuft…";
   try {
     const result = await api("/api/performance/refresh", { method: "POST", body: "{}" });
-    toast(result.status === "ok" ? `Leistungsdaten aktualisiert${result.estimates ? ` · ${result.estimates} KI-Schätzungen ergänzt` : ""}` : "Aktualisierung läuft bereits");
-    if (result.estimate_error) toast(`Leistungsdaten aktualisiert, KI-Schätzung fehlgeschlagen: ${result.estimate_error}`, true);
+    toast(result.status === "ok" ? "Leistungsdaten aktualisiert" : "Aktualisierung läuft bereits");
     invalidateContextPreview();
     await load();
   } catch (error) {
