@@ -63,7 +63,7 @@ STATIC_TARGETS = {
     "logo.png": PUBLIC_DIR / "logo.png",
     "icon.svg": PUBLIC_DIR / "icon.svg",
 }
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -84,7 +84,6 @@ PUSH_RE = re.compile(r"^/api/workouts/([0-9a-f-]+)/push$")
 DELETE_PLANNED_RE = re.compile(r"^/api/planned/([^/]+)$")
 DELETE_DRAFT_RE = re.compile(r"^/api/drafts/([0-9a-f-]+)$")
 PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
-PUBLIC_EVENT_CANDIDATE_RE = re.compile(r"^/api/calendar/candidates/([0-9a-f-]+)/import$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 
 
@@ -542,6 +541,10 @@ def initialise_database() -> None:
                 target TEXT NOT NULL,
                 course_profile TEXT NOT NULL,
                 notes TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'RACE_B',
+                start_date_local TEXT,
+                description TEXT NOT NULL DEFAULT '',
+                moving_time INTEGER,
                 intervals_event_id TEXT,
                 external_id TEXT,
                 sync_dirty INTEGER NOT NULL DEFAULT 1,
@@ -628,10 +631,25 @@ def initialise_database() -> None:
             ("external_id", "TEXT"),
             ("sync_dirty", "INTEGER NOT NULL DEFAULT 1"),
             ("last_synced_at", "TEXT"),
+            ("category", "TEXT NOT NULL DEFAULT 'RACE_B'"),
+            ("start_date_local", "TEXT"),
+            ("description", "TEXT NOT NULL DEFAULT ''"),
+            ("moving_time", "INTEGER"),
         ):
             existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(competitions)").fetchall()}
             if column not in existing_columns:
                 db.execute(f"ALTER TABLE competitions ADD COLUMN {column} {definition}")
+        db.execute(
+            "UPDATE competitions SET category=CASE WHEN priority IN ('A','B','C') THEN 'RACE_' || priority ELSE 'RACE_B' END "
+            "WHERE category IS NULL OR category=''"
+        )
+        db.execute(
+            "UPDATE competitions SET start_date_local=event_date || 'T00:00:00' "
+            "WHERE start_date_local IS NULL OR start_date_local=''"
+        )
+        db.execute(
+            "UPDATE competitions SET description=notes WHERE (description IS NULL OR description='') AND notes <> ''"
+        )
         # Older databases do not have a plan identifier on drafts. Keeping it
         # in the JSON payload makes this migration additive and reversible.
         if get_kv("profile", db) is None:
@@ -1490,7 +1508,66 @@ COMPETITION_TEXT_LIMITS = {
     "target": 1000,
     "course_profile": 2000,
     "notes": 2000,
+    "description": 12000,
+    "external_id": 200,
 }
+
+
+def competition_start(value: Any, fallback_date: Any = None) -> tuple[str, str]:
+    raw = str(value or "").strip()
+    fallback = str(fallback_date or "").strip()
+    if not raw:
+        raw = fallback + "T00:00:00"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise AppError(400, "Der Startzeitpunkt des Wettkampfs muss ein gültiges Datum sein.") from exc
+    if parsed.tzinfo is not None:
+        parsed = parsed.replace(tzinfo=None)
+    # The date input is retained for compatibility with older clients. If it
+    # changed while the datetime field still contains the old date, honour the
+    # explicit date and keep the entered local time.
+    if fallback:
+        try:
+            fallback_day = date.fromisoformat(fallback)
+        except ValueError:
+            fallback_day = None
+        if fallback_day is not None and parsed.date() != fallback_day:
+            parsed = parsed.replace(year=fallback_day.year, month=fallback_day.month, day=fallback_day.day)
+    start = parsed.replace(second=0, microsecond=0).isoformat(timespec="seconds")
+    return parsed.date().isoformat(), start
+
+
+def competition_moving_time(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        seconds = int(float(value))
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Die Wettkampfdauer muss in Sekunden angegeben werden.") from exc
+    if seconds < 0 or seconds > 7 * 24 * 60 * 60:
+        raise AppError(400, "Die Wettkampfdauer muss zwischen 0 und 604800 Sekunden liegen.")
+    return seconds
+
+
+def competition_distance(value: Any) -> str:
+    """Keep the existing text field while accepting Intervals' meter value."""
+    raw = str(value or "").strip()[:COMPETITION_TEXT_LIMITS["distance"]]
+    if not raw:
+        return ""
+    try:
+        number = float(raw.lower().replace("km", "").replace(",", ".").strip())
+    except ValueError:
+        return raw
+    if "km" in raw.lower():
+        number *= 1000
+    return str(int(number)) if number.is_integer() else str(round(number, 3))
+
+
+def competition_target(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))[:COMPETITION_TEXT_LIMITS["target"]]
+    return str(value or "").strip()[:COMPETITION_TEXT_LIMITS["target"]]
 
 
 def normalize_competition(value: Any) -> dict[str, str]:
@@ -1499,13 +1576,14 @@ def normalize_competition(value: Any) -> dict[str, str]:
     name = str(value.get("name") or "").strip()[:COMPETITION_TEXT_LIMITS["name"]]
     if not name:
         raise AppError(400, "Jeder Wettkampf benötigt einen Namen.")
-    try:
-        event_date = date.fromisoformat(str(value.get("event_date") or "")).isoformat()
-    except ValueError as exc:
-        raise AppError(400, f"Wettkampf „{name}“ benötigt ein gültiges Datum.") from exc
-    priority = str(value.get("priority") or "B").strip().upper()
-    if priority not in {"A", "B", "C"}:
-        raise AppError(400, f"Die Priorität für „{name}“ muss A, B oder C sein.")
+    event_date, start_date_local = competition_start(value.get("start_date_local"), value.get("event_date"))
+    category = str(value.get("category") or "").strip().upper()
+    if category not in {"RACE_A", "RACE_B", "RACE_C"}:
+        priority = str(value.get("priority") or "B").strip().upper()
+        if priority not in {"A", "B", "C"}:
+            raise AppError(400, f"Die Kategorie für „{name}“ muss RACE_A, RACE_B oder RACE_C sein.")
+        category = f"RACE_{priority}"
+    priority = category.rsplit("_", 1)[-1]
     raw_id = str(value.get("id") or "").strip()
     try:
         competition_id = str(uuid.UUID(raw_id))
@@ -1515,20 +1593,29 @@ def normalize_competition(value: Any) -> dict[str, str]:
         "id": competition_id,
         "name": name,
         "event_date": event_date,
+        "start_date_local": start_date_local,
         "priority": priority,
+        "category": category,
+        "moving_time": competition_moving_time(value.get("moving_time")),
     }
     for field, limit in COMPETITION_TEXT_LIMITS.items():
         if field == "name":
             continue
+        if field in {"external_id", "description"}:
+            continue
         default = "Cycling" if field == "sport" else ""
-        result[field] = str(value.get(field) or default).strip()[:limit]
+        result[field] = competition_target(value.get(field)) if field == "target" else str(value.get(field) or default).strip()[:limit]
+    result["distance"] = competition_distance(value.get("distance"))
+    result["description"] = str(value.get("description") or value.get("notes") or "").strip()[:COMPETITION_TEXT_LIMITS["description"]]
+    result["external_id"] = str(value.get("external_id") or "").strip()[:COMPETITION_TEXT_LIMITS["external_id"]]
     return result
 
 
 def list_competitions(include_sync: bool = False) -> list[dict[str, Any]]:
-    fields = "id, name, event_date, sport, priority, distance, target, course_profile, notes"
-    if include_sync:
-        fields += ", intervals_event_id, sync_dirty, last_synced_at"
+    fields = (
+        "id, name, event_date, start_date_local, sport, priority, category, distance, target, "
+        "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, last_synced_at"
+    )
     with DB_LOCK, database() as db:
         rows = db.execute(
             f"SELECT {fields} FROM competitions ORDER BY event_date, priority, name"
@@ -1795,15 +1882,19 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
         set_kv("profile", json.dumps(normalized_profile, ensure_ascii=False), db)
         for competition in normalized_competitions:
             db.execute(
-                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, sync_dirty, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
+                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 1, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET name=excluded.name, event_date=excluded.event_date, sport=excluded.sport, "
                 "priority=excluded.priority, distance=excluded.distance, target=excluded.target, "
-                "course_profile=excluded.course_profile, notes=excluded.notes, sync_dirty=1, updated_at=excluded.updated_at",
+                "course_profile=excluded.course_profile, notes=excluded.notes, category=excluded.category, "
+                "start_date_local=excluded.start_date_local, description=excluded.description, moving_time=excluded.moving_time, "
+                "external_id=COALESCE(excluded.external_id, competitions.external_id), sync_dirty=1, updated_at=excluded.updated_at",
                 (
                     competition["id"], competition["name"], competition["event_date"], competition["sport"],
                     competition["priority"], competition["distance"], competition["target"],
-                    competition["course_profile"], competition["notes"], now, now,
+                    competition["course_profile"], competition["notes"], competition["category"],
+                    competition["start_date_local"], competition["description"], competition["moving_time"],
+                    competition["external_id"], now, now,
                 ),
             )
         if competition_ids:
@@ -1852,14 +1943,30 @@ def competition_external_id(competition_id: str) -> str:
 
 
 def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
+    category = str(competition.get("category") or "").upper()
+    if category not in {"RACE_A", "RACE_B", "RACE_C"}:
+        category = f"RACE_{competition.get('priority') if competition.get('priority') in {'A', 'B', 'C'} else 'B'}"
     payload = {
-        "category": f"RACE_{competition.get('priority') if competition.get('priority') in {'A', 'B', 'C'} else 'B'}",
-        "start_date_local": f"{competition['event_date']}T00:00:00",
+        "category": category,
+        "start_date_local": str(competition.get("start_date_local") or f"{competition['event_date']}T00:00:00"),
         "type": intervals_competition_sport(competition.get("sport")),
         "name": str(competition.get("name") or "Zielwettkampf")[:200],
-        "description": str(competition.get("notes") or "")[:12000],
+        "description": str(competition.get("description") or competition.get("notes") or "")[:12000],
         "external_id": str(competition.get("external_id") or competition_external_id(str(competition["id"]))),
     }
+    if competition.get("moving_time") is not None:
+        payload["moving_time"] = int(competition["moving_time"])
+    distance = competition.get("distance")
+    if distance not in (None, ""):
+        try:
+            payload["distance"] = float(str(distance).replace(",", "."))
+            if payload["distance"].is_integer():
+                payload["distance"] = int(payload["distance"])
+        except ValueError:
+            # Keep free-form legacy values local instead of sending invalid API data.
+            pass
+    if competition.get("target") not in (None, ""):
+        payload["target"] = competition_target(competition.get("target"))
     if competition.get("intervals_event_id"):
         remote_id = str(competition["intervals_event_id"])
         payload["id"] = int(remote_id) if remote_id.isdigit() else remote_id
@@ -1876,7 +1983,7 @@ def remote_competition_date(event: dict[str, Any]) -> str | None:
         return None
 
 
-def remote_competition_data(event: dict[str, Any]) -> dict[str, str] | None:
+def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
     event_date = remote_competition_date(event)
     name = str(event.get("name") or "").strip()[:COMPETITION_TEXT_LIMITS["name"]]
     sport = supported_competition_sport(event.get("type") or "Ride")
@@ -1884,12 +1991,29 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, str] | None:
         return None
     category = str(event.get("category") or "RACE_B").upper()
     priority = category.rsplit("_", 1)[-1] if category.rsplit("_", 1)[-1] in {"A", "B", "C"} else "B"
+    start_date_local = str(event.get("start_date_local") or f"{event_date}T00:00:00")[:19]
+    try:
+        moving_time = competition_moving_time(event.get("moving_time"))
+    except AppError:
+        moving_time = None
+    distance = event.get("distance")
+    if isinstance(distance, (int, float)):
+        distance = str(int(distance)) if float(distance).is_integer() else str(distance)
+    else:
+        distance = competition_distance(distance)
+    description = str(event.get("description") or "").strip()[:COMPETITION_TEXT_LIMITS["description"]]
     return {
         "name": name,
         "event_date": event_date,
+        "start_date_local": start_date_local,
         "sport": sport,
         "priority": priority,
-        "notes": str(event.get("description") or "").strip()[:COMPETITION_TEXT_LIMITS["notes"]],
+        "category": f"RACE_{priority}",
+        "distance": distance,
+        "target": competition_target(event.get("target")),
+        "description": description,
+        "moving_time": moving_time,
+        "notes": description[:COMPETITION_TEXT_LIMITS["notes"]],
     }
 
 
@@ -1961,8 +2085,13 @@ def sync_competitions(reason: str = "manual") -> dict[str, Any]:
                     data = remote_competition_data(remote)
                     if data:
                         db.execute(
-                            "UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, last_synced_at=?, updated_at=? WHERE id=?",
-                            (data["name"], data["event_date"], data["sport"], data["priority"], data["notes"], str(remote.get("id") or row.get("intervals_event_id") or "") or None, external_id, now, now, row["id"]),
+                            "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, last_synced_at=?, updated_at=? WHERE id=?",
+                            (
+                                data["name"], data["event_date"], data["start_date_local"], data["sport"], data["priority"],
+                                data["category"], data["distance"], data["target"], data["description"], data["moving_time"],
+                                data["notes"], str(remote.get("id") or row.get("intervals_event_id") or "") or None,
+                                external_id, now, now, row["id"],
+                            ),
                         )
                         updated += 1
                 elif row.get("intervals_event_id"):
@@ -1989,8 +2118,12 @@ def sync_competitions(reason: str = "manual") -> dict[str, Any]:
                 local_id = str(uuid.uuid4())
                 adopted_external_id = external_id or competition_external_id(local_id)
                 db.execute(
-                    "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, intervals_event_id, external_id, sync_dirty, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
-                    (local_id, data["name"], data["event_date"], data["sport"], data["priority"], "", "", "", data["notes"], str(remote.get("id") or "") or None, adopted_external_id, now, now, now),
+                    "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, intervals_event_id, external_id, sync_dirty, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                    (
+                        local_id, data["name"], data["event_date"], data["sport"], data["priority"], data["distance"],
+                        data["target"], "", data["notes"], data["category"], data["start_date_local"], data["description"],
+                        data["moving_time"], str(remote.get("id") or "") or None, adopted_external_id, now, now, now,
+                    ),
                 )
                 existing[local_id] = {"id": local_id, "name": data["name"], "event_date": data["event_date"], "sport": data["sport"]}
                 imported += 1
@@ -4267,7 +4400,6 @@ def public_state() -> dict[str, Any]:
         "competitions": list_competitions(),
         "local_feedback": local_feedback_context(),
         "planning": planning_state(),
-        "public_calendar": public_calendar_state(),
         "performance": current_performance_context(snapshot),
         "garmin": garmin_public_state(),
         "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
@@ -4389,7 +4521,6 @@ def diagnostic_report() -> dict[str, Any]:
         library_count = db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"]
         competition_count = db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()["count"]
         checkin_count = db.execute("SELECT COUNT(*) AS count FROM athlete_checkins").fetchone()["count"]
-        calendar_candidate_count = db.execute("SELECT COUNT(*) AS count FROM public_event_candidates").fetchone()["count"]
     return {
         "generated_at": utc_now(),
         "app": {"name": "Intervals Coach", "version": APP_VERSION},
@@ -4430,7 +4561,7 @@ def diagnostic_report() -> dict[str, Any]:
             "date": get_kv("morning_checkin_date"),
             "last_error": redact_text(get_kv("morning_checkin_error") or "") or None,
         },
-        "database": {"messages": message_count, "workout_drafts_legacy": draft_count, "workout_library": library_count, "competitions": competition_count, "athlete_checkins": checkin_count, "public_event_candidates": calendar_candidate_count},
+        "database": {"messages": message_count, "workout_drafts_legacy": draft_count, "workout_library": library_count, "competitions": competition_count, "athlete_checkins": checkin_count},
         "logs": recent_log_entries(),
         "note": "Zugangsdaten und Athleteninhalte sind bewusst ausgeschlossen. Diese JSON-Datei kann zur Fehlersuche bereitgestellt werden.",
     }
@@ -4454,7 +4585,6 @@ def privacy_export() -> dict[str, Any]:
         "training_plans": list_training_plans(),
         "local_feedback": local_feedback_context(),
         "planning": planning_state(),
-        "public_calendar": public_calendar_state(),
     }
 
 
@@ -4716,9 +4846,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/privacy/backup":
                 require_auth(self)
                 self.send_bytes(200, database_backup_bytes(), "application/octet-stream", {"Content-Disposition": "attachment; filename=intervals-coach-database.backup"})
-            elif path == "/api/calendar":
-                require_auth(self)
-                self.send_json(200, public_calendar_state())
             elif path == "/api/library":
                 require_auth(self)
                 self.send_json(200, {"workouts": get_workout_library()})
@@ -4822,10 +4949,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/planning/replan":
                 payload = self.read_json()
                 self.send_json(200, apply_adaptive_replan(payload.get("adjustment_id")) if payload.get("apply") else adaptive_replan_preview())
-            elif path == "/api/calendar/import":
-                self.send_json(200, import_public_calendar(self.read_json()))
-            elif match := PUBLIC_EVENT_CANDIDATE_RE.match(path):
-                self.send_json(200, import_public_event_candidate(match.group(1)))
             elif path == "/api/library/sync":
                 self.send_json(200, sync_workout_library(reason="manuell"))
             elif match := PLAN_LIBRARY_RE.match(path):

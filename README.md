@@ -42,8 +42,6 @@ It is not intended to be exposed directly to the public internet.
   check-in. Changes are shown as a preview and require explicit local approval;
   remote Intervals.icu calendar events are never changed by this process.
 - Annual event overview with base, build, peak, taper, and completed phases.
-  Public HTTPS iCalendar feeds can be imported as reviewable event candidates
-  before the athlete adds them to the local competition list.
 - Optional PWA notifications for pending draft approvals, upcoming events, and
   synchronization errors. Notifications are opt-in and are delivered by the
   browser/service worker while the PWA can run; device workout delivery remains
@@ -58,9 +56,11 @@ It is not intended to be exposed directly to the public internet.
 
 ## Target competitions and Intervals.icu
 
-Target competitions can be created locally in the profile and synchronized in
-both directions with Intervals.icu. Local changes are exported as `RACE_A`,
-`RACE_B`, or `RACE_C` events with a stable `external_id`. Matching race events
+Target competitions are entered manually in the profile with the Intervals.icu
+event fields: name, local start date/time, sport/type, category, description,
+duration, distance, target, and external ID. They are synchronized in both
+directions with Intervals.icu. Local changes are exported as `RACE_A`,
+`RACE_B`, or `RACE_C` events with a stable `external_id`; matching race events
 from Intervals.icu are imported into the local database.
 
 Competition synchronization accepts strength training, running, outdoor
@@ -139,7 +139,7 @@ After the token store has been created, restart the application container with
 the same `/data` mount. The application can then use the stored Garmin tokens
 without asking for the login code on every startup.
 
-## Local planning data and public event calendars
+## Local planning data and target competitions
 
 The **Profile** tab stores athlete-entered feedback separately from imported
 Garmin and Intervals.icu values. This includes subjective stress, soreness,
@@ -151,11 +151,6 @@ change preview. Only after explicit approval are eligible local drafts updated.
 It does not overwrite, delete, or reschedule remote Intervals.icu calendar
 events.
 
-Public event discovery accepts only HTTPS iCalendar feeds. The server rejects
-URLs containing credentials and blocks local/private network addresses. Events
-are stored as candidates first; the athlete must individually import a
-candidate as a competition before it becomes part of the local season plan.
-The feed URL must be public and must not require authentication.
 
 ## Docker and Unraid
 

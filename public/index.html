@@ -106,18 +106,8 @@
 
           <fieldset class="profile-section">
             <legend>Zielwettkämpfe</legend>
-            <p>Speichere hier Termine und Ergebnisziele. Synchronisiert werden nur Krafttraining, Lauf sowie Rad outdoor und Rad indoor/virtuell.</p>
+            <p>Trage Wettkämpfe manuell mit den Intervals.icu-Feldern ein. Änderungen werden mit Intervals.icu bidirektional synchronisiert.</p>
             <div id="competitionList" class="competition-list"></div>
-            <div class="public-calendar-import">
-              <h3>Öffentliche Veranstaltungskalender</h3>
-              <p>Optional: iCalendar-Feeds (HTTPS) nach Lauf-, Rad- oder Kraftveranstaltungen durchsuchen und passende Termine als Wettkämpfe übernehmen.</p>
-              <div class="form-grid">
-                <label>Kalendername<input id="publicCalendarName" placeholder="Zum Beispiel: Breitensport NRW"></label>
-                <label>iCalendar-URL<input id="publicCalendarUrl" type="url" inputmode="url" placeholder="https://example.org/events.ics"></label>
-              </div>
-              <button type="button" id="publicCalendarImportButton" class="secondary-button">Kalender durchsuchen</button>
-              <div id="publicCalendarCandidates" class="public-calendar-candidates"></div>
-            </div>
             <div class="settings-inline-action competition-sync-actions">
               <div><strong>Intervals.icu-Zielwettkämpfe</strong><span id="competitionSyncDetail">Noch nicht synchronisiert</span></div>
               <button type="button" id="competitionSyncButton" class="secondary-button">Mit Intervals.icu synchronisieren</button>
