@@ -349,10 +349,11 @@ protected as the release branch. Feature pull requests should target `develop`;
 The `Daily release` workflow checks every day at 03:00 UTC for commits since
 the latest release tag. If there is at least one commit, it opens a
 version-bump PR that increments `APP_VERSION` in `server.py`. After that PR is
-merged into `develop`, the workflow automatically enables squash auto-merge
-and opens a promotion PR from `develop` to protected `main`. The promotion PR
-also uses squash auto-merge. When it is merged, the workflow creates a release
-tag matching `APP_VERSION` on the resulting `main` commit. Its release notes
+merged into `develop`, the workflow automatically enables squash auto-merge,
+creates a synchronized promotion branch, and opens a promotion PR to protected
+`main`. The promotion PR also uses squash auto-merge. When it is merged, the
+workflow creates a release tag matching `APP_VERSION` on the resulting `main`
+commit. Its release notes
 contain all commits since the previous release. It can also be started
 manually through **Actions -> Daily release -> Run workflow**. Manual runs may
 optionally provide a target `MAJOR.MINOR.PATCH` version such as `1.2.0` or
