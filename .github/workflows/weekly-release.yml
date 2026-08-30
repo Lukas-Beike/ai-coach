@@ -184,10 +184,16 @@ jobs:
           latest_tag="$(gh release list --repo "$REPOSITORY" --limit 100 --json tagName,publishedAt,isDraft,isPrerelease \
             --jq '[.[] | select(.isDraft == false and .isPrerelease == false) | select(.tagName | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(.publishedAt) | last | .tagName // empty')"
           if [[ -n "$latest_tag" ]]; then
-            IFS=. read -r major minor patch <<< "$latest_tag"
-            expected_tag="${major}.${minor}.$((patch + 1))"
-            if [[ "$release_tag" != "$expected_tag" ]]; then
-              echo "APP_VERSION $release_tag is not the next patch version after $latest_tag (expected $expected_tag)."
+            version_is_greater() {
+              local left_major left_minor left_patch right_major right_minor right_patch
+              IFS=. read -r left_major left_minor left_patch <<< "$1"
+              IFS=. read -r right_major right_minor right_patch <<< "$2"
+              (( left_major > right_major )) ||
+                { (( left_major == right_major && left_minor > right_minor )) ||
+                  (( left_major == right_major && left_minor == right_minor && left_patch > right_patch )); }
+            }
+            if ! version_is_greater "$release_tag" "$latest_tag"; then
+              echo "APP_VERSION $release_tag must be greater than the latest release $latest_tag."
               exit 1
             fi
             if ! git rev-parse --verify --quiet "${latest_tag}^{commit}" >/dev/null; then
