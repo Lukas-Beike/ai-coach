@@ -88,11 +88,11 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
         with patch.object(server, "CONFIG", config), patch.object(server, "fetch_public_calendar", return_value=payload):
             result = server.sync_external_calendar("test")
-        self.assertEqual(result["events"], 1)
-        state = server.external_calendar_state()
-        self.assertTrue(state["configured"])
-        self.assertNotIn("url", state)
-        self.assertEqual(state["events"][0]["duration_minutes"], 120)
+            self.assertEqual(result["events"], 1)
+            state = server.external_calendar_state()
+            self.assertTrue(state["configured"])
+            self.assertNotIn("url", state)
+            self.assertEqual(state["events"][0]["duration_minutes"], 120)
 
     def test_external_calendar_sync_keeps_last_successful_events_on_failure(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
