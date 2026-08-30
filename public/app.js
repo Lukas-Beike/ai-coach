@@ -3,6 +3,8 @@ const state = {
   data: null,
   loadSequence: 0,
   busy: false,
+  chatInFlightMessage: null,
+  chatInFlightResponseId: null,
   chatQueue: [],
   chatQueueSequence: 0,
   profileDirty: false,
@@ -1137,7 +1139,7 @@ function createPendingMessage(entry) {
   node.textContent = entry.message;
   const label = document.createElement("span");
   label.className = "pending-label";
-  label.textContent = entry.mode === "steer" ? "Steuerung · als Nächstes" : "Warteschlange · danach";
+  label.textContent = entry.mode === "active" ? "Wird verarbeitet..." : entry.mode === "steer" ? "Steuerung · als Nächstes" : "Warteschlange · danach";
   node.append(label);
   return node;
 }
@@ -1150,13 +1152,14 @@ function renderMessages(messages, forceScroll = false) {
   const signature = JSON.stringify([
     visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content]),
     state.busy,
+    state.chatInFlightMessage,
     state.chatQueue.map((entry) => [entry.id, entry.mode, entry.message]),
   ]);
   if (root.dataset.signature === signature) return;
   const shouldScroll = forceScroll || chatIsNearBottom();
   root.dataset.signature = signature;
   root.replaceChildren();
-  if (!visibleMessages.length) {
+  if (!visibleMessages.length && !state.chatInFlightMessage && !state.chatQueue.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
     const title = document.createElement("strong");
@@ -1171,11 +1174,21 @@ function renderMessages(messages, forceScroll = false) {
     else node.textContent = message.content;
     root.append(node);
   }
+  if (state.chatInFlightMessage) {
+    root.append(createPendingMessage({ message: state.chatInFlightMessage, mode: "active" }));
+  }
   for (const entry of state.chatQueue) root.append(createPendingMessage(entry));
   if (state.busy) root.append(createCoachWorkingIndicator());
   updateChatQueueStatus();
   updateChatComposerVisibility();
   if (shouldScroll) scrollChatToLatest();
+}
+
+function clearPersistedChatRequest(messages) {
+  const responseId = state.chatInFlightResponseId;
+  if (!responseId || !(messages || []).some((message) => message.id === responseId)) return;
+  state.chatInFlightMessage = null;
+  state.chatInFlightResponseId = null;
 }
 
 function scrollChatToLatest() {
@@ -1992,6 +2005,7 @@ async function loadLogs() {
 function render(data) {
   const firstRender = !state.data;
   state.data = data;
+  clearPersistedChatRequest(data.messages);
   renderAppVersion(data.app);
   renderQuickMessageTemplates();
   notifyState(data);
@@ -2028,14 +2042,16 @@ async function load(path = "/api/state") {
   try {
     const payload = await api(path);
     if (requestSequence === state.loadSequence) render(payload);
+    return true;
   } catch (error) {
-    if (/Authentication/.test(error.message)) return;
+    if (/Authentication/.test(error.message)) return false;
     const statusCard = $("#statusCard");
     statusCard.hidden = false;
     statusCard.classList.add("warning");
     $("#statusTitle").textContent = "Trainingsdaten konnten nicht geladen werden";
     $("#statusDetail").textContent = error.message;
     toast(error.message, true);
+    return false;
   } finally {
     if (!$("#appShell").hidden) finishAppShellLoading();
   }
@@ -2060,16 +2076,23 @@ function queueChatMessage(message, mode) {
 }
 
 async function requestCoachResponse(message, restoreInputOnError = false) {
-  if (state.data) {
-    state.data.messages.push({ role: "user", content: message });
-    renderMessages(state.data.messages, true);
-  }
+  state.chatInFlightMessage = message;
+  state.chatInFlightResponseId = null;
+  renderMessages(state.data?.messages || [], true);
   try {
-    await api("/api/chat", { method: "POST", body: JSON.stringify({ message }) });
-    await load();
+    const result = await api("/api/chat", { method: "POST", body: JSON.stringify({ message }) });
+    state.chatInFlightResponseId = result.message?.id || null;
+    const loaded = await load();
+    if (loaded) {
+      state.chatInFlightMessage = null;
+      state.chatInFlightResponseId = null;
+      renderMessages(state.data?.messages || [], true);
+    }
     invalidateContextPreview();
     return true;
   } catch (error) {
+    state.chatInFlightMessage = null;
+    state.chatInFlightResponseId = null;
     toast(error.message, true);
     if (restoreInputOnError) $("#messageInput").value = message;
     await load();
@@ -2246,6 +2269,8 @@ async function resetCoachChat() {
     await api("/api/chat/reset", { method: "POST", body: "{}" });
     if (state.data) {
       state.data.messages = [];
+      state.chatInFlightMessage = null;
+      state.chatInFlightResponseId = null;
       state.chatQueue = [];
       renderMessages([], true);
     }
