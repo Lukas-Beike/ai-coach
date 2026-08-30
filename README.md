@@ -17,7 +17,8 @@ It is not intended to be exposed directly to the public internet.
 - Optional Garmin Connect synchronization with deduplication against
   Intervals.icu. Garmin-sourced VO2 max, running predictions, body weight, and
   sport-specific maximum heart rates are explicitly marked as Garmin Connect
-  data in the performance view.
+  data in the performance view. If Garmin data is unavailable, sport-specific
+  maximum heart rates can fall back to Intervals.icu data.
 - Activity synchronization for strength training, running, outdoor cycling,
   and indoor/virtual cycling.
 - Thirty-day trends for FTP, thresholds, VO2 max, running predictions,
