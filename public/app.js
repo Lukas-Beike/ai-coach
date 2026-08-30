@@ -13,7 +13,7 @@ const state = {
   voiceTimer: null,
   voiceStartedAt: 0,
   voiceTranscribing: false,
-  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, performance: false, intervalsFull: false, garminFull: false },
+  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, weather: false, performance: false, intervalsFull: false, garminFull: false },
   notificationKeys: new Set(),
   quickTemplatesVisible: false,
   activityTracked: false,
@@ -2072,6 +2072,12 @@ function renderSettings(data) {
       ? `${weatherLocation ? `Standort: ${weatherLocation} · ` : ""}${weather.fetched_at ? `letzte Abfrage: ${formatTime(weather.fetched_at)}` : "Standort im Profil hinterlegen"}`
       : "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
   }
+  const weatherSyncButton = $("#weatherSyncButton");
+  if (weatherSyncButton) {
+    const weatherSyncRunning = Boolean(state.localSync.weather);
+    weatherSyncButton.disabled = !weather.configured || weatherSyncRunning;
+    weatherSyncButton.textContent = weatherSyncRunning ? "Wetter wird aktualisiert…" : "Wetter aktualisieren";
+  }
   const connectionsSummary = $("#connectionsSummary");
   if (connectionsSummary) {
     connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Intervals", configured.intervals], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
@@ -2374,6 +2380,26 @@ async function syncExternalCalendar() {
   finally { state.localSync.externalCalendar = false; button.disabled = false; button.textContent = "Synchronisieren"; }
 }
 
+async function syncWeather() {
+  const button = $("#weatherSyncButton");
+  if (!button) return;
+  state.localSync.weather = true;
+  button.disabled = true;
+  button.classList.add("busy");
+  button.textContent = "Wetter wird aktualisiert…";
+  try {
+    const result = await api("/api/weather/sync", { method: "POST", body: "{}" });
+    toast(result.status === "ok" ? "Open-Meteo-Wetter aktualisiert" : result.status === "stale" ? "Open-Meteo nicht erreichbar · letzte Daten bleiben sichtbar" : "Bitte zuerst einen Wetterort im Profil hinterlegen", result.status === "stale");
+    invalidateContextPreview();
+    await load();
+  } catch (error) { toast(error.message, true); await load(); }
+  finally {
+    state.localSync.weather = false;
+    button.classList.remove("busy");
+    renderSettings(state.data || {});
+  }
+}
+
 async function fullResync(source) {
   const isGarmin = source === "garmin";
   const button = $(isGarmin ? "#garminFullResyncButton" : "#systemIntervalsFullResyncButton");
@@ -2640,6 +2666,7 @@ $("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync
 $("#competitionSyncButton").addEventListener("click", syncCompetitions);
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 $("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar);
+$("#weatherSyncButton").addEventListener("click", syncWeather);
 $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#replanButton").addEventListener("click", prepareReplan);
@@ -2683,7 +2710,7 @@ window.addEventListener("resize", updateChatComposerVisibility);
 window.addEventListener("pagehide", savePwaActivity);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js");
 setInterval(() => {
-  if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.performance || state.localSync.intervalsFull || state.localSync.garminFull) load();
+  if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.weather || state.localSync.performance || state.localSync.intervalsFull || state.localSync.garminFull) load();
 }, 1500);
 setInterval(() => {
   if (state.data && document.visibilityState === "visible") load();

@@ -3308,7 +3308,7 @@ def _fetch_weather_forecast(query: str) -> dict[str, Any]:
     return {"query": query[:200], "location": location, "model": model, "forecast": forecast, "fetched_at": utc_now()}
 
 
-def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = True) -> dict[str, Any]:
+def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = True, force: bool = False) -> dict[str, Any]:
     query = get_profile().get("weather_location", "").strip()[:200]
     if not query:
         return {"configured": False, "provider": "Open-Meteo", "days": [], "recommendations": [], "message": "Hinterlege im Profil einen Wetterort (Stadt oder PLZ)."}
@@ -3323,7 +3323,7 @@ def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = T
     except (TypeError, ValueError):
         cache_age = float("inf")
     error = None
-    if refresh and (not cache_matches or cache_age >= WEATHER_CACHE_SECONDS):
+    if refresh and (force or not cache_matches or cache_age >= WEATHER_CACHE_SECONDS):
         try:
             with WEATHER_LOCK:
                 cached = _fetch_weather_forecast(query)
@@ -3377,11 +3377,11 @@ def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = T
     return result
 
 
-def sync_weather(reason: str = "background") -> dict[str, Any]:
+def sync_weather(reason: str = "background", force: bool = False) -> dict[str, Any]:
     """Refresh the configured location's forecast without creating a chat event."""
     if not get_profile().get("weather_location", "").strip():
         return {"status": "not_configured"}
-    result = weather_state(refresh=True)
+    result = weather_state(refresh=True, force=force)
     if result.get("error") and not result.get("days"):
         raise AppError(502, str(result["error"]))
     return {
@@ -6560,6 +6560,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, sync_garmin(days=days))
             elif path == "/api/external-calendar/sync":
                 self.send_json(200, sync_external_calendar(reason="manuell"))
+            elif path == "/api/weather/sync":
+                self.send_json(200, sync_weather(reason="manuell", force=True))
             elif path == "/api/garmin/full-resync":
                 payload = self.read_json()
                 if payload.get("confirm") != "FULL_RESYNC":

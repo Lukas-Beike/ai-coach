@@ -104,7 +104,8 @@ The browser refreshes the local/remote view every minute while the PWA is
 visible and polls more frequently while a manual synchronization is running.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
-visible view also refreshes it when the cache has expired.
+visible view also refreshes it when the cache has expired. The current forecast
+can be forced manually from the Open-Meteo card in the System tab.
 GitHub release information is checked at most every 15 minutes. The morning
 check-in is generated at most once per local calendar day when its required
 integrations are configured.

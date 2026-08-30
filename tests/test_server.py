@@ -72,9 +72,12 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "_fetch_weather_forecast", return_value=forecast) as fetch:
             first = server.sync_weather("test")
             second = server.sync_weather("test")
+            manual = server.sync_weather("manuell", force=True)
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
-        fetch.assert_called_once_with("Berlin")
+        self.assertEqual(manual["status"], "ok")
+        self.assertEqual(fetch.call_count, 2)
+        fetch.assert_called_with("Berlin")
 
     def test_local_feedback_is_persisted_without_provider_values(self):
         result = server.save_checkin({
