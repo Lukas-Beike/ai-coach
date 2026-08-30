@@ -13,6 +13,15 @@ on:
         description: Release tag to build and publish
         required: true
         type: string
+      source_ref:
+        description: Optional branch or commit to check out instead of release_tag
+        required: false
+        type: string
+      publish_container:
+        description: Publish the container after tests pass
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -28,7 +37,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag || github.ref }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && github.event.inputs.source_ref || github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -58,7 +67,7 @@ jobs:
           python -m py_compile server.py tests/test_server.py
 
   build-and-push:
-    if: (github.event_name == 'release' && github.event.action == 'published') || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'release' && github.event.action == 'published') || (github.event_name == 'workflow_dispatch' && inputs.publish_container == true)
     needs: test
     runs-on: ubuntu-latest
     permissions:

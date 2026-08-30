@@ -12,6 +12,9 @@ on:
   pull_request:
     types: [closed]
     branches: [develop, main]
+  workflow_run:
+    workflows: ["Test and publish container image"]
+    types: [completed]
 
 concurrency:
   group: daily-release
@@ -87,6 +90,29 @@ jobs:
             fi
           }
 
+          trigger_release_test() {
+            local source_ref="$1"
+            local release_tag="$2"
+            gh workflow run publish-container.yml \
+              --repo "$REPOSITORY" \
+              --ref "$source_ref" \
+              --field "release_tag=$release_tag" \
+              --field "source_ref=$source_ref" \
+              --field "publish_container=false"
+          }
+
+          ensure_release_test() {
+            local pull_request_number="$1"
+            local source_ref="$2"
+            local release_tag="$3"
+            local test_check_count
+            test_check_count="$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name == "test")] | length')"
+            if [[ "$test_check_count" -eq 0 ]]; then
+              echo "Starting an explicit test run for PR #$pull_request_number."
+              trigger_release_test "$source_ref" "$release_tag"
+            fi
+          }
+
           version_merge=false
           if [[ "$EVENT_NAME" == "pull_request" && "$PR_MERGED" == "true" && "$PR_BASE" == "develop" && "$PR_HEAD" == chore/release-version-* ]]; then
             version_merge=true
@@ -152,6 +178,7 @@ jobs:
             if [[ -n "$existing_pr" ]]; then
               echo "Release promotion PR #$existing_pr is already open."
               enable_auto_merge "$existing_pr"
+              ensure_release_test "$existing_pr" "$promotion_branch" "$app_version"
               exit 0
             fi
             if git ls-remote --exit-code --heads origin "$promotion_branch" >/dev/null 2>&1; then
@@ -175,6 +202,8 @@ jobs:
               --title "chore(release): promote $app_version to main" \
               --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container.")"
             enable_auto_merge "$promotion_pr_url"
+            promotion_pr_number="$(gh pr view "$promotion_pr_url" --repo "$REPOSITORY" --json number --jq '.number')"
+            ensure_release_test "$promotion_pr_number" "$promotion_branch" "$app_version"
             exit 0
           fi
 
@@ -200,7 +229,9 @@ jobs:
           version_branch="chore/release-version-$next_tag"
           existing_pr="$(gh pr list --repo "$REPOSITORY" --base develop --head "$version_branch" --state open --json number --jq '.[0].number // empty')"
           if [[ -n "$existing_pr" ]]; then
-            echo "Version bump PR #$existing_pr is already open; merge it before the next release run."
+            echo "Version bump PR #$existing_pr is already open."
+            enable_auto_merge "$existing_pr"
+            ensure_release_test "$existing_pr" "$version_branch" "$next_tag"
             exit 0
           fi
           if git ls-remote --exit-code --heads origin "$version_branch" >/dev/null 2>&1; then
@@ -228,9 +259,18 @@ jobs:
             --title "chore(release): set application version to $next_tag" \
             --body "Synchronize APP_VERSION with the upcoming GitHub release $next_tag. Merge this PR to promote the release to main.")"
           enable_auto_merge "$version_pr_url"
+          version_pr_number="$(gh pr view "$version_pr_url" --repo "$REPOSITORY" --json number --jq '.number')"
+          ensure_release_test "$version_pr_number" "$version_branch" "$next_tag"
 
   create-release:
-    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && startsWith(github.event.pull_request.head.ref, 'chore/release-promotion-')
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'chore/release-promotion-')) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Test and publish container image' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-'))
     runs-on: ubuntu-latest
     steps:
       - name: Check out main
@@ -243,9 +283,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PROMOTION_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.event.workflow_run.head_branch }}
         shell: bash
         run: |
           set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            for attempt in {1..60}; do
+              merged_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$PROMOTION_BRANCH" --state merged --json number --jq '.[0].number // empty')"
+              if [[ -n "$merged_pr" ]]; then
+                break
+              fi
+              echo "Waiting for promotion branch $PROMOTION_BRANCH to merge (attempt $attempt/60)."
+              sleep 10
+            done
+            if [[ -z "${merged_pr:-}" ]]; then
+              echo "Promotion branch $PROMOTION_BRANCH was not merged after the test completed."
+              exit 1
+            fi
+            git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+            git reset --hard origin/main
+          fi
 
           release_tag="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
           if [[ -z "$release_tag" ]]; then
