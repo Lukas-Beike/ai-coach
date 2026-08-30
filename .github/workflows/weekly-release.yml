@@ -45,9 +45,28 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.ref }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
           REQUESTED_VERSION: ${{ inputs.release_version }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         shell: bash
         run: |
           set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_run" && "$WORKFLOW_RUN_BRANCH" == chore/release-version-* ]]; then
+            merged_version_pr=""
+            for attempt in {1..60}; do
+              merged_version_pr="$(gh pr list --repo "$REPOSITORY" --base develop --head "$WORKFLOW_RUN_BRANCH" --state merged --json number --jq '.[0].number // empty')"
+              if [[ -n "$merged_version_pr" ]]; then
+                break
+              fi
+              echo "Waiting for version PR $WORKFLOW_RUN_BRANCH to merge (attempt $attempt/60)."
+              sleep 10
+            done
+            if [[ -z "$merged_version_pr" ]]; then
+              echo "Version PR $WORKFLOW_RUN_BRANCH was not merged after the test completed."
+              exit 1
+            fi
+            git fetch --no-tags origin refs/heads/develop:refs/remotes/origin/develop
+            git reset --hard origin/develop
+          fi
 
           app_version="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
           if [[ -z "$app_version" ]]; then
