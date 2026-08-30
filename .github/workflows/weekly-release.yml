@@ -160,6 +160,8 @@ jobs:
             fi
 
             git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git switch --create "$promotion_branch"
             if ! git merge-base --is-ancestor origin/main HEAD; then
               git merge --no-edit --strategy=ours origin/main \
