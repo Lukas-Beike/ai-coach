@@ -83,6 +83,7 @@ OPENAI_CONVERSATION_LOCK = threading.Lock()
 MORNING_CHECKIN_LOCK = threading.Lock()
 GARMIN_LOCK = threading.Lock()
 EXTERNAL_CALENDAR_LOCK = threading.Lock()
+WEATHER_LOCK = threading.Lock()
 SESSION_LOCK = threading.RLock()
 SESSIONS: dict[str, dict[str, Any]] = {}
 RATE_LIMIT_LOCK = threading.Lock()
@@ -414,7 +415,7 @@ DEFAULT_PROFILE = {
 WEATHER_FORECAST_DAYS = 14
 WEATHER_RECOMMENDATION_DAYS = 5
 WEATHER_ICON_D2_DAYS = 2
-WEATHER_CACHE_SECONDS = 30 * 60
+WEATHER_CACHE_SECONDS = 3 * 60 * 60
 WEATHER_CACHE_KEY = "weather_cache"
 NRW_LATITUDE_BOUNDS = (50.3, 52.6)
 NRW_LONGITUDE_BOUNDS = (5.5, 9.6)
@@ -2865,7 +2866,7 @@ def _fetch_weather_forecast(query: str) -> dict[str, Any]:
     return {"query": query[:200], "location": location, "model": model, "forecast": forecast, "fetched_at": utc_now()}
 
 
-def weather_state(planned: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = True) -> dict[str, Any]:
     query = get_profile().get("weather_location", "").strip()[:200]
     if not query:
         return {"configured": False, "provider": "Open-Meteo", "days": [], "recommendations": [], "message": "Hinterlege im Profil einen Wetterort (Stadt oder PLZ)."}
@@ -2880,11 +2881,12 @@ def weather_state(planned: list[dict[str, Any]] | None = None) -> dict[str, Any]
     except (TypeError, ValueError):
         cache_age = float("inf")
     error = None
-    if not cache_matches or cache_age >= WEATHER_CACHE_SECONDS:
+    if refresh and (not cache_matches or cache_age >= WEATHER_CACHE_SECONDS):
         try:
-            cached = _fetch_weather_forecast(query)
-            set_kv(WEATHER_CACHE_KEY, json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
-            cache_matches = True
+            with WEATHER_LOCK:
+                cached = _fetch_weather_forecast(query)
+                set_kv(WEATHER_CACHE_KEY, json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
+                cache_matches = True
         except AppError as exc:
             error = exc.message if exc.status == 400 else "Wetterdaten konnten derzeit nicht aktualisiert werden."
             LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
@@ -2892,6 +2894,15 @@ def weather_state(planned: list[dict[str, Any]] | None = None) -> dict[str, Any]
             error = "Wetterdaten konnten derzeit nicht aktualisiert werden."
             LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
     if not cache_matches:
+        if not refresh:
+            return {
+                "configured": True,
+                "provider": "Open-Meteo",
+                "days": [],
+                "recommendations": [],
+                "loading": True,
+                "message": "Wetterdaten werden nachgeladen.",
+            }
         return {"configured": True, "provider": "Open-Meteo", "days": [], "recommendations": [], "error": error or "Wetterdaten sind nicht verfügbar."}
     forecast = cached.get("forecast")
     recommendations = []
@@ -2922,6 +2933,20 @@ def weather_state(planned: list[dict[str, Any]] | None = None) -> dict[str, Any]
         result["error"] = error
         result["stale"] = True
     return result
+
+
+def sync_weather(reason: str = "background") -> dict[str, Any]:
+    """Refresh the configured location's forecast without creating a chat event."""
+    if not get_profile().get("weather_location", "").strip():
+        return {"status": "not_configured"}
+    result = weather_state(refresh=True)
+    if result.get("error") and not result.get("days"):
+        raise AppError(502, str(result["error"]))
+    return {
+        "status": "stale" if result.get("stale") else "ok",
+        "reason": reason,
+        "fetched_at": result.get("fetched_at"),
+    }
 
 
 def add_weather_to_planned(planned: list[dict[str, Any]], weather: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2974,7 +2999,7 @@ def fetch_github_latest_release(repository: str) -> dict[str, Any]:
     }
 
 
-def github_release_status() -> dict[str, Any]:
+def github_release_status(refresh: bool = True) -> dict[str, Any]:
     repository = CONFIG.github_repository.strip()
     if not GITHUB_REPOSITORY_RE.fullmatch(repository):
         return {"status": "disabled", "message": "GitHub-Repository ist nicht konfiguriert."}
@@ -2988,6 +3013,8 @@ def github_release_status() -> dict[str, Any]:
             and now - float(GITHUB_RELEASE_CACHE.get("checked_at") or 0) < cache_seconds
         ):
             return dict(cached_status)
+        if not refresh:
+            return {"status": "loading", "repository": repository, "message": "GitHub-Release wird nachgeladen."}
         try:
             status = fetch_github_latest_release(repository)
         except Exception as exc:
@@ -5277,16 +5304,16 @@ def schedule_morning_checkin() -> None:
     threading.Thread(target=run_morning_checkin, args=(checkin_date,), daemon=True).start()
 
 
-def public_state() -> dict[str, Any]:
+def public_state(local_only: bool = False) -> dict[str, Any]:
     snapshot = latest_snapshot()
     activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
     planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
-    weather = weather_state(planned)
+    weather = weather_state(planned, refresh=not local_only)
     return {
         "app": {
             "name": "Intervals Coach",
             "version": APP_VERSION,
-            "github_release": github_release_status(),
+            "github_release": github_release_status(refresh=not local_only),
         },
         "messages": list_messages(),
         "drafts": list_workout_drafts(),
@@ -5346,6 +5373,7 @@ def public_state() -> dict[str, Any]:
         "configured": {
             "openai": bool(CONFIG.openai_api_key),
             "intervals": bool(CONFIG.intervals_api_key),
+            "weather": bool(weather.get("configured")),
             "external_calendar": bool(CONFIG.calendar_ical_url),
             },
         "usage": openai_usage_summary(),
@@ -5739,6 +5767,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 require_auth(self)
                 schedule_morning_checkin()
                 self.send_json(200, public_state())
+            elif path == "/api/state/local":
+                require_auth(self)
+                schedule_morning_checkin()
+                self.send_json(200, public_state(local_only=True))
             elif path == "/api/context-preview":
                 require_auth(self)
                 self.send_json(200, context_preview())
@@ -6079,6 +6111,8 @@ def daily_sync_loop() -> None:
     """Keep the local snapshot fresh once per calendar day without a webhook."""
     while True:
         time.sleep(300)
+        if get_profile().get("weather_location", "").strip():
+            safe_weather_sync("dreistündliche automatische Aktualisierung")
         if not (CONFIG.intervals_api_key or CONFIG.calendar_ical_url):
             continue
         today = local_now().date().isoformat()
@@ -6107,6 +6141,13 @@ def safe_external_calendar_sync(reason: str) -> None:
         LOGGER.error("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
 
 
+def safe_weather_sync(reason: str) -> None:
+    try:
+        sync_weather(reason)
+    except Exception:
+        LOGGER.error("Weather synchronization failed", extra={"event": "weather_background_sync_failed", "context": {"reason": reason}}, exc_info=True)
+
+
 def main() -> None:
     initialise_logging()
     configuration_error = security_configuration_error()
@@ -6122,7 +6163,9 @@ def main() -> None:
             threading.Thread(target=safe_sync, args=("startup", sync_period("intervals")), daemon=True).start()
         if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
             threading.Thread(target=safe_garmin_sync, args=("startup",), daemon=True).start()
-        threading.Thread(target=daily_sync_loop, daemon=True).start()
+    if get_profile().get("weather_location", "").strip():
+        threading.Thread(target=safe_weather_sync, args=("startup",), daemon=True).start()
+    threading.Thread(target=daily_sync_loop, daemon=True).start()
     server = CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
     server.allow_reuse_address = True
     LOGGER.info("Intervals Coach listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
