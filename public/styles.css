@@ -336,6 +336,13 @@ h2 {
 .planned-day-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 14px; }
 .planned-day-heading h3 { margin: 0; color: var(--ink); font-size: .9rem; }
 .planned-day-count { flex: 0 0 auto; color: var(--subtle); font-size: .68rem; }
+.weather-notice { margin: 0 0 12px; padding: 11px 13px; border: 1px solid rgba(52, 207, 161, .25); border-radius: 13px; color: var(--muted); background: rgba(52, 207, 161, .07); font-size: .72rem; line-height: 1.4; }
+.weather-notice.error { border-color: rgba(255, 159, 10, .45); background: rgba(255, 159, 10, .08); }
+.planned-weather { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 9px; padding: 0 14px 12px; color: var(--muted); font-size: .7rem; }
+.planned-weather strong { color: var(--ink); font-size: .75rem; }
+.planned-weather-recommendation { display: grid; gap: 3px; margin-top: 12px; padding: 10px 11px; border-left: 3px solid var(--accent-bright); border-radius: 8px; color: var(--muted); background: rgba(52, 207, 161, .07); font-size: .73rem; line-height: 1.4; }
+.planned-weather-recommendation strong { color: var(--ink); }
+.profile-help { margin: -9px 0 0 !important; text-align: left !important; }
 .planned-day-empty { margin: -4px 14px 14px; color: var(--subtle); font-size: .75rem; }
 .planned-day-entries { border-top: 1px solid var(--line); }
 .planned-entry + .planned-entry { border-top: 1px solid var(--line); }

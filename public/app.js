@@ -546,6 +546,39 @@ function plannedDayLabel(date, offset) {
   return formatted;
 }
 
+function weatherForDate(date) {
+  return (state.data?.weather?.days || []).find((item) => item.date === date) || null;
+}
+
+function weatherNumber(value, suffix = "") {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${Math.round(number)}${suffix}` : "–";
+}
+
+function weatherDirection(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return ["N", "NO", "O", "SO", "S", "SW", "W", "NW"][Math.round(number / 45) % 8];
+}
+
+function renderWeatherNotice(weather) {
+  const notice = $("#weatherNotice");
+  if (!notice) return;
+  notice.hidden = false;
+  notice.className = "weather-notice";
+  if (!weather?.configured) {
+    notice.textContent = "Wetterhinweise: Hinterlege im Profil einen Wetterort (Stadt oder PLZ).";
+    return;
+  }
+  if (weather.error && !weather.days?.length) {
+    notice.classList.add("error");
+    notice.textContent = weather.error;
+    return;
+  }
+  const location = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
+  notice.textContent = `${location ? `Wetter für ${location}` : "Wettervorhersage"} · ${weather.model || "Open-Meteo"} · Tageswerte bis 14 Tage · Zeitvorschläge bis 5 Tage · Quelle: Open-Meteo.com${weather.stale ? " · letzte verfügbare Daten" : ""}`;
+}
+
 function distanceLabel(value) {
   const distance = Number(value);
   if (!Number.isFinite(distance) || distance <= 0) return null;
@@ -748,6 +781,7 @@ function renderParallelCyclingWarning(groups) {
 
 function renderPlanned(planned) {
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
+  renderWeatherNotice(state.data?.weather);
   const root = $("#plannedCalendar");
   root.replaceChildren();
   const eventsByDate = new Map();
@@ -777,6 +811,19 @@ function renderPlanned(planned) {
     count.textContent = events.length ? `${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
     heading.append(title, count);
     dayRoot.append(heading);
+
+    const weather = weatherForDate(date);
+    if (weather) {
+      const weatherRoot = document.createElement("div");
+      weatherRoot.className = "planned-weather";
+      const condition = document.createElement("strong");
+      condition.textContent = weather.condition || "Wetter";
+      const summary = document.createElement("span");
+      const direction = weatherDirection(weather.wind_direction_dominant);
+      summary.textContent = `${weatherNumber(weather.temperature_min, " °C")} bis ${weatherNumber(weather.temperature_max, " °C")} · Regenrisiko ${weatherNumber(weather.precipitation_probability_max, " %")} · Wind bis ${weatherNumber(weather.wind_speed_max, " km/h")} / Böen ${weatherNumber(weather.wind_gusts_max, " km/h")}${direction ? ` aus ${direction}` : ""}`;
+      weatherRoot.append(condition, summary);
+      dayRoot.append(weatherRoot);
+    }
 
     if (!events.length) {
       const empty = document.createElement("p");
@@ -808,6 +855,17 @@ function renderPlanned(planned) {
           description.className = "planned-description";
           description.textContent = event.description;
           body.append(description);
+        }
+        if (event.weather_recommendation) {
+          const recommendation = document.createElement("div");
+          recommendation.className = "planned-weather-recommendation";
+          const recommendationTitle = document.createElement("strong");
+          recommendationTitle.textContent = `Beste Wetterzeit: ${event.weather_recommendation.suggested_time}`;
+          const recommendationReason = document.createElement("span");
+          const direction = weatherDirection(event.weather_recommendation.wind_direction);
+          recommendationReason.textContent = `${event.weather_recommendation.reason || "Günstigstes verfügbares Zeitfenster laut Vorhersage."}${direction ? ` Windrichtung: ${direction}.` : ""}`;
+          recommendation.append(recommendationTitle, recommendationReason);
+          body.append(recommendation);
         }
         if (event.id != null) {
           const actions = document.createElement("div");

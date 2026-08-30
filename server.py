@@ -322,6 +322,45 @@ DEFAULT_PROFILE = {
     "height_cm": "",
     "coaching_style": "Supportive, direct, and evidence-aware",
     "timezone": os.environ.get("TZ", "Europe/Berlin"),
+    "weather_location": "",
+}
+
+WEATHER_FORECAST_DAYS = 14
+WEATHER_RECOMMENDATION_DAYS = 5
+WEATHER_ICON_D2_DAYS = 2
+WEATHER_CACHE_SECONDS = 30 * 60
+WEATHER_CACHE_KEY = "weather_cache"
+NRW_LATITUDE_BOUNDS = (50.3, 52.6)
+NRW_LONGITUDE_BOUNDS = (5.5, 9.6)
+WEATHER_CONDITIONS = {
+    0: "Klar",
+    1: "Überwiegend klar",
+    2: "Teilweise bewölkt",
+    3: "Bedeckt",
+    45: "Nebel",
+    48: "Reifnebel",
+    51: "Leichter Nieselregen",
+    53: "Nieselregen",
+    55: "Starker Nieselregen",
+    56: "Leichter gefrierender Nieselregen",
+    57: "Starker gefrierender Nieselregen",
+    61: "Leichter Regen",
+    63: "Regen",
+    65: "Starker Regen",
+    66: "Leichter gefrierender Regen",
+    67: "Starker gefrierender Regen",
+    71: "Leichter Schneefall",
+    73: "Schneefall",
+    75: "Starker Schneefall",
+    77: "Schneegriesel",
+    80: "Leichte Regenschauer",
+    81: "Regenschauer",
+    82: "Starke Regenschauer",
+    85: "Leichte Schneeschauer",
+    86: "Starke Schneeschauer",
+    95: "Gewitter",
+    96: "Gewitter mit Hagel",
+    99: "Starkes Gewitter mit Hagel",
 }
 
 
@@ -339,6 +378,7 @@ Priorities:
 6. Do not overwrite or duplicate existing calendar workouts. Mention conflicts and ask before replacing anything.
 7. Keep normal chat answers concise and practical.
 8. When the athlete asks for the latest/recent units or explicitly asks to load and analyse current training, use the freshly loaded snapshot supplied by the app and say when the refresh failed or data may be stale.
+8a. For outdoor running and outdoor cycling, use the supplied weather forecast when choosing advice or a planned time. Concrete time-window recommendations are only available for the next five days; treat them as forecasts, not guarantees. Indoor, swimming, and strength sessions do not need weather adjustments.
 9. Never silently change durable athlete facts, target events, constraints, or preferences based only on chat. Explain the proposed change and ask the athlete to confirm it in the Profile screen.
 10. Reply in German unless the athlete explicitly asks for another language. Use metric units and German date conventions.
 11. Treat values labelled as AI estimates as uncertain performance inferences, never as measured facts. Do not present them as medical assessments.
@@ -1403,8 +1443,13 @@ def get_profile() -> dict[str, str]:
 
 
 def save_profile(profile: dict[str, Any]) -> dict[str, str]:
+    previous = get_profile()
     normalized = normalize_profile(profile)
     set_kv("profile", json.dumps(normalized, ensure_ascii=False))
+    if previous.get("weather_location", "") != normalized.get("weather_location", ""):
+        # A changed holiday/training location must never keep showing the
+        # forecast for the previous place until the normal cache expires.
+        set_kv(WEATHER_CACHE_KEY, "")
     return normalized
 
 
@@ -2278,6 +2323,305 @@ def http_json(
             exc_info=True,
         )
         raise
+
+
+def is_outdoor_activity(event: Any) -> bool:
+    """Return whether an event is a run or outdoor cycling workout."""
+    if not isinstance(event, dict):
+        return False
+    value = " ".join(
+        str(event.get(key) or "") for key in ("type", "sport", "sport_type", "name")
+    ).casefold()
+    if re.search(r"indoor|virtual|trainer|zwift|treadmill|ergometer|smart.?bike", value):
+        return False
+    return bool(re.search(r"ride|cycling|bike|bicycle|rad|velo|gravel|mtb|mountain.?bike|run|lauf|jog", value))
+
+
+def _weather_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _weather_array_value(values: Any, index: int) -> float | None:
+    if not isinstance(values, list) or index >= len(values):
+        return None
+    return _weather_number(values[index])
+
+
+def _weather_daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:
+    daily = forecast.get("daily") if isinstance(forecast.get("daily"), dict) else {}
+    dates = daily.get("time") if isinstance(daily.get("time"), list) else []
+    result: list[dict[str, Any]] = []
+    for index, raw_date in enumerate(dates[:WEATHER_FORECAST_DAYS]):
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(raw_date)):
+            continue
+        code = _weather_array_value(daily.get("weather_code"), index)
+        result.append({
+            "date": str(raw_date),
+            "weather_code": int(code) if code is not None else None,
+            "condition": WEATHER_CONDITIONS.get(int(code), "Unbekannte Wetterlage") if code is not None else "Keine Angabe",
+            "temperature_min": _weather_array_value(daily.get("temperature_2m_min"), index),
+            "temperature_max": _weather_array_value(daily.get("temperature_2m_max"), index),
+            "apparent_temperature_min": _weather_array_value(daily.get("apparent_temperature_min"), index),
+            "apparent_temperature_max": _weather_array_value(daily.get("apparent_temperature_max"), index),
+            "precipitation_probability_max": _weather_array_value(daily.get("precipitation_probability_max"), index),
+            "rain_sum": _weather_array_value(daily.get("rain_sum"), index),
+            "showers_sum": _weather_array_value(daily.get("showers_sum"), index),
+            "snowfall_sum": _weather_array_value(daily.get("snowfall_sum"), index),
+            "wind_speed_max": _weather_array_value(daily.get("wind_speed_10m_max"), index),
+            "wind_gusts_max": _weather_array_value(daily.get("wind_gusts_10m_max"), index),
+            "wind_direction_dominant": _weather_array_value(daily.get("wind_direction_10m_dominant"), index),
+            "sunrise": str(daily.get("sunrise", [])[index]) if isinstance(daily.get("sunrise"), list) and index < len(daily["sunrise"]) else None,
+            "sunset": str(daily.get("sunset", [])[index]) if isinstance(daily.get("sunset"), list) and index < len(daily["sunset"]) else None,
+        })
+    return result
+
+
+def _weather_hourly_rows(forecast: dict[str, Any], target_date: str) -> list[dict[str, float | int | str]]:
+    hourly = forecast.get("hourly") if isinstance(forecast.get("hourly"), dict) else {}
+    times = hourly.get("time") if isinstance(hourly.get("time"), list) else []
+    rows: list[dict[str, float | int | str]] = []
+    for index, raw_time in enumerate(times):
+        timestamp = str(raw_time)
+        if not timestamp.startswith(target_date + "T"):
+            continue
+        try:
+            hour = int(timestamp[11:13])
+        except (ValueError, IndexError):
+            continue
+        row: dict[str, float | int | str] = {"time": timestamp, "hour": hour}
+        for key in ("temperature_2m", "apparent_temperature", "precipitation_probability", "rain", "showers", "snowfall", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m"):
+            value = _weather_array_value(hourly.get(key), index)
+            if value is not None:
+                row[key] = value
+        code = _weather_array_value(hourly.get("weather_code"), index)
+        if code is not None:
+            row["weather_code"] = int(code)
+        rows.append(row)
+    return rows
+
+
+def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> dict[str, Any] | None:
+    event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", event_date):
+        return None
+    rows = [row for row in _weather_hourly_rows(forecast, event_date) if 6 <= int(row["hour"]) <= 20]
+    if not rows:
+        return None
+    duration_minutes = max(5, min(600, round((_weather_number(event.get("moving_time")) or 3600) / 60)))
+    duration_hours = max(1, math.ceil(duration_minutes / 60))
+    candidates: list[tuple[float, list[dict[str, float | int | str]]]] = []
+    for start in range(0, len(rows)):
+        interval = rows[start:start + duration_hours]
+        if len(interval) < duration_hours:
+            continue
+        precipitation = [_weather_number(item.get("precipitation_probability")) for item in interval]
+        rain = [(_weather_number(item.get("rain")) or 0) + (_weather_number(item.get("showers")) or 0) for item in interval]
+        temperatures = [_weather_number(item.get("apparent_temperature")) for item in interval]
+        gusts = [_weather_number(item.get("wind_gusts_10m")) for item in interval]
+        wind_speeds = [_weather_number(item.get("wind_speed_10m")) for item in interval]
+        codes = [int(item["weather_code"]) for item in interval if item.get("weather_code") is not None]
+        precipitation_avg = sum(value for value in precipitation if value is not None) / max(1, len([value for value in precipitation if value is not None]))
+        temperature_avg = sum(value for value in temperatures if value is not None) / max(1, len([value for value in temperatures if value is not None]))
+        gust_max = max(gusts) if gusts else 0
+        wind_speed_avg = sum(value for value in wind_speeds if value is not None) / max(1, len([value for value in wind_speeds if value is not None]))
+        severe_weather = sum(25 for code in codes if code >= 95) + sum(8 for code in codes if 61 <= code <= 86)
+        score = (
+            precipitation_avg * 0.8
+            + sum(rain) * 8
+            + max(0, wind_speed_avg - 20) * (1.4 if "run" not in str(event.get("type") or "").casefold() else 0.5)
+            + max(0, gust_max - 30) * (1.0 if is_outdoor_activity(event) and "run" not in str(event.get("type") or "").casefold() else 0.5)
+            + max(0, 4 - temperature_avg) * 1.5
+            + max(0, temperature_avg - 27) * 1.2
+            + severe_weather
+        )
+        candidates.append((score, interval))
+    if not candidates:
+        return None
+    _, best = min(candidates, key=lambda item: item[0])
+    best_precipitation = [_weather_number(item.get("precipitation_probability")) for item in best]
+    precipitation_avg = round(sum(value for value in best_precipitation if value is not None) / max(1, len([value for value in best_precipitation if value is not None])))
+    temperatures = [_weather_number(item.get("apparent_temperature")) for item in best]
+    temperature_avg = round(sum(value for value in temperatures if value is not None) / max(1, len([value for value in temperatures if value is not None])))
+    gusts = [_weather_number(item.get("wind_gusts_10m")) for item in best]
+    gust_max = round(max(gusts)) if gusts else None
+    wind_speeds = [_weather_number(item.get("wind_speed_10m")) for item in best]
+    wind_speed_avg = round(sum(value for value in wind_speeds if value is not None) / max(1, len([value for value in wind_speeds if value is not None])))
+    directions = [_weather_number(item.get("wind_direction_10m")) for item in best]
+    wind_direction = round(sum(value for value in directions if value is not None) / max(1, len([value for value in directions if value is not None]))) if any(value is not None for value in directions) else None
+    start_hour = int(best[0]["hour"])
+    end_hour = start_hour + duration_hours
+    recommendation = {
+        "date": event_date,
+        "event_id": str(event.get("id")) if event.get("id") is not None else None,
+        "event_name": str(event.get("name") or "Geplante Einheit")[:200],
+        "suggested_time": f"{start_hour:02d}:00–{min(23, end_hour):02d}:00 Uhr",
+        "duration_minutes": duration_minutes,
+        "precipitation_probability": precipitation_avg,
+        "apparent_temperature": temperature_avg,
+        "wind_speed": wind_speed_avg,
+        "wind_direction": wind_direction,
+        "wind_gusts": gust_max,
+    }
+    reason = f"ca. {temperature_avg} °C gefühlte Temperatur, {wind_speed_avg} km/h Wind und {precipitation_avg} % Regenwahrscheinlichkeit"
+    if gust_max is not None:
+        reason += f", Böen bis {gust_max} km/h"
+    recommendation["reason"] = reason + "."
+    return recommendation
+
+
+def _merge_weather_forecasts(long_forecast: dict[str, Any], short_forecast: dict[str, Any]) -> dict[str, Any]:
+    """Overlay the higher-resolution ICON-D2 range on the long forecast."""
+    merged = json.loads(json.dumps(long_forecast))
+    for section_name in ("hourly", "daily"):
+        base = merged.get(section_name) if isinstance(merged.get(section_name), dict) else {}
+        short = short_forecast.get(section_name) if isinstance(short_forecast.get(section_name), dict) else {}
+        base_times = base.get("time") if isinstance(base.get("time"), list) else []
+        short_times = short.get("time") if isinstance(short.get("time"), list) else []
+        positions = {str(value): index for index, value in enumerate(base_times)}
+        for key, short_values in short.items():
+            if key == "time" or not isinstance(short_values, list):
+                continue
+            base_values = base.get(key)
+            if not isinstance(base_values, list) or len(base_values) != len(base_times):
+                continue
+            for short_index, timestamp in enumerate(short_times):
+                base_index = positions.get(str(timestamp))
+                if base_index is not None and short_index < len(short_values):
+                    base_values[base_index] = short_values[short_index]
+    return merged
+
+
+def _fetch_weather_forecast(query: str) -> dict[str, Any]:
+    geocode_url = "https://geocoding-api.open-meteo.com/v1/search?" + urlencode({
+        "name": query[:200], "count": 1, "language": "de", "format": "json",
+    })
+    geocode = http_json("GET", geocode_url, timeout=10, service="open-meteo-geocoding")
+    results = geocode.get("results") if isinstance(geocode, dict) else None
+    location_result = results[0] if isinstance(results, list) and results and isinstance(results[0], dict) else None
+    latitude = _weather_number(location_result.get("latitude")) if location_result else None
+    longitude = _weather_number(location_result.get("longitude")) if location_result else None
+    if latitude is None or longitude is None:
+        raise AppError(400, "Der Wetterort wurde nicht gefunden.")
+    location = {
+        "name": str(location_result.get("name") or query)[:200],
+        "country": str(location_result.get("country") or "")[:100],
+        "country_code": str(location_result.get("country_code") or "").upper()[:2],
+        "latitude": latitude,
+        "longitude": longitude,
+        "timezone": str(location_result.get("timezone") or "")[:80],
+    }
+    forecast_params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "timezone": "auto",
+        "forecast_days": WEATHER_FORECAST_DAYS,
+        "models": "ecmwf_ifs",
+        "hourly": ",".join((
+            "temperature_2m", "apparent_temperature", "precipitation_probability", "rain", "showers",
+            "snowfall", "weather_code", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m",
+        )),
+        "daily": ",".join((
+            "weather_code", "temperature_2m_min", "temperature_2m_max", "apparent_temperature_min",
+            "apparent_temperature_max", "precipitation_probability_max", "rain_sum", "showers_sum",
+            "snowfall_sum", "wind_speed_10m_max", "wind_gusts_10m_max", "wind_direction_10m_dominant", "sunrise", "sunset",
+        )),
+    }
+    forecast_url = "https://api.open-meteo.com/v1/forecast?" + urlencode(forecast_params)
+    forecast = http_json("GET", forecast_url, timeout=10, service="open-meteo-forecast-ecmwf")
+    if not isinstance(forecast, dict) or not isinstance(forecast.get("daily"), dict) or not isinstance(forecast.get("hourly"), dict):
+        raise AppError(502, "Open-Meteo hat keine vollständige Wettervorhersage geliefert.")
+    model = "ECMWF IFS HRES (3–14 Tage)"
+    in_nrw = location["country_code"] == "DE" and NRW_LATITUDE_BOUNDS[0] <= latitude <= NRW_LATITUDE_BOUNDS[1] and NRW_LONGITUDE_BOUNDS[0] <= longitude <= NRW_LONGITUDE_BOUNDS[1]
+    if in_nrw:
+        short_params = dict(forecast_params)
+        short_params["forecast_days"] = WEATHER_ICON_D2_DAYS
+        short_params["models"] = "icon_d2"
+        short_url = "https://api.open-meteo.com/v1/forecast?" + urlencode(short_params)
+        try:
+            short_forecast = http_json("GET", short_url, timeout=10, service="open-meteo-forecast-icon-d2")
+            if isinstance(short_forecast, dict) and isinstance(short_forecast.get("daily"), dict) and isinstance(short_forecast.get("hourly"), dict):
+                forecast = _merge_weather_forecasts(forecast, short_forecast)
+                model = "ICON-D2 (0–2 Tage) + ECMWF IFS HRES (3–14 Tage)"
+        except Exception as exc:
+            LOGGER.warning("ICON-D2 weather synchronization failed; using ECMWF", extra={"event": "weather_icon_d2_failed", "context": {"error_type": type(exc).__name__}})
+    return {"query": query[:200], "location": location, "model": model, "forecast": forecast, "fetched_at": utc_now()}
+
+
+def weather_state(planned: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    query = get_profile().get("weather_location", "").strip()[:200]
+    if not query:
+        return {"configured": False, "provider": "Open-Meteo", "days": [], "recommendations": [], "message": "Hinterlege im Profil einen Wetterort (Stadt oder PLZ)."}
+    try:
+        cached = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
+    except (TypeError, json.JSONDecodeError):
+        cached = {}
+    cache_matches = isinstance(cached, dict) and cached.get("query") == query and isinstance(cached.get("forecast"), dict)
+    fetched_at = str(cached.get("fetched_at") or "") if cache_matches else ""
+    try:
+        cache_age = (datetime.now(timezone.utc) - datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))).total_seconds()
+    except (TypeError, ValueError):
+        cache_age = float("inf")
+    error = None
+    if not cache_matches or cache_age >= WEATHER_CACHE_SECONDS:
+        try:
+            cached = _fetch_weather_forecast(query)
+            set_kv(WEATHER_CACHE_KEY, json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
+            cache_matches = True
+        except AppError as exc:
+            error = exc.message if exc.status == 400 else "Wetterdaten konnten derzeit nicht aktualisiert werden."
+            LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
+        except Exception as exc:
+            error = "Wetterdaten konnten derzeit nicht aktualisiert werden."
+            LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
+    if not cache_matches:
+        return {"configured": True, "provider": "Open-Meteo", "days": [], "recommendations": [], "error": error or "Wetterdaten sind nicht verfügbar."}
+    forecast = cached.get("forecast")
+    recommendations = []
+    today = local_now().date()
+    for event in planned or []:
+        if not is_outdoor_activity(event):
+            continue
+        event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+        try:
+            if not today <= date.fromisoformat(event_date) <= today + timedelta(days=WEATHER_RECOMMENDATION_DAYS - 1):
+                continue
+        except ValueError:
+            continue
+        recommendation = _weather_recommendation(event, forecast)
+        if recommendation:
+            recommendations.append(recommendation)
+    result = {
+        "configured": True,
+        "provider": "Open-Meteo",
+        "attribution": "Wetterdaten: Open-Meteo.com (CC BY 4.0)",
+        "model": cached.get("model"),
+        "location": cached.get("location"),
+        "fetched_at": cached.get("fetched_at"),
+        "days": _weather_daily_summary(forecast),
+        "recommendations": recommendations,
+    }
+    if error:
+        result["error"] = error
+        result["stale"] = True
+    return result
+
+
+def add_weather_to_planned(planned: list[dict[str, Any]], weather: dict[str, Any]) -> list[dict[str, Any]]:
+    recommendations = weather.get("recommendations") if isinstance(weather, dict) else []
+    by_id = {str(item.get("event_id")): item for item in recommendations or [] if item.get("event_id")}
+    by_date_name = {(item.get("date"), item.get("event_name")): item for item in recommendations or []}
+    enriched = []
+    for event in planned:
+        copy = dict(event)
+        recommendation = by_id.get(str(event.get("id"))) or by_date_name.get((str(event.get("start_date_local") or event.get("date") or "")[:10], str(event.get("name") or "Geplante Einheit")[:200]))
+        if recommendation:
+            copy["weather_recommendation"] = recommendation
+        enriched.append(copy)
+    return enriched
 
 
 class IntervalsClient:
@@ -3876,6 +4220,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None, include_
 
 def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     snapshot = snapshot if snapshot is not None else latest_snapshot()
+    planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
     return {
         "durable_profile": get_profile(),
         "target_competitions": list_competitions(),
@@ -3883,7 +4228,9 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
         "planning": planning_state(),
         "current_performance": current_performance_context(snapshot),
         "garmin": garmin_coach_context(),
+        "weather": weather_state(planned),
         "source_policy": {
+            "weather": "Open-Meteo forecast for the profile location; daily values up to 14 days, time-window recommendations only for the next 5 days and outdoor run/ride sessions",
             "local_feedback": "Athlete-entered subjective signals and availability; not copied from Garmin or Intervals.icu",
             "planning": "Locally calculated suggestions; changes to remote calendar events still require explicit approval",
             "durable_profile": "Vom Athleten bestätigte Werte, lokal in SQLite gespeichert",
@@ -4388,13 +4735,15 @@ def public_state() -> dict[str, Any]:
     snapshot = latest_snapshot()
     activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
     planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
+    weather = weather_state(planned)
     return {
         "messages": list_messages(),
         "drafts": list_workout_drafts(),
         "plans": list_training_plans(),
         "library": list_workout_library(),
         "activities": activities,
-        "planned": planned,
+        "planned": add_weather_to_planned(planned, weather),
+        "weather": weather,
         "parallel_cycling": parallel_cycling_event_groups(planned),
         "profile": get_profile(),
         "competitions": list_competitions(),
