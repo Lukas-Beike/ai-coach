@@ -15,6 +15,7 @@
   --accent-soft: rgba(16, 163, 127, .17);
   --blue: #0a84ff;
   --orange: #ff9f0a;
+  --yellow: #ffd60a;
   --danger: #ff453a;
   --shadow: 0 20px 60px rgba(0, 0, 0, .32);
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, .18);
@@ -71,20 +72,17 @@ h1 {
 }
 .app-update-indicator {
   display: inline-grid;
-  width: 1.4em;
-  height: 1.4em;
+  width: 1.5em;
+  height: 1.5em;
   margin-left: .12em;
   place-items: center;
-  border: 1px solid var(--accent-bright);
-  border-radius: 999px;
-  color: var(--accent-bright);
-  font-size: .34em;
-  font-weight: 800;
-  line-height: 1;
+  border-radius: 6px;
+  color: var(--yellow);
   text-decoration: none;
   vertical-align: .42em;
 }
-.app-update-indicator:hover { color: var(--ink); background: var(--accent-soft); }
+.app-update-warning { display: block; width: 100%; height: 100%; }
+.app-update-indicator:hover { color: #ffe566; background: rgba(255, 214, 10, .14); }
 .app-update-indicator[hidden] { display: none; }
 h2 {
   margin: 4px 0 0;
