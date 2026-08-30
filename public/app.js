@@ -1406,7 +1406,7 @@ function renderLibrary(workouts) {
   if (!Array.isArray(workouts) || !workouts.length) {
     const empty = document.createElement("p");
     empty.className = "context-empty";
-    empty.textContent = "Keine Einheiten in der Intervals.icu-Trainingsbibliothek gefunden.";
+    empty.textContent = "Keine Einheiten in der lokalen Trainingsbibliothek gefunden.";
     root.append(empty);
     return;
   }
@@ -1435,7 +1435,12 @@ function renderLibrary(workouts) {
         const cardTitle = document.createElement("h4");
         cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
         const meta = document.createElement("span");
-        meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null].filter(Boolean).join(" · ");
+        const syncLabel = workout.sync_status === "local"
+          ? "Lokal - noch nicht synchronisiert"
+          : workout.external_id
+            ? "Mit Intervals.icu synchronisiert"
+            : "Lokal";
+        meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, syncLabel].filter(Boolean).join(" - ");
         heading.append(cardTitle, meta);
         const description = document.createElement("p");
         description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
@@ -1450,7 +1455,7 @@ function renderLibrary(workouts) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "secondary-button";
-        button.textContent = "Als geplant übernehmen";
+        button.textContent = "Als lokalen Entwurf speichern";
         button.addEventListener("click", () => planLibraryWorkout(workout.id, dateInput, button));
         controls.append(dateLabelNode, button);
         card.append(heading, description, controls);
@@ -1492,10 +1497,10 @@ async function planLibraryWorkout(workoutId, dateInput, button) {
   button.textContent = "Wird eingeplant…";
   try {
     await api("/api/library/" + encodeURIComponent(workoutId) + "/plan", { method: "POST", body: JSON.stringify({ date: dateInput.value }) });
-    toast("Einheit eingeplant");
+    toast("Lokaler Entwurf erstellt");
     await load();
   } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Als geplant übernehmen"; }
+  finally { button.disabled = false; button.textContent = "Als lokalen Entwurf speichern"; }
 }
 
 function renderProfile(profile) {

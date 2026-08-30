@@ -4,6 +4,7 @@ import tempfile
 import threading
 import unittest
 import json
+import uuid
 from dataclasses import replace
 from datetime import date, timedelta
 from io import BytesIO
@@ -592,11 +593,18 @@ class CoachTests(unittest.TestCase):
         self.assertEqual({item["id"] for item in snapshot["recent_activities"]}, {"old", "new"})
 
     def test_library_is_cached_and_included_in_coach_context(self):
-        server.upsert_workout_library([{
+        imported = server.upsert_workout_library([{
             "id": 42, "name": "Locker Rad", "type": "Ride",
             "description": "- 45m Z2", "moving_time": 2700,
-        }])
-        self.assertEqual(server.list_workout_library()[0]["name"], "Locker Rad")
+        }])[0]
+        self.assertEqual(uuid.UUID(imported["id"]).version, 4)
+        self.assertEqual(imported["external_id"], "42")
+        updated = server.upsert_workout_library([{
+            "id": 42, "name": "Locker Rad aktualisiert", "type": "Ride",
+            "description": "- 45m Z2", "moving_time": 2700,
+        }])[0]
+        self.assertEqual(updated["id"], imported["id"])
+        self.assertEqual(server.list_workout_library()[0]["name"], "Locker Rad aktualisiert")
         self.assertIn("LOCAL TRAINING LIBRARY", server.build_training_context())
 
     def test_library_workout_can_be_planned_from_local_cache(self):
@@ -605,12 +613,12 @@ class CoachTests(unittest.TestCase):
             "description": "- 45m Z2", "moving_time": 2700,
         }])
         fake_event = {"id": "event-42", "name": "Locker Rad"}
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
-            server.IntervalsClient, "plan_library_workout", return_value=fake_event
-        ) as plan:
-            result = server.plan_library_workout("42", (date.today() + timedelta(days=1)).isoformat())
-        self.assertEqual(result["status"], "planned")
-        plan.assert_called_once()
+        library = server.list_workout_library()[0]
+        with patch.object(server, "plan_library_workout_remote", return_value=fake_event) as plan:
+            result = server.create_local_library_draft(library["id"], (date.today() + timedelta(days=1)).isoformat())
+        self.assertEqual(result["status"], "draft")
+        self.assertEqual(result["draft"]["library_workout_id"], library["id"])
+        plan.assert_not_called()
 
     def test_coach_library_creation_is_cached(self):
         created = [{"id": 77, "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%"}]
@@ -620,7 +628,9 @@ class CoachTests(unittest.TestCase):
             result = server.create_library_workouts([{
                 "name": "Coach Tempo", "sport": "Ride", "description": "- 30m 85%",
             }])
-        self.assertEqual(result[0]["id"], "77")
+        self.assertEqual(uuid.UUID(result[0]["id"]).version, 4)
+        self.assertEqual(result[0]["external_id"], "77")
+        self.assertEqual(result[0]["sync_status"], "synced")
         create.assert_called_once()
         self.assertEqual(server.list_workout_library()[0]["name"], "Coach Tempo")
 
@@ -638,7 +648,9 @@ class CoachTests(unittest.TestCase):
                 "duration_minutes": 55, "target": "POWER", "rationale": "Grundlage",
             }])[0]
         create.assert_not_called()
-        self.assertEqual(draft["library_workout_id"], "42")
+        library = server.list_workout_library()[0]
+        self.assertEqual(draft["library_workout_id"], library["id"])
+        self.assertEqual(library["external_id"], "42")
 
     def test_missing_library_workout_stays_local_until_approval(self):
         with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
@@ -650,10 +662,14 @@ class CoachTests(unittest.TestCase):
                 "target": "POWER", "rationale": "Schwelle",
             }])[0]
         create.assert_not_called()
-        self.assertNotIn("library_workout_id", draft)
+        self.assertEqual(uuid.UUID(draft["library_workout_id"]).version, 4)
+        library = server.list_workout_library()[0]
+        self.assertEqual(library["id"], draft["library_workout_id"])
+        self.assertIsNone(library["external_id"])
+        self.assertEqual(library["sync_status"], "local")
         self.assertEqual(server.list_workout_drafts()[0]["id"], draft["id"])
 
-    def test_new_draft_is_transferred_directly_on_explicit_approval(self):
+    def test_new_draft_library_entry_is_synced_on_explicit_approval(self):
         with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")):
             draft = server.save_workout_drafts([{
                 "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
@@ -661,12 +677,17 @@ class CoachTests(unittest.TestCase):
                 "target": "POWER", "rationale": "Schwelle",
             }])[0]
         fake_event = {"id": "event-direct"}
+        remote_library = {"id": "remote-77", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", "moving_time": 1800}
         with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
-            server.IntervalsClient, "push_workout", return_value=fake_event
-        ) as push:
+            server.IntervalsClient, "create_library_workouts", return_value=[remote_library]
+        ) as create, patch.object(server, "plan_library_workout_remote", return_value=fake_event) as plan:
             result = server.push_draft(draft["id"])
         self.assertEqual(result["status"], "pushed")
-        push.assert_called_once_with(draft["id"], {key: value for key, value in draft.items() if key not in {"id", "status", "created_at", "updated_at"}})
+        library = server.list_workout_library()[0]
+        self.assertEqual(library["external_id"], "remote-77")
+        self.assertEqual(library["id"], draft["library_workout_id"])
+        create.assert_called_once()
+        plan.assert_called_once_with("remote-77", library, draft["date"])
 
     def test_chat_creation_request_uses_local_draft_tool(self):
         future_date = (date.today() + timedelta(days=1)).isoformat()
@@ -722,8 +743,9 @@ class CoachTests(unittest.TestCase):
         ) as plan:
             result = server.push_draft(draft["id"])
         self.assertEqual(result["status"], "pushed")
+        library = server.list_workout_library()[0]
         plan.assert_called_once_with("42", {
-            "id": "42", "name": "Locker Rad", "type": "Ride", "description": "- 30m 70%", "moving_time": 1800,
+            **library,
         }, draft["date"])
 
     def test_planned_event_delete_updates_local_snapshot(self):
@@ -841,11 +863,14 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["activity_days"], 65)
         self.assertEqual(result["window_end"], server.local_now().date().isoformat())
 
-    def test_full_intervals_resync_deletes_only_local_cache_and_never_remote_data(self):
+    def test_full_intervals_resync_preserves_local_library_and_never_remote_data(self):
         server.save_athlete_context({}, [{"name": "Old local race", "event_date": (date.today() + timedelta(days=30)).isoformat()}])
+        server.upsert_workout_library([{
+            "id": "old-workout", "name": "Local template", "type": "Ride",
+            "description": "- 30m Z2", "moving_time": 1800,
+        }])
         with server.DB_LOCK, server.database() as db:
             db.execute("INSERT INTO snapshots(payload, created_at) VALUES (?, ?)", (json.dumps({"synced_at": "old"}), "old"))
-            db.execute("INSERT INTO workout_library(id, payload, updated_at) VALUES (?, ?, ?)", ("old-workout", "{}", "old"))
             db.execute(
                 "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)",
                 ("tombstone", "remote-event", "remote-external", "old"),
@@ -886,8 +911,9 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.latest_snapshot()["synced_at"], "new")
         self.assertEqual(server.list_competitions()[0]["name"], "Cloud race")
         with server.DB_LOCK, server.database() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"], 1)
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM competition_sync_tombstones").fetchone()["count"], 0)
+        self.assertEqual(server.list_workout_library()[0]["external_id"], "old-workout")
 
     def test_full_resync_blocks_intervals_operations(self):
         self.assertTrue(server.INTERVALS_RESYNC_GATE.begin_reset())

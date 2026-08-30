@@ -687,7 +687,11 @@ def initialise_database() -> None:
             );
             CREATE TABLE IF NOT EXISTS workout_library (
                 id TEXT PRIMARY KEY,
+                local_id TEXT,
+                external_id TEXT,
                 payload TEXT NOT NULL,
+                sync_dirty INTEGER NOT NULL DEFAULT 1,
+                last_synced_at TEXT,
                 updated_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS competitions (
@@ -812,6 +816,39 @@ def initialise_database() -> None:
             existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(competitions)").fetchall()}
             if column not in existing_columns:
                 db.execute(f"ALTER TABLE competitions ADD COLUMN {column} {definition}")
+        library_columns = {row["name"] for row in db.execute("PRAGMA table_info(workout_library)").fetchall()}
+        for column, definition in (
+            ("local_id", "TEXT"),
+            ("external_id", "TEXT"),
+            ("sync_dirty", "INTEGER NOT NULL DEFAULT 1"),
+            ("last_synced_at", "TEXT"),
+        ):
+            if column not in library_columns:
+                db.execute(f"ALTER TABLE workout_library ADD COLUMN {column} {definition}")
+        # Older versions used Intervals.icu's remote ID as the library key.
+        # Preserve those rows, but assign a durable local UUID and retain the
+        # old value as external_id. The local_id column makes this migration
+        # idempotent without rebuilding the encrypted table.
+        library_rows = db.execute("SELECT id, local_id, external_id, payload FROM workout_library").fetchall()
+        for row in library_rows:
+            if row.get("local_id"):
+                continue
+            try:
+                payload = json.loads(row.get("payload") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            local_id = str(uuid.uuid4())
+            external_id = str(row.get("external_id") or payload.get("external_id") or row.get("id") or "").strip() or None
+            payload["id"] = local_id
+            payload["external_id"] = external_id
+            payload["sync_status"] = "synced" if external_id else "local"
+            db.execute(
+                "UPDATE workout_library SET local_id=?, external_id=?, sync_dirty=?, last_synced_at=?, payload=? WHERE id=?",
+                (local_id, external_id, 0 if external_id else 1, utc_now() if external_id else None, json.dumps(payload, ensure_ascii=False), row["id"]),
+            )
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_workout_library_external_id ON workout_library(external_id) WHERE external_id IS NOT NULL")
         external_columns = {row["name"] for row in db.execute("PRAGMA table_info(external_calendar_events)").fetchall()}
         if "training_relevant" not in external_columns:
             db.execute("ALTER TABLE external_calendar_events ADD COLUMN training_relevant INTEGER NOT NULL DEFAULT 1")
@@ -4030,20 +4067,30 @@ def planning_state() -> dict[str, Any]:
     return {"season": season_plan_summary(), "latest_replan": latest_replan_preview()}
 
 
-def normalize_library_workout(workout: Any) -> dict[str, Any]:
+def normalize_library_workout(
+    workout: Any,
+    *,
+    local_id: str | None = None,
+    external_id: str | None = None,
+    sync_status: str = "synced",
+) -> dict[str, Any]:
     if not isinstance(workout, dict):
         raise AppError(400, "Jede Bibliothekseinheit muss ein Objekt sein.")
     raw_id = workout.get("id")
-    if raw_id in (None, ""):
-        raise AppError(400, "Bibliothekseinheit ohne Intervals.icu-ID.")
+    resolved_external_id = str(external_id or workout.get("external_id") or raw_id or "").strip() or None
+    resolved_local_id = str(local_id or workout.get("local_id") or "").strip() or str(uuid.uuid4())
+    if not resolved_external_id and not resolved_local_id:
+        raise AppError(400, "Bibliothekseinheit ohne lokale ID.")
     result = {
         key: value for key, value in workout.items()
         if key in {
-            "id", "name", "description", "type", "moving_time", "distance", "target",
+            "name", "description", "type", "moving_time", "distance", "target",
             "workout_doc", "icu_training_load", "icu_intensity", "indoor", "tags", "folder_id",
         }
     }
-    result["id"] = str(raw_id)
+    result["id"] = resolved_local_id
+    result["external_id"] = resolved_external_id
+    result["sync_status"] = sync_status
     result["name"] = str(result.get("name") or "Bibliotheks-Einheit")[:200]
     result["description"] = str(result.get("description") or "")[:12000]
     result["type"] = str(result.get("type") or "Ride")[:80]
@@ -4107,7 +4154,7 @@ def find_similar_library_workout(workout: dict[str, Any], library: list[dict[str
 
 
 def attach_cached_library_entries(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Attach matching cached library IDs without making any remote request."""
+    """Link cached entries or create a new local library entry, never remotely."""
     library = list_workout_library()
     prepared: list[dict[str, Any]] = []
     for workout in workouts:
@@ -4128,27 +4175,59 @@ def attach_cached_library_entries(workouts: list[dict[str, Any]]) -> list[dict[s
                 extra={"event": "workout_library_match", "context": {"library_workout_id": str(match["id"])}},
             )
             continue
-        prepared.append(workout)
+        local_entry = create_local_workout_library_entry(workout)
+        library.append(local_entry)
+        prepared.append({**workout, "library_workout_id": local_entry["id"]})
     return prepared
 
 
-def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool = False) -> list[dict[str, Any]]:
-    normalized = [normalize_library_workout(item) for item in workouts]
+def create_local_workout_library_entry(workout: dict[str, Any]) -> dict[str, Any]:
+    local_id = str(uuid.uuid4())
+    library_workout = {
+        **workout,
+        "type": workout.get("sport") or "Ride",
+        "moving_time": int(workout.get("duration_minutes") or 0) * 60,
+    }
+    entry = normalize_library_workout(library_workout, local_id=local_id, external_id=None, sync_status="local")
     now = utc_now()
     with DB_LOCK, database() as db:
-        for workout in normalized:
-            db.execute(
-                "INSERT INTO workout_library(id, payload, updated_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
-                (workout["id"], json.dumps(workout, ensure_ascii=False), now),
+        db.execute(
+            "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, NULL, ?)",
+            (local_id, local_id, json.dumps(entry, ensure_ascii=False), now),
+        )
+    return entry
+
+
+def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool = False) -> list[dict[str, Any]]:
+    """Merge remote templates while preserving local-only library entries."""
+    normalized: list[dict[str, Any]] = []
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        for workout in workouts:
+            external_id = str(workout.get("external_id") or workout.get("id") or "").strip()
+            if not external_id:
+                continue
+            existing = db.execute(
+                "SELECT id, local_id FROM workout_library WHERE external_id = ?",
+                (external_id,),
+            ).fetchone()
+            local_id = str(existing.get("local_id") or existing.get("id") or uuid.uuid4()) if existing else str(uuid.uuid4())
+            entry = normalize_library_workout(
+                workout,
+                local_id=local_id,
+                external_id=external_id,
+                sync_status="synced",
             )
-        if remove_missing:
-            ids = [item["id"] for item in normalized]
-            if ids:
-                placeholders = ",".join("?" for _ in ids)
-                db.execute(f"DELETE FROM workout_library WHERE id NOT IN ({placeholders})", ids)
-            else:
-                db.execute("DELETE FROM workout_library")
+            normalized.append(entry)
+            storage_id = existing["id"] if existing else local_id
+            db.execute(
+                "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, last_synced_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET local_id=excluded.local_id, external_id=excluded.external_id, payload=excluded.payload, sync_dirty=0, last_synced_at=excluded.last_synced_at, updated_at=excluded.updated_at",
+                (storage_id, local_id, external_id, json.dumps(entry, ensure_ascii=False), now, now),
+            )
+        # `remove_missing` used to delete the whole cache. Local-first
+        # libraries must retain local-only entries and remote templates that
+        # are temporarily absent from a provider response.
     return normalized
 
 
@@ -4199,6 +4278,7 @@ def create_library_workouts(workouts: list[dict[str, Any]]) -> list[dict[str, An
 
 @intervals_operation
 def plan_library_workout(workout_id: str, plan_date: str) -> dict[str, Any]:
+    return create_local_library_draft(workout_id, plan_date)
     normalized_id = str(workout_id or "").strip()
     if not normalized_id or len(normalized_id) > 120 or "/" in normalized_id:
         raise AppError(400, "UngÃ¼ltige Bibliothekseinheiten-ID.")
@@ -4280,6 +4360,76 @@ def get_workout_library() -> list[dict[str, Any]]:
 
 
 @intervals_operation
+def sync_local_workout_library_entry(local_id: str) -> dict[str, Any]:
+    try:
+        normalized_id = str(uuid.UUID(str(local_id)))
+    except (ValueError, AttributeError) as exc:
+        raise AppError(400, "Ungültige lokale Bibliothekseinheiten-ID.") from exc
+    with DB_LOCK, database() as db:
+        row = db.execute(
+            "SELECT id, local_id, external_id, payload FROM workout_library WHERE local_id = ?",
+            (normalized_id,),
+        ).fetchone()
+    if not row:
+        raise AppError(404, "Lokale Bibliothekseinheit nicht gefunden.")
+    try:
+        local_workout = json.loads(row["payload"])
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
+    if row.get("external_id"):
+        return local_workout
+    created = IntervalsClient().create_library_workouts([local_workout])
+    if not created or not isinstance(created[0], dict) or not str(created[0].get("id") or "").strip():
+        raise AppError(502, "Die Bibliothekseinheit konnte nicht zu Intervals.icu übertragen werden.")
+    remote_workout = created[0]
+    external_id = str(remote_workout["id"])
+    synced = normalize_library_workout(
+        remote_workout,
+        local_id=normalized_id,
+        external_id=external_id,
+        sync_status="synced",
+    )
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        db.execute(
+            "UPDATE workout_library SET external_id=?, payload=?, sync_dirty=0, last_synced_at=?, updated_at=? WHERE local_id=?",
+            (external_id, json.dumps(synced, ensure_ascii=False), now, now, normalized_id),
+        )
+    set_kv("last_library_sync_at", now)
+    set_kv("last_library_sync_error", "")
+    return synced
+
+
+def create_local_library_draft(workout_id: str, plan_date: str) -> dict[str, Any]:
+    try:
+        normalized_id = str(uuid.UUID(str(workout_id)))
+    except (ValueError, AttributeError) as exc:
+        raise AppError(400, "Ungültige lokale Bibliothekseinheiten-ID.") from exc
+    try:
+        date.fromisoformat(str(plan_date))
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.") from exc
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (normalized_id,)).fetchone()
+    if not row:
+        raise AppError(404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.")
+    workout = json.loads(row["payload"])
+    if calendar_conflicts({"date": str(plan_date)}):
+        raise AppError(409, "Für dieses Datum existiert bereits eine Kalendereinheit. Bitte zuerst synchronisieren und den Konflikt prüfen.")
+    drafts = save_workout_drafts([{
+        "date": str(plan_date),
+        "sport": workout.get("type") or "Ride",
+        "name": workout.get("name") or "Bibliotheks-Einheit",
+        "description": workout.get("description") or "",
+        "duration_minutes": max(5, round(float(workout.get("moving_time") or 300) / 60)),
+        "target": workout.get("target") or "AUTO",
+        "rationale": "Aus der lokalen Trainingsbibliothek übernommen.",
+    }], goal="Lokale Bibliothekseinheit")
+    add_message("event", f"Lokale Bibliothekseinheit wurde als Entwurf für den {plan_date} gespeichert.")
+    return {"status": "draft", "workout_id": normalized_id, "draft": drafts[0]}
+
+
+@intervals_operation
 def push_draft(draft_id: str) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
@@ -4297,11 +4447,14 @@ def push_draft(draft_id: str) -> dict[str, Any]:
         library_workout_id = str(workout.get("library_workout_id") or "").strip()
         if library_workout_id:
             with DB_LOCK, database() as db:
-                library_row = db.execute("SELECT payload FROM workout_library WHERE id = ?", (library_workout_id,)).fetchone()
+                library_row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (library_workout_id,)).fetchone()
             if not library_row:
                 raise AppError(409, "Die zugeordnete Bibliothekseinheit ist nicht mehr vorhanden. Bitte die Bibliothek synchronisieren.")
-            library_workout = json.loads(library_row["payload"])
-            event = plan_library_workout_remote(library_workout_id, library_workout, workout["date"])
+            library_workout = sync_local_workout_library_entry(library_workout_id)
+            external_id = str(library_workout.get("external_id") or "").strip()
+            if not external_id:
+                raise AppError(502, "Die Bibliothekseinheit hat nach der Synchronisierung keine externe ID.")
+            event = plan_library_workout_remote(external_id, library_workout, workout["date"])
         else:
             event = IntervalsClient().push_workout(draft_id, workout)
     except Exception as exc:
@@ -4372,7 +4525,9 @@ def provider_resync_state(provider: str) -> dict[str, Any]:
 def reset_local_provider_data(provider: str) -> None:
     """Delete only cached provider data; never issue a provider API request."""
     if provider == "intervals":
-        tables = ("snapshots", "workout_library", "competitions", "competition_sync_tombstones")
+        # The workout library is local-first. A full provider resync must not
+        # erase local templates that have not reached Intervals.icu yet.
+        tables = ("snapshots", "competitions", "competition_sync_tombstones")
         keys = (
             "last_sync_at", "last_sync_error", "last_sync_window_start", "last_sync_window_end",
             "last_library_sync_at", "last_library_sync_error",
@@ -5688,7 +5843,7 @@ def chat_with_coach(message: str) -> dict[str, Any]:
     if not text:
         log_empty_response(response)
         if created_drafts:
-            text = "Ich habe die Einheiten in deiner Intervals.icu-Trainingsbibliothek gespeichert, aber die erläuternde Antwort war unvollständig."
+            text = "Ich habe die Einheiten lokal als Trainingsbibliothek und Entwürfe gespeichert. Die Übertragung nach Intervals.icu erfolgt erst nach deiner Freigabe."
         elif response.get("status") == "incomplete":
             text = "Die Coach-Antwort wurde abgeschnitten, bevor Text erzeugt wurde. Bitte erneut versuchen; das Modell hat sein Antwortlimit erreicht."
         else:
@@ -6395,7 +6550,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, sync_workout_library(reason="manuell"))
             elif match := PLAN_LIBRARY_RE.match(path):
                 payload = self.read_json()
-                self.send_json(200, plan_library_workout(match.group(1), payload.get("date")))
+                self.send_json(200, create_local_library_draft(match.group(1), payload.get("date")))
             elif path == "/api/drafts":
                 payload = self.read_json()
                 workouts = payload.get("workouts")
