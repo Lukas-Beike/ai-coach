@@ -342,14 +342,26 @@ The container image is published to
 started manual publish workflow. Ordinary pushes and pull requests run tests
 but do not publish an image.
 
+The repository uses `develop` as its integration branch and keeps `main`
+protected as the release branch. Feature pull requests should target `develop`;
+`main` should only be updated through the release promotion pull request.
+
 The `Weekly release` workflow creates the next patch release every Monday at
-03:00 UTC from the current `main` branch. If the server-reported
-`APP_VERSION` does not match the next release tag, it opens a version-bump PR
-instead of pushing to `main`. After that PR is merged, the workflow creates the
-release automatically. Its release notes contain all commits since the previous
-release. It can also be started manually through **Actions -> Weekly release ->
-Run workflow**. The resulting release starts the test and container-publish
-workflow, which rejects any release where the tag and `APP_VERSION` differ.
+03:00 UTC, starting from `develop`. It opens a version-bump PR that increments
+`APP_VERSION` in `server.py`. After that PR is merged into `develop`, the
+workflow opens a promotion PR from `develop` to protected `main`. When that PR
+is merged, the workflow creates a release tag matching `APP_VERSION` on the
+resulting `main` commit. Its release notes contain all commits since the
+previous release. It can also be started manually through **Actions -> Weekly
+release -> Run workflow**. Manual runs may optionally provide a target
+`MAJOR.MINOR.PATCH` version such as `1.2.0` or `2.0.0`; when omitted, the next
+patch version is selected automatically.
+
+The resulting release starts the test and container-publish workflow, which
+rejects any release where the tag and `APP_VERSION` differ. Configure branch
+protection so that `develop` requires the normal CI checks and `main` disallows
+force pushes and direct human pushes while allowing the required pull request
+checks.
 
 Use Conventional Commits for manual commits and pull-request titles, for
 example:

@@ -4,9 +4,14 @@ on:
   schedule:
     - cron: "0 3 * * 1"
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: Optional target version, for example 1.2.0 or 2.0.0
+        required: false
+        type: string
   pull_request:
     types: [closed]
-    branches: [main]
+    branches: [develop, main]
 
 concurrency:
   group: weekly-release
@@ -18,8 +23,139 @@ permissions:
   pull-requests: write
 
 jobs:
-  release:
-    if: github.event_name != 'pull_request' || (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'chore/release-version-'))
+  prepare-version:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'develop' && startsWith(github.event.pull_request.head.ref, 'chore/release-version-'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Create version bump PR or promote release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          REQUESTED_VERSION: ${{ inputs.release_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app_version="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
+          if [[ -z "$app_version" ]]; then
+            echo "Could not read APP_VERSION from server.py."
+            exit 1
+          fi
+
+          IFS=. read -r major minor patch <<< "$app_version"
+          next_tag="${major}.${minor}.$((patch + 1))"
+          if [[ -n "$REQUESTED_VERSION" ]]; then
+            if [[ ! "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Requested release version must use MAJOR.MINOR.PATCH format."
+              exit 1
+            fi
+            next_tag="$REQUESTED_VERSION"
+          fi
+
+          version_is_greater() {
+            local left_major left_minor left_patch right_major right_minor right_patch
+            IFS=. read -r left_major left_minor left_patch <<< "$1"
+            IFS=. read -r right_major right_minor right_patch <<< "$2"
+            (( left_major > right_major )) ||
+              { (( left_major == right_major && left_minor > right_minor )) ||
+                (( left_major == right_major && left_minor == right_minor && left_patch > right_patch )); }
+          }
+
+          version_merge=false
+          if [[ "$EVENT_NAME" == "pull_request" && "$PR_MERGED" == "true" && "$PR_BASE" == "develop" && "$PR_HEAD" == chore/release-version-* ]]; then
+            version_merge=true
+          fi
+
+          latest_tag="$(gh release list --repo "$REPOSITORY" --limit 100 --json tagName,publishedAt,isDraft,isPrerelease \
+            --jq '[.[] | select(.isDraft == false and .isPrerelease == false) | select(.tagName | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(.publishedAt) | last | .tagName // empty')"
+          if [[ "$version_merge" == "true" ]]; then
+            if [[ -z "$latest_tag" ]]; then
+              echo "Cannot validate the merged version bump without a previous release tag."
+              exit 1
+            fi
+            IFS=. read -r latest_major latest_minor latest_patch <<< "$latest_tag"
+            expected_version="${latest_major}.${latest_minor}.$((latest_patch + 1))"
+            if [[ "$app_version" != "$expected_version" ]]; then
+              echo "Merged APP_VERSION $app_version is not the next patch version after $latest_tag (expected $expected_version)."
+              exit 1
+            fi
+          elif [[ -n "$latest_tag" && "$latest_tag" != "$app_version" ]]; then
+            echo "APP_VERSION $app_version does not match the latest release tag $latest_tag."
+            exit 1
+          fi
+
+          if ! version_is_greater "$next_tag" "$app_version"; then
+            echo "Release version $next_tag must be greater than APP_VERSION $app_version."
+            exit 1
+          fi
+
+          if [[ "$version_merge" == "true" ]]; then
+            existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head develop --state open --json number --jq '.[0].number // empty')"
+            if [[ -n "$existing_pr" ]]; then
+              echo "Release promotion PR #$existing_pr is already open."
+              exit 0
+            fi
+            gh pr create \
+              --repo "$REPOSITORY" \
+              --base main \
+              --head develop \
+              --title "chore(release): promote $app_version to main" \
+              --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container."
+            exit 0
+          fi
+
+          if gh release view "$next_tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $next_tag already exists; nothing to do."
+            exit 0
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$next_tag" >/dev/null 2>&1; then
+            echo "Tag $next_tag already exists without a GitHub release; refusing to overwrite it."
+            exit 1
+          fi
+
+          version_branch="chore/release-version-$next_tag"
+          existing_pr="$(gh pr list --repo "$REPOSITORY" --base develop --head "$version_branch" --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing_pr" ]]; then
+            echo "Version bump PR #$existing_pr is already open; merge it before the next release run."
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "$version_branch" >/dev/null 2>&1; then
+            echo "Remote branch $version_branch exists without an open PR; refusing to overwrite it."
+            exit 1
+          fi
+
+          git switch --create "$version_branch"
+          sed -i -E "s/^APP_VERSION = \"[0-9]+\.[0-9]+\.[0-9]+\"$/APP_VERSION = \"$next_tag\"/" server.py
+          updated_app_version="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
+          if [[ "$updated_app_version" != "$next_tag" ]]; then
+            echo "Failed to update APP_VERSION to $next_tag."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.py
+          git commit -m "chore(release): set application version to $next_tag"
+          git push --set-upstream origin "$version_branch"
+          gh pr create \
+            --repo "$REPOSITORY" \
+            --base develop \
+            --head "$version_branch" \
+            --title "chore(release): set application version to $next_tag" \
+            --body "Synchronize APP_VERSION with the upcoming GitHub release $next_tag. Merge this PR to promote the release to main."
+
+  create-release:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'develop'
     runs-on: ubuntu-latest
     steps:
       - name: Check out main
@@ -28,90 +164,62 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Create weekly release with commit changelog
+      - name: Create release with commit changelog
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
+
+          release_tag="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
+          if [[ -z "$release_tag" ]]; then
+            echo "Could not read APP_VERSION from server.py."
+            exit 1
+          fi
+
           latest_tag="$(gh release list --repo "$REPOSITORY" --limit 100 --json tagName,publishedAt,isDraft,isPrerelease \
             --jq '[.[] | select(.isDraft == false and .isPrerelease == false) | select(.tagName | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(.publishedAt) | last | .tagName // empty')"
           if [[ -n "$latest_tag" ]]; then
             IFS=. read -r major minor patch <<< "$latest_tag"
-            next_tag="${major}.${minor}.$((patch + 1))"
+            expected_tag="${major}.${minor}.$((patch + 1))"
+            if [[ "$release_tag" != "$expected_tag" ]]; then
+              echo "APP_VERSION $release_tag is not the next patch version after $latest_tag (expected $expected_tag)."
+              exit 1
+            fi
             if ! git rev-parse --verify --quiet "${latest_tag}^{commit}" >/dev/null; then
               git fetch --no-tags origin "refs/tags/${latest_tag}:refs/tags/${latest_tag}"
             fi
+            commit_range="${latest_tag}..HEAD"
+            compare_url="https://github.com/${REPOSITORY}/compare/${latest_tag}...HEAD"
           else
-            next_tag="0.0.1"
+            commit_range="HEAD"
+            compare_url="https://github.com/${REPOSITORY}/commits/HEAD"
           fi
 
-          if gh release view "$next_tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $next_tag already exists; nothing to do."
+          if gh release view "$release_tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $release_tag already exists; nothing to do."
             exit 0
           fi
-
-          current_app_version="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
-          if [[ -z "$current_app_version" ]]; then
-            echo "Could not read APP_VERSION from server.py."
+          if git ls-remote --exit-code --tags origin "refs/tags/$release_tag" >/dev/null 2>&1; then
+            echo "Tag $release_tag already exists without a GitHub release; refusing to overwrite it."
             exit 1
-          fi
-          if [[ "$current_app_version" != "$next_tag" ]]; then
-            version_branch="chore/release-version-$next_tag"
-            existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$version_branch" --state open --json number --jq '.[0].number // empty')"
-            if [[ -n "$existing_pr" ]]; then
-              echo "Version bump PR #$existing_pr is already open; merge it before creating the release."
-              exit 0
-            fi
-            if git ls-remote --exit-code --heads origin "$version_branch" >/dev/null 2>&1; then
-              echo "Remote branch $version_branch exists without an open PR; refusing to overwrite it."
-              exit 1
-            fi
-            git switch --create "$version_branch"
-            sed -i -E "s/^APP_VERSION = \"[0-9]+\.[0-9]+\.[0-9]+\"$/APP_VERSION = \"$next_tag\"/" server.py
-            updated_app_version="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
-            if [[ "$updated_app_version" != "$next_tag" ]]; then
-              echo "Failed to update APP_VERSION to $next_tag."
-              exit 1
-            fi
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add server.py
-            git commit -m "chore(release): set application version to $next_tag"
-            git push --set-upstream origin "$version_branch"
-            gh pr create \
-              --repo "$REPOSITORY" \
-              --base main \
-              --head "$version_branch" \
-              --title "chore(release): set application version to $next_tag" \
-              --body "Synchronize APP_VERSION with the upcoming GitHub release $next_tag. Merge this PR before the next weekly release run."
-            echo "Created version bump PR for $next_tag; release creation will continue after it is merged."
-            exit 0
           fi
 
           release_sha="$(git rev-parse HEAD)"
-          if [[ -n "$latest_tag" ]]; then
-            commit_range="${latest_tag}..${release_sha}"
-            compare_url="https://github.com/${REPOSITORY}/compare/${latest_tag}...${release_sha}"
-          else
-            commit_range="$release_sha"
-            compare_url="https://github.com/${REPOSITORY}/commits/${release_sha}"
-          fi
-
           notes_file="${RUNNER_TEMP}/weekly-release-notes.md"
           {
-            echo "## Änderungen seit ${latest_tag:-Projektbeginn}"
+            echo "## Changes since ${latest_tag:-project start}"
             echo
             git log --format='- %s (%h)' "$commit_range"
             echo
-            echo "[Vollständigen Commit-Vergleich ansehen](${compare_url})"
+            echo "[View the full commit comparison](${compare_url})"
           } > "$notes_file"
 
-          gh release create "$next_tag" \
+          gh release create "$release_tag" \
             --repo "$REPOSITORY" \
             --target "$release_sha" \
-            --title "$next_tag" \
+            --title "$release_tag" \
             --notes-file "$notes_file"
 
           # Releases created with GITHUB_TOKEN do not emit a release event that
@@ -119,4 +227,4 @@ jobs:
           gh workflow run publish-container.yml \
             --repo "$REPOSITORY" \
             --ref main \
-            --field "release_tag=$next_tag"
+            --field "release_tag=$release_tag"
