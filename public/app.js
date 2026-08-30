@@ -12,7 +12,7 @@ const state = {
   voiceTimer: null,
   voiceStartedAt: 0,
   voiceTranscribing: false,
-  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, performance: false },
+  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, performance: false, intervalsFull: false, garminFull: false },
   notificationKeys: new Set(),
   quickTemplatesVisible: false,
   activityTracked: false,
@@ -727,6 +727,8 @@ function renderActivities(activities) {
   const list = Array.isArray(activities) ? activities : [];
   const syncDetail = $("#activitySyncDetail");
   const syncNotices = [];
+  if (state.data?.provider_resync?.intervals?.running || state.localSync.intervalsFull) syncNotices.push(state.data?.provider_resync?.intervals?.status || "Intervals.icu wird vollständig neu geladen…");
+  if (state.data?.provider_resync?.garmin?.running || state.localSync.garminFull) syncNotices.push(state.data?.provider_resync?.garmin?.status || "Garmin wird vollständig neu geladen…");
   if (state.data?.sync?.running || state.localSync.intervals) syncNotices.push(state.data?.sync?.status || "Intervals.icu wird synchronisiert…");
   if (syncDetail) {
     const refreshedAt = state.data?.sync?.last_sync_at;
@@ -1232,6 +1234,10 @@ async function loadLibrary() {
   const button = $("#libraryLoadButton");
   const root = $("#library");
   if (!button || !root) return;
+  if (state.data?.provider_resync?.intervals?.running || state.localSync.intervalsFull) {
+    toast("Intervals.icu wird gerade vollständig neu geladen.", true);
+    return;
+  }
   button.disabled = true;
   button.textContent = "Bibliothek wird geladen…";
   try {
@@ -1278,18 +1284,24 @@ function renderGarmin(garmin) {
   const status = $("#garminStatus");
   const detail = $("#garminDetail");
   const button = $("#garminSyncButton");
+  const fullButton = $("#garminFullResyncButton");
+  const fullStatus = $("#garminFullResyncStatus");
   if (!status || !detail || !button) return;
-  button.disabled = Boolean(state.data?.garmin_sync?.running);
+  const fullResync = state.data?.provider_resync?.garmin || {};
+  const fullRunning = Boolean(fullResync.running || state.localSync.garminFull);
+  button.disabled = Boolean(state.data?.garmin_sync?.running || fullRunning);
   if (!garmin?.available) {
     status.textContent = "Garmin nicht verfügbar";
     detail.textContent = "";
     button.disabled = true;
+    if (fullButton) fullButton.disabled = true;
     return;
   }
   if (!garmin.configured) {
     status.textContent = "Garmin nicht eingerichtet";
     detail.textContent = "";
     button.disabled = true;
+    if (fullButton) fullButton.disabled = true;
     return;
   }
   const performanceSources = [garmin.has_vo2max ? "VO2max" : null, garmin.has_estimated_run_times ? "Laufprognosen" : null, garmin.has_max_hr ? "Max HF" : null, garmin.has_weight ? "Gewicht" : null].filter(Boolean);
@@ -1301,6 +1313,20 @@ function renderGarmin(garmin) {
     : garmin.source === "fixture" ? "Testdatei ist konfiguriert; synchronisiere sie mit dem Button."
       : "Noch kein Garmin-Abruf durchgeführt.";
   if (performanceSources.length) detail.textContent += ` · ${performanceSources.join("/")} aus Garmin`;
+  if (fullButton) {
+    fullButton.disabled = fullRunning || Boolean(state.data?.garmin_sync?.running || state.localSync.garmin);
+    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
+  }
+  if (fullStatus) {
+    fullStatus.classList.toggle("error", Boolean(fullResync.last_error));
+    fullStatus.textContent = fullRunning && fullResync.status
+      ? fullResync.status
+      : fullResync.last_error
+        ? fullResync.last_error
+        : fullResync.last_resync_at
+          ? `Letzter vollständiger Resync: ${formatTime(fullResync.last_resync_at)}`
+          : "Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.";
+  }
 }
 
 function contextField(labelText, field, value = "", options = {}) {
@@ -1394,10 +1420,11 @@ function renderCompetitions(competitions) {
 
 function renderCompetitionSync(data) {
   const sync = data.competition_sync || {};
+  const fullRunning = Boolean(data.provider_resync?.intervals?.running || state.localSync.intervalsFull);
   const button = $("#competitionSyncButton");
   const detail = $("#competitionSyncDetail");
   if (button) {
-    button.disabled = Boolean(sync.running || state.localSync.competitions);
+    button.disabled = Boolean(sync.running || state.localSync.competitions || fullRunning);
     button.textContent = sync.running || state.localSync.competitions ? "Synchronisierung läuft…" : "Mit Intervals.icu synchronisieren";
   }
   if (detail) {
@@ -1663,7 +1690,7 @@ function updateHeaderAction() {
     button.hidden = false;
     button.dataset.action = "performance";
     button.title = "Aktuelle Leistungsdaten von Intervals.icu und KI aktualisieren";
-    button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin);
+    button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
     button.textContent = state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin
       ? "Synchronisierung läuft…"
       : button.disabled ? "Leistungsdaten werden aktualisiert…" : "Leistungsdaten aktualisieren";
@@ -1671,7 +1698,7 @@ function updateHeaderAction() {
     button.hidden = false;
     button.dataset.action = "activities";
     button.title = "Aktivitäten der letzten 90 Tage von Intervals.icu laden";
-    button.disabled = Boolean(state.data?.sync?.running || state.localSync.intervals);
+    button.disabled = Boolean(state.data?.sync?.running || state.data?.provider_resync?.intervals?.running || state.localSync.intervals || state.localSync.intervalsFull);
     button.textContent = button.disabled ? "Synchronisierung läuft…" : "Aktivitäten aktualisieren";
   } else {
     button.hidden = true;
@@ -1745,9 +1772,27 @@ function renderSettings(data) {
   if (intervalsDays && document.activeElement !== intervalsDays) intervalsDays.value = data.sync_settings?.intervals_days || 90;
   if (garminDays && document.activeElement !== garminDays) garminDays.value = data.sync_settings?.garmin_days || 30;
   const intervalsSyncButton = $("#systemIntervalsSyncButton");
+  const intervalsFullButton = $("#systemIntervalsFullResyncButton");
+  const intervalsFullStatus = $("#intervalsFullResyncStatus");
+  const intervalsFullResync = data.provider_resync?.intervals || {};
+  const intervalsFullRunning = Boolean(intervalsFullResync.running || state.localSync.intervalsFull);
   if (intervalsSyncButton) {
-    intervalsSyncButton.disabled = Boolean(data.sync?.running || state.localSync.intervals);
+    intervalsSyncButton.disabled = Boolean(data.sync?.running || state.localSync.intervals || intervalsFullRunning);
     intervalsSyncButton.textContent = data.sync?.running || state.localSync.intervals ? "Synchronisierung läuft…" : "Synchronisieren";
+  }
+  if (intervalsFullButton) {
+    intervalsFullButton.disabled = !configured.intervals || intervalsFullRunning || Boolean(data.sync?.running || state.localSync.intervals);
+    intervalsFullButton.textContent = intervalsFullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
+  }
+  if (intervalsFullStatus) {
+    intervalsFullStatus.classList.toggle("error", Boolean(intervalsFullResync.last_error));
+    intervalsFullStatus.textContent = intervalsFullRunning && intervalsFullResync.status
+      ? intervalsFullResync.status
+      : intervalsFullResync.last_error
+        ? intervalsFullResync.last_error
+        : intervalsFullResync.last_resync_at
+          ? `Letzter vollständiger Resync: ${formatTime(intervalsFullResync.last_resync_at)}`
+          : "Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.";
   }
   const garminSyncButton = $("#garminSyncButton");
   if (garminSyncButton) {
@@ -1993,6 +2038,32 @@ async function syncExternalCalendar() {
   finally { state.localSync.externalCalendar = false; button.disabled = false; button.textContent = "Synchronisieren"; }
 }
 
+async function fullResync(source) {
+  const isGarmin = source === "garmin";
+  const button = $(isGarmin ? "#garminFullResyncButton" : "#systemIntervalsFullResyncButton");
+  if (!button) return;
+  const providerLabel = isGarmin ? "Garmin" : "Intervals.icu";
+  if (!window.confirm(`Alle lokal gespeicherten ${providerLabel}-Daten löschen und vollständig neu laden? Die Daten in ${providerLabel} bleiben unverändert.`)) return;
+  const stateKey = isGarmin ? "garminFull" : "intervalsFull";
+  state.localSync[stateKey] = true;
+  button.disabled = true;
+  button.classList.add("busy");
+  button.textContent = "Vollständiger Resync läuft…";
+  try {
+    const result = await api(`/api/${source}/full-resync`, { method: "POST", body: JSON.stringify({ confirm: "FULL_RESYNC" }) });
+    toast(result.status === "already_running" ? `${providerLabel} wird bereits vollständig neu geladen` : `${providerLabel} lokal vollständig neu geladen`);
+    invalidateContextPreview();
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    await load();
+  } finally {
+    state.localSync[stateKey] = false;
+    renderSettings(state.data || {});
+    updateHeaderAction();
+  }
+}
+
 async function resetCoachChat() {
   const button = $("#chatResetButton");
   if (!button || !window.confirm("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?")) return;
@@ -2220,9 +2291,11 @@ $("#headerActionButton").addEventListener("click", (event) => {
   else if (event.currentTarget.dataset.action === "activities") syncNow(event);
 });
 $("#systemIntervalsSyncButton").addEventListener("click", syncNow);
+$("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync("intervals"));
 $("#competitionSyncButton").addEventListener("click", syncCompetitions);
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 $("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar);
+$("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#feedbackForm").addEventListener("submit", saveFeedback);
 $("#replanButton").addEventListener("click", prepareReplan);
@@ -2266,7 +2339,7 @@ window.addEventListener("resize", updateChatComposerVisibility);
 window.addEventListener("pagehide", savePwaActivity);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js");
 setInterval(() => {
-  if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.performance) load();
+  if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.performance || state.localSync.intervalsFull || state.localSync.garminFull) load();
 }, 1500);
 setInterval(() => {
   if (state.data && document.visibilityState === "visible") load();
