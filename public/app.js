@@ -1992,9 +1992,23 @@ async function loadLibrary() {
       "Die Vorschau ist nur 10 Minuten gültig."
     );
     if (!confirmed) return;
-    await api("/api/library/sync", {
+    const actionPreview = await api("/api/coach/actions/preview", {
       method: "POST",
-      body: JSON.stringify({ confirm: "LIBRARY_SYNC", fingerprint: preview.fingerprint }),
+      body: JSON.stringify({
+        action_type: "sync_workout_library",
+        target_system: "intervals",
+        object_ids: {},
+        diff: preview.entries || [],
+        payload: { fingerprint: preview.fingerprint },
+      }),
+    });
+    const confirmedAction = await api("/api/coach/actions/confirm", {
+      method: "POST",
+      body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
+    });
+    await api("/api/coach/actions/execute", {
+      method: "POST",
+      body: JSON.stringify({ action_token: confirmedAction.action_token, payload_hash: confirmedAction.proposed_action.payload_hash }),
     });
     await load();
   } catch (error) {
@@ -3040,9 +3054,23 @@ async function syncCompetitions() {
     const message = `Intervals.icu-Wettkampf-Sync bestätigen?\n\nErstellen: ${summary.create || 0} · Ändern: ${summary.change || 0} · Löschen: ${summary.delete || 0} · Konflikte: ${summary.conflict || 0}${details}`;
     if (!window.confirm(message)) return;
     button.textContent = "Synchronisierung läuft…";
-    const result = await api("/api/competitions/sync", {
+    const actionPreview = await api("/api/coach/actions/preview", {
       method: "POST",
-      body: JSON.stringify({ confirm: "COMPETITION_SYNC", fingerprint: preview.fingerprint }),
+      body: JSON.stringify({
+        action_type: "sync_competitions",
+        target_system: "intervals",
+        object_ids: {},
+        diff: preview.actions || [],
+        payload: { fingerprint: preview.fingerprint },
+      }),
+    });
+    const confirmedAction = await api("/api/coach/actions/confirm", {
+      method: "POST",
+      body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
+    });
+    const result = await api("/api/coach/actions/execute", {
+      method: "POST",
+      body: JSON.stringify({ action_token: confirmedAction.action_token, payload_hash: confirmedAction.proposed_action.payload_hash }),
     });
     if (result.status === "already_running") toast("Zielwettkämpfe werden bereits synchronisiert");
     else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.conflicts ? ` · ${result.conflicts} Konflikt(e) bitte prüfen` : ""}${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
@@ -3312,7 +3340,25 @@ async function applyReplan() {
   if (!button || !adjustmentId || !window.confirm("Die vorgeschlagenen Änderungen auf lokale zukünftige Einheiten anwenden? Intervals.icu wird dabei nicht verändert.")) return;
   button.disabled = true;
   try {
-    await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: true, adjustment_id: adjustmentId }) });
+    const changes = state.data?.planning?.latest_replan?.changes || [];
+    const preview = await api("/api/coach/actions/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        action_type: "apply_adaptive_replan",
+        target_system: "local",
+        object_ids: { adjustment_id: adjustmentId },
+        diff: changes,
+        payload: { adjustment_id: adjustmentId },
+      }),
+    });
+    const confirmed = await api("/api/coach/actions/confirm", {
+      method: "POST",
+      body: JSON.stringify({ proposal_id: preview.proposed_action.id }),
+    });
+    await api("/api/coach/actions/execute", {
+      method: "POST",
+      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
+    });
     $("#adaptivePlanningDialog")?.close();
     toast("Adaptive Anpassung angewendet");
     await load();

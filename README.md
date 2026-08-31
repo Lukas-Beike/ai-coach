@@ -56,6 +56,9 @@ It is not intended to be exposed directly to the public internet.
 - Coach chat with selectable GPT-5.6 models, configurable thinking level,
   context preview, structured logs, and prioritized steering/FIFO message
   queueing while the coach is responding.
+- The normal Coach chat is read-only: durable local changes and every remote
+  sync require a separate preview, an exact UI confirmation, and a short-lived
+  single-use server-side action token bound to the session and payload.
 - The coach stores every dated planned workout directly in the local training
   library. Similar workouts are not deduplicated, so the library can grow into
   a complete local training history. Every library entry has its own local

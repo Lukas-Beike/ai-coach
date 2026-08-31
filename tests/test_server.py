@@ -141,6 +141,7 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM athlete_checkins")
             db.execute("DELETE FROM activity_feedback")
             db.execute("DELETE FROM plan_adjustments")
+            db.execute("DELETE FROM coach_action_proposals")
             db.execute("DELETE FROM public_event_candidates")
             db.execute("DELETE FROM public_event_sources")
             db.execute("DELETE FROM external_calendar_events")
@@ -497,9 +498,10 @@ class CoachTests(unittest.TestCase):
             result = server.chat_with_coach("Die Beine fühlten sich locker an.")
 
         response_calls = [payload for path, payload in calls if path == "/responses"]
-        self.assertIn("save_activity_feedback", [tool["name"] for tool in response_calls[0]["tools"]])
-        self.assertEqual(result["activity_feedback"][0]["activity_id"], "activity-3")
-        self.assertEqual(server.list_activity_feedback()[0]["notes"], "Beine fühlten sich locker an")
+        self.assertNotIn("save_activity_feedback", [tool["name"] for tool in response_calls[0]["tools"]])
+        self.assertIn("keine Änderung ausgeführt", result["message"]["content"])
+        self.assertEqual(result["activity_feedback"], [])
+        self.assertEqual(server.list_activity_feedback(), [])
 
     def test_chat_can_explicitly_refresh_intervals_data_with_a_tool(self):
         calls = []
@@ -530,10 +532,7 @@ class CoachTests(unittest.TestCase):
 
     def test_coach_tools_cover_explicit_read_refresh_and_adaptive_actions(self):
         expected_tools = {
-            "save_competition",
-            "delete_competition",
             "list_competitions",
-            "sync_competitions",
             "list_workout_library",
             "list_recent_activities",
             "list_planned_workouts",
@@ -544,20 +543,20 @@ class CoachTests(unittest.TestCase):
             "refresh_weather",
             "refresh_external_calendar",
             "preview_adaptive_replan",
-            "apply_adaptive_replan",
         }
         available_tools = {tool["name"] for tool in server.COACH_TOOLS}
         self.assertTrue(expected_tools <= available_tools)
+        self.assertTrue(available_tools.isdisjoint(server.MUTATING_COACH_TOOL_NAMES))
         routing_cases = {
             "Welche Wettkämpfe sind gespeichert?": "list_competitions",
-            "Füge einen Wettkampf hinzu": "save_competition",
-            "Ändere den Zielwettkampf": "save_competition",
-            "Aktualisiere den Wettkampf": "save_competition",
-            "Passe den Wettkampf an": "save_competition",
-            "Ändere den Wettbewerb": "save_competition",
-            "Lösche den Wettkampf": "delete_competition",
-            "Lösche den Wettbewerb": "delete_competition",
-            "Synchronisiere die Wettkämpfe": "sync_competitions",
+            "Füge einen Wettkampf hinzu": None,
+            "Ändere den Zielwettkampf": None,
+            "Aktualisiere den Wettkampf": None,
+            "Passe den Wettkampf an": None,
+            "Ändere den Wettbewerb": None,
+            "Lösche den Wettkampf": None,
+            "Lösche den Wettbewerb": None,
+            "Synchronisiere die Wettkämpfe": None,
             "Zeige geplante Einheiten": "list_planned_workouts",
             "Liste meine Trainingsbibliothek": "list_workout_library",
             "Zeige meine letzten Einheiten": "list_recent_activities",
@@ -568,7 +567,7 @@ class CoachTests(unittest.TestCase):
             "Aktualisiere das Wetter": "refresh_weather",
             "Synchronisiere den Kalender": "refresh_external_calendar",
             "Starte die adaptive Planung als Vorschau": "preview_adaptive_replan",
-            "Wende die adaptive Planung an": "apply_adaptive_replan",
+            "Wende die adaptive Planung an": None,
         }
         for message, expected in routing_cases.items():
             with self.subTest(message=message):
@@ -1748,9 +1747,9 @@ class CoachTests(unittest.TestCase):
             result = server.chat_with_coach("Erstelle mir für morgen eine Einheit.")
 
         response_calls = [payload for path, payload in calls if path == "/responses"]
-        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "save_workout_library_entries"})
-        self.assertEqual(len(result["library_entries"]), 1)
-        self.assertEqual(result["library_entries"][0]["sync_status"], "local")
+        self.assertEqual(response_calls[0]["tool_choice"], "auto")
+        self.assertEqual(result["library_entries"], [])
+        self.assertEqual(server.list_workout_library(), [])
         self.assertEqual(server.list_workout_drafts(), [])
         create.assert_not_called()
 
@@ -1854,10 +1853,9 @@ class CoachTests(unittest.TestCase):
             result = server.chat_with_coach("Wende die gespeicherte Bibliothekseinheit als Plan an.")
 
         response_calls = [payload for path, payload in calls if path == "/responses"]
-        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "apply_workout_library_plan"})
-        self.assertEqual(len(result["planned_library_entries"]), 1)
-        self.assertEqual(result["planned_library_entries"][0]["date"], tomorrow)
-        self.assertEqual(len(server.list_workout_library()), 2)
+        self.assertEqual(response_calls[0]["tool_choice"], "auto")
+        self.assertEqual(result["planned_library_entries"], [])
+        self.assertEqual(len(server.list_workout_library()), 1)
 
     def test_library_backed_draft_is_planned_from_library_on_approval(self):
         server.upsert_workout_library([{
@@ -1937,6 +1935,154 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(response_calls[0]["tool_choice"], "none")
         self.assertEqual(result["library_entries"], [])
         self.assertEqual(server.list_workout_library(), [])
+
+    def test_normal_coach_toolset_contains_no_mutating_tools(self):
+        names = {tool["name"] for tool in server.COACH_TOOLS}
+        self.assertTrue(names)
+        self.assertTrue(names.isdisjoint(server.MUTATING_COACH_TOOL_NAMES))
+
+    def test_negated_questions_and_explanations_cannot_mutate_from_chat(self):
+        calls = []
+        mutation_names = [
+            "save_workout_library_entries",
+            "delete_competition",
+            "sync_competitions",
+            "apply_adaptive_replan",
+            "save_workout_library_entries",
+        ]
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_negation_regressions"}
+            response_number = len([call for call in calls if call[0] == "/responses"])
+            if response_number % 2:
+                name = mutation_names[(response_number - 1) // 2]
+                return {"output": [{
+                    "type": "function_call",
+                    "name": name,
+                    "call_id": f"blocked-{response_number}",
+                    "arguments": "{}",
+                }]}
+            return {"output_text": "Nur eine Erklärung.", "output": []}
+
+        messages = [
+            "Plane keine Trainingseinheit, sondern erkläre nur die Optionen.",
+            "Lösche den Wettkampf nicht.",
+            "Synchronisiere den Wettkampf nicht mit Intervals.icu.",
+            "Wende den adaptiven Vorschlag nicht an.",
+            "Welche Einheiten sollte ich nächste Woche erwägen?",
+        ]
+        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ), patch.object(server, "sync_intervals", return_value={"status": "ok"}):
+            for message in messages:
+                result = server.chat_with_coach(message)
+                self.assertIn("keine Änderung ausgeführt", result["message"]["content"])
+
+        self.assertEqual(server.list_workout_library(), [])
+        self.assertEqual(server.list_competitions(), [])
+        with server.DB_LOCK, server.database() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM plan_adjustments").fetchone()["count"], 0)
+
+    def test_parallel_coach_action_execution_can_mutate_at_most_once(self):
+        future_date = (date.today() + timedelta(days=2)).isoformat()
+        proposal = server.create_coach_action_preview({
+            "action_type": "save_workout_library_entries",
+            "target_system": "local",
+            "object_ids": {"entries": 1},
+            "diff": [{"type": "create", "name": "Einmalig", "date": future_date}],
+            "payload": {"plan_name": "Einmalig", "goal": "", "workouts": []},
+        }, "session-a")
+        confirmed = server.confirm_coach_action_preview(proposal["proposed_action"]["id"], "session-a")
+        execution_calls = []
+        errors = []
+
+        def fake_execute(action_type, payload):
+            execution_calls.append((action_type, payload))
+            return {"ok": True}
+
+        def run_once():
+            try:
+                server.execute_coach_action(confirmed["action_token"], "session-a")
+            except server.AppError as exc:
+                errors.append(exc.status)
+
+        with patch.object(server, "_execute_coach_action", side_effect=fake_execute):
+            first = threading.Thread(target=run_once)
+            second = threading.Thread(target=run_once)
+            first.start()
+            second.start()
+            first.join()
+            second.join()
+
+        self.assertEqual(len(execution_calls), 1)
+        self.assertEqual(errors, [409])
+
+    def test_coach_action_token_is_session_bound_single_use_and_payload_bound(self):
+        future_date = (date.today() + timedelta(days=2)).isoformat()
+        payload = {
+            "plan_name": "Confirmed plan",
+            "goal": "Base",
+            "workouts": [{
+                "date": future_date, "sport": "Ride", "name": "Locker",
+                "description": "- 30m 70%", "duration_minutes": 30,
+                "target": "POWER", "rationale": "Base",
+            }],
+        }
+        proposal = server.create_coach_action_preview({
+            "action_type": "save_workout_library_entries",
+            "target_system": "local",
+            "object_ids": {"entries": 1},
+            "diff": [{"type": "create", "name": "Locker", "date": future_date}],
+            "payload": payload,
+        }, "session-a")
+        self.assertEqual(server.list_workout_library(), [])
+        confirmed = server.confirm_coach_action_preview(proposal["proposed_action"]["id"], "session-a")
+        with self.assertRaises(server.AppError) as wrong_session:
+            server.execute_coach_action(confirmed["action_token"], "session-b")
+        self.assertEqual(wrong_session.exception.status, 409)
+        with self.assertRaises(server.AppError) as foreign_payload:
+            server.execute_coach_action(confirmed["action_token"], "session-a", "0" * 64)
+        self.assertEqual(foreign_payload.exception.status, 409)
+        executed = server.execute_coach_action(confirmed["action_token"], "session-a")
+        self.assertTrue(executed["ok"])
+        self.assertEqual(len(server.list_workout_library()), 1)
+        with self.assertRaises(server.AppError) as replay:
+            server.execute_coach_action(confirmed["action_token"], "session-a")
+        self.assertEqual(replay.exception.status, 409)
+        self.assertEqual(len(server.list_workout_library()), 1)
+
+    def test_coach_action_preview_without_confirmation_does_not_mutate(self):
+        future_date = (date.today() + timedelta(days=3)).isoformat()
+        preview = server.create_coach_action_preview({
+            "action_type": "save_competition",
+            "target_system": "local",
+            "object_ids": {},
+            "diff": [{"type": "create", "name": "Race", "event_date": future_date}],
+            "payload": {
+                "competition_id": "", "name": "Race", "event_date": future_date,
+                "start_date_local": "", "sport": "Cycling", "priority": "B",
+                "distance": "", "target": "", "course_profile": "", "notes": "",
+                "description": "", "moving_time_seconds": -1,
+            },
+        }, "session-a")
+        self.assertEqual(preview["status"], "preview")
+        self.assertEqual(server.list_competitions(), [])
+
+    def test_expired_coach_action_preview_cannot_create_token(self):
+        preview = server.create_coach_action_preview({
+            "action_type": "save_activity_feedback",
+            "target_system": "local",
+            "object_ids": {"activity_id": "a"},
+            "diff": [{"type": "update", "activity_id": "a"}],
+            "payload": {"activity_id": "a", "activity_name": "Ride", "activity_date": "2026-08-31", "notes": "Good"},
+        }, "session-a")
+        with server.DB_LOCK, server.database() as db:
+            db.execute("UPDATE coach_action_proposals SET expires_at=0 WHERE id=?", (preview["proposed_action"]["id"],))
+        with self.assertRaises(server.AppError) as error:
+            server.confirm_coach_action_preview(preview["proposed_action"]["id"], "session-a")
+        self.assertEqual(error.exception.status, 409)
 
     def test_morning_checkin_prompt_is_not_a_workout_creation_request(self):
         prompt = server.MORNING_CHECKIN_PROMPT
@@ -2758,10 +2904,10 @@ class CoachTests(unittest.TestCase):
         ):
             result = server.chat_with_coach("Füge den Berlin Marathon als Zielwettkampf hinzu.")
 
-        self.assertEqual(result["message"]["content"], "Der Wettkampf wurde lokal gespeichert.")
-        self.assertEqual(server.list_competitions()[0]["name"], "Berlin Marathon")
+        self.assertIn("keine Änderung ausgeführt", result["message"]["content"])
+        self.assertEqual(server.list_competitions(), [])
         response_calls = [payload for path, payload in calls if path == "/responses"]
-        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "save_competition"})
+        self.assertEqual(response_calls[0]["tool_choice"], "auto")
 
     def test_chat_can_delete_competition_with_tool(self):
         event_date = (date.today() + timedelta(days=75)).isoformat()
@@ -2787,10 +2933,10 @@ class CoachTests(unittest.TestCase):
         ):
             result = server.chat_with_coach("Lösche den Zielwettkampf lokal.")
 
-        self.assertEqual(result["message"]["content"], "Der Wettkampf wurde lokal gelöscht.")
-        self.assertEqual(server.list_competitions(), [])
+        self.assertIn("keine Änderung ausgeführt", result["message"]["content"])
+        self.assertEqual(server.list_competitions()[0]["name"], "Berlin Marathon")
         response_calls = [payload for path, payload in calls if path == "/responses"]
-        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "delete_competition"})
+        self.assertEqual(response_calls[0]["tool_choice"], "auto")
 
     def test_coach_competition_update_is_pushed_to_existing_remote_event(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
