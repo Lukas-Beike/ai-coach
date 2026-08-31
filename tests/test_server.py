@@ -428,6 +428,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('id="checkinDialog"', index)
         self.assertIn('name="day_form"', index)
         self.assertIn('name="illness"', index)
+        self.assertIn('id="syncIllnessToIntervals"', app)
+        self.assertEqual(server.ILLNESS_CALENDAR_CATEGORY, "SICK")
         self.assertNotIn('class="checkin-section"', index)
 
     def test_activity_feedback_is_persisted_and_attached_to_activity(self):
@@ -767,12 +769,43 @@ class CoachTests(unittest.TestCase):
         }])[0]
         server.save_checkin({"illness": "Fever", "soreness": 8})
         preview = server.adaptive_replan_preview()
+        self.assertEqual(preview["illness_pause"]["recommended_pause_days"], server.ILLNESS_PAUSE_DEFAULT_DAYS)
+        self.assertEqual(preview["illness_pause"]["start_date"], server.local_now().date().isoformat())
         self.assertEqual(len(preview["changes"]), 1)
         self.assertEqual(server.list_workout_library()[0]["description"], "- 5m 115%")
         result = server.apply_adaptive_replan(preview["id"])
         self.assertEqual(result["updated"], 1)
         self.assertNotEqual(server.list_workout_library()[0]["description"], "- 5m 115%")
+        self.assertEqual(server.list_workout_library()[0]["name"], "Krankheitspause")
+        checkins = {row["checkin_date"]: row for row in server.list_checkins(30)}
+        for offset in range(server.ILLNESS_PAUSE_DEFAULT_DAYS):
+            pause_date = (server.local_now().date() + timedelta(days=offset)).isoformat()
+            self.assertEqual(checkins[pause_date]["illness"], "Fever")
+        repeated_preview = server.adaptive_replan_preview()
+        self.assertTrue(repeated_preview["illness_pause"]["approved"])
+        self.assertFalse(server.current_adaptive_replan_status()["illness_pause_pending"])
         self.assertEqual(server.list_workout_library()[0]["id"], draft["id"])
+
+    def test_illness_pause_can_sync_sick_events_after_confirmation(self):
+        server.save_checkin({"illness": "Erkältung"})
+        preview = server.adaptive_replan_preview()
+        calls = []
+
+        class FakeIntervalsClient:
+            def upsert_calendar_events(self, events):
+                calls.extend(events)
+                return [{"id": index} for index, _ in enumerate(events, 1)]
+
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
+            server, "IntervalsClient", return_value=FakeIntervalsClient()
+        ):
+            result = server.apply_adaptive_replan(preview["id"], sync_illness_to_intervals=True)
+
+        self.assertEqual(result["intervals_sync"]["status"], "ok")
+        self.assertEqual(result["intervals_sync"]["category"], "SICK")
+        self.assertEqual(len(calls), server.ILLNESS_PAUSE_DEFAULT_DAYS)
+        self.assertTrue(all(event["category"] == "SICK" for event in calls))
+        self.assertEqual(calls[0]["name"], "Krankheit")
 
     def test_adaptive_preview_rejects_changed_target_and_is_idempotent(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()

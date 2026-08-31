@@ -412,8 +412,10 @@ function adaptivePreviewMarkup(preview) {
   const signals = preview.signals?.length
     ? `Signale: ${preview.signals.map((signal) => escapeHtml(String(signal))).join(", ")}`
     : "Keine kritischen lokalen Signale erkannt.";
-  const changes = (preview.changes || []).map((change) => `<div class="replan-change"><strong>${escapeHtml(String(change.date || ""))}: ${escapeHtml(String(change.name || "Einheit"))}</strong><br>${escapeHtml(String(change.before?.description || ""))}<br>→ ${escapeHtml(String(change.after?.description || ""))}</div>`).join("");
-  return `<div><strong>${escapeHtml(String(preview.message || "Adaptive Prüfung"))}</strong><br>${signals}</div>${changes || "<div>Es gibt keine lokalen Entwürfe, die angepasst werden müssen.</div>"}<small>${escapeHtml(String(preview.scope || ""))}</small>`;
+  const changes = (preview.changes || []).map((change) => `<div class="replan-change"><strong>${escapeHtml(String(change.date || ""))}: ${escapeHtml(String(change.name || "Einheit"))}${change.after?.name ? ` → ${escapeHtml(String(change.after.name))}` : ""}</strong><br>${escapeHtml(String(change.before?.description || ""))}<br>→ ${escapeHtml(String(change.after?.description || ""))}</div>`).join("");
+  const pause = preview.illness_pause;
+  const pauseMarkup = pause && !pause.approved ? `<div class="illness-pause-preview"><strong>Krankheitspause</strong><span>${escapeHtml(String(pause.forecast || "Vorsichtige Prognose"))}</span><span>Vorgeschlagen: ${escapeHtml(String(pause.recommended_pause_days || ""))} Tage (${escapeHtml(String(pause.start_date || ""))} bis ${escapeHtml(String(pause.end_date || ""))})</span><label><input id="syncIllnessToIntervals" type="checkbox"> Krankheitstage zusätzlich als <code>SICK</code>-Einträge nach Intervals.icu synchronisieren</label></div>` : "";
+  return `<div><strong>${escapeHtml(String(preview.message || "Adaptive Prüfung"))}</strong><br>${signals}</div>${pauseMarkup}${changes || "<div>Es gibt keine lokalen Einheiten, die angepasst werden müssen.</div>"}<small>${escapeHtml(String(preview.scope || ""))}</small>`;
 }
 
 function openAdaptivePlanningDialog(preview) {
@@ -423,7 +425,7 @@ function openAdaptivePlanningDialog(preview) {
   if (!dialog || !node || !preview) return;
   node.innerHTML = adaptivePreviewMarkup(preview);
   if (apply) {
-    apply.hidden = !(preview.changes || []).length;
+    apply.hidden = !(preview.changes || []).length && !(preview.illness_pause && !preview.illness_pause.approved);
     apply.dataset.adjustmentId = preview.id || "";
   }
   if (!dialog.open) dialog.showModal();
@@ -440,9 +442,15 @@ function renderAdaptivePlanning(data) {
   }
   const preview = planning.latest_replan;
   const changes = Array.isArray(preview?.changes) ? preview.changes : [];
-  const required = planning.needs_replan ?? Boolean(preview?.status === "preview" && changes.length);
+  const illness = String(data.local_feedback?.today?.illness || "").trim();
+  const previewIllness = String(preview?.illness_pause?.illness || "").trim();
+  const illnessNeedsForecast = Boolean(illness && (!preview || !preview.illness_pause || previewIllness !== illness || !preview.illness_pause.approved));
+  const pendingIllnessPause = Boolean(preview?.status === "preview" && preview?.illness_pause && !preview.illness_pause.approved);
+  const required = Boolean(planning.needs_replan || illnessNeedsForecast || pendingIllnessPause);
   const count = Number(planning.replan_changes || changes.length);
-  const caption = count === 1
+  const caption = illnessNeedsForecast || pendingIllnessPause
+    ? "Krankheit gemeldet: Sportpause prognostizieren und bestätigen."
+    : count === 1
     ? "Ein zukünftiger Entwurf braucht eine Anpassung."
     : `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
   const notice = $("#adaptivePlanningNotice");
@@ -454,7 +462,7 @@ function renderAdaptivePlanning(data) {
     const button = $("#adaptivePlanningButton");
     if (button) {
       button.disabled = Boolean(state.localSync.adaptivePlanning);
-      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : "Planung aktualisieren";
+      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : illnessNeedsForecast ? "Krankheitspause prüfen" : "Planung aktualisieren";
     }
   }
   if (coachNotice) coachNotice.hidden = !required;
@@ -3325,7 +3333,7 @@ async function prepareReplan() {
   try {
     const result = await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: false }) });
     await load();
-    if (result.changes?.length) openAdaptivePlanningDialog(result);
+    if (result.changes?.length || result.illness_pause) openAdaptivePlanningDialog(result);
     else toast("Keine Planungsanpassung nötig");
   } catch (error) { toast(error.message, true); }
   finally {
@@ -3337,30 +3345,35 @@ async function prepareReplan() {
 async function applyReplan() {
   const button = $("#applyAdaptivePlanningButton");
   const adjustmentId = button?.dataset.adjustmentId;
-  if (!button || !adjustmentId || !window.confirm("Die vorgeschlagenen Änderungen auf lokale zukünftige Einheiten anwenden? Intervals.icu wird dabei nicht verändert.")) return;
+  const syncIllness = Boolean($("#syncIllnessToIntervals")?.checked);
+  const confirmation = syncIllness
+    ? "Krankheitspause bestätigen, die nächsten Tage im lokalen Check-in füllen, die Planung umbauen und Krankheitstage als SICK-Einträge nach Intervals.icu synchronisieren?"
+    : "Krankheitspause bestätigen, die nächsten Tage im lokalen Check-in füllen und die lokale Planung umbauen? Intervals.icu wird dabei nicht verändert.";
+  if (!button || !adjustmentId || !window.confirm(confirmation)) return;
   button.disabled = true;
   try {
     const changes = state.data?.planning?.latest_replan?.changes || [];
+    const illnessPause = state.data?.planning?.latest_replan?.illness_pause || null;
     const preview = await api("/api/coach/actions/preview", {
       method: "POST",
       body: JSON.stringify({
         action_type: "apply_adaptive_replan",
-        target_system: "local",
+        target_system: syncIllness ? "local+intervals" : "local",
         object_ids: { adjustment_id: adjustmentId },
-        diff: changes,
-        payload: { adjustment_id: adjustmentId },
+        diff: { changes, illness_pause: illnessPause },
+        payload: { adjustment_id: adjustmentId, sync_illness_to_intervals: syncIllness },
       }),
     });
     const confirmed = await api("/api/coach/actions/confirm", {
       method: "POST",
       body: JSON.stringify({ proposal_id: preview.proposed_action.id }),
     });
-    await api("/api/coach/actions/execute", {
+    const result = await api("/api/coach/actions/execute", {
       method: "POST",
       body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
     });
     $("#adaptivePlanningDialog")?.close();
-    toast("Adaptive Anpassung angewendet");
+    toast(result.intervals_sync?.status === "error" ? "Lokale Krankheitspause angewendet; Intervals.icu-Synchronisierung fehlgeschlagen" : "Krankheitspause und adaptive Anpassung angewendet");
     await load();
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; }
