@@ -216,6 +216,13 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    value = str(os.environ.get(name, "")).strip().casefold()
+    if not value:
+        return default
+    return value in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Config:
     port: int = int(os.environ.get("PORT", "8090"))
@@ -237,6 +244,9 @@ class Config:
     github_release_check_seconds: int = env_int("GITHUB_RELEASE_CHECK_SECONDS", GITHUB_RELEASE_CACHE_SECONDS)
     app_password: str = os.environ.get("APP_PASSWORD", "")
     openai_daily_token_budget: int = env_int("OPENAI_DAILY_TOKEN_BUDGET", 100_000)
+    # Set COOKIE_SECURE=true when TLS is terminated before this application.
+    # It stays opt-in so the documented local HTTP development flow works.
+    secure_cookies: bool = env_bool("COOKIE_SECURE", False)
     # -1 disables automatic deletion; this is the safe default for an athlete's history.
     data_retention_days: int = env_int("DATA_RETENTION_DAYS", -1)
 
@@ -468,6 +478,9 @@ WEATHER_ADAPTIVE_LONG_RIDE_MINUTES = 180
 WEATHER_ADAPTIVE_MAX_MINUTES = 90
 WEATHER_CACHE_SECONDS = 3 * 60 * 60
 WEATHER_CACHE_KEY = "weather_cache"
+WEATHER_FAILURE_KEY = "weather_failure"
+WEATHER_RETRY_BASE_SECONDS = 15 * 60
+WEATHER_RETRY_MAX_SECONDS = 6 * 60 * 60
 NRW_LATITUDE_BOUNDS = (50.3, 52.6)
 NRW_LONGITUDE_BOUNDS = (5.5, 9.6)
 WEATHER_CONDITIONS = {
@@ -2173,6 +2186,7 @@ def save_profile(profile: dict[str, Any]) -> dict[str, str]:
         # A changed holiday/training location must never keep showing the
         # forecast for the previous place until the normal cache expires.
         set_kv(WEATHER_CACHE_KEY, "")
+        set_kv(WEATHER_FAILURE_KEY, "")
     return normalized
 
 
@@ -4109,6 +4123,16 @@ def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = T
         cached = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
     except (TypeError, json.JSONDecodeError):
         cached = {}
+    try:
+        failure = json.loads(get_kv(WEATHER_FAILURE_KEY) or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        failure = {}
+    if not isinstance(failure, dict):
+        failure = {}
+    try:
+        previous_failure_count = max(0, int(failure.get("count") or 0))
+    except (TypeError, ValueError):
+        previous_failure_count = 0
     cache_matches = isinstance(cached, dict) and cached.get("query") == query and isinstance(cached.get("forecast"), dict)
     fetched_at = str(cached.get("fetched_at") or "") if cache_matches else ""
     try:
@@ -4118,18 +4142,33 @@ def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = T
     error = None
     refreshed = False
     if refresh and (force or not cache_matches or cache_age >= WEATHER_CACHE_SECONDS):
+        retry_at = str(failure.get("retry_at") or "")
         try:
-            with WEATHER_LOCK:
-                cached = _fetch_weather_forecast(query)
-                set_kv(WEATHER_CACHE_KEY, json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
-                cache_matches = True
-                refreshed = True
-        except AppError as exc:
-            error = exc.message if exc.status == 400 else "Wetterdaten konnten derzeit nicht aktualisiert werden."
-            LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
-        except Exception as exc:
-            error = "Wetterdaten konnten derzeit nicht aktualisiert werden."
-            LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
+            retry_wait = (datetime.fromisoformat(retry_at.replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()
+        except (TypeError, ValueError):
+            retry_wait = 0
+        if retry_wait > 0 and not force:
+            error = "Wetterdaten konnten nach einem Fehler noch nicht erneut geladen werden."
+        else:
+            try:
+                with WEATHER_LOCK:
+                    cached = _fetch_weather_forecast(query)
+                    set_kv(WEATHER_CACHE_KEY, json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
+                    set_kv(WEATHER_FAILURE_KEY, "")
+                    cache_matches = True
+                    refreshed = True
+            except AppError as exc:
+                error = exc.message if exc.status == 400 else "Wetterdaten konnten derzeit nicht aktualisiert werden."
+                failure_count = previous_failure_count + 1
+                delay = min(WEATHER_RETRY_BASE_SECONDS * (2 ** min(failure_count - 1, 5)), WEATHER_RETRY_MAX_SECONDS)
+                set_kv(WEATHER_FAILURE_KEY, json.dumps({"count": failure_count, "failed_at": utc_now(), "retry_at": (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()}, ensure_ascii=False))
+                LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
+            except Exception as exc:
+                error = "Wetterdaten konnten derzeit nicht aktualisiert werden."
+                failure_count = previous_failure_count + 1
+                delay = min(WEATHER_RETRY_BASE_SECONDS * (2 ** min(failure_count - 1, 5)), WEATHER_RETRY_MAX_SECONDS)
+                set_kv(WEATHER_FAILURE_KEY, json.dumps({"count": failure_count, "failed_at": utc_now(), "retry_at": (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()}, ensure_ascii=False))
+                LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
     if not cache_matches:
         if not refresh:
             return {
@@ -8335,23 +8374,52 @@ def privacy_export() -> dict[str, Any]:
         messages = [dict(row) for row in db.execute("SELECT role, content, created_at FROM messages ORDER BY id").fetchall()]
         snapshots = [json.loads(row["payload"]) for row in db.execute("SELECT payload FROM snapshots ORDER BY id").fetchall()]
         drafts = list_workout_drafts()
-        library = list_workout_library()
+        library = list_workout_library(include_archived=True)
         competitions = list_competitions()
         tool_calls = [dict(row) for row in db.execute("SELECT call_id, tool_name, result, created_at FROM chat_tool_calls ORDER BY created_at").fetchall()]
+        tombstones = [dict(row) for row in db.execute("SELECT intervals_event_id, external_id, created_at FROM competition_sync_tombstones ORDER BY created_at").fetchall()]
+        adjustments = [dict(row) for row in db.execute("SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at").fetchall()]
+        public_calendar = public_calendar_state(db)
+        kv_rows = db.execute("SELECT key, value FROM kv ORDER BY key").fetchall()
+    application_state: dict[str, Any] = {}
+    excluded_state = {"profile", "garmin_snapshot", WEATHER_CACHE_KEY}
+    for row in kv_rows:
+        key = str(row["key"])
+        if key in excluded_state or key.endswith("_running") or key.endswith("_status"):
+            continue
+        value = row["value"]
+        try:
+            application_state[key] = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            application_state[key] = value
+    try:
+        garmin_data = json.loads(get_kv("garmin_snapshot") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        garmin_data = {}
+    try:
+        weather_data = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        weather_data = {}
     return {
         "exported_at": utc_now(),
         "profile": get_profile(),
+        "application_state": application_state,
         "competitions": competitions,
+        "competition_sync_tombstones": tombstones,
         "messages": messages,
         "chat_tool_calls": tool_calls,
         "snapshots": snapshots,
         "legacy_workout_drafts": drafts,
         "workout_library": library,
         "training_plans": list_training_plans(),
+        "plan_adjustments": adjustments,
         "local_feedback": local_feedback_context(),
         "activity_feedback": activity_feedback_context(),
         "planning": planning_state(),
         "external_calendar": list_external_calendar_events(),
+        "public_calendar": public_calendar,
+        "garmin_snapshot": garmin_data,
+        "weather_cache": weather_data,
     }
 
 
@@ -8470,6 +8538,7 @@ def delete_remote_conversation(conversation_id: str) -> bool:
 
 def delete_local_data() -> dict[str, Any]:
     conversation_id = get_kv("openai_conversation_id") or ""
+    remote_delete_attempted = bool(conversation_id)
     remote_deleted = False
     if conversation_id:
         try:
@@ -8484,7 +8553,12 @@ def delete_local_data() -> dict[str, Any]:
             db.execute(f"DELETE FROM {table}")
         db.execute("DELETE FROM kv")
         set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
-    return {"status": "ok", "local_data_deleted": True, "remote_conversation_deleted": remote_deleted}
+    return {
+        "status": "ok",
+        "local_data_deleted": True,
+        "remote_delete_attempted": remote_delete_attempted,
+        "remote_conversation_deleted": remote_deleted,
+    }
 
 
 SESSION_COOKIE = "ic_session"
@@ -8590,6 +8664,20 @@ def require_csrf(handler: BaseHTTPRequestHandler, session: dict[str, Any]) -> No
         raise AppError(403, "Ungültiges CSRF-Token.")
 
 
+def session_cookie_headers(token: str = "", csrf: str = "", *, clear: bool = False) -> list[str]:
+    """Create hardened session cookies without duplicating flag logic."""
+    secure = "; Secure" if getattr(CONFIG, "secure_cookies", False) else ""
+    if clear:
+        max_age = "; Max-Age=0"
+        token = csrf = ""
+    else:
+        max_age = f"; Max-Age={SESSION_TTL_SECONDS}"
+    return [
+        f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict{secure}{max_age}",
+        f"{CSRF_COOKIE}={csrf}; Path=/; SameSite=Strict{secure}{max_age}",
+    ]
+
+
 class RequestHandler(BaseHTTPRequestHandler):
     server_version = f"IntervalsCoach/{APP_VERSION}"
     client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
@@ -8693,26 +8781,21 @@ class RequestHandler(BaseHTTPRequestHandler):
                 csrf = result["csrf"]
                 schedule_morning_checkin()
                 self.send_json(200, result, {
-                    "Set-Cookie": [
-                        f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_TTL_SECONDS}",
-                        f"{CSRF_COOKIE}={csrf}; Path=/; SameSite=Strict; Max-Age={SESSION_TTL_SECONDS}",
-                    ],
+                    "Set-Cookie": session_cookie_headers(token, csrf),
                 })
             elif path == "/api/privacy/restore":
                 session = require_auth(self)
                 require_csrf(self, session)
                 result = restore_database_backup(self.read_body(MAX_BACKUP_BYTES))
                 self.send_json(200, result, {"Set-Cookie": [
-                    f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
-                    f"{CSRF_COOKIE}=; Path=/; SameSite=Strict; Max-Age=0",
+                    session_cookie_headers(clear=True)[0], session_cookie_headers(clear=True)[1],
                 ]})
             elif path == "/api/logout":
                 session = require_auth(self)
                 require_csrf(self, session)
                 logout_user(self)
                 self.send_json(200, {"status": "ok"}, {"Set-Cookie": [
-                    f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
-                    f"{CSRF_COOKIE}=; Path=/; SameSite=Strict; Max-Age=0",
+                    session_cookie_headers(clear=True)[0], session_cookie_headers(clear=True)[1],
                 ]})
             else:
                 session = require_auth(self)

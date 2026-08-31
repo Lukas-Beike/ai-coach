@@ -107,19 +107,19 @@ Basis: `develop` / `45b5ca3`
 
 ### W12 – Datenschutz, Security-Polish, Tests und Dokumentation
 
-- [ ] Datenschutzexport vollständig definieren und implementieren.
-- [ ] Ergebnis eines fehlgeschlagenen Remote-Löschens in der UI sichtbar machen.
-- [ ] Cookies für HTTPS-Deployment härten.
-- [ ] Wetter-Fehler mit Backoff/negativem Cache behandeln.
-- [ ] Native Tests von Root-`.env` entkoppeln, ohne SQLCipher-Schutz abzuschwächen.
-- [ ] Frontend-/Browser-Smoke-Checks und fehlende Zustandsübergangstests ergänzen.
-- [ ] README, API-Verhalten und Release-/Asset-Versionen aktualisieren.
+- [x] Datenschutzexport vollständig definieren und implementieren.
+- [x] Ergebnis eines fehlgeschlagenen Remote-Löschens in der UI sichtbar machen.
+- [x] Cookies für HTTPS-Deployment härten.
+- [x] Wetter-Fehler mit Backoff/negativem Cache behandeln.
+- [x] Native Tests von Root-`.env` entkoppeln, ohne SQLCipher-Schutz abzuschwächen.
+- [x] Frontend-/Browser-Smoke-Checks und fehlende Zustandsübergangstests ergänzen.
+- [x] README, API-Verhalten und Release-/Asset-Versionen aktualisieren.
 
 ## Abschlusskriterien
 
-- [ ] Alle Workitems sind implementiert, getestet und jeweils per PR gesquasht gemerged.
-- [ ] `python -m unittest discover -s tests -v` im vorgesehenen Docker-Testlauf erfolgreich.
-- [ ] `python -m py_compile server.py tests/test_server.py` erfolgreich.
-- [ ] Relevanter Docker-Build erfolgreich.
-- [ ] Browser-Smoke-Checks für Login, Planung, Check-in, PWA-Assets und Notifications durchgeführt.
-- [ ] Arbeitsbaum enthält keine unbeabsichtigten Änderungen oder Runtime-Dateien.
+- [x] Alle Workitems sind implementiert, getestet und jeweils per PR gesquasht gemerged.
+- [x] `python -m unittest discover -s tests -v` im vorgesehenen Docker-Testlauf erfolgreich.
+- [x] `python -m py_compile server.py tests/test_server.py` erfolgreich.
+- [x] Relevanter Docker-Build erfolgreich.
+- [x] Browser-Smoke-Checks für Login, Planung, Check-in, PWA-Assets und Notifications durchgeführt.
+- [x] Arbeitsbaum enthält keine unbeabsichtigten Änderungen oder Runtime-Dateien.

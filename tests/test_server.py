@@ -12,10 +12,43 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="intervals-coach-test-"))
+os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
+os.environ.update({
+    "OPENAI_API_KEY": "test-openai-key",
+    "OPENAI_MODEL": "gpt-5.6-sol",
+    "OPENAI_DAILY_TOKEN_BUDGET": "100000",
+    "INTERVALS_API_KEY": "test-intervals-key",
+    "INTERVALS_ATHLETE_ID": "0",
+    "GARMIN_EMAIL": "test-garmin@example.invalid",
+    "GARMIN_PASSWORD": "test-garmin-password",
+    "GARMINTOKENS": os.path.join(os.environ["DATA_DIR"], "garmin_tokens"),
+    "GARMIN_FIXTURE_PATH": os.path.join(os.environ["DATA_DIR"], "missing-garmin-fixture.json"),
+    "CALENDAR_ICAL_URL": "https://calendar.example.invalid/feed.ics",
+    "GITHUB_TOKEN": "test-github-token",
+    "GITHUB_REPOSITORY": "test/example",
+    "GITHUB_RELEASE_CHECK_SECONDS": "900",
+    "APP_PASSWORD": "test-password-123",
+    "DATA_RETENTION_DAYS": "-1",
+    "PORT": "8090",
+    "COOKIE_SECURE": "false",
+})
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import server
+
+# load_local_env intentionally fills empty optional variables from a local
+# .env. Replace the imported configuration so tests remain isolated even when
+# the repository root contains a developer environment file.
+server.CONFIG = replace(
+    server.CONFIG,
+    garmin_email="",
+    garmin_password="",
+    garmin_fixture_path="",
+    calendar_ical_url="",
+    github_token="",
+    github_repository="test/example",
+    secure_cookies=False,
+)
 
 
 class CoachTests(unittest.TestCase):
@@ -62,10 +95,17 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["app"]["github_release"]["status"], "loading")
 
     def test_local_public_state_reuses_request_database_connections(self):
-        real_connect = sqlite3.connect
-        with patch.object(server.sqlite3, "connect", wraps=real_connect) as connect:
+        backend = server.sqlite_backend if server.CONFIG.app_password else server.sqlite3
+        real_connect = backend.connect
+        with patch.object(backend, "connect", wraps=real_connect) as connect:
             server.public_state(local_only=True)
         self.assertEqual(connect.call_count, 2)
+
+    def test_changing_weather_location_clears_negative_cache(self):
+        server.save_profile({"weather_location": "Berlin"})
+        server.set_kv(server.WEATHER_FAILURE_KEY, json.dumps({"count": 2, "retry_at": "2099-01-01T00:00:00+00:00"}))
+        server.save_profile({"weather_location": "Koeln"})
+        self.assertEqual(server.get_kv(server.WEATHER_FAILURE_KEY), "")
 
     def test_weather_background_sync_refreshes_and_reuses_three_hour_cache(self):
         server.save_profile({"weather_location": "Berlin"})
@@ -85,6 +125,77 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(manual["status"], "ok")
         self.assertEqual(fetch.call_count, 2)
         fetch.assert_called_with("Berlin")
+
+    def test_weather_failure_uses_exponential_negative_cache_until_forced(self):
+        server.save_profile({"weather_location": "Berlin"})
+        forecast = {
+            "query": "Berlin",
+            "location": {"name": "Berlin", "country": "Deutschland"},
+            "model": "ECMWF",
+            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
+            "fetched_at": server.utc_now(),
+        }
+        with patch.object(server, "_fetch_weather_forecast", side_effect=[server.AppError(503, "upstream"), forecast]) as fetch:
+            first = server.weather_state(refresh=True)
+            second = server.weather_state(refresh=True)
+            forced = server.weather_state(refresh=True, force=True)
+        self.assertEqual(fetch.call_count, 2)
+        self.assertIn("Wetterdaten", first["error"])
+        self.assertIn("noch nicht erneut", second["error"])
+        self.assertEqual(forced["fetched_at"], forecast["fetched_at"])
+        self.assertEqual(server.get_kv(server.WEATHER_FAILURE_KEY), "")
+
+    def test_session_cookies_secure_flag_is_configurable_without_changing_csrf_visibility(self):
+        insecure = server.session_cookie_headers("session-token", "csrf-token")
+        self.assertNotIn("; Secure", insecure[0])
+        self.assertNotIn("; Secure", insecure[1])
+        self.assertIn("HttpOnly", insecure[0])
+        self.assertNotIn("HttpOnly", insecure[1])
+        with patch.object(server, "CONFIG", replace(server.CONFIG, secure_cookies=True)):
+            secure = server.session_cookie_headers("session-token", "csrf-token")
+        self.assertIn("; Secure", secure[0])
+        self.assertIn("; Secure", secure[1])
+        self.assertIn("Max-Age=2592000", secure[0])
+
+    def test_privacy_export_contains_archived_and_provider_state_without_sessions_or_credentials(self):
+        archived = server.upsert_workout_library([{
+            "id": "remote-template-1", "name": "Archived template", "type": "Ride",
+            "description": "local", "duration_minutes": 60,
+        }])[0]
+        server.update_workout_library_entry(archived["id"], {"action": "archive"})
+        server.set_kv("garmin_snapshot", json.dumps({"source": "Garmin", "days": []}))
+        server.set_kv(server.WEATHER_CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}}))
+        server.set_kv("calendar_display", json.dumps({"past_weeks": 2, "future_weeks": 6}))
+        server.set_kv("openai_conversation_id", "conv-test")
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO competition_sync_tombstones(intervals_event_id, external_id, created_at) VALUES (?, ?, ?)",
+                ("event-1", "external-1", server.utc_now()),
+            )
+            db.execute(
+                "INSERT INTO plan_adjustments(id, payload, status, created_at, applied_at) VALUES (?, ?, ?, ?, ?)",
+                ("adjustment-1", json.dumps({"reason": "test"}), "preview", server.utc_now(), None),
+            )
+        exported = server.privacy_export()
+        self.assertTrue(any(item.get("name") == "Archived template" for item in exported["workout_library"]))
+        self.assertEqual(exported["garmin_snapshot"]["source"], "Garmin")
+        self.assertEqual(exported["weather_cache"]["query"], "Berlin")
+        self.assertEqual(exported["application_state"]["calendar_display"]["future_weeks"], 6)
+        self.assertEqual(exported["competition_sync_tombstones"][0]["external_id"], "external-1")
+        self.assertEqual(exported["plan_adjustments"][0]["id"], "adjustment-1")
+        self.assertNotIn("sessions", exported)
+        export_text = json.dumps(exported, ensure_ascii=False)
+        self.assertNotIn("test-openai-key", export_text)
+        self.assertNotIn("test-intervals-key", export_text)
+        self.assertNotIn("test-password-123", export_text)
+
+    def test_privacy_delete_reports_remote_attempt_and_failure(self):
+        server.set_kv("openai_conversation_id", "conv-test")
+        with patch.object(server, "delete_remote_conversation", side_effect=server.AppError(503, "upstream")):
+            result = server.delete_local_data()
+        self.assertTrue(result["remote_delete_attempted"])
+        self.assertFalse(result["remote_conversation_deleted"])
+        self.assertTrue(result["local_data_deleted"])
 
     def test_weather_refresh_rechecks_adaptive_planning(self):
         server.save_profile({"weather_location": "Berlin"})
@@ -2688,6 +2799,15 @@ class CoachTests(unittest.TestCase):
         self.assertIn(f'app.js?v={asset_version}', markup)
         self.assertIn(f'intervals-coach-v{asset_version}', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
+
+    def test_privacy_and_remote_delete_ui_has_explicit_failure_states(self):
+        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        app_source = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="privacyDeleteNotice"', markup)
+        self.assertIn('id="remoteDeleteNotice"', markup)
+        self.assertIn("remote_delete_attempted", app_source)
+        self.assertIn("remoteDeleteFailure", app_source)
+        self.assertIn("renderRemoteDeleteNotice", app_source)
 
     def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
         today = server.local_now().date()
