@@ -241,6 +241,17 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Read-only-Coaching bleibt ohne zusätzlichen Bestätigungsdialog nutzbar.
 - [x] Alle Mutations- und Replaytests laufen im SQLCipher-Container grün.
 
+**Handover FT-004**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `fix/ft-004-coach-action-authorization`, Implementierung `b86b5ce`
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, dieses Handover-Dokument
+- **Verhaltensänderung:** Der normale Coach-Chat erhält nur Read-only-Tools. Lokale Coach-Änderungen sowie Bibliotheks- und Wettkampf-Remote-Syncs benötigen eine strukturierte Vorschau mit Objekt, Zielsystem, Diff und Payload-Hash, eine UI-Bestätigung und ein sessiongebundenes, kurzlebiges Einmal-Token. Alte direkte Remote-Sync-Endpunkte sind gesperrt.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py` erfolgreich; `docker build -t ai-coach:ft004 .` erfolgreich; vollständiger SQLCipher-Containerlauf `docker run --rm -v "${PWD}:/review:ro" -w /review ai-coach:ft004 python -m unittest discover -s tests -v`: 211 Tests in 1006.915 Sekunden, `OK`.
+- **Manuelle Prüfung:** UI-Preview-/Bestätigungsflows implementiert; Browser-Smoke-Test folgt mit FT-007.
+- **Offene Risiken:** Browser-Smoke-Test und Accessibility-Prüfung bleiben FT-007/FT-020 zugeordnet.
+- **Folgetasks:** FT-005 und FT-006 sind entblockt; FT-007 bleibt für die Browser-Abnahme erforderlich.
+
 ### - [ ] FT-005 – Löschdialog an tatsächlichen Datenumfang angleichen
 
 **Quelle:** DATA-01
