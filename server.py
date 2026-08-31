@@ -82,6 +82,10 @@ WORKOUT_LIBRARY_SYNC_LOCK = threading.Lock()
 COMPETITION_SYNC_LOCK = threading.Lock()
 PERFORMANCE_LOCK = threading.Lock()
 OPENAI_CONVERSATION_LOCK = threading.Lock()
+CHAT_QUEUE_LIMIT = 3
+CHAT_QUEUE = threading.BoundedSemaphore(CHAT_QUEUE_LIMIT)
+CHAT_LOCK_TIMEOUT_SECONDS = 30
+OPENAI_USAGE_LOCK = threading.RLock()
 MORNING_CHECKIN_LOCK = threading.Lock()
 GARMIN_LOCK = threading.Lock()
 EXTERNAL_CALENDAR_LOCK = threading.Lock()
@@ -230,6 +234,7 @@ class Config:
     github_token: str = os.environ.get("GITHUB_TOKEN", "")
     github_release_check_seconds: int = env_int("GITHUB_RELEASE_CHECK_SECONDS", GITHUB_RELEASE_CACHE_SECONDS)
     app_password: str = os.environ.get("APP_PASSWORD", "")
+    openai_daily_token_budget: int = env_int("OPENAI_DAILY_TOKEN_BUDGET", 100_000)
     # -1 disables automatic deletion; this is the safe default for an athlete's history.
     data_retention_days: int = env_int("DATA_RETENTION_DAYS", -1)
 
@@ -820,17 +825,27 @@ COACH_TOOLS = [
 
 
 class AppError(Exception):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, *, reason: str | None = None):
         super().__init__(message)
         self.status = status
         self.message = message
+        self.reason = reason
 
 
 def serialise_conversation(function):
     @wraps(function)
     def wrapped(*args, **kwargs):
-        with OPENAI_CONVERSATION_LOCK:
+        if not CHAT_QUEUE.acquire(blocking=False):
+            raise AppError(429, "Der Coach ist gerade ausgelastet. Bitte später erneut versuchen.", reason="chat_queue_full")
+        acquired = OPENAI_CONVERSATION_LOCK.acquire(timeout=CHAT_LOCK_TIMEOUT_SECONDS)
+        if not acquired:
+            CHAT_QUEUE.release()
+            raise AppError(409, "Die vorherige Coach-Anfrage läuft noch. Bitte erneut versuchen.", reason="chat_request_timeout")
+        try:
             return function(*args, **kwargs)
+        finally:
+            OPENAI_CONVERSATION_LOCK.release()
+            CHAT_QUEUE.release()
     return wrapped
 
 
@@ -959,6 +974,12 @@ def initialise_database() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS chat_tool_calls (
+                call_id TEXT PRIMARY KEY,
+                tool_name TEXT NOT NULL,
+                result TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS snapshots (
@@ -1890,6 +1911,11 @@ def load_garmin_fixture(days: int) -> dict[str, Any]:
     return payload
 
 
+def persist_garmin_error(message: Any, source: str = "sync") -> None:
+    safe_message = redact_text(str(message or "Garmin synchronization failed."))[:1000]
+    set_kv("last_garmin_error", json.dumps([{"source": source, "message": safe_message}], ensure_ascii=False))
+
+
 @garmin_operation
 def sync_garmin(days: int = 30) -> dict[str, Any]:
     fixture = garmin_fixture_path()
@@ -1898,6 +1924,7 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
             "External Garmin call skipped",
             extra={"event": "external_call_skipped", "context": {"service": "garmin", "operation": "sync", "reason": "library_unavailable"}},
         )
+        persist_garmin_error("Die optionale Garmin-Bibliothek ist nicht installiert.", "configuration")
         raise AppError(503, "Die optionale Garmin-Bibliothek ist nicht installiert. Für lokale Tests kann GARMIN_FIXTURE_PATH gesetzt werden.")
     if fixture is not None:
         if not GARMIN_LOCK.acquire(blocking=False):
@@ -1913,7 +1940,11 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
             set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             set_kv("last_garmin_sync_at", payload["synced_at"])
             set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
-            return {"status": "ok", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
+            return {"status": "partial" if payload.get("errors") else "ok", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
+        except Exception as exc:
+            error = redact_text(str(exc))[:1000]
+            set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
+            raise
         finally:
             set_kv("garmin_sync_status", "")
             GARMIN_LOCK.release()
@@ -1925,6 +1956,7 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
                 "context": {"service": "garmin", "operation": "sync", "reason": "not_configured"},
             },
         )
+        persist_garmin_error("GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist nicht konfiguriert.", "configuration")
         raise AppError(503, "GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist nicht konfiguriert.")
     if not GARMIN_LOCK.acquire(blocking=False):
         return {"status": "already_running"}
@@ -2021,7 +2053,11 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
         set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         set_kv("last_garmin_sync_at", payload["synced_at"])
         set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
-        return {"status": "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": pagination}
+        return {"status": "partial" if payload["errors"] else "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": pagination}
+    except Exception as exc:
+        error = redact_text(str(exc))[:1000]
+        set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
+        raise
     finally:
         set_kv("garmin_sync_status", "")
         GARMIN_LOCK.release()
@@ -3548,7 +3584,12 @@ def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     provider_message = str(error.get("message") or "").strip().casefold()
     searchable = " ".join((code, error_type, provider_message))
 
-    if code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(
+    if code in {"conversation_locked", "conversation_lock_timeout", "concurrent_request"} or (
+        "conversation" in searchable and "lock" in searchable
+    ):
+        reason = "conversation_locked"
+        message = "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen."
+    elif code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(
         marker in searchable for marker in ("insufficient_quota", "quota", "billing_hard_limit", "credits")
     ):
         reason = "insufficient_quota"
@@ -3725,7 +3766,7 @@ def http_json(
             exc_info=True,
         )
         if error_details:
-            raise AppError(exc.code if exc.code == 429 else 502, error_details["message"]) from exc
+            raise AppError(exc.code if exc.code == 429 else 502, error_details["message"], reason=error_details["reason"]) from exc
         raise AppError(502, upstream_http_error_message(exc.code, raw_error, service)) from exc
     except (URLError, TimeoutError) as exc:
         if service == "openai":
@@ -3749,7 +3790,7 @@ def http_json(
             },
             exc_info=True,
         )
-        raise AppError(502, "Externer Dienst ist nicht erreichbar.") from exc
+        raise AppError(502, "Externer Dienst ist nicht erreichbar.", reason="network_error") from exc
     except Exception as exc:
         if service == "openai":
             record_openai_status({
@@ -7150,7 +7191,7 @@ def performance_trend_average(snapshot: dict[str, Any], metrics: dict[str, dict[
     return intervals_performance_average([row for row in rows if isinstance(row, dict)], key, days, end_date)
 
 
-def openai_usage_summary() -> dict[str, Any]:
+def _openai_usage_summary_unlocked() -> dict[str, Any]:
     today = local_now().date().isoformat()
     try:
         usage = json.loads(get_kv("openai_usage") or "{}")
@@ -7168,26 +7209,44 @@ def openai_usage_summary() -> dict[str, Any]:
         status = json.loads(get_kv(OPENAI_STATUS_KEY) or "{}")
     except (TypeError, json.JSONDecodeError):
         status = {}
+    budget = max(0, int(CONFIG.openai_daily_token_budget))
+    try:
+        total_tokens = max(0, int(usage.get("total_tokens") or 0))
+    except (TypeError, ValueError, OverflowError):
+        total_tokens = 0
     return {
         **usage,
+        "budget_tokens": budget,
+        "budget_remaining": max(0, budget - total_tokens) if budget else None,
         "rate_limits": rate_limits if isinstance(rate_limits, dict) else {},
         "status": status if isinstance(status, dict) else {},
     }
 
 
-def record_openai_usage(response: dict[str, Any], operation: str) -> None:
+def openai_usage_summary() -> dict[str, Any]:
+    with OPENAI_USAGE_LOCK:
+        return _openai_usage_summary_unlocked()
+
+
+def _record_openai_usage_unlocked(response: dict[str, Any], operation: str) -> None:
+    def safe_count(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError, OverflowError):
+            return 0
+
     usage = openai_usage_summary()
     raw = response.get("usage") if isinstance(response, dict) else None
     if not isinstance(raw, dict):
         raw = {}
-    input_tokens = int(raw.get("input_tokens") or raw.get("prompt_tokens") or 0)
-    output_tokens = int(raw.get("output_tokens") or raw.get("completion_tokens") or 0)
-    total_tokens = int(raw.get("total_tokens") or input_tokens + output_tokens)
+    input_tokens = safe_count(raw.get("input_tokens") or raw.get("prompt_tokens"))
+    output_tokens = safe_count(raw.get("output_tokens") or raw.get("completion_tokens"))
+    total_tokens = safe_count(raw.get("total_tokens")) or input_tokens + output_tokens
     usage.update({
-        "requests": int(usage["requests"]) + 1,
-        "input_tokens": int(usage["input_tokens"]) + input_tokens,
-        "output_tokens": int(usage["output_tokens"]) + output_tokens,
-        "total_tokens": int(usage["total_tokens"]) + total_tokens,
+        "requests": safe_count(usage.get("requests")) + 1,
+        "input_tokens": safe_count(usage.get("input_tokens")) + input_tokens,
+        "output_tokens": safe_count(usage.get("output_tokens")) + output_tokens,
+        "total_tokens": safe_count(usage.get("total_tokens")) + total_tokens,
         "last_operation": operation,
         "last_request_at": utc_now(),
     })
@@ -7198,9 +7257,36 @@ def record_openai_usage(response: dict[str, Any], operation: str) -> None:
     )
 
 
+def record_openai_usage(response: dict[str, Any], operation: str) -> None:
+    with OPENAI_USAGE_LOCK:
+        _record_openai_usage_unlocked(response, operation)
+
+
+def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise AppError(502, "OpenAI response is not a JSON object.", reason="invalid_response")
+    if result.get("error"):
+        record_openai_status({"state": "error", "reason": "response_error", "message": "OpenAI returned an error response.", "http_status": 200})
+        raise AppError(502, "OpenAI returned an error response.", reason="response_error")
+    if path == "/responses":
+        response_status = str(result.get("status") or "").casefold()
+        if response_status in {"failed", "cancelled"}:
+            record_openai_status({"state": "error", "reason": "response_failed", "message": "OpenAI did not complete the coach response.", "http_status": 200})
+            raise AppError(502, "OpenAI did not complete the coach response.", reason="response_failed")
+        if response_status and response_status not in {"completed", "incomplete", "in_progress", "queued"}:
+            record_openai_status({"state": "error", "reason": "invalid_response_status", "message": "OpenAI returned an unknown response status.", "http_status": 200})
+            raise AppError(502, "OpenAI returned an unknown response status.", reason="invalid_response_status")
+    return result
+
+
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+    if path == "/responses":
+        usage = openai_usage_summary()
+        budget = int(usage.get("budget_tokens") or 0)
+        if budget and int(usage.get("total_tokens") or 0) >= budget:
+            raise AppError(429, "Das tägliche OpenAI-Tokenbudget ist erreicht. Bitte morgen erneut versuchen.", reason="daily_token_budget")
     request_payload = dict(payload)
     if path == "/responses":
         request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
@@ -7212,6 +7298,7 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         timeout=90,
         service="openai",
     )
+    result = _validate_openai_response(path, result)
     if not isinstance(result, dict):
         raise AppError(502, "OpenAI hat eine unerwartete Antwort zurückgegeben.")
     record_openai_usage(result, path.strip("/") or "request")
@@ -7305,7 +7392,7 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             return openai_request("/responses", request_payload)
         except AppError as exc:
-            if "conversation_locked" not in exc.message or attempt == 2:
+            if exc.reason != "conversation_locked" or attempt == 2:
                 raise
             delay = 2 ** attempt
             LOGGER.warning(
@@ -7343,9 +7430,42 @@ def reset_coach_chat() -> dict[str, Any]:
                 LOGGER.warning("Remote OpenAI conversation could not be deleted during reset", extra={"event": "openai_reset_remote_delete_failed"}, exc_info=True)
         with DB_LOCK, database() as db:
             db.execute("DELETE FROM messages")
+            db.execute("DELETE FROM chat_tool_calls")
         set_kv("openai_conversation_id", "")
         set_kv("last_chat_reset_at", utc_now())
     return {"status": "ok", "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
+
+
+def cached_chat_tool_result(call_id: Any) -> dict[str, Any] | None:
+    normalized = str(call_id or "").strip()
+    if not normalized or len(normalized) > 200:
+        return None
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT result FROM chat_tool_calls WHERE call_id=?", (normalized,)).fetchone()
+    if not row:
+        return None
+    try:
+        result = json.loads(row["result"])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return result if isinstance(result, dict) else None
+
+
+def remember_chat_tool_result(call_id: Any, tool_name: Any, result: dict[str, Any]) -> None:
+    normalized = str(call_id or "").strip()
+    if not normalized or len(normalized) > 200:
+        return
+    payload = json.dumps(result, ensure_ascii=False)
+    if len(payload) > MAX_BODY_BYTES:
+        return
+    with DB_LOCK, database() as db:
+        db.execute(
+            "INSERT OR IGNORE INTO chat_tool_calls(call_id, tool_name, result, created_at) VALUES (?, ?, ?, ?)",
+            (normalized, str(tool_name or "unknown")[:100], payload, utc_now()),
+        )
+        db.execute(
+            "DELETE FROM chat_tool_calls WHERE call_id IN (SELECT call_id FROM chat_tool_calls ORDER BY created_at DESC LIMIT -1 OFFSET 500)"
+        )
 
 
 def output_text(response: dict[str, Any]) -> str:
@@ -7616,6 +7736,11 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True) -> dict[str, 
     for item in response.get("output", []):
         if not isinstance(item, dict) or item.get("type") != "function_call":
             continue
+        call_id = str(item.get("call_id") or "").strip()
+        cached_result = cached_chat_tool_result(call_id)
+        if cached_result is not None:
+            tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(cached_result)})
+            continue
         try:
             arguments = json.loads(item.get("arguments") or "{}")
             if item.get("name") in {
@@ -7748,7 +7873,8 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True) -> dict[str, 
                 continue
         except (AppError, json.JSONDecodeError, TypeError) as exc:
             result = {"ok": False, "error": str(exc)}
-        tool_outputs.append({"type": "function_call_output", "call_id": item.get("call_id"), "output": json.dumps(result)})
+        remember_chat_tool_result(call_id, item.get("name"), result)
+        tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result)})
     if tool_outputs:
         response = responses_request(
             {
@@ -8115,11 +8241,13 @@ def privacy_export() -> dict[str, Any]:
         drafts = list_workout_drafts()
         library = list_workout_library()
         competitions = list_competitions()
+        tool_calls = [dict(row) for row in db.execute("SELECT call_id, tool_name, result, created_at FROM chat_tool_calls ORDER BY created_at").fetchall()]
     return {
         "exported_at": utc_now(),
         "profile": get_profile(),
         "competitions": competitions,
         "messages": messages,
+        "chat_tool_calls": tool_calls,
         "snapshots": snapshots,
         "legacy_workout_drafts": drafts,
         "workout_library": library,
@@ -8134,6 +8262,7 @@ def privacy_export() -> dict[str, Any]:
 CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "kv": {"key", "value", "updated_at"},
     "messages": {"id", "role", "content", "created_at"},
+    "chat_tool_calls": {"call_id", "tool_name", "result", "created_at"},
     "snapshots": {"id", "payload", "created_at"},
     "workout_drafts": {"id", "payload", "status", "intervals_event_id", "error", "created_at", "updated_at"},
     "workout_library": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "last_synced_at", "updated_at"},
@@ -8253,7 +8382,7 @@ def delete_local_data() -> dict[str, Any]:
             LOGGER.warning("Remote OpenAI conversation could not be deleted", extra={"event": "privacy_remote_delete_failed"}, exc_info=True)
     with DB_LOCK, database() as db:
         for table in (
-            "messages", "snapshots", "workout_drafts", "workout_library", "competitions", "training_plans",
+            "messages", "chat_tool_calls", "snapshots", "workout_drafts", "workout_library", "competitions", "training_plans",
             "athlete_checkins", "activity_feedback", "plan_adjustments", "public_event_candidates", "public_event_sources", "external_calendar_events", "sessions",
         ):
             db.execute(f"DELETE FROM {table}")

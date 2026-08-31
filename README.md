@@ -110,6 +110,10 @@ It is not intended to be exposed directly to the public internet.
   and the classified status of the last API call. Account dollar balances are
   available through the OpenAI billing dashboard or authorized organization
   access, not through this application.
+- Chat requests use a bounded queue, retry only structured conversation-lock
+  failures, and persist tool-call results so retried follow-ups do not repeat
+  local mutations. `OPENAI_DAILY_TOKEN_BUDGET` can stop new Responses requests
+  after a configurable local daily token limit; `0` disables that guard.
 
 ## Loading and synchronization
 
@@ -222,6 +226,7 @@ Other supported operational variables are:
 
 ```text
 OPENAI_MODEL=gpt-5.6-sol
+OPENAI_DAILY_TOKEN_BUDGET=100000
 DATA_RETENTION_DAYS=-1
 PORT=8090
 DATA_DIR=/data
