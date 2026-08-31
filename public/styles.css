@@ -462,8 +462,6 @@ h2 {
 .parallel-cycling-option { display: flex; align-items: flex-start; gap: 8px; color: var(--ink); font-size: .8rem; line-height: 1.35; }
 .parallel-cycling-option input { flex: 0 0 auto; margin-top: 2px; accent-color: var(--orange); }
 .activity-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: -3px 0 15px; }
-.activity-search { max-width: 420px; margin: 0 0 12px; color: var(--muted); font-size: .72rem; }
-.activity-search input { margin-top: 6px; padding: 9px 11px; font-size: .78rem; }
 .activity-date-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 0 0 14px; color: var(--muted); font-size: .68rem; }
 .activity-date-filter label { width: min(150px, calc(50% - 4px)); }
 .activity-date-filter input { margin-top: 5px; padding: 8px 9px; font-size: .76rem; }
