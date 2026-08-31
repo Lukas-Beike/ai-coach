@@ -451,6 +451,9 @@ h2 {
 .planned-origin { display: grid; gap: 3px; margin-bottom: 12px; padding: 10px 11px; border-left: 3px solid var(--orange); border-radius: 8px; color: var(--muted); background: rgba(255, 159, 10, .08); font-size: .73rem; line-height: 1.4; }
 .planned-origin strong { color: #ffcc80; }
 .parallel-warning { margin: 0 0 16px; padding: 15px; border: 1px solid rgba(255, 159, 10, .45); border-radius: 17px; color: var(--ink); background: rgba(255, 159, 10, .09); }
+.remote-delete-notice { display: grid; gap: 6px; margin: 0 0 16px; padding: 12px 14px; border: 1px solid rgba(255, 69, 58, .55); border-radius: 14px; color: #ffcbc7; background: rgba(255, 69, 58, .1); font-size: .74rem; line-height: 1.4; }
+.remote-delete-notice strong { color: #fff; }
+.remote-delete-notice .secondary-button { justify-self: start; }
 .parallel-warning[hidden] { display: none; }
 .parallel-warning > strong { display: block; margin-bottom: 5px; }
 .parallel-warning > p { margin: 0 0 13px; color: var(--muted); font-size: .78rem; line-height: 1.45; }

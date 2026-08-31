@@ -30,6 +30,7 @@ const state = {
   notificationKeys: new Set(),
   quickTemplatesVisible: false,
   activityTracked: false,
+  remoteDeleteFailure: null,
   libraryFilter: "active",
 };
 const VOICE_MAX_DURATION_MS = 60_000;
@@ -491,6 +492,25 @@ function renderExternalCalendar(data) {
     return `<div class="external-calendar-event"><strong>${escapeHtml(String(event.name || "Kalendereintrag"))}</strong><span>${escapeHtml(String(event.event_date || ""))} · ${escapeHtml(time)} · ${escapeHtml(duration)} · ${escapeHtml(impact)}</span></div>`;
   }).join("");
   root.innerHTML = `<div class="external-calendar-heading"><strong>Externe Termine</strong><span>nächste 8 Wochen · ${events.length} Einträge</span></div>${items}`;
+}
+
+function renderRemoteDeleteNotice() {
+  const root = $("#remoteDeleteNotice");
+  if (!root) return;
+  root.replaceChildren();
+  const failure = state.remoteDeleteFailure;
+  root.hidden = !failure;
+  if (!failure) return;
+  const title = document.createElement("strong");
+  title.textContent = `Remote-Löschung fehlgeschlagen: ${failure.name || "Geplante Einheit"}`;
+  const message = document.createElement("span");
+  message.textContent = `${failure.message || "Der Remote-Kalendereintrag wurde nicht bestätigt gelöscht."} Bitte synchronisieren und den Eintrag erneut prüfen.`;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "secondary-button";
+  close.textContent = "Hinweis schließen";
+  close.addEventListener("click", () => { state.remoteDeleteFailure = null; renderRemoteDeleteNotice(); });
+  root.append(title, message, close);
 }
 
 function renderPublicCalendar(data) {
@@ -1526,9 +1546,12 @@ async function deletePlanned(eventId, button, name) {
   button.textContent = "Wird gelöscht…";
   try {
     await api(`/api/planned/${encodeURIComponent(eventId)}`, { method: "DELETE" });
+    state.remoteDeleteFailure = null;
     toast("Geplante Einheit gelöscht");
     await load();
   } catch (error) {
+    state.remoteDeleteFailure = { name: name || "Geplante Einheit", message: error.message };
+    renderRemoteDeleteNotice();
     toast(error.message, true);
     button.disabled = false;
     button.textContent = "Einheit löschen";
@@ -2764,6 +2787,7 @@ function render(data) {
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);
+  renderRemoteDeleteNotice();
   renderQuickMessageTemplates();
   notifyState(data);
   renderStatus(data);
@@ -3355,7 +3379,14 @@ async function downloadPrivacyExport() {
 async function deletePrivacyData() {
   if (!window.confirm("Alle lokalen Chats, Snapshots, Entwürfe und Profile löschen? Dieser Schritt kann nicht rückgängig gemacht werden.")) return;
   try {
-    await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: "DELETE" }) });
+    const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: "DELETE" }) });
+    const notice = $("#privacyDeleteNotice");
+    if (notice) {
+      notice.hidden = !(result.remote_delete_attempted && !result.remote_conversation_deleted);
+      notice.textContent = notice.hidden
+        ? ""
+        : "Lokale Daten wurden gelöscht, aber die OpenAI-Konversation konnte remote nicht bestätigt gelöscht werden. Prüfe den Anbieterstatus separat.";
+    }
     toast("Lokale Daten gelöscht");
     await load();
   } catch (error) { toast(error.message, true); }

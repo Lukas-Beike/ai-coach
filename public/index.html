@@ -70,6 +70,7 @@
         <div class="section-heading">
           <div><span class="eyebrow">KALENDER</span><h2>Geplant <span id="planningDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2><span id="planningSummary" class="tab-sync-detail"></span></div>
         </div>
+        <div id="remoteDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
         <div id="parallelCyclingWarning" class="parallel-warning" hidden></div>
         <div id="adaptivePlanningNotice" class="adaptive-planning-notice" hidden role="status">
           <div><strong>Adaptive Anpassung nötig</strong><small id="adaptivePlanningCaption">Die aktualisierte Planung wartet auf deine Prüfung.</small></div>
@@ -246,6 +247,7 @@
             <button id="privacyExportButton" type="button" class="secondary-button">Daten exportieren</button>
             <button id="privacyDeleteButton" type="button" class="secondary-button danger-button">Lokale Daten löschen</button>
           </div>
+          <div id="privacyDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
           <div class="settings-inline-action backup-actions">
             <div><strong>Verschlüsseltes Datenbank-Backup</strong><span>Die Datei kann nur mit demselben APP_PASSWORD wiederhergestellt werden.</span></div>
             <button id="backupDownloadButton" type="button" class="secondary-button">Backup herunterladen</button>

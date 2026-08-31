@@ -356,13 +356,16 @@ not request payloads or credentials. Client disconnects such as a closed
 browser connection are handled as normal aborted requests rather than internal
 server failures.
 
-The **Einstellungen** tab allows the athlete to export local data as JSON or delete
-local chats, snapshots, legacy drafts, library entries, competitions, and profile
-data. The database file itself remains in place. Chat reset and local cleanup
-also attempt to delete the stored OpenAI conversation; data held by external
+The **System** tab allows the athlete to export local data as JSON or delete
+local chats, snapshots, legacy drafts, active and archived library entries,
+competitions, plans, check-ins, feedback, provider snapshots, calendar imports,
+and profile state. Session cookies and server credentials are never part of the
+export. The database file itself remains in place. Chat reset and local cleanup
+also attempt to delete the stored OpenAI conversation; if that remote deletion
+cannot be confirmed, the UI shows an explicit warning. Data held by external
 providers remains subject to their own policies.
 
-For Intervals.icu and Garmin, the Einstellungen tab also offers a full local
+For Intervals.icu and Garmin, the System tab also offers a full local
 resynchronization. It removes only the locally cached data for that provider
 and then fetches it again; cloud data, credentials, and Garmin tokens are not
 deleted. While this operation runs, syncs for the affected provider and
@@ -377,7 +380,13 @@ the backup database. Before replacement, the current database is retained as a
 `*.pre-restore-*` copy in `/data`. Keep both files protected.
 
 The login session cookie is valid for 30 days and is protected with `HttpOnly`
-and `SameSite=Strict` attributes.
+and `SameSite=Strict` attributes. For HTTPS reverse-proxy deployments, set
+`COOKIE_SECURE=true`; this adds the `Secure` attribute to the session and CSRF
+cookies. Keep it `false` for the documented local HTTP development flow.
+
+Open-Meteo failures are shown without exposing provider details and are retried
+with an increasing local backoff. A forced manual weather refresh bypasses that
+backoff.
 
 ## Development and testing
 
