@@ -1,0 +1,125 @@
+# Feature- und Bug-Review: Umsetzungsplan
+
+Stand: 2026-08-31  
+Basis: `develop` / `45b5ca3`
+
+## Arbeitsregeln
+
+- Jedes Workitem erhält einen eigenen Branch aus dem aktuellen `develop`.
+- Vor Beginn und unmittelbar vor dem PR wird der Branch auf `develop` rebased.
+- Pro Workitem: implementieren, Tests ergänzen/ausführen, Conventional Commit,
+  PR eröffnen, Squash-Auto-Merge aktivieren und Merge-/Check-Status prüfen.
+- Erst nach bestätigtem Auto-Merge wird das nächste Workitem begonnen.
+- Keine Secrets, echten Datenbanken, Garmin-Tokens oder Root-`.env`-Werte in
+  Tests, Logs, Commits oder PRs.
+
+## Workitems
+
+### W0 – Task-Tracking
+
+- [x] `Task.md` anlegen und in einem eigenen Branch committen/mergen.
+
+### W1 – Sichere Provider-Resyncs
+
+- [ ] Voll-Resync lädt und validiert neue Daten vor dem Ersetzen.
+- [ ] Letzte gute Snapshots bleiben bei Fehlern erhalten.
+- [ ] Lokale Wettbewerbe und Sync-Tombstones bleiben autoritativ erhalten.
+- [ ] Garmin-Snapshot bleibt bei fehlgeschlagenem Voll-Resync erhalten.
+- [ ] Regressionstests für Erfolg, Fehler und lokale Datensätze ergänzen.
+
+### W2 – Transaktionssicheres Backup und Restore
+
+- [ ] Konsistenten Datenbank-Snapshot erstellen.
+- [ ] Restore gegen vollständiges aktuelles Schema, Migrationen und Integrität prüfen.
+- [ ] Restore-Sessions invalidieren und erneute Anmeldung erzwingen.
+- [ ] Regressionstests für unvollständige, beschädigte und gültige Backups ergänzen.
+
+### W3 – Sichere Remote-Kalenderaktionen
+
+- [ ] Löschen ausschließlich für zukünftige, app-eigene Workout-Events erlauben.
+- [ ] Rennen, Wettbewerbe und fremde Remote-Events serverseitig schützen.
+- [ ] UI nur mit zulässigen Löschaktionen versehen.
+- [ ] Tests für Kategorien, External-IDs und nicht erlaubte Events ergänzen.
+
+### W4 – Coach-Mutationen und Morgen-Check-in absichern
+
+- [ ] Automatischer Morgen-Check-in bleibt vollständig read-only.
+- [ ] Library-, Plan- und Activity-Feedback-Mutationen benötigen eine explizite
+  aktuelle Nutzeraktion/Bestätigung.
+- [ ] Prompt-Injection- und Halluzinationsfälle dürfen keine dauerhaften
+  Mutationen auslösen.
+- [ ] Idempotenz gegen doppelte Tool-Aufrufe ergänzen.
+
+### W5 – Kanonische lokale Planung
+
+- [ ] Lokale und Remote-geplante Einheiten in einem kanonischen Read-Model vereinen.
+- [ ] Kalender, Compliance, Wochenübersicht, Wetter und Konflikte verwenden dieselbe Sicht.
+- [ ] Sync-Quelle, lokale ID, Remote-ID und Sync-Status sichtbar machen.
+- [ ] Lokale Einheiten im Kalender bearbeiten/löschen/verschieben können.
+
+### W6 – Adaptive Planung mit Concurrency-Schutz
+
+- [ ] Preview speichert Version/Hash der betroffenen Einheit.
+- [ ] Apply lehnt veraltete Previews ab und überschreibt keine späteren Änderungen.
+- [ ] Fehlende Ziele werden als stale/partial gemeldet, nicht als erfolgreich angewendet.
+- [ ] Preview-/Apply- und Wiederholungs-Tests ergänzen.
+
+### W7 – Check-in, Datum und Zeitzonen
+
+- [ ] Vollständige Check-in-PWA-Oberfläche mit Verlauf und Bearbeitung ergänzen.
+- [ ] Serverweite lokale Datumsfunktion anhand der Profil-Zeitzone verwenden.
+- [ ] Frontend behandelt Datum-only-Werte ohne UTC-Verschiebung.
+- [ ] Regeln für heutige, zukünftige und vergangene Trainingsdaten vereinheitlichen.
+- [ ] Zeitzonenvalidierung beim Profil speichern.
+
+### W8 – Provider- und Kalender-Sync-Robustheit
+
+- [ ] `remote_missing` tatsächlich automatisch reconciliieren/wiederherstellen.
+- [ ] iCalendar-Feeds strikt validieren und letzten guten Stand behalten.
+- [ ] Wiederkehrende iCalendar-Termine mit begrenzter Expansion unterstützen oder klar ablehnen.
+- [ ] Kalender-SSRF/DNS-Rebinding-Schutz vervollständigen.
+- [ ] Intervals-/Garmin-Aktivitäten paginieren und Teilstände transparent machen.
+
+### W9 – Wettbewerbs- und Konfliktauflösung
+
+- [ ] Identity-only-Matches dürfen lokale Änderungen nicht still verwerfen.
+- [ ] Konfliktstatus und klare Merge-/Adopt-Strategie ergänzen.
+- [ ] Wettbewerbs- und Kalenderkonflikte mit Zeitfenstern statt nur Datum bewerten,
+  sofern die Providerdaten das zulassen.
+
+### W10 – Chat-, Kosten- und Statuszuverlässigkeit
+
+- [ ] Provider-Lock-Retry anhand strukturierter Fehlergründe reparieren.
+- [ ] Responses-Fehlerstatus strikt validieren.
+- [ ] Tool-Mutationen und Follow-up-Requests idempotent/reconciliierbar machen.
+- [ ] Chat-Warteschlange begrenzen/abbrechbar machen und Kostenbudget vorsehen.
+- [ ] Usage-Zähler atomar und zur lokalen Tagesgrenze passend aktualisieren.
+- [ ] Garmin-Fehlerstatus zuverlässig persistieren.
+
+### W11 – Bibliothek, Kalenderhorizont und PWA-Produktlücken
+
+- [ ] Library- und Mehrwochenplan-Ansicht vollständig nutzbar machen.
+- [ ] Lifecycle für lokale Einheiten (editieren, archivieren, löschen, verschieben)
+  ergänzen.
+- [ ] Kalenderhorizont mit tatsächlich geladenem Providerfenster synchronisieren.
+- [ ] Unbenutzte Public-Calendar-Importreste entfernen oder vollständig anbinden.
+- [ ] Open-Meteo-Attribution sichtbar und korrekt darstellen.
+
+### W12 – Datenschutz, Security-Polish, Tests und Dokumentation
+
+- [ ] Datenschutzexport vollständig definieren und implementieren.
+- [ ] Ergebnis eines fehlgeschlagenen Remote-Löschens in der UI sichtbar machen.
+- [ ] Cookies für HTTPS-Deployment härten.
+- [ ] Wetter-Fehler mit Backoff/negativem Cache behandeln.
+- [ ] Native Tests von Root-`.env` entkoppeln, ohne SQLCipher-Schutz abzuschwächen.
+- [ ] Frontend-/Browser-Smoke-Checks und fehlende Zustandsübergangstests ergänzen.
+- [ ] README, API-Verhalten und Release-/Asset-Versionen aktualisieren.
+
+## Abschlusskriterien
+
+- [ ] Alle Workitems sind implementiert, getestet und jeweils per PR gesquasht gemerged.
+- [ ] `python -m unittest discover -s tests -v` im vorgesehenen Docker-Testlauf erfolgreich.
+- [ ] `python -m py_compile server.py tests/test_server.py` erfolgreich.
+- [ ] Relevanter Docker-Build erfolgreich.
+- [ ] Browser-Smoke-Checks für Login, Planung, Check-in, PWA-Assets und Notifications durchgeführt.
+- [ ] Arbeitsbaum enthält keine unbeabsichtigten Änderungen oder Runtime-Dateien.
