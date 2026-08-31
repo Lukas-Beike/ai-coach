@@ -3983,14 +3983,14 @@ class CoachTests(unittest.TestCase):
             handler.wfile = Mock()
             return handler
 
-        first = make_handler("/app.js?v=119")
+        first = make_handler("/app.js?v=120")
         server.RequestHandler.send_static(first, "/app.js")
         response_headers = {call.args[0]: call.args[1] for call in first.send_header.call_args_list}
         self.assertEqual(first.send_response.call_args.args, (200,))
         self.assertEqual(response_headers["Cache-Control"], "public, max-age=31536000, immutable")
         self.assertTrue(response_headers["ETag"].startswith('"'))
 
-        cached = make_handler("/app.js?v=119", {"If-None-Match": response_headers["ETag"]})
+        cached = make_handler("/app.js?v=120", {"If-None-Match": response_headers["ETag"]})
         server.RequestHandler.send_static(cached, "/app.js")
         self.assertEqual(cached.send_response.call_args.args, (304,))
         cached.wfile.write.assert_not_called()

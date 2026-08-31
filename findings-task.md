@@ -623,7 +623,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-014.
 - **Folgetasks:** FT-015 ist entblockt.
 
-### - [ ] FT-015 – Versionierte Assets effizient cachen und komprimieren
+### - [x] FT-015 – Versionierte Assets effizient cachen und komprimieren
+
+**Status:** abgeschlossen
 
 **Quelle:** PERF-04
 **Ziel:** Versionierte JS/CSS/Bildassets werden langfristig gecacht; HTML und Service Worker bleiben revalidierbar.
@@ -631,18 +633,30 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Cachepolitik je Assettyp definieren.
-- [ ] Versionierte Assets cache-first und immutable ausliefern.
-- [ ] HTML und Service Worker network-first/revalidate halten.
-- [ ] ETag oder Last-Modified dort ergänzen, wo Versionierung nicht genügt.
-- [ ] Gzip/Brotli am dokumentierten HTTPS-Reverse-Proxy konfigurieren, nicht über unsichere öffentliche Exposition.
-- [ ] Offline-Upgrade und alte Cachebereinigung testen.
+- [x] Cachepolitik je Assettyp definieren.
+- [x] Versionierte Assets cache-first und immutable ausliefern.
+- [x] HTML und Service Worker network-first/revalidate halten.
+- [x] ETag oder Last-Modified dort ergänzen, wo Versionierung nicht genügt.
+- [x] Gzip/Brotli am dokumentierten HTTPS-Reverse-Proxy konfigurieren, nicht über unsichere öffentliche Exposition.
+- [x] Offline-Upgrade und alte Cachebereinigung testen.
 
 **Abnahmekriterien**
 
-- [ ] Zweiter Assetabruf verwendet Cache oder 304.
-- [ ] Neue Assetversion wird nach Deployment zuverlässig geladen.
-- [ ] API-Antworten und sensible States landen nicht im Service-Worker-Cache.
+- [x] Zweiter Assetabruf verwendet Cache oder 304.
+- [x] Neue Assetversion wird nach Deployment zuverlässig geladen.
+- [x] API-Antworten und sensible States landen nicht im Service-Worker-Cache.
+
+**Handover FT-015**
+
+- **Status:** abgeschlossen
+- **Branch und Commits:** `feat/ft-015-asset-cache`, `b0075e8`, `ff2fd8f`, `08d7d3c`; PR folgt nach finalem Rebase
+- **Geänderte Dateien:** `server.py`, `public/index.html`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, dieses Handover-Dokument
+- **Verhaltensänderung:** Versionierte JS/CSS/Bildassets verwenden `cache-first`, eine einjährige immutable Cache-Control-Policy und ETags. HTML, Manifest und Service Worker bleiben mit `no-cache` revalidierbar; der Service Worker lädt übrige Nicht-API-Anfragen network-first, löscht alte Cache-Versionen bei Aktivierung und ignoriert API-Anfragen.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check`, `docker build -t ai-coach:ft015 .` und vier parallele SQLCipher-Shards mit `62 + 61 + 61 + 61 = 245` Tests erfolgreich, alle `OK`.
+- **Review:** Diff-Review ohne offene Findings. Ein bestehender Test erwartete nach dem erforderlichen Asset-Bump noch `v119`; die Assertion wurde auf `v120` aktualisiert und der betroffene Shard erneut erfolgreich ausgeführt.
+- **Manuelle Prüfung:** CI-Browser-Smoke folgt im PR; Asset-Query-Versionen und Service-Worker-Cache wurden von v119 auf v120 aktualisiert. Gzip/Brotli bleibt auf dem vertrauenswürdigen HTTPS-Reverse-Proxy.
+- **Offene Risiken:** Keine für FT-015.
+- **Folgetasks:** FT-016 ist entblockt.
 
 ---
 
