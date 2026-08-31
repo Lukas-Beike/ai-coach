@@ -1548,6 +1548,22 @@ function updateChatComposerVisibility() {
   if (jump) jump.hidden = !hidden || !panel.classList.contains("active");
 }
 
+function jumpToChatComposer() {
+  const input = $("#messageInput");
+  if (!input) return;
+  const reducedMotion = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  let focused = false;
+  const focusComposer = () => {
+    if (focused) return;
+    focused = true;
+    updateChatComposerVisibility();
+    input.focus({ preventScroll: true });
+  };
+  if (!reducedMotion && "onscrollend" in window) window.addEventListener("scrollend", focusComposer, { once: true });
+  window.setTimeout(focusComposer, reducedMotion ? 0 : 500);
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
+}
+
 function updateChatQueueStatus() {
   const status = $("#chatQueueStatus");
   if (!status) return;
@@ -3382,8 +3398,7 @@ $("#quickMessageTemplates").addEventListener("click", (event) => {
 $("#voiceButton").addEventListener("click", toggleVoiceInput);
 $("#pwaUpdateButton").addEventListener("click", applyPwaUpdate);
 $("#chatJumpToComposer").addEventListener("click", () => {
-  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
-  requestAnimationFrame(() => $("#messageInput")?.focus());
+  jumpToChatComposer();
 });
 $("#headerActionButton").addEventListener("click", (event) => {
   if (event.currentTarget.dataset.action === "performance") refreshPerformance();
