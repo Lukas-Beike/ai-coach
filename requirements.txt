@@ -1,3 +1,4 @@
 garminconnect==0.3.11
 curl_cffi==0.16.2
 sqlcipher3-binary==0.6.0
+tzdata==2025.2

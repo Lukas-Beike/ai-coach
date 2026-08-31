@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=99">
+  <link rel="stylesheet" href="/styles.css?v=101">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -114,7 +114,7 @@
             <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Intervals.icu stehen…"></textarea></label>
             <div class="form-grid">
               <label>Coaching-Stil<input name="coaching_style"></label>
-              <label>Zeitzone<input name="timezone"></label>
+              <label>Zeitzone<input name="timezone" placeholder="Europe/Berlin" autocomplete="off"><small>IANA-Zeitzone, zum Beispiel Europe/Berlin oder America/New_York</small></label>
             </div>
             <label>Wetter-/Urlaubsstandort<input name="weather_location" placeholder="Stadt oder PLZ, z. B. Münster"></label>
             <p class="fine-print profile-help">Diesen Standort kannst du jederzeit ändern, zum Beispiel für einen Urlaub. Eine Stadt oder PLZ reicht; konkrete Zeitvorschläge gibt es nur für die nächsten 5 Tage.</p>
@@ -122,6 +122,27 @@
 
           <button type="submit">Athletenkontext speichern</button>
         </form>
+        <section class="checkin-section" aria-labelledby="checkinTitle">
+          <div class="settings-section-heading">
+            <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in</h3><p>Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach fest. Ein Datum kann später bearbeitet werden, aber nicht in der Zukunft liegen.</p></div>
+          </div>
+          <form id="checkinForm" class="checkin-form">
+            <div class="form-grid">
+              <label>Datum<input name="checkin_date" type="date" required></label>
+              <label>Verfügbare Minuten<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
+              <label>Muskelkater<input name="soreness" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+              <label>Stress<input name="stress" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+              <label>Motivation<input name="motivation" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+              <label>Session-RPE<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+            </div>
+            <label>Krankheit<textarea name="illness" rows="2" placeholder="Zum Beispiel Erkältung, Symptome oder Medikamente"></textarea></label>
+            <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
+            <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
+            <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
+            <button type="submit">Tages-Check-in speichern</button>
+          </form>
+          <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
+        </section>
         <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
           <div class="context-preview-heading">
             <div><span class="eyebrow">TRANSPARENZ</span><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>
@@ -267,6 +288,6 @@
       </div>
     </div>
   </dialog>
-  <script src="/app.js?v=100" defer></script>
+  <script src="/app.js?v=101" defer></script>
 </body>
 </html>
