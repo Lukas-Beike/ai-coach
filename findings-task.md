@@ -157,10 +157,10 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Handover FT-002**
 
 - **Status:** abgeschlossen
-- **Branch und Commit:** `fix/ft-002-readonly-library-sync`, Commit folgt nach Review
+- **Branch und Commit:** `fix/ft-002-readonly-library-sync`, Implementierung `3d7e92e`
 - **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, dieses Handover-Dokument
 - **Verhaltensänderung:** Provider-Aktivitätssync und Coach-Bibliotheksrefresh lesen nur noch; Bibliotheks-Remote-Mutationen benötigen eine aktuelle, zehn Minuten gültige Vorschau mit Fingerprint und sichtbarer UI-Bestätigung.
-- **Validierung:** fokussierter SQLCipher-Containerlauf mit 12 Tests: 10 grün, zwei erwartete Wettkampf-Charakterisierungsfehlschläge; Syntaxprüfung erfolgreich.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py` erfolgreich; `docker build -t ai-coach:ft002 .` erfolgreich; vollständiger SQLCipher-Containerlauf `docker run --rm -v "${PWD}:/review:ro" -w /review ai-coach:ft002 python -m unittest discover -s tests -v`: 200 Tests in 1107.328 Sekunden, `OK (expected failures=2)`, keine unerwarteten Fehler.
 - **Manuelle Prüfung:** UI-Flow implementiert; Browser-Smoke-Test folgt mit FT-007.
 - **Offene Risiken:** Startup-/Daily-Wettkampf-Push bleibt bis FT-003 durch `expectedFailure` charakterisiert.
 - **Folgetasks:** FT-003 entblockt; FT-004 kann den verbleibenden Chat-Mutationspfad ablösen.
