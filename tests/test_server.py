@@ -476,6 +476,49 @@ class CoachTests(unittest.TestCase):
         self.assertNotEqual(server.list_workout_library()[0]["description"], "- 5m 115%")
         self.assertEqual(server.list_workout_library()[0]["id"], draft["id"])
 
+    def test_adaptive_preview_rejects_changed_target_and_is_idempotent(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        draft = server.save_workout_library_entries([{
+            "date": tomorrow, "sport": "Ride", "name": "VO2 intervals",
+            "description": "- 5m 115%", "duration_minutes": 45, "target": "POWER",
+        }])[0]
+        server.save_checkin({"illness": "Fever", "soreness": 8})
+        preview = server.adaptive_replan_preview()
+        self.assertTrue(preview["changes"][0].get("source_fingerprint"))
+        server.update_local_planned_workout(draft["id"], {"action": "update", "name": "Athletenänderung"})
+
+        result = server.apply_adaptive_replan(preview["id"])
+        self.assertEqual(result["status"], "stale")
+        self.assertEqual(result["updated"], 0)
+        self.assertEqual(result["stale"][0]["reason"], "changed")
+        self.assertEqual(server.list_workout_library()[0]["name"], "Athletenänderung")
+        repeated = server.apply_adaptive_replan(preview["id"])
+        self.assertEqual(repeated["status"], "already_stale")
+
+    def test_adaptive_preview_reports_missing_target_and_repeat_apply_is_safe(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        draft = server.save_workout_library_entries([{
+            "date": tomorrow, "sport": "Ride", "name": "VO2 intervals",
+            "description": "- 5m 115%", "duration_minutes": 45, "target": "POWER",
+        }])[0]
+        server.save_checkin({"illness": "Fever", "soreness": 8})
+        preview = server.adaptive_replan_preview()
+        server.update_local_planned_workout(draft["id"], {"action": "delete"})
+        result = server.apply_adaptive_replan(preview["id"])
+        self.assertEqual(result["status"], "stale")
+        self.assertEqual(result["stale"][0]["reason"], "missing")
+
+        fresh = server.save_workout_library_entries([{
+            "date": tomorrow, "sport": "Ride", "name": "Tempo",
+            "description": "- 5m 110%", "duration_minutes": 45, "target": "POWER",
+        }])[0]
+        fresh_preview = server.adaptive_replan_preview()
+        applied = server.apply_adaptive_replan(fresh_preview["id"])
+        self.assertEqual(applied["status"], "ok")
+        self.assertGreaterEqual(applied["updated"], 1)
+        self.assertEqual(server.apply_adaptive_replan(fresh_preview["id"])["status"], "already_applied")
+        self.assertEqual(server.list_workout_library()[0]["id"], fresh["id"])
+
     def test_planned_event_exposes_private_calendar_adjustment_from_linked_draft(self):
         context = {
             "label": "Aufgrund privater Termine angepasst",

@@ -4828,6 +4828,15 @@ def current_adaptive_replan_status() -> dict[str, Any]:
     }
 
 
+def adaptive_workout_fingerprint(workout: dict[str, Any]) -> str:
+    """Hash the mutable fields that an adaptive preview is allowed to replace."""
+    source = {
+        key: workout.get(key)
+        for key in ("date", "name", "type", "duration_minutes", "description", "target", "rationale", "private_calendar_adjustment")
+    }
+    return hashlib.sha256(json.dumps(source, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
 def check_adaptive_replan(reason: str) -> dict[str, Any]:
     """Recalculate the local replan preview after a provider refresh."""
     try:
@@ -4939,6 +4948,7 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 "external_events": calendar_events,
                 "before": {"duration_minutes": draft.get("duration_minutes"), "description": draft.get("description")},
                 "after": {"duration_minutes": replacement["duration_minutes"], "description": replacement["description"], "rationale": replacement["rationale"]},
+                "source_fingerprint": adaptive_workout_fingerprint(draft),
                 "payload": replacement,
             })
     preview = {
@@ -4967,28 +4977,54 @@ def apply_adaptive_replan(adjustment_id: Any) -> dict[str, Any]:
             raise AppError(404, "Plananpassung nicht gefunden.")
         if row["status"] == "applied":
             return {"status": "already_applied", "id": normalized_id}
+        if row["status"] in {"stale", "partial"}:
+            return {"status": "already_" + str(row["status"]), "id": normalized_id}
         payload = json.loads(row["payload"])
         updated = 0
+        stale: list[dict[str, Any]] = []
         now = utc_now()
         for change in payload.get("changes", []):
             draft_id = str(change.get("library_workout_id") or "")
             replacement = change.get("payload")
             if not draft_id or not isinstance(replacement, dict):
                 continue
-            draft = db.execute("SELECT id FROM workout_library WHERE local_id=?", (draft_id,)).fetchone()
-            if draft:
-                replacement = {
-                    **replacement,
-                    "id": draft_id,
-                    "moving_time": int(replacement.get("duration_minutes") or 0) * 60,
-                    "sync_status": "local",
-                }
-                db.execute(
-                    "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
-                    (json.dumps(replacement, ensure_ascii=False), now, draft_id),
-                )
-                updated += 1
-        db.execute("UPDATE plan_adjustments SET status='applied', applied_at=? WHERE id=?", (now, normalized_id))
+            draft = db.execute("SELECT id, payload FROM workout_library WHERE local_id=?", (draft_id,)).fetchone()
+            if not draft:
+                stale.append({"library_workout_id": draft_id, "reason": "missing"})
+                continue
+            try:
+                current = json.loads(draft["payload"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                current = None
+            expected_fingerprint = str(change.get("source_fingerprint") or "")
+            if not isinstance(current, dict) or not expected_fingerprint or adaptive_workout_fingerprint(current) != expected_fingerprint:
+                stale.append({"library_workout_id": draft_id, "reason": "changed"})
+                continue
+            replacement = {
+                **replacement,
+                "id": draft_id,
+                "moving_time": int(replacement.get("duration_minutes") or 0) * 60,
+                "sync_status": "local",
+            }
+            db.execute(
+                "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
+                (json.dumps(replacement, ensure_ascii=False), now, draft_id),
+            )
+            updated += 1
+        status = "stale" if stale and not updated else "partial" if stale else "applied"
+        db.execute(
+            "UPDATE plan_adjustments SET status=?, applied_at=? WHERE id=?",
+            (status, now, normalized_id),
+        )
+    if stale:
+        return {
+            "status": status,
+            "id": normalized_id,
+            "updated": updated,
+            "stale": stale,
+            "message": "Die Vorschau war teilweise oder vollständig veraltet; die betroffenen Einheiten wurden nicht überschrieben.",
+            "planning": planning_state(),
+        }
     return {"status": "ok", "id": normalized_id, "updated": updated, "planning": planning_state()}
 
 

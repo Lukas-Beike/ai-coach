@@ -58,11 +58,11 @@ Basis: `develop` / `45b5ca3`
 
 ### W6 – Adaptive Planung mit Concurrency-Schutz
 
-- [ ] Preview speichert Version/Hash der betroffenen Einheit.
-- [ ] Apply lehnt veraltete Previews ab und überschreibt keine späteren Änderungen.
-- [ ] Fehlende Ziele werden als stale/partial gemeldet, nicht als erfolgreich angewendet.
-- [ ] Preview-/Apply- und Wiederholungs-Tests ergänzen.
-- [ ] Mutationen gegen doppelte Tool-Aufrufe idempotent machen.
+- [x] Preview speichert Version/Hash der betroffenen Einheit.
+- [x] Apply lehnt veraltete Previews ab und überschreibt keine späteren Änderungen.
+- [x] Fehlende Ziele werden als stale/partial gemeldet, nicht als erfolgreich angewendet.
+- [x] Preview-/Apply- und Wiederholungs-Tests ergänzen.
+- [x] Mutationen gegen doppelte Tool-Aufrufe idempotent machen.
 
 ### W7 – Check-in, Datum und Zeitzonen
 
