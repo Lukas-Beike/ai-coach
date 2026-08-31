@@ -353,7 +353,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Handover FT-007**
 
 - **Status:** abgeschlossen
-- **Branch und Commit:** `fix/ft-007-e2e-a11y-harness`, folgt nach Review
+- **Branch und Commit:** `fix/ft-007-e2e-a11y-harness`, `91e5656`
 - **Geänderte Dateien:** `package.json`, `package-lock.json`, `playwright.config.cjs`, `e2e/coach.spec.js`, `.github/workflows/publish-container.yml`, `.gitignore`, `public/styles.css`, `README.md`, dieses Handover-Dokument
 - **Verhaltensänderung:** Ein isolierter Docker-Fixture-Job führt Playwright-Smoke- und axe-WCAG-AA-Prüfungen für Desktop und Mobile aus. Der Harness nutzt Rollen/Labels, prüft alle sechs Hauptansichten, Login/Dialog, Profil-Formularzustand, Console-/Page-Errors sowie horizontalen Overflow. Der Primärakzent wurde auf einen WCAG-AA-konformen Kontrastwert angepasst.
 - **Validierung:** `docker build -t ai-coach:ft007 .` erfolgreich; 4 Playwright-Tests (Desktop/Mobile) erfolgreich, inklusive axe-Prüfungen; `npm ci` ohne Vulnerabilities; `git diff --check` sauber.
