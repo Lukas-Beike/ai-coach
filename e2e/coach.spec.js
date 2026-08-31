@@ -74,7 +74,7 @@ test.describe("critical browser states", () => {
     await expect(page).toHaveURL(/#performance$/);
     await page.goBack();
     await expect(page.locator("#settingsPanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#settings$/);
+    await expect(page).toHaveURL(/#more$/);
     await page.goForward();
     await expect(page.locator("#dataPanel")).toHaveClass(/active/);
     await page.goto("/#unknown-route");
