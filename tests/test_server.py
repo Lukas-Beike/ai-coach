@@ -3863,6 +3863,16 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "0")
         self.assertNotIn("current quota", json.dumps(summary))
 
+    def test_openai_documented_spend_and_usage_codes_are_classified(self):
+        for code in (
+            "organization_spend_limit_exceeded",
+            "project_spend_limit_exceeded",
+            "organization_usage_limit_exceeded",
+        ):
+            details = server.openai_error_details(429, json.dumps({"error": {"code": code}}).encode("utf-8"))
+            self.assertEqual(details["reason"], code)
+            self.assertIn("Limit", details["message"])
+
     def test_openai_conversation_lock_retry_uses_structured_reason(self):
         calls = []
         responses = [server.AppError(409, "locked", reason="conversation_locked"), {"output_text": "ok"}]
