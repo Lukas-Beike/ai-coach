@@ -998,6 +998,30 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 410)
         create.assert_not_called()
 
+    def test_library_upload_uses_single_workout_endpoint_and_canonical_sport(self):
+        client = server.IntervalsClient(server.Config(intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        with patch.object(client, "post", return_value={"id": "remote-1"}) as post:
+            result = client.create_library_workouts([{
+                "name": "Tempo",
+                "description": "- 30m 85%",
+                "sport": "Cycling",
+            }])
+        self.assertEqual(result, [{"id": "remote-1"}])
+        post.assert_called_once_with(
+            "/athlete/athlete-1/workouts",
+            {"name": "Tempo", "description": "- 30m 85%", "type": "Ride"},
+        )
+
+    def test_workout_sport_aliases_are_normalized_before_storage(self):
+        normalized = server.normalize_workout_draft({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Running",
+            "name": "Easy run",
+            "description": "- 30m Z2",
+            "duration_minutes": 30,
+        })
+        self.assertEqual(normalized["sport"], "Run")
+
     def test_draft_reuses_same_or_similar_library_workout(self):
         server.upsert_workout_library([{
             "id": 42, "name": "Locker Rad", "type": "Ride",
