@@ -688,12 +688,12 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Handover FT-016**
 
 - **Status:** abgeschlossen
-- **Branch und Commits:** `feat/ft-016-semantic-navigation`, `4ab5df3`, `cc5db2d`; PR folgt nach finalem Rebase
+- **Branch und Commits:** `feat/ft-016-semantic-navigation`, `4ab5df3`, `cc5db2d`; PR #157 per Auto-Squash gemerged als `7ac2b41`; E2E-Follow-up folgt
 - **Geänderte Dateien:** `public/app.js`, `public/index.html`, `public/styles.css`, `public/service-worker.js`, `e2e/coach.spec.js`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
 - **Verhaltensänderung:** Die sechs Hauptansichten sind über stabile Hash-Routen (`#coach`, `#activities`, `#planned`, `#performance`, `#profile`, `#settings`) als echte Links erreichbar. `aria-current`, Fokus auf das aktive Panel, Reload, Back/Forward, unbekannte Route und Login-Deep-Links werden synchronisiert; ungespeicherte Änderungen behalten ihre bisherige Schutzabfrage.
 - **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check`, `docker build -t ai-coach:ft016 .` und vier parallele SQLCipher-Shards mit `62 + 62 + 61 + 61 = 246` Tests erfolgreich, alle `OK`.
-- **Review:** Diff-Review ohne offene Findings; fokussierte Routing-/Asset-Regressionstests erfolgreich. Native Node-/Playwright-Ausführung ist auf Windows nicht installiert und wird im PR-CI validiert.
-- **Manuelle Prüfung:** CI-Browser-Smoke folgt im PR; die erweiterten E2E-Prüfungen decken Navigation, Deep-Link, Browsernavigation, Fokus und WCAG-AA-Zustände ab. Asset-Query-Versionen und Service-Worker-Cache wurden von v120 auf v121 aktualisiert.
+- **Review:** Diff-Review ohne offene Findings. Der erste CI-Browserlauf zeigte ein bestehendes Auth-Rate-Limit, weil die zusätzliche E2E-Spezifikation die Login-Anzahl erhöhte; `599f7f1` integriert Deep-Link-/History-Abdeckung in den bestehenden Login-Fall. Native Node-/Playwright-Ausführung ist auf Windows nicht installiert; der Follow-up-PR validiert dies erneut.
+- **Manuelle Prüfung:** CI-Browser-Smoke im Follow-up-PR; die E2E-Prüfungen decken Navigation, Deep-Link, Browsernavigation, Fokus und WCAG-AA-Zustände ab. Asset-Query-Versionen und Service-Worker-Cache wurden von v120 auf v121 aktualisiert.
 - **Offene Risiken:** Keine für FT-016.
 - **Folgetasks:** FT-017 ist entblockt.
 

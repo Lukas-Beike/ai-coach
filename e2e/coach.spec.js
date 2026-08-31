@@ -48,7 +48,7 @@ test.describe("critical browser states", () => {
   test("login, main views, dialog and profile form state", async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);
 
-    await page.goto("/");
+    await page.goto("/#profile");
     await expect(page.locator("#loginDialog")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Anmelden" })).toBeVisible();
     await page.getByLabel("Passwort").fill(APP_PASSWORD);
@@ -56,6 +56,9 @@ test.describe("critical browser states", () => {
     await page.getByLabel("Passwort").fill("");
     await expect(page.locator("#loginDialog")).toBeHidden();
     await expect(page.locator("#appShell")).toBeVisible();
+    await expect(page.locator("#profilePanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#profile$/);
+    await expect(page.locator("#profilePanel")).toBeFocused();
     await expect(page.locator(".dirty-indicator")).toHaveCount(5);
     const hiddenIndicators = await page.locator(".dirty-indicator").evaluateAll((nodes) => nodes.every((node) => node.hidden));
     expect(hiddenIndicators).toBe(true);
@@ -70,6 +73,17 @@ test.describe("critical browser states", () => {
       await expect(page.getByRole("link", { name: label, exact: true })).toHaveAttribute("aria-current", "page");
       await expect(page.getByRole("link", { name: label, exact: true })).toHaveAttribute("href", `#${route}`);
     }
+
+    await page.getByRole("link", { name: "Leistungsdaten", exact: true }).click();
+    await expect(page).toHaveURL(/#performance$/);
+    await page.goBack();
+    await expect(page.locator("#settingsPanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#settings$/);
+    await page.goForward();
+    await expect(page.locator("#dataPanel")).toHaveClass(/active/);
+    await page.goto("/#unknown-route");
+    await expect(page.locator("#chatPanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#coach$/);
 
     await page.getByRole("link", { name: "Geplant", exact: true }).click();
     const checkinButton = page.getByRole("button", { name: /Tages-Check-in/ }).first();
@@ -128,27 +142,4 @@ test.describe("critical browser states", () => {
     await page.screenshot({ path: testInfo.outputPath("settings-core.png"), fullPage: true });
   });
 
-  test("hash routes support deep links and browser history", async ({ page }) => {
-    await page.goto("/#profile");
-    await expect(page.locator("#loginDialog")).toBeVisible();
-    await page.getByLabel("Passwort").fill(APP_PASSWORD);
-    await page.getByRole("button", { name: "Anmelden" }).click();
-    await expect(page.locator("#loginDialog")).toBeHidden();
-    await expect(page.locator("#profilePanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#profile$/);
-    await expect(page.locator("#profilePanel")).toBeFocused();
-
-    await page.getByRole("link", { name: "Leistungsdaten", exact: true }).click();
-    await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#performance$/);
-    await page.goBack();
-    await expect(page.locator("#profilePanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#profile$/);
-    await page.goForward();
-    await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-
-    await page.goto("/#unknown-route");
-    await expect(page.locator("#chatPanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#coach$/);
-  });
 });
