@@ -17,7 +17,6 @@ os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
     "OPENAI_API_KEY": "test-openai-key",
     "OPENAI_MODEL": "gpt-5.6-sol",
-    "OPENAI_DAILY_TOKEN_BUDGET": "100000",
     "INTERVALS_API_KEY": "test-intervals-key",
     "INTERVALS_ATHLETE_ID": "0",
     "GARMIN_EMAIL": "test-garmin@example.invalid",
@@ -3834,12 +3833,12 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "12000")
         self.assertEqual(summary["status"]["state"], "ok")
 
-    def test_openai_insufficient_quota_error_is_classified_and_persisted(self):
+    def test_openai_credit_balance_exhausted_error_is_classified_and_persisted(self):
         error_body = json.dumps({
             "error": {
-                "message": "You exceeded your current quota, please check your plan and billing details.",
+                "message": "Your credit balance is exhausted.",
                 "type": "insufficient_quota",
-                "code": "insufficient_quota",
+                "code": "credit_balance_exhausted",
             }
         }).encode("utf-8")
         upstream_error = server.HTTPError(
@@ -3858,11 +3857,21 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 429)
         self.assertIn("Guthaben", raised.exception.message)
         summary = server.openai_usage_summary()
-        self.assertEqual(summary["status"]["reason"], "insufficient_quota")
+        self.assertEqual(summary["status"]["reason"], "credit_balance_exhausted")
         self.assertEqual(summary["status"]["http_status"], 429)
         self.assertEqual(summary["rate_limits"]["remaining_requests"], "0")
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "0")
         self.assertNotIn("current quota", json.dumps(summary))
+
+    def test_openai_documented_spend_and_usage_codes_are_classified(self):
+        for code in (
+            "organization_spend_limit_exceeded",
+            "project_spend_limit_exceeded",
+            "organization_usage_limit_exceeded",
+        ):
+            details = server.openai_error_details(429, json.dumps({"error": {"code": code}}).encode("utf-8"))
+            self.assertEqual(details["reason"], code)
+            self.assertIn("Limit", details["message"])
 
     def test_openai_conversation_lock_retry_uses_structured_reason(self):
         calls = []
@@ -3908,22 +3917,20 @@ class CoachTests(unittest.TestCase):
             server._validate_openai_response("/responses", {"error": {"message": "secret"}})
         self.assertEqual(error.exception.reason, "response_error")
 
-    def test_openai_daily_budget_is_enforced_before_request(self):
+    def test_openai_request_is_not_blocked_by_local_usage_total(self):
         server.set_kv("openai_usage", json.dumps({"date": server.local_now().date().isoformat(), "total_tokens": 10}))
-        config = replace(server.CONFIG, openai_api_key="test-key", openai_daily_token_budget=10)
-        with patch.object(server, "CONFIG", config), patch.object(server, "http_json") as request:
-            with self.assertRaises(server.AppError) as raised:
-                server.openai_request("/responses", {"model": "gpt-5.6-sol"})
-        self.assertEqual(raised.exception.reason, "daily_token_budget")
-        request.assert_not_called()
+        config = replace(server.CONFIG, openai_api_key="test-key")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", return_value={"status": "completed"}) as request:
+            result = server.openai_request("/responses", {"model": "gpt-5.6-sol"})
+        self.assertEqual(result["status"], "completed")
+        request.assert_called_once()
 
     def test_openai_usage_updates_are_atomic_and_tolerate_invalid_provider_counts(self):
-        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_daily_token_budget=1000)):
-            threads = [threading.Thread(target=server.record_openai_usage, args=({"usage": {"input_tokens": "bad", "output_tokens": 2}}, "test")) for _ in range(8)]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
+        threads = [threading.Thread(target=server.record_openai_usage, args=({"usage": {"input_tokens": "bad", "output_tokens": 2}}, "test")) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
         summary = server.openai_usage_summary()
         self.assertEqual(summary["requests"], 8)
         self.assertEqual(summary["input_tokens"], 0)

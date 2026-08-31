@@ -242,7 +242,6 @@ class Config:
     github_token: str = os.environ.get("GITHUB_TOKEN", "")
     github_release_check_seconds: int = env_int("GITHUB_RELEASE_CHECK_SECONDS", GITHUB_RELEASE_CACHE_SECONDS)
     app_password: str = os.environ.get("APP_PASSWORD", "")
-    openai_daily_token_budget: int = env_int("OPENAI_DAILY_TOKEN_BUDGET", 100_000)
     # Set COOKIE_SECURE=true when TLS is terminated before this application.
     # It stays opt-in so the documented local HTTP development flow works.
     secure_cookies: bool = env_bool("COOKIE_SECURE", False)
@@ -3902,6 +3901,12 @@ def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     ):
         reason = "conversation_locked"
         message = "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen."
+    elif code == "credit_balance_exhausted":
+        reason = "credit_balance_exhausted"
+        message = "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
+    elif code in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
+        reason = code
+        message = "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. Bitte das Limit im OpenAI-Konto prüfen."
     elif code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(
         marker in searchable for marker in ("insufficient_quota", "quota", "billing_hard_limit", "credits")
     ):
@@ -7903,8 +7908,8 @@ def _openai_usage_summary_unlocked() -> dict[str, Any]:
         usage = {}
     if not isinstance(usage, dict) or usage.get("date") != today:
         usage = {"date": today, "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    usage.pop("request_limit", None)
-    usage.pop("token_limit", None)
+    for legacy_budget_key in ("request_limit", "token_limit", "budget_tokens", "budget_remaining"):
+        usage.pop(legacy_budget_key, None)
     try:
         rate_limits = json.loads(get_kv("openai_rate_limits") or "{}")
     except (TypeError, json.JSONDecodeError):
@@ -7913,15 +7918,8 @@ def _openai_usage_summary_unlocked() -> dict[str, Any]:
         status = json.loads(get_kv(OPENAI_STATUS_KEY) or "{}")
     except (TypeError, json.JSONDecodeError):
         status = {}
-    budget = max(0, int(CONFIG.openai_daily_token_budget))
-    try:
-        total_tokens = max(0, int(usage.get("total_tokens") or 0))
-    except (TypeError, ValueError, OverflowError):
-        total_tokens = 0
     return {
         **usage,
-        "budget_tokens": budget,
-        "budget_remaining": max(0, budget - total_tokens) if budget else None,
         "rate_limits": rate_limits if isinstance(rate_limits, dict) else {},
         "status": status if isinstance(status, dict) else {},
     }
@@ -7986,11 +7984,6 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
-    if path == "/responses":
-        usage = openai_usage_summary()
-        budget = int(usage.get("budget_tokens") or 0)
-        if budget and int(usage.get("total_tokens") or 0) >= budget:
-            raise AppError(429, "Das tägliche OpenAI-Tokenbudget ist erreicht. Bitte morgen erneut versuchen.", reason="daily_token_budget")
     request_payload = dict(payload)
     if path == "/responses":
         request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
