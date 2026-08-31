@@ -89,7 +89,10 @@ It is not intended to be exposed directly to the public internet.
 - Local athlete check-ins for day form (such as heavy legs and fatigue),
   subjective soreness, stress, motivation, session RPE, illness, pain, available
   training time, and day-specific constraints. Reported illness is a high-priority
-  planning constraint and is shown separately in the dated daily context.
+  planning constraint and is shown separately in the dated daily context. The
+  coach can propose a conservative sport-pause forecast; only after explicit
+  confirmation are future local sessions replaced with illness-pause entries and
+  the corresponding future check-in days filled.
   The Geplant tab combines each dated check-in with recovery signals, weather,
   planned sessions, and read-only calendar appointments; existing entries can
   be selected and edited directly on their day. Check-in dates and daily
@@ -310,6 +313,10 @@ date, start/end time, duration, and all-day status to identify library entries
 that are hard or long. It does not infer or diagnose an infection from a family event;
 illness must still be entered in the athlete check-in. Every suggested change
 remains a local preview and requires **Anpassung anwenden**.
+
+Confirmed illness pauses can optionally be synchronized as explicit `SICK`
+calendar entries to Intervals.icu. This remote calendar write is always a
+separate athlete-selected option and is never performed by the preview itself.
 
 
 ## Docker and Unraid

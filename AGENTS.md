@@ -216,6 +216,7 @@ the affected UI flow when a browser is available.
 - Every pull request title must use the same format. Allowed types are
   `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`,
   `style`, and `test`; breaking changes use `!` before the colon.
+- Every pull request description must be written in English.
 - When creating a pull request, enable squash auto-merge (`--auto --squash`)
   when repository permissions and required checks allow it. Do not merge it
   immediately unless explicitly requested.

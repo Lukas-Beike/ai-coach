@@ -1381,6 +1381,10 @@ ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = date(2000, 1, 1)
 EXTERNAL_CALENDAR_WINDOW_DAYS = 56
+ILLNESS_PAUSE_DEFAULT_DAYS = 3
+ILLNESS_PAUSE_MAX_DAYS = 21
+ILLNESS_CALENDAR_CATEGORY = "SICK"
+ILLNESS_EVENT_EXTERNAL_PREFIX = "intervals-coach-sick-"
 # Keep enough calendar history to show whether recently planned workouts were
 # completed, while retaining the existing five-week forward planning horizon.
 PLANNED_CALENDAR_HISTORY_DAYS = 35
@@ -4948,6 +4952,16 @@ class IntervalsClient:
             raise AppError(502, "Intervals.icu hat keine Zielwettkämpfe zurückgegeben.")
         return [event for event in result if isinstance(event, dict)]
 
+    def upsert_calendar_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Upsert explicitly approved non-workout calendar events."""
+        if not events:
+            return []
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
+        if not isinstance(result, list):
+            raise AppError(502, "Intervals.icu hat keine Kalendereinträge zurückgegeben.")
+        return [event for event in result if isinstance(event, dict)]
+
     def bulk_delete_events(self, identifiers: list[dict[str, str]]) -> Any:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         return self.put(f"/athlete/{athlete}/events/bulk-delete", identifiers)
@@ -5382,11 +5396,32 @@ def latest_replan_preview() -> dict[str, Any] | None:
 def current_adaptive_replan_status() -> dict[str, Any]:
     preview = latest_replan_preview()
     changes = preview.get("changes", []) if isinstance(preview, dict) else []
+    illness_pause_pending = bool(
+        preview
+        and preview.get("status") == "preview"
+        and isinstance(preview.get("illness_pause"), dict)
+        and not preview["illness_pause"].get("approved")
+    )
     change_count = len(changes) if isinstance(changes, list) else 0
     return {
-        "needs_replan": bool(preview and preview.get("status") == "preview" and change_count),
+        "needs_replan": bool(preview and preview.get("status") == "preview" and (change_count or illness_pause_pending)),
         "replan_changes": change_count,
+        "illness_pause_pending": illness_pause_pending,
     }
+
+
+def latest_illness_pause_state() -> tuple[str, dict[str, Any]] | None:
+    with DB_LOCK, database() as db:
+        rows = db.execute("SELECT payload, status FROM plan_adjustments ORDER BY created_at DESC LIMIT 100").fetchall()
+    for row in rows:
+        try:
+            payload = json.loads(row.get("payload") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        pause = payload.get("illness_pause") if isinstance(payload, dict) else None
+        if isinstance(pause, dict):
+            return str(row.get("status") or ""), pause
+    return None
 
 
 def adaptive_workout_fingerprint(workout: dict[str, Any]) -> str:
@@ -5416,6 +5451,58 @@ def check_adaptive_replan(reason: str) -> dict[str, Any]:
         return current_adaptive_replan_status()
 
 
+def illness_pause_forecast(feedback: dict[str, Any], today: date) -> dict[str, Any] | None:
+    illness = str(feedback.get("illness") or "").strip()[:CHECKIN_TEXT_LIMITS["illness"]]
+    if not illness:
+        return None
+    end_date = today + timedelta(days=ILLNESS_PAUSE_DEFAULT_DAYS - 1)
+    return {
+        "start_date": today.isoformat(),
+        "end_date": end_date.isoformat(),
+        "recommended_pause_days": ILLNESS_PAUSE_DEFAULT_DAYS,
+        "illness": illness,
+        "forecast": "Vorsichtige Trainingsprognose: zunächst vollständige Sportpause und danach schrittweise Rückkehr. Die Dauer ist ein Coach-Vorschlag, keine medizinische Diagnose, und muss bestätigt werden.",
+    }
+
+
+def illness_pause_replacement(workout: dict[str, Any], reason: str) -> dict[str, Any]:
+    return {
+        **workout,
+        "name": "Krankheitspause",
+        "duration_minutes": 5,
+        "description": "- 5m Rest / no training while ill",
+        "target": "AUTO",
+        "rationale": f"Krankheitspause: {reason}. Die ursprüngliche Einheit bleibt in der lokalen Bibliothekshistorie erhalten.",
+    }
+
+
+def illness_calendar_events(pause: dict[str, Any], illness: str) -> list[dict[str, Any]]:
+    start = date.fromisoformat(str(pause["start_date"])[:10])
+    end = date.fromisoformat(str(pause["end_date"])[:10])
+    events: list[dict[str, Any]] = []
+    current = start
+    while current <= end:
+        date_key = current.isoformat()
+        events.append({
+            "category": ILLNESS_CALENDAR_CATEGORY,
+            "start_date_local": f"{date_key}T00:00:00",
+            "name": "Krankheit",
+            "description": str(illness or "Krankheit").strip()[:12000],
+            "external_id": f"{ILLNESS_EVENT_EXTERNAL_PREFIX}{date_key}",
+        })
+        current += timedelta(days=1)
+    return events
+
+
+def sync_illness_pause_to_intervals(pause: dict[str, Any]) -> dict[str, Any]:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    illness = str(pause.get("illness") or "Krankheit").strip()[:CHECKIN_TEXT_LIMITS["illness"]]
+    client = IntervalsClient()
+    pushed = client.upsert_calendar_events(illness_calendar_events(pause, illness))
+    return {"status": "ok", "synced": len(pushed), "category": ILLNESS_CALENDAR_CATEGORY}
+
+
 def adaptive_replan_preview() -> dict[str, Any]:
     today_date = local_now().date()
     today = today_date.isoformat()
@@ -5437,6 +5524,16 @@ def adaptive_replan_preview() -> dict[str, Any]:
         signals.append("high subjective stress")
     if feedback.get("motivation") is not None and feedback["motivation"] <= 2:
         signals.append("low motivation")
+    illness_pause = illness_pause_forecast(feedback, today_date)
+    previous_illness_pause = latest_illness_pause_state()
+    if illness_pause and previous_illness_pause:
+        previous_status, previous_pause = previous_illness_pause
+        if (
+            previous_status in {"applied", "partial"}
+            and str(previous_pause.get("start_date") or "") == today
+            and str(previous_pause.get("illness") or "") == illness_pause["illness"]
+        ):
+            illness_pause["approved"] = True
     external_events = list_external_calendar_events(1000)
     events_by_date: dict[str, list[dict[str, Any]]] = {}
     for event in external_events:
@@ -5446,13 +5543,15 @@ def adaptive_replan_preview() -> dict[str, Any]:
     for event_date, events in events_by_date.items():
         if event_date >= today:
             signals.append(f"family calendar on {event_date}: {len(events)} event(s)")
-    severe = bool(feedback.get("illness") or feedback.get("pain") or (feedback.get("soreness") or 0) >= 8)
+    severe = bool(feedback.get("pain") or (feedback.get("soreness") or 0) >= 8)
     high_load = bool((feedback.get("stress") or 0) >= 8 or (feedback.get("motivation") is not None and feedback.get("motivation") <= 2))
     available_minutes = feedback.get("available_minutes")
     changes: list[dict[str, Any]] = []
     for draft in list_workout_library(500):
         if not draft.get("date") or str(draft.get("date") or "") < today:
             continue
+        draft_date = str(draft.get("date") or "")[:10]
+        illness_active = bool(illness_pause and not illness_pause.get("approved") and illness_pause["start_date"] <= draft_date <= illness_pause["end_date"])
         duration = as_number(draft.get("duration_minutes"))
         limited = available_minutes is not None and duration is not None and duration > available_minutes
         calendar_events = events_by_date.get(str(draft.get("date") or ""), [])
@@ -5473,10 +5572,12 @@ def adaptive_replan_preview() -> dict[str, Any]:
         calendar_limited = bool(calendar_events) and (
             draft_is_hard(draft) or (duration is not None and calendar_limit is not None and duration > calendar_limit)
         )
-        if severe or (high_load and draft_is_hard(draft)) or limited or calendar_limited or no_intensity_limited or weather_reason:
+        if illness_active or severe or (high_load and draft_is_hard(draft)) or limited or calendar_limited or no_intensity_limited or weather_reason:
             reasons: list[str] = []
+            if illness_active:
+                reasons.append(f"illness reported; sport pause through {illness_pause['end_date']}")
             if severe:
-                reasons.append("illness or pain reported")
+                reasons.append("pain or high soreness reported")
             if high_load and draft_is_hard(draft):
                 reasons.append("recovery signal suggests reducing intensity")
             if limited and not severe:
@@ -5494,7 +5595,7 @@ def adaptive_replan_preview() -> dict[str, Any]:
                     WEATHER_ADAPTIVE_MAX_MINUTES if weather_reason else None,
                 ) if limit is not None
             ]
-            replacement = adaptive_recovery_replacement(
+            replacement = illness_pause_replacement(draft, reason) if illness_active else adaptive_recovery_replacement(
                 draft,
                 reason,
                 available_minutes if limited else None,
@@ -5508,15 +5609,20 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 "library_workout_id": draft["id"], "date": draft.get("date"), "name": draft.get("name"),
                 "external_events": calendar_events,
                 "before": {"duration_minutes": draft.get("duration_minutes"), "description": draft.get("description")},
-                "after": {"duration_minutes": replacement["duration_minutes"], "description": replacement["description"], "rationale": replacement["rationale"]},
+                "after": {"name": replacement.get("name"), "duration_minutes": replacement["duration_minutes"], "description": replacement["description"], "rationale": replacement["rationale"]},
                 "source_fingerprint": adaptive_workout_fingerprint(draft),
                 "payload": replacement,
             })
+    change_message = "Keine zukünftigen lokalen Einheiten müssen angepasst werden." if not changes else f"{len(changes)} zukünftige lokale Einheit(en) brauchen eine Prüfung."
+    if illness_pause and not illness_pause.get("approved"):
+        message = f"Krankheitsprognose: {illness_pause['recommended_pause_days']} Tage Sportpause bis {illness_pause['end_date']}. {change_message}"
+    else:
+        message = change_message
     preview = {
         "generated_at": utc_now(), "checkin_date": feedback.get("checkin_date") or today,
-        "signals": signals, "changes": changes,
-        "message": "No future local library entries require an adaptive change." if not changes else f"{len(changes)} future local library entr(y/ies) require review.",
-        "scope": "Only future local library entries are changed. Remote Intervals.icu events are never modified by this preview.",
+        "signals": signals, "changes": changes, "illness_pause": illness_pause,
+        "message": message,
+        "scope": "Nur nach Bestätigung werden lokale zukünftige Einheiten angepasst und die prognostizierten Krankheitstage eingetragen. Intervals.icu wird nur bei ausdrücklicher Auswahl synchronisiert.",
     }
     adjustment_id = str(uuid.uuid4())
     with DB_LOCK, database() as db:
@@ -5527,7 +5633,37 @@ def adaptive_replan_preview() -> dict[str, Any]:
     return {"id": adjustment_id, "status": "preview", **preview}
 
 
-def apply_adaptive_replan(adjustment_id: Any) -> dict[str, Any]:
+def _fill_illness_checkins(db: Any, pause: dict[str, Any], now: str) -> int:
+    illness = str(pause.get("illness") or "Krankheit").strip()[:CHECKIN_TEXT_LIMITS["illness"]]
+    start = date.fromisoformat(str(pause["start_date"])[:10])
+    end = date.fromisoformat(str(pause["end_date"])[:10])
+    marker = f"Krankheitspause prognostiziert ab {start.isoformat()}"
+    filled = 0
+    current = start
+    while current <= end:
+        date_key = current.isoformat()
+        existing = db.execute("SELECT illness, notes FROM athlete_checkins WHERE checkin_date=?", (date_key,)).fetchone()
+        if existing:
+            existing_illness = str(existing.get("illness") or "").strip()
+            combined_illness = existing_illness or illness
+            if existing_illness and illness and illness not in existing_illness:
+                combined_illness = f"{existing_illness}; {illness}"[:CHECKIN_TEXT_LIMITS["illness"]]
+            notes = str(existing.get("notes") or "").strip()
+            if marker not in notes:
+                notes = f"{notes} · {marker}".strip(" ·")[:CHECKIN_TEXT_LIMITS["notes"]]
+            db.execute("UPDATE athlete_checkins SET illness=?, notes=?, updated_at=? WHERE checkin_date=?", (combined_illness, notes, now, date_key))
+        else:
+            db.execute(
+                "INSERT INTO athlete_checkins(checkin_date, soreness, stress, motivation, session_rpe, day_form, illness, pain, available_minutes, availability_notes, notes, created_at, updated_at) "
+                "VALUES (?, NULL, NULL, NULL, NULL, '', ?, '', NULL, '', ?, ?, ?)",
+                (date_key, illness, marker, now, now),
+            )
+        filled += 1
+        current += timedelta(days=1)
+    return filled
+
+
+def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool = False) -> dict[str, Any]:
     try:
         normalized_id = str(uuid.UUID(str(adjustment_id)))
     except (ValueError, AttributeError) as exc:
@@ -5541,7 +5677,10 @@ def apply_adaptive_replan(adjustment_id: Any) -> dict[str, Any]:
         if row["status"] in {"stale", "partial"}:
             return {"status": "already_" + str(row["status"]), "id": normalized_id}
         payload = json.loads(row["payload"])
+        illness_pause = payload.get("illness_pause") if isinstance(payload.get("illness_pause"), dict) else None
+        active_illness_pause = illness_pause if illness_pause and not illness_pause.get("approved") else None
         updated = 0
+        updated_checkins = 0
         stale: list[dict[str, Any]] = []
         now = utc_now()
         for change in payload.get("changes", []):
@@ -5572,21 +5711,36 @@ def apply_adaptive_replan(adjustment_id: Any) -> dict[str, Any]:
                 (json.dumps(replacement, ensure_ascii=False), now, draft_id),
             )
             updated += 1
+        if active_illness_pause:
+            updated_checkins = _fill_illness_checkins(db, active_illness_pause, now)
+            payload["illness_pause"] = {**active_illness_pause, "approved": True}
         status = "stale" if stale and not updated else "partial" if stale else "applied"
         db.execute(
-            "UPDATE plan_adjustments SET status=?, applied_at=? WHERE id=?",
-            (status, now, normalized_id),
+            "UPDATE plan_adjustments SET payload=?, status=?, applied_at=? WHERE id=?",
+            (json.dumps(payload, ensure_ascii=False), status, now, normalized_id),
         )
+    remote_sync: dict[str, Any] | None = None
+    if sync_illness_to_intervals and active_illness_pause:
+        try:
+            remote_sync = sync_illness_pause_to_intervals(active_illness_pause)
+        except Exception as exc:
+            remote_sync = {"status": "error", "error": redact_text(str(exc))[:1000]}
     if stale:
         return {
             "status": status,
             "id": normalized_id,
             "updated": updated,
+            "updated_checkins": updated_checkins,
             "stale": stale,
+            "illness_pause": illness_pause,
+            "intervals_sync": remote_sync,
             "message": "Die Vorschau war teilweise oder vollständig veraltet; die betroffenen Einheiten wurden nicht überschrieben.",
             "planning": planning_state(),
         }
-    return {"status": "ok", "id": normalized_id, "updated": updated, "planning": planning_state()}
+    return {
+        "status": "ok", "id": normalized_id, "updated": updated, "updated_checkins": updated_checkins,
+        "illness_pause": illness_pause, "intervals_sync": remote_sync, "planning": planning_state(),
+    }
 
 
 def season_plan_summary() -> dict[str, Any]:
@@ -8182,6 +8336,7 @@ def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str
         fingerprint = str(payload.get("fingerprint") or "")
         _require_current_coach_sync_preview("library_sync_preview", fingerprint, "Bibliotheks")
     if action_type == "apply_adaptive_replan":
+        expected_targets[action_type] = {"local+intervals"} if payload.get("sync_illness_to_intervals") else {"local"}
         adjustment_id = str(payload.get("adjustment_id") or "")
         latest = latest_replan_preview()
         if not latest or latest.get("status") != "preview" or str(latest.get("id")) != adjustment_id:
@@ -8245,7 +8400,10 @@ def _execute_coach_action(action_type: str, payload: dict[str, Any]) -> dict[str
         _validate_workout_library_sync_confirmation({"confirm": "LIBRARY_SYNC", "fingerprint": payload.get("fingerprint")})
         return {"ok": True, **sync_workout_library("bestätigte Aktionsvorschau")}
     if action_type == "apply_adaptive_replan":
-        return {"ok": True, **apply_adaptive_replan(payload.get("adjustment_id"))}
+        return {"ok": True, **apply_adaptive_replan(
+            payload.get("adjustment_id"),
+            sync_illness_to_intervals=bool(payload.get("sync_illness_to_intervals")),
+        )}
     raise AppError(400, "Unbekannte Coach-Aktion.")
 
 
@@ -8539,7 +8697,9 @@ MORNING_CHECKIN_PROMPT = (
     "(zum Beispiel Muskelkater, schwere Beine, Müdigkeit oder ungewöhnliche Erschöpfung) und liegt eine Krankheit "
     "oder ein Krankheitssymptom vor? Die Angaben sollen im Tages-Check-in gespeichert werden können. "
     "Die Rückfrage soll keine Diagnose nahelegen und darf unbeantwortet bleiben. Eine gemeldete Krankheit "
-    "ist für die Trainingsplanung eine wichtige Einschränkung."
+    "ist für die Trainingsplanung eine wichtige Einschränkung. Wenn Krankheit gemeldet ist, gib zusätzlich "
+    "eine vorsichtige Prognose für die notwendige Sportpause in ganzen Tagen als Vorschlag aus und stelle klar, "
+    "dass der Athlet sie bestätigen muss."
 )
 
 
