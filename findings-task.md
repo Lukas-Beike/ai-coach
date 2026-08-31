@@ -483,6 +483,8 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 ### - [ ] FT-011 – Sync-Polling auf Statusendpunkt und Single-Flight umstellen
 
+**Status:** in Arbeit
+
 **Quelle:** PERF-02
 **Ziel:** Während eines Syncs wird nur ein kleiner Status gepollt; überlappende Voll-State-Requests und unnötige Rate-Limit-Last entfallen.
 **Abhängigkeiten:** FT-010

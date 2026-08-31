@@ -2,6 +2,7 @@ const $ = (selector) => document.querySelector(selector);
 const state = {
   data: null,
   loadSequence: 0,
+  loadPromise: null,
   busy: false,
   chatQueue: [],
   chatQueueSequence: 0,
@@ -31,11 +32,25 @@ const state = {
   activityTracked: false,
   remoteDeleteFailure: null,
   libraryFilter: "active",
+  syncPoll: {
+    controller: null,
+    timer: null,
+    operationId: null,
+    waiters: [],
+    channel: null,
+    leaseToken: `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  },
 };
 const VOICE_MAX_DURATION_MS = 60_000;
 const VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 const QUICK_TEMPLATES_INACTIVITY_MS = 6 * 60 * 60 * 1000;
 const LAST_PWA_ACTIVITY_KEY = "intervals-coach-last-pwa-activity";
+const SYNC_POLL_LEASE_KEY = "intervals-coach-sync-poll-lease";
+const SYNC_POLL_CHANNEL = "intervals-coach-sync-status";
+const SYNC_POLL_ACTIVE_MS = 1_500;
+const SYNC_POLL_IDLE_MS = 60_000;
+const SYNC_POLL_RETRY_MS = 5_000;
+const SYNC_POLL_LEASE_MS = 4_000;
 
 function readLastPwaActivity() {
   try {
@@ -143,6 +158,147 @@ async function api(path, options = {}) {
     throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
   }
   return payload;
+}
+
+function syncPollLeaseAvailable() {
+  try {
+    const current = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
+    if (current && current.expires_at > Date.now() && current.token !== state.syncPoll.leaseToken) return false;
+    const lease = { token: state.syncPoll.leaseToken, expires_at: Date.now() + SYNC_POLL_LEASE_MS };
+    localStorage.setItem(SYNC_POLL_LEASE_KEY, JSON.stringify(lease));
+    const verified = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
+    return verified?.token === state.syncPoll.leaseToken;
+  } catch (_) {
+    return true;
+  }
+}
+
+function releaseSyncPollLease() {
+  try {
+    const current = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
+    if (current?.token === state.syncPoll.leaseToken) localStorage.removeItem(SYNC_POLL_LEASE_KEY);
+  } catch (_) {}
+}
+
+function broadcastSyncMessage(message) {
+  try { state.syncPoll.channel?.postMessage(message); } catch (_) {}
+}
+
+function changedSyncAreas(nextVersions) {
+  const previous = state.data?.state_versions || {};
+  const areaMap = {
+    activities: ["activities"],
+    performance: ["performance"],
+    chat: ["chat"],
+    library: ["library", "plan"],
+    checkins: ["feedback"],
+    activity_feedback: ["feedback"],
+    profile: ["profile"],
+    plan: ["plan"],
+  };
+  const areas = new Set();
+  Object.entries(areaMap).forEach(([version, mappedAreas]) => {
+    if (nextVersions?.[version] !== undefined && nextVersions[version] !== previous[version]) mappedAreas.forEach((area) => areas.add(area));
+  });
+  return [...areas];
+}
+
+function renderSyncStatus(status) {
+  if (!state.data) return;
+  state.data.sync = {
+    ...(state.data.sync || {}),
+    running: Boolean(status.running),
+    status: status.message || null,
+    last_error: status.last_error || null,
+  };
+  renderActivities(state.data.activities || []);
+  renderPerformance(state.data.performance || {});
+  renderSettings(state.data);
+  updateHeaderAction();
+}
+
+function handleSyncStatus(status, broadcast = false) {
+  if (!status || typeof status !== "object") return;
+  if (broadcast) broadcastSyncMessage({ type: "status", status });
+  if (status.operation_id && status.running) {
+    state.syncPoll.operationId = status.operation_id;
+    state.localSync.intervals = true;
+  }
+  renderSyncStatus(status);
+  const changedAreas = changedSyncAreas(status.state_versions);
+  if (changedAreas.length && state.data) {
+    load("/api/bootstrap?local=1", changedAreas).catch(() => {});
+  } else if (state.data && status.state_versions) {
+    state.data.state_versions = { ...state.data.state_versions, ...status.state_versions };
+  }
+  if (!status.running && status.operation_id && status.operation_id === state.syncPoll.operationId) {
+    state.localSync.intervals = false;
+    state.syncPoll.operationId = null;
+    const waiters = state.syncPoll.waiters.splice(0);
+    waiters.forEach((resolve) => resolve(status));
+  }
+}
+
+function scheduleSyncPoll(delay = SYNC_POLL_IDLE_MS) {
+  if (state.syncPoll.timer) clearTimeout(state.syncPoll.timer);
+  state.syncPoll.timer = setTimeout(() => { state.syncPoll.timer = null; pollSyncStatus(); }, delay);
+}
+
+async function pollSyncStatus() {
+  if (!state.data || document.visibilityState !== "visible" || !navigator.onLine) {
+    scheduleSyncPoll(SYNC_POLL_RETRY_MS);
+    return;
+  }
+  if (!syncPollLeaseAvailable()) {
+    scheduleSyncPoll(SYNC_POLL_RETRY_MS);
+    return;
+  }
+  if (state.syncPoll.controller) return;
+  const controller = new AbortController();
+  state.syncPoll.controller = controller;
+  try {
+    const status = await api("/api/sync/status", { signal: controller.signal });
+    handleSyncStatus(status, true);
+    scheduleSyncPoll(status.running ? SYNC_POLL_ACTIVE_MS : SYNC_POLL_IDLE_MS);
+  } catch (error) {
+    if (error.name !== "AbortError") scheduleSyncPoll(SYNC_POLL_RETRY_MS);
+  } finally {
+    if (state.syncPoll.controller === controller) state.syncPoll.controller = null;
+    releaseSyncPollLease();
+  }
+}
+
+function waitForSync(operationId) {
+  if (!operationId) return Promise.resolve({ status: "unknown" });
+  state.syncPoll.operationId = operationId;
+  state.localSync.intervals = true;
+  broadcastSyncMessage({ type: "started", operation_id: operationId });
+  scheduleSyncPoll(0);
+  return new Promise((resolve) => state.syncPoll.waiters.push(resolve));
+}
+
+function setupSyncStatusMonitoring() {
+  if ("BroadcastChannel" in window) {
+    state.syncPoll.channel = new BroadcastChannel(SYNC_POLL_CHANNEL);
+    state.syncPoll.channel.addEventListener("message", (event) => {
+      const message = event.data || {};
+      if (message.type === "started" && message.operation_id) {
+        state.syncPoll.operationId = message.operation_id;
+        state.localSync.intervals = true;
+        scheduleSyncPoll(0);
+      } else if (message.type === "status") handleSyncStatus(message.status);
+    });
+  }
+  scheduleSyncPoll(0);
+}
+
+function handleSyncVisibility() {
+  if (document.visibilityState !== "visible") {
+    state.syncPoll.controller?.abort();
+    releaseSyncPollLease();
+    return;
+  }
+  scheduleSyncPoll(0);
 }
 
 async function apiAudio(path, blob) {
@@ -2932,41 +3088,43 @@ function render(data) {
   updateHeaderAction();
 }
 
-async function load(path = "/api/bootstrap") {
+async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
   const initialLoad = $("#appShell").classList.contains("is-loading");
   try {
     const localOnly = path.includes("local=1");
     const query = localOnly ? "?local=1" : "";
     const bootstrap = await api(path);
-    const domainData = Promise.all([
-      api("/api/chat/history?limit=100"),
-      api("/api/activities?limit=250"),
-      api(`/api/plan${query}`),
-      api("/api/library?limit=100"),
-      api("/api/performance"),
-      api("/api/feedback"),
-      api("/api/profile"),
-    ]);
-    const payload = { ...bootstrap };
+    const existing = state.data || {};
+    const payload = { ...existing, ...bootstrap };
+    ["messages", "messages_next_cursor", "activities", "activities_next_cursor", "library", "library_next_cursor", "plans", "planned", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", "garmin", "checkins", "local_feedback", "activity_feedback"].forEach((key) => {
+      if (existing[key] !== undefined) payload[key] = existing[key];
+    });
+    const areas = new Set(requestedAreas || ["chat", "activities", "plan", "library", "performance", "feedback", "profile"]);
+    const requests = [];
+    if (areas.has("chat")) requests.push(["chat", api("/api/chat/history?limit=100")]);
+    if (areas.has("activities")) requests.push(["activities", api("/api/activities?limit=250")]);
+    if (areas.has("plan")) requests.push(["plan", api(`/api/plan${query}`)]);
+    if (areas.has("library")) requests.push(["library", api("/api/library?limit=100")]);
+    if (areas.has("performance")) requests.push(["performance", api("/api/performance")]);
+    if (areas.has("feedback")) requests.push(["feedback", api("/api/feedback")]);
+    if (areas.has("profile")) requests.push(["profile", api("/api/profile")]);
+    const domainData = Promise.all(requests.map(async ([area, request]) => [area, await request]));
     if (initialLoad && requestSequence === state.loadSequence) {
       render(payload);
       finishAppShellLoading();
     }
-    const [chat, activities, plan, library, performance, feedback, profile] = await domainData;
-    Object.assign(payload, {
-      ...plan,
-      ...performance,
-      ...feedback,
-      profile: profile.profile || bootstrap.profile,
-      competitions: profile.competitions || bootstrap.competitions,
-      messages: chat.messages || [],
-      messages_next_cursor: chat.next_cursor,
-      activities: activities.activities || [],
-      activities_next_cursor: activities.next_cursor,
-      library: library.workouts || [],
-      library_next_cursor: library.next_cursor,
+    const results = await domainData;
+    results.forEach(([area, result]) => {
+      if (area === "chat") Object.assign(payload, { messages: result.messages || [], messages_next_cursor: result.next_cursor });
+      if (area === "activities") Object.assign(payload, { activities: result.activities || [], activities_next_cursor: result.next_cursor });
+      if (area === "plan") Object.assign(payload, result);
+      if (area === "library") Object.assign(payload, { library: result.workouts || [], library_next_cursor: result.next_cursor });
+      if (area === "performance") Object.assign(payload, result);
+      if (area === "feedback") Object.assign(payload, result);
+      if (area === "profile") Object.assign(payload, { profile: result.profile || bootstrap.profile, competitions: result.competitions || bootstrap.competitions });
     });
+    payload.state_versions = bootstrap.state_versions || payload.state_versions;
     if (requestSequence === state.loadSequence) render(payload);
   } catch (error) {
     if (/Authentication/.test(error.message)) return;
@@ -2979,6 +3137,16 @@ async function load(path = "/api/bootstrap") {
   } finally {
     if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
   }
+}
+
+function load(path = "/api/bootstrap", requestedAreas = null) {
+  if (state.loadPromise) return state.loadPromise;
+  const promise = loadState(path, requestedAreas);
+  const tracked = promise.finally(() => {
+    if (state.loadPromise === tracked) state.loadPromise = null;
+  });
+  state.loadPromise = tracked;
+  return tracked;
 }
 
 async function loadInitialState() {
@@ -3075,10 +3243,12 @@ async function syncNow(event) {
   button.disabled = true; button.classList.add("busy"); button.textContent = compactButton ? "Synchronisierung läuft…" : "Aktivitäten werden aktualisiert…";
   try {
     const result = await api("/api/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
-    const periodLabel = result.activity_days === -1 ? "aller verfügbaren Daten" : `der letzten ${result.activity_days} Tage`;
-    toast(result.status === "ok" ? `${result.activities} Aktivitäten ${periodLabel} aktualisiert` : "Aktualisierung läuft bereits");
-    invalidateContextPreview();
-    await load();
+    if (result.operation_id) {
+      const completed = await waitForSync(result.operation_id);
+      if (completed.status === "error") throw new Error(completed.last_error || "Synchronisierung fehlgeschlagen.");
+      toast(result.status === "already_running" ? "Aktualisierung läuft bereits" : "Aktualisierung abgeschlossen");
+      invalidateContextPreview();
+    } else toast("Aktualisierung läuft bereits");
   } catch (error) { toast(error.message, true); await load(); }
   finally { state.localSync.intervals = false; button.disabled = false; button.classList.remove("busy"); button.textContent = defaultCaption; updateHeaderAction(); }
 }
@@ -3685,6 +3855,7 @@ $("#activityFilterReset").addEventListener("click", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") savePwaActivity();
   else checkPwaReturn();
+  handleSyncVisibility();
 });
 document.addEventListener("pointerdown", handlePwaInteraction, { passive: true });
 window.addEventListener("scroll", updateChatComposerVisibility, { passive: true });
@@ -3696,11 +3867,6 @@ window.addEventListener("beforeunload", (event) => {
   event.returnValue = "";
 });
 setupPwaUpdates();
-setInterval(() => {
-  if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.weather || state.localSync.performance || state.localSync.intervalsFull || state.localSync.garminFull) load();
-}, 1500);
-setInterval(() => {
-  if (state.data && document.visibilityState === "visible") load();
-}, 60_000);
 renderNotificationStatus();
+setupSyncStatusMonitoring();
 bootstrapAuth();
