@@ -89,12 +89,12 @@ Basis: `develop` / `45b5ca3`
 
 ### W10 – Chat-, Kosten- und Statuszuverlässigkeit
 
-- [ ] Provider-Lock-Retry anhand strukturierter Fehlergründe reparieren.
-- [ ] Responses-Fehlerstatus strikt validieren.
-- [ ] Tool-Mutationen und Follow-up-Requests idempotent/reconciliierbar machen.
-- [ ] Chat-Warteschlange begrenzen/abbrechbar machen und Kostenbudget vorsehen.
-- [ ] Usage-Zähler atomar und zur lokalen Tagesgrenze passend aktualisieren.
-- [ ] Garmin-Fehlerstatus zuverlässig persistieren.
+- [x] Provider-Lock-Retry anhand strukturierter Fehlergründe reparieren.
+- [x] Responses-Fehlerstatus strikt validieren.
+- [x] Tool-Mutationen und Follow-up-Requests idempotent/reconciliierbar machen.
+- [x] Chat-Warteschlange begrenzen/abbrechbar machen und Kostenbudget vorsehen.
+- [x] Usage-Zähler atomar und zur lokalen Tagesgrenze passend aktualisieren.
+- [x] Garmin-Fehlerstatus zuverlässig persistieren.
 
 ### W11 – Bibliothek, Kalenderhorizont und PWA-Produktlücken
 

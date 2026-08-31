@@ -23,6 +23,7 @@ class CoachTests(unittest.TestCase):
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
             db.execute("DELETE FROM messages")
+            db.execute("DELETE FROM chat_tool_calls")
             db.execute("DELETE FROM snapshots")
             db.execute("DELETE FROM workout_drafts")
             db.execute("DELETE FROM training_plans")
@@ -2983,6 +2984,86 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(summary["rate_limits"]["remaining_requests"], "0")
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "0")
         self.assertNotIn("current quota", json.dumps(summary))
+
+    def test_openai_conversation_lock_retry_uses_structured_reason(self):
+        calls = []
+        responses = [server.AppError(409, "locked", reason="conversation_locked"), {"output_text": "ok"}]
+
+        def fake_request(path, payload):
+            calls.append(path)
+            result = responses.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        with patch.object(server, "openai_request", side_effect=fake_request), patch.object(server.time, "sleep") as sleep:
+            result = server.responses_request({"model": "gpt-5.6-sol"})
+        self.assertEqual(result["output_text"], "ok")
+        self.assertEqual(calls, ["/responses", "/responses"])
+        sleep.assert_called_once_with(1)
+
+    def test_chat_queue_is_bounded_instead_of_waiting_indefinitely(self):
+        acquired = [server.CHAT_QUEUE.acquire(blocking=False) for _ in range(server.CHAT_QUEUE_LIMIT)]
+        self.assertTrue(all(acquired))
+        try:
+            @server.serialise_conversation
+            def queued_operation():
+                return "completed"
+
+            with self.assertRaises(server.AppError) as raised:
+                queued_operation()
+            self.assertEqual(raised.exception.reason, "chat_queue_full")
+        finally:
+            for was_acquired in acquired:
+                if was_acquired:
+                    server.CHAT_QUEUE.release()
+
+    def test_responses_status_and_error_payloads_are_rejected(self):
+        with self.assertRaises(server.AppError) as failed:
+            server._validate_openai_response("/responses", {"status": "failed"})
+        self.assertEqual(failed.exception.reason, "response_failed")
+        with self.assertRaises(server.AppError) as unknown:
+            server._validate_openai_response("/responses", {"status": "mystery"})
+        self.assertEqual(unknown.exception.reason, "invalid_response_status")
+        with self.assertRaises(server.AppError) as error:
+            server._validate_openai_response("/responses", {"error": {"message": "secret"}})
+        self.assertEqual(error.exception.reason, "response_error")
+
+    def test_openai_daily_budget_is_enforced_before_request(self):
+        server.set_kv("openai_usage", json.dumps({"date": server.local_now().date().isoformat(), "total_tokens": 10}))
+        config = replace(server.CONFIG, openai_api_key="test-key", openai_daily_token_budget=10)
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json") as request:
+            with self.assertRaises(server.AppError) as raised:
+                server.openai_request("/responses", {"model": "gpt-5.6-sol"})
+        self.assertEqual(raised.exception.reason, "daily_token_budget")
+        request.assert_not_called()
+
+    def test_openai_usage_updates_are_atomic_and_tolerate_invalid_provider_counts(self):
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_daily_token_budget=1000)):
+            threads = [threading.Thread(target=server.record_openai_usage, args=({"usage": {"input_tokens": "bad", "output_tokens": 2}}, "test")) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        summary = server.openai_usage_summary()
+        self.assertEqual(summary["requests"], 8)
+        self.assertEqual(summary["input_tokens"], 0)
+        self.assertEqual(summary["output_tokens"], 16)
+
+    def test_chat_tool_results_are_idempotent_and_resettable(self):
+        server.remember_chat_tool_result("call-1", "save_workout_library_entries", {"ok": True, "id": "one"})
+        server.remember_chat_tool_result("call-1", "save_workout_library_entries", {"ok": True, "id": "two"})
+        self.assertEqual(server.cached_chat_tool_result("call-1"), {"ok": True, "id": "one"})
+        server.reset_coach_chat()
+        self.assertIsNone(server.cached_chat_tool_result("call-1"))
+
+    def test_garmin_sync_persists_fatal_error_status(self):
+        config = replace(server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json")
+        with patch.object(server, "CONFIG", config):
+            with self.assertRaises(Exception):
+                server.sync_garmin()
+        state = server.garmin_public_state()
+        self.assertTrue(state["last_error"])
 
     def test_garmin_sdk_calls_log_operation_and_result_summary(self):
         server.initialise_logging()
