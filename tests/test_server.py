@@ -507,12 +507,48 @@ class CoachTests(unittest.TestCase):
 
     def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
-        self.assertIn('async function load(path = "/api/bootstrap")', app)
+        self.assertIn('async function loadState(path = "/api/bootstrap", requestedAreas = null)', app)
+        self.assertIn('function load(path = "/api/bootstrap", requestedAreas = null)', app)
         self.assertIn('api("/api/chat/history?limit=100")', app)
         self.assertIn('api("/api/activities?limit=250")', app)
         self.assertIn('api(`/api/plan${query}`)', app)
         self.assertIn('render(payload);\n      finishAppShellLoading();', app)
+        self.assertIn('api("/api/sync/status", { signal: controller.signal })', app)
+        self.assertIn('const SYNC_POLL_ACTIVE_MS = 1_500;', app)
+        self.assertNotIn('setInterval(() => {\n  if (state.localSync.intervals', app)
         self.assertNotIn('async function load(path = "/api/state")', app)
+
+    def test_sync_status_is_bounded_and_contains_versions(self):
+        server.set_kv("sync_operation_id", "operation-test")
+        server.set_kv("sync_operation_status", "running")
+        server.set_kv("sync_operation_phase", "fetching")
+        server.set_kv("sync_operation_progress", "35")
+        server.set_kv("sync_operation_message", "Daten werden gelesen…")
+        with patch.object(server, "state_versions", return_value={"activities": "v1"}):
+            status = server.sync_status_state()
+        self.assertEqual(status["operation_id"], "operation-test")
+        self.assertEqual(status["phase"], "fetching")
+        self.assertEqual(status["progress"], 35)
+        self.assertEqual(status["state_versions"], {"activities": "v1"})
+        self.assertNotIn("activities", json.dumps(status["message"]))
+
+    def test_start_sync_operation_claims_one_operation(self):
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config), patch.object(server, "safe_sync") as worker, patch.object(server.threading, "Thread") as thread:
+            thread.return_value.start = Mock()
+            result = server.start_sync_operation(7, reason="test")
+            duplicate = server.start_sync_operation(7, reason="test")
+        try:
+            self.assertEqual(result["status"], "started")
+            self.assertEqual(result["activity_days"], 7)
+            self.assertEqual(duplicate["status"], "already_running")
+            self.assertEqual(duplicate["operation_id"], result["operation_id"])
+            thread.assert_called_once()
+            thread.return_value.start.assert_called_once_with()
+            worker.assert_not_called()
+        finally:
+            server.set_kv("sync_running", "0")
+            server.set_kv("sync_operation_status", "idle")
 
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")

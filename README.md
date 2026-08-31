@@ -185,6 +185,12 @@ search), while plans, performance, profile, feedback, and the workout library
 are loaded separately. The activity view can request the next page without
 reloading the complete application state.
 
+Manual Intervals.icu synchronization starts in the background and exposes only
+the bounded `/api/sync/status` response while it runs. The browser uses one
+status poll at a time, coordinates visible tabs through a short-lived local
+lease, pauses polling while hidden or offline, and reloads only domains whose
+state version changed after completion.
+
 ## Target competitions and Intervals.icu
 
 Target competitions are entered manually in the profile with the Intervals.icu

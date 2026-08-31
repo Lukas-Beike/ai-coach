@@ -481,7 +481,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-010.
 - **Folgetasks:** FT-011 ist entblockt.
 
-### - [ ] FT-011 – Sync-Polling auf Statusendpunkt und Single-Flight umstellen
+### - [x] FT-011 – Sync-Polling auf Statusendpunkt und Single-Flight umstellen
+
+**Status:** abgeschlossen
 
 **Quelle:** PERF-02
 **Ziel:** Während eines Syncs wird nur ein kleiner Status gepollt; überlappende Voll-State-Requests und unnötige Rate-Limit-Last entfallen.
@@ -489,20 +491,32 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] `/api/sync/status` mit Status, Phase, Fortschritt, Operation-ID und fachlichen State-Versionen definieren.
-- [ ] Nur einen aktiven Poll pro Browserkontext erlauben.
-- [ ] Vorherige Requests per `AbortController` abbrechen.
-- [ ] Sichtbarkeit, Offlinezustand und mehrere Tabs berücksichtigen.
-- [ ] Vollständige Bereichsdaten nur bei geänderter Version neu laden.
-- [ ] Poll-Backoff für Fehler/Leerlauf und schnelle Phase während aktiven Syncs definieren.
-- [ ] Tests für langsame Antwort, Out-of-order, Tabwechsel und Rate-Limit ergänzen.
+- [x] `/api/sync/status` mit Status, Phase, Fortschritt, Operation-ID und fachlichen State-Versionen definieren.
+- [x] Nur einen aktiven Poll pro Browserkontext erlauben.
+- [x] Vorherige Requests per `AbortController` abbrechen.
+- [x] Sichtbarkeit, Offlinezustand und mehrere Tabs berücksichtigen.
+- [x] Vollständige Bereichsdaten nur bei geänderter Version neu laden.
+- [x] Poll-Backoff für Fehler/Leerlauf und schnelle Phase während aktiven Syncs definieren.
+- [x] Tests für langsame Antwort, Out-of-order, Tabwechsel und Rate-Limit ergänzen.
 
 **Abnahmekriterien**
 
-- [ ] Keine überlappenden State-Loads aus demselben Tab.
-- [ ] Aktiver Sync benötigt keine Voll-State-Antwort alle 1,5 Sekunden.
-- [ ] Mehrere Tabs überschreiten den normalen API-Rate-Limit nicht.
-- [ ] Abschluss und Fehler werden zeitnah sichtbar.
+- [x] Keine überlappenden State-Loads aus demselben Tab.
+- [x] Aktiver Sync benötigt keine Voll-State-Antwort alle 1,5 Sekunden.
+- [x] Mehrere Tabs überschreiten den normalen API-Rate-Limit nicht.
+- [x] Abschluss und Fehler werden zeitnah sichtbar.
+
+**Handover FT-011**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `feat/ft-011-sync-status-single-flight`, `af47404`, PR folgt nach finalem Rebase
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
+- **Verhaltensänderung:** Manuelle Intervals.icu-Lesesynchronisierung läuft als Hintergrundoperation. `/api/sync/status` liefert ausschließlich begrenzte Fortschritts- und Versionsmetadaten. Der Browser pollt mit Single-Flight, Abort bei Hidden/Offline, kurzer Tab-Lease und BroadcastChannel; nach Abschluss werden nur geänderte Fachbereiche nachgeladen.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check`, `docker build -t ai-coach:ft011 .` und vier parallele SQLCipher-Test-Shards mit insgesamt 228 Tests erfolgreich.
+- **Review:** Diff-Review ohne offene Findings.
+- **Manuelle Prüfung:** CI-Browser-Smoke folgt im PR; alle bestehenden Login-, PWA-, Markdown-, Chat-, Voice- und Benachrichtigungswege bleiben unverändert.
+- **Offene Risiken:** Keine für FT-011.
+- **Folgetasks:** FT-012 ist entblockt.
 
 ### - [ ] FT-012 – Daily-Sync-Datum zeitzonensicher machen
 

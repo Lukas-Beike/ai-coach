@@ -77,6 +77,7 @@ MAX_EXTERNAL_CALENDAR_BYTES = 5_000_000
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
+SYNC_START_LOCK = threading.Lock()
 WORKOUT_LIBRARY_SYNC_LOCK = threading.Lock()
 COMPETITION_SYNC_LOCK = threading.Lock()
 COMPETITION_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
@@ -6311,6 +6312,7 @@ def state_versions() -> dict[str, str]:
         feedback = db.execute("SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest FROM activity_feedback").fetchone()
     return {
         "activities": f"{snapshot.get('synced_at') or ''}:{len(snapshot.get('recent_activities', [])) if isinstance(snapshot.get('recent_activities'), list) else 0}",
+        "performance": f"{get_kv('last_performance_refresh_at') or snapshot.get('synced_at') or ''}",
         "chat": f"{message['latest']}:{message['count']}",
         "library": f"{library['latest']}:{library['count']}",
         "checkins": f"{checkins['latest']}:{checkins['count']}",
@@ -6797,6 +6799,65 @@ def intervals_public_state(snapshot: dict[str, Any] | None = None) -> dict[str, 
     }
 
 
+def set_sync_operation_state(
+    operation_id: str,
+    status: str,
+    phase: str,
+    progress: int,
+    message: str,
+    error: str | None = None,
+) -> None:
+    """Persist bounded, non-athlete-facing status for the active read sync."""
+    set_kv("sync_operation_id", operation_id)
+    set_kv("sync_operation_status", status)
+    set_kv("sync_operation_phase", phase)
+    set_kv("sync_operation_progress", str(max(0, min(progress, 100))))
+    set_kv("sync_operation_message", message)
+    if error is not None:
+        set_kv("last_sync_error", redact_text(error)[:1000])
+
+
+def sync_status_state() -> dict[str, Any]:
+    running = SYNC_LOCK.locked() or get_kv("sync_running") == "1"
+    status = get_kv("sync_operation_status") or ("running" if running else "idle")
+    try:
+        progress = max(0, min(int(get_kv("sync_operation_progress") or 0), 100))
+    except (TypeError, ValueError):
+        progress = 0
+    return {
+        "status": status,
+        "phase": get_kv("sync_operation_phase") or ("running" if running else "idle"),
+        "progress": progress,
+        "operation_id": get_kv("sync_operation_id"),
+        "running": running,
+        "message": get_kv("sync_operation_message") or None,
+        "started_at": get_kv("sync_operation_started_at"),
+        "finished_at": get_kv("sync_operation_finished_at"),
+        "last_error": get_kv("last_sync_error") or None,
+        "state_versions": state_versions(),
+    }
+
+
+def start_sync_operation(activity_days: int, reason: str = "manual") -> dict[str, Any]:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    with SYNC_START_LOCK:
+        if SYNC_LOCK.locked() or get_kv("sync_running") == "1":
+            return {"status": "already_running", "operation_id": get_kv("sync_operation_id")}
+        operation_id = uuid.uuid4().hex
+        now = utc_now()
+        set_kv("sync_running", "1")
+        set_kv("sync_operation_started_at", now)
+        set_kv("sync_operation_finished_at", "")
+        set_sync_operation_state(operation_id, "running", "queued", 0, "Intervals.icu-Synchronisierung wird gestartet…")
+        threading.Thread(
+            target=safe_sync,
+            args=(reason, activity_days, operation_id),
+            daemon=True,
+        ).start()
+        return {"status": "started", "operation_id": operation_id, "activity_days": activity_days}
+
+
 def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
@@ -7238,17 +7299,25 @@ def full_provider_resync(provider: str) -> dict[str, Any]:
 
 
 @intervals_operation
-def sync_intervals(reason: str = "manual", activity_days: int | None = None) -> dict[str, Any]:
+def sync_intervals(
+    reason: str = "manual",
+    activity_days: int | None = None,
+    operation_id: str | None = None,
+) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
     if activity_days is None:
         activity_days = sync_period("intervals")
     if not SYNC_LOCK.acquire(blocking=False):
         return {"status": "already_running"}
+    operation_id = operation_id or (get_kv("sync_operation_id") if get_kv("sync_running") == "1" else None) or uuid.uuid4().hex
     try:
+        set_kv("sync_operation_started_at", get_kv("sync_operation_started_at") if get_kv("sync_running") == "1" else utc_now())
+        set_sync_operation_state(operation_id, "running", "fetching", 10, "Intervals.icu-Daten werden gelesen…")
         set_kv("sync_running", "1")
         set_kv("sync_status", "Intervals.icu: Synchronisierung läuft…")
         snapshot = IntervalsClient().fetch_snapshot(activity_days=activity_days)
+        set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
         save_snapshot(snapshot)
         # Provider activity synchronization is read-only. Local library
         # entries remain available from the cached local view and are pushed
@@ -7265,6 +7334,8 @@ def sync_intervals(reason: str = "manual", activity_days: int | None = None) -> 
         pagination = snapshot.get("provider_sync", {}).get("pagination", {}) if isinstance(snapshot, dict) else {}
         set_kv("last_sync_pagination", json.dumps(pagination, ensure_ascii=False, separators=(",", ":")))
         add_message("event", f"Trainingsdaten aktualisiert ({reason}, {period_label}).")
+        set_sync_operation_state(operation_id, "completed", "complete", 100, "Intervals.icu-Synchronisierung abgeschlossen.")
+        set_kv("sync_operation_finished_at", utc_now())
         return {
             "status": "partial" if library_error else "ok",
             "synced_at": snapshot["synced_at"],
@@ -7280,6 +7351,8 @@ def sync_intervals(reason: str = "manual", activity_days: int | None = None) -> 
         }
     except Exception as exc:
         set_kv("last_sync_error", redact_text(str(exc))[:1000])
+        set_sync_operation_state(operation_id, "error", "error", 100, "Intervals.icu-Synchronisierung fehlgeschlagen.", str(exc))
+        set_kv("sync_operation_finished_at", utc_now())
         LOGGER.error(
             "Intervals.icu synchronization failed",
             extra={"event": "sync_failed", "context": {"reason": reason, "last_success": get_kv("last_sync_at")}},
@@ -9945,6 +10018,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 schedule_morning_checkin()
                 query = parse_qs(urlparse(self.path).query)
                 self.send_json(200, public_bootstrap(local_only=query.get("local", ["0"])[0] == "1"))
+            elif path == "/api/sync/status":
+                require_auth(self)
+                self.send_json(200, sync_status_state())
             elif path == "/api/activities":
                 require_auth(self)
                 query = parse_qs(urlparse(self.path).query)
@@ -10077,7 +10153,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/sync":
                 payload = self.read_json()
                 days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))
-                self.send_json(200, sync_intervals("manuell", activity_days=days))
+                self.send_json(202, start_sync_operation(days, reason="manuell"))
+            elif path == "/api/sync/status":
+                raise AppError(405, "GET verwenden.")
             elif path == "/api/intervals/full-resync":
                 payload = self.read_json()
                 if payload.get("confirm") != "FULL_RESYNC":
@@ -10317,9 +10395,9 @@ class CoachHTTPServer(ThreadingHTTPServer):
     request_queue_size = 32
 
 
-def safe_sync(reason: str, activity_days: int | None = None) -> None:
+def safe_sync(reason: str, activity_days: int | None = None, operation_id: str | None = None) -> None:
     try:
-        sync_intervals(reason, activity_days=activity_days)
+        sync_intervals(reason, activity_days=activity_days, operation_id=operation_id)
     except Exception:
         LOGGER.error(
             "Background synchronization failed",
