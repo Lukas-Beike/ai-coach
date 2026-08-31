@@ -23,7 +23,7 @@ It is not intended to be exposed directly to the public internet.
   and indoor/virtual cycling.
 - Mobile-first profile and system sections can be collapsed; the planned
   calendar is grouped into collapsible full weeks with compact volume summaries.
-  The System tab controls how many past and future weeks are displayed.
+  The Einstellungen tab controls how many past and future weeks are displayed.
   Intervals.icu planned workouts are matched to completed activities through
   their pairing (with a conservative same-day/sport fallback) and show
   workout and weekly compliance percentages. The comparison uses training
@@ -94,7 +94,7 @@ It is not intended to be exposed directly to the public internet.
   long local library entries on busy days can be proposed as short easy sessions.
   Invalid feeds are rejected without replacing the last good local calendar;
   recurring events are reported as unsupported rather than partially expanded.
-- A separate public iCalendar import is available in the System tab for
+- A separate public iCalendar import is available in the Einstellungen tab for
   discovering competition candidates. Imported candidates remain local until
   the athlete explicitly adopts one as a target competition.
 - The planned calendar never displays a provider horizon wider than the
@@ -131,7 +131,7 @@ After login, the chat and all data already stored locally are rendered first.
 The browser then loads the current remote-enriched view in the background. The
 authentication request itself does not force a new Intervals.icu, Garmin, or
 calendar synchronization: those providers are synchronized at server
-startup, once per calendar day in the background, or on demand from the System
+startup, once per calendar day in the background, or on demand from the Einstellungen
 tab. The selected activity windows (Intervals.icu and Garmin) are retained
 locally and can be changed in that tab.
 
@@ -143,7 +143,7 @@ visible as partial provider status instead of being presented as complete.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
-can be forced manually from the Open-Meteo card in the System tab.
+can be forced manually from the Open-Meteo card in the Einstellungen tab.
 GitHub release information is checked at most every 15 minutes. The morning
 check-in is generated at most once per local calendar day when its required
 integrations are configured.
@@ -227,7 +227,7 @@ URL stays in the server environment and is excluded from browser state,
 exports, and logs.
 
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
-in the System tab. A successful sync keeps events from today through the next
+in the Einstellungen tab. A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
 settings or bypass explicit library synchronization or planning approvals.
@@ -253,7 +253,7 @@ remaining quotas when the API reports them.
 The application checks the latest non-draft, non-prerelease GitHub release on
 the server and caches the result for 15 minutes by default. A newer release is
 shown next to the application version and its release notes are available in
-the **System** tab. Set `GITHUB_TOKEN` only when the configured repository is
+the **Einstellungen** tab. Set `GITHUB_TOKEN` only when the configured repository is
 private; the token remains server-side and is never returned to the browser.
 
 ## Garmin authentication
@@ -356,13 +356,13 @@ not request payloads or credentials. Client disconnects such as a closed
 browser connection are handled as normal aborted requests rather than internal
 server failures.
 
-The **System** tab allows the athlete to export local data as JSON or delete
+The **Einstellungen** tab allows the athlete to export local data as JSON or delete
 local chats, snapshots, legacy drafts, library entries, competitions, and profile
 data. The database file itself remains in place. Chat reset and local cleanup
 also attempt to delete the stored OpenAI conversation; data held by external
 providers remains subject to their own policies.
 
-For Intervals.icu and Garmin, the System tab also offers a full local
+For Intervals.icu and Garmin, the Einstellungen tab also offers a full local
 resynchronization. It removes only the locally cached data for that provider
 and then fetches it again; cloud data, credentials, and Garmin tokens are not
 deleted. While this operation runs, syncs for the affected provider and
@@ -371,7 +371,7 @@ The Intervals.icu connection card also reports whether the provider is
 connected, synchronizing, or in error, including the time of the last
 successful update and a safe provider validation message when available.
 
-The **System** tab also provides an encrypted database backup download and a
+The **Einstellungen** tab also provides an encrypted database backup download and a
 validated restore action. Restoring requires the same `APP_PASSWORD` used by
 the backup database. Before replacement, the current database is retained as a
 `*.pre-restore-*` copy in `/data`. Keep both files protected.
