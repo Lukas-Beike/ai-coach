@@ -2102,6 +2102,7 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
             append_garmin_performance_history(payload, previous)
             set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             set_kv("last_garmin_sync_at", payload["synced_at"])
+            mark_daily_sync("garmin")
             set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
             return {"status": "partial" if payload.get("errors") else "ok", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
         except Exception as exc:
@@ -2215,6 +2216,7 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
         append_garmin_performance_history(payload, previous)
         set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         set_kv("last_garmin_sync_at", payload["synced_at"])
+        mark_daily_sync("garmin")
         set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
         return {"status": "partial" if payload["errors"] else "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": pagination}
     except Exception as exc:
@@ -2973,6 +2975,7 @@ def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
                     (event["id"], event["uid"], event["name"], event["event_date"], event["start_local"], event["end_local"], event["duration_minutes"], int(event["all_day"]), int(event.get("training_relevant", True)), int(event.get("no_intensity", False)), now),
                 )
         set_kv("last_external_calendar_sync_at", now)
+        mark_daily_sync("calendar")
         set_kv("last_external_calendar_sync_error", "")
         add_message("event", f"Kalender aktualisiert ({reason}, {len(events)} Einträge).")
         replan = check_adaptive_replan("external calendar")
@@ -7319,6 +7322,7 @@ def sync_intervals(
         snapshot = IntervalsClient().fetch_snapshot(activity_days=activity_days)
         set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
         save_snapshot(snapshot)
+        mark_daily_sync("intervals")
         # Provider activity synchronization is read-only. Local library
         # entries remain available from the cached local view and are pushed
         # only by the dedicated, explicitly confirmed library action.
@@ -9175,6 +9179,54 @@ def local_now() -> datetime:
         return datetime.now().astimezone()
 
 
+DAILY_SYNC_LEGACY_KEYS = {
+    "intervals": "last_sync_at",
+    "garmin": "last_garmin_sync_at",
+    "calendar": "last_external_calendar_sync_at",
+}
+
+
+def local_date_from_timestamp(value: Any, timezone_value: Any = None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        return parsed.astimezone(ZoneInfo(timezone_name(timezone_value or get_profile().get("timezone")))).date().isoformat()
+    except Exception:
+        return parsed.astimezone().date().isoformat()
+
+
+def daily_sync_marker_key(source: str) -> str:
+    if source not in DAILY_SYNC_LEGACY_KEYS:
+        raise ValueError(f"unknown daily sync source: {source}")
+    return f"daily_sync_{source}_local_date"
+
+
+def daily_sync_due(source: str, now: datetime | None = None) -> bool:
+    current_date = local_date_from_timestamp((now or local_now()).isoformat())
+    marker = get_kv(daily_sync_marker_key(source))
+    if marker:
+        return marker != current_date
+    # Migrate lazily from the old UTC instant. This is safe at startup and
+    # avoids treating a UTC date prefix as an athlete-local calendar date.
+    legacy_date = local_date_from_timestamp(get_kv(DAILY_SYNC_LEGACY_KEYS[source]))
+    if legacy_date:
+        set_kv(daily_sync_marker_key(source), legacy_date)
+        return legacy_date != current_date
+    return True
+
+
+def mark_daily_sync(source: str, now: datetime | None = None) -> None:
+    local_date = local_date_from_timestamp((now or local_now()).isoformat())
+    set_kv(daily_sync_marker_key(source), local_date)
+
+
 def morning_checkin_date() -> str | None:
     now = local_now()
     return now.date().isoformat() if 5 <= now.hour < 11 else None
@@ -10422,14 +10474,12 @@ def daily_sync_loop() -> None:
             safe_weather_sync("dreistündliche automatische Aktualisierung")
         if not (CONFIG.intervals_api_key or CONFIG.calendar_ical_url):
             continue
-        today = local_now().date().isoformat()
-        if CONFIG.calendar_ical_url and (get_kv("last_external_calendar_sync_at") or "")[:10] != today:
+        if CONFIG.calendar_ical_url and daily_sync_due("calendar"):
             safe_external_calendar_sync("tägliche automatische Aktualisierung")
-        last_sync = get_kv("last_sync_at") or ""
         if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
-            if (get_kv("last_garmin_sync_at") or "")[:10] != today:
+            if daily_sync_due("garmin"):
                 safe_garmin_sync("tägliche automatische Aktualisierung")
-        if not CONFIG.intervals_api_key or last_sync[:10] == today or get_kv("sync_running") == "1" or INTERVALS_RESYNC_GATE.is_resetting():
+        if not CONFIG.intervals_api_key or not daily_sync_due("intervals") or get_kv("sync_running") == "1" or INTERVALS_RESYNC_GATE.is_resetting():
             continue
         safe_sync("tägliche automatische Aktualisierung", activity_days=sync_period("intervals"))
 

@@ -7,7 +7,7 @@ import json
 import uuid
 import sqlite3
 from dataclasses import replace
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
@@ -549,6 +549,38 @@ class CoachTests(unittest.TestCase):
         finally:
             server.set_kv("sync_running", "0")
             server.set_kv("sync_operation_status", "idle")
+
+    def test_daily_sync_date_uses_athlete_timezone_and_dst(self):
+        with patch.object(server, "get_profile", return_value={"timezone": "Europe/Berlin"}):
+            self.assertEqual(server.local_date_from_timestamp("2026-03-29T00:30:00+00:00"), "2026-03-29")
+            self.assertEqual(server.local_date_from_timestamp("2026-03-29T22:30:00+00:00"), "2026-03-30")
+
+        with patch.object(server, "get_profile", return_value={"timezone": "America/Los_Angeles"}):
+            self.assertEqual(server.local_date_from_timestamp("2026-08-31T06:30:00+00:00"), "2026-08-30")
+
+    def test_daily_sync_due_lazily_migrates_legacy_utc_timestamp(self):
+        server.set_kv("last_sync_at", "2026-03-29T23:30:00+00:00")
+        with patch.object(server, "get_profile", return_value={"timezone": "Europe/Berlin"}):
+            restarted_at_local_midnight = datetime(2026, 3, 30, 0, 30, tzinfo=timezone(timedelta(hours=1)))
+            self.assertFalse(server.daily_sync_due("intervals", restarted_at_local_midnight))
+            self.assertEqual(server.get_kv("daily_sync_intervals_local_date"), "2026-03-30")
+            next_local_day = datetime(2026, 3, 31, 0, 1, tzinfo=timezone(timedelta(hours=2)))
+            self.assertTrue(server.daily_sync_due("intervals", next_local_day))
+
+    def test_daily_sync_markers_are_separate_per_provider(self):
+        local_day = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+        server.mark_daily_sync("intervals", local_day)
+        self.assertFalse(server.daily_sync_due("intervals", local_day))
+        self.assertTrue(server.daily_sync_due("garmin", local_day))
+        self.assertTrue(server.daily_sync_due("calendar", local_day))
+
+    def test_daily_sync_loop_uses_local_provider_markers(self):
+        source = Path(server.__file__).read_text(encoding="utf-8")
+        loop = source[source.index("def daily_sync_loop"):source.index("def safe_garmin_sync")]
+        self.assertIn('daily_sync_due("calendar")', loop)
+        self.assertIn('daily_sync_due("garmin")', loop)
+        self.assertIn('daily_sync_due("intervals")', loop)
+        self.assertNotIn('[:10]', loop)
 
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")

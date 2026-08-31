@@ -518,7 +518,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-011.
 - **Folgetasks:** FT-012 ist entblockt.
 
-### - [ ] FT-012 – Daily-Sync-Datum zeitzonensicher machen
+### - [x] FT-012 – Daily-Sync-Datum zeitzonensicher machen
+
+**Status:** abgeschlossen
 
 **Quelle:** SYNC-03
 **Ziel:** Jeder tägliche Job läuft pro lokalem Athletentag höchstens einmal, unabhängig von UTC-Versatz und DST.
@@ -526,17 +528,29 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Einheitliches Modell wählen: explizites lokales Ausführungsdatum oder UTC-Instant mit korrekter Umrechnung.
-- [ ] Konfigurierte Athletenzeitzone validieren und als Quelle verwenden.
-- [ ] Separate Datumswerte je Providerjob speichern.
-- [ ] Migration/Fallback für bestehende UTC-Zeitstempel definieren.
-- [ ] Tests für Europe/Berlin, westliche Zeitzone, DST-Wechsel und Neustart um Mitternacht ergänzen.
+- [x] Einheitliches Modell wählen: explizites lokales Ausführungsdatum oder UTC-Instant mit korrekter Umrechnung.
+- [x] Konfigurierte Athletenzeitzone validieren und als Quelle verwenden.
+- [x] Separate Datumswerte je Providerjob speichern.
+- [x] Migration/Fallback für bestehende UTC-Zeitstempel definieren.
+- [x] Tests für Europe/Berlin, westliche Zeitzone, DST-Wechsel und Neustart um Mitternacht ergänzen.
 
 **Abnahmekriterien**
 
-- [ ] Kein Fünf-Minuten-Mehrfachlauf zwischen lokaler und UTC-Mitternacht.
-- [ ] Kein lokaler Tag wird wegen UTC-Vergleich übersprungen.
-- [ ] Manueller Sync beeinflusst die definierte Daily-Semantik nur wie dokumentiert.
+- [x] Kein Fünf-Minuten-Mehrfachlauf zwischen lokaler und UTC-Mitternacht.
+- [x] Kein lokaler Tag wird wegen UTC-Vergleich übersprungen.
+- [x] Manueller Sync beeinflusst die definierte Daily-Semantik nur wie dokumentiert.
+
+**Handover FT-012**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `feat/ft-012-daily-sync-timezone`, `c42a287`, PR folgt nach finalem Rebase
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
+- **Verhaltensänderung:** Tägliche Intervals-, Garmin- und Kalenderläufe verwenden je Provider einen dauerhaften lokalen Ausführungstag in der validierten Athletenzeitzone. Bestehende UTC-Zeitstempel werden beim ersten Zugriff einmalig in lokale Marker überführt; erfolgreiche manuelle Synchronisierungen zählen für den aktuellen lokalen Tag.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check`, `docker build -t ai-coach:ft012 .` und beschleunigte SQLCipher-Teststruktur mit 4 parallelen Shards, insgesamt 232 Tests, erfolgreich.
+- **Review:** Diff-Review ohne Findings; `git diff --check` sauber.
+- **Manuelle Prüfung:** Nicht erforderlich; FT-012 ändert nur Backend-Scheduling, Persistenzmarker und Regressionstests. Browser-Smoke-Tests bleiben durch unveränderte Frontend-Assets abgedeckt.
+- **Offene Risiken:** Keine für FT-012.
+- **Folgetasks:** FT-013 ist entblockt.
 
 ### - [ ] FT-013 – Session-Schreiblast drosseln und Semantik vereinheitlichen
 
