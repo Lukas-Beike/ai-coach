@@ -321,7 +321,7 @@ jobs:
       github.event.workflow_run.name == 'Test and publish container image' &&
       github.event.workflow_run.event == 'workflow_dispatch' &&
       github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-'))
+      startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-')
     runs-on: ubuntu-latest
     steps:
       - name: Create release GitHub App token
