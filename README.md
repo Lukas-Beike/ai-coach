@@ -161,6 +161,14 @@ GitHub release information is checked at most every 15 minutes. The morning
 check-in is generated at most once per local calendar day when its required
 integrations are configured.
 
+Versioned JavaScript, CSS, and image assets with a `?v=...` query are served
+with a one-year immutable cache policy and an ETag. HTML, the manifest, and the
+service worker remain revalidatable with `no-cache`. The service worker uses
+cache-first for versioned assets and network-first for other non-API requests,
+removes older versioned caches on activation, and never caches API responses.
+Enable gzip or Brotli only at the documented trusted HTTPS reverse proxy; the
+application remains LAN/VPN-only.
+
 ## Coach context projection
 
 The encrypted provider snapshots and the general local state remain complete.

@@ -64,6 +64,9 @@ STATIC_TARGETS = {
     "logo.png": PUBLIC_DIR / "logo.png",
     "icon.svg": PUBLIC_DIR / "icon.svg",
 }
+VERSIONED_STATIC_ASSETS = {"app.js", "styles.css", "logo.png", "icon.svg"}
+STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
+STATIC_IMMUTABLE_MAX_AGE = 31536000
 APP_VERSION = "1.3.2"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -10545,15 +10548,30 @@ class RequestHandler(BaseHTTPRequestHandler):
             target = STATIC_TARGETS["index.html"]
         data = target.read_bytes()
         mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        etag = f'"{hashlib.sha256(data).hexdigest()[:24]}"'
+        query = parse_qs(urlparse(getattr(self, "path", "")).query)
+        versioned = target.name in VERSIONED_STATIC_ASSETS and bool(str(query.get("v", [""])[0]).strip())
+        cache_control = (
+            f"public, max-age={STATIC_IMMUTABLE_MAX_AGE}, immutable"
+            if versioned
+            else "no-cache" if target.name in STATIC_REVALIDATE_ASSETS
+            else "public, max-age=3600"
+        )
+        if getattr(self, "headers", {}).get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", cache_control)
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header("Content-Type", mime + ("; charset=utf-8" if mime.startswith("text/") else ""))
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("ETag", etag)
+        self.send_header("Cache-Control", cache_control)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
-        no_cache = {"index.html", "app.js", "styles.css", "service-worker.js", "manifest.webmanifest"}
-        self.send_header("Cache-Control", "no-cache" if target.name in no_cache else "public, max-age=3600")
         try:
             self.end_headers()
             self.wfile.write(data)
