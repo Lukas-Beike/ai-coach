@@ -51,10 +51,10 @@ Basis: `develop` / `45b5ca3`
 
 ### W5 – Kanonische lokale Planung
 
-- [ ] Lokale und Remote-geplante Einheiten in einem kanonischen Read-Model vereinen.
-- [ ] Kalender, Compliance, Wochenübersicht, Wetter und Konflikte verwenden dieselbe Sicht.
-- [ ] Sync-Quelle, lokale ID, Remote-ID und Sync-Status sichtbar machen.
-- [ ] Lokale Einheiten im Kalender bearbeiten/löschen/verschieben können.
+- [x] Lokale und Remote-geplante Einheiten in einem kanonischen Read-Model vereinen.
+- [x] Kalender, Compliance, Wochenübersicht, Wetter und Konflikte verwenden dieselbe Sicht.
+- [x] Sync-Quelle, lokale ID, Remote-ID und Sync-Status sichtbar machen.
+- [x] Lokale Einheiten im Kalender bearbeiten/löschen/verschieben können.
 
 ### W6 – Adaptive Planung mit Concurrency-Schutz
 

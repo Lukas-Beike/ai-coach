@@ -92,6 +92,7 @@ RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMITS: dict[str, list[float]] = {}
 PUSH_RE = re.compile(r"^/api/workouts/([0-9a-f-]+)/push$")
 DELETE_PLANNED_RE = re.compile(r"^/api/planned/([^/]+)$")
+LOCAL_PLANNED_RE = re.compile(r"^/api/planned/local/([0-9a-f-]+)$")
 DELETE_DRAFT_RE = re.compile(r"^/api/drafts/([0-9a-f-]+)$")
 PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
 LIBRARY_PLAN_BATCH_RE = re.compile(r"^/api/library/plan$")
@@ -5049,6 +5050,7 @@ def normalize_library_workout(
             "name", "description", "type", "moving_time", "duration_minutes", "distance", "target",
             "workout_doc", "icu_training_load", "icu_intensity", "indoor", "tags", "folder_id",
             "date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment",
+            "remote_event_id", "remote_event_external_id",
         }
     }
     result["id"] = resolved_local_id
@@ -5326,11 +5328,108 @@ def list_local_planned_workouts(limit: int = 250) -> list[dict[str, Any]]:
     return result
 
 
+def list_dated_local_planned_workouts(limit: int = 500) -> list[dict[str, Any]]:
+    """Return every dated local plan entry for the canonical calendar view."""
+    result = []
+    for entry in list_workout_library(limit):
+        if not isinstance(entry, dict) or entry.get("source") not in {"coach", "library", "legacy-draft"}:
+            continue
+        try:
+            date.fromisoformat(str(entry.get("date") or ""))
+        except (TypeError, ValueError):
+            continue
+        result.append(entry)
+    return result
+
+
+def canonical_planned_workouts(
+    remote: list[Any] | None,
+    local: list[Any] | None,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    """Merge local planned library entries and remote calendar events.
+
+    Local entries remain the editable source of truth. A remote event is
+    joined only when a local entry recorded its remote event identity; an
+    otherwise similar same-day event is intentionally shown separately.
+    """
+    remote_rows = [dict(item) for item in (remote or []) if isinstance(item, dict)]
+    local_rows = [dict(item) for item in (local or []) if isinstance(item, dict)]
+    remote_by_id = {str(item.get("id")): item for item in remote_rows if item.get("id") not in (None, "")}
+    remote_by_external = {str(item.get("external_id")): item for item in remote_rows if item.get("external_id")}
+    joined_remote_ids: set[str] = set()
+    result: list[dict[str, Any]] = []
+
+    def local_event(entry: dict[str, Any], linked: dict[str, Any] | None) -> dict[str, Any]:
+        local_id = str(entry.get("id") or entry.get("local_id") or "")
+        event_date = str(entry.get("date") or "")[:10]
+        remote_id = str(linked.get("id") or entry.get("remote_event_id") or "") if linked else str(entry.get("remote_event_id") or "")
+        remote_external_id = str(linked.get("external_id") or entry.get("remote_event_external_id") or "") if linked else str(entry.get("remote_event_external_id") or "")
+        result_event = {
+            **entry,
+            "id": remote_id or local_id,
+            "local_id": local_id or None,
+            "local_library_id": local_id or None,
+            "remote_id": remote_id or None,
+            "remote_event_id": remote_id or None,
+            "remote_library_id": str(entry.get("external_id") or "") or None,
+            "external_id": remote_external_id or None,
+            "category": "WORKOUT",
+            "start_date_local": event_date + "T00:00:00" if event_date else None,
+            "is_local": True,
+            "is_remote": bool(linked),
+            "sync_source": "local+intervals" if linked else "local",
+            "sync_status": "synced" if linked else str(entry.get("sync_status") or "local"),
+        }
+        if linked:
+            for key in ("compliance",):
+                if key in linked:
+                    result_event[key] = linked[key]
+        return result_event
+
+    for entry in local_rows:
+        remote_id = str(entry.get("remote_event_id") or "").strip()
+        remote_external_id = str(entry.get("remote_event_external_id") or "").strip()
+        linked = remote_by_id.get(remote_id) if remote_id else None
+        if linked is None and remote_external_id:
+            linked = remote_by_external.get(remote_external_id)
+        if linked is not None:
+            joined_remote_ids.add(str(linked.get("id")))
+        result.append(local_event(entry, linked))
+
+    for event in remote_rows:
+        event_id = str(event.get("id") or "")
+        if event_id and event_id in joined_remote_ids:
+            continue
+        result.append({
+            **event,
+            "local_id": None,
+            "local_library_id": None,
+            "remote_id": event_id or None,
+            "remote_event_id": event_id or None,
+            "remote_library_id": None,
+            "is_local": False,
+            "is_remote": True,
+            "sync_source": "intervals",
+            "sync_status": "remote",
+        })
+
+    def sort_key(item: dict[str, Any]) -> tuple[str, str, str]:
+        return (
+            str(item.get("start_date_local") or item.get("date") or "9999-12-31"),
+            str(item.get("name") or "").casefold(),
+            str(item.get("local_id") or item.get("remote_id") or ""),
+        )
+
+    return sorted(result, key=sort_key)[: max(1, min(int(limit), 1000))]
+
+
 def list_coach_planned_workouts(limit: int = 250) -> dict[str, Any]:
     snapshot = latest_snapshot() or {}
     remote = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
     remote = [item for item in remote if isinstance(item, dict)][:limit]
-    return {"local": list_local_planned_workouts(limit), "intervals": remote}
+    local = list_local_planned_workouts(limit)
+    return {"local": local, "intervals": remote, "canonical": canonical_planned_workouts(remote, local, limit)}
 
 
 @intervals_operation
@@ -5670,6 +5769,25 @@ def apply_workout_library_plan(
                 if not external_id:
                     raise AppError(502, "Die Bibliothekseinheit hat keine externe ID.")
                 item["event"] = plan_library_workout_remote(external_id, synced_library, item["date"])
+                remote_event_id = str(item["event"].get("id") or "").strip()
+                remote_event_external_id = str(item["event"].get("external_id") or "").strip()
+                if remote_event_id:
+                    with DB_LOCK, database() as db:
+                        row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (item["library_workout_id"],)).fetchone()
+                        if row:
+                            try:
+                                local_payload = json.loads(row["payload"])
+                            except (TypeError, ValueError, json.JSONDecodeError):
+                                local_payload = {}
+                            if isinstance(local_payload, dict) and local_payload.get("date"):
+                                local_payload["remote_event_id"] = remote_event_id
+                                if remote_event_external_id:
+                                    local_payload["remote_event_external_id"] = remote_event_external_id
+                                db.execute(
+                                    "UPDATE workout_library SET payload=?, updated_at=? WHERE local_id=?",
+                                    (json.dumps(local_payload, ensure_ascii=False), utc_now(), item["library_workout_id"]),
+                                )
+                                item["library_entry"] = local_payload
                 item["status"] = "synced"
             except Exception as exc:
                 remote_errors.append(f"{item['date']}: {redact_text(str(exc))[:500]}")
@@ -5713,6 +5831,69 @@ def create_local_library_plan(workout_id: str, plan_date: str) -> dict[str, Any]
     })
     add_message("event", f"Lokale Bibliothekseinheit wurde für den {plan_date} gespeichert.")
     return {"status": "local", "workout_id": normalized_id, "library_entry": entry}
+
+
+def update_local_planned_workout(local_id: str, values: Any) -> dict[str, Any]:
+    """Edit or remove a dated local plan without writing to a provider."""
+    try:
+        normalized_id = str(uuid.UUID(str(local_id)))
+    except (ValueError, AttributeError) as exc:
+        raise AppError(400, "Ungültige lokale Planungs-ID.") from exc
+    if not isinstance(values, dict):
+        raise AppError(400, "Die lokale Planung muss als Objekt gesendet werden.")
+    action = str(values.get("action") or "update").strip().casefold()
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (normalized_id,)).fetchone()
+        if not row:
+            raise AppError(404, "Lokale Planung nicht gefunden.")
+        try:
+            current = json.loads(row["payload"])
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise AppError(500, "Die lokale Planung ist beschädigt.") from exc
+        if not isinstance(current, dict) or not current.get("date") or current.get("source") not in {"coach", "library", "legacy-draft"}:
+            raise AppError(403, "Nur datierte lokale Trainingsbibliothekseinheiten können bearbeitet werden.")
+        if action == "delete":
+            db.execute("DELETE FROM workout_library WHERE local_id = ?", (normalized_id,))
+            updated = None
+        elif action == "update":
+            candidate = dict(current)
+            for key in ("date", "name", "description", "duration_minutes", "target"):
+                if key in values:
+                    candidate[key] = values.get(key)
+            if "type" in values or "sport" in values:
+                candidate["type"] = values.get("type") or values.get("sport")
+            candidate["date"] = str(candidate.get("date") or "").strip()
+            try:
+                date.fromisoformat(candidate["date"])
+            except (TypeError, ValueError) as exc:
+                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.") from exc
+            if candidate["date"][:10] != str(current.get("date") or "")[:10]:
+                conflicts = calendar_conflicts({"date": candidate["date"][:10]}, {normalized_id})
+                if conflicts:
+                    raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht verschoben werden.")
+            normalized = normalize_library_workout(
+                candidate,
+                local_id=normalized_id,
+                external_id=str(current.get("external_id") or "") or None,
+                sync_status="local",
+            )
+            normalized["source"] = str(current.get("source") or "library")[:40]
+            for key in ("plan_id", "plan_name", "rationale", "remote_event_id", "remote_event_external_id", "private_calendar_adjustment"):
+                if current.get(key) is not None:
+                    normalized[key] = current[key]
+            now = utc_now()
+            db.execute(
+                "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
+                (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
+            )
+            updated = normalized
+        else:
+            raise AppError(400, "Unbekannte Aktion für lokale Planung.")
+    if action == "delete":
+        add_message("event", "Lokale geplante Einheit wurde entfernt.")
+        return {"status": "deleted", "local_id": normalized_id}
+    add_message("event", "Lokale geplante Einheit wurde aktualisiert.")
+    return {"status": "local", "local_id": normalized_id, "library_entry": updated}
 
 
 def create_local_library_draft(workout_id: str, plan_date: str) -> dict[str, Any]:
@@ -7402,7 +7583,9 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
     with DB_LOCK, database():
         snapshot = latest_snapshot()
         activities = activities_with_feedback(snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else [])
-        planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
+        remote_planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
+        local_planned = list_dated_local_planned_workouts()
+        planned = canonical_planned_workouts(remote_planned, local_planned)
         legacy_drafts = list_workout_drafts()
         planned, planning_compliance = planning_compliance_state(planned, activities)
         planned = add_private_calendar_context_to_planned(planned, legacy_drafts)
@@ -7415,6 +7598,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         weather = weather_state(planned, refresh=True)
     if weather.pop("_refreshed", False):
         check_adaptive_replan("weather")
+    planned_with_weather = add_weather_to_planned(planned, weather)
     github_release = github_release_status(refresh=not local_only)
 
     with DB_LOCK, database():
@@ -7428,7 +7612,13 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "plans": list_training_plans(),
             "library": list_workout_library(),
             "activities": activities,
-            "planned": add_weather_to_planned(planned, weather),
+            "planned": planned_with_weather,
+            "planning_view": {
+                "source": "canonical",
+                "local_count": sum(1 for item in planned if item.get("is_local")),
+                "remote_count": sum(1 for item in planned if item.get("is_remote")),
+                "items": planned_with_weather,
+            },
             "planning_compliance": planning_compliance,
             "weather": weather,
             "parallel_cycling": parallel_cycling_event_groups(planned),
@@ -8072,6 +8262,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, apply_adaptive_replan(payload.get("adjustment_id")) if payload.get("apply") else adaptive_replan_preview())
             elif path == "/api/library/sync":
                 self.send_json(200, sync_workout_library(reason="manuell"))
+            elif match := LOCAL_PLANNED_RE.match(path):
+                self.send_json(200, update_local_planned_workout(unquote(match.group(1)), self.read_json()))
             elif LIBRARY_PLAN_BATCH_RE.match(path):
                 payload = self.read_json()
                 self.send_json(200, apply_workout_library_plan(

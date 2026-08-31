@@ -604,6 +604,62 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(enriched[0]["compliance"]["status"], "completed")
         self.assertEqual(enriched[0]["compliance"]["percentage"], 83)
 
+    def test_canonical_planning_view_merges_sources_and_exposes_identity(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        local = server.create_local_workout_library_entry({
+            "date": tomorrow, "sport": "Ride", "name": "Lokales Tempo",
+            "description": "- 30m 85%", "duration_minutes": 30,
+            "source": "library", "rationale": "Test",
+        })
+        remote = {
+            "id": "remote-event-1", "external_id": "intervals-coach-library-1",
+            "category": "WORKOUT", "type": "Ride", "name": "Lokales Tempo",
+            "start_date_local": tomorrow + "T07:00:00", "moving_time": 1800,
+        }
+        independent = {
+            "id": "remote-event-2", "category": "WORKOUT", "type": "Run", "name": "Remote Lauf",
+            "start_date_local": tomorrow + "T08:00:00", "moving_time": 1200,
+        }
+        view = server.canonical_planned_workouts([remote, independent], [local])
+        self.assertEqual(len(view), 3)
+        local_row = next(row for row in view if row.get("local_id") == local["id"])
+        self.assertEqual(local_row["sync_source"], "local")
+        self.assertEqual(local_row["sync_status"], "local")
+        self.assertFalse(local_row["is_remote"])
+        self.assertEqual(local_row["remote_id"], None)
+        remote_row = next(row for row in view if row.get("remote_id") == "remote-event-2")
+        self.assertEqual(remote_row["sync_source"], "intervals")
+        self.assertFalse(remote_row["is_local"])
+
+        with server.DB_LOCK, server.database() as db:
+            payload = json.loads(db.execute("SELECT payload FROM workout_library WHERE local_id=?", (local["id"],)).fetchone()["payload"])
+            payload["remote_event_id"] = "remote-event-1"
+            db.execute("UPDATE workout_library SET payload=? WHERE local_id=?", (json.dumps(payload), local["id"]))
+        merged = server.canonical_planned_workouts([remote, independent], server.list_dated_local_planned_workouts())
+        joined = next(row for row in merged if row.get("local_id") == local["id"])
+        self.assertEqual(joined["sync_source"], "local+intervals")
+        self.assertEqual(joined["remote_id"], "remote-event-1")
+        self.assertEqual(sum(row.get("remote_id") == "remote-event-1" for row in merged), 1)
+
+    def test_local_planned_workout_can_be_edited_moved_and_removed(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        day_after = (date.today() + timedelta(days=2)).isoformat()
+        local = server.create_local_workout_library_entry({
+            "date": tomorrow, "sport": "Ride", "name": "Locker",
+            "description": "- 30m Z2", "duration_minutes": 30,
+            "source": "library", "rationale": "Test",
+        })
+        updated = server.update_local_planned_workout(local["id"], {
+            "action": "update", "date": day_after, "name": "Verschoben",
+            "description": "- 40m Z2", "duration_minutes": 40,
+        })
+        self.assertEqual(updated["library_entry"]["name"], "Verschoben")
+        self.assertEqual(updated["library_entry"]["date"], day_after)
+        self.assertEqual(updated["library_entry"]["sync_status"], "local")
+        removed = server.update_local_planned_workout(local["id"], {"action": "delete"})
+        self.assertEqual(removed["status"], "deleted")
+        self.assertEqual(server.list_dated_local_planned_workouts(), [])
+
     def test_workout_payload_is_an_idempotent_calendar_event(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         payload = server.workout_event_payload("abc", {
