@@ -74,11 +74,11 @@ Basis: `develop` / `45b5ca3`
 
 ### W8 – Provider- und Kalender-Sync-Robustheit
 
-- [ ] `remote_missing` tatsächlich automatisch reconciliieren/wiederherstellen.
-- [ ] iCalendar-Feeds strikt validieren und letzten guten Stand behalten.
-- [ ] Wiederkehrende iCalendar-Termine mit begrenzter Expansion unterstützen oder klar ablehnen.
-- [ ] Kalender-SSRF/DNS-Rebinding-Schutz vervollständigen.
-- [ ] Intervals-/Garmin-Aktivitäten paginieren und Teilstände transparent machen.
+- [x] `remote_missing` tatsächlich automatisch reconciliieren/wiederherstellen.
+- [x] iCalendar-Feeds strikt validieren und letzten guten Stand behalten.
+- [x] Wiederkehrende iCalendar-Termine mit begrenzter Expansion unterstützen oder klar ablehnen.
+- [x] Kalender-SSRF/DNS-Rebinding-Schutz vervollständigen.
+- [x] Intervals-/Garmin-Aktivitäten paginieren und Teilstände transparent machen.
 
 ### W9 – Wettbewerbs- und Konfliktauflösung
 

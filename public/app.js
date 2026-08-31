@@ -1727,6 +1727,10 @@ function renderGarmin(garmin) {
     return;
   }
   const performanceSources = [garmin.has_vo2max ? "VO2max" : null, garmin.has_estimated_run_times ? "Laufprognosen" : null, garmin.has_max_hr ? "Max HF" : null, garmin.has_weight ? "Gewicht" : null].filter(Boolean);
+  const paginationDetail = Object.entries(garmin.pagination || {})
+    .filter(([, value]) => value && (Number(value.windows) > 1 || value.complete === false))
+    .map(([name, value]) => `${name}: ${value.records || 0} Datensätze in ${value.windows || 0} Zeitfenstern${value.complete === false ? " · unvollständig" : ""}`)
+    .join(" · ");
   status.textContent = garmin.source === "fixture"
     ? "Lokale Garmin-Testdaten aktiv"
     : garmin.last_error ? "Mit Fehlern synchronisiert" : "Optionaler Direktabruf aktiv";
@@ -1735,6 +1739,7 @@ function renderGarmin(garmin) {
     : garmin.source === "fixture" ? "Testdatei ist konfiguriert; synchronisiere sie mit dem Button."
       : "Noch kein Garmin-Abruf durchgeführt.";
   if (performanceSources.length) detail.textContent += ` · ${performanceSources.join("/")} aus Garmin`;
+  if (paginationDetail) detail.textContent += ` · ${paginationDetail}`;
   if (fullButton) {
     fullButton.disabled = fullRunning || Boolean(state.data?.garmin_sync?.running || state.localSync.garmin);
     fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
@@ -2258,6 +2263,10 @@ function renderSettings(data) {
     const librarySync = intervals.library_sync || {};
     const libraryState = librarySync.state || {};
     const libraryCount = Number(libraryState.synced || 0);
+    const paginationDetail = Object.entries(intervals.pagination || {})
+      .filter(([, value]) => value && (Number(value.pages) > 1 || value.complete === false))
+      .map(([name, value]) => `${name}: ${value.records || 0} Datensätze auf ${value.pages || 0} Seiten${value.complete === false ? " · unvollständig" : ""}`)
+      .join(" · ");
     intervalsDetail.classList.toggle("error", Boolean(intervals.last_error));
     intervalsDetail.textContent = !intervals.configured
       ? "API-Schlüssel nicht konfiguriert"
@@ -2266,7 +2275,7 @@ function renderSettings(data) {
         : intervals.last_error
           ? intervals.last_error
           : intervals.last_sync_at || librarySync.last_sync_at
-            ? `Letzte Aktualisierung: ${formatTime(intervals.last_sync_at || librarySync.last_sync_at)}${libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : ""}`
+            ? `Letzte Aktualisierung: ${formatTime(intervals.last_sync_at || librarySync.last_sync_at)}${libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : ""}${paginationDetail ? ` · ${paginationDetail}` : ""}`
             : "Noch keine Synchronisierung durchgeführt";
   }
   setStatus("#garminConnectionStatus", garmin.configured, garmin.configured ? (garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert") : "Nicht konfiguriert");

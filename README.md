@@ -88,6 +88,8 @@ It is not intended to be exposed directly to the public internet.
 - Read-only shared iCalendar integration for the next 8 weeks. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local library entries on busy days can be proposed as short easy sessions.
+  Invalid feeds are rejected without replacing the last good local calendar;
+  recurring events are reported as unsupported rather than partially expanded.
 - Adaptive plan review that checks after a weather or shared-calendar refresh
   whether future local library entries need adjustment. In the next two days,
   persistent rain or snow can trigger a shorter easy replacement for a long
@@ -121,6 +123,9 @@ locally and can be changed in that tab.
 
 The browser refreshes the local/remote view every minute while the PWA is
 visible and polls more frequently while a manual synchronization is running.
+Large Intervals.icu responses are fetched in bounded pages and the latest
+sync reports the fetched page/window counts; incomplete Garmin ranges remain
+visible as partial provider status instead of being presented as complete.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
