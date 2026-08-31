@@ -362,7 +362,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-007; die globale Farbe wurde ausschließlich wegen der nachgewiesenen WCAG-AA-Verletzung angepasst.
 - **Folgetasks:** FT-008 und die weiteren Pakete sind entblockt.
 
-### - [ ] FT-008 – Reproduzierte UI-Regressionsfehler beheben
+### - [x] FT-008 – Reproduzierte UI-Regressionsfehler beheben
+
+**Status:** abgeschlossen
 
 **Quelle:** UI-01, UI-02, UI-03
 **Ziel:** Versteckte Hinweise bleiben verborgen, der Coach-Sicherheitshinweis ist lesbar und der Check-in besitzt die gemeinsame Buttondarstellung.
@@ -370,20 +372,32 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Globalen `[hidden]`-Vertrag ergänzen oder alle überschreibenden Komponentenregeln sicher korrigieren.
-- [ ] `.dirty-indicator` vor Änderungen unsichtbar und danach sichtbar testen.
-- [ ] `.remote-delete-notice` ohne Inhalt unsichtbar testen.
-- [ ] Coach-Scrollbereich um Composer, Bottom-Navigation und Safe Area korrekt aufpolstern.
-- [ ] Sicherheitshinweis auf 390 × 844 und mit 200 % Textzoom prüfen.
-- [ ] Check-in-Button an gemeinsames Primary-Button-System anbinden.
-- [ ] Assetversionen und Service-Worker-Cache aktualisieren.
+- [x] Globalen `[hidden]`-Vertrag ergänzen oder alle überschreibenden Komponentenregeln sicher korrigieren.
+- [x] `.dirty-indicator` vor Änderungen unsichtbar und danach sichtbar testen.
+- [x] `.remote-delete-notice` ohne Inhalt unsichtbar testen.
+- [x] Coach-Scrollbereich um Composer, Bottom-Navigation und Safe Area korrekt aufpolstern.
+- [x] Sicherheitshinweis auf 390 × 844 und mit 200 % Textzoom prüfen.
+- [x] Check-in-Button an gemeinsames Primary-Button-System anbinden.
+- [x] Assetversionen und Service-Worker-Cache aktualisieren.
 
 **Abnahmekriterien**
 
-- [ ] Keine falsche „Ungespeichert“-Anzeige nach frischem Laden.
-- [ ] Keine leere rote Notice im Planbereich.
-- [ ] Coach-Hinweis wird weder vom Composer noch von der Navigation verdeckt.
-- [ ] Keine neuen Overflow-, Fokus- oder Console-Fehler.
+- [x] Keine falsche „Ungespeichert“-Anzeige nach frischem Laden.
+- [x] Keine leere rote Notice im Planbereich.
+- [x] Coach-Hinweis wird weder vom Composer noch von der Navigation verdeckt.
+- [x] Keine neuen Overflow-, Fokus- oder Console-Fehler.
+
+**Handover FT-008**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `fix/ft-008-ui-regressions`, `e7c1116`
+- **Geänderte Dateien:** `public/styles.css`, `public/index.html`, `public/service-worker.js`, `e2e/coach.spec.js`, `playwright.config.cjs`, dieses Handover-Dokument
+- **Verhaltensänderung:** Das `hidden`-Attribut wird global verbindlich durchgesetzt. Dirty-Indikatoren und leere Remote-Notices bleiben unsichtbar, bis sie Inhalt haben. Der Coach erhält einen festen UI-Puffer für Composer, Navigation und Safe Area. Der Tages-Check-in-Submit erfüllt die gemeinsame Primary-Mindesthöhe. Asset- und Service-Worker-Version wurden auf 116 aktualisiert.
+- **Validierung:** `docker build -t ai-coach:ft008 .` erfolgreich; 4 Playwright-Tests auf Desktop/Mobile erfolgreich, einschließlich 390×844 und 200%-Textskalierung; `python -m py_compile server.py tests/test_server.py tests/run_tests.py`; `git diff --check`.
+- **Review:** Diff-Review ohne offene Findings nach Korrektur des 200%-Testablaufs.
+- **Manuelle Prüfung:** Browserzustände und Layout sind durch den Docker-/Playwright-Lauf abgedeckt.
+- **Offene Risiken:** Keine für FT-008.
+- **Folgetasks:** FT-009 und die weiteren Pakete sind entblockt.
 
 ### - [ ] FT-009 – Coach-Kontext kompakt und dedupliziert projizieren
 
