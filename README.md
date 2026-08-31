@@ -445,6 +445,12 @@ For HTTPS reverse-proxy deployments, set
 `COOKIE_SECURE=true`; this adds the `Secure` attribute to the session and CSRF
 cookies. Keep it `false` for the documented local HTTP development flow.
 
+During database restore, the process enters a maintenance mode. Running
+provider and coach operations are allowed to finish before the database is
+validated and exchanged; new mutations receive a temporary maintenance error.
+Read-only status endpoints remain available, and the browser displays the
+maintenance state. A failed restore leaves the current database in place.
+
 Open-Meteo failures are shown without exposing provider details and are retried
 with an increasing local backoff. A forced manual weather refresh bypasses that
 backoff.

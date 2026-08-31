@@ -108,6 +108,58 @@ COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
 
 
+class MaintenanceGate:
+    """Block new application mutations while a database restore is active."""
+
+    def __init__(self):
+        self.condition = threading.Condition()
+        self.active = 0
+        self.restoring = False
+
+    @contextmanager
+    def operation(self):
+        with self.condition:
+            if self.restoring:
+                raise AppError(503, "Die Anwendung befindet sich gerade im Wartungsmodus. Bitte später erneut versuchen.")
+            self.active += 1
+        try:
+            yield
+        finally:
+            with self.condition:
+                self.active -= 1
+                self.condition.notify_all()
+
+    @contextmanager
+    def restore(self):
+        with self.condition:
+            if self.restoring:
+                raise AppError(409, "Eine Datenbankwiederherstellung läuft bereits.")
+            self.restoring = True
+            while self.active:
+                self.condition.wait()
+        try:
+            yield
+        finally:
+            with self.condition:
+                self.restoring = False
+                self.condition.notify_all()
+
+    def state(self) -> dict[str, Any]:
+        with self.condition:
+            return {"active": self.restoring, "running_operations": self.active}
+
+
+MAINTENANCE_GATE = MaintenanceGate()
+
+
+def maintenance_operation(function: Any) -> Any:
+    @wraps(function)
+    def guarded(*args: Any, **kwargs: Any) -> Any:
+        with MAINTENANCE_GATE.operation():
+            return function(*args, **kwargs)
+    return guarded
+
+
 class ProviderResyncGate:
     """Coordinate local provider resets with all provider operations."""
 
@@ -2079,6 +2131,7 @@ def persist_garmin_error(message: Any, source: str = "sync") -> None:
     set_kv("last_garmin_error", json.dumps([{"source": source, "message": safe_message}], ensure_ascii=False))
 
 
+@maintenance_operation
 @garmin_operation
 def sync_garmin(days: int = 30) -> dict[str, Any]:
     fixture = garmin_fixture_path()
@@ -2950,6 +3003,7 @@ def external_calendar_state() -> dict[str, Any]:
     }
 
 
+@maintenance_operation
 def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
     if not CONFIG.calendar_ical_url:
         raise AppError(503, "CALENDAR_ICAL_URL ist nicht konfiguriert.")
@@ -3691,6 +3745,7 @@ def _competition_remote_events(client: Any, local_rows: list[dict[str, Any]]) ->
     ]
 
 
+@maintenance_operation
 @intervals_operation
 def competition_sync_preview() -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
@@ -3716,6 +3771,7 @@ def competition_sync_preview() -> dict[str, Any]:
         COMPETITION_SYNC_LOCK.release()
 
 
+@maintenance_operation
 @intervals_operation
 def sync_competitions(
     reason: str = "manual",
@@ -4586,6 +4642,7 @@ def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict
     return f"Wetterprognose für {event_date}: {condition}{detail_text}; lange Outdoor-Ausfahrt nicht sinnvoll"
 
 
+@maintenance_operation
 def sync_weather(reason: str = "background", force: bool = False) -> dict[str, Any]:
     """Refresh the configured location's forecast without creating a chat event."""
     if not get_profile().get("weather_location", "").strip():
@@ -6465,6 +6522,7 @@ def list_coach_planned_workouts(limit: int = 250) -> dict[str, Any]:
     return {"local": local, "intervals": remote, "canonical": canonical_planned_workouts(remote, local, limit)}
 
 
+@maintenance_operation
 @intervals_operation
 def sync_workout_library(reason: str = "manual") -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
@@ -6569,6 +6627,7 @@ def _validate_workout_library_sync_confirmation(payload: dict[str, Any]) -> None
         raise AppError(409, "Die Bibliothek wurde seit der Vorschau geändert. Bitte erneut prüfen.")
 
 
+@maintenance_operation
 @intervals_operation
 def refresh_workout_library(reason: str = "manual") -> dict[str, Any]:
     """Refresh the cached library without performing any remote writes."""
@@ -6634,6 +6693,7 @@ def save_snapshot_view(snapshot: dict[str, Any]) -> None:
         db.execute("DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT 12)")
 
 
+@maintenance_operation
 @intervals_operation
 def delete_planned_event(event_id: str) -> dict[str, Any]:
     normalized_id = str(event_id or "").strip()
@@ -6838,6 +6898,7 @@ def sync_status_state() -> dict[str, Any]:
         "finished_at": get_kv("sync_operation_finished_at"),
         "last_error": get_kv("last_sync_error") or None,
         "state_versions": state_versions(),
+        "maintenance": MAINTENANCE_GATE.state(),
     }
 
 
@@ -6910,6 +6971,7 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
     return synced
 
 
+@maintenance_operation
 @intervals_operation
 def sync_local_workout_library_entry(local_id: str) -> dict[str, Any]:
     try:
@@ -7301,6 +7363,7 @@ def full_provider_resync(provider: str) -> dict[str, Any]:
             gate.end_reset()
 
 
+@maintenance_operation
 @intervals_operation
 def sync_intervals(
     reason: str = "manual",
@@ -7371,6 +7434,7 @@ def sync_intervals(
             SYNC_LOCK.release()
 
 
+@maintenance_operation
 @intervals_operation
 def refresh_current_performance() -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
@@ -8902,6 +8966,7 @@ def _execute_coach_action(action_type: str, payload: dict[str, Any]) -> dict[str
     raise AppError(400, "Unbekannte Coach-Aktion.")
 
 
+@maintenance_operation
 def execute_coach_action(token: Any, session_csrf_hash: str, payload_hash: Any = None) -> dict[str, Any]:
     raw_token = str(token or "").strip()
     if len(raw_token) < 32:
@@ -8931,6 +8996,7 @@ def execute_coach_action(token: Any, session_csrf_hash: str, payload_hash: Any =
     return result
 
 
+@maintenance_operation
 @serialise_conversation
 def chat_with_coach(message: str, *, allow_mutations: bool = True) -> dict[str, Any]:
     message = message.strip()
@@ -9246,6 +9312,7 @@ MORNING_CHECKIN_PROMPT = (
 )
 
 
+@maintenance_operation
 def run_morning_checkin(checkin_date: str) -> None:
     try:
         set_kv("morning_checkin_running", "1")
@@ -9768,6 +9835,11 @@ def database_backup_bytes() -> bytes:
 
 
 def restore_database_backup(payload: bytes) -> dict[str, Any]:
+    with MAINTENANCE_GATE.restore():
+        return _restore_database_backup(payload)
+
+
+def _restore_database_backup(payload: bytes) -> dict[str, Any]:
     if not payload or len(payload) > MAX_BACKUP_BYTES:
         raise AppError(413, "Das Datenbank-Backup ist leer oder zu groß.")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -10089,10 +10161,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             if path == "/api/health":
-                self.send_json(200, {"status": "ok"})
+                self.send_json(200, {"status": "ok", "maintenance": MAINTENANCE_GATE.state()})
             elif path == "/api/auth/status":
                 session = authenticated_session(self)
-                result = {"authenticated": bool(session)}
+                result = {"authenticated": bool(session), "maintenance": MAINTENANCE_GATE.state()}
                 if session:
                     schedule_morning_checkin()
                 self.send_json(200, result)
@@ -10194,14 +10266,16 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/logout":
                 session = require_auth(self)
                 require_csrf(self, session)
-                logout_user(self)
+                with MAINTENANCE_GATE.operation():
+                    logout_user(self)
                 self.send_json(200, {"status": "ok"}, {"Set-Cookie": [
                     session_cookie_headers(clear=True)[0], session_cookie_headers(clear=True)[1],
                 ]})
             else:
                 session = require_auth(self)
                 require_csrf(self, session)
-                self.handle_authenticated_post(path, session)
+                with MAINTENANCE_GATE.operation():
+                    self.handle_authenticated_post(path, session)
         except AppError as exc:
             if exc.status >= 500:
                 LOGGER.error(
@@ -10309,6 +10383,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 raise AppError(404, "Nicht gefunden.")
 
     def do_DELETE(self) -> None:
+        try:
+            with MAINTENANCE_GATE.operation():
+                self._do_DELETE()
+        except AppError as exc:
+            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]})
+
+    def _do_DELETE(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
         try:
             path = urlparse(self.path).path
@@ -10337,6 +10418,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(500, {"error": "Interner Serverfehler."})
 
     def do_PUT(self) -> None:
+        try:
+            with MAINTENANCE_GATE.operation():
+                self._do_PUT()
+        except AppError as exc:
+            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]})
+
+    def _do_PUT(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
         try:
             path = urlparse(self.path).path
