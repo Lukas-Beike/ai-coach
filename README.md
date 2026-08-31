@@ -270,7 +270,11 @@ URL stays in the server environment and is excluded from browser state,
 exports, and logs.
 
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
-in the Einstellungen tab. Events themselves are shown only in the **Geplant** tab.
+in the Einstellungen tab. Daily synchronization uses the athlete's validated
+IANA timezone and stores a separate local execution date for each provider.
+Existing UTC timestamps are converted lazily when the local marker is missing;
+a successful manual sync counts for that provider's current local day. Events
+themselves are shown only in the **Geplant** tab.
 A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
