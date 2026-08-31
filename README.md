@@ -67,9 +67,21 @@ It is not intended to be exposed directly to the public internet.
   reconciles it before creating it again; local templates are never removed by
   a full Intervals.icu resync.
 - Multi-week plans are grouped in the local library.
+- The coach can explicitly apply saved library entries as local planned units.
+  Existing calendar dates are checked first. Intervals.icu calendar writes stay
+  disabled unless the athlete explicitly requests that synchronization.
 - Bidirectional synchronization of target competitions with Intervals.icu.
+- The coach can explicitly list, create, update, and locally delete target
+  competitions. Linked remote changes remain pending until an explicit
+  competition synchronization is requested.
 - Local athlete check-ins for subjective soreness, stress, motivation, session
   RPE, pain/illness notes, available training time, and day-specific constraints.
+- After a completed activity, the coach can ask for a short subjective follow-up
+  and store the athlete's answer as activity feedback.
+- The coach can explicitly read the local workout library and planned units and
+  refresh Intervals.icu, current performance, Garmin, weather, the external
+  calendar, and the workout-library synchronization. Adaptive planning can be
+  previewed and, after explicit approval, applied to future local workouts.
 - Read-only shared iCalendar integration for the next 8 weeks. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local library entries on busy days can be proposed as short easy sessions.
