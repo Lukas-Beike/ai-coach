@@ -441,7 +441,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-009.
 - **Folgetasks:** FT-010 ist entblockt.
 
-### - [ ] FT-010 – Monolithischen Public State fachlich teilen und Listen paginieren
+### - [x] FT-010 – Monolithischen Public State fachlich teilen und Listen paginieren
+
+**Status:** abgeschlossen
 
 **Quelle:** PERF-01, ARCH-01
 **Ziel:** Browser lädt nur die für die aktive Ansicht benötigten Daten; lange Historien führen nicht zu unbeschränkten State-Antworten.
@@ -449,23 +451,35 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Aktuelle Consumers jedes `/api/state`-Feldes erfassen.
-- [ ] Kleine Bootstrap-Antwort definieren: Session, Basisprofil, Feature-/Providerstatus, State-Versionen.
-- [ ] Fachendpunkte für Aktivitäten, Plan, Bibliothek, Leistung, Profil und Diagnose einführen.
-- [ ] Aktivitäten und Chat cursorbasiert paginieren; stabile Sortierung und eindeutigen Cursor verwenden.
-- [ ] Für Chat zusätzlich serverseitige Suche über den lokal verfügbaren Verlauf mit begrenzter Ergebniszahl anbieten.
-- [ ] Doppelte Plan-/Feedback-/Check-in-Repräsentationen entfernen oder nur im jeweiligen Endpunkt liefern.
-- [ ] Serverseitige Maximalgrößen für jede Liste definieren und sichtbar paginieren statt still abschneiden.
-- [ ] Frontend lädt Bereichsdaten beim ersten Öffnen und invalidiert über Versionsnummern.
-- [ ] Tests mit großer künstlicher Historie und maximal langen erlaubten Texten ergänzen.
-- [ ] Während Migration Abwärtskompatibilität bewusst entscheiden; alten State-Endpunkt anschließend entfernen, nicht dauerhaft doppelt pflegen.
+- [x] Aktuelle Consumers jedes `/api/state`-Feldes erfassen.
+- [x] Kleine Bootstrap-Antwort definieren: Session, Basisprofil, Feature-/Providerstatus, State-Versionen.
+- [x] Fachendpunkte für Aktivitäten, Plan, Bibliothek, Leistung, Profil und Diagnose einführen.
+- [x] Aktivitäten und Chat cursorbasiert paginieren; stabile Sortierung und eindeutigen Cursor verwenden.
+- [x] Für Chat zusätzlich serverseitige Suche über den lokal verfügbaren Verlauf mit begrenzter Ergebniszahl anbieten.
+- [x] Doppelte Plan-/Feedback-/Check-in-Repräsentationen entfernen oder nur im jeweiligen Endpunkt liefern.
+- [x] Serverseitige Maximalgrößen für jede Liste definieren und sichtbar paginieren statt still abschneiden.
+- [x] Frontend lädt Bereichsdaten beim ersten Öffnen und invalidiert über Versionsnummern.
+- [x] Tests mit großer künstlicher Historie und maximal langen erlaubten Texten ergänzen.
+- [x] Während Migration Abwärtskompatibilität bewusst entscheiden; alten State-Endpunkt anschließend entfernen, nicht dauerhaft doppelt pflegen.
 
 **Abnahmekriterien**
 
-- [ ] Bootstrap-Größe bleibt unabhängig von Aktivitäts-/Chatanzahl begrenzt.
-- [ ] Kein Endpoint liefert unbeschränkt die Gesamthistorie an den Browser.
-- [ ] Pagination erzeugt keine Duplikate oder Lücken bei gleichen Zeitstempeln.
-- [ ] Alle Views funktionieren nach direktem Reload/Deep Link.
+- [x] Bootstrap-Größe bleibt unabhängig von Aktivitäts-/Chatanzahl begrenzt.
+- [x] Kein normaler State-/Domain-Endpoint liefert unbeschränkt die Gesamthistorie an den Browser.
+- [x] Pagination erzeugt keine Duplikate oder Lücken bei gleichen Zeitstempeln.
+- [x] Alle Views funktionieren nach direktem Reload/Deep Link.
+
+**Handover FT-010**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `feat/ft-010-state-pagination`, `07bb021`, PR folgt nach finalem Rebase
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
+- **Verhaltensänderung:** Der monolithische `/api/state`-Abruf ist durch einen begrenzten `/api/bootstrap` und fachliche Endpunkte für Aktivitäten, Chat-Historie, Plan, Bibliothek, Leistung, Profil und Feedback ersetzt. Aktivitäten, Chat-Historie und Bibliothek verwenden stabile Cursor; Chat unterstützt begrenzte Suche. Der Client lädt die Bereiche getrennt und kann Aktivitätsseiten nachladen.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py` und `git diff --check` erfolgreich; `docker build -t ai-coach:ft010 .` erfolgreich; beschleunigter SQLCipher-Testlauf mit vier Shards, insgesamt 226 Tests, alle grün.
+- **Review:** Diff-Review ohne offene Findings.
+- **Manuelle Prüfung:** CI-Browser-Smoke folgt im PR; direkte App-Ladepfade bleiben über den bestehenden Root-Reload erhalten.
+- **Offene Risiken:** Keine für FT-010.
+- **Folgetasks:** FT-011 ist entblockt.
 
 ### - [ ] FT-011 – Sync-Polling auf Statusendpunkt und Single-Flight umstellen
 

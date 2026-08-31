@@ -178,6 +178,13 @@ Intervals.icu sync, a manual synchronization, or a chat request that
 explicitly asks for current/latest training data. The browser's regular state
 poll only reads the local snapshot; it does not contact Intervals.icu.
 
+The browser bootstrap is intentionally independent of chat and activity
+history. Domain data is loaded through bounded endpoints: activities and chat
+history use stable cursors (chat history also supports bounded server-side
+search), while plans, performance, profile, feedback, and the workout library
+are loaded separately. The activity view can request the next page without
+reloading the complete application state.
+
 ## Target competitions and Intervals.icu
 
 Target competitions are entered manually in the profile with the Intervals.icu
