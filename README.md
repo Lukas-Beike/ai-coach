@@ -161,6 +161,18 @@ GitHub release information is checked at most every 15 minutes. The morning
 check-in is generated at most once per local calendar day when its required
 integrations are configured.
 
+## Coach context projection
+
+The encrypted provider snapshots and the general local state remain complete.
+Only the projection assembled for an OpenAI coaching request is bounded: it
+includes the five newest activities per normalized sport, compact planned
+workout fields, and at most 50 local planned units. Long descriptions and
+provider-only payloads are omitted from that projection. Local planned units
+are serialized once, and the context preview reports section sizes and the
+overall character-budget status. Current performance metrics retain their
+source labels; Garmin performance fields are included only when they add
+information not already represented by the Intervals.icu performance context.
+
 New activities become available to the coach after the startup/daily
 Intervals.icu sync, a manual synchronization, or a chat request that
 explicitly asks for current/latest training data. The browser's regular state

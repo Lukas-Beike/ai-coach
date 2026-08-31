@@ -2239,6 +2239,71 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in result["planned_workouts"]], ["Future workout"])
         self.assertEqual(result["activity_rollups_by_sport"]["Radfahren"]["last_7_days"]["sessions"], 7)
 
+    def test_coach_intervals_context_is_deterministic_for_same_timestamps_and_missing_sports(self):
+        today = server.local_now().date()
+        snapshot = {
+            "synced_at": "now",
+            "recent_activities": [
+                {"id": "b", "type": "Ride", "name": "B", "start_date_local": today.isoformat()},
+                {"id": "a", "type": "Ride", "name": "A", "start_date_local": today.isoformat()},
+                {"id": "other", "name": "Unclassified", "start_date_local": today.isoformat()},
+            ],
+            "upcoming_calendar": [],
+        }
+        first = server.coach_intervals_context(snapshot)
+        second = server.coach_intervals_context({**snapshot, "recent_activities": list(reversed(snapshot["recent_activities"]))})
+        self.assertEqual(first, second)
+        self.assertEqual([item["id"] for item in first["recent_activities_by_sport"]["Radfahren"]], ["b", "a"])
+        self.assertIn("Unclassified", first["recent_activities_by_sport"]["Unclassified"][0]["name"])
+
+    def test_coach_planned_projection_omits_long_description_and_keeps_relevant_fields(self):
+        today = server.local_now().date()
+        event = {
+            "id": "planned-1",
+            "start_date_local": (today + timedelta(days=1)).isoformat(),
+            "name": "Threshold ride",
+            "type": "Ride",
+            "moving_time": 3600,
+            "target": "2 x 20 min at threshold",
+            "icu_intensity": 0.92,
+            "status": "planned",
+            "sync_status": "local",
+            "description": "private provider detail " + "x" * 20_000,
+            "athlete_detail": "must not be projected",
+        }
+        projected = server.coach_intervals_context({"upcoming_calendar": [event]})["planned_workouts"][0]
+        self.assertEqual(projected["name"], "Threshold ride")
+        self.assertEqual(projected["status"], "planned")
+        self.assertNotIn("description", projected)
+        self.assertNotIn("athlete_detail", projected)
+
+    def test_build_training_context_serializes_local_plans_once_and_reports_projection_budget(self):
+        today = server.local_now().date()
+        server.create_local_workout_library_entry({
+            "date": (today + timedelta(days=1)).isoformat(),
+            "sport": "Ride",
+            "name": "Local plan fixture",
+            "description": "long description " + "x" * 20_000,
+            "duration_minutes": 60,
+            "target": "easy",
+            "source": "coach",
+        })
+        context = server.build_training_context()
+        self.assertEqual(context.count("LOCAL PLANNED WORKOUTS"), 1)
+        self.assertEqual(context.count('"local_planned_workouts"'), 1)
+        self.assertLessEqual(len(context), server.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
+        structured = server.structured_athlete_context()
+        self.assertIn("local_planned_workouts", structured)
+        self.assertIn('"projection"', context)
+        self.assertNotIn("long description", context)
+
+    def test_build_training_context_applies_total_budget_deterministically(self):
+        with patch.object(server, "structured_athlete_context", return_value={"source_policy": {"untrusted": "x" * 200_000}}):
+            first = server.build_training_context()
+            second = server.build_training_context()
+        self.assertEqual(first, second)
+        self.assertLessEqual(len(first), server.COACH_CONTEXT_TOTAL_CHAR_LIMIT)
+
     def test_build_training_context_uses_compact_intervals_projection(self):
         today = server.local_now().date()
         snapshot = {
@@ -2256,9 +2321,11 @@ class CoachTests(unittest.TestCase):
         self.assertIn("Ride 0", context)
         self.assertNotIn("Ride 5", context)
         self.assertNotIn("LATEST INTERVALS.ICU SNAPSHOT", context)
+        self.assertEqual(context.count('"local_planned_workouts"'), 1)
         preview = server.context_preview()
         self.assertTrue(preview["snapshot_compacted"])
         self.assertFalse(preview["snapshot_truncated"])
+        self.assertTrue(preview["projection"]["within_total_budget"])
 
     def test_coach_projection_does_not_change_provider_snapshots(self):
         today = server.local_now().date()
@@ -2279,13 +2346,17 @@ class CoachTests(unittest.TestCase):
             "sleep": [{"calendarDate": today.isoformat(), "sleepScore": 82}],
             "vendor_payload": "kept in the full snapshot",
         }
+        intervals_before = json.dumps(intervals_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        garmin_before = json.dumps(garmin_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         server.save_snapshot(intervals_snapshot)
-        server.set_kv("garmin_snapshot", json.dumps(garmin_snapshot))
+        server.set_kv("garmin_snapshot", json.dumps(garmin_snapshot, ensure_ascii=False))
 
         context = server.build_training_context()
 
         self.assertEqual(server.latest_snapshot(), intervals_snapshot)
         self.assertEqual(server.garmin_snapshot(), garmin_snapshot)
+        self.assertEqual(json.dumps(server.latest_snapshot(), ensure_ascii=False, sort_keys=True, separators=(",", ":")), intervals_before)
+        self.assertEqual(json.dumps(server.garmin_snapshot(), ensure_ascii=False, sort_keys=True, separators=(",", ":")), garmin_before)
         self.assertNotIn("provider_detail", context)
         self.assertNotIn("vendor_payload", context)
 
