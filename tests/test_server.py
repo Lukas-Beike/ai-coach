@@ -7,7 +7,7 @@ import json
 import uuid
 import sqlite3
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -180,6 +180,137 @@ class CoachTests(unittest.TestCase):
         context = server.structured_athlete_context()
         self.assertEqual(context["activity_feedback"]["recent"][0]["activity_name"], "Morgenlauf")
         self.assertIn("Linkes Knie", context["activity_feedback"]["recent"][0]["notes"])
+
+    def test_coach_activity_feedback_requires_a_known_snapshot_activity(self):
+        with self.assertRaises(server.AppError) as raised:
+            server.save_coach_activity_feedback("unknown", {
+                "activity_name": "Unbekannt", "activity_date": "2026-08-30", "notes": "War gut",
+            })
+        self.assertEqual(raised.exception.status, 404)
+
+        server.save_snapshot({
+            "synced_at": "now", "athlete": {},
+            "recent_activities": [{"id": "activity-2", "name": "Abendlauf", "start_date_local": "2026-08-30T18:00:00"}],
+            "recent_wellness": [], "upcoming_calendar": [],
+        })
+        result = server.save_coach_activity_feedback("activity-2", {
+            "activity_name": "Abendlauf", "activity_date": "2026-08-30", "notes": "Locker, aber am Ende müde",
+        })
+        self.assertEqual(result["activity_feedback"]["activity_id"], "activity-2")
+
+    def test_chat_can_store_athlete_activity_feedback_with_tool(self):
+        server.save_snapshot({
+            "synced_at": "now", "athlete": {},
+            "recent_activities": [{"id": "activity-3", "name": "Morgenfahrt", "start_date_local": "2026-08-31T07:00:00"}],
+            "recent_wellness": [], "upcoming_calendar": [],
+        })
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_feedback"}
+            if len([call for call in calls if call[0] == "/responses"]) == 1:
+                return {"output": [{
+                    "type": "function_call",
+                    "name": "save_activity_feedback",
+                    "call_id": "call_feedback",
+                    "arguments": json.dumps({
+                        "activity_id": "activity-3",
+                        "activity_name": "Morgenfahrt",
+                        "activity_date": "2026-08-31T07:00:00",
+                        "notes": "Beine fühlten sich locker an",
+                    }),
+                }]}
+            return {"output_text": "Danke, ich habe die Rückmeldung gespeichert.", "output": []}
+
+        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ):
+            result = server.chat_with_coach("Die Beine fühlten sich locker an.")
+
+        response_calls = [payload for path, payload in calls if path == "/responses"]
+        self.assertIn("save_activity_feedback", [tool["name"] for tool in response_calls[0]["tools"]])
+        self.assertEqual(result["activity_feedback"][0]["activity_id"], "activity-3")
+        self.assertEqual(server.list_activity_feedback()[0]["notes"], "Beine fühlten sich locker an")
+
+    def test_chat_can_explicitly_refresh_intervals_data_with_a_tool(self):
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_refresh"}
+            if len([call for call in calls if call[0] == "/responses"]) == 1:
+                return {"output": [{
+                    "type": "function_call",
+                    "name": "refresh_intervals_data",
+                    "call_id": "call_refresh",
+                    "arguments": json.dumps({"days": 7}),
+                }]}
+            return {"output_text": "Die Trainingsdaten sind aktualisiert.", "output": []}
+
+        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ), patch.object(
+            server, "sync_intervals", return_value={"status": "ok", "activities": 3, "events": 2}
+        ) as sync:
+            server.chat_with_coach("Aktualisiere meine Intervals.icu-Daten der letzten 7 Tage.")
+
+        response_calls = [payload for path, payload in calls if path == "/responses"]
+        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "refresh_intervals_data"})
+        sync.assert_called_once_with("Coach-Anfrage", activity_days=7)
+
+    def test_coach_tools_cover_explicit_read_refresh_and_adaptive_actions(self):
+        expected_tools = {
+            "save_competition",
+            "delete_competition",
+            "list_competitions",
+            "sync_competitions",
+            "list_workout_library",
+            "list_recent_activities",
+            "list_planned_workouts",
+            "refresh_intervals_data",
+            "refresh_current_performance",
+            "refresh_workout_library",
+            "refresh_garmin_data",
+            "refresh_weather",
+            "refresh_external_calendar",
+            "preview_adaptive_replan",
+            "apply_adaptive_replan",
+        }
+        available_tools = {tool["name"] for tool in server.COACH_TOOLS}
+        self.assertTrue(expected_tools <= available_tools)
+        routing_cases = {
+            "Welche Wettkämpfe sind gespeichert?": "list_competitions",
+            "Füge einen Wettkampf hinzu": "save_competition",
+            "Ändere den Zielwettkampf": "save_competition",
+            "Aktualisiere den Wettkampf": "save_competition",
+            "Passe den Wettkampf an": "save_competition",
+            "Ändere den Wettbewerb": "save_competition",
+            "Lösche den Wettkampf": "delete_competition",
+            "Lösche den Wettbewerb": "delete_competition",
+            "Synchronisiere die Wettkämpfe": "sync_competitions",
+            "Zeige geplante Einheiten": "list_planned_workouts",
+            "Liste meine Trainingsbibliothek": "list_workout_library",
+            "Zeige meine letzten Einheiten": "list_recent_activities",
+            "Aktualisiere meine Intervals.icu-Daten": "refresh_intervals_data",
+            "Aktualisiere meine Leistungsdaten": "refresh_current_performance",
+            "Aktualisiere die Trainingsbibliothek": "refresh_workout_library",
+            "Aktualisiere Garmin": "refresh_garmin_data",
+            "Aktualisiere das Wetter": "refresh_weather",
+            "Synchronisiere den Kalender": "refresh_external_calendar",
+            "Starte die adaptive Planung als Vorschau": "preview_adaptive_replan",
+            "Wende die adaptive Planung an": "apply_adaptive_replan",
+        }
+        for message, expected in routing_cases.items():
+            with self.subTest(message=message):
+                self.assertEqual(server.requested_coach_tool(message), expected)
+
+    def test_coach_adaptive_apply_requires_latest_preview_and_explicit_approval(self):
+        with self.assertRaises(server.AppError) as raised:
+            server.apply_coach_adaptive_replan(str(uuid.uuid4()), "Wende die adaptive Planung an.")
+        self.assertEqual(raised.exception.status, 409)
 
     def test_empty_activity_feedback_removes_entry_and_input_is_bounded(self):
         result = server.save_activity_feedback("activity-2", {"notes": "x" * 5000})
@@ -412,7 +543,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["recent_wellness"][0]["ctl"], 42)
 
     def test_planned_workouts_match_activities_and_roll_up_weekly_compliance(self):
-        today = server.local_now().date()
+        today = date(2026, 8, 26)
         events = [
             {
                 "id": "event-done", "category": "WORKOUT", "type": "Ride",
@@ -436,7 +567,8 @@ class CoachTests(unittest.TestCase):
             "moving_time": 3300, "icu_training_load": 40,
         }]
 
-        enriched, weekly = server.planning_compliance_state(events, activities)
+        with patch.object(server, "local_now", return_value=datetime(2026, 8, 26, 12, 0)):
+            enriched, weekly = server.planning_compliance_state(events, activities)
 
         self.assertEqual(enriched[0]["compliance"]["status"], "completed")
         self.assertEqual(enriched[0]["compliance"]["percentage"], 80)
@@ -1081,6 +1213,111 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.list_workout_drafts(), [])
         create.assert_not_called()
 
+    def test_saved_library_plan_can_be_applied_locally_as_a_batch(self):
+        server.upsert_workout_library([{
+            "id": 42, "name": "Locker Rad", "type": "Ride",
+            "description": "- 45m Z2", "moving_time": 2700,
+        }])
+        library = server.list_workout_library()[0]
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        result = server.apply_workout_library_plan([{
+            "library_workout_id": library["id"], "date": tomorrow,
+        }])
+        self.assertEqual(result["status"], "local")
+        self.assertEqual(result["local_planned"], 1)
+        self.assertEqual(result["planned"][0]["library_entry"]["date"], tomorrow)
+        self.assertEqual(len(server.list_workout_library()), 2)
+
+    def test_library_plan_checks_provider_calendar_conflicts_before_writing(self):
+        server.upsert_workout_library([{
+            "id": 43, "name": "Tempo", "type": "Ride",
+            "description": "- 30m 85%", "moving_time": 1800,
+        }])
+        library = server.list_workout_library()[0]
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        server.save_snapshot({
+            "synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [],
+            "upcoming_calendar": [{"id": "remote-event", "name": "Bereits geplant", "start_date_local": tomorrow + "T09:00:00"}],
+        })
+        with self.assertRaises(server.AppError) as raised:
+            server.apply_workout_library_plan([{
+                "library_workout_id": library["id"], "date": tomorrow,
+            }])
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(len(server.list_workout_library()), 1)
+
+    def test_library_plan_rejects_duplicate_source_on_same_date(self):
+        server.upsert_workout_library([{
+            "id": 46, "name": "Locker Rad", "type": "Ride",
+            "description": "- 30m Z2", "moving_time": 1800,
+        }])
+        library = server.list_workout_library()[0]
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        with self.assertRaises(server.AppError) as raised:
+            server.apply_workout_library_plan([
+                {"library_workout_id": library["id"], "date": tomorrow},
+                {"library_workout_id": library["id"], "date": tomorrow},
+            ])
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(len(server.list_workout_library()), 1)
+
+    def test_library_plan_can_explicitly_schedule_to_intervals(self):
+        server.upsert_workout_library([{
+            "id": 44, "name": "Intervall", "type": "Ride",
+            "description": "4x 5m 105%", "moving_time": 2400,
+        }])
+        library = server.list_workout_library()[0]
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        synced = {**library, "external_id": "44", "id": "44"}
+        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+            server, "sync_local_workout_library_entry", return_value=synced
+        ) as sync_library, patch.object(
+            server, "plan_library_workout_remote", return_value={"id": "event-44"}
+        ) as plan_remote:
+            result = server.apply_workout_library_plan([{
+                "library_workout_id": library["id"], "date": tomorrow,
+            }], sync_to_intervals=True)
+        self.assertEqual(result["status"], "synced")
+        self.assertTrue(result["synced_to_intervals"])
+        sync_library.assert_called_once_with(library["id"])
+        plan_remote.assert_called_once_with("44", synced, tomorrow)
+
+    def test_chat_can_apply_saved_library_plan_with_explicit_tool_choice(self):
+        server.upsert_workout_library([{
+            "id": 45, "name": "Locker Lauf", "type": "Run",
+            "description": "- 30m 70%", "moving_time": 1800,
+        }])
+        library = server.list_workout_library()[0]
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_apply"}
+            if len([call for call in calls if call[0] == "/responses"]) == 1:
+                return {"output": [{
+                    "type": "function_call",
+                    "name": "apply_workout_library_plan",
+                    "call_id": "call_apply",
+                    "arguments": json.dumps({
+                        "entries": [{"library_workout_id": library["id"], "date": tomorrow}],
+                        "sync_to_intervals": False,
+                    }),
+                }]}
+            return {"output_text": "Plan lokal angewendet.", "output": []}
+
+        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ):
+            result = server.chat_with_coach("Wende die gespeicherte Bibliothekseinheit als Plan an.")
+
+        response_calls = [payload for path, payload in calls if path == "/responses"]
+        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "apply_workout_library_plan"})
+        self.assertEqual(len(result["planned_library_entries"]), 1)
+        self.assertEqual(result["planned_library_entries"][0]["date"], tomorrow)
+        self.assertEqual(len(server.list_workout_library()), 2)
+
     def test_library_backed_draft_is_planned_from_library_on_approval(self):
         server.upsert_workout_library([{
             "id": 42, "name": "Locker Rad", "type": "Ride", "description": "- 30m 70%", "moving_time": 1800,
@@ -1501,6 +1738,171 @@ class CoachTests(unittest.TestCase):
         context = server.structured_athlete_context()
         self.assertEqual(context["target_competitions"][0]["name"], "Münsterland Giro")
         self.assertIn("bestätigte", context["source_policy"]["durable_profile"])
+
+    def test_coach_can_create_update_and_delete_competition_without_replacing_profile(self):
+        server.save_profile({"name": "Ada", "goals": "Long course"})
+        event_date = (date.today() + timedelta(days=60)).isoformat()
+        arguments = {
+            "competition_id": "",
+            "name": "Münsterland Giro",
+            "event_date": event_date,
+            "start_date_local": "",
+            "sport": "Cycling",
+            "priority": "A",
+            "distance": "125 km",
+            "target": "Finish strong",
+            "course_profile": "Rolling",
+            "notes": "",
+            "description": "",
+            "moving_time_seconds": -1,
+        }
+        created = server.save_coach_competition(arguments)
+        competition_id = created["competition"]["id"]
+        self.assertEqual(created["status"], "created")
+        self.assertEqual(server.get_profile()["name"], "Ada")
+
+        updated = server.save_coach_competition({
+            **arguments,
+            "competition_id": competition_id,
+            "name": "Münsterland Giro 2027",
+            "priority": "B",
+        })
+        self.assertEqual(updated["status"], "updated")
+        self.assertEqual(updated["competition"]["name"], "Münsterland Giro 2027")
+        self.assertEqual(updated["competition"]["priority"], "B")
+
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE competitions SET intervals_event_id=?, external_id=? WHERE id=?",
+                ("123", server.competition_external_id(competition_id), competition_id),
+            )
+        deleted = server.delete_coach_competition(competition_id)
+        self.assertEqual(deleted["status"], "deleted")
+        self.assertTrue(deleted["remote_sync_pending"])
+        self.assertEqual(server.list_competitions(), [])
+        with server.DB_LOCK, server.database() as db:
+            tombstone = db.execute("SELECT intervals_event_id, external_id FROM competition_sync_tombstones").fetchone()
+        self.assertEqual(tombstone["intervals_event_id"], "123")
+
+    def test_chat_can_save_competition_with_tool(self):
+        event_date = (date.today() + timedelta(days=75)).isoformat()
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_competition"}
+            if len([call for call in calls if call[0] == "/responses"]) == 1:
+                return {"output": [{
+                    "type": "function_call",
+                    "name": "save_competition",
+                    "call_id": "call_competition",
+                    "arguments": json.dumps({
+                        "competition_id": "",
+                        "name": "Berlin Marathon",
+                        "event_date": event_date,
+                        "start_date_local": "",
+                        "sport": "Running",
+                        "priority": "A",
+                        "distance": "42.2 km",
+                        "target": "Finish",
+                        "course_profile": "Road",
+                        "notes": "",
+                        "description": "",
+                        "moving_time_seconds": -1,
+                        "sync_to_intervals": False,
+                    }),
+                }]}
+            return {"output_text": "Der Wettkampf wurde lokal gespeichert.", "output": []}
+
+        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ):
+            result = server.chat_with_coach("Füge den Berlin Marathon als Zielwettkampf hinzu.")
+
+        self.assertEqual(result["message"]["content"], "Der Wettkampf wurde lokal gespeichert.")
+        self.assertEqual(server.list_competitions()[0]["name"], "Berlin Marathon")
+        response_calls = [payload for path, payload in calls if path == "/responses"]
+        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "save_competition"})
+
+    def test_chat_can_delete_competition_with_tool(self):
+        event_date = (date.today() + timedelta(days=75)).isoformat()
+        saved = server.save_athlete_context({}, [{"name": "Berlin Marathon", "event_date": event_date, "sport": "Running"}])
+        competition_id = saved["competitions"][0]["id"]
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_competition_delete"}
+            if len([call for call in calls if call[0] == "/responses"]) == 1:
+                return {"output": [{
+                    "type": "function_call",
+                    "name": "delete_competition",
+                    "call_id": "call_competition_delete",
+                    "arguments": json.dumps({"competition_id": competition_id, "sync_to_intervals": False}),
+                }]}
+            return {"output_text": "Der Wettkampf wurde lokal gelöscht.", "output": []}
+
+        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ):
+            result = server.chat_with_coach("Lösche den Zielwettkampf lokal.")
+
+        self.assertEqual(result["message"]["content"], "Der Wettkampf wurde lokal gelöscht.")
+        self.assertEqual(server.list_competitions(), [])
+        response_calls = [payload for path, payload in calls if path == "/responses"]
+        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "delete_competition"})
+
+    def test_coach_competition_update_is_pushed_to_existing_remote_event(self):
+        event_date = (date.today() + timedelta(days=60)).isoformat()
+        saved = server.save_athlete_context({}, [{"name": "Old Race", "event_date": event_date, "sport": "Cycling"}])
+        competition_id = saved["competitions"][0]["id"]
+        external_id = server.competition_external_id(competition_id)
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0 WHERE id=?",
+                ("123", external_id, competition_id),
+            )
+        server.save_coach_competition({
+            "competition_id": competition_id,
+            "name": "Updated Race",
+            "event_date": event_date,
+            "start_date_local": "",
+            "sport": "Cycling",
+            "priority": "A",
+            "distance": "100 km",
+            "target": "Finish",
+            "course_profile": "Road",
+            "notes": "Updated locally",
+            "description": "Updated locally",
+            "moving_time_seconds": -1,
+        })
+        pushed = []
+
+        class FakeIntervalsClient:
+            def fetch_competition_events(self):
+                return [{
+                    "id": 123, "category": "RACE_B", "start_date_local": event_date + "T08:00:00",
+                    "type": "Ride", "name": "Old Race",
+                }]
+
+            def upsert_competition_events(self, events):
+                pushed.extend(events)
+                return [{**events[0], "id": 123}] if events else []
+
+            def bulk_delete_events(self, identifiers):
+                return 0
+
+        with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
+            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+        ):
+            result = server.sync_competitions("test")
+
+        self.assertEqual(result["pushed"], 1)
+        self.assertEqual(pushed[0]["id"], 123)
+        self.assertEqual(pushed[0]["name"], "Updated Race")
+        self.assertEqual(server.list_competitions(include_sync=True)[0]["sync_dirty"], 0)
 
     def test_competition_sync_pushes_local_events_idempotently(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
