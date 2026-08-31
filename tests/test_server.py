@@ -753,7 +753,7 @@ class CoachTests(unittest.TestCase):
         service_worker = (Path(__file__).resolve().parents[1] / "public" / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
-        self.assertIn('/app.js?v=119', index)
+        self.assertIn('/app.js?v=120', index)
         self.assertIn('intervals-coach-v120', service_worker)
 
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
