@@ -11,6 +11,9 @@ const state = {
   checkinSelectedDate: null,
   activityTypes: new Set(),
   activitySearch: "",
+  activityFromDate: "",
+  activityToDate: "",
+  activityVisibleCount: 250,
   activityFeedbackDirty: new Set(),
   planningEditDirty: new Set(),
   libraryDateDirty: new Set(),
@@ -84,6 +87,10 @@ function showLogin() {
   state.activityFeedbackDirty.clear();
   state.planningEditDirty.clear();
   state.libraryDateDirty.clear();
+  state.activitySearch = "";
+  state.activityFromDate = "";
+  state.activityToDate = "";
+  state.activityVisibleCount = 250;
   setDirtyIndicator("activityDirtyIndicator", false);
   setDirtyIndicator("planningDirtyIndicator", false);
   setDirtyIndicator("libraryDirtyIndicator", false);
@@ -877,6 +884,7 @@ function renderActivityFilters(activities) {
     button.addEventListener("click", () => {
       if (state.activityTypes.has(type)) state.activityTypes.delete(type);
       else state.activityTypes.add(type);
+      state.activityVisibleCount = 250;
       renderActivities(state.data?.activities || []);
     });
     root.append(button);
@@ -888,6 +896,7 @@ function renderActivityFilters(activities) {
     clear.textContent = "Zurücksetzen";
     clear.addEventListener("click", () => {
       state.activityTypes.clear();
+      state.activityVisibleCount = 250;
       renderActivities(state.data?.activities || []);
     });
     root.append(clear);
@@ -929,18 +938,30 @@ function renderActivities(activities) {
       : refreshedAt ? `Letzte Aktualisierung: ${formatTime(refreshedAt)}` : "Noch nicht aktualisiert";
   }
   renderActivityFilters(list);
+  const dateFilteredActivities = list.filter((activity) => {
+    const activityDate = String(activity.start_date_local || activity.date || "").slice(0, 10);
+    if (state.activityFromDate && (!activityDate || activityDate < state.activityFromDate)) return false;
+    if (state.activityToDate && (!activityDate || activityDate > state.activityToDate)) return false;
+    return true;
+  });
   const filteredActivities = state.activityTypes.size
-    ? list.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))
-    : list;
+    ? dateFilteredActivities.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))
+    : dateFilteredActivities;
   const query = state.activitySearch.trim().toLocaleLowerCase("de-DE");
   const displayedActivities = query
     ? filteredActivities.filter((activity) => [activity.name, activity.type, activity.sport, activity.sport_type].filter(Boolean).join(" ").toLocaleLowerCase("de-DE").includes(query))
     : filteredActivities;
-  const isFiltered = Boolean(state.activityTypes.size || query);
+  const isFiltered = Boolean(state.activityTypes.size || query || state.activityFromDate || state.activityToDate);
   renderActivityStats(displayedActivities, isFiltered);
   const stats = $("#activityStats");
   if (stats) stats.setAttribute("aria-label", isFiltered ? "Gefilterte Aktivitätsstatistik" : "Aktivitätsstatistik");
   const root = $("#activities");
+  const search = $("#activitySearch");
+  const fromDate = $("#activityFromDate");
+  const toDate = $("#activityToDate");
+  if (search && search.value !== state.activitySearch) search.value = state.activitySearch;
+  if (fromDate && fromDate.value !== state.activityFromDate) fromDate.value = state.activityFromDate;
+  if (toDate && toDate.value !== state.activityToDate) toDate.value = state.activityToDate;
   root.replaceChildren();
   if (!displayedActivities.length) {
     const empty = document.createElement("div");
@@ -948,12 +969,12 @@ function renderActivities(activities) {
     const title = document.createElement("strong");
     title.textContent = list.length ? "Keine passenden Einheiten" : "Noch keine absolvierten Einheiten";
     empty.append(title, document.createTextNode(list.length
-      ? query ? "Passe die Suche an oder setze sie zurück." : "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück."
+      ? query ? "Passe die Suche an oder setze sie zurück." : state.activityFromDate || state.activityToDate ? "Passe den Zeitraum an oder setze den Filter zurück." : "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück."
       : "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen."));
     root.append(empty);
     return;
   }
-  displayedActivities.slice(0, 250).forEach((activity) => {
+  displayedActivities.slice(0, state.activityVisibleCount).forEach((activity) => {
     const card = document.createElement("article");
     card.className = "activity-card";
     const top = document.createElement("div");
@@ -974,6 +995,7 @@ function renderActivities(activities) {
     meta.addEventListener("click", () => {
       if (state.activityTypes.has(type)) state.activityTypes.delete(type);
       else state.activityTypes.add(type);
+      state.activityVisibleCount = 250;
       renderActivities(state.data?.activities || []);
     });
     const stats = document.createElement("div");
@@ -1030,11 +1052,16 @@ function renderActivities(activities) {
     }
     root.append(card);
   });
-  if (displayedActivities.length > 250) {
-    const note = document.createElement("p");
-    note.className = "fine-print";
-    note.textContent = "Es werden die 250 neuesten Einheiten angezeigt.";
-    root.append(note);
+  if (displayedActivities.length > state.activityVisibleCount) {
+    const loadMore = document.createElement("button");
+    loadMore.type = "button";
+    loadMore.className = "secondary-button activity-load-more";
+    loadMore.textContent = `Weitere Einheiten laden (${displayedActivities.length - state.activityVisibleCount} verbleibend)`;
+    loadMore.addEventListener("click", () => {
+      state.activityVisibleCount += 250;
+      renderActivities(state.data?.activities || []);
+    });
+    root.append(loadMore);
   }
 }
 
@@ -3382,6 +3409,25 @@ $("#messageInput").addEventListener("keydown", (event) => {
 });
 $("#activitySearch").addEventListener("input", (event) => {
   state.activitySearch = event.target.value;
+  state.activityVisibleCount = 250;
+  renderActivities(state.data?.activities || []);
+});
+$("#activityFromDate").addEventListener("input", (event) => {
+  state.activityFromDate = event.target.value;
+  state.activityVisibleCount = 250;
+  renderActivities(state.data?.activities || []);
+});
+$("#activityToDate").addEventListener("input", (event) => {
+  state.activityToDate = event.target.value;
+  state.activityVisibleCount = 250;
+  renderActivities(state.data?.activities || []);
+});
+$("#activityFilterReset").addEventListener("click", () => {
+  state.activityTypes.clear();
+  state.activitySearch = "";
+  state.activityFromDate = "";
+  state.activityToDate = "";
+  state.activityVisibleCount = 250;
   renderActivities(state.data?.activities || []);
 });
 document.addEventListener("visibilitychange", () => {
