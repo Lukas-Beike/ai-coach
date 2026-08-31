@@ -1135,14 +1135,30 @@ function renderActivities(activities) {
     }
     root.append(card);
   });
-  if (displayedActivities.length > state.activityVisibleCount) {
+  if (displayedActivities.length > state.activityVisibleCount || state.data?.activities_next_cursor) {
     const loadMore = document.createElement("button");
     loadMore.type = "button";
     loadMore.className = "secondary-button activity-load-more";
-    loadMore.textContent = `Weitere Einheiten laden (${displayedActivities.length - state.activityVisibleCount} verbleibend)`;
-    loadMore.addEventListener("click", () => {
-      state.activityVisibleCount += 250;
-      renderActivities(state.data?.activities || []);
+    loadMore.textContent = displayedActivities.length > state.activityVisibleCount
+      ? `Weitere Einheiten laden (${displayedActivities.length - state.activityVisibleCount} verbleibend)`
+      : "Weitere Einheiten laden";
+    loadMore.addEventListener("click", async () => {
+      if (displayedActivities.length > state.activityVisibleCount) {
+        state.activityVisibleCount += 250;
+        renderActivities(state.data?.activities || []);
+        return;
+      }
+      loadMore.disabled = true;
+      try {
+        const page = await api(`/api/activities?limit=250&cursor=${encodeURIComponent(state.data.activities_next_cursor)}`);
+        state.data.activities = [...(state.data.activities || []), ...(page.activities || [])];
+        state.data.activities_next_cursor = page.next_cursor;
+        state.activityVisibleCount += 250;
+        renderActivities(state.data.activities);
+      } catch (error) {
+        toast(error.message, true);
+        loadMore.disabled = false;
+      }
     });
     root.append(loadMore);
   }
@@ -2916,10 +2932,35 @@ function render(data) {
   updateHeaderAction();
 }
 
-async function load(path = "/api/state") {
+async function load(path = "/api/bootstrap") {
   const requestSequence = ++state.loadSequence;
   try {
-    const payload = await api(path);
+    const localOnly = path.includes("local=1");
+    const query = localOnly ? "?local=1" : "";
+    const bootstrap = await api(path);
+    const [chat, activities, plan, library, performance, feedback, profile] = await Promise.all([
+      api("/api/chat/history?limit=100"),
+      api("/api/activities?limit=250"),
+      api(`/api/plan${query}`),
+      api("/api/library?limit=100"),
+      api("/api/performance"),
+      api("/api/feedback"),
+      api("/api/profile"),
+    ]);
+    const payload = {
+      ...bootstrap,
+      ...plan,
+      ...performance,
+      ...feedback,
+      profile: profile.profile || bootstrap.profile,
+      competitions: profile.competitions || bootstrap.competitions,
+      messages: chat.messages || [],
+      messages_next_cursor: chat.next_cursor,
+      activities: activities.activities || [],
+      activities_next_cursor: activities.next_cursor,
+      library: library.workouts || [],
+      library_next_cursor: library.next_cursor,
+    };
     if (requestSequence === state.loadSequence) render(payload);
   } catch (error) {
     if (/Authentication/.test(error.message)) return;
@@ -2935,8 +2976,7 @@ async function load(path = "/api/state") {
 }
 
 async function loadInitialState() {
-  await load("/api/state/local");
-  if (state.data) load();
+  await load("/api/bootstrap?local=1");
 }
 
 function queueChatMessage(message, mode) {

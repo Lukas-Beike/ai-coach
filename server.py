@@ -2633,16 +2633,19 @@ def normalize_competition(value: Any) -> dict[str, str]:
     return result
 
 
-def list_competitions(include_sync: bool = False) -> list[dict[str, Any]]:
+def list_competitions(include_sync: bool = False, limit: int | None = None) -> list[dict[str, Any]]:
     fields = (
         "id, name, event_date, start_date_local, sport, priority, category, distance, target, "
         "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
         "sync_state, sync_conflict, last_synced_at"
     )
     with DB_LOCK, database() as db:
-        rows = db.execute(
-            f"SELECT {fields} FROM competitions ORDER BY event_date, priority, name"
-        ).fetchall()
+        query = f"SELECT {fields} FROM competitions ORDER BY event_date, priority, name"
+        params: tuple[Any, ...] = ()
+        if limit is not None:
+            query += " LIMIT ?"
+            params = (max(1, min(int(limit), 500)),)
+        rows = db.execute(query, params).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -6183,6 +6186,140 @@ def list_workout_library(limit: int = 500, include_archived: bool = False) -> li
     return result
 
 
+API_PAGE_DEFAULT = 100
+API_PAGE_MAX = 250
+CHAT_PAGE_MAX = 100
+LIBRARY_PAGE_MAX = 100
+
+
+def api_page_limit(raw: Any, default: int = API_PAGE_DEFAULT, maximum: int = API_PAGE_MAX) -> int:
+    try:
+        return max(1, min(int(raw), maximum))
+    except (TypeError, ValueError):
+        return default
+
+
+def encode_page_cursor(value: Any) -> str:
+    raw = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_page_cursor(value: Any) -> Any | None:
+    if not value:
+        return None
+    try:
+        padding = "=" * (-len(str(value)) % 4)
+        return json.loads(base64.urlsafe_b64decode(f"{value}{padding}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def activity_page_key(activity: dict[str, Any]) -> tuple[str, str]:
+    return (
+        str(first_present(activity, ("start_date_local", "start_date", "date")) or "")[:40],
+        str(first_present(activity, ("id", "activityId", "external_id")) or ""),
+    )
+
+
+def paged_activities(cursor: Any = None, limit: Any = None, days: Any = ALL_SYNC_DAYS) -> dict[str, Any]:
+    snapshot = latest_snapshot() or {}
+    activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
+    activities = [item for item in activities if isinstance(item, dict)] if isinstance(activities, list) else []
+    try:
+        days_value = int(days)
+    except (TypeError, ValueError):
+        days_value = ALL_SYNC_DAYS
+    if days_value != ALL_SYNC_DAYS:
+        cutoff = local_now().date() - timedelta(days=max(1, days_value) - 1)
+        activities = [item for item in activities if _record_date(activity_page_key(item)[0]) >= cutoff.isoformat()]
+    activities.sort(key=activity_page_key, reverse=True)
+    decoded = decode_page_cursor(cursor)
+    if isinstance(decoded, list) and len(decoded) == 2:
+        after = (str(decoded[0]), str(decoded[1]))
+        activities = [item for item in activities if activity_page_key(item) < after]
+    page_size = api_page_limit(limit, API_PAGE_DEFAULT)
+    page = activities[:page_size]
+    return {
+        "snapshot_synced_at": snapshot.get("synced_at") if isinstance(snapshot, dict) else None,
+        "activities": activities_with_feedback(page),
+        "next_cursor": encode_page_cursor(activity_page_key(page[-1])) if len(activities) > len(page) and page else None,
+        "limit": page_size,
+        "days": days_value,
+    }
+
+
+def paged_chat_history(cursor: Any = None, limit: Any = None, search: Any = None) -> dict[str, Any]:
+    page_size = api_page_limit(limit, API_PAGE_DEFAULT, CHAT_PAGE_MAX)
+    term = str(search or "").strip()[:200]
+    params: list[Any] = []
+    clauses = []
+    if term:
+        clauses.append("content LIKE ? ESCAPE '\\'")
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.append(f"%{escaped}%")
+    decoded = decode_page_cursor(cursor)
+    if isinstance(decoded, int) or (isinstance(decoded, str) and decoded.isdigit()):
+        clauses.append("id < ?")
+        params.append(int(decoded))
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            f"SELECT id, role, content, created_at FROM messages{where} ORDER BY id DESC LIMIT ?",
+            (*params, page_size + 1),
+        ).fetchall()
+    has_more = len(rows) > page_size
+    rows = rows[:page_size]
+    return {
+        "messages": [dict(row) for row in reversed(rows)],
+        "next_cursor": encode_page_cursor(int(rows[-1]["id"])) if has_more and rows else None,
+        "limit": page_size,
+        "search": term,
+    }
+
+
+def paged_library(cursor: Any = None, limit: Any = None) -> dict[str, Any]:
+    workouts = list_workout_library(limit=1000, include_archived=True)
+    workouts.sort(key=lambda item: (
+        str(item.get("type") or "").casefold(),
+        str(item.get("name") or "").casefold(),
+        str(item.get("id") or ""),
+    ))
+    decoded = decode_page_cursor(cursor)
+    if isinstance(decoded, list) and len(decoded) == 3:
+        after = tuple(str(part) for part in decoded)
+        workouts = [item for item in workouts if (
+            str(item.get("type") or "").casefold(),
+            str(item.get("name") or "").casefold(),
+            str(item.get("id") or ""),
+        ) > after]
+    page_size = api_page_limit(limit, API_PAGE_DEFAULT, LIBRARY_PAGE_MAX)
+    page = workouts[:page_size]
+    key = lambda item: (str(item.get("type") or "").casefold(), str(item.get("name") or "").casefold(), str(item.get("id") or ""))
+    return {
+        "workouts": page,
+        "next_cursor": encode_page_cursor(key(page[-1])) if len(workouts) > len(page) and page else None,
+        "limit": page_size,
+    }
+
+
+def state_versions() -> dict[str, str]:
+    snapshot = latest_snapshot() or {}
+    with DB_LOCK, database() as db:
+        message = db.execute("SELECT COUNT(*) AS count, COALESCE(MAX(id), 0) AS latest FROM messages").fetchone()
+        library = db.execute("SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest FROM workout_library").fetchone()
+        checkins = db.execute("SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest FROM athlete_checkins").fetchone()
+        feedback = db.execute("SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest FROM activity_feedback").fetchone()
+    return {
+        "activities": f"{snapshot.get('synced_at') or ''}:{len(snapshot.get('recent_activities', [])) if isinstance(snapshot.get('recent_activities'), list) else 0}",
+        "chat": f"{message['latest']}:{message['count']}",
+        "library": f"{library['latest']}:{library['count']}",
+        "checkins": f"{checkins['latest']}:{checkins['count']}",
+        "activity_feedback": f"{feedback['latest']}:{feedback['count']}",
+        "profile": hashlib.sha256(json.dumps(get_profile(), sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16],
+        "plan": f"{snapshot.get('synced_at') or ''}:{get_kv('last_external_calendar_sync_at') or ''}:{library['latest']}:{checkins['latest']}",
+    }
+
+
 def list_recent_activities(days: int = ALL_SYNC_DAYS, limit: int = 250) -> dict[str, Any]:
     """Read completed activities from the latest local snapshot without syncing."""
     snapshot = latest_snapshot() or {}
@@ -9058,6 +9195,107 @@ def add_private_calendar_context_to_planned(
     return enriched
 
 
+def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
+    """Return only bounded metadata needed before domain areas are loaded."""
+    snapshot = latest_snapshot()
+    return {
+        "schema_version": 2,
+        "state_versions": state_versions(),
+        "app": {"name": "Intervals Coach", "version": APP_VERSION, "github_release": github_release_status(refresh=not local_only)},
+        "messages": [],
+        "plans": [],
+        "library": [],
+        "activities": [],
+        "planned": [],
+        "planning_view": {"source": "canonical", "local_count": 0, "remote_count": 0, "items": [], "provider_window": {}},
+        "planning_compliance": [],
+        "weather": {},
+        "parallel_cycling": [],
+        "profile": get_profile(),
+        "competitions": list_competitions(limit=100),
+        "checkins": [],
+        "local_feedback": {"today": None, "recent": [], "scope": "Only athlete-entered subjective feedback and constraints; wearable/provider values remain in their source sections."},
+        "activity_feedback": {"recent": [], "scope": "Only athlete-entered notes about completed activities; this feedback is separate from daily check-ins and provider values."},
+        "planning": {},
+        "external_calendar": external_calendar_state(),
+        "daily_planning_context": [],
+        "performance": {},
+        "garmin": garmin_public_state(),
+        "intervals": intervals_public_state(snapshot),
+        "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
+        "provider_resync": {"intervals": provider_resync_state("intervals"), "garmin": provider_resync_state("garmin")},
+        "sync": {
+            "last_sync_at": get_kv("last_sync_at"), "last_error": get_kv("last_sync_error") or None,
+            "running": get_kv("sync_running") == "1", "status": get_kv("sync_status") or None,
+            "last_window_start": get_kv("last_sync_window_start"), "last_window_end": get_kv("last_sync_window_end"),
+        },
+        "library_sync": {"last_sync_at": get_kv("last_library_sync_at"), "last_error": get_kv("last_library_sync_error") or None, "state": workout_library_sync_summary()},
+        "sync_settings": {"intervals_days": sync_period("intervals"), "garmin_days": sync_period("garmin")},
+        "calendar_display": calendar_display_settings(),
+        "competition_sync": {
+            "last_sync_at": get_kv("last_competition_sync_at"), "last_error": get_kv("last_competition_sync_error") or None,
+            "running": get_kv("competition_sync_running") == "1", "status": get_kv("competition_sync_status") or None,
+        },
+        "performance_refresh": {
+            "last_refresh_at": get_kv("last_performance_refresh_at"), "last_error": get_kv("last_performance_error") or None,
+            "running": get_kv("performance_refresh_running") == "1",
+        },
+        "morning_checkin": {
+            "status": get_kv("morning_checkin_status") or "waiting", "running": get_kv("morning_checkin_running") == "1",
+            "date": get_kv("morning_checkin_date"), "last_error": get_kv("morning_checkin_error") or None,
+        },
+        "model": {"selected": selected_model(), "options": available_model_options()},
+        "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
+        "configured": {
+            "openai": bool(CONFIG.openai_api_key), "intervals": bool(CONFIG.intervals_api_key),
+            "weather": bool(get_profile().get("weather_location")), "external_calendar": bool(CONFIG.calendar_ical_url),
+        },
+        "usage": openai_usage_summary(),
+    }
+
+
+def public_plan_state(local_only: bool = False) -> dict[str, Any]:
+    snapshot = latest_snapshot() or {}
+    remote_planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
+    remote_planned = [item for item in remote_planned if isinstance(item, dict)][:500]
+    local_planned = list_dated_local_planned_workouts(limit=500)
+    planned = canonical_planned_workouts(remote_planned, local_planned)
+    activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
+    activities = activities[:1000] if isinstance(activities, list) else []
+    activities = activities_with_feedback(activities)
+    planning_compliance = planning_compliance_state(planned, activities)
+    weather = weather_state(planned, refresh=not local_only)
+    if weather.pop("_refreshed", False):
+        check_adaptive_replan("weather")
+    planned_with_weather = add_weather_to_planned(planned, weather)
+    provider_sync = snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
+    calendar_window = provider_sync.get("calendar_window", {}) if isinstance(provider_sync, dict) else {}
+    return {
+        "plans": list_training_plans(limit=30),
+        "planned": planned_with_weather,
+        "planning_view": {
+            "source": "canonical", "local_count": sum(1 for item in planned if item.get("is_local")),
+            "remote_count": sum(1 for item in planned if item.get("is_remote")), "items": planned_with_weather,
+            "provider_window": calendar_window,
+        },
+        "planning_compliance": planning_compliance,
+        "weather": weather,
+        "parallel_cycling": parallel_cycling_event_groups(planned),
+        "external_calendar": external_calendar_state(),
+        "daily_planning_context": daily_planning_context(snapshot, planned, weather, list_checkins(30), list_external_calendar_events(50)),
+        "planning": planning_state(),
+    }
+
+
+def public_performance_state() -> dict[str, Any]:
+    snapshot = latest_snapshot()
+    return {"performance": current_performance_context(snapshot), "garmin": garmin_public_state()}
+
+
+def public_feedback_state() -> dict[str, Any]:
+    return {"checkins": list_checkins(30), "local_feedback": local_feedback_context(), "activity_feedback": activity_feedback_context()}
+
+
 def public_state(local_only: bool = False) -> dict[str, Any]:
     # Build the local part under one connection. SQLCipher setup is relatively
     # expensive, and the composite state otherwise opened the encrypted DB for
@@ -9702,14 +9940,36 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if session:
                     schedule_morning_checkin()
                 self.send_json(200, result)
-            elif path == "/api/state":
+            elif path == "/api/bootstrap":
                 require_auth(self)
                 schedule_morning_checkin()
-                self.send_json(200, public_state())
-            elif path == "/api/state/local":
+                query = parse_qs(urlparse(self.path).query)
+                self.send_json(200, public_bootstrap(local_only=query.get("local", ["0"])[0] == "1"))
+            elif path == "/api/activities":
                 require_auth(self)
-                schedule_morning_checkin()
-                self.send_json(200, public_state(local_only=True))
+                query = parse_qs(urlparse(self.path).query)
+                self.send_json(200, paged_activities(query.get("cursor", [None])[0], query.get("limit", [None])[0], query.get("days", [ALL_SYNC_DAYS])[0]))
+            elif path == "/api/chat/history":
+                require_auth(self)
+                query = parse_qs(urlparse(self.path).query)
+                self.send_json(200, paged_chat_history(query.get("cursor", [None])[0], query.get("limit", [None])[0], query.get("q", [None])[0]))
+            elif path == "/api/plan":
+                require_auth(self)
+                query = parse_qs(urlparse(self.path).query)
+                self.send_json(200, public_plan_state(local_only=query.get("local", ["0"])[0] == "1"))
+            elif path == "/api/library":
+                require_auth(self)
+                query = parse_qs(urlparse(self.path).query)
+                self.send_json(200, paged_library(query.get("cursor", [None])[0], query.get("limit", [None])[0]))
+            elif path == "/api/performance":
+                require_auth(self)
+                self.send_json(200, public_performance_state())
+            elif path == "/api/profile":
+                require_auth(self)
+                self.send_json(200, {"profile": get_profile(), "competitions": list_competitions(limit=100)})
+            elif path == "/api/feedback":
+                require_auth(self)
+                self.send_json(200, public_feedback_state())
             elif path == "/api/context-preview":
                 require_auth(self)
                 self.send_json(200, context_preview())
@@ -9733,9 +9993,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/privacy/backup":
                 require_auth(self)
                 self.send_bytes(200, database_backup_bytes(), "application/octet-stream", {"Content-Disposition": "attachment; filename=intervals-coach-database.backup"})
-            elif path == "/api/library":
-                require_auth(self)
-                self.send_json(200, {"workouts": get_workout_library()})
             elif path.startswith("/api/"):
                 raise AppError(404, "Nicht gefunden.")
             else:

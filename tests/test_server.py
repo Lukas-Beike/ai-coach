@@ -449,6 +449,70 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["daily_planning_context"][0]["date"], today)
         self.assertEqual(state["daily_planning_context"][0]["checkin"]["motivation"], 8)
 
+    def test_activity_pagination_has_stable_cursor_without_duplicates(self):
+        today = server.local_now().date()
+        server.save_snapshot({
+            "synced_at": "now", "athlete": {}, "recent_wellness": [], "upcoming_calendar": [],
+            "recent_activities": [
+                {"id": f"activity-{index}", "name": f"Activity {index}", "type": "Ride", "start_date_local": today.isoformat()}
+                for index in range(5)
+            ],
+        })
+        first = server.paged_activities(limit=2)
+        second = server.paged_activities(cursor=first["next_cursor"], limit=2)
+        third = server.paged_activities(cursor=second["next_cursor"], limit=2)
+        ids = [item["id"] for page in (first, second, third) for item in page["activities"]]
+        self.assertEqual(ids, ["activity-4", "activity-3", "activity-2", "activity-1", "activity-0"])
+        self.assertIsNone(third["next_cursor"])
+
+    def test_chat_history_pagination_and_bounded_search_use_message_id_cursor(self):
+        for index in range(5):
+            server.add_message("user", f"searchable {index}")
+        first = server.paged_chat_history(limit=2)
+        second = server.paged_chat_history(cursor=first["next_cursor"], limit=2)
+        page_ids = [item["id"] for item in first["messages"] + second["messages"]]
+        self.assertEqual(set(page_ids), {2, 3, 4, 5})
+        self.assertEqual(len(page_ids), len(set(page_ids)))
+        search = server.paged_chat_history(limit=10, search="searchable 3")
+        self.assertEqual([item["content"] for item in search["messages"]], ["searchable 3"])
+
+    def test_library_pagination_has_stable_type_name_id_cursor(self):
+        server.upsert_workout_library([
+            {"id": f"template-{index}", "name": f"Template {index}", "type": "Ride", "description": "- 30m Z2"}
+            for index in range(3)
+        ])
+        first = server.paged_library(limit=2)
+        second = server.paged_library(cursor=first["next_cursor"], limit=2)
+        names = [item["name"] for page in (first, second) for item in page["workouts"]]
+        self.assertEqual(names, ["Template 0", "Template 1", "Template 2"])
+        self.assertIsNone(second["next_cursor"])
+
+    def test_bootstrap_is_bounded_and_excludes_history_collections(self):
+        today = server.local_now().date()
+        server.save_snapshot({
+            "synced_at": "now", "athlete": {}, "recent_wellness": [], "upcoming_calendar": [],
+            "recent_activities": [
+                {"id": f"activity-{index}", "type": "Ride", "start_date_local": today.isoformat()}
+                for index in range(500)
+            ],
+        })
+        for index in range(500):
+            server.add_message("user", f"message {index}")
+        bootstrap = server.public_bootstrap(local_only=True)
+        self.assertEqual(bootstrap["schema_version"], 2)
+        self.assertEqual(bootstrap["messages"], [])
+        self.assertEqual(bootstrap["activities"], [])
+        self.assertIn("activities", bootstrap["state_versions"])
+        self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 20_000)
+
+    def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('async function load(path = "/api/bootstrap")', app)
+        self.assertIn('api("/api/chat/history?limit=100")', app)
+        self.assertIn('api("/api/activities?limit=250")', app)
+        self.assertIn('api(`/api/plan${query}`)', app)
+        self.assertNotIn('async function load(path = "/api/state")', app)
+
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
