@@ -557,6 +557,13 @@ on a trusted LAN or behind a private VPN. Review local library entries before
 synchronizing them to Intervals.icu, and seek professional advice for injuries,
 illness, or warning symptoms.
 
+Before deleting local data, the Privacy section shows the complete local data
+scope and record counts. The action requires entering `LOKALE DATEN LÖSCHEN`.
+It deletes only local application data; Intervals.icu, Garmin, and external
+calendar data remain unchanged. A best-effort OpenAI conversation deletion is
+reported separately when a conversation exists. Create an encrypted backup or
+privacy export first if the data may be needed later.
+
 ## License
 
 Intervals Coach is licensed under the GNU Affero General Public License v3.0.

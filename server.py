@@ -9194,6 +9194,48 @@ def delete_remote_conversation(conversation_id: str) -> bool:
     return True
 
 
+PRIVACY_DELETE_SCOPE = (
+    ("chats", "Chats, Coach-Werkzeug- und Aktionsprotokolle", ("messages", "chat_tool_calls", "coach_action_proposals")),
+    ("snapshots", "Trainings-Snapshots", ("snapshots",)),
+    ("library", "Workout-Bibliothek und Entwürfe", ("workout_drafts", "workout_library")),
+    ("competitions", "Wettkämpfe und Sync-Vormerkungen", ("competitions", "competition_sync_tombstones")),
+    ("plans", "Trainingspläne", ("training_plans",)),
+    ("checkins", "Tages-Check-ins", ("athlete_checkins",)),
+    ("feedback", "Aktivitätsfeedback", ("activity_feedback",)),
+    ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),
+    ("calendars", "Kalenderquellen, Kandidaten und lokale Kalenderereignisse", ("public_event_sources", "public_event_candidates", "external_calendar_events")),
+    ("sessions", "Anmeldesitzungen", ("sessions",)),
+    ("settings", "Profil, Einstellungen, Syncstatus und lokale Caches", ("kv",)),
+)
+PRIVACY_REMOTE_SCOPE = (
+    "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
+    "Garmin-Konto und Garmin-Daten bleiben unverändert.",
+    "Externe Kalenderquelle und deren Anbieter bleiben unverändert.",
+)
+
+
+def _privacy_delete_counts(db: Any) -> dict[str, int]:
+    counts = {}
+    for category, _label, tables in PRIVACY_DELETE_SCOPE:
+        counts[category] = sum(int(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"]) for table in tables)
+    return counts
+
+
+def privacy_delete_preview() -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        counts = _privacy_delete_counts(db)
+    return {
+        "status": "preview",
+        "confirmation_text": "LOKALE DATEN LÖSCHEN",
+        "categories": [
+            {"id": category, "label": label, "records": counts[category]}
+            for category, label, _tables in PRIVACY_DELETE_SCOPE
+        ],
+        "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
+        "openai_conversation": "Eine vorhandene OpenAI-Konversation wird vor dem Löschen zum Löschen angefragt; ein Fehlschlag wird separat ausgewiesen.",
+    }
+
+
 def delete_local_data() -> dict[str, Any]:
     conversation_id = get_kv("openai_conversation_id") or ""
     remote_delete_attempted = bool(conversation_id)
@@ -9204,18 +9246,19 @@ def delete_local_data() -> dict[str, Any]:
         except Exception:
             LOGGER.warning("Remote OpenAI conversation could not be deleted", extra={"event": "privacy_remote_delete_failed"}, exc_info=True)
     with DB_LOCK, database() as db:
-        for table in (
-            "messages", "chat_tool_calls", "snapshots", "workout_drafts", "workout_library", "competitions", "training_plans",
-            "athlete_checkins", "activity_feedback", "plan_adjustments", "coach_action_proposals", "public_event_candidates", "public_event_sources", "external_calendar_events", "sessions",
-        ):
+        deleted_counts = _privacy_delete_counts(db)
+        deleted_tables = {table for _category, _label, tables in PRIVACY_DELETE_SCOPE for table in tables}
+        for table in deleted_tables:
             db.execute(f"DELETE FROM {table}")
         db.execute("DELETE FROM kv")
         set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
     return {
         "status": "ok",
         "local_data_deleted": True,
+        "deleted_categories": deleted_counts,
         "remote_delete_attempted": remote_delete_attempted,
         "remote_conversation_deleted": remote_deleted,
+        "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
     }
 
 
@@ -9403,6 +9446,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/privacy/export":
                 require_auth(self)
                 self.send_json(200, privacy_export(), {"Content-Disposition": "attachment; filename=intervals-coach-export.json"})
+            elif path == "/api/privacy/delete/preview":
+                require_auth(self)
+                self.send_json(200, privacy_delete_preview())
             elif path == "/api/privacy/backup":
                 require_auth(self)
                 self.send_bytes(200, database_backup_bytes(), "application/octet-stream", {"Content-Disposition": "attachment; filename=intervals-coach-database.backup"})
@@ -9526,8 +9572,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, reset_coach_chat())
             elif path == "/api/privacy/delete":
                 payload = self.read_json()
-                if payload.get("confirm") != "DELETE":
-                    raise AppError(400, "Zum Löschen muss DELETE bestätigt werden.")
+                if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
+                    raise AppError(400, "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.")
                 self.send_json(200, delete_local_data())
             elif path == "/api/feedback":
                 self.send_json(200, save_checkin(self.read_json()))

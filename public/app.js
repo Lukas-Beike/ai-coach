@@ -3497,15 +3497,32 @@ async function downloadPrivacyExport() {
 }
 
 async function deletePrivacyData() {
-  if (!window.confirm("Alle lokalen Chats, Snapshots, Entwürfe und Profile löschen? Dieser Schritt kann nicht rückgängig gemacht werden.")) return;
   try {
-    const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: "DELETE" }) });
+    const preview = await api("/api/privacy/delete/preview");
+    const categories = (preview.categories || []).map((category) => `${category.label}: ${category.records || 0}`).join("\n");
+    const scope = `Unwiderruflich lokal gelöscht werden:\n${categories}\n\n` +
+      `${(preview.remote_untouched || []).join("\n")}\n\n` +
+      `${preview.openai_conversation || "Eine vorhandene OpenAI-Konversation wird separat behandelt."}\n\n` +
+      "Erstelle bei Bedarf vorher ein verschlüsseltes Backup oder einen Export. Dieser Schritt kann nicht rückgängig gemacht werden.";
+    if (!window.confirm(scope)) return;
+    const confirmation = window.prompt(`Zur Bestätigung exakt eingeben: ${preview.confirmation_text}`, "");
+    if (confirmation !== preview.confirmation_text) {
+      toast("Löschen abgebrochen: Bestätigungstext stimmt nicht überein.", true);
+      return;
+    }
+    const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: confirmation }) });
     const notice = $("#privacyDeleteNotice");
     if (notice) {
       notice.hidden = !(result.remote_delete_attempted && !result.remote_conversation_deleted);
       notice.textContent = notice.hidden
         ? ""
         : "Lokale Daten wurden gelöscht, aber die OpenAI-Konversation konnte remote nicht bestätigt gelöscht werden. Prüfe den Anbieterstatus separat.";
+    }
+    const resultNotice = $("#privacyDeleteResult");
+    if (resultNotice) {
+      const deleted = Object.entries(result.deleted_categories || {}).map(([category, count]) => `${category}: ${count}`).join(" · ");
+      resultNotice.hidden = false;
+      resultNotice.textContent = `Lokale Datenklassen gelöscht: ${deleted || "keine"}. Remote-Providerdaten bleiben unverändert.`;
     }
     toast("Lokale Daten gelöscht");
     await load();
