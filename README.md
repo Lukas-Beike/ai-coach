@@ -166,6 +166,11 @@ directions with Intervals.icu. Local changes are exported as `RACE_A`,
 `RACE_B`, or `RACE_C` events with a stable `external_id`; matching race events
 from Intervals.icu are imported into the local database.
 
+Startup, daily, and ordinary pull synchronization only reads competition events
+and never exports local changes or deletion tombstones. The dedicated competition
+sync first shows a create/change/delete diff and requires immediate confirmation;
+its ten-minute fingerprint prevents a stale preview from writing.
+
 Competition synchronization accepts strength training, running, outdoor
 cycling (`Ride`), and indoor/virtual cycling (`VirtualRide`). Other sports are
 skipped. Remote events that were previously linked but no longer exist are

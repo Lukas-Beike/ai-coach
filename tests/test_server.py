@@ -2223,7 +2223,6 @@ class CoachTests(unittest.TestCase):
         }])
         return recorder, client
 
-    @unittest.expectedFailure
     def test_startup_sync_competition_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_competition_contract_fixture()
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
@@ -2232,7 +2231,6 @@ class CoachTests(unittest.TestCase):
             server.safe_sync("startup")
         self.assertEqual(recorder.mutations, [])
 
-    @unittest.expectedFailure
     def test_daily_sync_competition_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_competition_contract_fixture()
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
@@ -2302,7 +2300,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server, "IntervalsClient", return_value=client
         ):
-            created = server.sync_competitions("explicit approval")
+            created = server.sync_competitions("explicit approval", push_local=True)
             server.save_coach_competition({
                 "competition_id": competition_id,
                 "name": "Explicit race changed",
@@ -2310,10 +2308,92 @@ class CoachTests(unittest.TestCase):
                 "sport": "Cycling",
             })
             server.save_athlete_context({}, [])
-            deleted = server.sync_competitions("explicit approval")
+            deleted = server.sync_competitions("explicit approval", push_local=True)
         self.assertEqual(created["pushed"], 1)
         self.assertEqual(deleted["deleted_remote"], 1)
         self.assertEqual([call["method"] for call in recorder.mutations], ["POST", "DELETE"])
+
+    def test_competition_sync_preview_requires_current_fingerprint_before_push(self):
+        event_date = (date.today() + timedelta(days=31)).isoformat()
+        saved = server.save_athlete_context({}, [{
+            "name": "Preview race",
+            "event_date": event_date,
+            "sport": "Cycling",
+        }])
+        competition_id = saved["competitions"][0]["id"]
+        recorder = IntervalsRequestRecorder()
+        client = RecordedIntervalsClient(recorder)
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
+            server, "IntervalsClient", return_value=client
+        ):
+            preview = server.competition_sync_preview()
+            self.assertEqual(preview["summary"]["create"], 1)
+            self.assertEqual(recorder.mutations, [])
+            server.save_coach_competition({
+                "competition_id": competition_id,
+                "name": "Preview race changed",
+                "event_date": event_date,
+                "sport": "Cycling",
+            })
+            with self.assertRaises(server.AppError) as error:
+                server.sync_competitions("explicit approval", push_local=True, expected_fingerprint=preview["fingerprint"])
+        self.assertEqual(error.exception.status, 409)
+        self.assertEqual(recorder.mutations, [])
+
+    def test_competition_sync_preview_fingerprint_allows_immediate_confirmed_push(self):
+        event_date = (date.today() + timedelta(days=32)).isoformat()
+        server.save_athlete_context({}, [{
+            "name": "Confirmed race",
+            "event_date": event_date,
+            "sport": "Cycling",
+        }])
+        recorder = IntervalsRequestRecorder()
+        client = RecordedIntervalsClient(recorder)
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
+            server, "IntervalsClient", return_value=client
+        ):
+            preview = server.competition_sync_preview()
+            result = server.sync_competitions("explicit approval", push_local=True, expected_fingerprint=preview["fingerprint"])
+        self.assertEqual(result["pushed"], 1)
+        self.assertEqual([call["method"] for call in recorder.mutations], ["POST"])
+
+    def test_read_competition_pull_keeps_dirty_local_changes_as_conflict(self):
+        event_date = (date.today() + timedelta(days=33)).isoformat()
+        saved = server.save_athlete_context({}, [{
+            "name": "Remote original",
+            "event_date": event_date,
+            "sport": "Cycling",
+        }])
+        competition_id = saved["competitions"][0]["id"]
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced' WHERE id=?",
+                ("123", server.competition_external_id(competition_id), competition_id),
+            )
+        server.save_coach_competition({
+            "competition_id": competition_id,
+            "name": "Local pending change",
+            "event_date": event_date,
+            "sport": "Cycling",
+        })
+        recorder = IntervalsRequestRecorder()
+        client = RecordedIntervalsClient(recorder, competitions=[{
+            "id": 123,
+            "category": "RACE_B",
+            "start_date_local": event_date + "T08:00:00",
+            "type": "Ride",
+            "name": "Remote original",
+        }])
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
+            server, "IntervalsClient", return_value=client
+        ):
+            result = server.sync_competitions("read-only")
+        competition = server.list_competitions(include_sync=True)[0]
+        self.assertEqual(result["pushed"], 0)
+        self.assertEqual(competition["name"], "Local pending change")
+        self.assertEqual(competition["sync_dirty"], 1)
+        self.assertEqual(competition["sync_state"], "conflict")
+        self.assertEqual(recorder.mutations, [])
 
     def test_explicit_plan_push_records_a_remote_calendar_write(self):
         recorder = IntervalsRequestRecorder()
@@ -2748,7 +2828,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.sync_competitions("test")
+            result = server.sync_competitions("test", push_local=True)
 
         self.assertEqual(result["pushed"], 1)
         self.assertEqual(pushed[0]["id"], 123)
@@ -2780,8 +2860,8 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.sync_competitions("test")
-            second = server.sync_competitions("test")
+            result = server.sync_competitions("test", push_local=True)
+            second = server.sync_competitions("test", push_local=True)
 
         self.assertEqual(result["pushed"], 1)
         self.assertEqual(second["pushed"], 0)
@@ -2818,7 +2898,7 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            result = server.sync_competitions("test")
+            result = server.sync_competitions("test", push_local=True)
 
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(result["conflicts"], 1)
@@ -2869,7 +2949,7 @@ class CoachTests(unittest.TestCase):
             server.sync_competitions("test")
             # Explicitly choosing the local version enables a provider update.
             server.resolve_competition_conflict(competition_id, "keep_local")
-            result = server.sync_competitions("test")
+            result = server.sync_competitions("test", push_local=True)
         self.assertEqual(result["pushed"], 1)
         self.assertEqual(server.list_competitions(include_sync=True)[0]["sync_state"], "synced")
 
@@ -2965,9 +3045,9 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(
             server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
         ):
-            server.sync_competitions("test")
+            server.sync_competitions("test", push_local=True)
             server.save_athlete_context({}, [])
-            result = server.sync_competitions("test")
+            result = server.sync_competitions("test", push_local=True)
 
         self.assertEqual(result["deleted_remote"], 1)
         self.assertEqual(deleted, [{"id": "888"}])

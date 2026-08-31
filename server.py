@@ -79,6 +79,7 @@ DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
 WORKOUT_LIBRARY_SYNC_LOCK = threading.Lock()
 COMPETITION_SYNC_LOCK = threading.Lock()
+COMPETITION_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
 PERFORMANCE_LOCK = threading.Lock()
 OPENAI_CONVERSATION_LOCK = threading.Lock()
 CHAT_QUEUE_LIMIT = 3
@@ -3429,8 +3430,136 @@ def resolve_competition_conflict(competition_id: Any, strategy: Any) -> dict[str
     return {"status": "resolved", "strategy": selected, "competition": saved, "competitions": list_competitions(include_sync=True)}
 
 
+def _competition_sync_plan(
+    local_rows: list[dict[str, Any]],
+    tombstones: list[dict[str, Any]],
+    remote_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a remote mutation plan without changing local or provider state."""
+    remote_by_external = {str(event.get("external_id")): event for event in remote_events if event.get("external_id")}
+    remote_by_id = {str(event.get("id")): event for event in remote_events if event.get("id")}
+    remote_by_identity = {
+        key: event
+        for event in remote_events
+        if (key := competition_sync_key(event)) is not None
+    }
+    actions: list[dict[str, Any]] = []
+    outbound: list[dict[str, Any]] = []
+    dirty_rows = [row for row in local_rows if row.get("sync_dirty")]
+    for row in dirty_rows:
+        if not supported_competition_sport(row.get("sport")):
+            continue
+        remote = None
+        if row.get("intervals_event_id"):
+            remote = remote_by_id.get(str(row["intervals_event_id"]))
+        if remote is None and row.get("external_id"):
+            remote = remote_by_external.get(str(row["external_id"]))
+        identity_remote = remote_by_identity.get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
+        if remote is None:
+            remote = identity_remote
+        if identity_remote and row.get("sync_state") != "local_override":
+            actions.append({
+                "type": "conflict",
+                "local_id": str(row["id"]),
+                "remote_id": str(identity_remote.get("id") or ""),
+                "name": str(row.get("name") or ""),
+                "event_date": str(row.get("event_date") or ""),
+                "sport": str(row.get("sport") or ""),
+                "reason": "remote_identity_changed",
+            })
+            continue
+        if row.get("intervals_event_id") and remote is None:
+            actions.append({
+                "type": "conflict",
+                "local_id": str(row["id"]),
+                "remote_id": str(row.get("intervals_event_id") or ""),
+                "name": str(row.get("name") or ""),
+                "event_date": str(row.get("event_date") or ""),
+                "sport": str(row.get("sport") or ""),
+                "reason": "remote_missing",
+            })
+            continue
+        payload = competition_event_payload(row)
+        outbound.append(payload)
+        actions.append({
+            "type": "change" if remote is not None else "create",
+            "local_id": str(row["id"]),
+            "remote_id": str((remote or {}).get("id") or row.get("intervals_event_id") or ""),
+            "name": str(row.get("name") or ""),
+            "event_date": str(row.get("event_date") or ""),
+            "sport": str(row.get("sport") or ""),
+            "payload_hash": hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest(),
+        })
+    delete_identifiers = [
+        {"id": row["intervals_event_id"]} if row.get("intervals_event_id") else {"external_id": row["external_id"]}
+        for row in tombstones if row.get("intervals_event_id") or row.get("external_id")
+    ]
+    for identifier in delete_identifiers:
+        actions.append({"type": "delete", **{key: str(value) for key, value in identifier.items()}})
+    remote_signature = [
+        {
+            key: event.get(key)
+            for key in ("id", "external_id", "name", "start_date_local", "type", "category", "distance", "moving_time", "target", "description")
+        }
+        for event in sorted(remote_events, key=lambda item: (str(item.get("id") or ""), str(item.get("external_id") or "")))
+    ]
+    basis = {"actions": actions, "remote": remote_signature}
+    fingerprint = hashlib.sha256(json.dumps(basis, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
+    summary = {kind: sum(1 for action in actions if action["type"] == kind) for kind in ("create", "change", "delete", "conflict")}
+    return {
+        "actions": actions,
+        "outbound": outbound,
+        "delete_identifiers": delete_identifiers,
+        "dirty_count": len(dirty_rows),
+        "skipped": len(dirty_rows) - len(outbound) - summary["conflict"],
+        "summary": summary,
+        "fingerprint": fingerprint,
+        "remote_events": remote_events,
+        "remote_by_external": remote_by_external,
+        "remote_by_id": remote_by_id,
+        "remote_by_identity": remote_by_identity,
+    }
+
+
+def _competition_remote_events(client: Any, local_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    linked_ids = {str(row["intervals_event_id"]) for row in local_rows if row.get("intervals_event_id")}
+    return [
+        event for event in client.fetch_competition_events()
+        if is_remote_competition_event(event, linked_ids)
+    ]
+
+
 @intervals_operation
-def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[str, Any]:
+def competition_sync_preview() -> dict[str, Any]:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    if not COMPETITION_SYNC_LOCK.acquire(blocking=False):
+        return {"status": "already_running"}
+    try:
+        client = IntervalsClient()
+        with DB_LOCK, database() as db:
+            tombstones = [dict(row) for row in db.execute("SELECT * FROM competition_sync_tombstones ORDER BY created_at").fetchall()]
+            local_rows = [dict(row) for row in db.execute("SELECT * FROM competitions ORDER BY event_date, priority, name").fetchall()]
+        plan = _competition_sync_plan(local_rows, tombstones, _competition_remote_events(client, local_rows))
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=COMPETITION_SYNC_PREVIEW_TTL_SECONDS)).isoformat()
+        set_kv("competition_sync_preview", json.dumps({"fingerprint": plan["fingerprint"], "expires_at": expires_at}, ensure_ascii=False))
+        return {
+            "status": "preview",
+            "fingerprint": plan["fingerprint"],
+            "expires_at": expires_at,
+            "actions": plan["actions"],
+            "summary": plan["summary"],
+        }
+    finally:
+        COMPETITION_SYNC_LOCK.release()
+
+
+@intervals_operation
+def sync_competitions(
+    reason: str = "manual",
+    push_local: bool = False,
+    expected_fingerprint: str | None = None,
+) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
     if not COMPETITION_SYNC_LOCK.acquire(blocking=False):
@@ -3443,54 +3572,32 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
             tombstones = [dict(row) for row in db.execute("SELECT * FROM competition_sync_tombstones ORDER BY created_at").fetchall()]
             local_rows = [dict(row) for row in db.execute("SELECT * FROM competitions ORDER BY event_date, priority, name").fetchall()]
         deleted_remote = 0
-        if tombstones and push_local:
-            identifiers = [
-                {"id": row["intervals_event_id"]} if row.get("intervals_event_id") else {"external_id": row["external_id"]}
-                for row in tombstones if row.get("intervals_event_id") or row.get("external_id")
-            ]
-            if identifiers:
-                client.bulk_delete_events(identifiers)
-                deleted_remote = len(identifiers)
-            with DB_LOCK, database() as db:
-                db.execute("DELETE FROM competition_sync_tombstones")
-
-        linked_ids = {str(row["intervals_event_id"]) for row in local_rows if row.get("intervals_event_id")}
-        remote_events = [
-            event for event in client.fetch_competition_events()
-            if is_remote_competition_event(event, linked_ids)
-        ]
+        remote_events = _competition_remote_events(client, local_rows)
         # A full local reset must import the cloud state without exporting
         # anything that may have been entered locally while the import runs.
-        remote_by_external = {str(event.get("external_id")): event for event in remote_events if event.get("external_id")}
-        remote_by_id = {str(event.get("id")): event for event in remote_events if event.get("id")}
-        remote_by_identity = {
-            key: event
-            for event in remote_events
-            if (key := competition_sync_key(event)) is not None
-        }
-        dirty_rows = [row for row in local_rows if row.get("sync_dirty")] if push_local else []
-        outbound = []
-        for row in dirty_rows:
-            if not supported_competition_sport(row.get("sport")):
-                continue
-            # A local event without a known provider ID may be the same event
-            # that was entered in Intervals.icu first. Adopt it before sending
-            # anything so an ordinary save cannot create a duplicate.
-            remote = None
-            if row.get("intervals_event_id"):
-                remote = remote_by_id.get(str(row["intervals_event_id"]))
-            if remote is None and row.get("external_id"):
-                remote = remote_by_external.get(str(row["external_id"]))
-            identity_remote = remote_by_identity.get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
-            if remote is None:
-                remote = identity_remote
-            if remote is not None and remote.get("id") is not None and not row.get("intervals_event_id") and row.get("sync_state") != "local_override":
-                # An identity-only match is ambiguous when the local row is
-                # dirty. Keep both versions and require an explicit choice.
-                continue
-            outbound.append(competition_event_payload(row))
-        skipped = len(dirty_rows) - len(outbound)
-        pushed = client.upsert_competition_events(outbound)
+        plan = _competition_sync_plan(local_rows, tombstones, remote_events)
+        remote_by_external = plan["remote_by_external"]
+        remote_by_id = plan["remote_by_id"]
+        remote_by_identity = plan["remote_by_identity"]
+        outbound = plan["outbound"] if push_local else []
+        skipped = plan["skipped"]
+        if push_local and expected_fingerprint:
+            stored = get_kv("competition_sync_preview") or ""
+            try:
+                preview = json.loads(stored)
+                expires_at = datetime.fromisoformat(str(preview.get("expires_at")))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raise AppError(409, "Die Wettkampf-Vorschau ist nicht mehr gültig.")
+            if expires_at <= datetime.now(timezone.utc) or preview.get("fingerprint") != expected_fingerprint:
+                raise AppError(409, "Die Wettkampf-Vorschau ist abgelaufen oder wurde verändert.")
+            if plan["fingerprint"] != expected_fingerprint:
+                raise AppError(409, "Lokale oder Remote-Wettkampfdaten haben sich seit der Vorschau verändert.")
+        if push_local and plan["delete_identifiers"]:
+            client.bulk_delete_events(plan["delete_identifiers"])
+            deleted_remote = len(plan["delete_identifiers"])
+            with DB_LOCK, database() as db:
+                db.execute("DELETE FROM competition_sync_tombstones")
+        pushed = client.upsert_competition_events(outbound) if push_local and outbound else []
         pushed_by_external = {str(event.get("external_id")): event for event in pushed if event.get("external_id")}
         pushed_by_id = {str(event.get("id")): event for event in pushed if event.get("id")}
         remote_events.extend(pushed)
@@ -3518,6 +3625,20 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
                 if not remote:
                     remote = identity_remote
                 if row.get("sync_dirty"):
+                    if not push_local:
+                        if remote:
+                            db.execute(
+                                "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                                (competition_conflict_payload(row, remote, "remote_changed"), now, row["id"]),
+                            )
+                            conflicts += 1
+                        elif row.get("intervals_event_id"):
+                            db.execute(
+                                "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                                (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
+                            )
+                            conflicts += 1
+                        continue
                     if remote:
                         db.execute(
                             "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
@@ -9011,7 +9132,16 @@ class RequestHandler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 self.send_json(200, resolve_competition_conflict(unquote(match.group(1)), payload.get("strategy")))
             elif path == "/api/competitions/sync":
-                self.send_json(200, sync_competitions("manuell"))
+                payload = self.read_json()
+                if payload.get("confirm") != "COMPETITION_SYNC":
+                    raise AppError(400, "Zum Wettkampf-Sync muss COMPETITION_SYNC bestätigt werden.")
+                fingerprint = str(payload.get("fingerprint") or "")
+                if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+                    raise AppError(400, "Für den Wettkampf-Sync ist ein gültiger Vorschau-Fingerprint erforderlich.")
+                self.send_json(200, sync_competitions("manuell", push_local=True, expected_fingerprint=fingerprint))
+            elif path == "/api/competitions/sync/preview":
+                self.read_json()
+                self.send_json(200, competition_sync_preview())
             elif path == "/api/performance/refresh":
                 self.send_json(200, refresh_current_performance())
             elif path == "/api/garmin/sync":
@@ -9250,7 +9380,7 @@ def safe_sync(reason: str, activity_days: int | None = None) -> None:
             exc_info=True,
         )
     try:
-        sync_competitions(reason)
+        sync_competitions(reason, push_local=False)
     except Exception:
         LOGGER.error(
             "Background competition synchronization failed",
