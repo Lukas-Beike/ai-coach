@@ -80,7 +80,10 @@ function showLogin() {
 function showAppShellLoading() {
   const shell = $("#appShell");
   const statusCard = $("#statusCard");
-  shell.hidden = false;
+  const loader = $("#authLoading");
+  loader.hidden = false;
+  loader.textContent = "Trainingsbereich wird geladen…";
+  shell.hidden = true;
   shell.classList.add("is-loading");
   shell.setAttribute("aria-busy", "true");
   statusCard.hidden = false;
@@ -92,6 +95,8 @@ function showAppShellLoading() {
 
 function finishAppShellLoading() {
   const shell = $("#appShell");
+  $("#authLoading").hidden = true;
+  if (!$("#loginDialog")?.open) shell.hidden = false;
   shell.classList.remove("is-loading");
   shell.removeAttribute("aria-busy");
 }
@@ -128,8 +133,10 @@ async function apiAudio(path, blob) {
 }
 
 async function bootstrapAuth() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" });
+    const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store", signal: controller.signal });
     const status = await response.json();
     if (status.authenticated) {
       $("#authLoading").hidden = true;
@@ -141,7 +148,7 @@ async function bootstrapAuth() {
   } catch (_) {
     $("#loginError").textContent = "Server nicht erreichbar.";
     showLogin();
-  }
+  } finally { clearTimeout(timeout); }
 }
 
 async function login(event) {
@@ -1305,9 +1312,13 @@ function scrollChatToLatest() {
     const target = root.lastElementChild;
     if (!target) return;
     const composer = $("#chatForm");
-    const bottomOffset = (composer?.offsetHeight || 70) + 94 + (window.visualViewport?.offsetTop || 0);
-    const targetBottom = target.getBoundingClientRect().bottom + window.scrollY;
-    window.scrollTo({ top: Math.max(0, targetBottom - window.innerHeight + bottomOffset), behavior: "auto" });
+    const targetBottom = target.getBoundingClientRect().bottom;
+    const composerTop = composer?.getBoundingClientRect().top;
+    const targetGap = 12;
+    const desiredBottom = Number.isFinite(composerTop)
+      ? composerTop - targetGap
+      : window.innerHeight - targetGap;
+    window.scrollTo({ top: Math.max(0, window.scrollY + targetBottom - desiredBottom), behavior: "auto" });
   });
 }
 
@@ -2186,7 +2197,7 @@ async function load(path = "/api/state") {
     $("#statusDetail").textContent = error.message;
     toast(error.message, true);
   } finally {
-    if (!$("#appShell").hidden) finishAppShellLoading();
+    if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
   }
 }
 
