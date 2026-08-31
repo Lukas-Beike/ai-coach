@@ -82,7 +82,7 @@ test.describe("critical browser states", () => {
     await expect(page).toHaveURL(/#coach$/);
 
     await page.getByRole("link", { name: "Heute", exact: true }).click();
-    const checkinButton = page.getByRole("button", { name: /Tages-Check-in/ }).first();
+    const checkinButton = page.getByRole("button", { name: /Check-in (ausfüllen|bearbeiten)/ }).first();
     await expect(checkinButton).toBeVisible();
     await checkinButton.click();
     const checkinDialog = page.locator("#checkinDialog");

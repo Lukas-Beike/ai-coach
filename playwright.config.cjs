@@ -5,6 +5,9 @@ module.exports = defineConfig({
   timeout: 60_000,
   expect: { timeout: 30_000 },
   fullyParallel: true,
+  // The fixture server intentionally rate-limits login attempts by client IP.
+  // Run the shared-fixture browser scenarios serially to avoid cross-test auth state.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI
