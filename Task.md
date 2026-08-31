@@ -21,18 +21,18 @@ Basis: `develop` / `45b5ca3`
 
 ### W1 – Sichere Provider-Resyncs
 
-- [ ] Voll-Resync lädt und validiert neue Daten vor dem Ersetzen.
-- [ ] Letzte gute Snapshots bleiben bei Fehlern erhalten.
-- [ ] Lokale Wettbewerbe und Sync-Tombstones bleiben autoritativ erhalten.
-- [ ] Garmin-Snapshot bleibt bei fehlgeschlagenem Voll-Resync erhalten.
-- [ ] Regressionstests für Erfolg, Fehler und lokale Datensätze ergänzen.
+- [x] Voll-Resync lädt und validiert neue Daten vor dem Ersetzen.
+- [x] Letzte gute Snapshots bleiben bei Fehlern erhalten.
+- [x] Lokale Wettbewerbe und Sync-Tombstones bleiben autoritativ erhalten.
+- [x] Garmin-Snapshot bleibt bei fehlgeschlagenem Voll-Resync erhalten.
+- [x] Regressionstests für Erfolg, Fehler und lokale Datensätze ergänzen.
 
 ### W2 – Transaktionssicheres Backup und Restore
 
-- [ ] Konsistenten Datenbank-Snapshot erstellen.
-- [ ] Restore gegen vollständiges aktuelles Schema, Migrationen und Integrität prüfen.
-- [ ] Restore-Sessions invalidieren und erneute Anmeldung erzwingen.
-- [ ] Regressionstests für unvollständige, beschädigte und gültige Backups ergänzen.
+- [x] Konsistenten Datenbank-Snapshot erstellen.
+- [x] Restore gegen vollständiges aktuelles Schema, Migrationen und Integrität prüfen.
+- [x] Restore-Sessions invalidieren und erneute Anmeldung erzwingen.
+- [x] Regressionstests für unvollständige, beschädigte und gültige Backups ergänzen.
 
 ### W3 – Sichere Remote-Kalenderaktionen
 
