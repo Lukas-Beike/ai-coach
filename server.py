@@ -2078,11 +2078,27 @@ def list_messages(limit: int = 100) -> list[dict[str, Any]]:
     return [dict(row) for row in reversed(rows)]
 
 
-def normalize_profile(value: dict[str, Any]) -> dict[str, str]:
+DEFAULT_TIMEZONE = "Europe/Berlin"
+
+
+def timezone_name(value: Any, *, strict: bool = False) -> str:
+    candidate = str(value or DEFAULT_TIMEZONE).strip()[:120] or DEFAULT_TIMEZONE
+    try:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        ZoneInfo(candidate)
+    except (ZoneInfoNotFoundError, ValueError):
+        if strict:
+            raise AppError(400, "Die Zeitzone muss eine gültige IANA-Zeitzone sein.")
+        return DEFAULT_TIMEZONE
+    return candidate
+
+
+def normalize_profile(value: dict[str, Any], *, validate_timezone: bool = False) -> dict[str, str]:
     result = dict(DEFAULT_PROFILE)
     for key in result:
         if key in value:
             result[key] = str(value[key]).strip()[:4000]
+    result["timezone"] = timezone_name(result.get("timezone"), strict=validate_timezone)
     return result
 
 
@@ -2095,7 +2111,7 @@ def get_profile() -> dict[str, str]:
 
 def save_profile(profile: dict[str, Any]) -> dict[str, str]:
     previous = get_profile()
-    normalized = normalize_profile(profile)
+    normalized = normalize_profile(profile, validate_timezone=True)
     set_kv("profile", json.dumps(normalized, ensure_ascii=False))
     if previous.get("weather_location", "") != normalized.get("weather_location", ""):
         # A changed holiday/training location must never keep showing the
@@ -2140,11 +2156,14 @@ def bounded_minutes(value: Any) -> int | None:
 def normalize_checkin(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise AppError(400, "Das lokale Feedback muss ein Objekt sein.")
-    raw_date = str(value.get("checkin_date") or date.today().isoformat()).strip()
+    today = local_now().date()
+    raw_date = str(value.get("checkin_date") or today.isoformat()).strip()
     try:
         checkin_date = date.fromisoformat(raw_date).isoformat()
     except ValueError as exc:
         raise AppError(400, "Das Datum des lokalen Feedbacks ist ungültig.") from exc
+    if checkin_date > today.isoformat():
+        raise AppError(400, "Ein Tages-Check-in kann nicht in der Zukunft liegen.")
     result: dict[str, Any] = {"checkin_date": checkin_date}
     for field in CHECKIN_SCORE_FIELDS:
         result[field] = bounded_score(value.get(field))
@@ -2189,7 +2208,7 @@ def save_checkin(value: Any) -> dict[str, Any]:
 
 def local_feedback_context() -> dict[str, Any]:
     checkins = list_checkins()
-    today = date.today().isoformat()
+    today = local_now().date().isoformat()
     return {
         "today": next((item for item in checkins if item["checkin_date"] == today), None),
         "recent": checkins[:14],
@@ -2562,7 +2581,7 @@ def _ical_temporal_value(raw: str, parameters: dict[str, str]) -> tuple[datetime
     is_date = parameters.get("VALUE", "").upper() == "DATE" or bool(re.fullmatch(r"\d{8}", value))
     try:
         from zoneinfo import ZoneInfo
-        local_zone = ZoneInfo(get_profile().get("timezone") or "Europe/Berlin")
+        local_zone = ZoneInfo(timezone_name(get_profile().get("timezone")))
     except Exception:
         local_zone = datetime.now().astimezone().tzinfo or timezone.utc
     if is_date:
@@ -2574,10 +2593,10 @@ def _ical_temporal_value(raw: str, parameters: dict[str, str]) -> tuple[datetime
         else:
             format_value = "%Y%m%dT%H%M" if len(value) == 13 else "%Y%m%dT%H%M%S"
             parsed = datetime.strptime(value, format_value)
-            timezone_name = parameters.get("TZID", "").strip('"')
-            if timezone_name:
+            event_timezone_name = parameters.get("TZID", "").strip('"')
+            if event_timezone_name:
                 try:
-                    parsed = parsed.replace(tzinfo=ZoneInfo(timezone_name))
+                    parsed = parsed.replace(tzinfo=ZoneInfo(event_timezone_name))
                 except Exception:
                     parsed = parsed.replace(tzinfo=local_zone)
             else:
@@ -2866,7 +2885,7 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
         raise AppError(400, "Wettkämpfe müssen als Liste übergeben werden.")
     if len(competitions) > 20:
         raise AppError(400, "Es können maximal 20 Wettkämpfe gespeichert werden.")
-    normalized_profile = normalize_profile(profile)
+    normalized_profile = normalize_profile(profile, validate_timezone=True)
     normalized_competitions = [normalize_competition(value) for value in competitions]
     competition_ids = [competition["id"] for competition in normalized_competitions]
     if len(competition_ids) != len(set(competition_ids)):
@@ -4575,7 +4594,7 @@ def workout_event_payload(draft_id: str, workout: dict[str, Any]) -> dict[str, A
         workout_date = date.fromisoformat(str(workout["date"]))
     except (KeyError, TypeError, ValueError) as exc:
         raise AppError(400, "Das Trainingsdatum muss das Format JJJJ-MM-TT haben.") from exc
-    if workout_date < date.today() - timedelta(days=1):
+    if workout_date < local_now().date() - timedelta(days=1):
         raise AppError(400, "Eine Einheit in der Vergangenheit wird nicht übertragen.")
     duration = int(workout.get("duration_minutes", 0))
     if duration < 5 or duration > 600:
@@ -5029,7 +5048,7 @@ def apply_adaptive_replan(adjustment_id: Any) -> dict[str, Any]:
 
 
 def season_plan_summary() -> dict[str, Any]:
-    today = date.today()
+    today = local_now().date()
     events: list[dict[str, Any]] = []
     for competition in list_competitions():
         try:
@@ -6171,7 +6190,7 @@ def refresh_current_performance() -> dict[str, Any]:
 
 
 def activity_rollup(activities: list[Any], days: int, end_date: date | None = None) -> dict[str, Any]:
-    anchor = end_date or date.today()
+    anchor = end_date or local_now().date()
     cutoff = anchor - timedelta(days=days - 1)
     count = 0
     moving_seconds = 0.0
@@ -6203,7 +6222,7 @@ def activity_rollup(activities: list[Any], days: int, end_date: date | None = No
 
 
 def wellness_average(rows: list[dict[str, Any]], keys: tuple[str, ...], days: int, end_date: date | None = None, divisor: float = 1.0) -> float | None:
-    anchor = end_date or date.today()
+    anchor = end_date or local_now().date()
     cutoff = anchor - timedelta(days=days - 1)
     values: list[float] = []
     for row in rows:
@@ -6232,7 +6251,7 @@ def actual_atl_series(wellness_rows: list[dict[str, Any]], activities: list[Any]
     if not dated_wellness:
         return {}
     dated_wellness.sort(key=lambda item: item[0])
-    anchor = end_date or date.today()
+    anchor = end_date or local_now().date()
     load_by_date: dict[date, float] = {}
     for activity in activities:
         if not isinstance(activity, dict):
@@ -6272,7 +6291,7 @@ def actual_atl_series(wellness_rows: list[dict[str, Any]], activities: list[Any]
 
 
 def eftp_30_day_average(wellness_rows: list[dict[str, Any]], activities: list[Any], end_date: date | None = None) -> float | None:
-    anchor = end_date or date.today()
+    anchor = end_date or local_now().date()
     cutoff = anchor - timedelta(days=29)
     values: list[float] = []
     for row in wellness_rows:
@@ -6366,7 +6385,7 @@ def readiness_score_value(value: Any) -> float | int | None:
 
 
 def wellness_form_average(rows: list[dict[str, Any]], days: int, end_date: date | None = None) -> float | None:
-    anchor = end_date or date.today()
+    anchor = end_date or local_now().date()
     cutoff = anchor - timedelta(days=days - 1)
     values: list[float] = []
     for row in rows:
@@ -6548,7 +6567,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         "tsb": wellness_form_value(latest_wellness),
         "rampRate": first_present(latest_wellness, ("rampRate",)),
     }
-    today = date.today()
+    today = local_now().date()
     last_7 = activity_rollup(activities, 7, today)
     previous_7 = activity_rollup(activities, 7, today - timedelta(days=7))
     last_30 = activity_rollup(activities, 30, today)
@@ -6891,7 +6910,7 @@ def performance_trend_average(snapshot: dict[str, Any], metrics: dict[str, dict[
 
 
 def openai_usage_summary() -> dict[str, Any]:
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = local_now().date().isoformat()
     try:
         usage = json.loads(get_kv("openai_usage") or "{}")
     except (TypeError, json.JSONDecodeError):
@@ -7523,10 +7542,10 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True) -> dict[str, 
 
 
 def local_now() -> datetime:
-    timezone_name = get_profile().get("timezone") or "Europe/Berlin"
+    configured_timezone = timezone_name(get_profile().get("timezone"))
     try:
         from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo(timezone_name))
+        return datetime.now(ZoneInfo(configured_timezone))
     except Exception:
         return datetime.now().astimezone()
 
@@ -7660,6 +7679,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "parallel_cycling": parallel_cycling_event_groups(planned),
             "profile": get_profile(),
             "competitions": list_competitions(),
+            "checkins": list_checkins(30),
             "local_feedback": local_feedback_context(),
             "activity_feedback": activity_feedback_context(),
             "planning": planning_state(),

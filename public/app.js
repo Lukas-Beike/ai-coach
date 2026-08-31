@@ -6,6 +6,8 @@ const state = {
   chatQueue: [],
   chatQueueSequence: 0,
   profileDirty: false,
+  checkinDirty: false,
+  checkinSelectedDate: null,
   activityTypes: new Set(),
   plannedWeekOpen: new Map(),
   voiceRecorder: null,
@@ -377,7 +379,7 @@ function notifyState(data) {
   if (error) showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
 }
 
-function todayIso() { return new Date().toISOString().slice(0, 10); }
+function todayIso() { return localDateKey(new Date()); }
 
 function adaptivePreviewMarkup(preview) {
   const signals = preview.signals?.length
@@ -584,14 +586,19 @@ function renderStatus(data) {
     : error ? "Coach benötigt Aufmerksamkeit" : "Coach ist bereit";
   $("#statusDetail").textContent = missing.length
     ? "Ergänze die fehlende Serverkonfiguration"
-    : error || (morning.status === "ready" ? `Morgen-Check-in abgeschlossen: ${formatTime(morning.date)}` : "Bereit für deine nächste Frage");
+    : error || (morning.status === "ready" ? `Morgen-Check-in abgeschlossen: ${dateLabel(morning.date)}` : "Bereit für deine nächste Frage");
   statusCard.classList.remove("working");
 }
 
 function dateLabel(value) {
   if (!value) return "—";
+  const raw = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [year, month, day] = raw.split("-").map(Number);
+    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(year, month - 1, day));
+  }
   const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? String(value).slice(0, 10) : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
+  return Number.isNaN(parsed.valueOf()) ? raw.slice(0, 10) : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
 }
 
 const CALENDAR_DISPLAY_DEFAULTS = { past_weeks: 1, future_weeks: 4 };
@@ -603,8 +610,19 @@ function calendarDisplayValue(value, fallback) {
 }
 
 function localDateKey(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.valueOf())) return "";
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function timezoneDateKey(timeZone) {
+  if (!timeZone) return todayIso();
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  } catch (_) { return todayIso(); }
 }
 
 function plannedEventDate(event) {
@@ -1627,6 +1645,63 @@ function renderProfile(profile) {
   }
 }
 
+function populateCheckin(checkin, timeZone) {
+  const form = $("#checkinForm");
+  if (!form) return;
+  const values = checkin || { checkin_date: timezoneDateKey(timeZone) };
+  for (const field of ["checkin_date", "soreness", "stress", "motivation", "session_rpe", "available_minutes", "illness", "pain", "availability_notes", "notes"]) {
+    if (form.elements[field]) form.elements[field].value = values[field] ?? "";
+  }
+  state.checkinSelectedDate = values.checkin_date || null;
+  state.checkinDirty = false;
+}
+
+function renderCheckins(checkins, timeZone) {
+  const form = $("#checkinForm");
+  const history = $("#checkinHistory");
+  if (!form || !history) return;
+  const rows = Array.isArray(checkins) ? checkins : [];
+  if (!state.checkinDirty) {
+    const selected = rows.find((row) => row.checkin_date === state.checkinSelectedDate)
+      || rows.find((row) => row.checkin_date === timezoneDateKey(timeZone));
+    populateCheckin(selected, timeZone);
+  }
+  history.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "fine-print";
+    empty.textContent = "Noch kein Tages-Check-in gespeichert.";
+    history.append(empty);
+    return;
+  }
+  const heading = document.createElement("strong");
+  heading.textContent = "Gespeicherte Check-ins";
+  history.append(heading);
+  for (const row of rows) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "checkin-history-item";
+    button.classList.toggle("selected", row.checkin_date === state.checkinSelectedDate);
+    const title = document.createElement("strong");
+    title.textContent = dateLabel(row.checkin_date);
+    const values = [
+      row.soreness != null ? `Schmerz/Muskelkater ${row.soreness}/10` : null,
+      row.stress != null ? `Stress ${row.stress}/10` : null,
+      row.motivation != null ? `Motivation ${row.motivation}/10` : null,
+      row.illness ? "Krankheit notiert" : null,
+      row.pain ? "Schmerz notiert" : null,
+    ].filter(Boolean);
+    const summary = document.createElement("span");
+    summary.textContent = values.join(" · ") || "Ohne Bewertungen";
+    button.append(title, summary);
+    button.addEventListener("click", () => {
+      populateCheckin(row, timeZone);
+      renderCheckins(rows, timeZone);
+    });
+    history.append(button);
+  }
+}
+
 function renderGarmin(garmin) {
   const status = $("#garminStatus");
   const detail = $("#garminDetail");
@@ -2321,6 +2396,7 @@ function render(data) {
     librarySyncDetail.classList.toggle("error", Boolean(data.library_sync?.last_error || libraryState.sync_error));
   }
   renderProfile(data.profile);
+  renderCheckins(data.checkins || data.local_feedback?.recent || [], data.profile?.timezone);
   renderGarmin(data.garmin);
   renderCompetitions(data.competitions || []);
   renderAdaptivePlanning(data);
@@ -2598,6 +2674,27 @@ async function saveProfile(event) {
   } catch (error) { toast(error.message, true); }
 }
 
+async function saveCheckin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  for (const field of ["soreness", "stress", "motivation", "session_rpe", "available_minutes"]) {
+    values[field] = values[field] === "" ? null : Number(values[field]);
+  }
+  const button = form.querySelector("button[type=submit]");
+  if (button) { button.disabled = true; button.textContent = "Check-in wird gespeichert…"; }
+  try {
+    const result = await api("/api/feedback", { method: "POST", body: JSON.stringify(values) });
+    state.checkinDirty = false;
+    state.checkinSelectedDate = result.checkin?.checkin_date || values.checkin_date;
+    toast("Tages-Check-in gespeichert");
+    await load();
+  } catch (error) { toast(error.message, true); }
+  finally {
+    if (button) { button.disabled = false; button.textContent = "Tages-Check-in speichern"; }
+  }
+}
+
 async function saveActivityFeedback(event, activity, button) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -2841,11 +2938,13 @@ $("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar)
 $("#weatherSyncButton").addEventListener("click", syncWeather);
 $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
 $("#profileForm").addEventListener("submit", saveProfile);
+$("#checkinForm").addEventListener("submit", saveCheckin);
 $("#adaptivePlanningButton").addEventListener("click", prepareReplan);
 $("#applyAdaptivePlanningButton").addEventListener("click", applyReplan);
 $("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptivePlanningDialog")?.close());
 $("#coachAdaptivePlanningButton").addEventListener("click", () => document.querySelector('.nav-item[data-panel="workoutsPanel"]')?.click());
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; });
+$("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; });
 $("#competitionList").addEventListener("input", () => { state.profileDirty = true; });
 $("#addCompetitionButton").addEventListener("click", addCompetition);
 $("#modelSelect").addEventListener("change", saveModel);

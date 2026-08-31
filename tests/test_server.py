@@ -162,6 +162,36 @@ class CoachTests(unittest.TestCase):
         with self.assertRaises(server.AppError):
             server.save_checkin({"soreness": 11})
 
+    def test_profile_timezone_is_validated_and_local_now_uses_it(self):
+        with self.assertRaises(server.AppError) as raised:
+            server.save_profile({"timezone": "Mars/NotAZone"})
+        self.assertEqual(raised.exception.status, 400)
+        profile = server.save_profile({"timezone": "UTC"})
+        self.assertEqual(profile["timezone"], "UTC")
+        self.assertEqual(getattr(server.local_now().tzinfo, "key", None), "UTC")
+
+    def test_checkin_uses_local_date_and_rejects_future_dates(self):
+        fixed_now = datetime(2026, 8, 31, 23, 30)
+        with patch.object(server, "local_now", return_value=fixed_now):
+            self.assertEqual(server.normalize_checkin({})["checkin_date"], "2026-08-31")
+            with self.assertRaises(server.AppError) as raised:
+                server.save_checkin({"checkin_date": "2026-09-01"})
+        self.assertEqual(raised.exception.status, 400)
+
+    def test_public_state_exposes_checkin_history(self):
+        server.save_checkin({"checkin_date": "2026-08-30", "motivation": 8})
+        state = server.public_state(local_only=True)
+        self.assertEqual(state["checkins"][0]["checkin_date"], "2026-08-30")
+        self.assertEqual(state["checkins"][0]["motivation"], 8)
+
+    def test_frontend_preserves_date_only_values_and_renders_checkins(self):
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('if (typeof value === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return value;', app)
+        self.assertIn('function renderCheckins(checkins, timeZone)', app)
+        self.assertIn('id="checkinForm"', index)
+        self.assertIn('id="checkinHistory"', index)
+
     def test_activity_feedback_is_persisted_and_attached_to_activity(self):
         server.save_snapshot({
             "synced_at": "2026-08-30T08:00:00+00:00",

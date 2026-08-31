@@ -66,11 +66,11 @@ Basis: `develop` / `45b5ca3`
 
 ### W7 – Check-in, Datum und Zeitzonen
 
-- [ ] Vollständige Check-in-PWA-Oberfläche mit Verlauf und Bearbeitung ergänzen.
-- [ ] Serverweite lokale Datumsfunktion anhand der Profil-Zeitzone verwenden.
-- [ ] Frontend behandelt Datum-only-Werte ohne UTC-Verschiebung.
-- [ ] Regeln für heutige, zukünftige und vergangene Trainingsdaten vereinheitlichen.
-- [ ] Zeitzonenvalidierung beim Profil speichern.
+- [x] Vollständige Check-in-PWA-Oberfläche mit Verlauf und Bearbeitung ergänzen.
+- [x] Serverweite lokale Datumsfunktion anhand der Profil-Zeitzone verwenden.
+- [x] Frontend behandelt Datum-only-Werte ohne UTC-Verschiebung.
+- [x] Regeln für heutige, zukünftige und vergangene Trainingsdaten vereinheitlichen.
+- [x] Zeitzonenvalidierung beim Profil speichern.
 
 ### W8 – Provider- und Kalender-Sync-Robustheit
 
