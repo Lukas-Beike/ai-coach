@@ -879,15 +879,16 @@ function renderDailyPlanningContext(date, todayKey) {
   }
   if (checkin) {
     const checkinValues = [
+      checkin.day_form ? `Tagesform: ${checkin.day_form}` : null,
       checkin.soreness != null ? `Muskelkater ${checkin.soreness}/10` : null,
       checkin.stress != null ? `Stress ${checkin.stress}/10` : null,
       checkin.motivation != null ? `Motivation ${checkin.motivation}/10` : null,
       checkin.available_minutes != null ? `${checkin.available_minutes} Min. verfügbar` : null,
-      checkin.illness ? "Krankheit notiert" : null,
       checkin.pain ? "Schmerz notiert" : null,
       checkin.availability_notes || checkin.notes ? "Notizen vorhanden" : null,
     ].filter(Boolean);
     addSignal("Tages-Check-in", checkinValues.join(" · ") || "Gespeichert", "checkin");
+    if (checkin.illness) addSignal("Krankheit (wichtig)", checkin.illness, "illness");
   }
   if (appointments.length) {
     const appointmentValues = appointments.map((event) => {
@@ -2049,7 +2050,7 @@ function populateCheckin(checkin, timeZone) {
   const form = $("#checkinForm");
   if (!form) return;
   const values = checkin || { checkin_date: timezoneDateKey(timeZone) };
-  for (const field of ["checkin_date", "soreness", "stress", "motivation", "session_rpe", "available_minutes", "illness", "pain", "availability_notes", "notes"]) {
+  for (const field of ["checkin_date", "soreness", "stress", "motivation", "session_rpe", "day_form", "available_minutes", "illness", "pain", "availability_notes", "notes"]) {
     if (form.elements[field]) form.elements[field].value = values[field] ?? "";
   }
   state.checkinSelectedDate = values.checkin_date || null;
@@ -2100,10 +2101,11 @@ function renderCheckins(checkins, timeZone) {
     const title = document.createElement("strong");
     title.textContent = dateLabel(row.checkin_date);
     const values = [
+      row.day_form ? `Tagesform: ${row.day_form}` : null,
       row.soreness != null ? `Schmerz/Muskelkater ${row.soreness}/10` : null,
       row.stress != null ? `Stress ${row.stress}/10` : null,
       row.motivation != null ? `Motivation ${row.motivation}/10` : null,
-      row.illness ? "Krankheit notiert" : null,
+      row.illness ? `Krankheit: ${row.illness}` : null,
       row.pain ? "Schmerz notiert" : null,
     ].filter(Boolean);
     const summary = document.createElement("span");

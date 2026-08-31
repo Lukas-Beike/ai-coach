@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=112">
+  <link rel="stylesheet" href="/styles.css?v=113">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -92,7 +92,8 @@
                 <label>Motivation<input name="motivation" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
                 <label>Session-RPE<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
               </div>
-              <label>Krankheit<textarea name="illness" rows="2" placeholder="Zum Beispiel Erkältung, Symptome oder Medikamente"></textarea></label>
+              <label>Tagesform<textarea name="day_form" rows="2" placeholder="Zum Beispiel schwere Beine, Müdigkeit oder ungewöhnlich fit"></textarea></label>
+              <label class="checkin-critical-field">Krankheit (wichtig)<textarea name="illness" rows="2" placeholder="Zum Beispiel Erkältung, Fieber oder andere Symptome"></textarea></label>
               <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
               <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
               <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
@@ -308,6 +309,6 @@
       </div>
     </div>
   </dialog>
-  <script src="/app.js?v=112" defer></script>
+  <script src="/app.js?v=113" defer></script>
 </body>
 </html>

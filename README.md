@@ -83,8 +83,10 @@ It is not intended to be exposed directly to the public internet.
 - The coach can explicitly list, create, update, and locally delete target
   competitions. Linked remote changes remain pending until an explicit
   competition synchronization is requested.
-- Local athlete check-ins for subjective soreness, stress, motivation, session
-  RPE, pain/illness notes, available training time, and day-specific constraints.
+- Local athlete check-ins for day form (such as heavy legs and fatigue),
+  subjective soreness, stress, motivation, session RPE, illness, pain, available
+  training time, and day-specific constraints. Reported illness is a high-priority
+  planning constraint and is shown separately in the dated daily context.
   The Geplant tab combines each dated check-in with recovery signals, weather,
   planned sessions, and read-only calendar appointments; existing entries can
   be selected and edited directly on their day. Check-in dates and daily
