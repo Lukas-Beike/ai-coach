@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=105">
+  <link rel="stylesheet" href="/styles.css?v=106">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -53,7 +53,7 @@
 
       <section id="activitiesPanel" class="panel" aria-label="Aktivitäten">
         <div class="section-heading">
-          <div><span class="eyebrow">TRAININGSVERLAUF</span><h2>Aktivitäten</h2><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
+          <div><span class="eyebrow">TRAININGSVERLAUF</span><h2>Aktivitäten <span id="activityDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
         </div>
         <label class="activity-search" for="activitySearch">Aktivitäten durchsuchen<input id="activitySearch" type="search" placeholder="Name oder Sportart" autocomplete="off"></label>
         <div id="activityStats" class="activity-stats-summary" aria-label="Aktivitätsstatistik"></div>
@@ -63,7 +63,7 @@
 
       <section id="workoutsPanel" class="panel" aria-label="Geplante Einheiten">
         <div class="section-heading">
-          <div><span class="eyebrow">KALENDER</span><h2>Geplant</h2><span id="planningSummary" class="tab-sync-detail"></span></div>
+          <div><span class="eyebrow">KALENDER</span><h2>Geplant <span id="planningDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2><span id="planningSummary" class="tab-sync-detail"></span></div>
         </div>
         <div id="parallelCyclingWarning" class="parallel-warning" hidden></div>
         <div id="adaptivePlanningNotice" class="adaptive-planning-notice" hidden role="status">
@@ -84,7 +84,7 @@
           <button type="submit" form="profileForm">Wettkämpfe speichern</button>
         </details>
         <div class="library-heading">
-          <div><h3 class="subsection-title">Trainingsbibliothek</h3><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
+          <div><h3 class="subsection-title">Trainingsbibliothek <span id="libraryDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
           <button id="libraryLoadButton" class="secondary-button" type="button">Bibliothek synchronisieren</button>
         </div>
         <div id="library" class="library"></div>
@@ -300,6 +300,6 @@
       </div>
     </div>
   </dialog>
-  <script src="/app.js?v=105" defer></script>
+  <script src="/app.js?v=106" defer></script>
 </body>
 </html>

@@ -84,6 +84,9 @@ function showLogin() {
   state.activityFeedbackDirty.clear();
   state.planningEditDirty.clear();
   state.libraryDateDirty.clear();
+  setDirtyIndicator("activityDirtyIndicator", false);
+  setDirtyIndicator("planningDirtyIndicator", false);
+  setDirtyIndicator("libraryDirtyIndicator", false);
   $("#appShell").hidden = true;
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
@@ -547,6 +550,9 @@ function discardUnsavedChanges() {
   state.activityFeedbackDirty.clear();
   state.planningEditDirty.clear();
   state.libraryDateDirty.clear();
+  setDirtyIndicator("activityDirtyIndicator", false);
+  setDirtyIndicator("planningDirtyIndicator", false);
+  setDirtyIndicator("libraryDirtyIndicator", false);
   if (state.data) render(state.data);
 }
 
@@ -908,6 +914,7 @@ function renderActivityStats(activities, filtered = false) {
 }
 
 function renderActivities(activities) {
+  setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
   if (state.activityFeedbackDirty.size) return;
   const list = Array.isArray(activities) ? activities : [];
   const syncDetail = $("#activitySyncDetail");
@@ -1013,7 +1020,10 @@ function renderActivities(activities) {
       feedbackButton.type = "submit";
       feedbackButton.textContent = "Besonderheiten speichern";
       feedbackForm.append(feedbackLabel, feedbackButton);
-      feedbackInput.addEventListener("input", () => state.activityFeedbackDirty.add(String(activityId)));
+      feedbackInput.addEventListener("input", () => {
+        state.activityFeedbackDirty.add(String(activityId));
+        setDirtyIndicator("activityDirtyIndicator", true);
+      });
       feedbackForm.addEventListener("submit", (event) => saveActivityFeedback(event, activity, feedbackButton));
       feedbackDetails.append(feedbackSummary, feedbackForm);
       card.append(feedbackDetails);
@@ -1100,7 +1110,10 @@ function renderLocalPlanningActions(event, body) {
   editorSummary.textContent = "Lokale Planung bearbeiten oder verschieben";
   const form = document.createElement("form");
   form.className = "local-planning-form";
-  form.addEventListener("input", () => state.planningEditDirty.add(String(event.local_id)));
+  form.addEventListener("input", () => {
+    state.planningEditDirty.add(String(event.local_id));
+    setDirtyIndicator("planningDirtyIndicator", true);
+  });
   const dateLabel = document.createElement("label");
   dateLabel.textContent = "Datum";
   const dateInput = document.createElement("input");
@@ -1155,6 +1168,7 @@ function renderLocalPlanningActions(event, body) {
         }),
       });
       state.planningEditDirty.delete(String(event.local_id));
+      setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
       toast("Lokale Planung gespeichert");
       await load();
     } catch (error) {
@@ -1203,6 +1217,7 @@ function renderLocalPlanningActions(event, body) {
 }
 
 function renderPlanned(planned, externalCalendarEvents = []) {
+  setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
   if (state.planningEditDirty.size) return;
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   renderWeatherNotice(state.data?.weather);
@@ -1687,6 +1702,7 @@ function renderTrainingPlans(plans, workouts) {
 function renderLibrary(workouts) {
   const root = $("#library");
   if (!root) return;
+  setDirtyIndicator("libraryDirtyIndicator", state.libraryDateDirty.size > 0);
   if (state.libraryDateDirty.size) return;
   root.replaceChildren();
   const allWorkouts = Array.isArray(workouts) ? workouts : [];
@@ -1757,8 +1773,12 @@ function renderLibrary(workouts) {
         const dateInput = document.createElement("input");
         dateInput.type = "date";
         dateInput.value = addDateKey(timezoneDateKey(state.data?.profile?.timezone, new Date()), 1);
-        dateInput.addEventListener("input", () => state.libraryDateDirty.add(String(workout.id)));
-        dateInput.addEventListener("change", () => state.libraryDateDirty.add(String(workout.id)));
+        const markLibraryDateDirty = () => {
+          state.libraryDateDirty.add(String(workout.id));
+          setDirtyIndicator("libraryDirtyIndicator", true);
+        };
+        dateInput.addEventListener("input", markLibraryDateDirty);
+        dateInput.addEventListener("change", markLibraryDateDirty);
         dateLabelNode.append(dateInput);
         const button = document.createElement("button");
         button.type = "button";
@@ -2132,14 +2152,16 @@ function renderCompetitionSync(data) {
 
 async function resolveCompetitionConflict(competitionId, strategy, button) {
   if (!competitionId) return;
+  if (state.profileDirty) {
+    toast("Bitte zuerst die lokalen Profiländerungen speichern oder verwerfen.", true);
+    return;
+  }
   button.disabled = true;
   try {
     await api(`/api/competitions/${encodeURIComponent(competitionId)}/resolve`, {
       method: "POST",
       body: JSON.stringify({ strategy }),
     });
-    state.profileDirty = false;
-    setDirtyIndicator("profileDirtyIndicator", false);
     toast(strategy === "adopt_remote" ? "Remote-Wettkampf übernommen" : "Lokaler Wettkampf wird priorisiert");
     invalidateContextPreview();
     await load();
@@ -3074,6 +3096,7 @@ async function saveActivityFeedback(event, activity, button) {
   try {
     await api(`/api/activities/${encodeURIComponent(String(activityId))}/feedback`, { method: "POST", body: JSON.stringify(payload) });
     state.activityFeedbackDirty.delete(String(activityId));
+    setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
     toast(payload.notes.trim() ? "Besonderheiten gespeichert" : "Besonderheiten entfernt");
     await load();
   } catch (error) {
