@@ -61,7 +61,9 @@ It is not intended to be exposed directly to the public internet.
   a complete local training history. Every library entry has its own local
   UUID. Imported Intervals.icu templates additionally retain their provider ID
   as `external_id`; local entries remain local until the library is explicitly
-  synchronized.
+   synchronized.
+   Beim ersten expliziten Bibliothekssync wird dafür bei Intervals.icu bei
+   Bedarf ein privater Ordner „Intervals Coach“ angelegt.
 - If a provider response no longer contains an imported template, it is kept
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by
@@ -94,9 +96,6 @@ It is not intended to be exposed directly to the public internet.
   long local library entries on busy days can be proposed as short easy sessions.
   Invalid feeds are rejected without replacing the last good local calendar;
   recurring events are reported as unsupported rather than partially expanded.
-- A separate public iCalendar import is available in the Einstellungen tab for
-  discovering competition candidates. Imported candidates remain local until
-  the athlete explicitly adopts one as a target competition.
 - The planned calendar never displays a provider horizon wider than the
   Intervals.icu window actually loaded by the latest snapshot. The configured
   display preference may therefore be reduced temporarily after a short sync.
@@ -227,7 +226,8 @@ URL stays in the server environment and is excluded from browser state,
 exports, and logs.
 
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
-in the Einstellungen tab. A successful sync keeps events from today through the next
+in the Einstellungen tab. Events themselves are shown only in the **Geplant** tab.
+A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
 settings or bypass explicit library synchronization or planning approvals.

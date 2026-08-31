@@ -73,7 +73,6 @@ GITHUB_RELEASE_CACHE: dict[str, Any] = {"repository": "", "checked_at": 0.0, "st
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
-MAX_PUBLIC_CALENDAR_BYTES = 5_000_000
 MAX_EXTERNAL_CALENDAR_BYTES = 5_000_000
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 DB_LOCK = threading.RLock()
@@ -101,7 +100,6 @@ LIBRARY_ENTRY_RE = re.compile(r"^/api/library/([0-9a-f-]+)$")
 DELETE_DRAFT_RE = re.compile(r"^/api/drafts/([0-9a-f-]+)$")
 PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
 LIBRARY_PLAN_BATCH_RE = re.compile(r"^/api/library/plan$")
-PUBLIC_CALENDAR_CANDIDATE_RE = re.compile(r"^/api/calendar/candidates/([0-9a-f-]+)/import$")
 ACTIVITY_FEEDBACK_RE = re.compile(r"^/api/activities/([^/]+)/feedback$")
 COMPETITION_CONFLICT_RE = re.compile(r"^/api/competitions/([0-9a-f-]+)/resolve$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
@@ -2497,48 +2495,21 @@ def list_competitions(include_sync: bool = False) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def _resolve_public_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     try:
         addresses = [ipaddress.ip_address(hostname)]
     except ValueError:
         try:
             addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
         except OSError as exc:
-            message = "Die Kalenderadresse konnte nicht aufgelöst werden." if status == 400 else "Der öffentliche Kalender konnte nicht aufgelöst werden."
+            message = "Die Kalenderadresse konnte nicht aufgelöst werden."
             raise AppError(status, message) from exc
     if not addresses or any(not address.is_global for address in addresses):
         raise AppError(status, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
     return addresses
 
 
-def public_calendar_url(value: Any) -> str:
-    raw = str(value or "").strip()
-    parsed = urlparse(raw)
-    try:
-        port = parsed.port
-    except ValueError as exc:
-        raise AppError(400, "Public calendars must use a valid HTTPS port.") from exc
-    if port not in {None, 443}:
-        raise AppError(400, "Public calendars must use HTTPS port 443.")
-    if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
-        raise AppError(400, "Öffentliche Kalender müssen über eine HTTPS-URL ohne Zugangsdaten erreichbar sein.")
-    hostname = parsed.hostname.rstrip(".").casefold()
-    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
-        raise AppError(400, "Lokale Kalenderadressen werden aus Sicherheitsgründen nicht abgerufen.")
-    try:
-        addresses = [ipaddress.ip_address(hostname)]
-    except ValueError:
-        try:
-            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
-        except OSError as exc:
-            raise AppError(400, "Die öffentliche Kalenderadresse konnte nicht aufgelöst werden.") from exc
-    if any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
-        raise AppError(400, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
-    _resolve_public_calendar_addresses(hostname, status=400)
-    return raw
-
-
-def fetch_public_calendar(url: str) -> bytes:
+def fetch_calendar_feed(url: str) -> bytes:
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").rstrip(".").casefold()
     try:
@@ -2547,7 +2518,7 @@ def fetch_public_calendar(url: str) -> bytes:
         try:
             addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
         except OSError as exc:
-            raise AppError(502, "The public calendar address could not be resolved.") from exc
+            raise AppError(502, "Der Kalender-Feed konnte nicht aufgelöst werden.") from exc
     if not addresses or any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
         raise AppError(400, "Private or local calendar addresses are not fetched.")
     port = parsed.port or 443
@@ -2555,7 +2526,7 @@ def fetch_public_calendar(url: str) -> bytes:
     if parsed.query:
         request_target += "?" + parsed.query
     if any(char in request_target for char in "\r\n"):
-        raise AppError(400, "The public calendar address contains invalid characters.")
+        raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.")
     try:
         host_header = hostname.encode("idna").decode("ascii")
         request_bytes = (
@@ -2566,12 +2537,12 @@ def fetch_public_calendar(url: str) -> bytes:
             "Connection: close\r\n\r\n"
         ).encode("ascii")
     except UnicodeError as exc:
-        raise AppError(400, "The public calendar address contains invalid characters.") from exc
+        raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.") from exc
     tls_context = ssl.create_default_context()
     tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
     # Resolve immediately before connecting and connect only to these checked
     # addresses. This closes the validation/fetch DNS rebinding window.
-    addresses = _resolve_public_calendar_addresses(hostname, status=502)
+    addresses = _resolve_calendar_addresses(hostname, status=502)
     for address in addresses:
         raw_socket = None
         tls_socket = None
@@ -2583,16 +2554,16 @@ def fetch_public_calendar(url: str) -> bytes:
             response = HTTPResponse(tls_socket, method="GET")
             response.begin()
             if 300 <= response.status < 400:
-                raise AppError(400, "The public calendar must not redirect to another address.")
+                raise AppError(400, "Der Kalender-Feed darf nicht auf eine andere Adresse weiterleiten.")
             if response.status >= 400:
-                raise AppError(502, f"The public calendar returned HTTP {response.status}.")
-            return response.read(MAX_PUBLIC_CALENDAR_BYTES + 1)
+                raise AppError(502, f"Der Kalender-Feed antwortete mit HTTP {response.status}.")
+            return response.read(MAX_EXTERNAL_CALENDAR_BYTES + 1)
         finally:
             if tls_socket is not None:
                 tls_socket.close()
             if raw_socket is not None:
                 raw_socket.close()
-    raise AppError(502, "The public calendar could not be loaded.")
+    raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.")
 
 
 def parse_ics_value(value: str) -> str:
@@ -2612,43 +2583,6 @@ def parse_ics_date(value: str) -> str | None:
         return date.fromisoformat(f"{match.group(1)[:4]}-{match.group(1)[4:6]}-{match.group(1)[6:8]}").isoformat()
     except ValueError:
         return None
-
-
-def parse_public_calendar(payload: bytes) -> list[dict[str, str]]:
-    try:
-        text = payload.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise AppError(400, "Der öffentliche Kalender ist keine gültige UTF-8-iCalendar-Datei.") from exc
-    unfolded: list[str] = []
-    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        if line.startswith((" ", "\t")) and unfolded:
-            unfolded[-1] += line[1:]
-        else:
-            unfolded.append(line)
-    events: list[dict[str, str]] = []
-    current: dict[str, str] | None = None
-    for line in unfolded:
-        if line.upper() == "BEGIN:VEVENT":
-            current = {}
-            continue
-        if line.upper() == "END:VEVENT":
-            if current and current.get("uid") and current.get("name") and current.get("event_date"):
-                events.append(current)
-            current = None
-            continue
-        if current is None or ":" not in line:
-            continue
-        key_part, raw_value = line.split(":", 1)
-        key = key_part.split(";", 1)[0].upper()
-        value = parse_ics_value(raw_value)
-        if key == "UID": current["uid"] = value[:500]
-        elif key == "SUMMARY": current["name"] = value[:200]
-        elif key == "DTSTART": current["event_date"] = parse_ics_date(value) or ""
-        elif key == "CATEGORIES": current["sport"] = value[:120]
-        elif key == "LOCATION": current["location"] = value[:500]
-        elif key == "URL": current["url"] = value[:1000]
-        elif key == "DESCRIPTION": current["description"] = value[:2000]
-    return events[:500]
 
 
 def _unfold_ical(payload: bytes) -> list[str]:
@@ -2831,7 +2765,7 @@ def external_calendar_url(value: Any) -> str:
             raise AppError(400, "Die Kalenderadresse konnte nicht aufgelöst werden.") from exc
     if any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
         raise AppError(400, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
-    _resolve_public_calendar_addresses(hostname, status=400)
+    _resolve_calendar_addresses(hostname, status=400)
     return raw
 
 
@@ -2867,7 +2801,7 @@ def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
     try:
         set_kv("external_calendar_sync_status", "Kalender: Synchronisierung läuft…")
         url = external_calendar_url(CONFIG.calendar_ical_url)
-        payload = fetch_public_calendar(url)
+        payload = fetch_calendar_feed(url)
         if len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
             raise AppError(413, "Der Kalender-Feed ist zu groß.")
         events = parse_ical_calendar(payload)
@@ -2933,76 +2867,6 @@ def public_calendar_state(db: Any | None = None) -> dict[str, Any]:
         "FROM public_event_candidates c JOIN public_event_sources s ON s.id = c.source_id ORDER BY c.event_date, c.name LIMIT 100"
     ).fetchall()
     return {"sources": [dict(row) for row in sources], "candidates": [dict(row) for row in candidates]}
-
-
-def import_public_calendar(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise AppError(400, "Der öffentliche Kalender muss als Objekt übergeben werden.")
-    url = public_calendar_url(value.get("url"))
-    name = str(value.get("name") or "Öffentlicher Kalender").strip()[:200] or "Öffentlicher Kalender"
-    try:
-        payload = fetch_public_calendar(url)
-    except AppError:
-        raise
-    except Exception as exc:
-        raise AppError(502, f"Der öffentliche Kalender konnte nicht geladen werden: {redact_text(str(exc))[:300]}") from exc
-    if len(payload) > MAX_PUBLIC_CALENDAR_BYTES:
-        raise AppError(413, "Der öffentliche Kalender ist zu groß.")
-    events = parse_public_calendar(payload)
-    source_id = str(uuid.uuid5(uuid.NAMESPACE_URL, url))
-    now = utc_now()
-    with DB_LOCK, database() as db:
-        db.execute(
-            "INSERT INTO public_event_sources(id, name, url, last_sync_at, last_error, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, '', ?, ?) ON CONFLICT(url) DO UPDATE SET name=excluded.name, "
-            "last_sync_at=excluded.last_sync_at, last_error='', updated_at=excluded.updated_at",
-            (source_id, name, url, now, now, now),
-        )
-        row = db.execute("SELECT id FROM public_event_sources WHERE url=?", (url,)).fetchone()
-        source_id = row["id"]
-        for event in events:
-            categories = event.get("sport") or event.get("name") or "Cycling"
-            sport = supported_competition_sport(categories) or "Cycling"
-            candidate_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{url}#{event['uid']}"))
-            details = event.get("description", "")
-            if event.get("location"):
-                details = f"{details}\nLocation: {event['location']}".strip()
-            if event.get("url"):
-                details = f"{details}\nEvent URL: {event['url']}".strip()
-            db.execute(
-                "INSERT INTO public_event_candidates(id, source_id, uid, name, event_date, sport, distance, location, url, description, imported_competition_id, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, NULL, ?, ?) ON CONFLICT(source_id, uid) DO UPDATE SET "
-                "name=excluded.name, event_date=excluded.event_date, sport=excluded.sport, location=excluded.location, "
-                "url=excluded.url, description=excluded.description, updated_at=excluded.updated_at",
-                (candidate_id, source_id, event["uid"], event["name"], event["event_date"], sport, event.get("location", "")[:500], event.get("url", "")[:1000], details[:2000], now, now),
-            )
-        db.execute("UPDATE public_event_sources SET last_error='' WHERE id=?", (source_id,))
-    return {"status": "ok", "source": next(item for item in list_public_calendar_sources() if item["id"] == source_id), "events": len(events), **public_calendar_state()}
-
-
-def import_public_event_candidate(candidate_id: str) -> dict[str, Any]:
-    try:
-        normalized_id = str(uuid.UUID(candidate_id))
-    except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige Kalenderveranstaltung.") from exc
-    with DB_LOCK, database() as db:
-        row = db.execute("SELECT * FROM public_event_candidates WHERE id=?", (normalized_id,)).fetchone()
-        if not row:
-            raise AppError(404, "Kalenderveranstaltung nicht gefunden.")
-        if row["imported_competition_id"]:
-            return {"status": "already_imported", "competition_id": row["imported_competition_id"], **public_calendar_state()}
-        competition = normalize_competition({
-            "name": row["name"], "event_date": row["event_date"], "sport": row["sport"],
-            "notes": row["description"], "distance": row["distance"],
-        })
-        now = utc_now()
-        db.execute(
-            "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, sync_dirty, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, 'B', ?, '', '', ?, 1, ?, ?)",
-            (competition["id"], competition["name"], competition["event_date"], competition["sport"], competition["distance"], competition["notes"], now, now),
-        )
-        db.execute("UPDATE public_event_candidates SET imported_competition_id=?, updated_at=? WHERE id=?", (competition["id"], now, normalized_id))
-    return {"status": "ok", "competition": competition, **public_calendar_state()}
 
 
 def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
@@ -4559,6 +4423,7 @@ class IntervalsClient:
         self.headers = {"Authorization": f"Basic {credentials}"}
         self.base = "https://intervals.icu/api/v1"
         self.pagination: dict[str, dict[str, Any]] = {}
+        self._workout_folder_id: int | None = None
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         query = "?" + urlencode(params, doseq=True) if params else ""
@@ -4628,14 +4493,57 @@ class IntervalsClient:
         )
         return [selected(item, fields) for item in result if isinstance(item, dict)]
 
+    @staticmethod
+    def _folder_id(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            folder_id = int(value)
+        except (TypeError, ValueError):
+            return None
+        return folder_id if folder_id > 0 else None
+
+    def get_or_create_workout_folder(self) -> int:
+        """Return the private library folder used for coach-created templates."""
+        if self._workout_folder_id is not None:
+            return self._workout_folder_id
+        athlete = quote(self.config.intervals_athlete_id, safe="")
+        folders = self.get(f"/athlete/{athlete}/folders")
+        if isinstance(folders, dict):
+            folders = folders.get("folders") or folders.get("data") or []
+        if not isinstance(folders, list):
+            raise AppError(502, "Intervals.icu hat keine gültige Ordnerliste zurückgegeben.")
+        matching: list[dict[str, Any]] = []
+        pending = [item for item in folders if isinstance(item, dict)]
+        while pending:
+            folder = pending.pop(0)
+            if str(folder.get("name") or "").strip() == "Intervals Coach":
+                matching.append(folder)
+            children = folder.get("children")
+            if isinstance(children, list):
+                pending.extend(item for item in children if isinstance(item, dict))
+        for folder in matching:
+            folder_id = self._folder_id(folder.get("id"))
+            if folder_id is not None:
+                self._workout_folder_id = folder_id
+                return folder_id
+        created = self.post(f"/athlete/{athlete}/folders", {"name": "Intervals Coach"})
+        folder_id = self._folder_id(created.get("id") if isinstance(created, dict) else None)
+        if folder_id is None:
+            raise AppError(502, "Intervals.icu hat keinen gültigen Ordner zurückgegeben.")
+        self._workout_folder_id = folder_id
+        return folder_id
+
     def create_library_workouts(self, workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
+        folder_id = self.get_or_create_workout_folder()
         created: list[dict[str, Any]] = []
         for workout in workouts:
             payload = {
                 "name": str(workout.get("name") or "Coach-Einheit")[:200],
                 "description": str(workout.get("description") or "")[:12000],
                 "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
+                "folder_id": folder_id,
             }
             result = self.post(f"/athlete/{athlete}/workouts", payload)
             if not isinstance(result, dict):
@@ -4646,11 +4554,15 @@ class IntervalsClient:
     def update_library_workout(self, workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         remote_id = quote(str(workout_id), safe="")
-        result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", {
+        payload = {
             "name": str(workout.get("name") or "Coach-Einheit")[:200],
             "description": str(workout.get("description") or "")[:12000],
             "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
-        })
+        }
+        folder_id = self._folder_id(workout.get("folder_id"))
+        if folder_id is not None:
+            payload["folder_id"] = folder_id
+        result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", payload)
         if not isinstance(result, dict):
             raise AppError(502, "Intervals.icu returned no updated library workout.")
         return result
@@ -8185,7 +8097,6 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "activity_feedback": activity_feedback_context(),
             "planning": planning_state(),
             "external_calendar": external_calendar_state(),
-            "public_calendar": public_calendar_state(db),
             "performance": current_performance_context(snapshot),
             "garmin": garmin_public_state(),
             "intervals": intervals_public_state(snapshot),
@@ -8870,10 +8781,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, apply_adaptive_replan(payload.get("adjustment_id")) if payload.get("apply") else adaptive_replan_preview())
             elif path == "/api/library/sync":
                 self.send_json(200, sync_workout_library(reason="manuell"))
-            elif match := PUBLIC_CALENDAR_CANDIDATE_RE.match(path):
-                self.send_json(200, import_public_event_candidate(unquote(match.group(1))))
-            elif path == "/api/calendar/import":
-                self.send_json(200, import_public_calendar(self.read_json()))
             elif match := LIBRARY_ENTRY_RE.match(path):
                 self.send_json(200, update_workout_library_entry(unquote(match.group(1)), self.read_json()))
             elif match := LOCAL_PLANNED_RE.match(path):

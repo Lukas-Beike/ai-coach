@@ -466,30 +466,16 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("Lokales Athleten-Feedback", markup)
         self.assertIn('id="activitiesPanel"', markup)
 
-    def test_public_calendar_parser_extracts_supported_event_fields(self):
-        events = server.parse_public_calendar(
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:ride-1\r\nDTSTART;VALUE=DATE:20260920\r\n"
-            b"SUMMARY:Muensterland Giro\r\nCATEGORIES:Cycling\r\nLOCATION:Muenster\r\n"
-            b"DESCRIPTION:Gran fondo\\, long route\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-        )
-        self.assertEqual(events[0]["event_date"], "2026-09-20")
-        self.assertEqual(events[0]["name"], "Muensterland Giro")
-        self.assertEqual(events[0]["location"], "Muenster")
-        self.assertEqual(events[0]["description"], "Gran fondo, long route")
-
-    def test_public_calendar_import_persists_candidates_for_explicit_adoption(self):
-        payload = (
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:race-1\r\nDTSTART;VALUE=DATE:20260920\r\n"
-            b"SUMMARY:Local Race\r\nCATEGORIES:Cycling\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-        )
-        with patch.object(server, "fetch_public_calendar", return_value=payload):
-            result = server.import_public_calendar({"url": "https://93.184.216.34/calendar.ics", "name": "Race feed"})
-        self.assertEqual(result["events"], 1)
-        candidate = result["candidates"][0]
-        self.assertIsNone(candidate["imported_competition_id"])
-        adopted = server.import_public_event_candidate(candidate["id"])
-        self.assertEqual(adopted["status"], "ok")
-        self.assertEqual(adopted["competition"]["name"], "Local Race")
+    def test_settings_do_not_render_calendar_events_or_public_competition_import(self):
+        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        app = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+        backend = Path(server.__file__).read_text(encoding="utf-8")
+        self.assertNotIn('id="externalCalendarEvents"', markup)
+        self.assertNotIn("Wettkampfkalender importieren", markup)
+        self.assertNotIn("publicCalendarImportForm", app)
+        self.assertNotIn("/api/calendar/import", backend)
+        self.assertNotIn("import_public_calendar", backend)
+        self.assertIn("renderExternalCalendarMarker", app)
 
     def test_ical_calendar_parser_extracts_timing_and_duration(self):
         events = server.parse_ical_calendar(
@@ -537,7 +523,7 @@ class CoachTests(unittest.TestCase):
             )
         with patch.object(server, "CONFIG", replace(server.CONFIG, calendar_ical_url="https://calendar.example/feed.ics")), patch.object(
             server, "external_calendar_url", return_value="https://calendar.example/feed.ics"
-        ), patch.object(server, "fetch_public_calendar", return_value=b"not an ical feed"):
+        ), patch.object(server, "fetch_calendar_feed", return_value=b"not an ical feed"):
             with self.assertRaises(server.AppError):
                 server.sync_external_calendar("test")
         self.assertEqual(server.list_external_calendar_events(1000)[0]["id"], "good-event")
@@ -579,7 +565,7 @@ class CoachTests(unittest.TestCase):
             b"DTEND:20260902T120000Z\r\nSUMMARY:School meeting\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
-        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_public_calendar", return_value=payload), patch.object(
+        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", return_value=payload), patch.object(
             server, "check_adaptive_replan", return_value={"needs_replan": True, "replan_changes": 2}
         ) as check:
             result = server.sync_external_calendar("test")
@@ -603,7 +589,7 @@ class CoachTests(unittest.TestCase):
             "END:VCALENDAR\r\n"
         ).encode()
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
-        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_public_calendar", return_value=payload):
+        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", return_value=payload):
             result = server.sync_external_calendar("test")
 
         self.assertEqual(result["window_days"], 56)
@@ -618,7 +604,7 @@ class CoachTests(unittest.TestCase):
                 ("event-old", "family-old", "Existing appointment", tomorrow, tomorrow + "T10:00:00+02:00", tomorrow + "T11:00:00+02:00", 60, 0, server.utc_now()),
             )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
-        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_public_calendar", side_effect=server.AppError(502, "upstream unavailable")):
+        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", side_effect=server.AppError(502, "upstream unavailable")):
             with self.assertRaises(server.AppError):
                 server.sync_external_calendar("test")
         self.assertEqual(server.list_external_calendar_events()[0]["id"], "event-old")
@@ -1260,7 +1246,7 @@ class CoachTests(unittest.TestCase):
         })
         state = server.public_state(local_only=True)
         self.assertEqual(state["planning_view"]["provider_window"]["end"], (today + timedelta(days=20)).isoformat())
-        self.assertIn("public_calendar", state)
+        self.assertNotIn("public_calendar", state)
 
     def test_legacy_library_rows_migrate_to_local_uuid_and_external_id(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -1344,27 +1330,46 @@ class CoachTests(unittest.TestCase):
 
     def test_library_upload_uses_single_workout_endpoint_and_canonical_sport(self):
         client = server.IntervalsClient(server.Config(intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
-        with patch.object(client, "post", return_value={"id": "remote-1"}) as post:
+        with patch.object(client, "get", return_value=[]), patch.object(
+            client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
+        ) as post:
             result = client.create_library_workouts([{
                 "name": "Tempo",
                 "description": "- 30m 85%",
                 "sport": "Cycling",
             }])
         self.assertEqual(result, [{"id": "remote-1"}])
+        self.assertEqual(post.call_args_list[0].args, (
+            "/athlete/athlete-1/folders",
+            {"name": "Intervals Coach"},
+        ))
+        self.assertEqual(post.call_args_list[1].args, (
+            "/athlete/athlete-1/workouts",
+            {"name": "Tempo", "description": "- 30m 85%", "type": "Ride", "folder_id": 12345},
+        ))
+
+    def test_existing_intervals_coach_folder_is_reused(self):
+        client = server.IntervalsClient(server.Config(intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        with patch.object(client, "get", return_value=[{"id": 77, "name": "Intervals Coach", "type": "FOLDER"}]), patch.object(
+            client, "post", return_value={"id": "remote-1"}
+        ) as post:
+            client.create_library_workouts([{"name": "Easy", "description": "- 30m Z2", "sport": "Ride"}])
         post.assert_called_once_with(
             "/athlete/athlete-1/workouts",
-            {"name": "Tempo", "description": "- 30m 85%", "type": "Ride"},
+            {"name": "Easy", "description": "- 30m Z2", "type": "Ride", "folder_id": 77},
         )
 
     def test_unknown_workout_sport_falls_back_to_provider_other_type(self):
         client = server.IntervalsClient(server.Config(intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
-        with patch.object(client, "post", return_value={"id": "remote-1"}) as post:
+        with patch.object(client, "get", return_value=[]), patch.object(
+            client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
+        ) as post:
             client.create_library_workouts([{
                 "name": "Regeneration",
                 "description": "Locker bewegen",
                 "sport": "Recovery Session",
             }])
-        self.assertEqual(post.call_args.args[1]["type"], "Other")
+        self.assertEqual(post.call_args_list[1].args[1]["type"], "Other")
 
     def test_workout_sport_aliases_are_normalized_before_storage(self):
         normalized = server.normalize_workout_draft({
@@ -2785,7 +2790,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('id="adaptivePlanningNotice"', markup)
         self.assertIn('id="coachAdaptivePlanningNotice"', markup)
         self.assertIn('id="adaptivePlanningButton"', markup)
-        self.assertIn('id="externalCalendarEvents"', markup)
+        self.assertNotIn('id="externalCalendarEvents"', markup)
         self.assertIn('id="planningSummary"', markup)
         self.assertIn("planned-calendar-marker", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
         self.assertIn("Number(event.training_relevant) === 0", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
