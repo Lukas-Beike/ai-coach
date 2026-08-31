@@ -2048,7 +2048,40 @@ function renderSettings(data) {
           ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
           : "Noch kein API-Aufruf geprüft";
   }
-  setStatus("#intervalsConnectionStatus", configured.intervals, configured.intervals ? "Konfiguriert" : "Nicht konfiguriert");
+  const intervals = data.intervals || {
+    configured: Boolean(configured.intervals),
+    state: configured.intervals ? "configured" : "not_configured",
+  };
+  const intervalsHealthy = intervals.configured && intervals.state !== "error";
+  setStatus(
+    "#intervalsConnectionStatus",
+    intervalsHealthy,
+    !intervals.configured
+      ? "Nicht konfiguriert"
+      : intervals.state === "syncing"
+        ? "Synchronisierung läuft…"
+        : intervals.state === "error"
+          ? "Fehler bei letzter Aktualisierung"
+          : intervals.state === "connected"
+            ? "Verbunden"
+            : "Konfiguriert · noch nicht getestet",
+  );
+  const intervalsDetail = $("#intervalsConnectionDetail");
+  if (intervalsDetail) {
+    const librarySync = intervals.library_sync || {};
+    const libraryState = librarySync.state || {};
+    const libraryCount = Number(libraryState.synced || 0);
+    intervalsDetail.classList.toggle("error", Boolean(intervals.last_error));
+    intervalsDetail.textContent = !intervals.configured
+      ? "API-Schlüssel nicht konfiguriert"
+      : intervals.state === "syncing"
+        ? intervals.status || "Intervals.icu wird synchronisiert."
+        : intervals.last_error
+          ? intervals.last_error
+          : intervals.last_sync_at || librarySync.last_sync_at
+            ? `Letzte Aktualisierung: ${formatTime(intervals.last_sync_at || librarySync.last_sync_at)}${libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : ""}`
+            : "Noch keine Synchronisierung durchgeführt";
+  }
   setStatus("#garminConnectionStatus", garmin.configured, garmin.configured ? (garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert") : "Nicht konfiguriert");
   const weatherLocation = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
   setStatus("#weatherConnectionStatus", weather.configured, weather.configured ? (weather.loading ? "Wird geladen" : "Konfiguriert") : "Nicht konfiguriert");
@@ -2066,7 +2099,7 @@ function renderSettings(data) {
   }
   const connectionsSummary = $("#connectionsSummary");
   if (connectionsSummary) {
-    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Intervals", configured.intervals], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
+    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
       .map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
   }
   const intervalsDays = $("#intervalsSyncDays");

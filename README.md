@@ -339,6 +339,9 @@ resynchronization. It removes only the locally cached data for that provider
 and then fetches it again; cloud data, credentials, and Garmin tokens are not
 deleted. While this operation runs, syncs for the affected provider and
 Intervals.icu write operations are blocked.
+The Intervals.icu connection card also reports whether the provider is
+connected, synchronizing, or in error, including the time of the last
+successful update and a safe provider validation message when available.
 
 The **System** tab also provides an encrypted database backup download and a
 validated restore action. Restoring requires the same `APP_PASSWORD` used by
