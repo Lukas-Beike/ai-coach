@@ -122,15 +122,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Handover FT-001**
 
 - **Status:** abgeschlossen
-- **Branch und Commit:** `test/ft-001-remote-mutation-contract`, Commit folgt nach Review
+- **Branch und Commit:** `test/ft-001-remote-mutation-contract`, `72c77e5`, PR #132
 - **Geänderte Dateien:** `tests/test_server.py`, dieses Handover-Dokument
 - **Verhaltensänderung:** keine; der Recorder erfasst ausschließlich sichere Request-Metadaten. Automatische bzw. lesende Schreibverletzungen sind als erwartete Charakterisierung dokumentiert.
-- **Validierung:** `python -m py_compile server.py tests/test_server.py` erfolgreich; fokussierter Testlauf im SQLCipher-Container erfolgreich mit fünf erwarteten Fehlschlägen und vier grünen Positivtests; nativer Lauf wegen fehlendem SQLCipher-Wheel nicht ausführbar.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py` erfolgreich; vollständiger Testlauf im SQLCipher-Container mit 196 Tests, sechs erwarteten Charakterisierungsfehlschlägen und keinen unerwarteten Fehlern; nativer Lauf wegen fehlendem SQLCipher-Wheel nicht ausführbar.
 - **Manuelle Prüfung:** nicht erforderlich, Backend-/Testpaket.
-- **Offene Risiken:** FT-002 und FT-003 müssen die fünf erwarteten Fehlschläge in Solltests überführen.
+- **Offene Risiken:** FT-002 hat vier Bibliotheksfälle in grüne Solltests überführt; zwei getrennte Wettkampffälle bleiben für FT-003 erwartete Fehlschläge.
 - **Folgetasks:** FT-002 und FT-003 entblockt.
 
-### - [ ] FT-002 – Intervals-Lesesync vom Workout-Bibliotheks-Push trennen
+### - [x] FT-002 – Intervals-Lesesync vom Workout-Bibliotheks-Push trennen
 
 **Quelle:** SYNC-01
 **Ziel:** `sync_intervals()` aktualisiert ausschließlich gelesene Providerdaten; Bibliothekseinträge werden nur über eine dedizierte, bestätigte Bibliotheksaktion remote erstellt oder aktualisiert.
@@ -138,21 +138,32 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Aufruf von `sync_workout_library()` aus dem allgemeinen `sync_intervals()` entfernen.
-- [ ] Startup, Daily, Full-Resync, Activity-Sync und Coach-Freshness bis zum Provider-Client verfolgen und als read-only kennzeichnen.
-- [ ] Dedizierten Bibliotheks-Sync-Endpunkt und vorhandene UI-Aktion als einzigen Einstieg für Remote-Push festlegen.
-- [ ] Vor Push eine Zusammenfassung der betroffenen Einträge erstellen: neu, geändert, fehlend, Fehlerwiederholung.
-- [ ] UI-Bestätigung an exakt diese Zusammenfassung/Fingerprint binden.
-- [ ] Während des Pushs Idempotenz und bestehenden Remote-Identifier erhalten.
-- [ ] Fehlerstatus lokal speichern, aber keinen automatischen späteren Retry aus einem Read-Sync zulassen.
-- [ ] README-Texte zu lokaler Bibliothek und explizitem Sync prüfen/aktualisieren.
+- [x] Aufruf von `sync_workout_library()` aus dem allgemeinen `sync_intervals()` entfernen.
+- [x] Startup, Daily, Full-Resync, Activity-Sync und Coach-Freshness bis zum Provider-Client verfolgen und als read-only kennzeichnen.
+- [x] Dedizierten Bibliotheks-Sync-Endpunkt und vorhandene UI-Aktion als einzigen Einstieg für Remote-Push festlegen.
+- [x] Vor Push eine Zusammenfassung der betroffenen Einträge erstellen: neu, geändert, fehlend, Fehlerwiederholung.
+- [x] UI-Bestätigung an exakt diese Zusammenfassung/Fingerprint binden.
+- [x] Während des Pushs Idempotenz und bestehenden Remote-Identifier erhalten.
+- [x] Fehlerstatus lokal speichern, aber keinen automatischen späteren Retry aus einem Read-Sync zulassen.
+- [x] README-Texte zu lokaler Bibliothek und explizitem Sync prüfen/aktualisieren.
 
 **Abnahmekriterien**
 
-- [ ] Alle negativen Tests aus FT-001 sind grün.
-- [ ] Nur der bestätigte Bibliotheks-Sync erzeugt erwartete Remote-Mutationen.
-- [ ] Abbruch, Reload oder abgelaufene Vorschau führen zu keinem Push.
-- [ ] Lokale Bibliothek und vollständige Intervals-Snapshots bleiben unverändert verfügbar.
+- [x] Alle Bibliotheks-bezogenen negativen Tests aus FT-001 sind grün; die separaten Wettkampf-Charakterisierungen bleiben FT-003 zugeordnet.
+- [x] Nur der bestätigte Bibliotheks-Sync erzeugt erwartete Remote-Mutationen.
+- [x] Abbruch, Reload oder abgelaufene Vorschau führen zu keinem Push.
+- [x] Lokale Bibliothek und vollständige Intervals-Snapshots bleiben unverändert verfügbar.
+
+**Handover FT-002**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `fix/ft-002-readonly-library-sync`, Commit folgt nach Review
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, dieses Handover-Dokument
+- **Verhaltensänderung:** Provider-Aktivitätssync und Coach-Bibliotheksrefresh lesen nur noch; Bibliotheks-Remote-Mutationen benötigen eine aktuelle, zehn Minuten gültige Vorschau mit Fingerprint und sichtbarer UI-Bestätigung.
+- **Validierung:** fokussierter SQLCipher-Containerlauf mit 12 Tests: 10 grün, zwei erwartete Wettkampf-Charakterisierungsfehlschläge; Syntaxprüfung erfolgreich.
+- **Manuelle Prüfung:** UI-Flow implementiert; Browser-Smoke-Test folgt mit FT-007.
+- **Offene Risiken:** Startup-/Daily-Wettkampf-Push bleibt bis FT-003 durch `expectedFailure` charakterisiert.
+- **Folgetasks:** FT-003 entblockt; FT-004 kann den verbleibenden Chat-Mutationspfad ablösen.
 
 ### - [ ] FT-003 – Automatische Wettkampfsynchronisation strikt read-only machen
 

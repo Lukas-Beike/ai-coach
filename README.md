@@ -64,6 +64,9 @@ It is not intended to be exposed directly to the public internet.
    synchronized.
    Beim ersten expliziten Bibliothekssync wird dafür bei Intervals.icu bei
    Bedarf ein privater Ordner „Intervals Coach“ angelegt.
+- The regular Intervals.icu activity pull is read-only and never uploads
+  pending local library entries. Only the separate library synchronization
+  action can create or update library templates remotely.
 - If a provider response no longer contains an imported template, it is kept
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by

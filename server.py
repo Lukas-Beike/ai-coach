@@ -773,7 +773,7 @@ LIST_PLANNED_TOOL = empty_tool(
 )
 REFRESH_INTERVALS_TOOL = days_tool(
     "refresh_intervals_data",
-    "Explicitly refresh Intervals.icu activities, wellness data, planned calendar events, and the linked local workout library.",
+    "Explicitly refresh Intervals.icu activities, wellness data, and planned calendar events. This read-only action does not upload local library entries.",
     365,
 )
 REFRESH_PERFORMANCE_TOOL = empty_tool(
@@ -782,7 +782,7 @@ REFRESH_PERFORMANCE_TOOL = empty_tool(
 )
 REFRESH_LIBRARY_TOOL = empty_tool(
     "refresh_workout_library",
-    "Explicitly synchronize the local workout library with Intervals.icu, including pending local library entries.",
+    "Explicitly refresh the cached local workout library from Intervals.icu without uploading pending local entries.",
 )
 REFRESH_GARMIN_TOOL = days_tool(
     "refresh_garmin_data",
@@ -5767,6 +5767,93 @@ def sync_workout_library(reason: str = "manual") -> dict[str, Any]:
     }
 
 
+LIBRARY_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
+
+
+def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any]], str]:
+    summary = {"new": 0, "changed": 0, "missing": 0, "error_retry": 0}
+    entries: list[dict[str, Any]] = []
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT local_id, external_id, sync_state, payload FROM workout_library "
+            "WHERE sync_state IN ('local', 'sync_error', 'remote_missing') ORDER BY local_id"
+        ).fetchall()
+    for row in rows:
+        state = str(row.get("sync_state") or "local")
+        category = "missing" if state == "remote_missing" else "error_retry" if state == "sync_error" else "changed" if row.get("external_id") else "new"
+        summary[category] += 1
+        payload = str(row.get("payload") or "")
+        entries.append({
+            "local_id": str(row.get("local_id") or ""),
+            "status": state,
+            "category": category,
+            "has_remote_id": bool(row.get("external_id")),
+            "payload_hash": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        })
+    fingerprint = hashlib.sha256(
+        json.dumps({"summary": summary, "entries": entries}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return summary, entries, fingerprint
+
+
+def workout_library_sync_preview() -> dict[str, Any]:
+    summary, entries, fingerprint = _workout_library_sync_snapshot()
+    expires_at = datetime.fromtimestamp(time.time() + LIBRARY_SYNC_PREVIEW_TTL_SECONDS, timezone.utc).isoformat()
+    set_kv("library_sync_preview", json.dumps({
+        "fingerprint": fingerprint,
+        "expires_at": expires_at,
+        "summary": summary,
+        "entries": entries,
+    }, ensure_ascii=False, separators=(",", ":")))
+    return {
+        "status": "preview",
+        "fingerprint": fingerprint,
+        "expires_at": expires_at,
+        "summary": summary,
+        "entries": entries,
+    }
+
+
+def _validate_workout_library_sync_confirmation(payload: dict[str, Any]) -> None:
+    if payload.get("confirm") != "LIBRARY_SYNC":
+        raise AppError(400, "Zum Bibliothekssync muss LIBRARY_SYNC bestätigt werden.")
+    fingerprint = str(payload.get("fingerprint") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        raise AppError(400, "Für den Bibliothekssync ist ein gültiger Vorschau-Fingerprint erforderlich.")
+    try:
+        preview = json.loads(get_kv("library_sync_preview") or "{}")
+        expires_at = datetime.fromisoformat(str(preview.get("expires_at")))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise AppError(409, "Die Bibliothekssynchronisierung benötigt eine neue Vorschau.") from exc
+    if expires_at <= datetime.now(timezone.utc) or preview.get("fingerprint") != fingerprint:
+        raise AppError(409, "Die Bibliotheksvorschau ist abgelaufen oder nicht mehr aktuell.")
+    _, _, current_fingerprint = _workout_library_sync_snapshot()
+    if current_fingerprint != fingerprint:
+        raise AppError(409, "Die Bibliothek wurde seit der Vorschau geändert. Bitte erneut prüfen.")
+
+
+@intervals_operation
+def refresh_workout_library(reason: str = "manual") -> dict[str, Any]:
+    """Refresh the cached library without performing any remote writes."""
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    with WORKOUT_LIBRARY_SYNC_LOCK:
+        workouts = IntervalsClient().get_workout_library()
+        normalized = upsert_workout_library(workouts, remove_missing=True)
+    synced_at = utc_now()
+    set_kv("last_library_sync_at", synced_at)
+    set_kv("last_library_sync_error", "")
+    add_message("event", f"Trainingsbibliothek gelesen ({reason}, {len(normalized)} Remote-Einheiten).")
+    return {
+        "status": "ok",
+        "workouts": len(normalized),
+        "local_synced": 0,
+        "local_errors": [],
+        "synced_at": synced_at,
+        "library_state": workout_library_sync_summary(),
+    }
+
+
 def create_library_workouts(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     raise AppError(410, "Bibliothekseinheiten werden über den lokalen Bibliothekssync übertragen.")
 
@@ -6431,21 +6518,11 @@ def sync_intervals(reason: str = "manual", activity_days: int | None = None) -> 
         set_kv("sync_status", "Intervals.icu: Synchronisierung läuft…")
         snapshot = IntervalsClient().fetch_snapshot(activity_days=activity_days)
         save_snapshot(snapshot)
+        # Provider activity synchronization is read-only. Local library
+        # entries remain available from the cached local view and are pushed
+        # only by the dedicated, explicitly confirmed library action.
         library_count = len(list_workout_library())
         library_error = None
-        try:
-            library_result = sync_workout_library(reason=reason)
-            library_count = library_result["workouts"]
-            if library_result.get("status") == "partial":
-                library_error = "; ".join(library_result.get("local_errors") or []) or get_kv("last_library_sync_error") or "Bibliothek nur teilweise synchronisiert."
-        except Exception as exc:
-            library_error = redact_text(str(exc))[:1000]
-            set_kv("last_library_sync_error", library_error)
-            LOGGER.error(
-                "Workout library synchronization failed",
-                extra={"event": "library_sync_failed", "context": {"reason": reason}},
-                exc_info=True,
-            )
         # A successful full sync supersedes a transient morning-check-in
         # network error that may otherwise keep the global status in warning.
         set_kv("morning_checkin_error", "")
@@ -7894,7 +7971,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True) -> dict[str, 
             elif item.get("name") == "refresh_current_performance":
                 result = {"ok": True, **refresh_current_performance()}
             elif item.get("name") == "refresh_workout_library":
-                result = {"ok": True, **sync_workout_library(reason="Coach-Anfrage")}
+                result = {"ok": True, **refresh_workout_library(reason="Coach-Anfrage")}
             elif item.get("name") == "refresh_garmin_data":
                 refreshed = sync_garmin(coach_sync_days(arguments.get("days"), 90))
                 result = {"ok": True, **refreshed}
@@ -8779,8 +8856,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/planning/replan":
                 payload = self.read_json()
                 self.send_json(200, apply_adaptive_replan(payload.get("adjustment_id")) if payload.get("apply") else adaptive_replan_preview())
+            elif path == "/api/library/sync/preview":
+                self.read_json()
+                self.send_json(200, workout_library_sync_preview())
             elif path == "/api/library/sync":
-                self.send_json(200, sync_workout_library(reason="manuell"))
+                payload = self.read_json()
+                _validate_workout_library_sync_confirmation(payload)
+                result = sync_workout_library(reason="manuell")
+                set_kv("library_sync_preview", "")
+                self.send_json(200, result)
             elif match := LIBRARY_ENTRY_RE.match(path):
                 self.send_json(200, update_workout_library_entry(unquote(match.group(1)), self.read_json()))
             elif match := LOCAL_PLANNED_RE.match(path):

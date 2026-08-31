@@ -2087,19 +2087,54 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["activity_days"], 65)
         self.assertEqual(result["window_end"], server.local_now().date().isoformat())
 
-    def test_sync_intervals_surfaces_partial_library_sync(self):
+    def test_sync_intervals_does_not_run_library_push(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(
             server.IntervalsClient, "fetch_snapshot", return_value=snapshot
         ), patch.object(
             server, "sync_workout_library", return_value={"status": "partial", "workouts": 1, "local_errors": ["upload failed"]}
-        ):
+        ) as library_sync:
             result = server.sync_intervals("test", activity_days=42)
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["library_error"], "upload failed")
+        library_sync.assert_not_called()
+        self.assertEqual(result["status"], "ok")
+        self.assertIsNone(result["library_error"])
 
-    def _prepare_remote_contract_fixture(self):
+    def test_library_refresh_is_read_only_even_with_pending_local_entries(self):
+        server.create_local_workout_library_entry({
+            "sport": "Ride",
+            "name": "Read-only refresh",
+            "description": "- 20m Z2",
+            "duration_minutes": 20,
+        })
+        recorder = IntervalsRequestRecorder()
+        client = RecordedIntervalsClient(recorder)
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
+            server, "IntervalsClient", return_value=client
+        ):
+            result = server.refresh_workout_library("read-only")
+        self.assertEqual(result["local_synced"], 0)
+        self.assertEqual(recorder.mutations, [])
+
+    def test_library_sync_preview_rejects_changed_payload(self):
+        entry = server.create_local_workout_library_entry({
+            "sport": "Ride",
+            "name": "Preview binding",
+            "description": "- 20m Z2",
+            "duration_minutes": 20,
+        })
+        preview = server.workout_library_sync_preview()
+        self.assertEqual(preview["summary"]["new"], 1)
+        self.assertEqual(preview["entries"][0]["local_id"], entry["id"])
+        server.update_workout_library_entry(entry["id"], {"action": "update", "name": "Changed after preview"})
+        with self.assertRaises(server.AppError) as raised:
+            server._validate_workout_library_sync_confirmation({
+                "confirm": "LIBRARY_SYNC",
+                "fingerprint": preview["fingerprint"],
+            })
+        self.assertEqual(raised.exception.status, 409)
+
+    def _prepare_remote_contract_fixture(self, include_competition=False):
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
         server.create_local_workout_library_entry({
@@ -2110,14 +2145,14 @@ class CoachTests(unittest.TestCase):
             "target": "POWER",
             "rationale": "Test",
         })
-        server.save_athlete_context({}, [{
-            "name": "Contract race",
-            "event_date": (date.today() + timedelta(days=30)).isoformat(),
-            "sport": "Cycling",
-        }])
+        if include_competition:
+            server.save_athlete_context({}, [{
+                "name": "Contract race",
+                "event_date": (date.today() + timedelta(days=30)).isoformat(),
+                "sport": "Cycling",
+            }])
         return recorder, client
 
-    @unittest.expectedFailure
     def test_startup_sync_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
@@ -2126,7 +2161,6 @@ class CoachTests(unittest.TestCase):
             server.safe_sync("startup")
         self.assertEqual(recorder.mutations, [])
 
-    @unittest.expectedFailure
     def test_daily_sync_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
@@ -2135,7 +2169,34 @@ class CoachTests(unittest.TestCase):
             server.safe_sync("daily")
         self.assertEqual(recorder.mutations, [])
 
+    def _prepare_competition_contract_fixture(self):
+        recorder = IntervalsRequestRecorder()
+        client = RecordedIntervalsClient(recorder)
+        server.save_athlete_context({}, [{
+            "name": "Competition contract",
+            "event_date": (date.today() + timedelta(days=30)).isoformat(),
+            "sport": "Cycling",
+        }])
+        return recorder, client
+
     @unittest.expectedFailure
+    def test_startup_sync_competition_contract_rejects_remote_mutations(self):
+        recorder, client = self._prepare_competition_contract_fixture()
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
+            server, "IntervalsClient", return_value=client
+        ):
+            server.safe_sync("startup")
+        self.assertEqual(recorder.mutations, [])
+
+    @unittest.expectedFailure
+    def test_daily_sync_competition_contract_rejects_remote_mutations(self):
+        recorder, client = self._prepare_competition_contract_fixture()
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
+            server, "IntervalsClient", return_value=client
+        ):
+            server.safe_sync("daily")
+        self.assertEqual(recorder.mutations, [])
+
     def test_manual_activity_sync_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
@@ -2144,7 +2205,6 @@ class CoachTests(unittest.TestCase):
             server.sync_intervals("activity", activity_days=7)
         self.assertEqual(recorder.mutations, [])
 
-    @unittest.expectedFailure
     def test_full_resync_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_remote_contract_fixture()
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
@@ -2153,7 +2213,6 @@ class CoachTests(unittest.TestCase):
             server.full_provider_resync("intervals")
         self.assertEqual(recorder.mutations, [])
 
-    @unittest.expectedFailure
     def test_coach_fresh_data_contract_rejects_remote_mutations(self):
         recorder, client = self._prepare_remote_contract_fixture()
 
@@ -2224,7 +2283,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["id"], "remote-planned-event")
         self.assertEqual([call["method"] for call in recorder.mutations], ["POST"])
 
-    @unittest.expectedFailure
     def test_local_sync_error_and_remote_missing_entries_are_not_retried_by_read_sync(self):
         recorder = IntervalsRequestRecorder()
         entries = [

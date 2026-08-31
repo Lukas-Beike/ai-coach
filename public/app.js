@@ -1884,7 +1884,20 @@ async function loadLibrary() {
   button.disabled = true;
   button.textContent = "Bibliothek wird geladen…";
   try {
-    await api("/api/library/sync", { method: "POST", body: "{}" });
+    const preview = await api("/api/library/sync/preview", { method: "POST", body: "{}" });
+    const summary = preview.summary || {};
+    const changeCount = Object.values(summary).reduce((total, value) => total + Number(value || 0), 0);
+    const confirmed = window.confirm(
+      `Bibliothekssync zu Intervals.icu freigeben? ${changeCount} lokale Einträge: ` +
+      `${summary.new || 0} neu, ${summary.changed || 0} geändert, ` +
+      `${summary.missing || 0} fehlend, ${summary.error_retry || 0} Fehlerwiederholung. ` +
+      "Die Vorschau ist nur 10 Minuten gültig."
+    );
+    if (!confirmed) return;
+    await api("/api/library/sync", {
+      method: "POST",
+      body: JSON.stringify({ confirm: "LIBRARY_SYNC", fingerprint: preview.fingerprint }),
+    });
     await load();
   } catch (error) {
     root.replaceChildren();
