@@ -9909,6 +9909,10 @@ def delete_local_data() -> dict[str, Any]:
 SESSION_COOKIE = "ic_session"
 CSRF_COOKIE = "ic_csrf"
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
+SESSION_TOUCH_INTERVAL_SECONDS = 5 * 60
+SESSION_CLEANUP_INTERVAL_SECONDS = 15 * 60
+SESSION_CLEANUP_BATCH_SIZE = 100
+SESSION_LAST_CLEANUP_MONOTONIC = 0.0
 
 
 def client_ip(handler: BaseHTTPRequestHandler) -> str:
@@ -9940,6 +9944,31 @@ def session_token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def session_timestamp(value: Any) -> float | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def cleanup_expired_sessions(db: Any, now: float, *, force: bool = False) -> int:
+    global SESSION_LAST_CLEANUP_MONOTONIC
+    current_monotonic = time.monotonic()
+    if not force and current_monotonic - SESSION_LAST_CLEANUP_MONOTONIC < SESSION_CLEANUP_INTERVAL_SECONDS:
+        return 0
+    cursor = db.execute(
+        "DELETE FROM sessions WHERE token_hash IN ("
+        "SELECT token_hash FROM sessions WHERE expires_at <= ? LIMIT ?"
+        ")",
+        (now, SESSION_CLEANUP_BATCH_SIZE),
+    )
+    SESSION_LAST_CLEANUP_MONOTONIC = current_monotonic
+    return cursor.rowcount
+
+
 def authenticated_session(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
     token = cookie_value(handler, SESSION_COOKIE)
     if not token:
@@ -9947,8 +9976,9 @@ def authenticated_session(handler: BaseHTTPRequestHandler) -> dict[str, Any] | N
     now = time.time()
     token_hash = session_token_hash(token)
     with SESSION_LOCK, DB_LOCK, database() as db:
+        cleanup_expired_sessions(db, now)
         row = db.execute(
-            "SELECT csrf_hash, expires_at FROM sessions WHERE token_hash = ?",
+            "SELECT csrf_hash, expires_at, last_seen FROM sessions WHERE token_hash = ?",
             (token_hash,),
         ).fetchone()
         if not row:
@@ -9956,12 +9986,13 @@ def authenticated_session(handler: BaseHTTPRequestHandler) -> dict[str, Any] | N
         if float(row["expires_at"]) <= now:
             db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
             return None
-        expires_at = now + SESSION_TTL_SECONDS
-        db.execute(
-            "UPDATE sessions SET expires_at = ?, last_seen = ? WHERE token_hash = ?",
-            (expires_at, utc_now(), token_hash),
-        )
-        return {"csrf_hash": row["csrf_hash"], "expires_at": expires_at}
+        last_seen = session_timestamp(row["last_seen"])
+        if last_seen is None or now - last_seen >= SESSION_TOUCH_INTERVAL_SECONDS:
+            db.execute(
+                "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
+                (utc_now(), token_hash),
+            )
+        return {"csrf_hash": row["csrf_hash"], "expires_at": float(row["expires_at"])}
 
 
 def login_user(handler: BaseHTTPRequestHandler, password: str) -> dict[str, Any]:

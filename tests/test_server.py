@@ -163,6 +163,16 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM kv")
         server.save_profile({})
 
+    def create_test_session(self):
+        token = f"session-{uuid.uuid4().hex}"
+        now = server.time.time()
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+                (server.session_token_hash(token), server.session_token_hash("csrf"), now + server.SESSION_TTL_SECONDS, server.utc_now(), server.utc_now()),
+            )
+        return token
+
     def test_profile_only_accepts_known_fields_and_trims(self):
         profile = server.normalize_profile({"name": "  Ada  ", "goals": "Finish strong", "admin": True})
         self.assertEqual(profile["name"], "Ada")
@@ -246,6 +256,116 @@ class CoachTests(unittest.TestCase):
         self.assertIn("; Secure", secure[0])
         self.assertIn("; Secure", secure[1])
         self.assertIn("Max-Age=2592000", secure[0])
+
+    def test_authenticated_session_throttles_last_seen_without_extending_fixed_expiry(self):
+        class Handler:
+            client_address = ("127.0.0.1", 8090)
+
+            def __init__(self, cookies=""):
+                self.headers = {"Cookie": cookies}
+
+        token = self.create_test_session()
+        token_hash = server.session_token_hash(token)
+        old_seen = "2020-01-01T00:00:00+00:00"
+        with server.DB_LOCK, server.database() as db:
+            original = db.execute("SELECT expires_at FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()["expires_at"]
+            db.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (old_seen, token_hash))
+
+        first = server.authenticated_session(Handler(f"ic_session={token}"))
+        with server.DB_LOCK, server.database() as db:
+            touched = db.execute("SELECT expires_at, last_seen FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()
+        second = server.authenticated_session(Handler(f"ic_session={token}"))
+        with server.DB_LOCK, server.database() as db:
+            unchanged = db.execute("SELECT expires_at, last_seen FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        self.assertEqual(touched["expires_at"], original)
+        self.assertNotEqual(touched["last_seen"], old_seen)
+        self.assertEqual(unchanged["expires_at"], original)
+        self.assertEqual(unchanged["last_seen"], touched["last_seen"])
+
+    def test_expired_session_is_rejected_and_removed_immediately(self):
+        class Handler:
+            client_address = ("127.0.0.1", 8090)
+
+            def __init__(self, cookies=""):
+                self.headers = {"Cookie": cookies}
+
+        token = self.create_test_session()
+        with server.DB_LOCK, server.database() as db:
+            db.execute("UPDATE sessions SET expires_at=? WHERE token_hash=?", (server.time.time() - 1, server.session_token_hash(token)))
+        self.assertIsNone(server.authenticated_session(Handler(f"ic_session={token}")))
+        with server.DB_LOCK, server.database() as db:
+            self.assertIsNone(db.execute("SELECT token_hash FROM sessions WHERE token_hash=?", (server.session_token_hash(token),)).fetchone())
+
+    def test_expired_session_cleanup_is_bounded_and_periodic(self):
+        with server.DB_LOCK, server.database() as db:
+            for index in range(server.SESSION_CLEANUP_BATCH_SIZE + 1):
+                db.execute(
+                    "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+                    (f"expired-{index}", f"csrf-{index}", 0, "now", "now"),
+                )
+            server.SESSION_LAST_CLEANUP_MONOTONIC = 0
+            deleted = server.cleanup_expired_sessions(db, server.time.time(), force=True)
+            remaining = db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()["count"]
+        self.assertEqual(deleted, server.SESSION_CLEANUP_BATCH_SIZE)
+        self.assertEqual(remaining, 1)
+
+    def test_parallel_authenticated_requests_share_a_valid_session(self):
+        class Handler:
+            client_address = ("127.0.0.1", 8090)
+
+            def __init__(self, cookies=""):
+                self.headers = {"Cookie": cookies}
+
+        token = self.create_test_session()
+        cookies = f"ic_session={token}"
+        barrier = threading.Barrier(8)
+        results = []
+        errors = []
+
+        def authenticate():
+            try:
+                barrier.wait(timeout=5)
+                results.append(server.authenticated_session(Handler(cookies)))
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=authenticate) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(results), 8)
+        self.assertTrue(all(result is not None for result in results))
+
+    def test_csrf_rejects_missing_or_foreign_token(self):
+        class MissingTokenHandler:
+            headers = {}
+
+        with self.assertRaises(server.AppError) as missing:
+            server.require_csrf(MissingTokenHandler(), {"csrf_hash": server.session_token_hash("expected")})
+        self.assertEqual(missing.exception.status, 403)
+
+        class Handler:
+            headers = {"X-CSRF-Token": "foreign"}
+
+        with self.assertRaises(server.AppError) as foreign:
+            server.require_csrf(Handler(), {"csrf_hash": server.session_token_hash("expected")})
+        self.assertEqual(foreign.exception.status, 403)
+
+    def test_logout_removes_session_immediately(self):
+        class Handler:
+            client_address = ("127.0.0.1", 8090)
+
+            def __init__(self, cookies=""):
+                self.headers = {"Cookie": cookies}
+
+        token = self.create_test_session()
+        server.logout_user(Handler(f"ic_session={token}"))
+        self.assertIsNone(server.authenticated_session(Handler(f"ic_session={token}")))
 
     def test_privacy_export_contains_archived_and_provider_state_without_sessions_or_credentials(self):
         archived = server.upsert_workout_library([{
@@ -471,7 +591,8 @@ class CoachTests(unittest.TestCase):
         first = server.paged_chat_history(limit=2)
         second = server.paged_chat_history(cursor=first["next_cursor"], limit=2)
         page_ids = [item["id"] for item in first["messages"] + second["messages"]]
-        self.assertEqual(set(page_ids), {2, 3, 4, 5})
+        page_contents = [item["content"] for item in first["messages"] + second["messages"]]
+        self.assertEqual(set(page_contents), {"searchable 1", "searchable 2", "searchable 3", "searchable 4"})
         self.assertEqual(len(page_ids), len(set(page_ids)))
         search = server.paged_chat_history(limit=10, search="searchable 3")
         self.assertEqual([item["content"] for item in search["messages"]], ["searchable 3"])

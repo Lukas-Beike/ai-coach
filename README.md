@@ -437,8 +437,11 @@ validated restore action. Restoring requires the same `APP_PASSWORD` used by
 the backup database. Before replacement, the current database is retained as a
 `*.pre-restore-*` copy in `/data`. Keep both files protected.
 
-The login session cookie is valid for 30 days and is protected with `HttpOnly`
-and `SameSite=Strict` attributes. For HTTPS reverse-proxy deployments, set
+The login session has a fixed 30-day lifetime; its cookie `Max-Age` and the
+server-side expiry use the same duration. The cookie is protected with `HttpOnly`
+and `SameSite=Strict` attributes. Activity metadata is written at most once per
+five minutes, while expired sessions are cleaned up in bounded periodic batches.
+For HTTPS reverse-proxy deployments, set
 `COOKIE_SECURE=true`; this adds the `Secure` attribute to the session and CSRF
 cookies. Keep it `false` for the documented local HTTP development flow.
 
