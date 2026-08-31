@@ -1012,6 +1012,16 @@ class CoachTests(unittest.TestCase):
             {"name": "Tempo", "description": "- 30m 85%", "type": "Ride"},
         )
 
+    def test_unknown_workout_sport_falls_back_to_provider_other_type(self):
+        client = server.IntervalsClient(server.Config(intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        with patch.object(client, "post", return_value={"id": "remote-1"}) as post:
+            client.create_library_workouts([{
+                "name": "Regeneration",
+                "description": "Locker bewegen",
+                "sport": "Recovery Session",
+            }])
+        self.assertEqual(post.call_args.args[1]["type"], "Other")
+
     def test_workout_sport_aliases_are_normalized_before_storage(self):
         normalized = server.normalize_workout_draft({
             "date": (date.today() + timedelta(days=1)).isoformat(),
@@ -2358,6 +2368,15 @@ class CoachTests(unittest.TestCase):
         self.assertIn("Number(event.training_relevant) === 0", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
         self.assertIn("Number(event.no_intensity) === 1", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
 
+    def test_intervals_connection_status_has_detail_and_refreshes_assets(self):
+        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        service_worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
+        self.assertIn('id="intervalsConnectionDetail"', markup)
+        asset_version = markup.split('app.js?v=', 1)[1].split('"', 1)[0]
+        self.assertIn(f'app.js?v={asset_version}', markup)
+        self.assertIn(f'intervals-coach-v{asset_version}', service_worker)
+        self.assertIn(f'/app.js?v={asset_version}', service_worker)
+
     def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
         today = server.local_now().date()
         daily_dates = [(today + timedelta(days=offset)).isoformat() for offset in range(14)]
@@ -2583,6 +2602,40 @@ class CoachTests(unittest.TestCase):
             handler.flush()
         entries = server.recent_log_entries()
         self.assertTrue(any(entry.get("event") == "upstream_network_error" for entry in entries))
+
+    def test_intervals_validation_error_includes_safe_provider_detail(self):
+        error_body = json.dumps({"error": {"message": "Invalid workout type"}}).encode("utf-8")
+        upstream_error = server.HTTPError(
+            "https://intervals.icu/api/v1/athlete/0/workouts",
+            422,
+            "Unprocessable Entity",
+            {},
+            BytesIO(error_body),
+        )
+        with patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError) as raised:
+                server.http_json("POST", "https://intervals.icu/api/v1/athlete/0/workouts", payload={}, service="intervals")
+        self.assertEqual(raised.exception.status, 502)
+        self.assertIn("422", raised.exception.message)
+        self.assertIn("Invalid workout type", raised.exception.message)
+
+    def test_intervals_public_state_reports_sync_health(self):
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config):
+            server.set_kv("last_library_sync_at", "2026-08-31T08:00:00+00:00")
+            state = server.intervals_public_state()
+        self.assertEqual(state["state"], "connected")
+        self.assertEqual(state["last_sync_at"], None)
+        self.assertEqual(state["library_sync"]["last_sync_at"], "2026-08-31T08:00:00+00:00")
+        self.assertIsNone(state["last_error"])
+
+    def test_intervals_public_state_reports_library_error(self):
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config):
+            server.set_kv("last_library_sync_error", "Intervals.icu weist die Anfrage zurück (422): Invalid workout type")
+            state = server.intervals_public_state()
+        self.assertEqual(state["state"], "error")
+        self.assertIn("422", state["last_error"])
 
     def test_external_http_calls_log_start_and_completion_without_payload(self):
         class FakeResponse:

@@ -3052,9 +3052,38 @@ COMPETITION_SPORTS = {
 
 INTERVALS_WORKOUT_SPORTS = {
     **COMPETITION_SPORTS,
+    "bike": "Ride",
+    "biking": "Ride",
+    "bicycle": "Ride",
+    "bike workout": "Ride",
+    "cycling workout": "Ride",
     "swim": "Swim",
     "swimming": "Swim",
     "schwimmen": "Swim",
+    "run workout": "Run",
+    "jogging": "Run",
+    "jog": "Run",
+    "gym": "WeightTraining",
+    "weights": "WeightTraining",
+    "weight training": "WeightTraining",
+    "hiking": "Hike",
+    "walking": "Walk",
+    "row": "Rowing",
+    "rowing": "Rowing",
+    "yoga": "Yoga",
+}
+
+INTERVALS_WORKOUT_TYPES = {
+    "Ride", "Run", "Swim", "WeightTraining", "Hike", "Walk", "AlpineSki",
+    "BackcountrySki", "Badminton", "Canoeing", "Crossfit", "EBikeRide",
+    "EMountainBikeRide", "Elliptical", "Golf", "GravelRide", "Handcycle",
+    "HighIntensityIntervalTraining", "IceSkate", "InlineSkate", "Kayaking",
+    "Kitesurf", "MountainBikeRide", "NordicSki", "OpenWaterSwim", "Padel",
+    "Pilates", "Pickleball", "Racquetball", "Rugby", "RockClimbing", "RollerSki",
+    "Rowing", "Sail", "Skateboard", "Snowboard", "Snowshoe", "Soccer", "Squash",
+    "StairStepper", "StandUpPaddling", "Surfing", "TableTennis", "Tennis", "TrailRun",
+    "Transition", "Velomobile", "VirtualRide", "VirtualRow", "VirtualRun", "WaterSport",
+    "Wheelchair", "Windsurf", "Workout", "Yoga", "Other",
 }
 
 
@@ -3073,7 +3102,15 @@ def intervals_workout_sport(value: Any) -> str:
     """Return the provider's canonical activity type for workout payloads."""
     raw = str(value or "Ride").strip()
     normalized = re.sub(r"[\s_-]+", " ", raw.casefold())
-    return INTERVALS_WORKOUT_SPORTS.get(raw.casefold()) or INTERVALS_WORKOUT_SPORTS.get(normalized) or raw[:80] or "Ride"
+    canonical = INTERVALS_WORKOUT_SPORTS.get(raw.casefold()) or INTERVALS_WORKOUT_SPORTS.get(normalized)
+    if canonical:
+        return canonical
+    for activity_type in INTERVALS_WORKOUT_TYPES:
+        if activity_type.casefold() == raw.casefold():
+            return activity_type
+    # The API validates activity types. An unknown natural-language label from
+    # a local/AI-generated workout must not turn into an invalid provider value.
+    return "Other"
 
 
 def competition_external_id(competition_id: str) -> str:
@@ -3420,6 +3457,37 @@ def record_openai_rate_limits(response_headers: Any) -> None:
         set_kv("openai_rate_limits", json.dumps({"updated_at": utc_now(), **values}, ensure_ascii=False))
 
 
+def upstream_http_error_message(status: int, raw_body: bytes, service: str | None) -> str:
+    """Expose a bounded provider validation hint without exposing the payload."""
+    if service != "intervals":
+        return f"Anfrage an externen Dienst fehlgeschlagen ({status})."
+    detail = ""
+    try:
+        parsed = json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else None
+    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        error = parsed.get("error")
+        if isinstance(error, dict):
+            for key in ("message", "detail", "title"):
+                if error.get(key):
+                    detail = str(error[key])
+                    break
+        elif isinstance(error, str):
+            detail = error
+        if not detail:
+            for key in ("message", "detail", "title"):
+                if parsed.get(key):
+                    detail = str(parsed[key])
+                    break
+    elif isinstance(parsed, str):
+        detail = parsed
+    detail = re.sub(r"\s+", " ", redact_text(detail)).strip()[:500]
+    if detail:
+        return f"Intervals.icu weist die Anfrage zurück ({status}): {detail}"
+    return f"Anfrage an externen Dienst fehlgeschlagen ({status})."
+
+
 def http_json(
     method: str,
     url: str,
@@ -3504,7 +3572,7 @@ def http_json(
         )
         if error_details:
             raise AppError(exc.code if exc.code == 429 else 502, error_details["message"]) from exc
-        raise AppError(502, f"Anfrage an externen Dienst fehlgeschlagen ({exc.code}).") from exc
+        raise AppError(502, upstream_http_error_message(exc.code, raw_error, service)) from exc
     except (URLError, TimeoutError) as exc:
         if service == "openai":
             record_openai_status({
@@ -5407,6 +5475,40 @@ def workout_library_sync_summary() -> dict[str, int]:
         state = str(row.get("sync_state") or "local")
         summary[state] = int(row.get("count") or 0)
     return summary
+
+
+def intervals_public_state() -> dict[str, Any]:
+    """Return connection health without exposing Intervals credentials."""
+    configured = bool(CONFIG.intervals_api_key)
+    last_sync_at = get_kv("last_sync_at")
+    last_library_sync_at = get_kv("last_library_sync_at")
+    last_sync_error = get_kv("last_sync_error") or None
+    last_library_sync_error = get_kv("last_library_sync_error") or None
+    running = SYNC_LOCK.locked() or WORKOUT_LIBRARY_SYNC_LOCK.locked()
+    error = last_sync_error or last_library_sync_error
+    if not configured:
+        state = "not_configured"
+    elif running:
+        state = "syncing"
+    elif error:
+        state = "error"
+    elif last_sync_at or last_library_sync_at:
+        state = "connected"
+    else:
+        state = "configured"
+    return {
+        "configured": configured,
+        "state": state,
+        "running": running,
+        "status": get_kv("sync_status") or None,
+        "last_sync_at": last_sync_at,
+        "last_error": error,
+        "library_sync": {
+            "last_sync_at": last_library_sync_at,
+            "last_error": last_library_sync_error,
+            "state": workout_library_sync_summary(),
+        },
+    }
 
 
 def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
@@ -7338,6 +7440,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "external_calendar": external_calendar_state(),
             "performance": current_performance_context(snapshot),
             "garmin": garmin_public_state(),
+            "intervals": intervals_public_state(),
             "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
             "provider_resync": {
                 "intervals": provider_resync_state("intervals"),
