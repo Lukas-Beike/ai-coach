@@ -697,9 +697,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-016.
 - **Folgetasks:** FT-017 ist entblockt.
 
-### - [ ] FT-017 – Neue mobile Hauptnavigation und „Heute“-Ansicht umsetzen
+### - [x] FT-017 – Neue mobile Hauptnavigation und „Heute“-Ansicht umsetzen
 
-**Status:** in Umsetzung; lokaler Patch und Container-Validierung abgeschlossen, PR-/CI-Abnahme offen
+**Status:** abgeschlossen
 
 **Quelle:** UX-01, Feature-Gap „Heute“
 **Ziel:** Die sechs Hauptziele orientieren sich am täglichen Ablauf: Coach, Heute, Verlauf, Plan, Leistung, Mehr.
@@ -717,20 +717,21 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Abnahmekriterien**
 
-- [ ] Täglicher Check-in ist ohne Öffnen technischer Profileinstellungen erreichbar.
-- [ ] „Heute“ funktioniert auch bei fehlendem Garmin/Wetter/Workout mit klaren Empty States.
-- [ ] Keine doppelte Dateneingabe oder implizite durable Mutation.
+- [x] Täglicher Check-in ist ohne Öffnen technischer Profileinstellungen erreichbar.
+- [x] „Heute“ funktioniert auch bei fehlendem Garmin/Wetter/Workout mit klaren Empty States.
+- [x] Keine doppelte Dateneingabe oder implizite durable Mutation.
 
-**Handover FT-017 (laufend)**
+**Handover FT-017**
 
-- **Status:** in Umsetzung
-- **Branch und Commit:** `feat/ft-017-today`, `671c50d`
-- **Geänderte Dateien:** `public/app.js`, `public/index.html`, `public/styles.css`, `public/service-worker.js`, `e2e/coach.spec.js`, `tests/test_server.py`, `README.md`
+- **Status:** abgeschlossen
+- **Branch und Commits:** `feat/ft-017-today`, `671c50d`; PR #161 per Auto-Squash gemerged als `8924f2e`; Browser-Assertion PR #162 als `2fcc51f`; E2E-Stabilisierung PR #163 per Auto-Squash gemerged als `9bb4a06`; Check-in-Dialog-Korrektur PR #164 per Auto-Squash gemerged als `c997447`
+- **Geänderte Dateien:** `public/app.js`, `public/index.html`, `public/styles.css`, `public/service-worker.js`, `e2e/coach.spec.js`, `playwright.config.cjs`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
 - **Verhaltensänderung:** Die Hauptnavigation führt jetzt zu Coach, Heute, Verlauf, Plan, Leistung und Mehr. Die neue Heute-Ansicht projiziert ausschließlich bereits geladene lokale Zustände; der Check-in-Dialog ist dort erreichbar. Fehlende Daten, Laden, Offline, Sync und Fehler werden explizit dargestellt.
 - **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check`, `docker build -t ai-coach:ft017 .` und vier parallele SQLCipher-Shards mit `62 + 62 + 61 + 61 = 246` Tests erfolgreich, alle `OK`.
-- **Manuelle Prüfung:** CI-Browser-Smoke und Accessibility stehen im PR noch aus; native Node-/Playwright-Ausführung ist unter Windows nicht installiert.
-- **Offene Risiken:** PR-/CI-Abnahme ausstehend.
-- **Folgetasks:** FT-018 und FT-019 bleiben bis zur Abnahme offen.
+- **Review:** Diff-Review ohne offene Findings. Die Nachprüfung fand zwei konkrete E2E-/UI-Probleme: die leere Check-in-Schaltfläche wurde mit dem falschen Text selektiert, und der Dialog lag in einem inaktiven Panel. Beide Korrekturen wurden umgesetzt und erneut geprüft.
+- **Manuelle Prüfung:** CI-Browser-Smoke und Accessibility im Korrektur-PR #164 bestanden; vier Test-Shards, Syntax und CodeQL/Analyse bestanden. Die Browserausführung nutzt weiterhin die schnelle parallele Projektstruktur; native Node-/Playwright-Ausführung ist unter Windows nicht installiert.
+- **Offene Risiken:** Keine für FT-017.
+- **Folgetasks:** FT-018 und FT-019 sind entblockt.
 
 ### - [ ] FT-018 – „Plan“ in Kalender, Bibliothek und Ziele & Pläne segmentieren
 
