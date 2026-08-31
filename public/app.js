@@ -7,6 +7,7 @@ const state = {
   chatQueueSequence: 0,
   profileDirty: false,
   checkinDirty: false,
+  chatDraftDirty: false,
   checkinSelectedDate: null,
   activityTypes: new Set(),
   activitySearch: "",
@@ -79,6 +80,7 @@ function showLogin() {
   state.data = null;
   state.profileDirty = false;
   state.checkinDirty = false;
+  state.chatDraftDirty = false;
   state.activityFeedbackDirty.clear();
   state.planningEditDirty.clear();
   state.libraryDateDirty.clear();
@@ -522,6 +524,8 @@ function formatTime(value) {
 function hasUnsavedChanges() {
   return state.profileDirty
     || state.checkinDirty
+    || state.chatDraftDirty
+    || Boolean($("#messageInput")?.value.trim())
     || state.activityFeedbackDirty.size > 0
     || state.planningEditDirty.size > 0
     || state.libraryDateDirty.size > 0;
@@ -539,6 +543,7 @@ function confirmDiscardChanges() {
 function discardUnsavedChanges() {
   state.profileDirty = false;
   state.checkinDirty = false;
+  state.chatDraftDirty = false;
   state.activityFeedbackDirty.clear();
   state.planningEditDirty.clear();
   state.libraryDateDirty.clear();
@@ -2736,6 +2741,7 @@ function queueChatMessage(message, mode) {
   });
   const input = $("#messageInput");
   input.value = "";
+  state.chatDraftDirty = false;
   input.style.height = "auto";
   renderMessages(state.data?.messages || [], true);
   updateChatControls();
@@ -2753,7 +2759,10 @@ async function requestCoachResponse(message, restoreInputOnError = false) {
     return true;
   } catch (error) {
     toast(error.message, true);
-    if (restoreInputOnError) $("#messageInput").value = message;
+    if (restoreInputOnError) {
+      $("#messageInput").value = message;
+      state.chatDraftDirty = true;
+    }
     await load();
     invalidateContextPreview();
     return false;
@@ -2782,6 +2791,7 @@ async function sendMessage(event) {
   state.quickTemplatesVisible = false;
   renderQuickMessageTemplates();
   input.value = "";
+  state.chatDraftDirty = false;
   input.style.height = "auto";
   updateChatControls();
   updateVoiceButton();
@@ -3013,6 +3023,7 @@ function setupPwaUpdates() {
 }
 
 async function applyPwaUpdate() {
+  if (!confirmDiscardChanges()) return;
   try {
     const registration = await navigator.serviceWorker.getRegistration();
     if (!registration?.waiting) {
@@ -3336,6 +3347,7 @@ $("#systemContextPreviewButton").addEventListener("click", () => {
   loadContextPreview();
 });
 $("#messageInput").addEventListener("input", (event) => {
+  state.chatDraftDirty = Boolean(event.target.value.trim());
   event.target.style.height = "auto";
   event.target.style.height = `${Math.min(event.target.scrollHeight, 150)}px`;
 });
