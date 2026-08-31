@@ -10,7 +10,6 @@ const state = {
   chatDraftDirty: false,
   checkinSelectedDate: null,
   activityTypes: new Set(),
-  activitySearch: "",
   activityFromDate: "",
   activityToDate: "",
   activityVisibleCount: 250,
@@ -94,7 +93,6 @@ function showLogin() {
   state.activityFeedbackDrafts.clear();
   state.planningDrafts.clear();
   state.libraryDateDrafts.clear();
-  state.activitySearch = "";
   state.activityFromDate = "";
   state.activityToDate = "";
   state.activityVisibleCount = 250;
@@ -414,8 +412,10 @@ function adaptivePreviewMarkup(preview) {
   const signals = preview.signals?.length
     ? `Signale: ${preview.signals.map((signal) => escapeHtml(String(signal))).join(", ")}`
     : "Keine kritischen lokalen Signale erkannt.";
-  const changes = (preview.changes || []).map((change) => `<div class="replan-change"><strong>${escapeHtml(String(change.date || ""))}: ${escapeHtml(String(change.name || "Einheit"))}</strong><br>${escapeHtml(String(change.before?.description || ""))}<br>→ ${escapeHtml(String(change.after?.description || ""))}</div>`).join("");
-  return `<div><strong>${escapeHtml(String(preview.message || "Adaptive Prüfung"))}</strong><br>${signals}</div>${changes || "<div>Es gibt keine lokalen Entwürfe, die angepasst werden müssen.</div>"}<small>${escapeHtml(String(preview.scope || ""))}</small>`;
+  const changes = (preview.changes || []).map((change) => `<div class="replan-change"><strong>${escapeHtml(String(change.date || ""))}: ${escapeHtml(String(change.name || "Einheit"))}${change.after?.name ? ` → ${escapeHtml(String(change.after.name))}` : ""}</strong><br>${escapeHtml(String(change.before?.description || ""))}<br>→ ${escapeHtml(String(change.after?.description || ""))}</div>`).join("");
+  const pause = preview.illness_pause;
+  const pauseMarkup = pause && !pause.approved ? `<div class="illness-pause-preview"><strong>Krankheitspause</strong><span>${escapeHtml(String(pause.forecast || "Vorsichtige Prognose"))}</span><span>Vorgeschlagen: ${escapeHtml(String(pause.recommended_pause_days || ""))} Tage (${escapeHtml(String(pause.start_date || ""))} bis ${escapeHtml(String(pause.end_date || ""))})</span><label><input id="syncIllnessToIntervals" type="checkbox"> Krankheitstage zusätzlich als <code>SICK</code>-Einträge nach Intervals.icu synchronisieren</label></div>` : "";
+  return `<div><strong>${escapeHtml(String(preview.message || "Adaptive Prüfung"))}</strong><br>${signals}</div>${pauseMarkup}${changes || "<div>Es gibt keine lokalen Einheiten, die angepasst werden müssen.</div>"}<small>${escapeHtml(String(preview.scope || ""))}</small>`;
 }
 
 function openAdaptivePlanningDialog(preview) {
@@ -425,7 +425,7 @@ function openAdaptivePlanningDialog(preview) {
   if (!dialog || !node || !preview) return;
   node.innerHTML = adaptivePreviewMarkup(preview);
   if (apply) {
-    apply.hidden = !(preview.changes || []).length;
+    apply.hidden = !(preview.changes || []).length && !(preview.illness_pause && !preview.illness_pause.approved);
     apply.dataset.adjustmentId = preview.id || "";
   }
   if (!dialog.open) dialog.showModal();
@@ -442,9 +442,15 @@ function renderAdaptivePlanning(data) {
   }
   const preview = planning.latest_replan;
   const changes = Array.isArray(preview?.changes) ? preview.changes : [];
-  const required = planning.needs_replan ?? Boolean(preview?.status === "preview" && changes.length);
+  const illness = String(data.local_feedback?.today?.illness || "").trim();
+  const previewIllness = String(preview?.illness_pause?.illness || "").trim();
+  const illnessNeedsForecast = Boolean(illness && (!preview || !preview.illness_pause || previewIllness !== illness || !preview.illness_pause.approved));
+  const pendingIllnessPause = Boolean(preview?.status === "preview" && preview?.illness_pause && !preview.illness_pause.approved);
+  const required = Boolean(planning.needs_replan || illnessNeedsForecast || pendingIllnessPause);
   const count = Number(planning.replan_changes || changes.length);
-  const caption = count === 1
+  const caption = illnessNeedsForecast || pendingIllnessPause
+    ? "Krankheit gemeldet: Sportpause prognostizieren und bestätigen."
+    : count === 1
     ? "Ein zukünftiger Entwurf braucht eine Anpassung."
     : `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
   const notice = $("#adaptivePlanningNotice");
@@ -456,7 +462,7 @@ function renderAdaptivePlanning(data) {
     const button = $("#adaptivePlanningButton");
     if (button) {
       button.disabled = Boolean(state.localSync.adaptivePlanning);
-      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : "Planung aktualisieren";
+      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : illnessNeedsForecast ? "Krankheitspause prüfen" : "Planung aktualisieren";
     }
   }
   if (coachNotice) coachNotice.hidden = !required;
@@ -474,24 +480,6 @@ function renderExternalCalendar(data) {
     syncButton.disabled = Boolean(calendar.running || state.localSync.externalCalendar);
     syncButton.textContent = calendar.running || state.localSync.externalCalendar ? "Synchronisierung läuft…" : "Synchronisieren";
   }
-  const root = $("#externalCalendarEvents");
-  if (!root) return;
-  const events = calendar.events || [];
-  if (!calendar.configured) {
-    root.textContent = "Kein externer Kalender konfiguriert.";
-    return;
-  }
-  if (!events.length) {
-    root.textContent = calendar.last_error ? `Kalender: ${calendar.last_error}` : "Keine externen Termine in den nächsten 8 Wochen.";
-    return;
-  }
-  const items = events.slice(0, 12).map((event) => {
-    const time = event.all_day ? "Ganztägig" : `${formatTime(event.start_local)} – ${formatTime(event.end_local)}`;
-    const duration = `${event.duration_minutes || 0} Min.`;
-    const impact = event.training_relevant === 0 ? "nur Info" : event.no_intensity === 1 ? "keine Intensität" : "Trainingssignal";
-    return `<div class="external-calendar-event"><strong>${escapeHtml(String(event.name || "Kalendereintrag"))}</strong><span>${escapeHtml(String(event.event_date || ""))} · ${escapeHtml(time)} · ${escapeHtml(duration)} · ${escapeHtml(impact)}</span></div>`;
-  }).join("");
-  root.innerHTML = `<div class="external-calendar-heading"><strong>Externe Termine</strong><span>nächste 8 Wochen · ${events.length} Einträge</span></div>${items}`;
 }
 
 function renderRemoteDeleteNotice() {
@@ -511,39 +499,6 @@ function renderRemoteDeleteNotice() {
   close.textContent = "Hinweis schließen";
   close.addEventListener("click", () => { state.remoteDeleteFailure = null; renderRemoteDeleteNotice(); });
   root.append(title, message, close);
-}
-
-function renderPublicCalendar(data) {
-  const root = $("#publicCalendarCandidates");
-  if (!root) return;
-  root.replaceChildren();
-  const calendar = data.public_calendar || {};
-  const candidates = calendar.candidates || [];
-  const sources = calendar.sources || [];
-  if (!candidates.length && !sources.length) {
-    root.textContent = "Noch kein öffentlicher Wettkampfkalender importiert.";
-    return;
-  }
-  if (sources.length) {
-    const sourceSummary = document.createElement("p");
-    sourceSummary.className = "fine-print";
-    sourceSummary.textContent = `${sources.length} lokaler Kalender${sources.length === 1 ? "" : "e"} · ${candidates.length} Kandidat${candidates.length === 1 ? "" : "en"}`;
-    root.append(sourceSummary);
-  }
-  for (const candidate of candidates.slice(0, 30)) {
-    const card = document.createElement("article");
-    card.className = "public-calendar-candidate";
-    const imported = Boolean(candidate.imported_competition_id);
-    card.innerHTML = `<div><strong>${escapeHtml(String(candidate.name || "Veranstaltung"))}</strong><span>${escapeHtml(String(candidate.event_date || ""))} · ${escapeHtml(String(candidate.sport || ""))}</span></div>${candidate.location ? `<span>${escapeHtml(String(candidate.location))}</span>` : ""}${candidate.description ? `<p>${escapeHtml(String(candidate.description))}</p>` : ""}`;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "secondary-button";
-    button.textContent = imported ? "Als Wettkampf übernommen" : "Als Wettkampf übernehmen";
-    button.disabled = imported;
-    button.addEventListener("click", () => importPublicCandidate(candidate.id, button));
-    card.append(button);
-    root.append(card);
-  }
 }
 
 function formatTime(value) {
@@ -872,6 +827,102 @@ function renderWeatherNotice(weather) {
   notice.textContent = `${location ? `Wetter für ${location}` : "Wettervorhersage"} · ${weather.model || "Open-Meteo"} · Tageswerte bis 14 Tage · Zeitvorschläge bis 5 Tage · Quelle: Open-Meteo.com${weather.stale ? " · letzte verfügbare Daten" : ""}`;
 }
 
+function planningContextForDate(date) {
+  return (state.data?.daily_planning_context || []).find((item) => item.date === date) || { date };
+}
+
+function planningContextNumber(value, suffix = "") {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number % 1 ? number.toLocaleString("de-DE", { maximumFractionDigits: 1 }) : number}${suffix}` : null;
+}
+
+function renderDailyPlanningContext(date, todayKey) {
+  const context = planningContextForDate(date);
+  const weather = context.weather || weatherForDate(date);
+  const checkin = context.checkin;
+  const recovery = context.recovery;
+  const appointments = Array.isArray(context.appointments) ? context.appointments : [];
+  const hasSignals = weather || checkin || recovery || appointments.length;
+  if (!hasSignals && dateKeyDifference(date, todayKey) > 0) return document.createDocumentFragment();
+  const root = document.createElement("div");
+  root.className = "planned-day-context";
+  const heading = document.createElement("strong");
+  heading.textContent = "Tageskontext";
+  root.append(heading);
+  const signals = document.createElement("div");
+  signals.className = "planned-day-context-signals";
+  const addSignal = (label, value, className = "") => {
+    if (!value) return;
+    const signal = document.createElement("div");
+    signal.className = `planned-day-signal${className ? ` ${className}` : ""}`;
+    const title = document.createElement("span");
+    title.className = "planned-day-signal-label";
+    title.textContent = label;
+    const detail = document.createElement("span");
+    detail.textContent = value;
+    signal.append(title, detail);
+    signals.append(signal);
+  };
+  if (weather) {
+    const weatherValues = [
+      weather.condition || "Vorhersage",
+      [planningContextNumber(weather.temperature_min, " °C"), planningContextNumber(weather.temperature_max, " °C")].filter(Boolean).join(" bis "),
+      planningContextNumber(weather.precipitation_probability_max, " % Regen"),
+      planningContextNumber(weather.wind_speed_max, " km/h Wind"),
+    ].filter(Boolean);
+    addSignal(`${weatherIconFor(weather)} Wetter`, weatherValues.join(" · "));
+  }
+  if (recovery) {
+    const recoveryValues = [
+      planningContextNumber(recovery.sleep_hours, " h Schlaf"),
+      planningContextNumber(recovery.sleep_score, " Schlafscore"),
+      planningContextNumber(recovery.hrv, " ms HRV"),
+      planningContextNumber(recovery.readiness, " Readiness"),
+      planningContextNumber(recovery.resting_hr, " bpm Ruhepuls"),
+      planningContextNumber(recovery.body_battery, " Body Battery"),
+    ].filter(Boolean);
+    const recoverySources = [...new Set(Object.values(recovery.sources || {}))].filter(Boolean);
+    if (recoverySources.length) recoveryValues.push(`Quelle: ${recoverySources.join(", ")}`);
+    addSignal("Erholung", recoveryValues.join(" · "), "recovery");
+  }
+  if (checkin) {
+    const checkinValues = [
+      checkin.day_form ? `Tagesform: ${checkin.day_form}` : null,
+      checkin.soreness != null ? `Muskelkater ${checkin.soreness}/10` : null,
+      checkin.stress != null ? `Stress ${checkin.stress}/10` : null,
+      checkin.motivation != null ? `Motivation ${checkin.motivation}/10` : null,
+      checkin.available_minutes != null ? `${checkin.available_minutes} Min. verfügbar` : null,
+      checkin.pain ? "Schmerz notiert" : null,
+      checkin.availability_notes || checkin.notes ? "Notizen vorhanden" : null,
+    ].filter(Boolean);
+    addSignal("Tages-Check-in", checkinValues.join(" · ") || "Gespeichert", "checkin");
+    if (checkin.illness) addSignal("Krankheit (wichtig)", checkin.illness, "illness");
+  }
+  if (appointments.length) {
+    const appointmentValues = appointments.map((event) => {
+      const time = event.all_day ? "ganztägig" : event.start_local ? formatTime(event.start_local) : "Termin";
+      return `${event.name || "Kalendereintrag"} (${time})`;
+    });
+    addSignal("Termine", appointmentValues.join(" · "), "appointments");
+  }
+  if (hasSignals) root.append(signals);
+  else {
+    const empty = document.createElement("span");
+    empty.className = "planned-day-context-empty";
+    empty.textContent = "Noch keine Tagesinfos hinterlegt.";
+    root.append(empty);
+  }
+  if (dateKeyDifference(date, todayKey) <= 0) {
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "planned-day-checkin-button";
+    editButton.textContent = checkin ? "Tages-Check-in bearbeiten" : "Tages-Check-in hinzufügen";
+    editButton.addEventListener("click", () => openCheckinEditor(date));
+    root.append(editButton);
+  }
+  return root;
+}
+
 function distanceLabel(value) {
   const distance = Number(value);
   if (!Number.isFinite(distance) || distance <= 0) return null;
@@ -980,19 +1031,14 @@ function renderActivities(activities) {
   const filteredActivities = state.activityTypes.size
     ? dateFilteredActivities.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))
     : dateFilteredActivities;
-  const query = state.activitySearch.trim().toLocaleLowerCase("de-DE");
-  const displayedActivities = query
-    ? filteredActivities.filter((activity) => [activity.name, activity.type, activity.sport, activity.sport_type].filter(Boolean).join(" ").toLocaleLowerCase("de-DE").includes(query))
-    : filteredActivities;
-  const isFiltered = Boolean(state.activityTypes.size || query || state.activityFromDate || state.activityToDate);
+  const displayedActivities = filteredActivities;
+  const isFiltered = Boolean(state.activityTypes.size || state.activityFromDate || state.activityToDate);
   renderActivityStats(displayedActivities, isFiltered);
   const stats = $("#activityStats");
   if (stats) stats.setAttribute("aria-label", isFiltered ? "Gefilterte Aktivitätsstatistik" : "Aktivitätsstatistik");
   const root = $("#activities");
-  const search = $("#activitySearch");
   const fromDate = $("#activityFromDate");
   const toDate = $("#activityToDate");
-  if (search && search.value !== state.activitySearch) search.value = state.activitySearch;
   if (fromDate && fromDate.value !== state.activityFromDate) fromDate.value = state.activityFromDate;
   if (toDate && toDate.value !== state.activityToDate) toDate.value = state.activityToDate;
   root.replaceChildren();
@@ -1002,7 +1048,7 @@ function renderActivities(activities) {
     const title = document.createElement("strong");
     title.textContent = list.length ? "Keine passenden Einheiten" : "Noch keine absolvierten Einheiten";
     empty.append(title, document.createTextNode(list.length
-      ? query ? "Passe die Suche an oder setze sie zurück." : state.activityFromDate || state.activityToDate ? "Passe den Zeitraum an oder setze den Filter zurück." : "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück."
+      ? state.activityFromDate || state.activityToDate ? "Passe den Zeitraum an oder setze den Filter zurück." : "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück."
       : "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen."));
     root.append(empty);
     return;
@@ -1289,11 +1335,12 @@ function renderLocalPlanningActions(event, body) {
   body.append(actions);
 }
 
-function renderPlanned(planned, externalCalendarEvents = []) {
+function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContext = []) {
   setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   renderWeatherNotice(state.data?.weather);
   const root = $("#plannedCalendar");
+  state.data.daily_planning_context = Array.isArray(dailyPlanningContext) ? dailyPlanningContext : [];
   root.querySelectorAll("details.planned-week").forEach((week) => state.plannedWeekOpen.set(week.dataset.week, week.open));
   root.replaceChildren();
   const eventsByDate = new Map();
@@ -1383,8 +1430,9 @@ function renderPlanned(planned, externalCalendarEvents = []) {
       heading.append(title, count);
       dayRoot.append(heading);
 
+      dayRoot.append(renderDailyPlanningContext(date, todayKey));
       const weather = weatherForDate(date);
-      if (weather) {
+      if (weather && !planningContextForDate(date).weather) {
         const weatherRoot = document.createElement("div");
         weatherRoot.className = "planned-weather";
         const icon = document.createElement("span");
@@ -1942,7 +1990,34 @@ async function loadLibrary() {
   button.disabled = true;
   button.textContent = "Bibliothek wird geladen…";
   try {
-    await api("/api/library/sync", { method: "POST", body: "{}" });
+    const preview = await api("/api/library/sync/preview", { method: "POST", body: "{}" });
+    const summary = preview.summary || {};
+    const changeCount = Object.values(summary).reduce((total, value) => total + Number(value || 0), 0);
+    const confirmed = window.confirm(
+      `Bibliothekssync zu Intervals.icu freigeben? ${changeCount} lokale Einträge: ` +
+      `${summary.new || 0} neu, ${summary.changed || 0} geändert, ` +
+      `${summary.missing || 0} fehlend, ${summary.error_retry || 0} Fehlerwiederholung. ` +
+      "Die Vorschau ist nur 10 Minuten gültig."
+    );
+    if (!confirmed) return;
+    const actionPreview = await api("/api/coach/actions/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        action_type: "sync_workout_library",
+        target_system: "intervals",
+        object_ids: {},
+        diff: preview.entries || [],
+        payload: { fingerprint: preview.fingerprint },
+      }),
+    });
+    const confirmedAction = await api("/api/coach/actions/confirm", {
+      method: "POST",
+      body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
+    });
+    await api("/api/coach/actions/execute", {
+      method: "POST",
+      body: JSON.stringify({ action_token: confirmedAction.action_token, payload_hash: confirmedAction.proposed_action.payload_hash }),
+    });
     await load();
   } catch (error) {
     root.replaceChildren();
@@ -1997,11 +2072,25 @@ function populateCheckin(checkin, timeZone) {
   const form = $("#checkinForm");
   if (!form) return;
   const values = checkin || { checkin_date: timezoneDateKey(timeZone) };
-  for (const field of ["checkin_date", "soreness", "stress", "motivation", "session_rpe", "available_minutes", "illness", "pain", "availability_notes", "notes"]) {
+  for (const field of ["checkin_date", "soreness", "stress", "motivation", "session_rpe", "day_form", "available_minutes", "illness", "pain", "availability_notes", "notes"]) {
     if (form.elements[field]) form.elements[field].value = values[field] ?? "";
   }
   state.checkinSelectedDate = values.checkin_date || null;
   state.checkinDirty = false;
+}
+
+function openCheckinEditor(date) {
+  const dialog = $("#checkinDialog");
+  const form = $("#checkinForm");
+  if (!dialog || !form) return;
+  const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
+  if (date > todayKey) return;
+  const checkin = (state.data?.checkins || []).find((row) => row.checkin_date === date) || { checkin_date: date };
+  form.elements.checkin_date.max = todayKey;
+  populateCheckin(checkin, state.data?.profile?.timezone);
+  renderCheckins(state.data?.checkins || [], state.data?.profile?.timezone);
+  if (!dialog.open) dialog.showModal();
+  form.elements.soreness?.focus();
 }
 
 function renderCheckins(checkins, timeZone) {
@@ -2012,8 +2101,8 @@ function renderCheckins(checkins, timeZone) {
   const rows = Array.isArray(checkins) ? checkins : [];
   if (!state.checkinDirty) {
     const selected = rows.find((row) => row.checkin_date === state.checkinSelectedDate)
-      || rows.find((row) => row.checkin_date === timezoneDateKey(timeZone));
-    populateCheckin(selected, timeZone);
+      || (!state.checkinSelectedDate ? rows.find((row) => row.checkin_date === timezoneDateKey(timeZone)) : null);
+    populateCheckin(selected || (state.checkinSelectedDate ? { checkin_date: state.checkinSelectedDate } : null), timeZone);
   }
   history.replaceChildren();
   if (!rows.length) {
@@ -2034,10 +2123,11 @@ function renderCheckins(checkins, timeZone) {
     const title = document.createElement("strong");
     title.textContent = dateLabel(row.checkin_date);
     const values = [
+      row.day_form ? `Tagesform: ${row.day_form}` : null,
       row.soreness != null ? `Schmerz/Muskelkater ${row.soreness}/10` : null,
       row.stress != null ? `Stress ${row.stress}/10` : null,
       row.motivation != null ? `Motivation ${row.motivation}/10` : null,
-      row.illness ? "Krankheit notiert" : null,
+      row.illness ? `Krankheit: ${row.illness}` : null,
       row.pain ? "Schmerz notiert" : null,
     ].filter(Boolean);
     const summary = document.createElement("span");
@@ -2793,7 +2883,7 @@ function render(data) {
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
-  renderPlanned(data.planned || [], data.external_calendar?.events || []);
+  renderPlanned(data.planned || [], data.external_calendar?.events || [], data.daily_planning_context || []);
   renderLibrary(data.library || []);
   renderTrainingPlans(data.plans || [], data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
@@ -2818,7 +2908,6 @@ function render(data) {
   renderCompetitions(data.competitions || []);
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
-  renderPublicCalendar(data);
   renderCompetitionSync(data);
   renderPerformance(data.performance);
   renderModel(data.model);
@@ -2957,9 +3046,40 @@ async function syncCompetitions() {
   if (!button) return;
   state.localSync.competitions = true;
   button.disabled = true;
-  button.textContent = "Synchronisierung läuft…";
+  button.textContent = "Vorschau wird erstellt…";
   try {
-    const result = await api("/api/competitions/sync", { method: "POST", body: "{}" });
+    const preview = await api("/api/competitions/sync/preview", { method: "POST", body: "{}" });
+    if (preview.status === "already_running") {
+      toast("Zielwettkämpfe werden bereits synchronisiert");
+      return;
+    }
+    const summary = preview.summary || {};
+    const actions = (preview.actions || []).map((action) => {
+      const label = action.type === "create" ? "Erstellen" : action.type === "change" ? "Ändern" : action.type === "delete" ? "Löschen" : "Konflikt";
+      return `${label}: ${action.name || action.local_id || action.remote_id || "Wettkampf"}${action.event_date ? ` (${action.event_date})` : ""}`;
+    });
+    const details = actions.length ? `\n\n${actions.join("\n")}` : "\n\nKeine Remote-Änderungen erforderlich.";
+    const message = `Intervals.icu-Wettkampf-Sync bestätigen?\n\nErstellen: ${summary.create || 0} · Ändern: ${summary.change || 0} · Löschen: ${summary.delete || 0} · Konflikte: ${summary.conflict || 0}${details}`;
+    if (!window.confirm(message)) return;
+    button.textContent = "Synchronisierung läuft…";
+    const actionPreview = await api("/api/coach/actions/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        action_type: "sync_competitions",
+        target_system: "intervals",
+        object_ids: {},
+        diff: preview.actions || [],
+        payload: { fingerprint: preview.fingerprint },
+      }),
+    });
+    const confirmedAction = await api("/api/coach/actions/confirm", {
+      method: "POST",
+      body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
+    });
+    const result = await api("/api/coach/actions/execute", {
+      method: "POST",
+      body: JSON.stringify({ action_token: confirmedAction.action_token, payload_hash: confirmedAction.proposed_action.payload_hash }),
+    });
     if (result.status === "already_running") toast("Zielwettkämpfe werden bereits synchronisiert");
     else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.conflicts ? ` · ${result.conflicts} Konflikt(e) bitte prüfen` : ""}${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
     invalidateContextPreview();
@@ -3169,6 +3289,7 @@ async function saveCheckin(event) {
     setDirtyIndicator("checkinDirtyIndicator", false);
     state.checkinSelectedDate = result.checkin?.checkin_date || values.checkin_date;
     toast("Tages-Check-in gespeichert");
+    $("#checkinDialog")?.close();
     await load();
   } catch (error) { toast(error.message, true); }
   finally {
@@ -3212,7 +3333,7 @@ async function prepareReplan() {
   try {
     const result = await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: false }) });
     await load();
-    if (result.changes?.length) openAdaptivePlanningDialog(result);
+    if (result.changes?.length || result.illness_pause) openAdaptivePlanningDialog(result);
     else toast("Keine Planungsanpassung nötig");
   } catch (error) { toast(error.message, true); }
   finally {
@@ -3224,39 +3345,38 @@ async function prepareReplan() {
 async function applyReplan() {
   const button = $("#applyAdaptivePlanningButton");
   const adjustmentId = button?.dataset.adjustmentId;
-  if (!button || !adjustmentId || !window.confirm("Die vorgeschlagenen Änderungen auf lokale zukünftige Einheiten anwenden? Intervals.icu wird dabei nicht verändert.")) return;
+  const syncIllness = Boolean($("#syncIllnessToIntervals")?.checked);
+  const confirmation = syncIllness
+    ? "Krankheitspause bestätigen, die nächsten Tage im lokalen Check-in füllen, die Planung umbauen und Krankheitstage als SICK-Einträge nach Intervals.icu synchronisieren?"
+    : "Krankheitspause bestätigen, die nächsten Tage im lokalen Check-in füllen und die lokale Planung umbauen? Intervals.icu wird dabei nicht verändert.";
+  if (!button || !adjustmentId || !window.confirm(confirmation)) return;
   button.disabled = true;
   try {
-    await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: true, adjustment_id: adjustmentId }) });
+    const changes = state.data?.planning?.latest_replan?.changes || [];
+    const illnessPause = state.data?.planning?.latest_replan?.illness_pause || null;
+    const preview = await api("/api/coach/actions/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        action_type: "apply_adaptive_replan",
+        target_system: syncIllness ? "local+intervals" : "local",
+        object_ids: { adjustment_id: adjustmentId },
+        diff: { changes, illness_pause: illnessPause },
+        payload: { adjustment_id: adjustmentId, sync_illness_to_intervals: syncIllness },
+      }),
+    });
+    const confirmed = await api("/api/coach/actions/confirm", {
+      method: "POST",
+      body: JSON.stringify({ proposal_id: preview.proposed_action.id }),
+    });
+    const result = await api("/api/coach/actions/execute", {
+      method: "POST",
+      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
+    });
     $("#adaptivePlanningDialog")?.close();
-    toast("Adaptive Anpassung angewendet");
+    toast(result.intervals_sync?.status === "error" ? "Lokale Krankheitspause angewendet; Intervals.icu-Synchronisierung fehlgeschlagen" : "Krankheitspause und adaptive Anpassung angewendet");
     await load();
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; }
-}
-
-async function importPublicCalendar() {
-  const button = $("#publicCalendarImportButton");
-  const url = $("#publicCalendarUrl")?.value.trim();
-  const name = $("#publicCalendarName")?.value.trim();
-  if (!url) { toast("Bitte eine HTTPS-iCalendar-URL eintragen", true); return; }
-  button.disabled = true;
-  button.textContent = "Kalender wird geladen…";
-  try {
-    const result = await api("/api/calendar/import", { method: "POST", body: JSON.stringify({ url, name }) });
-    toast(`${result.events || 0} Veranstaltungen gefunden`);
-    await load();
-  } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Kalender durchsuchen"; }
-}
-
-async function importPublicCandidate(id, button) {
-  button.disabled = true;
-  try {
-    await api(`/api/calendar/candidates/${encodeURIComponent(id)}/import`, { method: "POST", body: "{}" });
-    toast("Veranstaltung als Wettkampf übernommen");
-    await load();
-  } catch (error) { toast(error.message, true); button.disabled = false; }
 }
 
 async function downloadDatabaseBackup() {
@@ -3444,6 +3564,7 @@ $("#weatherSyncButton").addEventListener("click", syncWeather);
 $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#checkinForm").addEventListener("submit", saveCheckin);
+$("#checkinCloseButton").addEventListener("click", () => $("#checkinDialog")?.close());
 $("#adaptivePlanningButton").addEventListener("click", prepareReplan);
 $("#applyAdaptivePlanningButton").addEventListener("click", applyReplan);
 $("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptivePlanningDialog")?.close());
@@ -3466,7 +3587,6 @@ $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);
 $("#logoutButton").addEventListener("click", logout);
 $("#libraryLoadButton").addEventListener("click", loadLibrary);
 $("#libraryFilter").addEventListener("change", (event) => { state.libraryFilter = event.target.value; renderLibrary(state.data?.library || []); });
-$("#publicCalendarImportForm").addEventListener("submit", (event) => { event.preventDefault(); importPublicCalendar(); });
 $("#systemContextPreviewButton").addEventListener("click", () => {
   $("#systemContextPreviewButton").dataset.loaded = "false";
   loadContextPreview();
@@ -3482,11 +3602,6 @@ $("#messageInput").addEventListener("keydown", (event) => {
     $("#chatForm").requestSubmit();
   }
 });
-$("#activitySearch").addEventListener("input", (event) => {
-  state.activitySearch = event.target.value;
-  state.activityVisibleCount = 250;
-  renderActivities(state.data?.activities || []);
-});
 $("#activityFromDate").addEventListener("input", (event) => {
   state.activityFromDate = event.target.value;
   state.activityVisibleCount = 250;
@@ -3499,7 +3614,6 @@ $("#activityToDate").addEventListener("input", (event) => {
 });
 $("#activityFilterReset").addEventListener("click", () => {
   state.activityTypes.clear();
-  state.activitySearch = "";
   state.activityFromDate = "";
   state.activityToDate = "";
   state.activityVisibleCount = 250;

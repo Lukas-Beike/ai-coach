@@ -56,12 +56,20 @@ It is not intended to be exposed directly to the public internet.
 - Coach chat with selectable GPT-5.6 models, configurable thinking level,
   context preview, structured logs, and prioritized steering/FIFO message
   queueing while the coach is responding.
+- The normal Coach chat is read-only: durable local changes and every remote
+  sync require a separate preview, an exact UI confirmation, and a short-lived
+  single-use server-side action token bound to the session and payload.
 - The coach stores every dated planned workout directly in the local training
   library. Similar workouts are not deduplicated, so the library can grow into
   a complete local training history. Every library entry has its own local
   UUID. Imported Intervals.icu templates additionally retain their provider ID
   as `external_id`; local entries remain local until the library is explicitly
-  synchronized.
+   synchronized.
+   Beim ersten expliziten Bibliothekssync wird dafür bei Intervals.icu bei
+   Bedarf ein privater Ordner „Intervals Coach“ angelegt.
+- The regular Intervals.icu activity pull is read-only and never uploads
+  pending local library entries. Only the separate library synchronization
+  action can create or update library templates remotely.
 - If a provider response no longer contains an imported template, it is kept
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by
@@ -78,11 +86,18 @@ It is not intended to be exposed directly to the public internet.
 - The coach can explicitly list, create, update, and locally delete target
   competitions. Linked remote changes remain pending until an explicit
   competition synchronization is requested.
-- Local athlete check-ins for subjective soreness, stress, motivation, session
-  RPE, pain/illness notes, available training time, and day-specific constraints.
-  The Profile tab provides a dated check-in history; existing entries can be
-  selected and edited. Check-in dates and daily training boundaries use the
-  saved IANA profile timezone, and future check-ins are rejected.
+- Local athlete check-ins for day form (such as heavy legs and fatigue),
+  subjective soreness, stress, motivation, session RPE, illness, pain, available
+  training time, and day-specific constraints. Reported illness is a high-priority
+  planning constraint and is shown separately in the dated daily context. The
+  coach can propose a conservative sport-pause forecast; only after explicit
+  confirmation are future local sessions replaced with illness-pause entries and
+  the corresponding future check-in days filled.
+  The Geplant tab combines each dated check-in with recovery signals, weather,
+  planned sessions, and read-only calendar appointments; existing entries can
+  be selected and edited directly on their day. Check-in dates and daily
+  training boundaries use the saved IANA profile timezone, and future check-ins
+  are rejected.
 - After a completed activity, the coach can ask for a short subjective follow-up
   and store the athlete's answer as activity feedback.
 - The coach can explicitly read the local workout library and planned units and
@@ -94,9 +109,6 @@ It is not intended to be exposed directly to the public internet.
   long local library entries on busy days can be proposed as short easy sessions.
   Invalid feeds are rejected without replacing the last good local calendar;
   recurring events are reported as unsupported rather than partially expanded.
-- A separate public iCalendar import is available in the Einstellungen tab for
-  discovering competition candidates. Imported candidates remain local until
-  the athlete explicitly adopts one as a target competition.
 - The planned calendar never displays a provider horizon wider than the
   Intervals.icu window actually loaded by the latest snapshot. The configured
   display preference may therefore be reduced temporarily after a short sync.
@@ -161,6 +173,11 @@ duration, distance, target, and external ID. They are synchronized in both
 directions with Intervals.icu. Local changes are exported as `RACE_A`,
 `RACE_B`, or `RACE_C` events with a stable `external_id`; matching race events
 from Intervals.icu are imported into the local database.
+
+Startup, daily, and ordinary pull synchronization only reads competition events
+and never exports local changes or deletion tombstones. The dedicated competition
+sync first shows a create/change/delete diff and requires immediate confirmation;
+its ten-minute fingerprint prevents a stale preview from writing.
 
 Competition synchronization accepts strength training, running, outdoor
 cycling (`Ride`), and indoor/virtual cycling (`VirtualRide`). Other sports are
@@ -227,7 +244,8 @@ URL stays in the server environment and is excluded from browser state,
 exports, and logs.
 
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
-in the Einstellungen tab. A successful sync keeps events from today through the next
+in the Einstellungen tab. Events themselves are shown only in the **Geplant** tab.
+A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
 settings or bypass explicit library synchronization or planning approvals.
@@ -295,6 +313,10 @@ date, start/end time, duration, and all-day status to identify library entries
 that are hard or long. It does not infer or diagnose an infection from a family event;
 illness must still be entered in the athlete check-in. Every suggested change
 remains a local preview and requires **Anpassung anwenden**.
+
+Confirmed illness pauses can optionally be synchronized as explicit `SICK`
+calendar entries to Intervals.icu. This remote calendar write is always a
+separate athlete-selected option and is never performed by the preview itself.
 
 
 ## Docker and Unraid
