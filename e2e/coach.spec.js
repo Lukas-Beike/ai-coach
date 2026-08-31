@@ -63,10 +63,6 @@ test.describe("critical browser states", () => {
     const hiddenIndicators = await page.locator(".dirty-indicator").evaluateAll((nodes) => nodes.every((node) => node.hidden));
     expect(hiddenIndicators).toBe(true);
     await expect(page.locator("#remoteDeleteNotice")).toBeHidden();
-    const safetyHint = page.getByText("Trainingsempfehlungen dienen zur Orientierung", { exact: false });
-    await expect(safetyHint).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath("coach-core.png"), fullPage: true });
-
     for (const [label, panelId, route] of navigation) {
       await page.getByRole("link", { name: label, exact: true }).click();
       await expect(page.locator(`#${panelId}`)).toHaveClass(/active/);
@@ -97,6 +93,9 @@ test.describe("critical browser states", () => {
     await expect(checkinDialog).toBeHidden();
 
     await page.getByRole("link", { name: "Coach", exact: true }).click();
+    const safetyHint = page.getByText("Trainingsempfehlungen dienen zur Orientierung", { exact: false });
+    await expect(safetyHint).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("coach-core.png"), fullPage: true });
     await safetyHint.scrollIntoViewIfNeeded();
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
     await safetyHint.scrollIntoViewIfNeeded();
