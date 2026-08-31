@@ -3188,7 +3188,7 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
             tombstones = [dict(row) for row in db.execute("SELECT * FROM competition_sync_tombstones ORDER BY created_at").fetchall()]
             local_rows = [dict(row) for row in db.execute("SELECT * FROM competitions ORDER BY event_date, priority, name").fetchall()]
         deleted_remote = 0
-        if tombstones:
+        if tombstones and push_local:
             identifiers = [
                 {"id": row["intervals_event_id"]} if row.get("intervals_event_id") else {"external_id": row["external_id"]}
                 for row in tombstones if row.get("intervals_event_id") or row.get("external_id")
@@ -3270,7 +3270,7 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
                             ),
                         )
                         updated += 1
-                elif row.get("intervals_event_id"):
+                elif row.get("intervals_event_id") and push_local:
                     db.execute("DELETE FROM competitions WHERE id=?", (row["id"],))
                     removed += 1
 
@@ -5702,31 +5702,6 @@ def provider_resync_state(provider: str) -> dict[str, Any]:
     }
 
 
-def reset_local_provider_data(provider: str) -> None:
-    """Delete only cached provider data; never issue a provider API request."""
-    if provider == "intervals":
-        # The workout library is local-first. A full provider resync must not
-        # erase local templates that have not reached Intervals.icu yet.
-        tables = ("snapshots", "competitions", "competition_sync_tombstones")
-        keys = (
-            "last_sync_at", "last_sync_error", "last_sync_window_start", "last_sync_window_end",
-            "last_library_sync_at", "last_library_sync_error",
-            "last_competition_sync_at", "last_competition_sync_error",
-            "competition_sync_running", "competition_sync_status",
-            "last_performance_refresh_at", "last_performance_error",
-        )
-    elif provider == "garmin":
-        tables = ()
-        keys = ("garmin_snapshot", "last_garmin_sync_at", "last_garmin_error", "garmin_sync_status")
-    else:
-        raise AppError(400, "Unbekannte Anbindung.")
-    with DB_LOCK, database() as db:
-        for table in tables:
-            db.execute(f"DELETE FROM {table}")
-        for key in keys:
-            db.execute("DELETE FROM kv WHERE key = ?", (key,))
-
-
 def full_provider_resync(provider: str) -> dict[str, Any]:
     if provider not in PROVIDER_RESYNC_KEYS:
         raise AppError(400, "Unbekannte Anbindung.")
@@ -5745,9 +5720,11 @@ def full_provider_resync(provider: str) -> dict[str, Any]:
     label = "Intervals.icu" if provider == "intervals" else "Garmin"
     try:
         set_kv(keys["running"], "1")
-        set_kv(keys["status"], f"{label}: lokale Daten werden zurückgesetzt…")
+        set_kv(keys["status"], f"{label}: bestehende Daten bleiben erhalten, Resync läuft…")
         set_kv(keys["error"], "")
-        reset_local_provider_data(provider)
+        # A full resync refreshes provider caches in place. The sync functions
+        # replace data only after a successful provider response, so the last
+        # good snapshot and all athlete-owned records remain recoverable.
         set_kv(keys["status"], f"{label}: vollständiger Resync läuft…")
         if provider == "intervals":
             result = sync_intervals("Vollständiger Resync", activity_days=ALL_SYNC_DAYS)
@@ -7527,16 +7504,45 @@ def privacy_export() -> dict[str, Any]:
     }
 
 
-def database_backup_bytes() -> bytes:
-    with DB_LOCK, database() as db:
-        try:
-            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        except Exception:
-            LOGGER.warning("Database WAL checkpoint failed before backup", extra={"event": "database_backup_checkpoint_failed"}, exc_info=True)
+CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
+    "kv": {"key", "value", "updated_at"},
+    "messages": {"id", "role", "content", "created_at"},
+    "snapshots": {"id", "payload", "created_at"},
+    "workout_drafts": {"id", "payload", "status", "intervals_event_id", "error", "created_at", "updated_at"},
+    "workout_library": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "last_synced_at", "updated_at"},
+    "competitions": {"id", "name", "event_date", "sport", "priority", "distance", "target", "course_profile", "notes", "category", "start_date_local", "description", "moving_time", "intervals_event_id", "external_id", "sync_dirty", "last_synced_at", "created_at", "updated_at"},
+    "competition_sync_tombstones": {"id", "intervals_event_id", "external_id", "created_at"},
+    "training_plans": {"id", "name", "goal", "start_date", "end_date", "status", "created_at", "updated_at"},
+    "athlete_checkins": {"checkin_date", "soreness", "stress", "motivation", "session_rpe", "illness", "pain", "available_minutes", "availability_notes", "notes", "created_at", "updated_at"},
+    "activity_feedback": {"activity_id", "activity_name", "activity_date", "notes", "created_at", "updated_at"},
+    "plan_adjustments": {"id", "payload", "status", "created_at", "applied_at"},
+    "public_event_sources": {"id", "name", "url", "last_sync_at", "last_error", "created_at", "updated_at"},
+    "public_event_candidates": {"id", "source_id", "uid", "name", "event_date", "sport", "distance", "location", "url", "description", "imported_competition_id", "created_at", "updated_at"},
+    "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "updated_at"},
+    "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
+}
+
+
+def _checkpoint_database_locked() -> None:
+    """Checkpoint WAL content while DB_LOCK prevents concurrent writers."""
+    if not DB_PATH.exists():
+        return
     try:
-        return DB_PATH.read_bytes()
-    except OSError as exc:
-        raise AppError(500, "Die Datenbank konnte nicht als Backup gelesen werden.") from exc
+        with database() as db:
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception:
+        # A restore must remain possible even if the current database is
+        # damaged. The pre-restore copy is still useful for manual recovery.
+        LOGGER.warning("Database WAL checkpoint failed", extra={"event": "database_wal_checkpoint_failed"}, exc_info=True)
+
+
+def database_backup_bytes() -> bytes:
+    with DB_LOCK:
+        _checkpoint_database_locked()
+        try:
+            return DB_PATH.read_bytes()
+        except OSError as exc:
+            raise AppError(500, "Die Datenbank konnte nicht als Backup gelesen werden.") from exc
 
 
 def restore_database_backup(payload: bytes) -> dict[str, Any]:
@@ -7555,12 +7561,26 @@ def restore_database_backup(payload: bytes) -> dict[str, Any]:
             if CONFIG.app_password:
                 _configure_cipher(connection, CONFIG.app_password)
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-            if not {"kv", "messages", "snapshots"}.issubset(tables):
-                raise AppError(400, "Das Backup ist keine gültige Intervals-Coach-Datenbank.")
-            connection.execute("SELECT count(*) FROM kv").fetchone()
+            if set(CURRENT_DATABASE_SCHEMA) - tables:
+                raise AppError(400, "Das Backup verwendet kein vollständiges aktuelles Datenbankschema.")
+            missing_columns = {
+                table: sorted(columns - {row[1] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()})
+                for table, columns in CURRENT_DATABASE_SCHEMA.items()
+            }
+            missing_columns = {table: columns for table, columns in missing_columns.items() if columns}
+            if missing_columns:
+                raise AppError(400, "Das Backup verwendet unvollständige Datenbanktabellen.")
+            integrity = connection.execute("PRAGMA integrity_check").fetchone()
+            if not integrity or str(integrity[0]).casefold() != "ok":
+                raise AppError(400, "Die Integritätsprüfung des Backups ist fehlgeschlagen.")
+            # Never restore sessions captured in a backup. The current browser
+            # is forced to authenticate again after the replacement.
+            connection.execute("DELETE FROM sessions")
+            connection.commit()
         finally:
             connection.close()
         with DB_LOCK:
+            _checkpoint_database_locked()
             backup_path = DATA_DIR / f"{DB_PATH.name}.pre-restore-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
             if DB_PATH.exists():
                 shutil.copy2(DB_PATH, backup_path)
@@ -7829,7 +7849,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/privacy/restore":
                 session = require_auth(self)
                 require_csrf(self, session)
-                self.send_json(200, restore_database_backup(self.read_body(MAX_BACKUP_BYTES)))
+                result = restore_database_backup(self.read_body(MAX_BACKUP_BYTES))
+                self.send_json(200, result, {"Set-Cookie": [
+                    f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
+                    f"{CSRF_COOKIE}=; Path=/; SameSite=Strict; Max-Age=0",
+                ]})
             elif path == "/api/logout":
                 session = require_auth(self)
                 require_csrf(self, session)

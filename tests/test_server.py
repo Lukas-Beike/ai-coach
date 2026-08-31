@@ -1624,11 +1624,76 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(deleted, [])
         self.assertEqual(server.latest_snapshot()["synced_at"], "new")
-        self.assertEqual(server.list_competitions()[0]["name"], "Cloud race")
+        self.assertEqual(
+            {competition["name"] for competition in server.list_competitions()},
+            {"Old local race", "Cloud race"},
+        )
         with server.DB_LOCK, server.database() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"], 1)
-            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM competition_sync_tombstones").fetchone()["count"], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM competition_sync_tombstones").fetchone()["count"], 1)
         self.assertEqual(server.list_workout_library()[0]["external_id"], "old-workout")
+
+    def test_full_intervals_resync_keeps_last_snapshot_on_provider_failure(self):
+        old_snapshot = {"synced_at": "old", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        server.save_snapshot(old_snapshot)
+
+        class FailingIntervalsClient:
+            def fetch_snapshot(self, activity_days):
+                raise RuntimeError("provider unavailable")
+
+        with patch.object(server, "IntervalsClient", FailingIntervalsClient), patch.object(
+            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+        ):
+            with self.assertRaises(RuntimeError):
+                server.full_provider_resync("intervals")
+        self.assertEqual(server.latest_snapshot()["synced_at"], "old")
+
+    def test_full_garmin_resync_keeps_last_snapshot_on_provider_failure(self):
+        server.set_kv("garmin_snapshot", json.dumps({"old": True}))
+        config = replace(server.CONFIG, garmin_fixture_path="fixture.json")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server, "sync_garmin", side_effect=RuntimeError("provider unavailable")
+        ):
+            with self.assertRaises(RuntimeError):
+                server.full_provider_resync("garmin")
+        self.assertEqual(json.loads(server.get_kv("garmin_snapshot")), {"old": True})
+
+    @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfügbar.")
+    def test_restore_rejects_incomplete_schema_and_invalidates_sessions(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            data_dir = Path(temp_root) / "data"
+            config = replace(server.CONFIG, app_password="test-password-123")
+            db_path = data_dir / "intervals-coach.db"
+            with patch.object(server, "DATA_DIR", data_dir), patch.object(server, "DB_PATH", db_path), patch.object(server, "CONFIG", config):
+                server.initialise_database()
+                server.set_kv("restore-marker", "preserved")
+                with server.DB_LOCK, server.database() as db:
+                    db.execute(
+                        "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+                        ("token", "csrf", 9999999999, "now", "now"),
+                    )
+                valid_backup = server.database_backup_bytes()
+                restored = server.restore_database_backup(valid_backup)
+                self.assertEqual(restored["status"], "ok")
+                self.assertEqual(server.get_kv("restore-marker"), "preserved")
+                with server.DB_LOCK, server.database() as db:
+                    self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()["count"], 0)
+
+                incomplete_path = data_dir / "incomplete.db"
+                connection = server.sqlite_backend.connect(incomplete_path, timeout=20)
+                try:
+                    server._configure_cipher(connection, config.app_password)
+                    connection.executescript(
+                        "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);"
+                        "CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);"
+                        "CREATE TABLE snapshots (id INTEGER PRIMARY KEY, payload TEXT NOT NULL, created_at TEXT NOT NULL);"
+                    )
+                    connection.commit()
+                finally:
+                    connection.close()
+                with self.assertRaises(server.AppError) as error:
+                    server.restore_database_backup(incomplete_path.read_bytes())
+                self.assertEqual(error.exception.status, 400)
 
     def test_full_resync_blocks_intervals_operations(self):
         self.assertTrue(server.INTERVALS_RESYNC_GATE.begin_reset())
