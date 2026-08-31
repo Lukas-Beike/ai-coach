@@ -2478,6 +2478,9 @@ function openCheckinEditor(date) {
   populateCheckin(checkin, state.data?.profile?.timezone);
   renderCheckins(state.data?.checkins || [], state.data?.profile?.timezone);
   if (state.route !== "today") applyNavigationRoute("today", { historyMode: "push", focus: false });
+  // The dialog may still be nested in a hidden panel in older cached markup.
+  // Move it to the document root before opening so that panel cannot suppress the modal.
+  if (dialog.parentElement?.classList.contains("panel")) document.body.append(dialog);
   if (!dialog.open) dialog.showModal();
   form.elements.soreness?.focus();
 }
