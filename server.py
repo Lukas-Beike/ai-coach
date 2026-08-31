@@ -1499,8 +1499,21 @@ PLANNED_CALENDAR_HISTORY_DAYS = 35
 PLANNED_CALENDAR_FUTURE_DAYS = 35
 COACH_RECENT_ACTIVITIES_PER_SPORT = 5
 COACH_PLANNED_EVENT_LIMIT = 50
+COACH_LOCAL_PLANNED_LIMIT = 50
 COACH_LIBRARY_LIMIT = 12
 COACH_LIBRARY_DESCRIPTION_LIMIT = 1500
+COACH_CONTEXT_TOTAL_CHAR_LIMIT = 120_000
+COACH_CONTEXT_SECTION_LIMITS = {
+    "intervals": 32_000,
+    "current_performance": 24_000,
+    "garmin": 16_000,
+    "local_feedback": 12_000,
+    "activity_feedback": 12_000,
+    "planning": 16_000,
+    "weather": 16_000,
+    "daily_planning_context": 24_000,
+    "external_calendar": 20_000,
+}
 
 
 def sync_period(source: str) -> int:
@@ -7659,18 +7672,123 @@ COACH_ACTIVITY_FIELDS = (
 
 
 def compact_coach_activity(activity: Any) -> dict[str, Any]:
-    return selected(activity, COACH_ACTIVITY_FIELDS)
+    compacted = selected(activity, COACH_ACTIVITY_FIELDS)
+    for key, limit in (("id", 200), ("name", 200), ("type", 80), ("feel", 120)):
+        if key in compacted:
+            compacted[key] = str(compacted[key])[:limit]
+    return compacted
 
 
 def compact_coach_planned_event(event: Any) -> dict[str, Any]:
     compacted = selected(event, (
-        "id", "start_date_local", "category", "name", "description", "type", "moving_time", "elapsed_time",
-        "distance", "icu_training_load", "icu_intensity", "target", "external_id",
+        "id", "start_date_local", "name", "type", "moving_time", "target", "icu_intensity", "status", "sync_status",
     ))
-    for key, limit in (("name", 200), ("description", 2000), ("type", 80), ("target", 1000), ("external_id", 200)):
+    for key, limit in (("id", 200), ("start_date_local", 40), ("name", 200), ("type", 80), ("target", 1000), ("status", 80), ("sync_status", 80)):
         if key in compacted:
             compacted[key] = str(compacted[key])[:limit]
     return compacted
+
+
+def compact_coach_local_planned_workout(workout: Any) -> dict[str, Any]:
+    """Project local plans for the prompt without exposing stored descriptions."""
+    compacted = selected(workout, (
+        "id", "date", "name", "type", "duration_minutes", "target", "icu_intensity", "status", "sync_status",
+    ))
+    for key, limit in (("id", 80), ("date", 20), ("name", 200), ("type", 80), ("target", 1000), ("status", 80), ("sync_status", 80)):
+        if key in compacted:
+            compacted[key] = str(compacted[key])[:limit]
+    return compacted
+
+
+def compact_coach_local_planned_workouts(workouts: Any) -> list[dict[str, Any]]:
+    if not isinstance(workouts, list):
+        return []
+    return [
+        compact_coach_local_planned_workout(workout)
+        for workout in sorted(
+            (item for item in workouts if isinstance(item, dict)),
+            key=lambda item: (str(item.get("date") or ""), str(item.get("id") or "")),
+        )[:COACH_LOCAL_PLANNED_LIMIT]
+    ]
+
+
+def coach_context_json_size(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+
+
+def bounded_coach_context_value(value: Any, limit: int) -> Any:
+    """Keep a JSON value valid while deterministically fitting a character limit."""
+    if limit <= 0:
+        return None
+    if coach_context_json_size(value) <= limit:
+        return value
+    if isinstance(value, str):
+        low, high = 0, len(value)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if coach_context_json_size(value[:middle]) <= limit:
+                low = middle
+            else:
+                high = middle - 1
+        return value[:low]
+    if isinstance(value, list):
+        result: list[Any] = []
+        for item in value:
+            candidate = result + [bounded_coach_context_value(item, limit)]
+            if coach_context_json_size(candidate) > limit:
+                break
+            result = candidate
+        return result
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            candidate = dict(result)
+            candidate[str(key)] = bounded_coach_context_value(item, limit)
+            if coach_context_json_size(candidate) > limit:
+                break
+            result = candidate
+        return result
+    return None
+
+
+def bounded_coach_context_sections(context: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, int | str]]]:
+    projected = dict(context)
+    truncations: list[dict[str, int | str]] = []
+    for section, limit in COACH_CONTEXT_SECTION_LIMITS.items():
+        original_size = coach_context_json_size(projected.get(section))
+        projected_value = bounded_coach_context_value(projected.get(section), limit)
+        projected[section] = projected_value
+        projected_size = coach_context_json_size(projected_value)
+        if projected_size < original_size:
+            truncations.append({"section": section, "original_characters": original_size, "projected_characters": projected_size})
+    return projected, truncations
+
+
+def coach_context_projection_meta(
+    context: dict[str, Any],
+    local_planned_count: int,
+    library_count: int,
+    truncations: list[dict[str, int | str]] | None = None,
+) -> dict[str, Any]:
+    section_sizes = {
+        section: coach_context_json_size(context.get(section))
+        for section in sorted(COACH_CONTEXT_SECTION_LIMITS)
+    }
+    return {
+        "version": 1,
+        "budgets": {**COACH_CONTEXT_SECTION_LIMITS, "total": COACH_CONTEXT_TOTAL_CHAR_LIMIT},
+        "section_characters": section_sizes,
+        "over_budget_sections": [
+            section for section in sorted(section_sizes)
+            if section_sizes[section] > COACH_CONTEXT_SECTION_LIMITS[section]
+        ],
+        "truncated_sections": truncations or [],
+        "planned_local_items": local_planned_count,
+        "library_items": library_count,
+        "activity_limit_per_sport": COACH_RECENT_ACTIVITIES_PER_SPORT,
+        "planned_event_limit": COACH_PLANNED_EVENT_LIMIT,
+        "local_planned_limit": COACH_LOCAL_PLANNED_LIMIT,
+    }
 
 
 def coach_intervals_context(snapshot: dict[str, Any] | None) -> dict[str, Any]:
@@ -7690,7 +7808,15 @@ def coach_intervals_context(snapshot: dict[str, Any] | None) -> dict[str, Any]:
     recent_by_sport = {
         sport: [
             compact_coach_activity(activity)
-            for activity in sorted(rows, key=lambda item: str(item.get("start_date_local") or ""), reverse=True)[:COACH_RECENT_ACTIVITIES_PER_SPORT]
+            for activity in sorted(
+                rows,
+                key=lambda item: (
+                    str(item.get("start_date_local") or ""),
+                    str(item.get("id") or item.get("activityId") or ""),
+                    str(item.get("name") or ""),
+                ),
+                reverse=True,
+            )[:COACH_RECENT_ACTIVITIES_PER_SPORT]
         ]
         for sport, rows in sorted(grouped.items())
     }
@@ -7773,7 +7899,13 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
 
 def coach_workout_library() -> list[dict[str, Any]]:
     """Return a small, balanced template catalogue for the coach prompt."""
-    library = [item for item in list_workout_library() if isinstance(item, dict)]
+    # Dated entries are local planned units and are projected separately in the
+    # structured context. Keeping them out of the template catalogue prevents
+    # the same plan (and its description) from entering the prompt twice.
+    library = [
+        item for item in list_workout_library()
+        if isinstance(item, dict) and not item.get("date")
+    ]
     by_type: dict[str, list[dict[str, Any]]] = {}
     for workout in library:
         workout_type = workout_library_type(workout.get("type") or workout.get("sport"))
@@ -7803,17 +7935,41 @@ def coach_workout_library() -> list[dict[str, Any]]:
 def build_training_context() -> str:
     snapshot = latest_snapshot()
     structured_context = structured_athlete_context(snapshot)
-    library_text = json.dumps(coach_workout_library(), ensure_ascii=False, separators=(",", ":"))
-    return (
+    prompt_context = dict(structured_context)
+    local_planned_workouts = compact_coach_local_planned_workouts(prompt_context.get("local_planned_workouts"))
+    prompt_context["local_planned_workouts"] = local_planned_workouts
+    prompt_context, truncations = bounded_coach_context_sections(prompt_context)
+    library = coach_workout_library()
+    prompt_context["projection"] = coach_context_projection_meta(
+        prompt_context,
+        len(local_planned_workouts),
+        len(library),
+        truncations,
+    )
+    prompt_context = {"projection": prompt_context.pop("projection"), **prompt_context}
+    library_text = json.dumps(library, ensure_ascii=False, separators=(",", ":"))
+    structured_text = json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
+    context_prefix = (
         COACH_PROMPT
         + "\nBEGIN UNTRUSTED EXTERNAL DATA\nSTRUCTURED ATHLETE CONTEXT (authoritative for this turn):\n"
-        + json.dumps(structured_context, ensure_ascii=False, separators=(",", ":"))
-        + "\nLOCAL TRAINING LIBRARY (bounded selection synced from Intervals.icu; templates available to the coach):\n"
+        + "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"
+    )
+    context_suffix = (
+        "\nLOCAL TRAINING LIBRARY (bounded selection synced from Intervals.icu; templates available to the coach):\n"
         + library_text
-        + "\nLOCAL PLANNED WORKOUTS (dated local units; use their local IDs only when the athlete explicitly asks to apply the plan):\n"
-        + json.dumps(structured_context["local_planned_workouts"], ensure_ascii=False, separators=(",", ":"))
         + "\nEND UNTRUSTED EXTERNAL DATA\n"
     )
+    context = context_prefix + structured_text + context_suffix
+    if len(context) > COACH_CONTEXT_TOTAL_CHAR_LIMIT:
+        structured_limit = max(0, COACH_CONTEXT_TOTAL_CHAR_LIMIT - len(context_prefix) - len(context_suffix))
+        prompt_context = bounded_coach_context_value(prompt_context, structured_limit)
+        structured_text = json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
+        context = context_prefix + structured_text + context_suffix
+        LOGGER.warning(
+            "Coach context exceeds projection budget",
+            extra={"event": "coach_context_budget_applied", "characters": len(context), "budget": COACH_CONTEXT_TOTAL_CHAR_LIMIT},
+        )
+    return context
 
 
 def context_preview() -> dict[str, Any]:
@@ -7824,6 +7980,19 @@ def context_preview() -> dict[str, Any]:
         None,
     )
     context_text = build_training_context()
+    preview_structured_context = structured_athlete_context(snapshot)
+    preview_prompt_context = dict(preview_structured_context)
+    preview_local_plans = compact_coach_local_planned_workouts(preview_prompt_context.get("local_planned_workouts"))
+    preview_prompt_context["local_planned_workouts"] = preview_local_plans
+    preview_prompt_context, preview_truncations = bounded_coach_context_sections(preview_prompt_context)
+    projection = coach_context_projection_meta(
+        preview_prompt_context,
+        len(preview_local_plans),
+        len(coach_workout_library()),
+        preview_truncations,
+    )
+    projection["context_characters"] = len(context_text)
+    projection["within_total_budget"] = len(context_text) <= COACH_CONTEXT_TOTAL_CHAR_LIMIT
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "snapshot_truncated": False,
@@ -7851,8 +8020,9 @@ def context_preview() -> dict[str, Any]:
             "content": last_user_message or "Noch keine Chat-Nachricht gesendet.",
             "note": "Diese Eingabe wird als input getrennt vom Kontext/instructions an die Responses API übergeben.",
         },
-        "structured_athlete_context": structured_athlete_context(snapshot),
+        "structured_athlete_context": preview_structured_context,
         "latest_intervals_snapshot": coach_intervals_context(snapshot),
+        "projection": projection,
         "context_text": context_text,
         "local_training_library": coach_workout_library(),
     }
