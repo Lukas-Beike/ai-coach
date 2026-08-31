@@ -98,12 +98,12 @@ Basis: `develop` / `45b5ca3`
 
 ### W11 – Bibliothek, Kalenderhorizont und PWA-Produktlücken
 
-- [ ] Library- und Mehrwochenplan-Ansicht vollständig nutzbar machen.
-- [ ] Lifecycle für lokale Einheiten (editieren, archivieren, löschen, verschieben)
+- [x] Library- und Mehrwochenplan-Ansicht vollständig nutzbar machen.
+- [x] Lifecycle für lokale Einheiten (editieren, archivieren, löschen, verschieben)
   ergänzen.
-- [ ] Kalenderhorizont mit tatsächlich geladenem Providerfenster synchronisieren.
-- [ ] Unbenutzte Public-Calendar-Importreste entfernen oder vollständig anbinden.
-- [ ] Open-Meteo-Attribution sichtbar und korrekt darstellen.
+- [x] Kalenderhorizont mit tatsächlich geladenem Providerfenster synchronisieren.
+- [x] Unbenutzte Public-Calendar-Importreste entfernen oder vollständig anbinden.
+- [x] Open-Meteo-Attribution sichtbar und korrekt darstellen.
 
 ### W12 – Datenschutz, Security-Polish, Tests und Dokumentation
 

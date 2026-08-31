@@ -97,9 +97,11 @@ RATE_LIMITS: dict[str, list[float]] = {}
 PUSH_RE = re.compile(r"^/api/workouts/([0-9a-f-]+)/push$")
 DELETE_PLANNED_RE = re.compile(r"^/api/planned/([^/]+)$")
 LOCAL_PLANNED_RE = re.compile(r"^/api/planned/local/([0-9a-f-]+)$")
+LIBRARY_ENTRY_RE = re.compile(r"^/api/library/([0-9a-f-]+)$")
 DELETE_DRAFT_RE = re.compile(r"^/api/drafts/([0-9a-f-]+)$")
 PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
 LIBRARY_PLAN_BATCH_RE = re.compile(r"^/api/library/plan$")
+PUBLIC_CALENDAR_CANDIDATE_RE = re.compile(r"^/api/calendar/candidates/([0-9a-f-]+)/import$")
 ACTIVITY_FEEDBACK_RE = re.compile(r"^/api/activities/([^/]+)/feedback$")
 COMPETITION_CONFLICT_RE = re.compile(r"^/api/competitions/([0-9a-f-]+)/resolve$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
@@ -2906,8 +2908,17 @@ def list_public_event_candidates(limit: int = 100) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def public_calendar_state() -> dict[str, Any]:
-    return {"sources": list_public_calendar_sources(), "candidates": list_public_event_candidates()}
+def public_calendar_state(db: Any | None = None) -> dict[str, Any]:
+    if db is None:
+        return {"sources": list_public_calendar_sources(), "candidates": list_public_event_candidates()}
+    sources = db.execute(
+        "SELECT id, name, url, last_sync_at, last_error, created_at, updated_at FROM public_event_sources ORDER BY updated_at DESC"
+    ).fetchall()
+    candidates = db.execute(
+        "SELECT c.id, c.source_id, s.name AS source_name, c.uid, c.name, c.event_date, c.sport, c.distance, c.location, c.url, c.description, c.imported_competition_id, c.created_at, c.updated_at "
+        "FROM public_event_candidates c JOIN public_event_sources s ON s.id = c.source_id ORDER BY c.event_date, c.name LIMIT 100"
+    ).fetchall()
+    return {"sources": [dict(row) for row in sources], "candidates": [dict(row) for row in candidates]}
 
 
 def import_public_calendar(value: Any) -> dict[str, Any]:
@@ -4643,7 +4654,10 @@ class IntervalsClient:
         )
         athlete_data = self.get(f"/athlete/{athlete}")
         incoming = compact_snapshot(athlete_data, activities, wellness, events, history_days=request_days)
-        incoming["provider_sync"] = {"pagination": self.pagination}
+        incoming["provider_sync"] = {
+            "pagination": self.pagination,
+            "calendar_window": {"start": calendar_start.isoformat(), "end": calendar_end.isoformat()},
+        }
         if not incremental:
             return incoming
         merged = dict(incoming)
@@ -5376,7 +5390,7 @@ def normalize_library_workout(
         if key in {
             "name", "description", "type", "moving_time", "duration_minutes", "distance", "target",
             "workout_doc", "icu_training_load", "icu_intensity", "indoor", "tags", "folder_id",
-            "date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment",
+            "date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_deleted",
             "remote_event_id", "remote_event_external_id",
         }
     }
@@ -5399,6 +5413,8 @@ def normalize_library_workout(
         result["plan_name"] = str(result["plan_name"])[:200]
     if result.get("source"):
         result["source"] = str(result["source"])[:40]
+    result["archived"] = bool(result.get("archived"))
+    result["local_deleted"] = bool(result.get("local_deleted"))
     return result
 
 
@@ -5572,7 +5588,7 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
                 except (TypeError, ValueError, KeyError, json.JSONDecodeError):
                     existing_payload = {}
                 if isinstance(existing_payload, dict):
-                    for metadata_key in ("date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment"):
+                    for metadata_key in ("date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_deleted"):
                         if existing_payload.get(metadata_key) is not None:
                             entry[metadata_key] = existing_payload[metadata_key]
             normalized.append(entry)
@@ -5604,16 +5620,18 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
     return normalized
 
 
-def list_workout_library(limit: int = 500) -> list[dict[str, Any]]:
+def list_workout_library(limit: int = 500, include_archived: bool = False) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
         rows = db.execute(
             "SELECT payload FROM workout_library ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT ?",
-            (limit,),
+            (max(1, min(int(limit) * (2 if include_archived else 1), 1000)),),
         ).fetchall()
     result = []
     for row in rows:
         try:
-            result.append(json.loads(row["payload"]))
+            payload = json.loads(row["payload"])
+            if isinstance(payload, dict) and (include_archived or not payload.get("archived")):
+                result.append(payload)
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
     return result
@@ -5874,6 +5892,62 @@ def get_workout_library() -> list[dict[str, Any]]:
     return list_workout_library()
 
 
+def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
+    """Edit, archive, restore, or remove a local library template."""
+    try:
+        normalized_id = str(uuid.UUID(str(local_id)))
+    except (ValueError, AttributeError) as exc:
+        raise AppError(400, "Ungültige Bibliothekseinheiten-ID.") from exc
+    if not isinstance(values, dict):
+        raise AppError(400, "Die Bibliothekseinheit muss als Objekt gesendet werden.")
+    action = str(values.get("action") or "update").strip().casefold()
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT payload, external_id FROM workout_library WHERE local_id=?", (normalized_id,)).fetchone()
+        if not row:
+            raise AppError(404, "Bibliothekseinheit nicht gefunden.")
+        try:
+            current = json.loads(row["payload"])
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
+        if not isinstance(current, dict):
+            raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.")
+        if current.get("date"):
+            raise AppError(409, "Geplante lokale Einheiten werden im Kalender bearbeitet.")
+        if action == "delete":
+            if row.get("external_id"):
+                raise AppError(409, "Synchronisierte Bibliothekseinheiten können nicht lokal gelöscht werden. Archiviere sie stattdessen.")
+            db.execute("DELETE FROM workout_library WHERE local_id=?", (normalized_id,))
+            add_message("event", f"Bibliothekseinheit „{current.get('name') or 'Einheit'}“ wurde lokal gelöscht.")
+            return {"status": "deleted", "local_id": normalized_id}
+        candidate = dict(current)
+        if action in {"archive", "restore"}:
+            candidate["archived"] = action == "archive"
+        elif action == "update":
+            for key in ("name", "description", "duration_minutes", "target"):
+                if key in values:
+                    candidate[key] = values.get(key)
+            if "type" in values or "sport" in values:
+                candidate["type"] = values.get("type") or values.get("sport")
+        else:
+            raise AppError(400, "Unbekannte Aktion für die Bibliothekseinheit.")
+        normalized = normalize_library_workout(
+            candidate,
+            local_id=normalized_id,
+            external_id=str(row.get("external_id") or "") or None,
+            sync_status="local",
+        )
+        for key in ("source", "rationale", "plan_id", "plan_name", "private_calendar_adjustment"):
+            if current.get(key) is not None:
+                normalized[key] = current[key]
+        now = utc_now()
+        db.execute(
+            "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
+            (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
+        )
+    add_message("event", f"Bibliothekseinheit „{normalized.get('name') or 'Einheit'}“ wurde aktualisiert.")
+    return {"status": "local", "local_id": normalized_id, "library_entry": normalized}
+
+
 def update_workout_library_sync_state(local_id: str, state: str, error: str | None = None) -> None:
     """Persist sync progress separately from the provider payload."""
     with DB_LOCK, database() as db:
@@ -5903,7 +5977,7 @@ def workout_library_sync_summary() -> dict[str, int]:
     return summary
 
 
-def intervals_public_state() -> dict[str, Any]:
+def intervals_public_state(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return connection health without exposing Intervals credentials."""
     configured = bool(CONFIG.intervals_api_key)
     last_sync_at = get_kv("last_sync_at")
@@ -5918,6 +5992,14 @@ def intervals_public_state() -> dict[str, Any]:
         pagination = {}
     running = SYNC_LOCK.locked() or WORKOUT_LIBRARY_SYNC_LOCK.locked()
     error = last_sync_error or last_library_sync_error
+    snapshot = snapshot if isinstance(snapshot, dict) else (latest_snapshot() or {})
+    calendar_window = snapshot.get("provider_sync", {}).get("calendar_window") if isinstance(snapshot, dict) else None
+    if not isinstance(calendar_window, dict):
+        today = local_now().date()
+        calendar_window = {
+            "start": (today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)).isoformat(),
+            "end": (today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat(),
+        }
     if not configured:
         state = "not_configured"
     elif running:
@@ -5936,6 +6018,7 @@ def intervals_public_state() -> dict[str, Any]:
         "last_sync_at": last_sync_at,
         "last_error": error,
         "pagination": pagination,
+        "calendar_window": calendar_window,
         "library_sync": {
             "last_sync_at": last_library_sync_at,
             "last_error": last_library_sync_error,
@@ -6189,13 +6272,16 @@ def update_local_planned_workout(local_id: str, values: Any) -> dict[str, Any]:
         if action == "delete":
             db.execute("DELETE FROM workout_library WHERE local_id = ?", (normalized_id,))
             updated = None
-        elif action == "update":
+        elif action in {"archive", "restore", "update"}:
             candidate = dict(current)
-            for key in ("date", "name", "description", "duration_minutes", "target"):
-                if key in values:
-                    candidate[key] = values.get(key)
-            if "type" in values or "sport" in values:
-                candidate["type"] = values.get("type") or values.get("sport")
+            if action in {"archive", "restore"}:
+                candidate["archived"] = action == "archive"
+            else:
+                for key in ("date", "name", "description", "duration_minutes", "target"):
+                    if key in values:
+                        candidate[key] = values.get(key)
+                if "type" in values or "sport" in values:
+                    candidate["type"] = values.get("type") or values.get("sport")
             candidate["date"] = str(candidate.get("date") or "").strip()
             try:
                 date.fromisoformat(candidate["date"])
@@ -6212,7 +6298,7 @@ def update_local_planned_workout(local_id: str, values: Any) -> dict[str, Any]:
                 sync_status="local",
             )
             normalized["source"] = str(current.get("source") or "library")[:40]
-            for key in ("plan_id", "plan_name", "rationale", "remote_event_id", "remote_event_external_id", "private_calendar_adjustment"):
+            for key in ("plan_id", "plan_name", "rationale", "remote_event_id", "remote_event_external_id", "private_calendar_adjustment", "local_deleted"):
                 if current.get(key) is not None:
                     normalized[key] = current[key]
             now = utc_now()
@@ -8008,6 +8094,14 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         remote_planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
         local_planned = list_dated_local_planned_workouts()
         planned = canonical_planned_workouts(remote_planned, local_planned)
+        provider_sync = snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
+        calendar_window = provider_sync.get("calendar_window") if isinstance(provider_sync, dict) else None
+        if not isinstance(calendar_window, dict):
+            today = local_now().date()
+            calendar_window = {
+                "start": (today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)).isoformat(),
+                "end": (today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat(),
+            }
         legacy_drafts = list_workout_drafts()
         planned, planning_compliance = planning_compliance_state(planned, activities)
         planned = add_private_calendar_context_to_planned(planned, legacy_drafts)
@@ -8023,7 +8117,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
     planned_with_weather = add_weather_to_planned(planned, weather)
     github_release = github_release_status(refresh=not local_only)
 
-    with DB_LOCK, database():
+    with DB_LOCK, database() as db:
         return {
             "app": {
                 "name": "Intervals Coach",
@@ -8032,7 +8126,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             },
             "messages": list_messages(),
             "plans": list_training_plans(),
-            "library": list_workout_library(),
+            "library": list_workout_library(include_archived=True),
             "activities": activities,
             "planned": planned_with_weather,
             "planning_view": {
@@ -8040,6 +8134,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "local_count": sum(1 for item in planned if item.get("is_local")),
                 "remote_count": sum(1 for item in planned if item.get("is_remote")),
                 "items": planned_with_weather,
+                "provider_window": calendar_window,
             },
             "planning_compliance": planning_compliance,
             "weather": weather,
@@ -8051,9 +8146,10 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "activity_feedback": activity_feedback_context(),
             "planning": planning_state(),
             "external_calendar": external_calendar_state(),
+            "public_calendar": public_calendar_state(db),
             "performance": current_performance_context(snapshot),
             "garmin": garmin_public_state(),
-            "intervals": intervals_public_state(),
+            "intervals": intervals_public_state(snapshot),
             "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
             "provider_resync": {
                 "intervals": provider_resync_state("intervals"),
@@ -8691,6 +8787,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, apply_adaptive_replan(payload.get("adjustment_id")) if payload.get("apply") else adaptive_replan_preview())
             elif path == "/api/library/sync":
                 self.send_json(200, sync_workout_library(reason="manuell"))
+            elif match := PUBLIC_CALENDAR_CANDIDATE_RE.match(path):
+                self.send_json(200, import_public_event_candidate(unquote(match.group(1))))
+            elif path == "/api/calendar/import":
+                self.send_json(200, import_public_calendar(self.read_json()))
+            elif match := LIBRARY_ENTRY_RE.match(path):
+                self.send_json(200, update_workout_library_entry(unquote(match.group(1)), self.read_json()))
             elif match := LOCAL_PLANNED_RE.match(path):
                 self.send_json(200, update_local_planned_workout(unquote(match.group(1)), self.read_json()))
             elif LIBRARY_PLAN_BATCH_RE.match(path):
