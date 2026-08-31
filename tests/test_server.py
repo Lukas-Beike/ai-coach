@@ -3972,6 +3972,55 @@ class CoachTests(unittest.TestCase):
 
         self.assertEqual(error.exception.status, 403)
 
+    def test_versioned_static_assets_are_immutable_and_support_etag_revalidation(self):
+        def make_handler(path, headers=None):
+            handler = object.__new__(server.RequestHandler)
+            handler.path = path
+            handler.headers = headers or {}
+            handler.send_response = Mock()
+            handler.send_header = Mock()
+            handler.end_headers = Mock()
+            handler.wfile = Mock()
+            return handler
+
+        first = make_handler("/app.js?v=119")
+        server.RequestHandler.send_static(first, "/app.js")
+        response_headers = {call.args[0]: call.args[1] for call in first.send_header.call_args_list}
+        self.assertEqual(first.send_response.call_args.args, (200,))
+        self.assertEqual(response_headers["Cache-Control"], "public, max-age=31536000, immutable")
+        self.assertTrue(response_headers["ETag"].startswith('"'))
+
+        cached = make_handler("/app.js?v=119", {"If-None-Match": response_headers["ETag"]})
+        server.RequestHandler.send_static(cached, "/app.js")
+        self.assertEqual(cached.send_response.call_args.args, (304,))
+        cached.wfile.write.assert_not_called()
+
+    def test_html_and_service_worker_remain_revalidatable(self):
+        for path in ("/", "/service-worker.js", "/manifest.webmanifest"):
+            with self.subTest(path=path):
+                handler = object.__new__(server.RequestHandler)
+                handler.path = path
+                handler.headers = {}
+                handler.send_response = Mock()
+                handler.send_header = Mock()
+                handler.end_headers = Mock()
+                handler.wfile = Mock()
+                server.RequestHandler.send_static(handler, path)
+                response_headers = {call.args[0]: call.args[1] for call in handler.send_header.call_args_list}
+                self.assertEqual(response_headers["Cache-Control"], "no-cache")
+
+    def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
+        source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
+        self.assertIn('"/app.js?v=120"', source)
+        self.assertIn('"/icon.svg?v=120"', source)
+        self.assertIn('pathname.startsWith("/api/")', source)
+        self.assertIn('event.request.method !== "GET"', source)
+        self.assertIn("const VERSIONED_ASSETS = new Set", source)
+        self.assertIn("cached || fetch(event.request)", source)
+        self.assertIn("keys.filter((key) => key !== CACHE)", source)
+        self.assertIn("fetch(event.request).then", source)
+        self.assertIn("cache.put(event.request, response.clone())", source)
+
     def test_app_loading_status_uses_a_real_unicode_ellipsis(self):
         app_source = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
 
