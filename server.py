@@ -1078,6 +1078,10 @@ EXTERNAL_CALENDAR_WINDOW_DAYS = 56
 # completed, while retaining the existing five-week forward planning horizon.
 PLANNED_CALENDAR_HISTORY_DAYS = 35
 PLANNED_CALENDAR_FUTURE_DAYS = 35
+COACH_RECENT_ACTIVITIES_PER_SPORT = 5
+COACH_PLANNED_EVENT_LIMIT = 50
+COACH_LIBRARY_LIMIT = 12
+COACH_LIBRARY_DESCRIPTION_LIMIT = 1500
 
 
 def sync_period(source: str) -> int:
@@ -1277,7 +1281,7 @@ def filter_garmin_activities(activities: Any, intervals_activities: Any) -> tupl
 GARMIN_CONTEXT_FIELDS = {
     "date", "calendarDate", "start", "end", "sleepTimeSeconds", "sleepDuration", "sleepScore", "overallSleepScore",
     "deepSleepSeconds", "lightSleepSeconds", "remSleepSeconds", "awakeSleepSeconds", "value", "score", "status",
-    "hrvStatus", "hrvWeeklyAvg", "hrvLastNight", "bodyBattery", "body_battery", "charged", "drained", "qualifier",
+    "hrvStatus", "hrvWeeklyAvg", "weeklyAvg", "hrvLastNight", "lastNightAvg", "bodyBattery", "body_battery", "charged", "drained", "qualifier",
     "racePredictionTime", "distance", "activityId", "activityName", "activityType", "startTimeLocal", "duration",
     "averageHR", "maxHR", "maxHeartRate", "calories", "trainingEffect", "vO2MaxValue", "trainingReadiness", "recoveryTime",
     "weight", "weightKg", "weight_kg", "summaryDate", "latestWeight", "calendarDate",
@@ -1571,6 +1575,49 @@ def compact_garmin_context(value: Any, depth: int = 0) -> Any:
     return str(value)[:200]
 
 
+GARMIN_RECOVERY_FIELDS = (
+    "date", "calendarDate", "summaryDate", "sleepTimeSeconds", "sleepDuration", "sleepScore", "overallSleepScore",
+    "hrvStatus", "hrvWeeklyAvg", "weeklyAvg", "hrvLastNight", "lastNightAvg", "bodyBattery", "body_battery",
+    "charged", "drained", "score", "status", "level", "qualifier", "trainingReadiness", "trainingReadinessScore",
+    "trainingReadinessLevel", "overallReadinessScore", "overallReadinessLevel", "readinessScore", "recoveryTime",
+)
+
+
+def latest_garmin_record(value: Any) -> dict[str, Any]:
+    """Return one dated Garmin record without exposing the complete range payload."""
+    if not isinstance(value, (dict, list)):
+        return {}
+    records: list[dict[str, Any]] = []
+    pending: list[Any] = [value]
+    visited = 0
+    while pending and visited < 2000:
+        current = pending.pop()
+        visited += 1
+        if isinstance(current, dict):
+            if first_present(current, ("calendarDate", "summaryDate", "date", "timestamp", "id")):
+                records.append(current)
+            pending.extend(item for item in current.values() if isinstance(item, (dict, list)))
+        elif isinstance(current, list):
+            pending.extend(item for item in current[:500] if isinstance(item, (dict, list)))
+    if records:
+        return max(
+            records,
+            key=lambda item: (
+                1 if first_present(item, ("calendarDate", "summaryDate", "date", "timestamp")) else 0,
+                str(first_present(item, ("calendarDate", "summaryDate", "date", "timestamp", "id")) or ""),
+            ),
+            default={},
+        )
+    return value if isinstance(value, dict) else {}
+
+
+def compact_garmin_recovery(value: Any) -> dict[str, Any]:
+    if isinstance(value, (int, float, bool)):
+        return {"value": value}
+    record = latest_garmin_record(value)
+    return selected(record, GARMIN_RECOVERY_FIELDS)
+
+
 def load_garmin_fixture(days: int) -> dict[str, Any]:
     path = garmin_fixture_path()
     if path is None:
@@ -1753,25 +1800,25 @@ def garmin_public_state() -> dict[str, Any]:
     }
 
 
-def garmin_coach_context() -> dict[str, Any]:
+def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
     snapshot = garmin_snapshot()
-    activities = snapshot.get("activities") if isinstance(snapshot.get("activities"), list) else []
-    canonical = latest_snapshot()
-    filtered_activities, skipped = filter_garmin_activities(activities, canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
-    return {
+    context = {
         "synced_at": snapshot.get("synced_at"),
         "start": snapshot.get("start"),
         "end": snapshot.get("end"),
-        "sleep": compact_garmin_context(snapshot.get("sleep")),
-        "hrv": compact_garmin_context(snapshot.get("hrv")),
-        "readiness": compact_garmin_context(snapshot.get("readiness")),
-        "body_battery": compact_garmin_context(snapshot.get("body_battery")),
-        "race_predictions": compact_garmin_context(snapshot.get("race_predictions")),
-        "performance": garmin_performance_context(snapshot),
-        "recent_activities": [selected(activity, ("activityId", "activityName", "activityType", "startTimeLocal", "duration", "distance", "averageHR", "maxHR", "calories", "trainingEffect", "vO2MaxValue")) for activity in filtered_activities[:50] if isinstance(activity, dict)],
-        "duplicate_activities_skipped": skipped,
+        "recovery": {
+            "sleep": compact_garmin_recovery(snapshot.get("sleep")),
+            "hrv": compact_garmin_recovery(snapshot.get("hrv")),
+            "readiness": compact_garmin_recovery(snapshot.get("readiness")),
+            "body_battery": compact_garmin_recovery(snapshot.get("body_battery")),
+        },
+        "scope": "Nur der aktuellste Garmin-Recovery-Datensatz. Leistungswerte und Aktivitäten stehen in den deduplizierten bzw. abgeleiteten Abschnitten.",
         "errors": [str(error)[:300] for error in snapshot.get("errors", []) if error][:20],
     }
+    if include_performance:
+        context["performance"] = garmin_performance_context(snapshot)
+        context["scope"] = "Kein Intervals.icu-Snapshot vorhanden; Garmin-Leistungswerte und der aktuellste Recovery-Datensatz werden als Fallback verwendet."
+    return context
 
 
 def add_message(role: str, content: str) -> dict[str, Any]:
@@ -5723,6 +5770,95 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
     }
 
 
+def activity_sport(activity: dict[str, Any]) -> str:
+    raw = str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "Andere Sportart")
+    folded = raw.casefold()
+    if "run" in folded or "lauf" in folded:
+        return "Laufen"
+    if "ride" in folded or "rad" in folded or "cycling" in folded or "bike" in folded:
+        return "Radfahren"
+    if "swim" in folded or "schwimm" in folded:
+        return "Schwimmen"
+    if "strength" in folded or "kraft" in folded or "weight" in folded or "gym" in folded:
+        return "Krafttraining"
+    return raw[:80]
+
+
+COACH_ACTIVITY_FIELDS = (
+    "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain",
+    "icu_training_load", "icu_intensity", "average_heartrate", "max_heartrate", "average_watts",
+    "weighted_average_watts", "average_speed", "icu_weighted_avg_speed", "icu_pace", "icu_rpe", "feel",
+)
+
+
+def compact_coach_activity(activity: Any) -> dict[str, Any]:
+    return selected(activity, COACH_ACTIVITY_FIELDS)
+
+
+def compact_coach_planned_event(event: Any) -> dict[str, Any]:
+    compacted = selected(event, (
+        "id", "start_date_local", "category", "name", "description", "type", "moving_time", "elapsed_time",
+        "distance", "icu_training_load", "icu_intensity", "target", "external_id",
+    ))
+    for key, limit in (("name", 200), ("description", 2000), ("type", 80), ("target", 1000), ("external_id", 200)):
+        if key in compacted:
+            compacted[key] = str(compacted[key])[:limit]
+    return compacted
+
+
+def coach_intervals_context(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    """Build the bounded Intervals.icu projection sent to the coach."""
+    if not isinstance(snapshot, dict):
+        return {
+            "synced_at": None,
+            "recent_activities_by_sport": {},
+            "activity_rollups_by_sport": {},
+            "planned_workouts": [],
+        }
+
+    activities = [item for item in snapshot.get("recent_activities", []) if isinstance(item, dict)]
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for activity in activities:
+        grouped.setdefault(activity_sport(activity), []).append(activity)
+    recent_by_sport = {
+        sport: [
+            compact_coach_activity(activity)
+            for activity in sorted(rows, key=lambda item: str(item.get("start_date_local") or ""), reverse=True)[:COACH_RECENT_ACTIVITIES_PER_SPORT]
+        ]
+        for sport, rows in sorted(grouped.items())
+    }
+    today = local_now().date()
+    rollups_by_sport = {
+        sport: {
+            "last_7_days": activity_rollup(rows, 7, today),
+            "last_30_days": activity_rollup(rows, 30, today),
+        }
+        for sport, rows in sorted(grouped.items())
+    }
+
+    planned: list[dict[str, Any]] = []
+    for event in snapshot.get("upcoming_calendar", []):
+        if not isinstance(event, dict):
+            continue
+        raw_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+        try:
+            event_date = date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        if event_date < today:
+            continue
+        planned.append(event)
+    planned.sort(key=lambda item: (str(item.get("start_date_local") or item.get("date") or ""), str(item.get("name") or "")))
+
+    return {
+        "synced_at": snapshot.get("synced_at"),
+        "recent_activities_by_sport": recent_by_sport,
+        "activity_rollups_by_sport": rollups_by_sport,
+        "planned_workouts": [compact_coach_planned_event(event) for event in planned[:COACH_PLANNED_EVENT_LIMIT]],
+        "scope": "Letzte 5 abgeschlossene Einheiten je Sportart, Sportartensummen sowie zukünftige geplante Einheiten; kein vollständiger Roh-Snapshot.",
+    }
+
+
 def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     snapshot = snapshot if snapshot is not None else latest_snapshot()
     planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
@@ -5735,10 +5871,11 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
         "external_calendar": {
             "provider": "iCalendar",
             "read_only": True,
-            "events": list_external_calendar_events(training_relevant_only=True),
+            "events": list_external_calendar_events(limit=50, training_relevant_only=True),
         },
+        "intervals": coach_intervals_context(snapshot),
         "current_performance": current_performance_context(snapshot),
-        "garmin": garmin_coach_context(),
+        "garmin": garmin_coach_context(include_performance=not snapshot),
         "weather": weather_state(planned, refresh=False),
         "source_policy": {
             "weather": "Open-Meteo forecast for the profile location; daily values up to 14 days, time-window recommendations only for the next 5 days and outdoor run/ride sessions",
@@ -5754,21 +5891,43 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
     }
 
 
+def coach_workout_library() -> list[dict[str, Any]]:
+    """Return a small, balanced template catalogue for the coach prompt."""
+    library = [item for item in list_workout_library() if isinstance(item, dict)]
+    by_type: dict[str, list[dict[str, Any]]] = {}
+    for workout in library:
+        workout_type = workout_library_type(workout.get("type") or workout.get("sport"))
+        by_type.setdefault(workout_type, []).append(workout)
+
+    chosen: list[dict[str, Any]] = []
+    for index in range(max((len(items) for items in by_type.values()), default=0)):
+        for workout_type in sorted(by_type):
+            items = by_type[workout_type]
+            if index < len(items) and len(chosen) < COACH_LIBRARY_LIMIT:
+                compacted = selected(items[index], (
+                    "id", "name", "description", "type", "moving_time", "distance", "target",
+                    "icu_training_load", "icu_intensity", "indoor", "tags",
+                ))
+                if "name" in compacted:
+                    compacted["name"] = str(compacted["name"])[:200]
+                if "description" in compacted:
+                    compacted["description"] = str(compacted["description"])[:COACH_LIBRARY_DESCRIPTION_LIMIT]
+                if isinstance(compacted.get("tags"), list):
+                    compacted["tags"] = [str(tag)[:80] for tag in compacted["tags"][:10]]
+                chosen.append(compacted)
+        if len(chosen) >= COACH_LIBRARY_LIMIT:
+            break
+    return chosen
+
+
 def build_training_context() -> str:
     snapshot = latest_snapshot()
-    snapshot_text = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")) if snapshot else "Noch kein Intervals.icu-Snapshot vorhanden."
-    if len(snapshot_text) > 80_000:
-        snapshot_text = snapshot_text[:80_000] + "...[truncated]"
-    library_text = json.dumps(list_workout_library(), ensure_ascii=False, separators=(",", ":"))
-    if len(library_text) > 40_000:
-        library_text = library_text[:40_000] + "...[truncated]"
+    library_text = json.dumps(coach_workout_library(), ensure_ascii=False, separators=(",", ":"))
     return (
         COACH_PROMPT
         + "\nBEGIN UNTRUSTED EXTERNAL DATA\nSTRUCTURED ATHLETE CONTEXT (authoritative for this turn):\n"
         + json.dumps(structured_athlete_context(snapshot), ensure_ascii=False, separators=(",", ":"))
-        + "\nLATEST INTERVALS.ICU SNAPSHOT:\n"
-        + snapshot_text
-        + "\nLOCAL TRAINING LIBRARY (synced from Intervals.icu; templates available to the coach):\n"
+        + "\nLOCAL TRAINING LIBRARY (bounded selection synced from Intervals.icu; templates available to the coach):\n"
         + library_text
         + "\nEND UNTRUSTED EXTERNAL DATA\n"
     )
@@ -5777,10 +5936,6 @@ def build_training_context() -> str:
 def context_preview() -> dict[str, Any]:
     """Return the exact, user-inspectable context assembled for the next coach turn."""
     snapshot = latest_snapshot()
-    snapshot_text = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")) if snapshot else "Noch kein Intervals.icu-Snapshot vorhanden."
-    snapshot_truncated = len(snapshot_text) > 80_000
-    if snapshot_truncated:
-        snapshot_text = snapshot_text[:80_000] + "...[truncated]"
     last_user_message = next(
         (str(message.get("content") or "") for message in reversed(list_messages()) if message.get("role") == "user"),
         None,
@@ -5788,15 +5943,16 @@ def context_preview() -> dict[str, Any]:
     context_text = build_training_context()
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "snapshot_truncated": snapshot_truncated,
+        "snapshot_truncated": False,
+        "snapshot_compacted": bool(snapshot),
         "assembly": [
             "COACH_PROMPT: feste Coaching-Regeln und Sicherheitsvorgaben",
             "STRUCTURED ATHLETE CONTEXT: Profil, Zielwettkämpfe, Leistungsdaten und Garmin",
             "LOCAL FEEDBACK: subjective athlete signals and availability not copied from external services",
             "ACTIVITY FEEDBACK: athlete-entered notes about completed activities",
             "LOCAL PLANNING: season overview and review-required adaptive suggestions",
-            "LATEST INTERVALS.ICU SNAPSHOT: letzter gespeicherter Trainings-/Wellness-Snapshot",
-            "LOCAL TRAINING LIBRARY: lokal zwischengespeicherte und mit Intervals.icu synchronisierte Workout-Vorlagen",
+            "COMPACT INTERVALS.ICU CONTEXT: letzte 5 Aktivitäten je Sportart, Summen und zukünftige geplante Einheiten",
+            "LOCAL TRAINING LIBRARY: ausgewählte lokal zwischengespeicherte und mit Intervals.icu synchronisierte Workout-Vorlagen",
             "OpenAI Conversation: Dialogkontinuität; nicht autoritativ für dauerhafte Athletenfakten",
         ],
         "conversation": {
@@ -5811,9 +5967,9 @@ def context_preview() -> dict[str, Any]:
             "note": "Diese Eingabe wird als input getrennt vom Kontext/instructions an die Responses API übergeben.",
         },
         "structured_athlete_context": structured_athlete_context(snapshot),
-        "latest_intervals_snapshot": snapshot if not snapshot_truncated else snapshot_text,
+        "latest_intervals_snapshot": coach_intervals_context(snapshot),
         "context_text": context_text,
-        "local_training_library": list_workout_library(),
+        "local_training_library": coach_workout_library(),
     }
 
 
