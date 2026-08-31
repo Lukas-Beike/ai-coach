@@ -190,11 +190,11 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Handover FT-003**
 
-- **Status:** abgeschlossen; vollständige Endvalidierung folgt vor PR-Erstellung
-- **Branch und Commit:** `fix/ft-003-readonly-competition-sync`, Implementierung folgt nach Endvalidierung
+- **Status:** abgeschlossen
+- **Branch und Commit:** `fix/ft-003-readonly-competition-sync`, Implementierung `b59ce15`
 - **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, dieses Handover-Dokument
 - **Verhaltensänderung:** Startup-, Daily- und allgemeine Wettkampf-Pulls verwenden read-only Defaults. Der dedizierte UI-Sync zeigt Create/Change/Delete/Conflict, verlangt `COMPETITION_SYNC` plus aktuellen zehnminütigen Fingerprint und schützt lokale Pending-Änderungen vor stillem Überschreiben.
-- **Validierung:** Syntaxprüfung und fokussierter SQLCipher-Containerlauf mit 9 Tests erfolgreich; vollständiger SQLCipher-Lauf folgt.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py` erfolgreich; `docker build -t ai-coach:ft003 .` erfolgreich; vollständiger SQLCipher-Containerlauf `docker run --rm -v "${PWD}:/review:ro" -w /review ai-coach:ft003 python -m unittest discover -s tests -v`: 203 Tests in 868.794 Sekunden, `OK`, keine erwarteten oder unerwarteten Fehler.
 - **Manuelle Prüfung:** UI-Flow implementiert; Browser-Smoke-Test folgt mit FT-007.
 - **Offene Risiken:** FT-004 muss die verbleibenden mutierenden Coach-Chat-Werkzeuge aus dem normalen Chat entfernen.
 - **Folgetasks:** FT-004 entblockt; FT-007 bleibt für Browser-Smoke-Test erforderlich.
