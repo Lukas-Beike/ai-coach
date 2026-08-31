@@ -99,6 +99,60 @@ jobs:
           fi
           echo "All test shards and syntax checks passed."
 
+  e2e:
+    if: needs.test.result == 'success'
+    needs: test
+    name: Browser smoke and accessibility checks
+    runs-on: ubuntu-latest
+    env:
+      # This is an isolated fixture credential, never a repository or provider secret.
+      E2E_APP_PASSWORD: e2e-fixture-password-1234
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v6.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install browser test dependencies
+        run: npm ci
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Build isolated application image
+        run: docker build --tag ai-coach:e2e .
+      - name: Start isolated fixture application
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach --name ai-coach-e2e --publish 8090:8090 \
+            --read-only --security-opt no-new-privileges:true \
+            --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
+            ai-coach:e2e >/dev/null
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8090/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "The isolated fixture application did not become healthy."
+          exit 1
+      - name: Run browser smoke and accessibility checks
+        run: npm run test:e2e
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-test-artifacts
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Remove isolated fixture application
+        if: always()
+        run: docker rm --force ai-coach-e2e >/dev/null 2>&1 || true
+
   build-and-push:
     if: (github.event_name == 'release' && github.event.action == 'published') || (github.event_name == 'workflow_dispatch' && inputs.publish_container == true)
     needs: test
