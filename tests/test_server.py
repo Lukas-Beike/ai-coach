@@ -444,11 +444,24 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(enriched[1]["compliance"]["percentage"], 0)
         self.assertNotIn("compliance", enriched[2])
         current_week = next(item for item in weekly if item["week_start"] == (today - timedelta(days=today.weekday())).isoformat())
-        self.assertEqual(current_week["planned_units"], 2)
-        self.assertEqual(current_week["completed_units"], 1)
-        self.assertEqual(current_week["unit_percentage"], 50)
-        self.assertEqual(current_week["percentage"], 40)
-        self.assertEqual(current_week["basis"], "training_load")
+        if today.weekday() == 0:
+            # On Monday, yesterday belongs to the previous calendar week.
+            self.assertEqual(current_week["planned_units"], 1)
+            self.assertEqual(current_week["completed_units"], 1)
+            self.assertEqual(current_week["unit_percentage"], 100)
+            self.assertEqual(current_week["percentage"], 80)
+            previous_week = next(item for item in weekly if item["week_start"] == (today - timedelta(days=7)).isoformat())
+            self.assertEqual(previous_week["planned_units"], 1)
+            self.assertEqual(previous_week["completed_units"], 0)
+            self.assertEqual(previous_week["unit_percentage"], 0)
+            self.assertEqual(previous_week["percentage"], 0)
+            self.assertEqual(previous_week["basis"], "training_load")
+        else:
+            self.assertEqual(current_week["planned_units"], 2)
+            self.assertEqual(current_week["completed_units"], 1)
+            self.assertEqual(current_week["unit_percentage"], 50)
+            self.assertEqual(current_week["percentage"], 40)
+            self.assertEqual(current_week["basis"], "training_load")
 
     def test_planned_workout_fallback_matches_unpaired_same_day_sport(self):
         today = server.local_now().date().isoformat()
