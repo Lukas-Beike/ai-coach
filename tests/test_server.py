@@ -272,6 +272,24 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(result["remote_delete_attempted"])
         self.assertFalse(result["remote_conversation_deleted"])
         self.assertTrue(result["local_data_deleted"])
+        self.assertIn("remote_untouched", result)
+
+    def test_privacy_delete_preview_covers_every_durable_table_and_reports_counts(self):
+        expected_tables = set(server.CURRENT_DATABASE_SCHEMA)
+        scoped_tables = {table for _category, _label, tables in server.PRIVACY_DELETE_SCOPE for table in tables}
+        self.assertEqual(scoped_tables, expected_tables)
+        server.set_kv("openai_conversation_id", "conv-test")
+        preview = server.privacy_delete_preview()
+        self.assertEqual({item["id"] for item in preview["categories"]}, {item[0] for item in server.PRIVACY_DELETE_SCOPE})
+        self.assertEqual(preview["confirmation_text"], "LOKALE DATEN LÖSCHEN")
+        self.assertTrue(preview["remote_untouched"])
+        with patch.object(server, "delete_remote_conversation", return_value=True):
+            result = server.delete_local_data()
+        self.assertTrue(result["local_data_deleted"])
+        self.assertEqual(set(result["deleted_categories"]), {item[0] for item in server.PRIVACY_DELETE_SCOPE})
+        with server.DB_LOCK, server.database() as db:
+            for table in expected_tables - {"kv"}:
+                self.assertEqual(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"], 0)
 
     def test_weather_refresh_rechecks_adaptive_planning(self):
         server.save_profile({"weather_location": "Berlin"})

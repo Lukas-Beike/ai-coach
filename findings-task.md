@@ -252,7 +252,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Browser-Smoke-Test und Accessibility-Prüfung bleiben FT-007/FT-020 zugeordnet.
 - **Folgetasks:** FT-005 und FT-006 sind entblockt; FT-007 bleibt für die Browser-Abnahme erforderlich.
 
-### - [ ] FT-005 – Löschdialog an tatsächlichen Datenumfang angleichen
+### - [x] FT-005 – Löschdialog an tatsächlichen Datenumfang angleichen
 
 **Quelle:** DATA-01
 **Ziel:** Vor „Lokale Daten löschen“ ist vollständig und verständlich ersichtlich, welche Daten unwiederbringlich entfernt werden und welche Remote-Daten unberührt bleiben.
@@ -260,19 +260,30 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Server-Löschliste als autoritative Quelle inventarisieren.
-- [ ] Dialog nennt Chats, Snapshots, Bibliothek, Wettkämpfe/Tombstones, Pläne, Check-ins, Feedback, adaptive Änderungen, Kalenderquellen/-kandidaten, Sessions, Einstellungen und Syncstatus.
-- [ ] Remote-Ausnahmen und Versuch der OpenAI-Konversationslöschung präzise erklären.
-- [ ] Vorher verschlüsseltes Backup und Privacy-Export anbieten.
-- [ ] Starke Bestätigung per eindeutiger Texteingabe einführen.
-- [ ] Nach Abschluss Ergebnis je Datenklasse und nicht gelöschte Remote-Bereiche anzeigen.
-- [ ] Dialog- und API-Tests gegen die tatsächliche Tabellenliste koppeln, damit neue Tabellen nicht still fehlen.
+- [x] Server-Löschliste als autoritative Quelle inventarisieren.
+- [x] Dialog nennt Chats, Snapshots, Bibliothek, Wettkämpfe/Tombstones, Pläne, Check-ins, Feedback, adaptive Änderungen, Kalenderquellen/-kandidaten, Sessions, Einstellungen und Syncstatus.
+- [x] Remote-Ausnahmen und Versuch der OpenAI-Konversationslöschung präzise erklären.
+- [x] Vorher verschlüsseltes Backup und Privacy-Export anbieten.
+- [x] Starke Bestätigung per eindeutiger Texteingabe einführen.
+- [x] Nach Abschluss Ergebnis je Datenklasse und nicht gelöschte Remote-Bereiche anzeigen.
+- [x] Dialog- und API-Tests gegen die tatsächliche Tabellenliste koppeln, damit neue Tabellen nicht still fehlen.
 
 **Abnahmekriterien**
 
-- [ ] UI-Aufzählung deckt jede vom Server gelöschte durable Datenklasse ab.
-- [ ] Abbrechen und falsche Bestätigung löschen nichts.
-- [ ] Keine Remote-Providerdaten werden als lokal gelöscht dargestellt.
+- [x] UI-Aufzählung deckt jede vom Server gelöschte durable Datenklasse ab.
+- [x] Abbrechen und falsche Bestätigung löschen nichts.
+- [x] Keine Remote-Providerdaten werden als lokal gelöscht dargestellt.
+
+**Handover FT-005**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `fix/ft-005-privacy-delete`, Implementierung folgt nach Commit
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, dieses Handover-Dokument
+- **Verhaltensänderung:** Die Privacy-Ansicht lädt vor dem Löschen eine autoritative Vorschau mit allen dauerhaften lokalen Datenklassen und Record-Anzahlen. Löschen erfordert den exakten Text `LOKALE DATEN LÖSCHEN`; Ergebniszahlen und Remote-Ausnahmen werden angezeigt. Intervals.icu, Garmin und externe Kalender werden nicht als lokal gelöscht dargestellt.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py` erfolgreich; `docker build -t ai-coach:ft005 .` erfolgreich; vollständiger SQLCipher-Containerlauf `docker run --rm -v "${PWD}:/review:ro" -w /review ai-coach:ft005 python -m unittest discover -s tests -v`: 212 Tests in 826.349 Sekunden, `OK`.
+- **Manuelle Prüfung:** UI-Flow implementiert; Browser-Smoke-Test folgt mit FT-007.
+- **Offene Risiken:** Browser-Smoke-Test bleibt FT-007 zugeordnet.
+- **Folgetasks:** FT-006 und FT-007 sind entblockt.
 
 ### - [ ] FT-006 – Sensitive Konfigurationswerte vollständig redigieren
 
