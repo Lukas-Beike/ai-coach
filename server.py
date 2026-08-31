@@ -3049,6 +3049,13 @@ COMPETITION_SPORTS = {
     "weighttraining": "WeightTraining",
 }
 
+INTERVALS_WORKOUT_SPORTS = {
+    **COMPETITION_SPORTS,
+    "swim": "Swim",
+    "swimming": "Swim",
+    "schwimmen": "Swim",
+}
+
 
 def supported_competition_sport(value: Any) -> str | None:
     raw = str(value or "").strip().casefold()
@@ -3059,6 +3066,13 @@ def supported_competition_sport(value: Any) -> str | None:
 def intervals_competition_sport(value: Any) -> str:
     raw = str(value or "Cycling").strip()
     return supported_competition_sport(raw) or raw[:80] or "Ride"
+
+
+def intervals_workout_sport(value: Any) -> str:
+    """Return the provider's canonical activity type for workout payloads."""
+    raw = str(value or "Ride").strip()
+    normalized = re.sub(r"[\s_-]+", " ", raw.casefold())
+    return INTERVALS_WORKOUT_SPORTS.get(raw.casefold()) or INTERVALS_WORKOUT_SPORTS.get(normalized) or raw[:80] or "Ride"
 
 
 def competition_external_id(competition_id: str) -> str:
@@ -4264,17 +4278,18 @@ class IntervalsClient:
 
     def create_library_workouts(self, workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
-        payload = []
+        created: list[dict[str, Any]] = []
         for workout in workouts:
-            payload.append({
+            payload = {
                 "name": str(workout.get("name") or "Coach-Einheit")[:200],
                 "description": str(workout.get("description") or "")[:12000],
-                "type": str(workout.get("sport") or "Ride")[:80],
-            })
-        result = self.post(f"/athlete/{athlete}/workouts/bulk", payload)
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Trainingsbibliothek-Einheiten zurÃ¼ckgegeben.")
-        return [item for item in result if isinstance(item, dict)]
+                "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
+            }
+            result = self.post(f"/athlete/{athlete}/workouts", payload)
+            if not isinstance(result, dict):
+                raise AppError(502, "Intervals.icu hat keine Trainingsbibliotheks-Einheit zurÃ¼ckgegeben.")
+            created.append(result)
+        return created
 
     def update_library_workout(self, workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
@@ -4282,7 +4297,7 @@ class IntervalsClient:
         result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", {
             "name": str(workout.get("name") or "Coach-Einheit")[:200],
             "description": str(workout.get("description") or "")[:12000],
-            "type": str(workout.get("type") or workout.get("sport") or "Ride")[:80],
+            "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
         })
         if not isinstance(result, dict):
             raise AppError(502, "Intervals.icu returned no updated library workout.")
@@ -4498,7 +4513,7 @@ def workout_event_payload(draft_id: str, workout: dict[str, Any]) -> dict[str, A
     return {
         "category": "WORKOUT",
         "start_date_local": workout_date.isoformat() + "T00:00:00",
-        "type": str(workout.get("sport") or "Ride")[:80],
+        "type": intervals_workout_sport(workout.get("sport")),
         "name": str(workout.get("name") or "Coach workout")[:200],
         "description": str(workout.get("description") or "")[:12000],
         "moving_time": duration * 60,
@@ -4512,7 +4527,7 @@ def normalize_workout_draft(workout: Any) -> dict[str, Any]:
         raise AppError(400, "Jede geplante Einheit muss ein Objekt sein.")
     draft = {
         "date": str(workout.get("date") or "").strip(),
-        "sport": str(workout.get("sport") or "Ride").strip()[:80],
+        "sport": intervals_workout_sport(workout.get("sport")),
         "name": str(workout.get("name") or "Coach-Einheit").strip()[:200],
         "description": str(workout.get("description") or "").strip()[:12000],
         "duration_minutes": workout.get("duration_minutes"),
@@ -4972,7 +4987,7 @@ def normalize_library_workout(
     result["sync_status"] = sync_status
     result["name"] = str(result.get("name") or "Bibliotheks-Einheit")[:200]
     result["description"] = str(result.get("description") or "")[:12000]
-    result["type"] = str(result.get("type") or "Ride")[:80]
+    result["type"] = intervals_workout_sport(result.get("type"))
     if result.get("duration_minutes") is None and result.get("moving_time") is not None:
         try:
             result["duration_minutes"] = max(5, round(float(result["moving_time"]) / 60))
