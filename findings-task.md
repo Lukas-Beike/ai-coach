@@ -199,46 +199,58 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** FT-004 muss die verbleibenden mutierenden Coach-Chat-Werkzeuge aus dem normalen Chat entfernen.
 - **Folgetasks:** FT-004 entblockt; FT-007 bleibt für Browser-Smoke-Test erforderlich.
 
-### - [ ] FT-004 – Zweistufige Coach-Autorisierung für alle Mutationen einführen
+### - [x] FT-004 – Zweistufige Coach-Autorisierung für alle Mutationen einführen
 
 **Quelle:** COACH-01, COACH-03, COACH-04
 **Ziel:** Normaler Chat darf lesen und Änderungsvorschläge erstellen, aber keine dauerhafte lokale oder entfernte Mutation direkt ausführen. Eine Mutation erfordert eine separate UI-Bestätigung und ein einmaliges serverseitiges Action-Token.
 **Abhängigkeiten:** FT-001; fachlich mit FT-002/FT-003 abstimmen
 **Risiko:** Security- und Trust-Boundary; nicht als reine Promptänderung lösen
+**Status:** abgeschlossen; normaler Coach-Chat ist read-only und Mutationen laufen über Vorschau, UI-Bestätigung und einmalige serverseitige Tokens.
 
 **Umsetzung**
 
-- [ ] Vollständige Toolliste klassifizieren: read-only, lokale Mutation, Remote-Mutation.
-- [ ] Mutierende Tools aus dem normalen Chat-Toolset entfernen.
-- [ ] Keyword-/Regex-Erkennung nicht mehr als Autorisierung oder erzwungene Toolwahl verwenden.
-- [ ] Struktur für `proposed_action` definieren: Aktionstyp, Zielsystem, Objekt-IDs, Diff, Payload-Hash, Ablaufzeit.
-- [ ] Server erzeugt nur nach valider Vorschau ein kryptografisch zufälliges, sessiongebundenes Einmal-Token.
-- [ ] UI zeigt exakten Diff, lokale/remote Wirkung und destruktive Teile vor Bestätigung.
-- [ ] Ausführungsendpunkt akzeptiert nur passendes, unbenutztes, nicht abgelaufenes Token.
-- [ ] Token vor oder atomar mit der Mutation verbrauchen; Replay und Parallelaufrufe abweisen.
-- [ ] Payload nach Bestätigung nicht still neu generieren oder verändern.
-- [ ] Ergebnis als technisches Audit-Metadatum protokollieren, ohne Prompt-/Athleteninhalt.
-- [ ] Negations-, Frage- und Erklärungssätze als Regressionstests aufnehmen.
-- [ ] Bestehende adaptive Vorschau-/Fingerprint-Muster wiederverwenden, wo passend.
+- [x] Vollständige Toolliste klassifizieren: read-only, lokale Mutation, Remote-Mutation.
+- [x] Mutierende Tools aus dem normalen Chat-Toolset entfernen.
+- [x] Keyword-/Regex-Erkennung nicht mehr als Autorisierung oder erzwungene Toolwahl verwenden.
+- [x] Struktur für `proposed_action` definieren: Aktionstyp, Zielsystem, Objekt-IDs, Diff, Payload-Hash, Ablaufzeit.
+- [x] Server erzeugt nur nach valider Vorschau ein kryptografisch zufälliges, sessiongebundenes Einmal-Token.
+- [x] UI zeigt exakten Diff, lokale/remote Wirkung und destruktive Teile vor Bestätigung.
+- [x] Ausführungsendpunkt akzeptiert nur passendes, unbenutztes, nicht abgelaufenes Token.
+- [x] Token vor oder atomar mit der Mutation verbrauchen; Replay und Parallelaufrufe abweisen.
+- [x] Payload nach Bestätigung nicht still neu generieren oder verändern.
+- [x] Ergebnis als technisches Audit-Metadatum protokollieren, ohne Prompt-/Athleteninhalt.
+- [x] Negations-, Frage- und Erklärungssätze als Regressionstests aufnehmen.
+- [x] Bestehende adaptive Vorschau-/Fingerprint-Muster wiederverwenden, wo passend.
 
 **Pflicht-Testfälle**
 
-- [ ] „Plane keine Trainingseinheit, sondern erkläre nur die Optionen.“ mutiert nichts.
-- [ ] „Lösche den Wettkampf nicht.“ mutiert nichts.
-- [ ] „Synchronisiere den Wettkampf nicht mit Intervals.icu.“ mutiert nichts.
-- [ ] „Wende den adaptiven Vorschlag nicht an.“ mutiert nichts.
-- [ ] Fragen über Training lösen keine Workout-Erstellung aus.
-- [ ] Gültige Vorschau ohne Klick mutiert nichts.
-- [ ] Abgelaufenes, falsches, bereits verwendetes und payloadfremdes Token wird abgelehnt.
-- [ ] Doppelklick/Parallelrequest erzeugt höchstens eine Mutation.
-- [ ] Morning-Check-in bleibt vollständig mutierungsfrei.
+- [x] „Plane keine Trainingseinheit, sondern erkläre nur die Optionen.“ mutiert nichts.
+- [x] „Lösche den Wettkampf nicht.“ mutiert nichts.
+- [x] „Synchronisiere den Wettkampf nicht mit Intervals.icu.“ mutiert nichts.
+- [x] „Wende den adaptiven Vorschlag nicht an.“ mutiert nichts.
+- [x] Fragen über Training lösen keine Workout-Erstellung aus.
+- [x] Gültige Vorschau ohne Klick mutiert nichts.
+- [x] Abgelaufenes, falsches, bereits verwendetes und payloadfremdes Token wird abgelehnt.
+- [x] Doppelklick/Parallelrequest erzeugt höchstens eine Mutation.
+- [x] Morning-Check-in bleibt vollständig mutierungsfrei.
 
 **Abnahmekriterien**
 
-- [ ] Rohtext allein kann keine lokale oder Remote-Mutation autorisieren.
-- [ ] Jede Mutation nennt vor Ausführung Objekt, Zielsystem und Wirkung.
-- [ ] Read-only-Coaching bleibt ohne zusätzlichen Bestätigungsdialog nutzbar.
-- [ ] Alle Mutations- und Replaytests laufen im SQLCipher-Container grün.
+- [x] Rohtext allein kann keine lokale oder Remote-Mutation autorisieren.
+- [x] Jede Mutation nennt vor Ausführung Objekt, Zielsystem und Wirkung.
+- [x] Read-only-Coaching bleibt ohne zusätzlichen Bestätigungsdialog nutzbar.
+- [x] Alle Mutations- und Replaytests laufen im SQLCipher-Container grün.
+
+**Handover FT-004**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `fix/ft-004-coach-action-authorization`, Implementierung `b86b5ce`
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, dieses Handover-Dokument
+- **Verhaltensänderung:** Der normale Coach-Chat erhält nur Read-only-Tools. Lokale Coach-Änderungen sowie Bibliotheks- und Wettkampf-Remote-Syncs benötigen eine strukturierte Vorschau mit Objekt, Zielsystem, Diff und Payload-Hash, eine UI-Bestätigung und ein sessiongebundenes, kurzlebiges Einmal-Token. Alte direkte Remote-Sync-Endpunkte sind gesperrt.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py` erfolgreich; `docker build -t ai-coach:ft004 .` erfolgreich; vollständiger SQLCipher-Containerlauf `docker run --rm -v "${PWD}:/review:ro" -w /review ai-coach:ft004 python -m unittest discover -s tests -v`: 211 Tests in 1006.915 Sekunden, `OK`.
+- **Manuelle Prüfung:** UI-Preview-/Bestätigungsflows implementiert; Browser-Smoke-Test folgt mit FT-007.
+- **Offene Risiken:** Browser-Smoke-Test und Accessibility-Prüfung bleiben FT-007/FT-020 zugeordnet.
+- **Folgetasks:** FT-005 und FT-006 sind entblockt; FT-007 bleibt für die Browser-Abnahme erforderlich.
 
 ### - [ ] FT-005 – Löschdialog an tatsächlichen Datenumfang angleichen
 
