@@ -204,6 +204,7 @@ function changedSyncAreas(nextVersions) {
 }
 
 function renderSyncStatus(status) {
+  renderMaintenanceStatus(status.maintenance);
   if (!state.data) return;
   state.data.sync = {
     ...(state.data.sync || {}),
@@ -215,6 +216,21 @@ function renderSyncStatus(status) {
   renderPerformance(state.data.performance || {});
   renderSettings(state.data);
   updateHeaderAction();
+}
+
+function renderMaintenanceStatus(maintenance) {
+  const active = Boolean(maintenance?.active);
+  const statusCard = $("#statusCard");
+  if (!statusCard) return;
+  if (!active) {
+    if ($("#statusTitle").textContent === "Wartungsmodus aktiv") statusCard.hidden = true;
+    return;
+  }
+  statusCard.hidden = false;
+  statusCard.classList.remove("working");
+  statusCard.classList.add("warning");
+  $("#statusTitle").textContent = "Wartungsmodus aktiv";
+  $("#statusDetail").textContent = "Die Datenbank wird wiederhergestellt; Änderungen sind vorübergehend pausiert.";
 }
 
 function handleSyncStatus(status, broadcast = false) {
@@ -323,6 +339,7 @@ async function bootstrapAuth() {
   try {
     const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store", signal: controller.signal });
     const status = await response.json();
+    renderMaintenanceStatus(status.maintenance);
     if (status.authenticated) {
       $("#authLoading").hidden = true;
       $("#loginDialog").close();

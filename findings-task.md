@@ -587,7 +587,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-013.
 - **Folgetasks:** FT-014 ist entblockt.
 
-### - [ ] FT-014 – Restore durch globalen Maintenance-Gate absichern
+### - [x] FT-014 – Restore durch globalen Maintenance-Gate absichern
+
+**Status:** abgeschlossen
 
 **Quelle:** REC-01
 **Ziel:** Während Backup-Restore können keine laufenden oder neuen Provider-/Coach-Jobs veraltete Ergebnisse in die wiederhergestellte Datenbank schreiben.
@@ -595,19 +597,31 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Prozessweiten Maintenance-Zustand mit klarer Lock-Reihenfolge definieren.
-- [ ] Neue Chat-, Sync- und Mutationsrequests während Restore mit sicherem Status ablehnen.
-- [ ] Laufende Jobs kontrolliert auslaufen lassen oder abbrechen und auf Abschluss warten.
-- [ ] Erst danach Checkpoint, Validierung, Austausch und Reinitialisierung durchführen.
-- [ ] Bei Fehler alte DB atomar weiterverwenden und Maintenance sicher verlassen.
-- [ ] Race-Test mit blockiertem Providerfetch und parallelem Restore erstellen.
-- [ ] UI zeigt Wartungszustand und Ergebnis ohne sensible Details.
+- [x] Prozessweiten Maintenance-Zustand mit klarer Lock-Reihenfolge definieren.
+- [x] Neue Chat-, Sync- und Mutationsrequests während Restore mit sicherem Status ablehnen.
+- [x] Laufende Jobs kontrolliert auslaufen lassen oder abbrechen und auf Abschluss warten.
+- [x] Erst danach Checkpoint, Validierung, Austausch und Reinitialisierung durchführen.
+- [x] Bei Fehler alte DB atomar weiterverwenden und Maintenance sicher verlassen.
+- [x] Race-Test mit blockiertem Providerfetch und parallelem Restore erstellen.
+- [x] UI zeigt Wartungszustand und Ergebnis ohne sensible Details.
 
 **Abnahmekriterien**
 
-- [ ] Kein vor Restore geholtes Providerresultat wird danach gespeichert.
-- [ ] Fehlgeschlagener Restore beschädigt weder DB noch Backups.
-- [ ] Maintenance-Status bleibt nach Exception/Neustart nicht irrtümlich aktiv.
+- [x] Kein vor Restore geholtes Providerresultat wird danach gespeichert.
+- [x] Fehlgeschlagener Restore beschädigt weder DB noch Backups.
+- [x] Maintenance-Status bleibt nach Exception/Neustart nicht irrtümlich aktiv.
+
+**Handover FT-014**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `feat/ft-014-restore-maintenance-gate`, Implementierung folgt nach Review; PR folgt nach finalem Rebase
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
+- **Verhaltensänderung:** Ein prozessweiter Maintenance-Gate lässt aktive Provider-/Coach-/Mutationsoperationen kontrolliert auslaufen und weist neue Mutationsrequests mit einem nicht-sensiblen 503-Status ab. Der Restore validiert und tauscht die Datenbank erst danach; bei Fehlern wird der Zustand über `finally` sicher verlassen. Health-/Auth-/Sync-Status und die UI zeigen den Wartungszustand, die bestehende Restore-Ergebnisanzeige bleibt erhalten.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check`, `docker build -t ai-coach:ft014 .` und beschleunigte SQLCipher-Teststruktur mit 4 parallelen Shards erfolgreich: 61 + 61 + 60 + 60 = 242 Tests, alle `OK`.
+- **Review:** Diff-Review ohne Findings; zusätzlich Race-/Exception-/Status-/UI-Regressionstests; `git diff --check` sauber.
+- **Manuelle Prüfung:** CI-Browser-Smoke folgt im PR; Asset-Query-Versionen und Service-Worker-Cache wurden von v118 auf v119 aktualisiert.
+- **Offene Risiken:** Keine für FT-014.
+- **Folgetasks:** FT-015 ist entblockt.
 
 ### - [ ] FT-015 – Versionierte Assets effizient cachen und komprimieren
 

@@ -1,5 +1,5 @@
-const CACHE = "intervals-coach-v118";
-const ASSETS = ["/", "/styles.css?v=118", "/app.js?v=118", "/icon.svg", "/manifest.webmanifest"];
+const CACHE = "intervals-coach-v119";
+const ASSETS = ["/", "/styles.css?v=119", "/app.js?v=119", "/icon.svg", "/manifest.webmanifest"];
 self.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS))));
 self.addEventListener("activate", (event) => event.waitUntil((async () => {
   const keys = await caches.keys();

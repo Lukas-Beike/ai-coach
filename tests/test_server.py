@@ -493,8 +493,9 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(planning["replan_changes"], 1)
 
     def test_local_feedback_is_persisted_without_provider_values(self):
+        local_today = server.local_now().date().isoformat()
         result = server.save_checkin({
-            "checkin_date": date.today().isoformat(), "soreness": "7", "stress": "4", "motivation": "8",
+            "checkin_date": local_today, "soreness": "7", "stress": "4", "motivation": "8",
             "available_minutes": "45", "day_form": "Schwere Beine und müde", "illness": "",
             "pain": "left knee", "notes": "Short easy session preferred",
         })
@@ -702,6 +703,58 @@ class CoachTests(unittest.TestCase):
         self.assertIn('daily_sync_due("garmin")', loop)
         self.assertIn('daily_sync_due("intervals")', loop)
         self.assertNotIn('[:10]', loop)
+
+    def test_maintenance_gate_blocks_new_operations_and_waits_for_running_one(self):
+        gate = server.MaintenanceGate()
+        started = threading.Event()
+        release = threading.Event()
+        restore_entered = threading.Event()
+
+        def blocked_provider_fetch():
+            with gate.operation():
+                started.set()
+                release.wait(timeout=5)
+
+        def restore_operation():
+            with gate.restore():
+                restore_entered.set()
+
+        worker = threading.Thread(target=blocked_provider_fetch)
+        worker.start()
+        self.assertTrue(started.wait(timeout=5))
+        restoring = threading.Thread(target=restore_operation)
+        restoring.start()
+        self.assertFalse(restore_entered.wait(timeout=0.05))
+        with self.assertRaises(server.AppError) as blocked:
+            with gate.operation():
+                pass
+        self.assertEqual(blocked.exception.status, 503)
+        release.set()
+        worker.join(timeout=5)
+        restoring.join(timeout=5)
+        self.assertTrue(restore_entered.is_set())
+        self.assertEqual(gate.state(), {"active": False, "running_operations": 0})
+
+    def test_maintenance_gate_clears_after_restore_exception(self):
+        gate = server.MaintenanceGate()
+        with self.assertRaises(RuntimeError):
+            with gate.restore():
+                raise RuntimeError("restore failed")
+        self.assertEqual(gate.state(), {"active": False, "running_operations": 0})
+
+    def test_sync_status_exposes_non_sensitive_maintenance_state(self):
+        status = server.sync_status_state()
+        self.assertEqual(set(status["maintenance"]), {"active", "running_operations"})
+        self.assertFalse(status["maintenance"]["active"])
+
+    def test_maintenance_ui_status_and_restore_asset_versions_are_present(self):
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
+        service_worker = (Path(__file__).resolve().parents[1] / "public" / "service-worker.js").read_text(encoding="utf-8")
+        self.assertIn('"Wartungsmodus aktiv"', app)
+        self.assertIn('status.maintenance', app)
+        self.assertIn('/app.js?v=119', index)
+        self.assertIn('intervals-coach-v119', service_worker)
 
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -1555,7 +1608,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["weight_kg"]["source"], "Garmin Connect")
 
     def test_performance_exposes_thirty_day_trends_for_api_and_garmin_values(self):
-        today = date.today()
+        today = server.local_now().date()
         snapshot = {
             "synced_at": "now", "athlete": {}, "recent_activities": [],
             "recent_wellness": [
