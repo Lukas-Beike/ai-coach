@@ -134,8 +134,9 @@ It is not intended to be exposed directly to the public internet.
   access, not through this application.
 - Chat requests use a bounded queue, retry only structured conversation-lock
   failures, and persist tool-call results so retried follow-ups do not repeat
-  local mutations. `OPENAI_DAILY_TOKEN_BUDGET` can stop new Responses requests
-  after a configurable local daily token limit; `0` disables that guard.
+  local mutations. The application does not impose a local daily request or
+  token budget; requests continue until OpenAI rejects them because the
+  account or project quota is exhausted.
 
 ## Loading and synchronization
 
@@ -254,7 +255,6 @@ Other supported operational variables are:
 
 ```text
 OPENAI_MODEL=gpt-5.6-sol
-OPENAI_DAILY_TOKEN_BUDGET=100000
 DATA_RETENTION_DAYS=-1
 PORT=8090
 DATA_DIR=/data
@@ -266,7 +266,9 @@ GITHUB_RELEASE_CHECK_SECONDS=900
 
 `DATA_RETENTION_DAYS=-1` is the default and disables automatic deletion. The
 application does not impose its own OpenAI request or token limits; it displays
-remaining quotas when the API reports them.
+remaining quotas when the API reports them. When OpenAI returns a billing or
+quota error such as `credit_balance_exhausted`, the app shows a clear message
+and points to billing.
 
 The application checks the latest non-draft, non-prerelease GitHub release on
 the server and caches the result for 15 minutes by default. A newer release is
@@ -374,9 +376,14 @@ are never sent to the browser or included in the coach context. Text received
 from external services is treated as untrusted data and never as instructions.
 
 Logs record external service, operation, path, duration, and result sizes, but
-not request payloads or credentials. Client disconnects such as a closed
-browser connection are handled as normal aborted requests rather than internal
-server failures.
+not request/response bodies or credentials. Garmin identity values and private
+calendar URLs are redacted case-insensitively, including URL-encoded forms;
+URL userinfo, known token query parameters, and long credential-like path
+segments are removed while a non-sensitive provider host remains visible for
+diagnostics. Provider failures use short classified error messages rather than
+forwarding SDK exception text. Client disconnects such as a closed browser
+connection are handled as normal aborted requests rather than internal server
+failures.
 
 The **System** tab allows the athlete to export local data as JSON or delete
 local chats, snapshots, legacy drafts, active and archived library entries,
@@ -497,6 +504,11 @@ python -m unittest discover -s tests -v
 python -m py_compile server.py tests/test_server.py
 ```
 
+The GitHub Actions test workflow runs the unit tests in four parallel shards
+with `python tests/run_tests.py --shard <number> --total 4`. General tests use
+an isolated fast SQLite fixture; the dedicated encryption checks retain their
+SQLCipher setup.
+
 Pull requests run the unit tests and syntax checks. The conventional-commit
 workflow validates pull-request titles and commit subjects. Dependabot manages
 Python, Docker, and GitHub Actions dependencies and can automatically squash
@@ -556,6 +568,13 @@ Intervals Coach is a private planning assistant, not a medical device. Keep it
 on a trusted LAN or behind a private VPN. Review local library entries before
 synchronizing them to Intervals.icu, and seek professional advice for injuries,
 illness, or warning symptoms.
+
+Before deleting local data, the Privacy section shows the complete local data
+scope and record counts. The action requires entering `LOKALE DATEN LÖSCHEN`.
+It deletes only local application data; Intervals.icu, Garmin, and external
+calendar data remain unchanged. A best-effort OpenAI conversation deletion is
+reported separately when a conversation exists. Create an encrypted backup or
+privacy export first if the data may be needed later.
 
 ## License
 

@@ -34,7 +34,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
+from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 try:
@@ -64,7 +64,7 @@ STATIC_TARGETS = {
     "logo.png": PUBLIC_DIR / "logo.png",
     "icon.svg": PUBLIC_DIR / "icon.svg",
 }
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -242,7 +242,6 @@ class Config:
     github_token: str = os.environ.get("GITHUB_TOKEN", "")
     github_release_check_seconds: int = env_int("GITHUB_RELEASE_CHECK_SECONDS", GITHUB_RELEASE_CACHE_SECONDS)
     app_password: str = os.environ.get("APP_PASSWORD", "")
-    openai_daily_token_budget: int = env_int("OPENAI_DAILY_TOKEN_BUDGET", 100_000)
     # Set COOKIE_SECURE=true when TLS is terminated before this application.
     # It stays opt-in so the documented local HTTP development flow works.
     secure_cookies: bool = env_bool("COOKIE_SECURE", False)
@@ -337,18 +336,103 @@ def save_calendar_display_settings(values: Any) -> dict[str, Any]:
     return {"status": "ok", **calendar_display_settings()}
 
 
+REDACTED_URL_QUERY_KEYS = frozenset({
+    "access_token", "api_key", "apikey", "auth", "authorization", "credential", "key",
+    "password", "refresh_token", "secret", "signature", "sig", "token",
+})
+URL_VALUE_RE = re.compile(r"(?i)https?://[^\s<>\"'`]+")
+
+
+def _secret_variants(value: Any) -> set[str]:
+    """Return raw and URL-encoded forms without ever logging the value."""
+    candidate = str(value or "")
+    if not candidate:
+        return set()
+    variants = {candidate}
+    for _ in range(2):
+        for item in tuple(variants):
+            variants.add(unquote(item))
+            variants.add(quote(item, safe=""))
+    return {item for item in variants if len(item) >= 4}
+
+
+def _safe_url_netloc(parsed: Any) -> str:
+    """Keep a provider host for diagnostics while dropping URL userinfo."""
+    try:
+        hostname = str(parsed.hostname or "")
+        port = parsed.port
+    except ValueError:
+        return "[REDACTED_HOST]"
+    if not hostname:
+        return "[REDACTED_HOST]"
+    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    return f"{host}:{port}" if port else host
+
+
+def _unguessable_url_path_segment(segment: str) -> bool:
+    decoded = unquote(segment)
+    if len(decoded) >= 32:
+        return True
+    if len(decoded) < 16:
+        return False
+    classes = sum(bool(re.search(pattern, decoded)) for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
+    return classes >= 2 and len(set(decoded)) >= 8
+
+
+def _redact_url(match: re.Match[str]) -> str:
+    raw = match.group(0)
+    trailing = ""
+    while raw and raw[-1] in ".,;:!?)]}":
+        trailing = raw[-1] + trailing
+        raw = raw[:-1]
+    try:
+        parsed = urlparse(raw)
+        if parsed.scheme.casefold() not in {"http", "https"} or not parsed.netloc:
+            return match.group(0)
+        path_segments = []
+        for segment in parsed.path.split("/"):
+            path_segments.append("[REDACTED_PATH]" if _unguessable_url_path_segment(segment) else segment)
+        path = "/".join(path_segments)
+        query_pairs = []
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True):
+            safe_item = "[REDACTED]" if key.casefold().replace("-", "_") in REDACTED_URL_QUERY_KEYS else item
+            query_pairs.append((key, safe_item))
+        safe = urlunparse((parsed.scheme.casefold(), _safe_url_netloc(parsed), path, "", urlencode(query_pairs), ""))
+        return safe + trailing
+    except (TypeError, ValueError):
+        return "[REDACTED_URL]" + trailing
+
+
+def _safe_calendar_url() -> str:
+    try:
+        parsed = urlparse(str(getattr(CONFIG, "calendar_ical_url", "") or ""))
+        if parsed.scheme.casefold() in {"http", "https"} and parsed.netloc:
+            return urlunparse((parsed.scheme.casefold(), _safe_url_netloc(parsed), "/redacted", "", "", ""))
+    except (TypeError, ValueError):
+        pass
+    return "[REDACTED_CALENDAR_URL]"
+
+
 def redact_text(value: str) -> str:
-    redacted = value
+    """Redact configured secrets and credential-bearing URLs case-insensitively."""
+    redacted = str(value or "")
+    calendar_url = str(getattr(CONFIG, "calendar_ical_url", "") or "")
+    for variant in sorted(_secret_variants(calendar_url), key=len, reverse=True):
+        redacted = re.sub(re.escape(variant), _safe_calendar_url(), redacted, flags=re.IGNORECASE)
+    redacted = URL_VALUE_RE.sub(_redact_url, redacted)
     secret_values = (
         CONFIG.openai_api_key,
         CONFIG.intervals_api_key,
+        getattr(CONFIG, "garmin_email", ""),
         getattr(CONFIG, "garmin_password", ""),
+        getattr(CONFIG, "garmin_tokenstore", ""),
+        getattr(CONFIG, "garmin_fixture_path", ""),
         getattr(CONFIG, "github_token", ""),
         getattr(CONFIG, "app_password", ""),
     )
     for secret_value in secret_values:
-        if secret_value and len(secret_value) >= 4:
-            redacted = redacted.replace(secret_value, "[REDACTED]")
+        for variant in sorted(_secret_variants(secret_value), key=len, reverse=True):
+            redacted = re.sub(re.escape(variant), "[REDACTED]", redacted, flags=re.IGNORECASE)
     redacted = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted)
     redacted = re.sub(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+", r"\1[REDACTED]", redacted)
     return redacted
@@ -415,6 +499,27 @@ def external_result_context(result: Any) -> dict[str, Any]:
     return {"result_type": type(result).__name__}
 
 
+def provider_error(service: str | None, category: str, *, status: int | None = None) -> AppError:
+    """Create a short, classified provider error without forwarding exception text."""
+    label = {
+        "garmin": "Garmin",
+        "intervals": "Intervals.icu",
+        "openai": "OpenAI",
+        "calendar": "Der externe Kalender",
+    }.get(str(service or "").casefold(), "Der externe Dienst")
+    if category == "network":
+        message = f"{label} ist nicht erreichbar."
+        reason = "network_error" if str(service or "").casefold() == "openai" else "provider_network_error"
+    elif category == "http":
+        suffix = f" (HTTP {status})" if status else ""
+        message = f"{label} konnte die Anfrage nicht verarbeiten{suffix}."
+        reason = "http_error" if str(service or "").casefold() == "openai" else "provider_http_error"
+    else:
+        message = f"Die Antwort von {label} konnte nicht verarbeitet werden."
+        reason = "client_error" if str(service or "").casefold() == "openai" else "provider_client_error"
+    return AppError(502, message, reason=reason)
+
+
 def external_call(
     service: str,
     operation: str,
@@ -422,11 +527,14 @@ def external_call(
     details: dict[str, Any] | None = None,
 ) -> Any:
     """Log a non-HTTP SDK call and return its result without exposing payloads."""
+    initialise_logging()
     context = {"service": service, "operation": operation, **(details or {})}
     started = time.perf_counter()
     LOGGER.info("External call started", extra={"event": "external_call_started", "context": context})
     try:
         result = call()
+    except AppError:
+        raise
     except Exception as exc:
         failure_context = {
             **context,
@@ -435,7 +543,7 @@ def external_call(
             "error": redact_text(str(exc))[:500],
         }
         LOGGER.error("External call failed", extra={"event": "external_call_failed", "context": failure_context}, exc_info=True)
-        raise
+        raise provider_error(service, "client") from exc
     LOGGER.info(
         "External call completed",
         extra={
@@ -2114,6 +2222,7 @@ def garmin_public_state() -> dict[str, Any]:
         parsed_error = json.loads(raw_error) if raw_error else None
     except json.JSONDecodeError:
         parsed_error = raw_error
+    parsed_error = sanitize_log_value(parsed_error)
     return {
         "available": Garmin is not None or garmin_fixture_path() is not None,
         "configured": bool(CONFIG.garmin_fixture_path or CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()),
@@ -2147,7 +2256,7 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
             "body_battery": compact_garmin_recovery(snapshot.get("body_battery")),
         },
         "scope": "Nur der aktuellste Garmin-Recovery-Datensatz. Leistungswerte und Aktivitäten stehen in den deduplizierten bzw. abgeleiteten Abschnitten.",
-        "errors": [str(error)[:300] for error in snapshot.get("errors", []) if error][:20],
+        "errors": [redact_text(str(error))[:300] for error in snapshot.get("errors", []) if error][:20],
     }
     if include_performance:
         context["performance"] = garmin_performance_context(snapshot)
@@ -2851,10 +2960,15 @@ def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
         add_message("event", f"Kalender aktualisiert ({reason}, {len(events)} Einträge).")
         replan = check_adaptive_replan("external calendar")
         return {"status": "ok", "synced_at": now, "events": len(events), "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS, **replan}
-    except Exception as exc:
-        set_kv("last_external_calendar_sync_error", redact_text(str(exc))[:1000])
+    except AppError as exc:
+        set_kv("last_external_calendar_sync_error", redact_text(exc.message)[:1000])
         LOGGER.error("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
         raise
+    except Exception as exc:
+        safe_error = provider_error("calendar", "client")
+        set_kv("last_external_calendar_sync_error", safe_error.message)
+        LOGGER.error("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason, "error_type": type(exc).__name__}}, exc_info=True)
+        raise safe_error from exc
     finally:
         set_kv("external_calendar_sync_status", "")
         EXTERNAL_CALENDAR_LOCK.release()
@@ -3787,6 +3901,12 @@ def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     ):
         reason = "conversation_locked"
         message = "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen."
+    elif code == "credit_balance_exhausted":
+        reason = "credit_balance_exhausted"
+        message = "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
+    elif code in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
+        reason = code
+        message = "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. Bitte das Limit im OpenAI-Konto prüfen."
     elif code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(
         marker in searchable for marker in ("insufficient_quota", "quota", "billing_hard_limit", "credits")
     ):
@@ -3891,6 +4011,7 @@ def http_json(
     raw_body: bytes | None = None,
     content_type: str | None = None,
 ) -> Any:
+    initialise_logging()
     if raw_body is not None and payload is not None:
         raise ValueError("payload and raw_body are mutually exclusive")
     body = raw_body if raw_body is not None else (None if payload is None else json.dumps(payload).encode("utf-8"))
@@ -3965,7 +4086,7 @@ def http_json(
         )
         if error_details:
             raise AppError(exc.code if exc.code == 429 else 502, error_details["message"], reason=error_details["reason"]) from exc
-        raise AppError(502, upstream_http_error_message(exc.code, raw_error, service)) from exc
+        raise AppError(502, upstream_http_error_message(exc.code, raw_error, service), reason="provider_http_error") from exc
     except (URLError, TimeoutError) as exc:
         if service == "openai":
             record_openai_status({
@@ -3988,7 +4109,9 @@ def http_json(
             },
             exc_info=True,
         )
-        raise AppError(502, "Externer Dienst ist nicht erreichbar.", reason="network_error") from exc
+        raise provider_error(service, "network") from exc
+    except AppError:
+        raise
     except Exception as exc:
         if service == "openai":
             record_openai_status({
@@ -4011,7 +4134,7 @@ def http_json(
             },
             exc_info=True,
         )
-        raise
+        raise provider_error(service, "client") from exc
 
 
 def is_outdoor_activity(event: Any) -> bool:
@@ -6210,10 +6333,10 @@ def sync_workout_library(reason: str = "manual") -> dict[str, Any]:
                 local_synced += 1
             except Exception as exc:
                 error = redact_text(str(exc))[:1000]
-                update_workout_library_sync_state(local_id, "sync_error", error)
+                update_workout_library_sync_state(local_id, "sync_error", redact_text(error))
                 local_errors.append(error)
     set_kv("last_library_sync_at", utc_now())
-    set_kv("last_library_sync_error", "; ".join(local_errors))
+    set_kv("last_library_sync_error", redact_text("; ".join(local_errors)))
     status = "partial" if local_errors else "ok"
     add_message("event", f"Trainingsbibliothek aktualisiert ({reason}, {len(normalized)} Remote-Einheiten, {local_synced} lokale Einheiten synchronisiert).")
     return {
@@ -6585,7 +6708,7 @@ def sync_local_workout_library_entry(local_id: str) -> dict[str, Any]:
         try:
             return _sync_local_workout_library_entry_unlocked(normalized_id)
         except Exception as exc:
-            update_workout_library_sync_state(normalized_id, "sync_error", str(exc))
+            update_workout_library_sync_state(normalized_id, "sync_error", redact_text(str(exc))[:1000])
             raise
 
 
@@ -7785,8 +7908,8 @@ def _openai_usage_summary_unlocked() -> dict[str, Any]:
         usage = {}
     if not isinstance(usage, dict) or usage.get("date") != today:
         usage = {"date": today, "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    usage.pop("request_limit", None)
-    usage.pop("token_limit", None)
+    for legacy_budget_key in ("request_limit", "token_limit", "budget_tokens", "budget_remaining"):
+        usage.pop(legacy_budget_key, None)
     try:
         rate_limits = json.loads(get_kv("openai_rate_limits") or "{}")
     except (TypeError, json.JSONDecodeError):
@@ -7795,15 +7918,8 @@ def _openai_usage_summary_unlocked() -> dict[str, Any]:
         status = json.loads(get_kv(OPENAI_STATUS_KEY) or "{}")
     except (TypeError, json.JSONDecodeError):
         status = {}
-    budget = max(0, int(CONFIG.openai_daily_token_budget))
-    try:
-        total_tokens = max(0, int(usage.get("total_tokens") or 0))
-    except (TypeError, ValueError, OverflowError):
-        total_tokens = 0
     return {
         **usage,
-        "budget_tokens": budget,
-        "budget_remaining": max(0, budget - total_tokens) if budget else None,
         "rate_limits": rate_limits if isinstance(rate_limits, dict) else {},
         "status": status if isinstance(status, dict) else {},
     }
@@ -7868,11 +7984,6 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
-    if path == "/responses":
-        usage = openai_usage_summary()
-        budget = int(usage.get("budget_tokens") or 0)
-        if budget and int(usage.get("total_tokens") or 0) >= budget:
-            raise AppError(429, "Das tägliche OpenAI-Tokenbudget ist erreicht. Bitte morgen erneut versuchen.", reason="daily_token_budget")
     request_payload = dict(payload)
     if path == "/responses":
         request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
@@ -8637,7 +8748,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True) -> dict[str, 
             else:
                 continue
         except (AppError, json.JSONDecodeError, TypeError) as exc:
-            result = {"ok": False, "error": str(exc)}
+            result = {"ok": False, "error": redact_text(str(exc))[:1000]}
         remember_chat_tool_result(call_id, item.get("name"), result)
         tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result)})
     if tool_outputs:
@@ -9194,6 +9305,48 @@ def delete_remote_conversation(conversation_id: str) -> bool:
     return True
 
 
+PRIVACY_DELETE_SCOPE = (
+    ("chats", "Chats, Coach-Werkzeug- und Aktionsprotokolle", ("messages", "chat_tool_calls", "coach_action_proposals")),
+    ("snapshots", "Trainings-Snapshots", ("snapshots",)),
+    ("library", "Workout-Bibliothek und Entwürfe", ("workout_drafts", "workout_library")),
+    ("competitions", "Wettkämpfe und Sync-Vormerkungen", ("competitions", "competition_sync_tombstones")),
+    ("plans", "Trainingspläne", ("training_plans",)),
+    ("checkins", "Tages-Check-ins", ("athlete_checkins",)),
+    ("feedback", "Aktivitätsfeedback", ("activity_feedback",)),
+    ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),
+    ("calendars", "Kalenderquellen, Kandidaten und lokale Kalenderereignisse", ("public_event_sources", "public_event_candidates", "external_calendar_events")),
+    ("sessions", "Anmeldesitzungen", ("sessions",)),
+    ("settings", "Profil, Einstellungen, Syncstatus und lokale Caches", ("kv",)),
+)
+PRIVACY_REMOTE_SCOPE = (
+    "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
+    "Garmin-Konto und Garmin-Daten bleiben unverändert.",
+    "Externe Kalenderquelle und deren Anbieter bleiben unverändert.",
+)
+
+
+def _privacy_delete_counts(db: Any) -> dict[str, int]:
+    counts = {}
+    for category, _label, tables in PRIVACY_DELETE_SCOPE:
+        counts[category] = sum(int(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"]) for table in tables)
+    return counts
+
+
+def privacy_delete_preview() -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        counts = _privacy_delete_counts(db)
+    return {
+        "status": "preview",
+        "confirmation_text": "LOKALE DATEN LÖSCHEN",
+        "categories": [
+            {"id": category, "label": label, "records": counts[category]}
+            for category, label, _tables in PRIVACY_DELETE_SCOPE
+        ],
+        "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
+        "openai_conversation": "Eine vorhandene OpenAI-Konversation wird vor dem Löschen zum Löschen angefragt; ein Fehlschlag wird separat ausgewiesen.",
+    }
+
+
 def delete_local_data() -> dict[str, Any]:
     conversation_id = get_kv("openai_conversation_id") or ""
     remote_delete_attempted = bool(conversation_id)
@@ -9204,18 +9357,19 @@ def delete_local_data() -> dict[str, Any]:
         except Exception:
             LOGGER.warning("Remote OpenAI conversation could not be deleted", extra={"event": "privacy_remote_delete_failed"}, exc_info=True)
     with DB_LOCK, database() as db:
-        for table in (
-            "messages", "chat_tool_calls", "snapshots", "workout_drafts", "workout_library", "competitions", "training_plans",
-            "athlete_checkins", "activity_feedback", "plan_adjustments", "coach_action_proposals", "public_event_candidates", "public_event_sources", "external_calendar_events", "sessions",
-        ):
+        deleted_counts = _privacy_delete_counts(db)
+        deleted_tables = {table for _category, _label, tables in PRIVACY_DELETE_SCOPE for table in tables}
+        for table in deleted_tables:
             db.execute(f"DELETE FROM {table}")
         db.execute("DELETE FROM kv")
         set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
     return {
         "status": "ok",
         "local_data_deleted": True,
+        "deleted_categories": deleted_counts,
         "remote_delete_attempted": remote_delete_attempted,
         "remote_conversation_deleted": remote_deleted,
+        "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
     }
 
 
@@ -9403,6 +9557,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/privacy/export":
                 require_auth(self)
                 self.send_json(200, privacy_export(), {"Content-Disposition": "attachment; filename=intervals-coach-export.json"})
+            elif path == "/api/privacy/delete/preview":
+                require_auth(self)
+                self.send_json(200, privacy_delete_preview())
             elif path == "/api/privacy/backup":
                 require_auth(self)
                 self.send_bytes(200, database_backup_bytes(), "application/octet-stream", {"Content-Disposition": "attachment; filename=intervals-coach-database.backup"})
@@ -9420,7 +9577,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extra={"event": "http_app_error", "context": {"method": "GET", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
-            self.send_json(exc.status, {"error": exc.message})
+            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]})
         except Exception as exc:
             LOGGER.error(
                 "Unhandled GET error",
@@ -9467,7 +9624,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     exc_info=True,
                 )
             headers = {"WWW-Authenticate": "Session"} if exc.status == 401 else None
-            self.send_json(exc.status, {"error": exc.message}, headers)
+            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]}, headers)
         except Exception as exc:
             LOGGER.error(
                 "Unhandled POST error",
@@ -9526,8 +9683,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, reset_coach_chat())
             elif path == "/api/privacy/delete":
                 payload = self.read_json()
-                if payload.get("confirm") != "DELETE":
-                    raise AppError(400, "Zum Löschen muss DELETE bestätigt werden.")
+                if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
+                    raise AppError(400, "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.")
                 self.send_json(200, delete_local_data())
             elif path == "/api/feedback":
                 self.send_json(200, save_checkin(self.read_json()))
@@ -9582,7 +9739,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extra={"event": "http_app_error", "context": {"method": "DELETE", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
-            self.send_json(exc.status, {"error": exc.message})
+            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]})
         except Exception:
             LOGGER.error(
                 "Unhandled DELETE error",
@@ -9620,7 +9777,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extra={"event": "http_app_error", "context": {"method": "PUT", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
-            self.send_json(exc.status, {"error": exc.message})
+            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]})
         except Exception as exc:
             LOGGER.error(
                 "Unhandled PUT error",

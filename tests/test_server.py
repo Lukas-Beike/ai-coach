@@ -10,13 +10,13 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
 from unittest.mock import Mock, patch
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
     "OPENAI_API_KEY": "test-openai-key",
     "OPENAI_MODEL": "gpt-5.6-sol",
-    "OPENAI_DAILY_TOKEN_BUDGET": "100000",
     "INTERVALS_API_KEY": "test-intervals-key",
     "INTERVALS_ATHLETE_ID": "0",
     "GARMIN_EMAIL": "test-garmin@example.invalid",
@@ -127,8 +127,22 @@ class RecordedIntervalsClient:
 
 
 class CoachTests(unittest.TestCase):
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._original_config = server.CONFIG
+        # Most tests exercise application behaviour, not the encryption
+        # implementation. Keep those tests isolated but use plain SQLite so
+        # the dedicated SQLCipher tests remain the only expensive setup path.
+        server.CONFIG = replace(server.CONFIG, app_password="")
         server.initialise_database()
+        cls.addClassCleanup(cls._restore_test_config)
+
+    @classmethod
+    def _restore_test_config(cls):
+        server.CONFIG = cls._original_config
+
+    def setUp(self):
         with server.DB_LOCK, server.database() as db:
             db.execute("DELETE FROM messages")
             db.execute("DELETE FROM chat_tool_calls")
@@ -272,6 +286,24 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(result["remote_delete_attempted"])
         self.assertFalse(result["remote_conversation_deleted"])
         self.assertTrue(result["local_data_deleted"])
+        self.assertIn("remote_untouched", result)
+
+    def test_privacy_delete_preview_covers_every_durable_table_and_reports_counts(self):
+        expected_tables = set(server.CURRENT_DATABASE_SCHEMA)
+        scoped_tables = {table for _category, _label, tables in server.PRIVACY_DELETE_SCOPE for table in tables}
+        self.assertEqual(scoped_tables, expected_tables)
+        server.set_kv("openai_conversation_id", "conv-test")
+        preview = server.privacy_delete_preview()
+        self.assertEqual({item["id"] for item in preview["categories"]}, {item[0] for item in server.PRIVACY_DELETE_SCOPE})
+        self.assertEqual(preview["confirmation_text"], "LOKALE DATEN LÖSCHEN")
+        self.assertTrue(preview["remote_untouched"])
+        with patch.object(server, "delete_remote_conversation", return_value=True):
+            result = server.delete_local_data()
+        self.assertTrue(result["local_data_deleted"])
+        self.assertEqual(set(result["deleted_categories"]), {item[0] for item in server.PRIVACY_DELETE_SCOPE})
+        with server.DB_LOCK, server.database() as db:
+            for table in expected_tables - {"kv"}:
+                self.assertEqual(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"], 0)
 
     def test_weather_refresh_rechecks_adaptive_planning(self):
         server.save_profile({"weather_location": "Berlin"})
@@ -494,7 +526,7 @@ class CoachTests(unittest.TestCase):
                 }]}
             return {"output_text": "Danke, ich habe die Rückmeldung gespeichert.", "output": []}
 
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
             server, "openai_request", side_effect=fake_openai
         ):
             result = server.chat_with_coach("Die Beine fühlten sich locker an.")
@@ -521,7 +553,7 @@ class CoachTests(unittest.TestCase):
                 }]}
             return {"output_text": "Die Trainingsdaten sind aktualisiert.", "output": []}
 
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
             server, "openai_request", side_effect=fake_openai
         ), patch.object(
             server, "sync_intervals", return_value={"status": "ok", "activities": 3, "events": 2}
@@ -1333,7 +1365,7 @@ class CoachTests(unittest.TestCase):
 
     def test_existing_snapshot_uses_configured_intervals_window(self):
         server.save_snapshot({"synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_activities": [{"id": "old"}], "recent_wellness": [], "upcoming_calendar": []})
-        client = server.IntervalsClient(server.Config(intervals_api_key="test-key"))
+        client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         calls = []
 
         def fake_get(path, params=None):
@@ -1477,7 +1509,7 @@ class CoachTests(unittest.TestCase):
         plan.assert_not_called()
 
     def test_direct_library_creation_path_is_disabled(self):
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "create_library_workouts"
         ) as create:
             with self.assertRaises(server.AppError) as raised:
@@ -1486,7 +1518,7 @@ class CoachTests(unittest.TestCase):
         create.assert_not_called()
 
     def test_library_upload_uses_single_workout_endpoint_and_canonical_sport(self):
-        client = server.IntervalsClient(server.Config(intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get", return_value=[]), patch.object(
             client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
         ) as post:
@@ -1506,7 +1538,7 @@ class CoachTests(unittest.TestCase):
         ))
 
     def test_existing_intervals_coach_folder_is_reused(self):
-        client = server.IntervalsClient(server.Config(intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get", return_value=[{"id": 77, "name": "Intervals Coach", "type": "FOLDER"}]), patch.object(
             client, "post", return_value={"id": "remote-1"}
         ) as post:
@@ -1517,7 +1549,7 @@ class CoachTests(unittest.TestCase):
         )
 
     def test_unknown_workout_sport_falls_back_to_provider_other_type(self):
-        client = server.IntervalsClient(server.Config(intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get", return_value=[]), patch.object(
             client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
         ) as post:
@@ -1543,7 +1575,7 @@ class CoachTests(unittest.TestCase):
             "id": 42, "name": "Locker Rad", "type": "Ride",
             "description": "- 15m 55-70% Warmup\n- 30m 70%\n- 10m 50% Cooldown", "moving_time": 3300,
         }])
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server, "create_library_workouts"
         ) as create:
             draft = server.save_workout_drafts([{
@@ -1557,7 +1589,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(library["external_id"], "42")
 
     def test_missing_library_workout_stays_local_until_approval(self):
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server, "create_library_workouts"
         ) as create:
             draft = server.save_workout_drafts([{
@@ -1574,7 +1606,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.list_workout_drafts()[0]["id"], draft["id"])
 
     def test_new_draft_library_entry_is_synced_on_explicit_approval(self):
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")):
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
             draft = server.save_workout_drafts([{
                 "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
                 "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
@@ -1582,7 +1614,7 @@ class CoachTests(unittest.TestCase):
             }])[0]
         fake_event = {"id": "event-direct"}
         remote_library = {"id": "remote-77", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", "moving_time": 1800}
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "create_library_workouts", return_value=[remote_library]
         ) as create, patch.object(server.IntervalsClient, "get_workout_library", return_value=[]), patch.object(
             server, "plan_library_workout_remote", return_value=fake_event
@@ -1602,7 +1634,7 @@ class CoachTests(unittest.TestCase):
             "target": "POWER", "rationale": "Schwelle",
         }])[0]
         remote = {"id": "remote-recovered", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", "moving_time": 1800}
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "get_workout_library", return_value=[remote]
         ), patch.object(server.IntervalsClient, "create_library_workouts") as create:
             synced = server.sync_local_workout_library_entry(draft["library_workout_id"])
@@ -1618,7 +1650,7 @@ class CoachTests(unittest.TestCase):
             "target": "POWER", "rationale": "Schwelle",
         }])[0]
         remote = {"id": "remote-77", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", "moving_time": 1800}
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "get_workout_library", return_value=[]
         ), patch.object(server.IntervalsClient, "create_library_workouts", return_value=[remote]) as create, patch.object(
             server, "plan_library_workout_remote"
@@ -1637,7 +1669,7 @@ class CoachTests(unittest.TestCase):
             "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
             "target": "POWER", "rationale": "Schwelle",
         }])[0]
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "get_workout_library", return_value=[]
         ), patch.object(
             server.IntervalsClient, "create_library_workouts", side_effect=server.AppError(502, "upstream unavailable")
@@ -1659,7 +1691,7 @@ class CoachTests(unittest.TestCase):
             "target": "POWER", "rationale": "Schwelle",
         }])[0]
         remote = {"id": "remote-77", "name": "Coach Intervals", "type": "Ride", "description": "- 5m 115%", "moving_time": 2700}
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "get_workout_library", return_value=[]
         ), patch.object(server.IntervalsClient, "create_library_workouts", return_value=[remote]):
             server.sync_workout_library("initial")
@@ -1671,7 +1703,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotEqual(adapted_description, remote["description"])
 
         updated_remote = {**remote, "description": adapted_description, "moving_time": 2700}
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "get_workout_library", return_value=[remote]
         ), patch.object(server.IntervalsClient, "update_library_workout", return_value=updated_remote) as update:
             result = server.sync_workout_library("adapted")
@@ -1690,7 +1722,7 @@ class CoachTests(unittest.TestCase):
             "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
             "target": "POWER", "rationale": "Schwelle",
         }])[0]
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "get_workout_library", side_effect=server.AppError(502, "upstream unavailable")
         ):
             with self.assertRaises(server.AppError):
@@ -1705,7 +1737,7 @@ class CoachTests(unittest.TestCase):
             "description": "- 30m Z2", "moving_time": 1800,
         }])[0]
         restored = {"id": "remote-restored", "name": "Remote template", "type": "Ride", "description": "- 30m Z2", "moving_time": 1800}
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "get_workout_library", return_value=[]
         ), patch.object(server.IntervalsClient, "create_library_workouts", return_value=[restored]) as create:
             result = server.sync_workout_library("test")
@@ -1717,7 +1749,7 @@ class CoachTests(unittest.TestCase):
         create.assert_called_once()
 
     def test_intervals_collection_pagination_is_bounded_and_reported(self):
-        client = server.IntervalsClient(server.Config(intervals_api_key="test-key"))
+        client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         first_page = [{"id": f"activity-{index}"} for index in range(500)]
         second_page = [{"id": "activity-500"}]
         with patch.object(client, "get", side_effect=[first_page, second_page]) as get:
@@ -1727,7 +1759,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(get.call_args_list[1].args[1]["offset"], 500)
 
     def test_intervals_collection_rejects_repeated_full_page(self):
-        client = server.IntervalsClient(server.Config(intervals_api_key="test-key"))
+        client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         page = [{"id": f"activity-{index}"} for index in range(500)]
         with patch.object(client, "get", side_effect=[page, page]):
             with self.assertRaises(server.AppError) as raised:
@@ -1735,7 +1767,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 502)
 
     def test_intervals_snapshot_exposes_complete_page_metadata(self):
-        client = server.IntervalsClient(server.Config(intervals_api_key="test-key"))
+        client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         with patch.object(client, "get", side_effect=[
             [{"id": "activity-1", "start_date_local": "2026-08-31T08:00:00"}],
             [{"id": "2026-08-31"}],
@@ -1774,7 +1806,7 @@ class CoachTests(unittest.TestCase):
                 }
             return {"output_text": "Lokaler Entwurf erstellt.", "output": []}
 
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test", intervals_api_key="intervals-test")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test", intervals_api_key="intervals-test")), patch.object(
             server, "openai_request", side_effect=fake_openai
         ), patch.object(server, "create_library_workouts") as create:
             result = server.chat_with_coach("Erstelle mir für morgen eine Einheit.")
@@ -1842,7 +1874,7 @@ class CoachTests(unittest.TestCase):
         library = server.list_workout_library()[0]
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         synced = {**library, "external_id": "44", "id": "44"}
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server, "sync_local_workout_library_entry", return_value=synced
         ) as sync_library, patch.object(
             server, "plan_library_workout_remote", return_value={"id": "event-44"}
@@ -1880,7 +1912,7 @@ class CoachTests(unittest.TestCase):
                 }]}
             return {"output_text": "Plan lokal angewendet.", "output": []}
 
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
             server, "openai_request", side_effect=fake_openai
         ):
             result = server.chat_with_coach("Wende die gespeicherte Bibliothekseinheit als Plan an.")
@@ -1894,14 +1926,14 @@ class CoachTests(unittest.TestCase):
         server.upsert_workout_library([{
             "id": 42, "name": "Locker Rad", "type": "Ride", "description": "- 30m 70%", "moving_time": 1800,
         }])
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")):
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
             draft = server.save_workout_drafts([{
                 "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
                 "name": "Locker Rad", "description": "- 30m 70%", "duration_minutes": 30,
                 "target": "POWER", "rationale": "Regeneration",
             }])[0]
         fake_event = {"id": "event-42"}
-        with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server, "plan_library_workout_remote", return_value=fake_event
         ) as plan:
             result = server.push_draft(draft["id"])
@@ -1958,7 +1990,7 @@ class CoachTests(unittest.TestCase):
                 }]}
             return {"output_text": "Nur eine Empfehlung.", "output": []}
 
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
             server, "openai_request", side_effect=fake_openai
         ):
             result = server.chat_with_coach("Gib mir nur eine Einschätzung.", allow_mutations=False)
@@ -2006,7 +2038,7 @@ class CoachTests(unittest.TestCase):
             "Wende den adaptiven Vorschlag nicht an.",
             "Welche Einheiten sollte ich nächste Woche erwägen?",
         ]
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
             server, "openai_request", side_effect=fake_openai
         ), patch.object(server, "sync_intervals", return_value={"status": "ok"}):
             for message in messages:
@@ -2141,7 +2173,7 @@ class CoachTests(unittest.TestCase):
             return {"text": "Wie soll ich morgen trainieren?"}
 
         audio = b"fake-webm-audio"
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="test-key")), patch.object(
             server, "http_json", side_effect=fake_http_json
         ):
             result = server.transcribe_audio(audio, "audio/webm;codecs=opus")
@@ -2159,7 +2191,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(captured["headers"]["Authorization"], "Bearer test-key")
 
     def test_transcribe_audio_rejects_unknown_format_and_oversized_audio(self):
-        config = server.Config(openai_api_key="test-key")
+        config = replace(server.CONFIG, openai_api_key="test-key")
         with patch.object(server, "CONFIG", config):
             with self.assertRaises(server.AppError) as unsupported:
                 server.transcribe_audio(b"audio", "audio/flac")
@@ -2932,7 +2964,7 @@ class CoachTests(unittest.TestCase):
                 }]}
             return {"output_text": "Der Wettkampf wurde lokal gespeichert.", "output": []}
 
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
             server, "openai_request", side_effect=fake_openai
         ):
             result = server.chat_with_coach("Füge den Berlin Marathon als Zielwettkampf hinzu.")
@@ -2961,7 +2993,7 @@ class CoachTests(unittest.TestCase):
                 }]}
             return {"output_text": "Der Wettkampf wurde lokal gelöscht.", "output": []}
 
-        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
             server, "openai_request", side_effect=fake_openai
         ):
             result = server.chat_with_coach("Lösche den Zielwettkampf lokal.")
@@ -3351,7 +3383,7 @@ class CoachTests(unittest.TestCase):
                 return {"synced_at": "2026-08-28T08:00:00+00:00", "athlete": {}, "recent_wellness": [], "recent_activities": [], "upcoming_calendar": []}
 
         with patch.object(server, "IntervalsClient", FakeIntervalsClient), patch.object(server, "openai_request") as openai_request:
-            with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")):
+            with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
                 result = server.refresh_current_performance()
         self.assertEqual(result["status"], "ok")
         self.assertEqual(len(calls), 1)
@@ -3614,6 +3646,90 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("sk-test-secret-value", report_text)
         self.assertIn("logs", server.diagnostic_report())
 
+    def test_redaction_covers_garmin_email_encoded_url_and_structural_credentials(self):
+        email = "Athlete.Redaction@example.invalid"
+        calendar_url = "https://calendar.example.invalid/private/FeedSecret-9aB7cD2eF4gH6iJ8kL0mN.ics?accessToken=calendar-query-secret"
+        config = replace(server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url)
+        userinfo_url = "https://calendar-user:calendar-password@calendar.example.invalid/family.ics"
+        token_url = "https://calendar.example.invalid/feed.ics?provider=family&ACCESS-TOKEN=query-secret"
+        long_path_url = "https://calendar.example.invalid/public/9aB7cD2eF4gH6iJ8kL0mN2pQ4rS6tU8vW0xY.ics"
+        with patch.object(server, "CONFIG", config):
+            samples = " | ".join((
+                email,
+                email.casefold(),
+                quote(email, safe=""),
+                calendar_url,
+                quote(calendar_url, safe=""),
+                userinfo_url,
+                token_url,
+                long_path_url,
+            ))
+            redacted = server.redact_text(samples)
+        for secret in (email, calendar_url, quote(email, safe=""), quote(calendar_url, safe=""), "calendar-password", "query-secret"):
+            self.assertNotIn(secret.casefold(), redacted.casefold())
+        self.assertIn("calendar.example.invalid", redacted)
+        self.assertIn("[REDACTED_PATH]", redacted)
+        self.assertNotIn("calendar-user", redacted)
+
+    def test_provider_errors_are_classified_and_stored_diagnostics_are_redacted(self):
+        email = "garmin.fake.person@example.invalid"
+        calendar_url = "https://calendar.example.invalid/private/fake-calendar-token-1234567890.ics"
+        config = replace(server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url)
+        with patch.object(server, "CONFIG", config):
+            with self.assertRaises(server.AppError) as sdk_error:
+                server.external_call("garmin", "login", lambda: (_ for _ in ()).throw(RuntimeError(f"login {email}")))
+            self.assertEqual(sdk_error.exception.reason, "provider_client_error")
+            self.assertNotIn(email, str(sdk_error.exception))
+
+            with patch.object(server, "external_calendar_url", return_value=calendar_url), patch.object(
+                server, "fetch_calendar_feed", side_effect=RuntimeError(f"calendar request failed for {email}")
+            ):
+                with self.assertRaises(server.AppError) as calendar_error:
+                    server.sync_external_calendar("test")
+            self.assertEqual(calendar_error.exception.reason, "provider_client_error")
+            self.assertNotIn(email, str(calendar_error.exception))
+
+            server.set_kv("last_garmin_error", json.dumps([{"source": "login", "message": f"{email} {calendar_url}"}]))
+            state = server.garmin_public_state()
+            report = json.dumps(server.diagnostic_report(), ensure_ascii=False)
+        self.assertNotIn(email, json.dumps(state, ensure_ascii=False))
+        self.assertNotIn(calendar_url, report)
+        self.assertIn("calendar.example.invalid", report)
+
+    def test_http_provider_error_api_text_is_safe_and_bodies_are_not_logged(self):
+        email = "fake.garmin@example.invalid"
+        calendar_url = "https://calendar.example.invalid/private/fake-calendar-token-1234567890.ics"
+        config = replace(server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url)
+        error_body = json.dumps({"error": {"message": f"rejected {email} {calendar_url}"}}).encode("utf-8")
+        upstream_error = server.HTTPError("https://intervals.icu/api/v1/athlete/0", 422, "Unprocessable Entity", {}, BytesIO(error_body))
+        server.initialise_logging()
+        with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError) as raised:
+                server.http_json("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
+        self.assertEqual(raised.exception.reason, "provider_http_error")
+        self.assertNotIn(email, raised.exception.message)
+        self.assertNotIn(calendar_url, raised.exception.message)
+
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, *args):
+                return b'{"body_marker":"do-not-log-response-body"}'
+
+        with patch.object(server, "urlopen", return_value=FakeResponse()):
+            server.http_json("POST", "https://intervals.icu/api/v1/athlete/0", payload={"body_marker": "do-not-log-request-body"}, service="intervals")
+        for handler in server.LOGGER.handlers:
+            handler.flush()
+        log_text = json.dumps(server.recent_log_entries(), ensure_ascii=False)
+        self.assertNotIn("do-not-log-request-body", log_text)
+        self.assertNotIn("do-not-log-response-body", log_text)
+
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.initialise_logging()
         with patch.object(server, "urlopen", side_effect=server.URLError("offline")):
@@ -3717,12 +3833,12 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "12000")
         self.assertEqual(summary["status"]["state"], "ok")
 
-    def test_openai_insufficient_quota_error_is_classified_and_persisted(self):
+    def test_openai_credit_balance_exhausted_error_is_classified_and_persisted(self):
         error_body = json.dumps({
             "error": {
-                "message": "You exceeded your current quota, please check your plan and billing details.",
+                "message": "Your credit balance is exhausted.",
                 "type": "insufficient_quota",
-                "code": "insufficient_quota",
+                "code": "credit_balance_exhausted",
             }
         }).encode("utf-8")
         upstream_error = server.HTTPError(
@@ -3741,11 +3857,21 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 429)
         self.assertIn("Guthaben", raised.exception.message)
         summary = server.openai_usage_summary()
-        self.assertEqual(summary["status"]["reason"], "insufficient_quota")
+        self.assertEqual(summary["status"]["reason"], "credit_balance_exhausted")
         self.assertEqual(summary["status"]["http_status"], 429)
         self.assertEqual(summary["rate_limits"]["remaining_requests"], "0")
         self.assertEqual(summary["rate_limits"]["remaining_tokens"], "0")
         self.assertNotIn("current quota", json.dumps(summary))
+
+    def test_openai_documented_spend_and_usage_codes_are_classified(self):
+        for code in (
+            "organization_spend_limit_exceeded",
+            "project_spend_limit_exceeded",
+            "organization_usage_limit_exceeded",
+        ):
+            details = server.openai_error_details(429, json.dumps({"error": {"code": code}}).encode("utf-8"))
+            self.assertEqual(details["reason"], code)
+            self.assertIn("Limit", details["message"])
 
     def test_openai_conversation_lock_retry_uses_structured_reason(self):
         calls = []
@@ -3791,22 +3917,20 @@ class CoachTests(unittest.TestCase):
             server._validate_openai_response("/responses", {"error": {"message": "secret"}})
         self.assertEqual(error.exception.reason, "response_error")
 
-    def test_openai_daily_budget_is_enforced_before_request(self):
+    def test_openai_request_is_not_blocked_by_local_usage_total(self):
         server.set_kv("openai_usage", json.dumps({"date": server.local_now().date().isoformat(), "total_tokens": 10}))
-        config = replace(server.CONFIG, openai_api_key="test-key", openai_daily_token_budget=10)
-        with patch.object(server, "CONFIG", config), patch.object(server, "http_json") as request:
-            with self.assertRaises(server.AppError) as raised:
-                server.openai_request("/responses", {"model": "gpt-5.6-sol"})
-        self.assertEqual(raised.exception.reason, "daily_token_budget")
-        request.assert_not_called()
+        config = replace(server.CONFIG, openai_api_key="test-key")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", return_value={"status": "completed"}) as request:
+            result = server.openai_request("/responses", {"model": "gpt-5.6-sol"})
+        self.assertEqual(result["status"], "completed")
+        request.assert_called_once()
 
     def test_openai_usage_updates_are_atomic_and_tolerate_invalid_provider_counts(self):
-        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_daily_token_budget=1000)):
-            threads = [threading.Thread(target=server.record_openai_usage, args=({"usage": {"input_tokens": "bad", "output_tokens": 2}}, "test")) for _ in range(8)]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
+        threads = [threading.Thread(target=server.record_openai_usage, args=({"usage": {"input_tokens": "bad", "output_tokens": 2}}, "test")) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
         summary = server.openai_usage_summary()
         self.assertEqual(summary["requests"], 8)
         self.assertEqual(summary["input_tokens"], 0)
