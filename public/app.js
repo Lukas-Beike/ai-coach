@@ -10,7 +10,6 @@ const state = {
   chatDraftDirty: false,
   checkinSelectedDate: null,
   activityTypes: new Set(),
-  activitySearch: "",
   activityFromDate: "",
   activityToDate: "",
   activityVisibleCount: 250,
@@ -94,7 +93,6 @@ function showLogin() {
   state.activityFeedbackDrafts.clear();
   state.planningDrafts.clear();
   state.libraryDateDrafts.clear();
-  state.activitySearch = "";
   state.activityFromDate = "";
   state.activityToDate = "";
   state.activityVisibleCount = 250;
@@ -980,19 +978,14 @@ function renderActivities(activities) {
   const filteredActivities = state.activityTypes.size
     ? dateFilteredActivities.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))
     : dateFilteredActivities;
-  const query = state.activitySearch.trim().toLocaleLowerCase("de-DE");
-  const displayedActivities = query
-    ? filteredActivities.filter((activity) => [activity.name, activity.type, activity.sport, activity.sport_type].filter(Boolean).join(" ").toLocaleLowerCase("de-DE").includes(query))
-    : filteredActivities;
-  const isFiltered = Boolean(state.activityTypes.size || query || state.activityFromDate || state.activityToDate);
+  const displayedActivities = filteredActivities;
+  const isFiltered = Boolean(state.activityTypes.size || state.activityFromDate || state.activityToDate);
   renderActivityStats(displayedActivities, isFiltered);
   const stats = $("#activityStats");
   if (stats) stats.setAttribute("aria-label", isFiltered ? "Gefilterte Aktivitätsstatistik" : "Aktivitätsstatistik");
   const root = $("#activities");
-  const search = $("#activitySearch");
   const fromDate = $("#activityFromDate");
   const toDate = $("#activityToDate");
-  if (search && search.value !== state.activitySearch) search.value = state.activitySearch;
   if (fromDate && fromDate.value !== state.activityFromDate) fromDate.value = state.activityFromDate;
   if (toDate && toDate.value !== state.activityToDate) toDate.value = state.activityToDate;
   root.replaceChildren();
@@ -1002,7 +995,7 @@ function renderActivities(activities) {
     const title = document.createElement("strong");
     title.textContent = list.length ? "Keine passenden Einheiten" : "Noch keine absolvierten Einheiten";
     empty.append(title, document.createTextNode(list.length
-      ? query ? "Passe die Suche an oder setze sie zurück." : state.activityFromDate || state.activityToDate ? "Passe den Zeitraum an oder setze den Filter zurück." : "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück."
+      ? state.activityFromDate || state.activityToDate ? "Passe den Zeitraum an oder setze den Filter zurück." : "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück."
       : "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen."));
     root.append(empty);
     return;
@@ -3482,11 +3475,6 @@ $("#messageInput").addEventListener("keydown", (event) => {
     $("#chatForm").requestSubmit();
   }
 });
-$("#activitySearch").addEventListener("input", (event) => {
-  state.activitySearch = event.target.value;
-  state.activityVisibleCount = 250;
-  renderActivities(state.data?.activities || []);
-});
 $("#activityFromDate").addEventListener("input", (event) => {
   state.activityFromDate = event.target.value;
   state.activityVisibleCount = 250;
@@ -3499,7 +3487,6 @@ $("#activityToDate").addEventListener("input", (event) => {
 });
 $("#activityFilterReset").addEventListener("click", () => {
   state.activityTypes.clear();
-  state.activitySearch = "";
   state.activityFromDate = "";
   state.activityToDate = "";
   state.activityVisibleCount = 250;
