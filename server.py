@@ -1898,11 +1898,12 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
             payload = load_garmin_fixture(days)
             canonical = latest_snapshot()
             payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
+            payload.setdefault("provider_sync", {"pagination": {"fixture": {"windows": 1, "records": len(payload.get("activities") or []), "complete": True}}})
             append_garmin_performance_history(payload, previous)
             set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             set_kv("last_garmin_sync_at", payload["synced_at"])
             set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
-            return {"status": "ok", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or [])}
+            return {"status": "ok", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
         finally:
             set_kv("garmin_sync_status", "")
             GARMIN_LOCK.release()
@@ -1939,9 +1940,11 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
             )
             raise AppError(401, "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb des Servers eingerichtet werden.")
         payload: dict[str, Any] = {"synced_at": utc_now(), "start": start.isoformat(), "end": today.isoformat(), "errors": []}
+        pagination: dict[str, dict[str, Any]] = {}
         set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
 
         def fetch_range(key: str, fetch: Any, window_start: date, window_end: date) -> None:
+            stats = pagination.setdefault(key, {"windows": len(windows), "records": 0, "complete": True})
             try:
                 value = external_call(
                     "garmin",
@@ -1951,9 +1954,12 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
                 )
                 if isinstance(value, list):
                     payload.setdefault(key, []).extend(value)
+                    stats["records"] = int(stats["records"]) + len(value)
                 elif value is not None and key not in payload:
                     payload[key] = value
             except Exception as exc:
+                stats["complete"] = False
+                stats["error"] = redact_text(str(exc))[:500]
                 payload["errors"].append({"source": key, "message": redact_text(str(exc))[:500]})
                 LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": key}}, exc_info=True)
 
@@ -1998,13 +2004,14 @@ def sync_garmin(days: int = 30) -> dict[str, Any]:
                 payload["errors"].append({"source": "weight", "message": redact_text(str(exc))[:500]})
                 LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": "weight"}}, exc_info=True)
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
+        payload["provider_sync"] = {"pagination": pagination}
         canonical = latest_snapshot()
         payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
         append_garmin_performance_history(payload, previous)
         set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         set_kv("last_garmin_sync_at", payload["synced_at"])
         set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
-        return {"status": "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or [])}
+        return {"status": "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": pagination}
     finally:
         set_kv("garmin_sync_status", "")
         GARMIN_LOCK.release()
@@ -2026,6 +2033,7 @@ def garmin_public_state() -> dict[str, Any]:
         "source": snapshot.get("source") or ("library" if Garmin is not None else None),
         "last_sync_at": get_kv("last_garmin_sync_at"),
         "last_error": parsed_error,
+        "pagination": snapshot.get("provider_sync", {}).get("pagination", {}),
         "activities": len(filtered_activities),
         "duplicate_activities_skipped": skipped,
         "has_sleep": bool(snapshot.get("sleep")),
@@ -2426,6 +2434,20 @@ def list_competitions(include_sync: bool = False) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def _resolve_public_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    try:
+        addresses = [ipaddress.ip_address(hostname)]
+    except ValueError:
+        try:
+            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
+        except OSError as exc:
+            message = "Die Kalenderadresse konnte nicht aufgelöst werden." if status == 400 else "Der öffentliche Kalender konnte nicht aufgelöst werden."
+            raise AppError(status, message) from exc
+    if not addresses or any(not address.is_global for address in addresses):
+        raise AppError(status, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
+    return addresses
+
+
 def public_calendar_url(value: Any) -> str:
     raw = str(value or "").strip()
     parsed = urlparse(raw)
@@ -2435,7 +2457,7 @@ def public_calendar_url(value: Any) -> str:
         raise AppError(400, "Public calendars must use a valid HTTPS port.") from exc
     if port not in {None, 443}:
         raise AppError(400, "Public calendars must use HTTPS port 443.")
-    if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password:
+    if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
         raise AppError(400, "Öffentliche Kalender müssen über eine HTTPS-URL ohne Zugangsdaten erreichbar sein.")
     hostname = parsed.hostname.rstrip(".").casefold()
     if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
@@ -2449,6 +2471,7 @@ def public_calendar_url(value: Any) -> str:
             raise AppError(400, "Die öffentliche Kalenderadresse konnte nicht aufgelöst werden.") from exc
     if any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
         raise AppError(400, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
+    _resolve_public_calendar_addresses(hostname, status=400)
     return raw
 
 
@@ -2483,6 +2506,9 @@ def fetch_public_calendar(url: str) -> bytes:
         raise AppError(400, "The public calendar address contains invalid characters.") from exc
     tls_context = ssl.create_default_context()
     tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
+    # Resolve immediately before connecting and connect only to these checked
+    # addresses. This closes the validation/fetch DNS rebinding window.
+    addresses = _resolve_public_calendar_addresses(hostname, status=502)
     for address in addresses:
         raw_socket = None
         tls_socket = None
@@ -2563,16 +2589,38 @@ def parse_public_calendar(payload: bytes) -> list[dict[str, str]]:
 
 
 def _unfold_ical(payload: bytes) -> list[str]:
+    if not isinstance(payload, (bytes, bytearray)) or len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
+        raise AppError(413, "Der Kalender-Feed ist zu groß.")
     try:
         text = payload.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise AppError(400, "Der Kalender-Feed ist keine gültige UTF-8-iCalendar-Datei.") from exc
     unfolded: list[str] = []
     for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if len(line) > 20000:
+            raise AppError(400, "Der Kalender-Feed enthält eine zu lange Zeile.")
         if line.startswith((" ", "\t")) and unfolded:
             unfolded[-1] += line[1:]
         else:
             unfolded.append(line)
+    nonempty = [line for line in unfolded if line]
+    if not nonempty or nonempty[0].upper() != "BEGIN:VCALENDAR" or nonempty[-1].upper() != "END:VCALENDAR":
+        raise AppError(400, "Der Kalender-Feed muss ein vollständiges VCALENDAR-Dokument sein.")
+    stack: list[str] = []
+    for line in nonempty:
+        upper = line.upper()
+        if upper.startswith("BEGIN:"):
+            stack.append(upper[6:])
+            continue
+        if upper.startswith("END:"):
+            component = upper[4:]
+            if not stack or stack.pop() != component:
+                raise AppError(400, "Der Kalender-Feed enthält ungültige Komponenten.")
+            continue
+        if ":" not in line:
+            raise AppError(400, "Der Kalender-Feed enthält eine ungültige Eigenschaft.")
+    if stack:
+        raise AppError(400, "Der Kalender-Feed enthält nicht geschlossene Komponenten.")
     return unfolded
 
 
@@ -2639,6 +2687,10 @@ def parse_ical_calendar(payload: bytes) -> list[dict[str, Any]]:
             current = {}
             continue
         if upper == "END:VEVENT":
+            if current and current.get("recurrence"):
+                raise AppError(400, "Wiederkehrende Kalendertermine werden nicht unterstützt.")
+            if current and current.get("status", "").upper() != "CANCELLED" and not (current.get("uid") and current.get("start")):
+                raise AppError(400, "Ein Kalendertermin benötigt UID und DTSTART.")
             if current and current.get("uid") and current.get("start"):
                 if current.get("status", "").upper() != "CANCELLED":
                     start = current["start"]
@@ -2689,6 +2741,8 @@ def parse_ical_calendar(payload: bytes) -> list[dict[str, Any]]:
             current["description"] = parse_ics_value(raw_value)[:2000]
         elif key == "STATUS":
             current["status"] = parse_ics_value(raw_value)[:30]
+        elif key in {"RRULE", "RDATE", "EXRULE", "EXDATE", "RECURRENCE-ID"}:
+            current["recurrence"] = True
     events.sort(key=lambda item: (item["start_local"], item["name"]))
     return events[:1000]
 
@@ -2701,7 +2755,7 @@ def external_calendar_url(value: Any) -> str:
     except ValueError as exc:
         raise AppError(400, "Die Kalenderadresse muss einen gültigen HTTPS-Port verwenden.") from exc
     hostname = (parsed.hostname or "").rstrip(".").casefold()
-    if parsed.scheme.lower() != "https" or port not in {None, 443} or not hostname or parsed.username or parsed.password:
+    if parsed.scheme.lower() != "https" or port not in {None, 443} or not hostname or parsed.username or parsed.password or parsed.fragment:
         raise AppError(400, "Die Kalenderadresse muss eine HTTPS-URL ohne Zugangsdaten sein.")
     if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
         raise AppError(400, "Lokale Kalenderadressen werden aus Sicherheitsgründen nicht abgerufen.")
@@ -2714,6 +2768,7 @@ def external_calendar_url(value: Any) -> str:
             raise AppError(400, "Die Kalenderadresse konnte nicht aufgelöst werden.") from exc
     if any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
         raise AppError(400, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
+    _resolve_public_calendar_addresses(hostname, status=400)
     return raw
 
 
@@ -4333,10 +4388,48 @@ class IntervalsClient:
         credentials = base64.b64encode(f"API_KEY:{config.intervals_api_key}".encode()).decode()
         self.headers = {"Authorization": f"Basic {credentials}"}
         self.base = "https://intervals.icu/api/v1"
+        self.pagination: dict[str, dict[str, Any]] = {}
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         query = "?" + urlencode(params, doseq=True) if params else ""
         return http_json("GET", self.base + path + query, headers=self.headers, service="intervals")
+
+    def get_paged_collection(
+        self,
+        path: str,
+        params: dict[str, Any] | None,
+        collection: str,
+        page_size: int = 500,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        pages = 0
+        fingerprints: set[str] = set()
+        while True:
+            page = self.get(path, {**(params or {}), "limit": page_size, "offset": offset})
+            if not isinstance(page, list):
+                raise AppError(502, f"Intervals.icu hat keine gültige {collection}-Seite zurückgegeben.")
+            page_rows = [item for item in page if isinstance(item, dict)]
+            if len(page_rows) != len(page):
+                raise AppError(502, f"Intervals.icu liefert ungültige Datensätze in der {collection}-Seite.")
+            pages += 1
+            fingerprint = hashlib.sha256(json.dumps(page_rows, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+            if fingerprint in fingerprints and page_rows:
+                raise AppError(502, f"Intervals.icu liefert wiederholt dieselbe {collection}-Seite.")
+            fingerprints.add(fingerprint)
+            rows.extend(page_rows)
+            if len(page) < page_size:
+                break
+            offset += len(page)
+            if pages >= 100:
+                raise AppError(502, f"Die {collection}-Synchronisierung überschreitet das Seitenlimit.")
+        previous = self.pagination.get(collection) or {"pages": 0, "records": 0, "complete": True}
+        self.pagination[collection] = {
+            "pages": int(previous.get("pages") or 0) + pages,
+            "records": int(previous.get("records") or 0) + len(rows),
+            "complete": bool(previous.get("complete", True)),
+        }
+        return rows
 
     @intervals_operation
     def post(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
@@ -4355,7 +4448,7 @@ class IntervalsClient:
 
     def get_workout_library(self) -> list[dict[str, Any]]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.get(f"/athlete/{athlete}/workouts")
+        result = self.get_paged_collection(f"/athlete/{athlete}/workouts", {}, "workout_library")
         if not isinstance(result, list):
             raise AppError(502, "Intervals.icu hat keine Trainingsbibliothek zurÃ¼ckgegeben.")
         fields = (
@@ -4419,20 +4512,18 @@ class IntervalsClient:
         wellness: list[Any] = []
         for window_start, window_end in sync_date_windows(request_days, today):
             range_params = {"oldest": window_start.isoformat(), "newest": window_end.isoformat()}
-            activity_page = self.get(f"/athlete/{athlete}/activities", {**range_params, "limit": 500})
-            wellness_page = self.get(f"/athlete/{athlete}/wellness", range_params)
-            if isinstance(activity_page, list):
-                activities.extend(activity_page)
-            if isinstance(wellness_page, list):
-                wellness.extend(wellness_page)
+            activities.extend(self.get_paged_collection(f"/athlete/{athlete}/activities", range_params, "activities"))
+            wellness.extend(self.get_paged_collection(f"/athlete/{athlete}/wellness", range_params, "wellness"))
         activities = deduplicate_api_records(activities)
         wellness = deduplicate_api_records(wellness)
-        events = self.get(
+        events = self.get_paged_collection(
             f"/athlete/{athlete}/events",
             {"oldest": calendar_start.isoformat(), "newest": calendar_end.isoformat()},
+            "events",
         )
         athlete_data = self.get(f"/athlete/{athlete}")
         incoming = compact_snapshot(athlete_data, activities, wellness, events, history_days=request_days)
+        incoming["provider_sync"] = {"pagination": self.pagination}
         if not incremental:
             return incoming
         merged = dict(incoming)
@@ -4446,12 +4537,13 @@ class IntervalsClient:
         """Fetch a broad calendar range for target-event synchronization."""
         athlete = quote(self.config.intervals_athlete_id, safe="")
         today = local_now().date()
-        result = self.get(
+        result = self.get_paged_collection(
             f"/athlete/{athlete}/events",
             {
                 "oldest": (today - timedelta(days=365)).isoformat(),
                 "newest": (today + timedelta(days=730)).isoformat(),
             },
+            "competition_events",
         )
         if not isinstance(result, list):
             raise AppError(502, "Intervals.icu hat keine Kalenderevents zurückgegeben.")
@@ -4476,18 +4568,21 @@ class IntervalsClient:
         today = local_now().date()
         wellness_start = today - timedelta(days=90)
         athlete_data = self.get(f"/athlete/{athlete}")
-        wellness = self.get(
+        wellness = self.get_paged_collection(
             f"/athlete/{athlete}/wellness",
             {"oldest": wellness_start.isoformat(), "newest": today.isoformat()},
+            "performance_wellness",
         )
         existing_snapshot = existing_snapshot if isinstance(existing_snapshot, dict) else {}
-        return compact_snapshot(
+        snapshot = compact_snapshot(
             athlete_data,
             existing_snapshot.get("recent_activities", []),
             wellness,
             existing_snapshot.get("upcoming_calendar", []),
             history_days=90,
         )
+        snapshot["provider_sync"] = {"pagination": self.pagination}
+        return snapshot
 
     def push_workout(self, draft_id: str, workout: dict[str, Any]) -> dict[str, Any]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
@@ -5498,7 +5593,7 @@ def sync_workout_library(reason: str = "manual") -> dict[str, Any]:
             local_ids = [
                 str(row["local_id"])
                 for row in db.execute(
-                    "SELECT local_id FROM workout_library WHERE sync_state IN ('local', 'sync_error')"
+                    "SELECT local_id FROM workout_library WHERE sync_state IN ('local', 'sync_error', 'remote_missing')"
                 ).fetchall()
                 if row.get("local_id")
             ]
@@ -5638,6 +5733,12 @@ def intervals_public_state() -> dict[str, Any]:
     last_library_sync_at = get_kv("last_library_sync_at")
     last_sync_error = get_kv("last_sync_error") or None
     last_library_sync_error = get_kv("last_library_sync_error") or None
+    try:
+        pagination = json.loads(get_kv("last_sync_pagination") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pagination = {}
+    if not isinstance(pagination, dict):
+        pagination = {}
     running = SYNC_LOCK.locked() or WORKOUT_LIBRARY_SYNC_LOCK.locked()
     error = last_sync_error or last_library_sync_error
     if not configured:
@@ -5657,6 +5758,7 @@ def intervals_public_state() -> dict[str, Any]:
         "status": get_kv("sync_status") or None,
         "last_sync_at": last_sync_at,
         "last_error": error,
+        "pagination": pagination,
         "library_sync": {
             "last_sync_at": last_library_sync_at,
             "last_error": last_library_sync_error,
@@ -6137,6 +6239,8 @@ def sync_intervals(reason: str = "manual", activity_days: int | None = None) -> 
         sync_window = sync_date_windows(activity_days)
         set_kv("last_sync_window_start", sync_window[0][0].isoformat())
         set_kv("last_sync_window_end", sync_window[-1][1].isoformat())
+        pagination = snapshot.get("provider_sync", {}).get("pagination", {}) if isinstance(snapshot, dict) else {}
+        set_kv("last_sync_pagination", json.dumps(pagination, ensure_ascii=False, separators=(",", ":")))
         add_message("event", f"Trainingsdaten aktualisiert ({reason}, {period_label}).")
         return {
             "status": "partial" if library_error else "ok",
@@ -6149,6 +6253,7 @@ def sync_intervals(reason: str = "manual", activity_days: int | None = None) -> 
             "window_end": sync_window[-1][1].isoformat(),
             "library": library_count,
             "library_error": library_error,
+            "pagination": pagination,
         }
     except Exception as exc:
         set_kv("last_sync_error", redact_text(str(exc))[:1000])

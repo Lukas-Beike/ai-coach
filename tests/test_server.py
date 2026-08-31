@@ -390,6 +390,38 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(events[4]["no_intensity"])
         self.assertTrue(events[4]["training_relevant"])
 
+    def test_ical_parser_rejects_incomplete_and_recurring_feeds(self):
+        with self.assertRaises(server.AppError):
+            server.parse_ical_calendar(b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:broken\r\nEND:VEVENT\r\n")
+        recurring = (
+            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:recurring\r\n"
+            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY\r\n"
+            b"SUMMARY:Repeated\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+        with self.assertRaises(server.AppError) as raised:
+            server.parse_ical_calendar(recurring)
+        self.assertEqual(raised.exception.status, 400)
+
+    def test_external_calendar_keeps_last_good_events_on_invalid_feed(self):
+        today = server.local_now().date().isoformat()
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("good-event", "good-event", "Good event", today, today + "T10:00:00+02:00", today + "T11:00:00+02:00", 60, 0, 1, server.utc_now()),
+            )
+        with patch.object(server, "CONFIG", replace(server.CONFIG, calendar_ical_url="https://calendar.example/feed.ics")), patch.object(
+            server, "external_calendar_url", return_value="https://calendar.example/feed.ics"
+        ), patch.object(server, "fetch_public_calendar", return_value=b"not an ical feed"):
+            with self.assertRaises(server.AppError):
+                server.sync_external_calendar("test")
+        self.assertEqual(server.list_external_calendar_events(1000)[0]["id"], "good-event")
+
+    def test_calendar_dns_validation_rejects_non_global_addresses(self):
+        with patch.object(server.socket, "getaddrinfo", return_value=[(None, None, None, None, ("100.64.0.1", 443))]):
+            with self.assertRaises(server.AppError) as raised:
+                server.external_calendar_url("https://calendar.example/feed.ics")
+        self.assertEqual(raised.exception.status, 400)
+
     def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         with server.DB_LOCK, server.database() as db:
@@ -1322,20 +1354,53 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(library["sync_status"], "sync_error")
         self.assertEqual(server.workout_library_sync_summary()["sync_error"], 1)
 
-    def test_library_pull_marks_missing_remote_templates_without_deleting_them(self):
+    def test_library_sync_recreates_missing_remote_templates(self):
         imported = server.upsert_workout_library([{
             "id": "remote-missing", "name": "Remote template", "type": "Ride",
             "description": "- 30m Z2", "moving_time": 1800,
         }])[0]
+        restored = {"id": "remote-restored", "name": "Remote template", "type": "Ride", "description": "- 30m Z2", "moving_time": 1800}
         with patch.object(server, "CONFIG", server.Config(intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "get_workout_library", return_value=[]
-        ):
+        ), patch.object(server.IntervalsClient, "create_library_workouts", return_value=[restored]) as create:
             result = server.sync_workout_library("test")
         self.assertEqual(result["workouts"], 0)
         library = server.list_workout_library()[0]
         self.assertEqual(library["id"], imported["id"])
-        self.assertEqual(library["external_id"], "remote-missing")
-        self.assertEqual(library["sync_status"], "remote_missing")
+        self.assertEqual(library["external_id"], "remote-restored")
+        self.assertEqual(library["sync_status"], "synced")
+        create.assert_called_once()
+
+    def test_intervals_collection_pagination_is_bounded_and_reported(self):
+        client = server.IntervalsClient(server.Config(intervals_api_key="test-key"))
+        first_page = [{"id": f"activity-{index}"} for index in range(500)]
+        second_page = [{"id": "activity-500"}]
+        with patch.object(client, "get", side_effect=[first_page, second_page]) as get:
+            rows = client.get_paged_collection("/athlete/0/activities", {"oldest": "2026-01-01"}, "activities")
+        self.assertEqual(len(rows), 501)
+        self.assertEqual(client.pagination["activities"], {"pages": 2, "records": 501, "complete": True})
+        self.assertEqual(get.call_args_list[1].args[1]["offset"], 500)
+
+    def test_intervals_collection_rejects_repeated_full_page(self):
+        client = server.IntervalsClient(server.Config(intervals_api_key="test-key"))
+        page = [{"id": f"activity-{index}"} for index in range(500)]
+        with patch.object(client, "get", side_effect=[page, page]):
+            with self.assertRaises(server.AppError) as raised:
+                client.get_paged_collection("/athlete/0/activities", {}, "activities")
+        self.assertEqual(raised.exception.status, 502)
+
+    def test_intervals_snapshot_exposes_complete_page_metadata(self):
+        client = server.IntervalsClient(server.Config(intervals_api_key="test-key"))
+        with patch.object(client, "get", side_effect=[
+            [{"id": "activity-1", "start_date_local": "2026-08-31T08:00:00"}],
+            [{"id": "2026-08-31"}],
+            [],
+            {"id": "athlete-1"},
+        ]):
+            snapshot = client.fetch_snapshot(activity_days=1)
+        self.assertTrue(snapshot["provider_sync"]["pagination"]["activities"]["complete"])
+        self.assertEqual(snapshot["provider_sync"]["pagination"]["activities"]["records"], 1)
+        self.assertTrue(snapshot["provider_sync"]["pagination"]["events"]["complete"])
 
     def test_chat_creation_request_stores_directly_in_local_library(self):
         future_date = (date.today() + timedelta(days=1)).isoformat()
