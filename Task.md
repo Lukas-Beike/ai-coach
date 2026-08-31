@@ -36,19 +36,18 @@ Basis: `develop` / `45b5ca3`
 
 ### W3 – Sichere Remote-Kalenderaktionen
 
-- [ ] Löschen ausschließlich für zukünftige, app-eigene Workout-Events erlauben.
-- [ ] Rennen, Wettbewerbe und fremde Remote-Events serverseitig schützen.
-- [ ] UI nur mit zulässigen Löschaktionen versehen.
-- [ ] Tests für Kategorien, External-IDs und nicht erlaubte Events ergänzen.
+- [x] Löschen ausschließlich für zukünftige, app-eigene Workout-Events erlauben.
+- [x] Rennen, Wettbewerbe und fremde Remote-Events serverseitig schützen.
+- [x] UI nur mit zulässigen Löschaktionen versehen.
+- [x] Tests für Kategorien, External-IDs und nicht erlaubte Events ergänzen.
 
 ### W4 – Coach-Mutationen und Morgen-Check-in absichern
 
-- [ ] Automatischer Morgen-Check-in bleibt vollständig read-only.
-- [ ] Library-, Plan- und Activity-Feedback-Mutationen benötigen eine explizite
+- [x] Automatischer Morgen-Check-in bleibt vollständig read-only.
+- [x] Library-, Plan- und Activity-Feedback-Mutationen benötigen eine explizite
   aktuelle Nutzeraktion/Bestätigung.
-- [ ] Prompt-Injection- und Halluzinationsfälle dürfen keine dauerhaften
+- [x] Prompt-Injection- und Halluzinationsfälle dürfen keine dauerhaften
   Mutationen auslösen.
-- [ ] Idempotenz gegen doppelte Tool-Aufrufe ergänzen.
 
 ### W5 – Kanonische lokale Planung
 
@@ -63,6 +62,7 @@ Basis: `develop` / `45b5ca3`
 - [ ] Apply lehnt veraltete Previews ab und überschreibt keine späteren Änderungen.
 - [ ] Fehlende Ziele werden als stale/partial gemeldet, nicht als erfolgreich angewendet.
 - [ ] Preview-/Apply- und Wiederholungs-Tests ergänzen.
+- [ ] Mutationen gegen doppelte Tool-Aufrufe idempotent machen.
 
 ### W7 – Check-in, Datum und Zeitzonen
 

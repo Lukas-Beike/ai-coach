@@ -1370,12 +1370,64 @@ class CoachTests(unittest.TestCase):
         ) as delete_event:
             snapshot = server.compact_snapshot({}, [], [], [{
                 "id": "event-1", "name": "Tempo", "category": "WORKOUT",
+                "external_id": "intervals-coach-event-1",
+                "start_date_local": (date.today() + timedelta(days=1)).isoformat() + "T06:00:00",
             }])
             server.save_snapshot(snapshot)
             result = server.delete_planned_event("event-1")
         self.assertEqual(result["status"], "deleted")
         delete_event.assert_called_once_with("event-1")
         self.assertEqual(server.latest_snapshot()["upcoming_calendar"], [])
+
+    def test_planned_event_delete_rejects_race_and_unowned_workout(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        snapshot = server.compact_snapshot({}, [], [], [
+            {"id": "race-1", "name": "Rennen", "category": "RACE", "external_id": "intervals-coach-competition-1", "start_date_local": tomorrow + "T08:00:00"},
+            {"id": "workout-1", "name": "Fremdes Workout", "category": "WORKOUT", "external_id": "intervals-remote-1", "start_date_local": tomorrow + "T09:00:00"},
+        ])
+        server.save_snapshot(snapshot)
+        config = server.Config(**{**server.CONFIG.__dict__, "intervals_api_key": "test-key"})
+        with patch.object(server, "CONFIG", config), patch.object(server.IntervalsClient, "delete_event") as delete_event:
+            for event_id in ("race-1", "workout-1"):
+                with self.assertRaises(server.AppError) as raised:
+                    server.delete_planned_event(event_id)
+                self.assertEqual(raised.exception.status, 403)
+        delete_event.assert_not_called()
+
+    def test_read_only_chat_cannot_execute_mutating_tool(self):
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_read_only"}
+            if len([call for call in calls if call[0] == "/responses"]) == 1:
+                return {"output": [{
+                    "type": "function_call",
+                    "name": "save_workout_library_entries",
+                    "call_id": "blocked_write",
+                    "arguments": json.dumps({"plan_name": "unwanted", "goal": "", "workouts": []}),
+                }]}
+            return {"output_text": "Nur eine Empfehlung.", "output": []}
+
+        with patch.object(server, "CONFIG", server.Config(openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ):
+            result = server.chat_with_coach("Gib mir nur eine Einschätzung.", allow_mutations=False)
+
+        response_calls = [payload for path, payload in calls if path == "/responses"]
+        self.assertEqual(response_calls[0]["tools"], [])
+        self.assertEqual(response_calls[0]["tool_choice"], "none")
+        self.assertEqual(result["library_entries"], [])
+        self.assertEqual(server.list_workout_library(), [])
+
+    def test_morning_checkin_prompt_is_not_a_workout_creation_request(self):
+        prompt = (
+            "Gib mir den heutigen Morgen-Check-in auf Basis des frisch aktualisierten Snapshots. "
+            "Bewerte Trainingsbelastung, Schlaf, Erholung und geplante Einheiten. Empfiehl das heutige Vorgehen "
+            "und nenne mögliche Anpassungen nur als Vorschlag; nimm keine Änderungen an Einheiten vor."
+        )
+        self.assertFalse(server.prompt_requests_workout_creation(prompt))
 
     def test_output_text_falls_back_to_nested_content(self):
         response = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Hello"}]}]}

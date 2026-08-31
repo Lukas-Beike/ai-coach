@@ -97,6 +97,7 @@ PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
 LIBRARY_PLAN_BATCH_RE = re.compile(r"^/api/library/plan$")
 ACTIVITY_FEEDBACK_RE = re.compile(r"^/api/activities/([^/]+)/feedback$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
+COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
 
 
 class ProviderResyncGate:
@@ -4518,7 +4519,7 @@ def workout_event_payload(draft_id: str, workout: dict[str, Any]) -> dict[str, A
         "description": str(workout.get("description") or "")[:12000],
         "moving_time": duration * 60,
         "target": workout.get("target") if workout.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
-        "external_id": f"intervals-coach-{draft_id}",
+        "external_id": f"{COACH_EVENT_EXTERNAL_PREFIX}{draft_id}",
     }
 
 
@@ -5358,6 +5359,14 @@ def delete_planned_event(event_id: str) -> dict[str, Any]:
     event = next((item for item in planned if isinstance(item, dict) and str(item.get("id")) == normalized_id), None)
     if event is None:
         raise AppError(404, "Geplante Einheit wurde im lokalen Kalender nicht gefunden. Bitte zuerst synchronisieren.")
+    event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+    event_external_id = str(event.get("external_id") or "")
+    if (
+        str(event.get("category") or "").upper() != "WORKOUT"
+        or not event_external_id.startswith(COACH_EVENT_EXTERNAL_PREFIX)
+        or event_date < local_now().date().isoformat()
+    ):
+        raise AppError(403, "Nur zukünftige, von Intervals Coach angelegte Workouts können hier gelöscht werden.")
     IntervalsClient().delete_event(normalized_id)
     if isinstance(snapshot, dict):
         snapshot["upcoming_calendar"] = [item for item in planned if str(item.get("id")) != normalized_id]
@@ -6817,6 +6826,19 @@ def prompt_requests_workout_creation(message: str) -> bool:
     return asks_for_workout and asks_to_create
 
 
+def prompt_contains_activity_feedback(message: str) -> bool:
+    """Recognise a current athlete observation suitable for feedback storage."""
+    text = message.casefold().strip()
+    if not text or "?" in text:
+        return False
+    explicit_save = bool(re.search(r"\b(speicher\w*|notier\w*|feedback|rückmeldung|rueckmeldung|besonderheit\w*)\b", text))
+    observation = bool(re.search(
+        r"\b(ich|mir|mein|meine|fühl\w*|fuehl\w*|war|waren|hatte|beine|schmerz\w*|müd\w*|mued\w*|locker|hart|gut|schlecht)\b",
+        text,
+    ))
+    return explicit_save or observation
+
+
 def prompt_requests_library_plan_application(message: str) -> bool:
     """Recognise an explicit request to apply an already saved library plan."""
     text = message.casefold()
@@ -6958,7 +6980,7 @@ def apply_coach_adaptive_replan(adjustment_id: Any, message: str) -> dict[str, A
 
 
 @serialise_conversation
-def chat_with_coach(message: str) -> dict[str, Any]:
+def chat_with_coach(message: str, *, allow_mutations: bool = True) -> dict[str, Any]:
     message = message.strip()
     if not message:
         raise AppError(400, "Die Nachricht darf nicht leer sein.")
@@ -6984,7 +7006,9 @@ def chat_with_coach(message: str) -> dict[str, Any]:
     apply_library_plan = prompt_requests_library_plan_application(message)
     create_workout = prompt_requests_workout_creation(message)
     tool_choice = (
-        {"type": "function", "name": "apply_workout_library_plan"}
+        "none"
+        if not allow_mutations
+        else {"type": "function", "name": "apply_workout_library_plan"}
         if apply_library_plan
         else {"type": "function", "name": "save_workout_library_entries"}
         if create_workout
@@ -6992,7 +7016,7 @@ def chat_with_coach(message: str) -> dict[str, Any]:
         if requested_tool
         else "auto"
     )
-    coach_tools = COACH_TOOLS
+    coach_tools = COACH_TOOLS if allow_mutations else []
     response = responses_request(
         {
             "model": selected_model(),
@@ -7028,6 +7052,18 @@ def chat_with_coach(message: str) -> dict[str, Any]:
                 "sync_competitions",
             } and requested_tool != item.get("name"):
                 raise AppError(400, "Diese Coach-Aktion muss in der aktuellen Nachricht ausdrücklich angefordert werden.")
+            if item.get("name") == "save_workout_library_entries" and (
+                not allow_mutations or not create_workout
+            ):
+                raise AppError(400, "Das Speichern einer Einheit muss in der aktuellen Nachricht ausdrücklich angefordert werden.")
+            if item.get("name") == "apply_workout_library_plan" and (
+                not allow_mutations or not apply_library_plan
+            ):
+                raise AppError(400, "Das Anwenden eines Bibliotheksplans muss in der aktuellen Nachricht ausdrücklich angefordert werden.")
+            if item.get("name") == "save_activity_feedback" and (
+                not allow_mutations or not prompt_contains_activity_feedback(message)
+            ):
+                raise AppError(400, "Aktivitätsfeedback muss aus einer aktuellen Athletenrückmeldung stammen.")
             if item.get("name") == "save_workout_library_entries":
                 entries = save_workout_library_entries(
                     arguments.get("workouts") or [],
@@ -7200,7 +7236,8 @@ def run_morning_checkin(checkin_date: str) -> None:
         chat_with_coach(
             "Gib mir den heutigen Morgen-Check-in auf Basis des frisch aktualisierten Snapshots. "
             "Bewerte Trainingsbelastung, Schlaf, Erholung und geplante Einheiten. Empfiehl das heutige Vorgehen "
-            "und erstelle nur bei Sinnhaftigkeit neue Bibliothekseinheiten."
+            "und nenne mögliche Anpassungen nur als Vorschlag; nimm keine Änderungen an Einheiten vor.",
+            allow_mutations=False,
         )
         set_kv("morning_checkin_date", checkin_date)
         set_kv("morning_checkin_status", "ready")
