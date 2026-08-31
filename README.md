@@ -374,9 +374,14 @@ are never sent to the browser or included in the coach context. Text received
 from external services is treated as untrusted data and never as instructions.
 
 Logs record external service, operation, path, duration, and result sizes, but
-not request payloads or credentials. Client disconnects such as a closed
-browser connection are handled as normal aborted requests rather than internal
-server failures.
+not request/response bodies or credentials. Garmin identity values and private
+calendar URLs are redacted case-insensitively, including URL-encoded forms;
+URL userinfo, known token query parameters, and long credential-like path
+segments are removed while a non-sensitive provider host remains visible for
+diagnostics. Provider failures use short classified error messages rather than
+forwarding SDK exception text. Client disconnects such as a closed browser
+connection are handled as normal aborted requests rather than internal server
+failures.
 
 The **System** tab allows the athlete to export local data as JSON or delete
 local chats, snapshots, legacy drafts, active and archived library entries,

@@ -285,7 +285,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Browser-Smoke-Test bleibt FT-007 zugeordnet.
 - **Folgetasks:** FT-006 und FT-007 sind entblockt.
 
-### - [ ] FT-006 – Sensitive Konfigurationswerte vollständig redigieren
+### - [x] FT-006 – Sensitive Konfigurationswerte vollständig redigieren
+
+**Status:** abgeschlossen
 
 **Quelle:** SEC-01
 **Ziel:** Logs, Diagnosen und Fehlertexte können weder Garmin-Identität noch private Kalender-Credentials oder andere konfigurierte Secrets offenlegen.
@@ -293,18 +295,30 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Zentrale Secret-/PII-Redaction um Garmin-E-Mail und `CALENDAR_ICAL_URL` ergänzen.
-- [ ] URL-Userinfo, bekannte Token-Queryparameter und lange nicht erratbare URL-Pfade strukturell bereinigen.
-- [ ] Provider-Exceptions in definierte Fehlercodes/kurze sichere Meldungen überführen.
-- [ ] Redaction auf normale Logs, Tracebacks, Diagnoseexport und gespeicherte Fehler anwenden.
-- [ ] Tests mit vollständigem Wert, eingebettetem Wert, URL-Encoding und gemischter Groß-/Kleinschreibung ergänzen.
-- [ ] Sicherstellen, dass Tests nur Fake-Secrets verwenden.
+- [x] Zentrale Secret-/PII-Redaction um Garmin-E-Mail und `CALENDAR_ICAL_URL` ergänzen.
+- [x] URL-Userinfo, bekannte Token-Queryparameter und lange nicht erratbare URL-Pfade strukturell bereinigen.
+- [x] Provider-Exceptions in definierte Fehlercodes/kurze sichere Meldungen überführen.
+- [x] Redaction auf normale Logs, Tracebacks, Diagnoseexport und gespeicherte Fehler anwenden.
+- [x] Tests mit vollständigem Wert, eingebettetem Wert, URL-Encoding und gemischter Groß-/Kleinschreibung ergänzen.
+- [x] Sicherstellen, dass Tests nur Fake-Secrets verwenden.
 
 **Abnahmekriterien**
 
-- [ ] Kein Fake-Secret erscheint in Log-, Diagnose- oder API-Testausgabe.
-- [ ] Nicht-sensitive Host-/Providerinformation bleibt für Diagnosezwecke erhalten.
-- [ ] Request-/Response-Bodies werden weiterhin nicht geloggt.
+- [x] Kein Fake-Secret erscheint in Log-, Diagnose- oder API-Testausgabe.
+- [x] Nicht-sensitive Host-/Providerinformation bleibt für Diagnosezwecke erhalten.
+- [x] Request-/Response-Bodies werden weiterhin nicht geloggt.
+
+**Handover FT-006**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `fix/ft-006-sensitive-redaction`, Implementierung `bee1190`
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
+- **Verhaltensänderung:** Garmin-Identität, private Kalender-URLs und konfigurierte Secrets werden zentral in Logs, Tracebacks, Diagnosen, gespeicherten Fehlern und API-Fehlertexten redigiert. URL-Userinfo, bekannte Token-Queryparameter und lange credential-artige Pfade werden entfernt; der nicht-sensitive Host bleibt sichtbar. Provider-Ausnahmen werden mit sicheren Fehlercodes und kurzen Meldungen klassifiziert. Request-/Response-Bodies bleiben außerhalb der Logs.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py` erfolgreich; `docker build -t ai-coach:ft006 .` erfolgreich; beschleunigte SQLCipher-Shards `python tests/run_tests.py --shard N --total 4` erfolgreich: 4 × 54 Tests, insgesamt 216 Tests, Laufzeiten 17,93 s / 17,58 s / 12,90 s / 18,98 s, alle `OK`.
+- **Review:** Diff-Review ohne Findings; `git diff --check` sauber.
+- **Manuelle Prüfung:** Browser-Smoke-Test bleibt FT-007 zugeordnet; API-/Diagnose-/Log-Verhalten ist durch Fake-Secret-Tests abgedeckt.
+- **Offene Risiken:** Browser-Smoke-Test bleibt FT-007 zugeordnet.
+- **Folgetasks:** FT-007 und die weiteren Pakete sind entblockt.
 
 ---
 

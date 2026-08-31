@@ -10,6 +10,7 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
 from unittest.mock import Mock, patch
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
@@ -3645,6 +3646,90 @@ class CoachTests(unittest.TestCase):
         report_text = json.dumps(server.diagnostic_report())
         self.assertNotIn("sk-test-secret-value", report_text)
         self.assertIn("logs", server.diagnostic_report())
+
+    def test_redaction_covers_garmin_email_encoded_url_and_structural_credentials(self):
+        email = "Athlete.Redaction@example.invalid"
+        calendar_url = "https://calendar.example.invalid/private/FeedSecret-9aB7cD2eF4gH6iJ8kL0mN.ics?accessToken=calendar-query-secret"
+        config = replace(server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url)
+        userinfo_url = "https://calendar-user:calendar-password@calendar.example.invalid/family.ics"
+        token_url = "https://calendar.example.invalid/feed.ics?provider=family&ACCESS-TOKEN=query-secret"
+        long_path_url = "https://calendar.example.invalid/public/9aB7cD2eF4gH6iJ8kL0mN2pQ4rS6tU8vW0xY.ics"
+        with patch.object(server, "CONFIG", config):
+            samples = " | ".join((
+                email,
+                email.casefold(),
+                quote(email, safe=""),
+                calendar_url,
+                quote(calendar_url, safe=""),
+                userinfo_url,
+                token_url,
+                long_path_url,
+            ))
+            redacted = server.redact_text(samples)
+        for secret in (email, calendar_url, quote(email, safe=""), quote(calendar_url, safe=""), "calendar-password", "query-secret"):
+            self.assertNotIn(secret.casefold(), redacted.casefold())
+        self.assertIn("calendar.example.invalid", redacted)
+        self.assertIn("[REDACTED_PATH]", redacted)
+        self.assertNotIn("calendar-user", redacted)
+
+    def test_provider_errors_are_classified_and_stored_diagnostics_are_redacted(self):
+        email = "garmin.fake.person@example.invalid"
+        calendar_url = "https://calendar.example.invalid/private/fake-calendar-token-1234567890.ics"
+        config = replace(server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url)
+        with patch.object(server, "CONFIG", config):
+            with self.assertRaises(server.AppError) as sdk_error:
+                server.external_call("garmin", "login", lambda: (_ for _ in ()).throw(RuntimeError(f"login {email}")))
+            self.assertEqual(sdk_error.exception.reason, "provider_client_error")
+            self.assertNotIn(email, str(sdk_error.exception))
+
+            with patch.object(server, "external_calendar_url", return_value=calendar_url), patch.object(
+                server, "fetch_calendar_feed", side_effect=RuntimeError(f"calendar request failed for {email}")
+            ):
+                with self.assertRaises(server.AppError) as calendar_error:
+                    server.sync_external_calendar("test")
+            self.assertEqual(calendar_error.exception.reason, "provider_client_error")
+            self.assertNotIn(email, str(calendar_error.exception))
+
+            server.set_kv("last_garmin_error", json.dumps([{"source": "login", "message": f"{email} {calendar_url}"}]))
+            state = server.garmin_public_state()
+            report = json.dumps(server.diagnostic_report(), ensure_ascii=False)
+        self.assertNotIn(email, json.dumps(state, ensure_ascii=False))
+        self.assertNotIn(calendar_url, report)
+        self.assertIn("calendar.example.invalid", report)
+
+    def test_http_provider_error_api_text_is_safe_and_bodies_are_not_logged(self):
+        email = "fake.garmin@example.invalid"
+        calendar_url = "https://calendar.example.invalid/private/fake-calendar-token-1234567890.ics"
+        config = replace(server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url)
+        error_body = json.dumps({"error": {"message": f"rejected {email} {calendar_url}"}}).encode("utf-8")
+        upstream_error = server.HTTPError("https://intervals.icu/api/v1/athlete/0", 422, "Unprocessable Entity", {}, BytesIO(error_body))
+        server.initialise_logging()
+        with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError) as raised:
+                server.http_json("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
+        self.assertEqual(raised.exception.reason, "provider_http_error")
+        self.assertNotIn(email, raised.exception.message)
+        self.assertNotIn(calendar_url, raised.exception.message)
+
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, *args):
+                return b'{"body_marker":"do-not-log-response-body"}'
+
+        with patch.object(server, "urlopen", return_value=FakeResponse()):
+            server.http_json("POST", "https://intervals.icu/api/v1/athlete/0", payload={"body_marker": "do-not-log-request-body"}, service="intervals")
+        for handler in server.LOGGER.handlers:
+            handler.flush()
+        log_text = json.dumps(server.recent_log_entries(), ensure_ascii=False)
+        self.assertNotIn("do-not-log-request-body", log_text)
+        self.assertNotIn("do-not-log-response-body", log_text)
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.initialise_logging()
