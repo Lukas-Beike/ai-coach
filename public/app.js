@@ -1801,6 +1801,35 @@ function competitionEditor(competition = {}, index = 0) {
   });
   top.append(title, remove);
 
+  if (competition.sync_state === "conflict") {
+    const conflict = document.createElement("div");
+    conflict.className = "competition-conflict";
+    const remote = (() => {
+      try { return JSON.parse(competition.sync_conflict || "{}").remote || {}; } catch (_) { return {}; }
+    })();
+    const message = document.createElement("span");
+    message.textContent = remote.name
+      ? `Konflikt: Remote enthält „${remote.name}“ am ${dateLabel(remote.event_date || "")}.`
+      : "Konflikt: Das Remote-Event konnte nicht eindeutig zugeordnet werden.";
+    const actions = document.createElement("div");
+    actions.className = "competition-conflict-actions";
+    for (const [strategy, labelText] of [["keep_local", "Lokal behalten"], ["adopt_remote", "Remote übernehmen"]]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = labelText;
+      button.addEventListener("click", () => resolveCompetitionConflict(competition.id, strategy, button));
+      actions.append(button);
+    }
+    conflict.append(message, actions);
+    card.append(conflict);
+  } else if (competition.sync_state === "local_override") {
+    const status = document.createElement("small");
+    status.className = "competition-sync-state";
+    status.textContent = "Lokal priorisiert · beim nächsten Sync wird das Remote-Event aktualisiert";
+    card.append(status);
+  }
+
   const mainGrid = document.createElement("div");
   mainGrid.className = "form-grid";
   mainGrid.append(
@@ -1863,6 +1892,24 @@ function renderCompetitionSync(data) {
           ? `Letzte Aktualisierung: ${formatTime(sync.last_sync_at)}`
           : "Noch nicht synchronisiert";
     detail.classList.toggle("error", Boolean(sync.last_error));
+  }
+}
+
+async function resolveCompetitionConflict(competitionId, strategy, button) {
+  if (!competitionId) return;
+  button.disabled = true;
+  try {
+    await api(`/api/competitions/${encodeURIComponent(competitionId)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ strategy }),
+    });
+    state.profileDirty = false;
+    toast(strategy === "adopt_remote" ? "Remote-Wettkampf übernommen" : "Lokaler Wettkampf wird priorisiert");
+    invalidateContextPreview();
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
   }
 }
 
@@ -2547,7 +2594,7 @@ async function syncCompetitions() {
   try {
     const result = await api("/api/competitions/sync", { method: "POST", body: "{}" });
     if (result.status === "already_running") toast("Zielwettkämpfe werden bereits synchronisiert");
-    else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
+    else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.conflicts ? ` · ${result.conflicts} Konflikt(e) bitte prüfen` : ""}${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
