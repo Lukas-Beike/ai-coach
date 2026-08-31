@@ -315,11 +315,11 @@ jobs:
           ensure_release_test "$version_pr_number" "$version_branch" "$next_tag"
 
   create-release:
+    # The explicit promotion test is the single release-creation gate.
     if: >-
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true &&
-      github.event.pull_request.base.ref == 'main' &&
-      startsWith(github.event.pull_request.head.ref, 'chore/release-promotion-')) ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Test and publish container image' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.name == 'Test and publish container image' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
       github.event.workflow_run.conclusion == 'success' &&
       startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-'))
     runs-on: ubuntu-latest
@@ -372,6 +372,11 @@ jobs:
           if [[ -z "$release_tag" ]]; then
             echo "Could not read APP_VERSION from server.py."
             exit 1
+          fi
+
+          if gh release view "$release_tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $release_tag already exists; nothing to do."
+            exit 0
           fi
 
           latest_tag="$(gh release list --repo "$REPOSITORY" --limit 100 --json tagName,publishedAt,isDraft,isPrerelease \
@@ -435,10 +440,6 @@ jobs:
              compare_url="https://github.com/${REPOSITORY}/commits/${develop_release_base}"
            fi
 
-          if gh release view "$release_tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $release_tag already exists; nothing to do."
-            exit 0
-          fi
           if git ls-remote --exit-code --tags origin "refs/tags/$release_tag" >/dev/null 2>&1; then
             echo "Tag $release_tag already exists without a GitHub release; refusing to overwrite it."
             exit 1
@@ -460,9 +461,5 @@ jobs:
             --title "$release_tag" \
             --notes-file "$notes_file"
 
-          # Releases created with GITHUB_TOKEN do not emit a release event that
-          # can start another workflow, so dispatch the image workflow explicitly.
-          gh workflow run publish-container.yml \
-            --repo "$REPOSITORY" \
-            --ref main \
-            --field "release_tag=$release_tag"
+          # This release is created with the GitHub App token, so its release
+          # event starts publish-container.yml. Keep one container publish path.
