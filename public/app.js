@@ -17,6 +17,9 @@ const state = {
   activityFeedbackDirty: new Set(),
   planningEditDirty: new Set(),
   libraryDateDirty: new Set(),
+  activityFeedbackDrafts: new Map(),
+  planningDrafts: new Map(),
+  libraryDateDrafts: new Map(),
   plannedWeekOpen: new Map(),
   voiceRecorder: null,
   voiceStream: null,
@@ -87,6 +90,9 @@ function showLogin() {
   state.activityFeedbackDirty.clear();
   state.planningEditDirty.clear();
   state.libraryDateDirty.clear();
+  state.activityFeedbackDrafts.clear();
+  state.planningDrafts.clear();
+  state.libraryDateDrafts.clear();
   state.activitySearch = "";
   state.activityFromDate = "";
   state.activityToDate = "";
@@ -557,6 +563,9 @@ function discardUnsavedChanges() {
   state.activityFeedbackDirty.clear();
   state.planningEditDirty.clear();
   state.libraryDateDirty.clear();
+  state.activityFeedbackDrafts.clear();
+  state.planningDrafts.clear();
+  state.libraryDateDrafts.clear();
   setDirtyIndicator("activityDirtyIndicator", false);
   setDirtyIndicator("planningDirtyIndicator", false);
   setDirtyIndicator("libraryDirtyIndicator", false);
@@ -924,7 +933,6 @@ function renderActivityStats(activities, filtered = false) {
 
 function renderActivities(activities) {
   setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
-  if (state.activityFeedbackDirty.size) return;
   const list = Array.isArray(activities) ? activities : [];
   const syncDetail = $("#activitySyncDetail");
   const syncNotices = [];
@@ -1036,14 +1044,18 @@ function renderActivities(activities) {
       feedbackInput.rows = 3;
       feedbackInput.maxLength = 4000;
       feedbackInput.placeholder = "Zum Beispiel Schmerzen, ungewohnte Müdigkeit oder etwas, das besonders gut lief …";
-      feedbackInput.value = feedback.notes || "";
+      feedbackInput.value = state.activityFeedbackDrafts.has(String(activityId))
+        ? state.activityFeedbackDrafts.get(String(activityId))
+        : feedback.notes || "";
       feedbackLabel.append(feedbackInput);
       const feedbackButton = document.createElement("button");
       feedbackButton.type = "submit";
       feedbackButton.textContent = "Besonderheiten speichern";
       feedbackForm.append(feedbackLabel, feedbackButton);
       feedbackInput.addEventListener("input", () => {
-        state.activityFeedbackDirty.add(String(activityId));
+        const key = String(activityId);
+        state.activityFeedbackDrafts.set(key, feedbackInput.value);
+        state.activityFeedbackDirty.add(key);
         setDirtyIndicator("activityDirtyIndicator", true);
       });
       feedbackForm.addEventListener("submit", (event) => saveActivityFeedback(event, activity, feedbackButton));
@@ -1138,15 +1150,23 @@ function renderLocalPlanningActions(event, body) {
   const form = document.createElement("form");
   form.className = "local-planning-form";
   form.addEventListener("input", () => {
-    state.planningEditDirty.add(String(event.local_id));
+    const key = String(event.local_id);
+    state.planningDrafts.set(key, {
+      date: dateInput.value,
+      name: nameInput.value,
+      duration: durationInput.value,
+      description: descriptionInput.value,
+    });
+    state.planningEditDirty.add(key);
     setDirtyIndicator("planningDirtyIndicator", true);
   });
+  const planningDraft = state.planningDrafts.get(String(event.local_id)) || {};
   const dateLabel = document.createElement("label");
   dateLabel.textContent = "Datum";
   const dateInput = document.createElement("input");
   dateInput.type = "date";
   dateInput.required = true;
-  dateInput.value = plannedEventDate(event);
+  dateInput.value = planningDraft.date ?? plannedEventDate(event);
   dateLabel.append(dateInput);
   const nameLabel = document.createElement("label");
   nameLabel.textContent = "Name";
@@ -1154,7 +1174,7 @@ function renderLocalPlanningActions(event, body) {
   nameInput.type = "text";
   nameInput.maxLength = 200;
   nameInput.required = true;
-  nameInput.value = event.name || "Geplante Einheit";
+  nameInput.value = planningDraft.name ?? event.name ?? "Geplante Einheit";
   nameLabel.append(nameInput);
   const durationLabel = document.createElement("label");
   durationLabel.textContent = "Dauer (Minuten)";
@@ -1163,7 +1183,7 @@ function renderLocalPlanningActions(event, body) {
   durationInput.min = "5";
   durationInput.max = "600";
   durationInput.required = true;
-  durationInput.value = event.duration_minutes || Math.round(Number(event.moving_time || 0) / 60) || 30;
+  durationInput.value = planningDraft.duration ?? (event.duration_minutes || Math.round(Number(event.moving_time || 0) / 60) || 30);
   durationLabel.append(durationInput);
   const descriptionLabel = document.createElement("label");
   descriptionLabel.textContent = "Workout-Text";
@@ -1171,7 +1191,7 @@ function renderLocalPlanningActions(event, body) {
   descriptionInput.rows = 4;
   descriptionInput.maxLength = 12000;
   descriptionInput.required = true;
-  descriptionInput.value = event.description || "";
+  descriptionInput.value = planningDraft.description ?? event.description ?? "";
   descriptionLabel.append(descriptionInput);
   const saveButton = document.createElement("button");
   saveButton.type = "submit";
@@ -1195,6 +1215,7 @@ function renderLocalPlanningActions(event, body) {
         }),
       });
       state.planningEditDirty.delete(String(event.local_id));
+      state.planningDrafts.delete(String(event.local_id));
       setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
       toast("Lokale Planung gespeichert");
       await load();
@@ -1245,7 +1266,6 @@ function renderLocalPlanningActions(event, body) {
 
 function renderPlanned(planned, externalCalendarEvents = []) {
   setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
-  if (state.planningEditDirty.size) return;
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   renderWeatherNotice(state.data?.weather);
   const root = $("#plannedCalendar");
@@ -1730,7 +1750,6 @@ function renderLibrary(workouts) {
   const root = $("#library");
   if (!root) return;
   setDirtyIndicator("libraryDirtyIndicator", state.libraryDateDirty.size > 0);
-  if (state.libraryDateDirty.size) return;
   root.replaceChildren();
   const allWorkouts = Array.isArray(workouts) ? workouts : [];
   const filter = state.libraryFilter || "active";
@@ -1799,9 +1818,12 @@ function renderLibrary(workouts) {
         dateLabelNode.textContent = "Datum";
         const dateInput = document.createElement("input");
         dateInput.type = "date";
-        dateInput.value = addDateKey(timezoneDateKey(state.data?.profile?.timezone, new Date()), 1);
+        dateInput.value = state.libraryDateDrafts.get(String(workout.id))
+          ?? addDateKey(timezoneDateKey(state.data?.profile?.timezone, new Date()), 1);
         const markLibraryDateDirty = () => {
-          state.libraryDateDirty.add(String(workout.id));
+          const key = String(workout.id);
+          state.libraryDateDrafts.set(key, dateInput.value);
+          state.libraryDateDirty.add(key);
           setDirtyIndicator("libraryDirtyIndicator", true);
         };
         dateInput.addEventListener("input", markLibraryDateDirty);
@@ -1906,6 +1928,8 @@ async function planLibraryWorkout(workoutId, dateInput, button) {
   try {
     await api("/api/library/" + encodeURIComponent(workoutId) + "/plan", { method: "POST", body: JSON.stringify({ date: dateInput.value }) });
     state.libraryDateDirty.delete(String(workoutId));
+    state.libraryDateDrafts.delete(String(workoutId));
+    setDirtyIndicator("libraryDirtyIndicator", state.libraryDateDirty.size > 0);
     toast("Lokale Bibliothekseinheit gespeichert");
     await load();
   } catch (error) { toast(error.message, true); }
@@ -3123,6 +3147,7 @@ async function saveActivityFeedback(event, activity, button) {
   try {
     await api(`/api/activities/${encodeURIComponent(String(activityId))}/feedback`, { method: "POST", body: JSON.stringify(payload) });
     state.activityFeedbackDirty.delete(String(activityId));
+    state.activityFeedbackDrafts.delete(String(activityId));
     setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
     toast(payload.notes.trim() ? "Besonderheiten gespeichert" : "Besonderheiten entfernt");
     await load();
