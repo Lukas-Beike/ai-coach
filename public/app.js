@@ -611,6 +611,11 @@ function plannedEventDate(event) {
   return String(event?.start_date_local || event?.date || "").slice(0, 10);
 }
 
+function isCoachOwnedWorkout(event) {
+  return String(event?.category || "").toUpperCase() === "WORKOUT"
+    && String(event?.external_id || "").startsWith("intervals-coach-");
+}
+
 function plannedDayLabel(date, offset) {
   const formatted = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(date);
   if (offset === 0) return `Heute · ${formatted}`;
@@ -1176,7 +1181,7 @@ function renderPlanned(planned, externalCalendarEvents = []) {
             recommendation.append(icon, recommendationTitle, recommendationReason);
             body.append(recommendation);
           }
-          if (event.id != null) {
+          if (event.id != null && isCoachOwnedWorkout(event)) {
             const actions = document.createElement("div");
             actions.className = "card-actions";
             const button = document.createElement("button");
