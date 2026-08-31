@@ -497,6 +497,11 @@ python -m unittest discover -s tests -v
 python -m py_compile server.py tests/test_server.py
 ```
 
+The GitHub Actions test workflow runs the unit tests in four parallel shards
+with `python tests/run_tests.py --shard <number> --total 4`. General tests use
+an isolated fast SQLite fixture; the dedicated encryption checks retain their
+SQLCipher setup.
+
 Pull requests run the unit tests and syntax checks. The conventional-commit
 workflow validates pull-request titles and commit subjects. Dependabot manages
 Python, Docker, and GitHub Actions dependencies and can automatically squash
