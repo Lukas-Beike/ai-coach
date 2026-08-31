@@ -420,6 +420,25 @@ h2 {
 .weather-notice { margin: 0 0 12px; padding: 11px 13px; border: 1px solid rgba(52, 207, 161, .25); border-radius: 13px; color: var(--muted); background: rgba(52, 207, 161, .07); font-size: .72rem; line-height: 1.4; }
 .weather-notice.error { border-color: rgba(255, 159, 10, .45); background: rgba(255, 159, 10, .08); }
 .adaptive-planning-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 14px; padding: 12px 13px; border: 1px solid rgba(255, 69, 58, .5); border-radius: 14px; color: var(--ink); background: rgba(255, 69, 58, .1); box-shadow: var(--shadow-soft); }
+.today-status { min-height: 1.2em; margin: -5px 0 12px; color: var(--muted); font-size: .74rem; line-height: 1.4; }
+.today-status.working { color: var(--accent-bright); }
+.today-status.error, .today-error { color: #ff9a93; }
+.today-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.today-card { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface-raised); }
+.today-card h3 { margin: 0; color: var(--ink); font-size: .9rem; }
+.today-card p { margin: 0; }
+.today-card-summary { color: var(--ink) !important; line-height: 1.45; }
+.today-empty { color: var(--subtle); line-height: 1.45; }
+.today-source { color: var(--subtle) !important; font-size: .68rem; }
+.today-item { display: grid; gap: 3px; min-width: 0; }
+.today-item strong { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
+.today-item span { color: var(--muted); font-size: .7rem; }
+.today-card .secondary-button { justify-self: start; min-height: 40px; }
+.today-adjustment { border-color: rgba(255, 69, 58, .45); }
+@media (max-width: 559px) {
+  .today-grid { grid-template-columns: 1fr; }
+  .today-card { padding: 14px; }
+}
 .adaptive-planning-notice[hidden] { display: none; }
 .adaptive-planning-notice > div { display: grid; gap: 4px; min-width: 0; }
 .adaptive-planning-notice strong { font-size: .78rem; }

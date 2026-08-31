@@ -23,7 +23,7 @@ It is not intended to be exposed directly to the public internet.
   and indoor/virtual cycling.
 - Mobile-first profile and system sections can be collapsed; the planned
   calendar is grouped into collapsible full weeks with compact volume summaries.
-  The Einstellungen tab controls how many past and future weeks are displayed.
+  The More tab controls how many past and future weeks are displayed.
   Intervals.icu planned workouts are matched to completed activities through
   their pairing (with a conservative same-day/sport fallback) and show
   workout and weekly compliance percentages. The comparison uses training
@@ -93,11 +93,16 @@ It is not intended to be exposed directly to the public internet.
   coach can propose a conservative sport-pause forecast; only after explicit
   confirmation are future local sessions replaced with illness-pause entries and
   the corresponding future check-in days filled.
-  The Geplant tab combines each dated check-in with recovery signals, weather,
+  The Plan tab combines each dated check-in with recovery signals, weather,
   planned sessions, and read-only calendar appointments; existing entries can
   be selected and edited directly on their day. Check-in dates and daily
   training boundaries use the saved IANA profile timezone, and future check-ins
-  are rejected.
+  are rejected. The Heute tab provides a compact daily view of the local
+  check-in, readiness/recovery signals, today's planned workout, relevant
+  weather, open activity feedback, and pending plan adjustments. It uses
+  already loaded state and does not trigger an additional coach or provider
+  request when opened. Missing, loading, offline, sync, and error states are
+  shown clearly.
 - After a completed activity, the coach can ask for a short subjective follow-up
   and store the athlete's answer as activity feedback.
 - The coach can explicitly read the local workout library and planned units and
@@ -144,7 +149,7 @@ After login, the chat and all data already stored locally are rendered first.
 The browser then loads the current remote-enriched view in the background. The
 authentication request itself does not force a new Intervals.icu, Garmin, or
 calendar synchronization: those providers are synchronized at server
-startup, once per calendar day in the background, or on demand from the Einstellungen
+startup, once per calendar day in the background, or on demand from the More
 tab. The selected activity windows (Intervals.icu and Garmin) are retained
 locally and can be changed in that tab.
 
@@ -156,16 +161,21 @@ visible as partial provider status instead of being presented as complete.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
-can be forced manually from the Open-Meteo card in the Einstellungen tab.
+can be forced manually from the Open-Meteo card in the More tab.
 GitHub release information is checked at most every 15 minutes. The morning
 check-in is generated at most once per local calendar day when its required
 integrations are configured.
 
-The six main views use stable hash links: `#coach`, `#activities`, `#planned`,
-`#performance`, `#profile`, and `#settings`. Navigation is implemented with
-real links, so direct links, reload, browser back/forward, keyboard access, and
+The six main views use stable hash links: `#coach`, `#today`, `#activities`,
+`#planned`, `#performance`, and `#more`. Navigation is implemented with real
+links, so direct links, reload, browser back/forward, keyboard access, and
 screen-reader announcements remain available. An unknown hash falls back to
-`#coach`; a deep link is retained through the login flow.
+`#coach`; a deep link is retained through the login flow. The `#today` view
+combines the local check-in, current recovery/readiness signals, today's
+planned workout, relevant weather, open activity feedback, and pending plan
+adjustments. It uses already loaded state only; opening the view does not
+trigger an additional coach or provider request. Missing data, offline state,
+sync progress, and the last sync error are shown explicitly.
 
 Versioned JavaScript, CSS, and image assets with a `?v=...` query are served
 with a one-year immutable cache policy and an ETag. HTML, the manifest, and the
@@ -284,11 +294,11 @@ URL stays in the server environment and is excluded from browser state,
 exports, and logs.
 
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
-in the Einstellungen tab. Daily synchronization uses the athlete's validated
+in the More tab. Daily synchronization uses the athlete's validated
 IANA timezone and stores a separate local execution date for each provider.
 Existing UTC timestamps are converted lazily when the local marker is missing;
 a successful manual sync counts for that provider's current local day. Events
-themselves are shown only in the **Geplant** tab.
+themselves are shown only in the **Plan** tab.
 A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
@@ -316,7 +326,7 @@ and points to billing.
 The application checks the latest non-draft, non-prerelease GitHub release on
 the server and caches the result for 15 minutes by default. A newer release is
 shown next to the application version and its release notes are available in
-the **Einstellungen** tab. Set `GITHUB_TOKEN` only when the configured repository is
+the **More** tab. Set `GITHUB_TOKEN` only when the configured repository is
 private; the token remains server-side and is never returned to the browser.
 
 ## Garmin authentication
@@ -446,7 +456,7 @@ The Intervals.icu connection card also reports whether the provider is
 connected, synchronizing, or in error, including the time of the last
 successful update and a safe provider validation message when available.
 
-The **Einstellungen** tab also provides an encrypted database backup download and a
+The **More** tab also provides an encrypted database backup download and a
 validated restore action. Restoring requires the same `APP_PASSWORD` used by
 the backup database. Before replacement, the current database is retained as a
 `*.pre-restore-*` copy in `/data`. Keep both files protected.

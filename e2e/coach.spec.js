@@ -8,11 +8,11 @@ if (!APP_PASSWORD || APP_PASSWORD.length < 12) {
 
 const navigation = [
   ["Coach", "chatPanel", "coach"],
-  ["Aktivitäten", "activitiesPanel", "activities"],
-  ["Geplant", "workoutsPanel", "planned"],
-  ["Leistungsdaten", "dataPanel", "performance"],
-  ["Profil", "profilePanel", "profile"],
-  ["Einstellungen", "settingsPanel", "settings"],
+  ["Heute", "todayPanel", "today"],
+  ["Verlauf", "activitiesPanel", "activities"],
+  ["Plan", "workoutsPanel", "planned"],
+  ["Leistung", "dataPanel", "performance"],
+  ["Mehr", "settingsPanel", "more"],
 ];
 
 async function login(page) {
@@ -70,7 +70,7 @@ test.describe("critical browser states", () => {
       await expect(page.getByRole("link", { name: label, exact: true })).toHaveAttribute("href", `#${route}`);
     }
 
-    await page.getByRole("link", { name: "Leistungsdaten", exact: true }).click();
+    await page.getByRole("link", { name: "Leistung", exact: true }).click();
     await expect(page).toHaveURL(/#performance$/);
     await page.goBack();
     await expect(page.locator("#settingsPanel")).toHaveClass(/active/);
@@ -81,7 +81,7 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#chatPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#coach$/);
 
-    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    await page.getByRole("link", { name: "Heute", exact: true }).click();
     const checkinButton = page.getByRole("button", { name: /Tages-Check-in/ }).first();
     await expect(checkinButton).toBeVisible();
     await checkinButton.click();
@@ -108,7 +108,8 @@ test.describe("critical browser states", () => {
     expect(safetyLayout.hintBottom).toBeLessThanOrEqual(Math.min(safetyLayout.composerTop, safetyLayout.navigationTop));
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
 
-    await page.getByRole("link", { name: "Profil", exact: true }).click();
+    await page.goto("/#profile");
+    await expect(page.locator("#profilePanel")).toHaveClass(/active/);
     const profileName = page.getByLabel("Name");
     await profileName.fill("Fixture Athlete");
     await expect(page.locator("#profileDirtyIndicator")).toBeVisible();
@@ -127,7 +128,7 @@ test.describe("critical browser states", () => {
     expect(loginResults.violations, "Login accessibility violations").toEqual([]);
     await login(page);
 
-    for (const [label, panelId] of navigation.filter(([name]) => ["Coach", "Profil", "Einstellungen"].includes(name))) {
+    for (const [label, panelId] of navigation.filter(([name]) => ["Coach", "Heute", "Mehr"].includes(name))) {
       await page.getByRole("link", { name: label, exact: true }).click();
       await expect(page.locator(`#${panelId}`)).toHaveClass(/active/);
       const results = await new AxeBuilder({ page })
