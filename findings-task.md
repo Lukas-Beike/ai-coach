@@ -699,25 +699,38 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 ### - [ ] FT-017 – Neue mobile Hauptnavigation und „Heute“-Ansicht umsetzen
 
+**Status:** in Umsetzung; lokaler Patch und Container-Validierung abgeschlossen, PR-/CI-Abnahme offen
+
 **Quelle:** UX-01, Feature-Gap „Heute“
 **Ziel:** Die sechs Hauptziele orientieren sich am täglichen Ablauf: Coach, Heute, Verlauf, Plan, Leistung, Mehr.
 **Abhängigkeiten:** FT-016, FT-010
 
 **Umsetzung**
 
-- [ ] Navigation auf `Coach`, `Heute`, `Verlauf`, `Plan`, `Leistung`, `Mehr` umstellen.
-- [ ] Tages-Check-in aus dem Stammdatenprofil in „Heute“ verschieben.
-- [ ] Readiness, heutiges Workout, relevantes Wetter, offene Rückmeldung und aktuelle Plananpassung kompakt zusammenführen.
-- [ ] Empty-, Loading-, Offline-, Sync- und Fehlerzustände definieren.
-- [ ] Bestehende APIs wiederverwenden oder fachlich geteilte Endpunkte aus FT-010 nutzen.
-- [ ] Keine zusätzliche automatische Coach-/Provideranfrage allein durch Öffnen der Ansicht auslösen.
-- [ ] Mobile Einhandbedienung und 200-%-Zoom prüfen.
+- [x] Navigation auf `Coach`, `Heute`, `Verlauf`, `Plan`, `Leistung`, `Mehr` umstellen.
+- [x] Tages-Check-in aus dem Stammdatenprofil in „Heute“ verschieben.
+- [x] Readiness, heutiges Workout, relevantes Wetter, offene Rückmeldung und aktuelle Plananpassung kompakt zusammenführen.
+- [x] Empty-, Loading-, Offline-, Sync- und Fehlerzustände definieren.
+- [x] Bestehende APIs wiederverwenden oder fachlich geteilte Endpunkte aus FT-010 nutzen.
+- [x] Keine zusätzliche automatische Coach-/Provideranfrage allein durch Öffnen der Ansicht auslösen.
+- [x] Mobile Einhandbedienung und 200-%-Zoom prüfen.
 
 **Abnahmekriterien**
 
 - [ ] Täglicher Check-in ist ohne Öffnen technischer Profileinstellungen erreichbar.
 - [ ] „Heute“ funktioniert auch bei fehlendem Garmin/Wetter/Workout mit klaren Empty States.
 - [ ] Keine doppelte Dateneingabe oder implizite durable Mutation.
+
+**Handover FT-017 (laufend)**
+
+- **Status:** in Umsetzung
+- **Branch und Commit:** `feat/ft-017-today`, `671c50d`
+- **Geänderte Dateien:** `public/app.js`, `public/index.html`, `public/styles.css`, `public/service-worker.js`, `e2e/coach.spec.js`, `tests/test_server.py`, `README.md`
+- **Verhaltensänderung:** Die Hauptnavigation führt jetzt zu Coach, Heute, Verlauf, Plan, Leistung und Mehr. Die neue Heute-Ansicht projiziert ausschließlich bereits geladene lokale Zustände; der Check-in-Dialog ist dort erreichbar. Fehlende Daten, Laden, Offline, Sync und Fehler werden explizit dargestellt.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check`, `docker build -t ai-coach:ft017 .` und vier parallele SQLCipher-Shards mit `62 + 62 + 61 + 61 = 246` Tests erfolgreich, alle `OK`.
+- **Manuelle Prüfung:** CI-Browser-Smoke und Accessibility stehen im PR noch aus; native Node-/Playwright-Ausführung ist unter Windows nicht installiert.
+- **Offene Risiken:** PR-/CI-Abnahme ausstehend.
+- **Folgetasks:** FT-018 und FT-019 bleiben bis zur Abnahme offen.
 
 ### - [ ] FT-018 – „Plan“ in Kalender, Bibliothek und Ziele & Pläne segmentieren
 

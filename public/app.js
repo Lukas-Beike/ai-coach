@@ -54,11 +54,23 @@ const SYNC_POLL_RETRY_MS = 5_000;
 const SYNC_POLL_LEASE_MS = 4_000;
 const NAV_ROUTES = Object.freeze({
   coach: "chatPanel",
+  today: "todayPanel",
   activities: "activitiesPanel",
   planned: "workoutsPanel",
   performance: "dataPanel",
+  more: "settingsPanel",
   profile: "profilePanel",
   settings: "settingsPanel",
+});
+const NAV_LINK_ROUTES = Object.freeze({
+  coach: "coach",
+  today: "today",
+  activities: "activities",
+  planned: "planned",
+  performance: "performance",
+  more: "more",
+  profile: "more",
+  settings: "more",
 });
 const DEFAULT_NAV_ROUTE = "coach";
 
@@ -73,30 +85,31 @@ function hashContainsKnownRoute(hash = window.location.hash) {
 }
 
 function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
-  const panelId = NAV_ROUTES[route] ? route : DEFAULT_NAV_ROUTE;
+  const panelRoute = NAV_ROUTES[route] ? route : DEFAULT_NAV_ROUTE;
+  const navigationRoute = NAV_LINK_ROUTES[panelRoute] || panelRoute;
   const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
-  if (currentPanel !== NAV_ROUTES[panelId] && !confirmDiscardChanges()) return false;
-  if (currentPanel !== NAV_ROUTES[panelId] && hasUnsavedChanges()) discardUnsavedChanges();
+  if (currentPanel !== NAV_ROUTES[panelRoute] && !confirmDiscardChanges()) return false;
+  if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges()) discardUnsavedChanges();
   document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
-  const navigation = document.querySelector(`.nav-item[data-route="${panelId}"]`);
-  const panel = document.querySelector(`#${NAV_ROUTES[panelId]}`);
+  const navigation = document.querySelector(`.nav-item[data-route="${navigationRoute}"]`);
+  const panel = document.querySelector(`#${NAV_ROUTES[panelRoute]}`);
   if (!navigation || !panel) return false;
   navigation.classList.add("active");
   document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
   navigation.setAttribute("aria-current", "page");
   panel.classList.add("active");
-  state.route = panelId;
-  const targetHash = `#${panelId}`;
+  state.route = panelRoute;
+  const targetHash = `#${panelRoute}`;
   if (window.location.hash !== targetHash) {
-    if (historyMode === "push") window.history.pushState({ route: panelId }, "", targetHash);
-    else if (historyMode === "replace") window.history.replaceState({ route: panelId }, "", targetHash);
+    if (historyMode === "push") window.history.pushState({ route: panelRoute }, "", targetHash);
+    else if (historyMode === "replace") window.history.replaceState({ route: panelRoute }, "", targetHash);
   }
   if (state.data) renderStatus(state.data);
   updateHeaderAction();
-  if (state.data && panelId === "settings") loadContextPreview();
-  if (state.data && panelId === "settings") loadLogs();
+  if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadContextPreview();
+  if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadLogs();
   window.scrollTo({ top: 0, behavior: "auto" });
-  if (panelId === "coach") scrollChatToLatest(true);
+  if (panelRoute === "coach") scrollChatToLatest(true);
   if (focus && !$("#appShell")?.hidden) {
     panel.setAttribute("tabindex", "-1");
     panel.focus({ preventScroll: true });
@@ -272,6 +285,7 @@ function renderSyncStatus(status) {
     last_error: status.last_error || null,
   };
   renderActivities(state.data.activities || []);
+  renderToday(state.data);
   renderPerformance(state.data.performance || {});
   renderSettings(state.data);
   updateHeaderAction();
@@ -1057,6 +1071,132 @@ function renderWeatherNotice(weather) {
   }
   const location = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
   notice.textContent = `${location ? `Wetter für ${location}` : "Wettervorhersage"} · ${weather.model || "Open-Meteo"} · Tageswerte bis 14 Tage · Zeitvorschläge bis 5 Tage · Quelle: Open-Meteo.com${weather.stale ? " · letzte verfügbare Daten" : ""}`;
+}
+
+function todayCard(title, className = "") {
+  const card = document.createElement("section");
+  card.className = `today-card${className ? ` ${className}` : ""}`;
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  card.append(heading);
+  return card;
+}
+
+function todayCardText(card, text, className = "today-empty") {
+  const node = document.createElement("p");
+  node.className = className;
+  node.textContent = text;
+  card.append(node);
+  return node;
+}
+
+function todayAction(text, handler, className = "secondary-button") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = text;
+  button.addEventListener("click", handler);
+  return button;
+}
+
+function todayActivityDate(activity) {
+  return String(activity?.start_date_local || activity?.date || activity?.activity_date || "").slice(0, 10);
+}
+
+function renderToday(data) {
+  const root = $("#todaySummary");
+  const status = $("#todayStatus");
+  const detail = $("#todaySyncDetail");
+  if (!root || !status) return;
+  root.replaceChildren();
+  status.className = "today-status";
+  status.textContent = "";
+  if (!data) {
+    status.textContent = "Heute wird geladen…";
+    return;
+  }
+  const todayKey = timezoneDateKey(data.profile?.timezone, new Date());
+  const context = (data.daily_planning_context || []).find((item) => item.date === todayKey) || {};
+  const checkin = data.local_feedback?.today || data.checkins?.find((item) => item.checkin_date === todayKey) || context.checkin;
+  const recovery = context.recovery || data.performance?.recovery || {};
+  const todayWorkouts = (data.planned || []).filter((event) => plannedEventDate(event) === todayKey);
+  const weather = context.weather || (data.weather?.days || []).find((item) => item.date === todayKey);
+  const syncMessages = [];
+  if ($("#appShell")?.classList.contains("is-loading")) syncMessages.push("Heute wird geladen…");
+  if (data.sync?.running || state.localSync.intervals) syncMessages.push(data.sync?.status || "Synchronisierung läuft…");
+  if (data.garmin_sync?.running || state.localSync.garmin) syncMessages.push(data.garmin_sync?.status || "Garmin wird synchronisiert…");
+  if (data.performance_refresh?.running || state.localSync.performance) syncMessages.push("Leistungsdaten werden aktualisiert…");
+  if (!navigator.onLine) syncMessages.push("Offline: Es werden nur bereits geladene Daten angezeigt.");
+  if (data.sync?.last_error) {
+    status.classList.add("error");
+    syncMessages.push(`Letzte Synchronisierung fehlgeschlagen: ${data.sync.last_error}`);
+  } else if (syncMessages.length) status.classList.add("working");
+  status.textContent = syncMessages.join(" · ");
+  if (detail) detail.textContent = syncMessages.length ? syncMessages.join(" · ") : `Stand: ${dateLabel(todayKey)}`;
+
+  const checkinCard = todayCard("Tages-Check-in", "today-checkin");
+  if (checkin) {
+    const values = [
+      checkin.day_form,
+      checkin.soreness != null ? `Muskelkater ${checkin.soreness}/10` : null,
+      checkin.stress != null ? `Stress ${checkin.stress}/10` : null,
+      checkin.motivation != null ? `Motivation ${checkin.motivation}/10` : null,
+      checkin.available_minutes != null ? `${checkin.available_minutes} Min. verfügbar` : null,
+      checkin.illness ? `Krankheit: ${checkin.illness}` : null,
+    ].filter(Boolean);
+    todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
+  } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
+  checkinCard.append(todayAction(checkin ? "Check-in bearbeiten" : "Check-in ausfüllen", () => openCheckinEditor(todayKey)));
+  root.append(checkinCard);
+
+  const readinessCard = todayCard("Readiness & Erholung", "today-readiness");
+  const recoveryValues = [
+    recovery.readiness != null ? `Readiness ${recovery.readiness}` : null,
+    recovery.sleep_hours != null ? `${recovery.sleep_hours} h Schlaf` : null,
+    recovery.hrv != null ? `${recovery.hrv} ms HRV` : null,
+    recovery.resting_hr != null ? `${recovery.resting_hr} bpm Ruhepuls` : null,
+  ].filter(Boolean);
+  todayCardText(readinessCard, recoveryValues.join(" · ") || "Keine Erholungsdaten für heute geladen.", recoveryValues.length ? "today-card-summary" : "today-empty");
+  if (recovery.readiness_source) todayCardText(readinessCard, `Quelle: ${recovery.readiness_source}`, "today-source");
+  root.append(readinessCard);
+
+  const workoutCard = todayCard("Heutiges Training", "today-workout");
+  if (!todayWorkouts.length) todayCardText(workoutCard, "Für heute ist keine geplante Einheit geladen.");
+  todayWorkouts.forEach((event) => {
+    const item = document.createElement("div");
+    item.className = "today-item";
+    const title = document.createElement("strong");
+    title.textContent = event.name || "Geplante Einheit";
+    const meta = document.createElement("span");
+    meta.textContent = [event.type || event.category, formatDuration(event.moving_time), distanceLabel(event.distance)].filter(Boolean).join(" · ") || "Details in Plan";
+    item.append(title, meta);
+    workoutCard.append(item);
+  });
+  workoutCard.append(todayAction("Plan öffnen", () => applyNavigationRoute("planned", { historyMode: "push" })));
+  root.append(workoutCard);
+
+  const weatherCard = todayCard("Wetter", "today-weather");
+  if (!data.weather?.configured) todayCardText(weatherCard, "Kein Wetterort hinterlegt. Du kannst ihn im Profil ergänzen.");
+  else if (data.weather?.error && !data.weather?.days?.length) todayCardText(weatherCard, data.weather.error, "today-empty today-error");
+  else if (!weather) todayCardText(weatherCard, "Für heute ist noch keine Wettervorhersage geladen.");
+  else todayCardText(weatherCard, [weatherIconFor(weather), weather.condition || "Vorhersage", weatherNumber(weather.temperature_min, " °C"), weatherNumber(weather.temperature_max, " °C"), weatherNumber(weather.precipitation_probability_max, " % Regen")].join(" · "), "today-card-summary");
+  root.append(weatherCard);
+
+  const feedbackCard = todayCard("Offene Rückmeldung", "today-feedback");
+  const openFeedback = (data.activities || []).find((activity) => todayActivityDate(activity) && !activity.activity_feedback);
+  if (openFeedback) {
+    todayCardText(feedbackCard, `Rückmeldung zu „${openFeedback.name || "letzter Aktivität"}“ ergänzen.`, "today-card-summary");
+    feedbackCard.append(todayAction("Verlauf öffnen", () => applyNavigationRoute("activities", { historyMode: "push" })));
+  } else todayCardText(feedbackCard, "Keine offene Rückmeldung zu den geladenen Aktivitäten.");
+  root.append(feedbackCard);
+
+  const adjustment = data.planning?.latest_replan;
+  if (adjustment && (adjustment.changes?.length || adjustment.illness_pause)) {
+    const adjustmentCard = todayCard("Aktuelle Plananpassung", "today-adjustment");
+    todayCardText(adjustmentCard, "Eine Planänderung wartet auf deine Prüfung.", "today-card-summary");
+    adjustmentCard.append(todayAction("Plananpassung prüfen", () => applyNavigationRoute("planned", { historyMode: "push" })));
+    root.append(adjustmentCard);
+  }
 }
 
 function planningContextForDate(date) {
@@ -2337,6 +2477,7 @@ function openCheckinEditor(date) {
   form.elements.checkin_date.max = todayKey;
   populateCheckin(checkin, state.data?.profile?.timezone);
   renderCheckins(state.data?.checkins || [], state.data?.profile?.timezone);
+  if (state.route !== "today") applyNavigationRoute("today", { historyMode: "push", focus: false });
   if (!dialog.open) dialog.showModal();
   form.elements.soreness?.focus();
 }
@@ -3130,6 +3271,7 @@ function render(data) {
   notifyState(data);
   renderStatus(data);
   renderMessages(data.messages, firstRender);
+  renderToday(data);
   renderActivities(data.activities || []);
   renderPlanned(data.planned || [], data.external_calendar?.events || [], data.daily_planning_context || []);
   renderLibrary(data.library || []);
