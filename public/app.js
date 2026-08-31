@@ -676,7 +676,12 @@ function dateLabel(value) {
     return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(year, month - 1, day));
   }
   const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? raw.slice(0, 10) : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
+  if (Number.isNaN(parsed.valueOf())) return raw.slice(0, 10);
+  try {
+    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeZone: state.data?.profile?.timezone || undefined }).format(parsed);
+  } catch (_) {
+    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
+  }
 }
 
 const CALENDAR_DISPLAY_DEFAULTS = { past_weeks: 1, future_weeks: 4 };
@@ -1294,11 +1299,10 @@ function renderPlanned(planned, externalCalendarEvents = []) {
   const configuredPastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
   const configuredFutureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
   const providerWindow = state.data?.planning_view?.provider_window || {};
-  const windowStart = providerWindow.start ? new Date(`${providerWindow.start}T00:00:00`) : null;
-  const windowEnd = providerWindow.end ? new Date(`${providerWindow.end}T00:00:00`) : null;
-  const dayMs = 86400000;
-  const loadedPastWeeks = windowStart && !Number.isNaN(windowStart.valueOf()) ? Math.max(0, Math.ceil((today - windowStart) / dayMs / 7)) : configuredPastWeeks;
-  const loadedFutureWeeks = windowEnd && !Number.isNaN(windowEnd.valueOf()) ? Math.max(0, Math.ceil((windowEnd - today) / dayMs / 7)) : configuredFutureWeeks;
+  const windowStartKey = String(providerWindow.start || "").slice(0, 10);
+  const windowEndKey = String(providerWindow.end || "").slice(0, 10);
+  const loadedPastWeeks = windowStartKey ? Math.max(0, Math.ceil(dateKeyDifference(todayKey, windowStartKey) / 7)) : configuredPastWeeks;
+  const loadedFutureWeeks = windowEndKey ? Math.max(0, Math.ceil(dateKeyDifference(windowEndKey, todayKey) / 7)) : configuredFutureWeeks;
   const pastWeeks = Math.min(configuredPastWeeks, loadedPastWeeks);
   const futureWeeks = Math.min(configuredFutureWeeks, loadedFutureWeeks);
   const historyStart = new Date(today);
