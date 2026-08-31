@@ -134,8 +134,9 @@ It is not intended to be exposed directly to the public internet.
   access, not through this application.
 - Chat requests use a bounded queue, retry only structured conversation-lock
   failures, and persist tool-call results so retried follow-ups do not repeat
-  local mutations. `OPENAI_DAILY_TOKEN_BUDGET` can stop new Responses requests
-  after a configurable local daily token limit; `0` disables that guard.
+  local mutations. The application does not impose a local daily request or
+  token budget; requests continue until OpenAI rejects them because the
+  account or project quota is exhausted.
 
 ## Loading and synchronization
 
@@ -254,7 +255,6 @@ Other supported operational variables are:
 
 ```text
 OPENAI_MODEL=gpt-5.6-sol
-OPENAI_DAILY_TOKEN_BUDGET=100000
 DATA_RETENTION_DAYS=-1
 PORT=8090
 DATA_DIR=/data
@@ -266,7 +266,9 @@ GITHUB_RELEASE_CHECK_SECONDS=900
 
 `DATA_RETENTION_DAYS=-1` is the default and disables automatic deletion. The
 application does not impose its own OpenAI request or token limits; it displays
-remaining quotas when the API reports them.
+remaining quotas when the API reports them. When OpenAI returns a billing or
+quota error such as `credit_balance_exhausted`, the app shows a clear message
+and points to billing.
 
 The application checks the latest non-draft, non-prerelease GitHub release on
 the server and caches the result for 15 minutes by default. A newer release is
