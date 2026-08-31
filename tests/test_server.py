@@ -576,6 +576,17 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("performance", result)
         self.assertNotIn("race_predictions", result)
 
+    def test_garmin_coach_context_extracts_nested_latest_recovery_record(self):
+        server.set_kv("garmin_snapshot", json.dumps({
+            "sleep": [{"id": "wrapper-z", "dailySleepDTO": {"calendarDate": "2026-08-29", "sleepTimeSeconds": 27000, "sleepScore": 82}}],
+            "readiness": {"trainingReadiness": {"calendarDate": "2026-08-29", "trainingReadinessScore": 78}},
+        }))
+
+        result = server.garmin_coach_context()
+
+        self.assertEqual(result["recovery"]["sleep"]["sleepScore"], 82)
+        self.assertEqual(result["recovery"]["readiness"]["trainingReadinessScore"], 78)
+
     def test_structured_context_keeps_garmin_value_in_performance_only(self):
         server.set_kv("garmin_snapshot", json.dumps({
             "max_metrics": {"running": {"vo2MaxValue": 55}},

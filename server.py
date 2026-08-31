@@ -1578,32 +1578,37 @@ def compact_garmin_context(value: Any, depth: int = 0) -> Any:
 GARMIN_RECOVERY_FIELDS = (
     "date", "calendarDate", "summaryDate", "sleepTimeSeconds", "sleepDuration", "sleepScore", "overallSleepScore",
     "hrvStatus", "hrvWeeklyAvg", "weeklyAvg", "hrvLastNight", "lastNightAvg", "bodyBattery", "body_battery",
-    "charged", "drained", "score", "status", "level", "qualifier", "trainingReadiness", "recoveryTime",
+    "charged", "drained", "score", "status", "level", "qualifier", "trainingReadiness", "trainingReadinessScore",
+    "trainingReadinessLevel", "overallReadinessScore", "overallReadinessLevel", "readinessScore", "recoveryTime",
 )
 
 
 def latest_garmin_record(value: Any) -> dict[str, Any]:
     """Return one dated Garmin record without exposing the complete range payload."""
-    if isinstance(value, list):
-        records = [item for item in value if isinstance(item, dict)]
+    if not isinstance(value, (dict, list)):
+        return {}
+    records: list[dict[str, Any]] = []
+    pending: list[Any] = [value]
+    visited = 0
+    while pending and visited < 2000:
+        current = pending.pop()
+        visited += 1
+        if isinstance(current, dict):
+            if first_present(current, ("calendarDate", "summaryDate", "date", "timestamp", "id")):
+                records.append(current)
+            pending.extend(item for item in current.values() if isinstance(item, (dict, list)))
+        elif isinstance(current, list):
+            pending.extend(item for item in current[:500] if isinstance(item, (dict, list)))
+    if records:
         return max(
             records,
-            key=lambda item: str(first_present(item, ("calendarDate", "summaryDate", "date", "timestamp", "id")) or ""),
+            key=lambda item: (
+                1 if first_present(item, ("calendarDate", "summaryDate", "date", "timestamp")) else 0,
+                str(first_present(item, ("calendarDate", "summaryDate", "date", "timestamp", "id")) or ""),
+            ),
             default={},
         )
-    if isinstance(value, dict):
-        dated_children = [
-            item for item in value.values()
-            if isinstance(item, dict) and first_present(item, ("calendarDate", "summaryDate", "date", "timestamp", "id"))
-        ]
-        if dated_children:
-            return max(
-                dated_children,
-                key=lambda item: str(first_present(item, ("calendarDate", "summaryDate", "date", "timestamp", "id")) or ""),
-                default={},
-            )
-        return value
-    return {}
+    return value if isinstance(value, dict) else {}
 
 
 def compact_garmin_recovery(value: Any) -> dict[str, Any]:
@@ -5822,15 +5827,15 @@ def coach_intervals_context(snapshot: dict[str, Any] | None) -> dict[str, Any]:
         ]
         for sport, rows in sorted(grouped.items())
     }
+    today = local_now().date()
     rollups_by_sport = {
         sport: {
-            "last_7_days": activity_rollup(rows, 7),
-            "last_30_days": activity_rollup(rows, 30),
+            "last_7_days": activity_rollup(rows, 7, today),
+            "last_30_days": activity_rollup(rows, 30, today),
         }
         for sport, rows in sorted(grouped.items())
     }
 
-    today = local_now().date()
     planned: list[dict[str, Any]] = []
     for event in snapshot.get("upcoming_calendar", []):
         if not isinstance(event, dict):
