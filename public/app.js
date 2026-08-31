@@ -2934,11 +2934,12 @@ function render(data) {
 
 async function load(path = "/api/bootstrap") {
   const requestSequence = ++state.loadSequence;
+  const initialLoad = $("#appShell").classList.contains("is-loading");
   try {
     const localOnly = path.includes("local=1");
     const query = localOnly ? "?local=1" : "";
     const bootstrap = await api(path);
-    const [chat, activities, plan, library, performance, feedback, profile] = await Promise.all([
+    const domainData = Promise.all([
       api("/api/chat/history?limit=100"),
       api("/api/activities?limit=250"),
       api(`/api/plan${query}`),
@@ -2947,8 +2948,13 @@ async function load(path = "/api/bootstrap") {
       api("/api/feedback"),
       api("/api/profile"),
     ]);
-    const payload = {
-      ...bootstrap,
+    const payload = { ...bootstrap };
+    if (initialLoad && requestSequence === state.loadSequence) {
+      render(payload);
+      finishAppShellLoading();
+    }
+    const [chat, activities, plan, library, performance, feedback, profile] = await domainData;
+    Object.assign(payload, {
       ...plan,
       ...performance,
       ...feedback,
@@ -2960,7 +2966,7 @@ async function load(path = "/api/bootstrap") {
       activities_next_cursor: activities.next_cursor,
       library: library.workouts || [],
       library_next_cursor: library.next_cursor,
-    };
+    });
     if (requestSequence === state.loadSequence) render(payload);
   } catch (error) {
     if (/Authentication/.test(error.message)) return;

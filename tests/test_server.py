@@ -511,6 +511,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('api("/api/chat/history?limit=100")', app)
         self.assertIn('api("/api/activities?limit=250")', app)
         self.assertIn('api(`/api/plan${query}`)', app)
+        self.assertIn('render(payload);\n      finishAppShellLoading();', app)
         self.assertNotIn('async function load(path = "/api/state")', app)
 
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
