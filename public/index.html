@@ -77,6 +77,30 @@
         </div>
         <div id="weatherNotice" class="weather-notice" hidden></div>
         <div id="plannedCalendar" class="planned-calendar"></div>
+        <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle">
+          <div class="checkin-dialog-content">
+            <div class="settings-section-heading">
+              <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in <span id="checkinDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><p>Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach am ausgewählten Tag fest.</p></div>
+              <button type="button" id="checkinCloseButton" class="secondary-button">Schließen</button>
+            </div>
+            <form id="checkinForm" class="checkin-form">
+              <div class="form-grid">
+                <label>Datum<input name="checkin_date" type="date" required></label>
+                <label>Verfügbare Minuten<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
+                <label>Muskelkater<input name="soreness" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+                <label>Stress<input name="stress" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+                <label>Motivation<input name="motivation" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+                <label>Session-RPE<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+              </div>
+              <label>Krankheit<textarea name="illness" rows="2" placeholder="Zum Beispiel Erkältung, Symptome oder Medikamente"></textarea></label>
+              <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
+              <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
+              <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
+              <button type="submit">Tages-Check-in speichern</button>
+            </form>
+            <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
+          </div>
+        </dialog>
         <details id="plannedCompetitionsSection" class="settings-section collapsible-section">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Zielwettkämpfe</span><span id="plannedCompetitionsSummary" class="collapsible-summary-meta">Noch keine Wettkämpfe</span></summary>
           <p>Trage Wettkämpfe manuell mit den Intervals.icu-Feldern ein. Änderungen werden mit Intervals.icu bidirektional synchronisiert.</p>
@@ -137,27 +161,6 @@
 
           <button type="submit">Athletenkontext speichern</button>
         </form>
-        <section class="checkin-section" aria-labelledby="checkinTitle">
-          <div class="settings-section-heading">
-            <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in <span id="checkinDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><p>Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach fest. Ein Datum kann später bearbeitet werden, aber nicht in der Zukunft liegen.</p></div>
-          </div>
-          <form id="checkinForm" class="checkin-form">
-            <div class="form-grid">
-              <label>Datum<input name="checkin_date" type="date" required></label>
-              <label>Verfügbare Minuten<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
-              <label>Muskelkater<input name="soreness" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-              <label>Stress<input name="stress" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-              <label>Motivation<input name="motivation" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-              <label>Session-RPE<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
-            </div>
-            <label>Krankheit<textarea name="illness" rows="2" placeholder="Zum Beispiel Erkältung, Symptome oder Medikamente"></textarea></label>
-            <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
-            <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
-            <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
-            <button type="submit">Tages-Check-in speichern</button>
-          </form>
-          <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
-        </section>
         <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
           <div class="context-preview-heading">
             <div><span class="eyebrow">TRANSPARENZ</span><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>

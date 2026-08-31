@@ -85,9 +85,11 @@ It is not intended to be exposed directly to the public internet.
   competition synchronization is requested.
 - Local athlete check-ins for subjective soreness, stress, motivation, session
   RPE, pain/illness notes, available training time, and day-specific constraints.
-  The Profile tab provides a dated check-in history; existing entries can be
-  selected and edited. Check-in dates and daily training boundaries use the
-  saved IANA profile timezone, and future check-ins are rejected.
+  The Geplant tab combines each dated check-in with recovery signals, weather,
+  planned sessions, and read-only calendar appointments; existing entries can
+  be selected and edited directly on their day. Check-in dates and daily
+  training boundaries use the saved IANA profile timezone, and future check-ins
+  are rejected.
 - After a completed activity, the coach can ask for a short subjective follow-up
   and store the athlete's answer as activity feedback.
 - The coach can explicitly read the local workout library and planned units and
