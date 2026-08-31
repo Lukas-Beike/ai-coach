@@ -514,6 +514,30 @@ workflow validates pull-request titles and commit subjects. Dependabot manages
 Python, Docker, and GitHub Actions dependencies and can automatically squash
 merge successful update pull requests.
 
+### Browser smoke and accessibility checks
+
+The Playwright harness runs against a disposable Docker fixture. It receives
+only a fake `APP_PASSWORD`, uses an anonymous container `/data` volume, and
+does not read `.env`, the host `data/` directory, or provider accounts. Install
+the JavaScript dependencies and run the desktop/mobile smoke and WCAG-AA
+checks with:
+
+```powershell
+$env:E2E_APP_PASSWORD = "e2e-fixture-password-1234"
+npm ci
+npx playwright install --with-deps chromium
+docker build -t ai-coach:e2e .
+docker run -d --name ai-coach-e2e -p 8090:8090 --read-only `
+  --security-opt no-new-privileges:true `
+  -e APP_PASSWORD=$env:E2E_APP_PASSWORD -e COOKIE_SECURE=false ai-coach:e2e
+npm run test:e2e
+docker rm -f ai-coach-e2e
+```
+
+The CI job uploads Playwright traces, screenshots, videos, and the HTML report
+only when the browser checks fail. These artifacts are generated from the
+empty fixture and are retained for seven days.
+
 ## Releases and container publishing
 
 The container image is published to

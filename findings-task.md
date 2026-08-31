@@ -324,7 +324,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 ## 6. P1 – Stabilität, Performance und UI-Regressionsschutz
 
-### - [ ] FT-007 – Minimalen Playwright-/Accessibility-Harness einführen
+### - [x] FT-007 – Minimalen Playwright-/Accessibility-Harness einführen
+
+**Status:** abgeschlossen
 
 **Quelle:** TEST-01, A11Y-01, A11Y-02
 **Ziel:** Kritische Browserzustände werden gegen einen isolierten Docker-Fixture-Start automatisiert geprüft.
@@ -332,21 +334,33 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Teststart ohne echte Provider/Secrets dokumentieren und automatisieren.
-- [ ] Login-Helfer und Desktop-/Mobile-Projekte anlegen.
-- [ ] Smoke-Test für alle Hauptansichten und Dialoge erstellen.
-- [ ] Console-Errors, Page-Errors und horizontalen Overflow als Fehler behandeln.
-- [ ] axe oder gleichwertige WCAG-AA-Prüfung für Kernansichten ergänzen.
-- [ ] Selektoren über Rollen/Labels/Test-IDs stabilisieren, nicht über fragile CSS-Strukturen.
-- [ ] Screenshots nur für wenige stabile Kernansichten einsetzen.
-- [ ] CI-Job mit Artefakten bei Fehlern ergänzen.
+- [x] Teststart ohne echte Provider/Secrets dokumentieren und automatisieren.
+- [x] Login-Helfer und Desktop-/Mobile-Projekte anlegen.
+- [x] Smoke-Test für alle Hauptansichten und Dialoge erstellen.
+- [x] Console-Errors, Page-Errors und horizontalen Overflow als Fehler behandeln.
+- [x] axe oder gleichwertige WCAG-AA-Prüfung für Kernansichten ergänzen.
+- [x] Selektoren über Rollen/Labels/Test-IDs stabilisieren, nicht über fragile CSS-Strukturen.
+- [x] Screenshots nur für wenige stabile Kernansichten einsetzen.
+- [x] CI-Job mit Artefakten bei Fehlern ergänzen.
 
 **Abnahmekriterien**
 
-- [ ] Test läuft ohne Zugriff auf `.env`, `/data` oder echte Konten.
-- [ ] Mobile und Desktop werden abgedeckt.
-- [ ] Login, Navigation, Dialog und mindestens ein Formularzustand sind geprüft.
-- [ ] Fehlerartefakte enthalten keine Secrets oder Athletendaten.
+- [x] Test läuft ohne Zugriff auf `.env`, `/data` oder echte Konten.
+- [x] Mobile und Desktop werden abgedeckt.
+- [x] Login, Navigation, Dialog und mindestens ein Formularzustand sind geprüft.
+- [x] Fehlerartefakte enthalten keine Secrets oder Athletendaten.
+
+**Handover FT-007**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `fix/ft-007-e2e-a11y-harness`, `91e5656`
+- **Geänderte Dateien:** `package.json`, `package-lock.json`, `playwright.config.cjs`, `e2e/coach.spec.js`, `.github/workflows/publish-container.yml`, `.gitignore`, `public/styles.css`, `README.md`, dieses Handover-Dokument
+- **Verhaltensänderung:** Ein isolierter Docker-Fixture-Job führt Playwright-Smoke- und axe-WCAG-AA-Prüfungen für Desktop und Mobile aus. Der Harness nutzt Rollen/Labels, prüft alle sechs Hauptansichten, Login/Dialog, Profil-Formularzustand, Console-/Page-Errors sowie horizontalen Overflow. Der Primärakzent wurde auf einen WCAG-AA-konformen Kontrastwert angepasst.
+- **Validierung:** `docker build -t ai-coach:ft007 .` erfolgreich; 4 Playwright-Tests (Desktop/Mobile) erfolgreich, inklusive axe-Prüfungen; `npm ci` ohne Vulnerabilities; `git diff --check` sauber.
+- **Review:** Lokales Diff-Review ohne offene Findings nach Korrektur des Test-Navigationszustands, des Kontrast-Findings und des Initial-Load-Wartefensters.
+- **Manuelle Prüfung:** Browser-Smoke ist durch den automatisierten Docker-Lauf abgedeckt; der CI-Job lädt bei Fehlern nur Fixture-Artefakte mit sieben Tagen Aufbewahrung hoch.
+- **Offene Risiken:** Keine für FT-007; die globale Farbe wurde ausschließlich wegen der nachgewiesenen WCAG-AA-Verletzung angepasst.
+- **Folgetasks:** FT-008 und die weiteren Pakete sind entblockt.
 
 ### - [ ] FT-008 – Reproduzierte UI-Regressionsfehler beheben
 
