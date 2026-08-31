@@ -85,6 +85,73 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(fetch.call_count, 2)
         fetch.assert_called_with("Berlin")
 
+    def test_weather_refresh_rechecks_adaptive_planning(self):
+        server.save_profile({"weather_location": "Berlin"})
+        forecast = {
+            "query": "Berlin",
+            "location": {"name": "Berlin", "country": "Deutschland"},
+            "model": "ECMWF",
+            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
+            "fetched_at": server.utc_now(),
+        }
+        with patch.object(server, "_fetch_weather_forecast", return_value=forecast), patch.object(
+            server, "check_adaptive_replan", return_value={"needs_replan": True, "replan_changes": 1}
+        ) as check:
+            result = server.sync_weather("test")
+        check.assert_called_once_with("weather")
+        self.assertTrue(result["needs_replan"])
+        self.assertEqual(result["replan_changes"], 1)
+
+    def test_coach_context_reads_weather_cache_without_refreshing_it(self):
+        server.save_profile({"weather_location": "Berlin"})
+        server.set_kv(server.WEATHER_CACHE_KEY, json.dumps({
+            "query": "Berlin",
+            "location": {"name": "Berlin", "country": "Deutschland"},
+            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
+            "fetched_at": "2000-01-01T00:00:00+00:00",
+        }))
+        with patch.object(server, "_fetch_weather_forecast", side_effect=AssertionError("coach context must not refresh weather")):
+            context = server.structured_athlete_context({"recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
+        self.assertEqual(context["weather"]["fetched_at"], "2000-01-01T00:00:00+00:00")
+
+    def test_adaptive_replan_shortens_long_ride_on_near_term_all_day_rain(self):
+        tomorrow = (server.local_now().date() + timedelta(days=1)).isoformat()
+        draft = server.save_workout_library_entries([{
+            "date": tomorrow, "sport": "Ride", "name": "Lange Ausfahrt",
+            "description": "Easy endurance ride", "duration_minutes": 240, "target": "POWER",
+        }])[0]
+        with patch.object(server, "weather_state", return_value={"days": [{
+            "date": tomorrow, "weather_code": 63, "precipitation_probability_max": 100,
+            "rain_sum": 12, "showers_sum": 0, "snowfall_sum": 0,
+        }]}) as weather:
+            preview = server.adaptive_replan_preview()
+        weather.assert_called_once_with(refresh=False)
+        self.assertEqual(preview["changes"][0]["library_workout_id"], draft["id"])
+        self.assertEqual(preview["changes"][0]["after"]["duration_minutes"], 90)
+        self.assertIn("Wetterprognose", preview["changes"][0]["after"]["rationale"])
+
+    def test_adaptive_replan_ignores_near_term_rain_for_indoor_or_later_rides(self):
+        tomorrow = server.local_now().date() + timedelta(days=1)
+        day_three = server.local_now().date() + timedelta(days=3)
+        drafts = server.save_workout_library_entries([
+            {"date": tomorrow.isoformat(), "sport": "VirtualRide", "name": "Indoor lang", "description": "Indoor endurance ride", "duration_minutes": 240},
+            {"date": day_three.isoformat(), "sport": "Ride", "name": "Spätere Ausfahrt", "description": "Outdoor endurance ride", "duration_minutes": 240},
+        ])
+        with patch.object(server, "weather_state", return_value={"days": [{
+            "date": tomorrow.isoformat(), "weather_code": 63, "precipitation_probability_max": 100,
+            "rain_sum": 12, "showers_sum": 0, "snowfall_sum": 0,
+        }]}):
+            preview = server.adaptive_replan_preview()
+        self.assertEqual(preview["changes"], [])
+        self.assertEqual({draft["name"] for draft in drafts}, {"Indoor lang", "Spätere Ausfahrt"})
+
+    def test_planning_state_exposes_required_adaptive_update(self):
+        server.save_profile({"weather_location": ""})
+        with patch.object(server, "latest_replan_preview", return_value={"status": "preview", "changes": [{"date": "2026-09-01"}]}):
+            planning = server.planning_state()
+        self.assertTrue(planning["needs_replan"])
+        self.assertEqual(planning["replan_changes"], 1)
+
     def test_local_feedback_is_persisted_without_provider_values(self):
         result = server.save_checkin({
             "checkin_date": date.today().isoformat(), "soreness": "7", "stress": "4", "motivation": "8",
@@ -193,9 +260,14 @@ class CoachTests(unittest.TestCase):
             b"DTEND:20260902T120000Z\r\nSUMMARY:School meeting\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
-        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_public_calendar", return_value=payload):
+        with patch.object(server, "CONFIG", config), patch.object(server, "fetch_public_calendar", return_value=payload), patch.object(
+            server, "check_adaptive_replan", return_value={"needs_replan": True, "replan_changes": 2}
+        ) as check:
             result = server.sync_external_calendar("test")
             self.assertEqual(result["events"], 1)
+            self.assertTrue(result["needs_replan"])
+            self.assertEqual(result["replan_changes"], 2)
+            check.assert_called_once_with("external calendar")
             state = server.external_calendar_state()
             self.assertTrue(state["configured"])
             self.assertNotIn("url", state)
@@ -372,11 +444,24 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(enriched[1]["compliance"]["percentage"], 0)
         self.assertNotIn("compliance", enriched[2])
         current_week = next(item for item in weekly if item["week_start"] == (today - timedelta(days=today.weekday())).isoformat())
-        self.assertEqual(current_week["planned_units"], 2)
-        self.assertEqual(current_week["completed_units"], 1)
-        self.assertEqual(current_week["unit_percentage"], 50)
-        self.assertEqual(current_week["percentage"], 40)
-        self.assertEqual(current_week["basis"], "training_load")
+        if today.weekday() == 0:
+            # On Monday, yesterday belongs to the previous calendar week.
+            self.assertEqual(current_week["planned_units"], 1)
+            self.assertEqual(current_week["completed_units"], 1)
+            self.assertEqual(current_week["unit_percentage"], 100)
+            self.assertEqual(current_week["percentage"], 80)
+            previous_week = next(item for item in weekly if item["week_start"] == (today - timedelta(days=7)).isoformat())
+            self.assertEqual(previous_week["planned_units"], 1)
+            self.assertEqual(previous_week["completed_units"], 0)
+            self.assertEqual(previous_week["unit_percentage"], 0)
+            self.assertEqual(previous_week["percentage"], 0)
+            self.assertEqual(previous_week["basis"], "training_load")
+        else:
+            self.assertEqual(current_week["planned_units"], 2)
+            self.assertEqual(current_week["completed_units"], 1)
+            self.assertEqual(current_week["unit_percentage"], 50)
+            self.assertEqual(current_week["percentage"], 40)
+            self.assertEqual(current_week["basis"], "training_load")
 
     def test_planned_workout_fallback_matches_unpaired_same_day_sport(self):
         today = server.local_now().date().isoformat()
@@ -1590,6 +1675,18 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
         self.assertEqual(state["planned"][0]["name"], "Intervalle")
         self.assertEqual(state["calendar_display"], {"past_weeks": 1, "future_weeks": 4})
+
+    def test_adaptive_planning_uses_compact_tab_not_dedicated_section(self):
+        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn('id="plannedPlanningSection"', markup)
+        self.assertIn('id="adaptivePlanningNotice"', markup)
+        self.assertIn('id="coachAdaptivePlanningNotice"', markup)
+        self.assertIn('id="adaptivePlanningButton"', markup)
+        self.assertIn('id="externalCalendarEvents"', markup)
+        self.assertIn('id="planningSummary"', markup)
+        self.assertIn("planned-calendar-marker", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
+        self.assertIn("Number(event.training_relevant) === 0", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
+        self.assertIn("Number(event.no_intensity) === 1", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
 
     def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
         today = server.local_now().date()

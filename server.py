@@ -452,6 +452,9 @@ DEFAULT_PROFILE = {
 WEATHER_FORECAST_DAYS = 14
 WEATHER_RECOMMENDATION_DAYS = 5
 WEATHER_ICON_D2_DAYS = 2
+WEATHER_ADAPTIVE_DAYS = 2
+WEATHER_ADAPTIVE_LONG_RIDE_MINUTES = 180
+WEATHER_ADAPTIVE_MAX_MINUTES = 90
 WEATHER_CACHE_SECONDS = 3 * 60 * 60
 WEATHER_CACHE_KEY = "weather_cache"
 NRW_LATITUDE_BOUNDS = (50.3, 52.6)
@@ -2443,12 +2446,8 @@ def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
         set_kv("last_external_calendar_sync_at", now)
         set_kv("last_external_calendar_sync_error", "")
         add_message("event", f"Kalender aktualisiert ({reason}, {len(events)} Einträge).")
-        replan_changes = 0
-        try:
-            replan_changes = len(adaptive_replan_preview().get("changes", []))
-        except Exception:
-            LOGGER.warning("Adaptive preview after calendar sync failed", extra={"event": "external_calendar_replan_preview_failed"}, exc_info=True)
-        return {"status": "ok", "synced_at": now, "events": len(events), "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS, "replan_changes": replan_changes}
+        replan = check_adaptive_replan("external calendar")
+        return {"status": "ok", "synced_at": now, "events": len(events), "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS, **replan}
     except Exception as exc:
         set_kv("last_external_calendar_sync_error", redact_text(str(exc))[:1000])
         LOGGER.error("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
@@ -3130,6 +3129,15 @@ def is_outdoor_activity(event: Any) -> bool:
     return bool(re.search(r"ride|cycling|bike|bicycle|rad|velo|gravel|mtb|mountain.?bike|run|lauf|jog", value))
 
 
+def is_cycling_activity(event: Any) -> bool:
+    if not isinstance(event, dict):
+        return False
+    value = " ".join(
+        str(event.get(key) or "") for key in ("type", "sport", "sport_type", "name")
+    ).casefold()
+    return bool(re.search(r"ride|cycling|bike|bicycle|rad|velo|gravel|mtb|mountain.?bike", value))
+
+
 def _weather_number(value: Any) -> float | None:
     try:
         number = float(value)
@@ -3398,12 +3406,14 @@ def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = T
     except (TypeError, ValueError):
         cache_age = float("inf")
     error = None
+    refreshed = False
     if refresh and (force or not cache_matches or cache_age >= WEATHER_CACHE_SECONDS):
         try:
             with WEATHER_LOCK:
                 cached = _fetch_weather_forecast(query)
                 set_kv(WEATHER_CACHE_KEY, json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
                 cache_matches = True
+                refreshed = True
         except AppError as exc:
             error = exc.message if exc.status == 400 else "Wetterdaten konnten derzeit nicht aktualisiert werden."
             LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
@@ -3449,7 +3459,66 @@ def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = T
     if error:
         result["error"] = error
         result["stale"] = True
+    if refreshed:
+        result["_refreshed"] = True
     return result
+
+
+def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict[str, Any]], today: date) -> str | None:
+    """Return a reason when a long outdoor ride is not reasonable in the near forecast."""
+    if not is_outdoor_activity(event) or not is_cycling_activity(event):
+        return None
+    duration_minutes = as_number(event.get("duration_minutes"))
+    if duration_minutes is None:
+        duration_minutes = (_weather_number(event.get("moving_time")) or 0) / 60
+    if duration_minutes < WEATHER_ADAPTIVE_LONG_RIDE_MINUTES:
+        return None
+    event_date = str(event.get("date") or event.get("start_date_local") or "")[:10]
+    try:
+        target_date = date.fromisoformat(event_date)
+    except ValueError:
+        return None
+    if not today <= target_date <= today + timedelta(days=WEATHER_ADAPTIVE_DAYS - 1):
+        return None
+    forecast = weather_days.get(event_date)
+    if not isinstance(forecast, dict):
+        return None
+    code = forecast.get("weather_code")
+    try:
+        code = int(code) if code is not None else None
+    except (TypeError, ValueError):
+        code = None
+    probability = _weather_number(forecast.get("precipitation_probability_max"))
+    rain_total = sum(
+        value or 0
+        for value in (
+            _weather_number(forecast.get("rain_sum")),
+            _weather_number(forecast.get("showers_sum")),
+        )
+    )
+    snowfall = _weather_number(forecast.get("snowfall_sum")) or 0
+    rain_codes = {61, 63, 65, 80, 81, 82, 95, 96, 99}
+    snow_codes = {71, 73, 75, 77, 85, 86}
+    persistent_rain = code in rain_codes and (
+        (probability is not None and probability >= 70 and rain_total >= 3)
+        or rain_total >= 8
+        or code in {63, 65, 81, 82, 95, 96, 99}
+    )
+    persistent_snow = code in snow_codes and (
+        (probability is not None and probability >= 70) or snowfall >= 2
+    )
+    if not persistent_rain and not persistent_snow:
+        return None
+    condition = "anhaltenden Regen" if persistent_rain else "anhaltenden Schneefall"
+    details = []
+    if probability is not None:
+        details.append(f"bis zu {round(probability)} % Niederschlagswahrscheinlichkeit")
+    if rain_total or snowfall:
+        amount = rain_total if persistent_rain else snowfall
+        unit = "mm Regen" if persistent_rain else "cm Schnee"
+        details.append(f"ca. {amount:g} {unit}")
+    detail_text = f" ({', '.join(details)})" if details else ""
+    return f"Wetterprognose für {event_date}: {condition}{detail_text}; lange Outdoor-Ausfahrt nicht sinnvoll"
 
 
 def sync_weather(reason: str = "background", force: bool = False) -> dict[str, Any]:
@@ -3459,10 +3528,12 @@ def sync_weather(reason: str = "background", force: bool = False) -> dict[str, A
     result = weather_state(refresh=True, force=force)
     if result.get("error") and not result.get("days"):
         raise AppError(502, str(result["error"]))
+    replan = check_adaptive_replan("weather") if result.get("_refreshed") else current_adaptive_replan_status()
     return {
         "status": "stale" if result.get("stale") else "ok",
         "reason": reason,
         "fetched_at": result.get("fetched_at"),
+        **replan,
     }
 
 
@@ -4217,9 +4288,44 @@ def latest_replan_preview() -> dict[str, Any] | None:
     return {"id": row["id"], "status": row["status"], "created_at": row["created_at"], "applied_at": row["applied_at"], **payload}
 
 
+def current_adaptive_replan_status() -> dict[str, Any]:
+    preview = latest_replan_preview()
+    changes = preview.get("changes", []) if isinstance(preview, dict) else []
+    change_count = len(changes) if isinstance(changes, list) else 0
+    return {
+        "needs_replan": bool(preview and preview.get("status") == "preview" and change_count),
+        "replan_changes": change_count,
+    }
+
+
+def check_adaptive_replan(reason: str) -> dict[str, Any]:
+    """Recalculate the local replan preview after a provider refresh."""
+    try:
+        preview = adaptive_replan_preview()
+        changes = preview.get("changes", []) if isinstance(preview, dict) else []
+        return {
+            "needs_replan": bool(changes),
+            "replan_changes": len(changes) if isinstance(changes, list) else 0,
+        }
+    except Exception:
+        LOGGER.warning(
+            "Adaptive preview after provider sync failed",
+            extra={"event": "adaptive_replan_preview_failed", "context": {"reason": reason}},
+            exc_info=True,
+        )
+        return current_adaptive_replan_status()
+
+
 def adaptive_replan_preview() -> dict[str, Any]:
-    today = date.today().isoformat()
+    today_date = local_now().date()
+    today = today_date.isoformat()
     feedback = local_feedback_context().get("today") or {}
+    weather = weather_state(refresh=False)
+    weather_days = {
+        str(day.get("date")): day
+        for day in weather.get("days", [])
+        if isinstance(day, dict) and day.get("date")
+    }
     signals: list[str] = []
     if feedback.get("illness"):
         signals.append("illness reported")
@@ -4250,6 +4356,7 @@ def adaptive_replan_preview() -> dict[str, Any]:
         duration = as_number(draft.get("duration_minutes"))
         limited = available_minutes is not None and duration is not None and duration > available_minutes
         calendar_events = events_by_date.get(str(draft.get("date") or ""), [])
+        weather_reason = _weather_adaptive_reason(draft, weather_days, today_date)
         calendar_limit: int | None = None
         calendar_reason = ""
         if calendar_events:
@@ -4266,7 +4373,7 @@ def adaptive_replan_preview() -> dict[str, Any]:
         calendar_limited = bool(calendar_events) and (
             draft_is_hard(draft) or (duration is not None and calendar_limit is not None and duration > calendar_limit)
         )
-        if severe or (high_load and draft_is_hard(draft)) or limited or calendar_limited or no_intensity_limited:
+        if severe or (high_load and draft_is_hard(draft)) or limited or calendar_limited or no_intensity_limited or weather_reason:
             reasons: list[str] = []
             if severe:
                 reasons.append("illness or pain reported")
@@ -4278,12 +4385,20 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 reasons.append(calendar_reason)
             if no_intensity_limited:
                 reasons.append("calendar marker [NO_INTENSITY] requests an easy session")
+            if weather_reason:
+                reasons.append(weather_reason)
             reason = "; ".join(reasons)
+            adaptive_limits = [
+                limit for limit in (
+                    calendar_limit if calendar_limited else None,
+                    WEATHER_ADAPTIVE_MAX_MINUTES if weather_reason else None,
+                ) if limit is not None
+            ]
             replacement = adaptive_recovery_replacement(
                 draft,
                 reason,
                 available_minutes if limited else None,
-                calendar_limit if calendar_limited else None,
+                min(adaptive_limits) if adaptive_limits else None,
             )
             if calendar_limited:
                 replacement["private_calendar_adjustment"] = private_calendar_adjustment_context(
@@ -4363,7 +4478,7 @@ def season_plan_summary() -> dict[str, Any]:
 
 
 def planning_state() -> dict[str, Any]:
-    return {"season": season_plan_summary(), "latest_replan": latest_replan_preview()}
+    return {"season": season_plan_summary(), "latest_replan": latest_replan_preview(), **current_adaptive_replan_status()}
 
 
 def normalize_library_workout(
@@ -5624,7 +5739,7 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
         },
         "current_performance": current_performance_context(snapshot),
         "garmin": garmin_coach_context(),
-        "weather": weather_state(planned),
+        "weather": weather_state(planned, refresh=False),
         "source_policy": {
             "weather": "Open-Meteo forecast for the profile location; daily values up to 14 days, time-window recommendations only for the next 5 days and outdoor run/ride sessions",
             "local_feedback": "Athlete-entered subjective signals and availability; not copied from Garmin or Intervals.icu",
@@ -6194,6 +6309,8 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
     # DB_LOCK. The local bootstrap path above remains completely offline.
     if not local_only:
         weather = weather_state(planned, refresh=True)
+    if weather.pop("_refreshed", False):
+        check_adaptive_replan("weather")
     github_release = github_release_status(refresh=not local_only)
 
     with DB_LOCK, database():
