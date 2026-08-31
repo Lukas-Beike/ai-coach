@@ -277,7 +277,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Handover FT-005**
 
 - **Status:** abgeschlossen
-- **Branch und Commit:** `fix/ft-005-privacy-delete`, Implementierung folgt nach Commit
+- **Branch und Commit:** `fix/ft-005-privacy-delete`, Implementierung `07c394d`
 - **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, dieses Handover-Dokument
 - **Verhaltensänderung:** Die Privacy-Ansicht lädt vor dem Löschen eine autoritative Vorschau mit allen dauerhaften lokalen Datenklassen und Record-Anzahlen. Löschen erfordert den exakten Text `LOKALE DATEN LÖSCHEN`; Ergebniszahlen und Remote-Ausnahmen werden angezeigt. Intervals.icu, Garmin und externe Kalender werden nicht als lokal gelöscht dargestellt.
 - **Validierung:** `python -m py_compile server.py tests/test_server.py` erfolgreich; `docker build -t ai-coach:ft005 .` erfolgreich; vollständiger SQLCipher-Containerlauf `docker run --rm -v "${PWD}:/review:ro" -w /review ai-coach:ft005 python -m unittest discover -s tests -v`: 212 Tests in 826.349 Sekunden, `OK`.
