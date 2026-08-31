@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=93">
+  <link rel="stylesheet" href="/styles.css?v=110">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -15,7 +15,7 @@
     <header class="topbar">
       <div>
         <span class="eyebrow">PRIVATER TRAININGSBEREICH</span>
-        <h1>Intervals Coach <small id="appVersion" class="app-version" aria-label="Version"></small><a id="appUpdateIndicator" class="app-update-indicator" href="#" target="_blank" rel="noopener noreferrer" hidden aria-label="Neuere Version verfügbar" title="Neuere Version verfügbar"><svg class="app-update-warning" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.5 21 20H3L12 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 9v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="17" r="1" fill="currentColor"></circle></svg></a></h1>
+        <h1>Intervals Coach <small id="appVersion" class="app-version" aria-label="Version"></small><a id="appUpdateIndicator" class="app-update-indicator" href="#" target="_blank" rel="noopener noreferrer" hidden aria-label="Neuere Version verfügbar" title="Neuere Version verfügbar"><svg class="app-update-warning" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.5 21 20H3L12 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 9v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="17" r="1" fill="currentColor"></circle></svg></a><button id="pwaUpdateButton" class="app-update-indicator pwa-update-button" type="button" hidden aria-label="Neue App-Version laden" title="Neue App-Version laden">↻</button></h1>
       </div>
       <button id="headerActionButton" class="secondary-button top-action" type="button" hidden></button>
     </header>
@@ -27,7 +27,11 @@
       </section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
-        <div id="messages" class="messages"></div>
+        <div id="coachAdaptivePlanningNotice" class="adaptive-planning-notice coach-adaptive-planning-notice" hidden role="status">
+          <div><strong>Deine Planung braucht eine Anpassung</strong><small>Öffne „Geplant“, um die Vorschläge zu prüfen.</small></div>
+          <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Geplant öffnen</button>
+        </div>
+        <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
         <form id="chatForm" class="composer">
           <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
             <span class="quick-message-label">Schnellstart</span>
@@ -42,13 +46,20 @@
             <button type="submit" id="sendButton">Senden</button>
           </div>
         </form>
+        <button type="button" id="chatJumpToComposer" class="chat-jump" hidden>Neue Nachricht</button>
         <p id="voiceStatus" class="voice-status" aria-live="polite" hidden></p>
         <p class="fine-print">Trainingsempfehlungen dienen zur Orientierung und ersetzen keinen medizinischen Rat. Jede Kalenderänderung gibst du selbst frei.</p>
       </section>
 
       <section id="activitiesPanel" class="panel" aria-label="Aktivitäten">
         <div class="section-heading">
-          <div><span class="eyebrow">TRAININGSVERLAUF</span><h2>Aktivitäten</h2><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
+          <div><span class="eyebrow">TRAININGSVERLAUF</span><h2>Aktivitäten <span id="activityDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
+        </div>
+        <label class="activity-search" for="activitySearch">Aktivitäten durchsuchen<input id="activitySearch" type="search" placeholder="Name oder Sportart" autocomplete="off"></label>
+        <div class="activity-date-filter" aria-label="Aktivitäten nach Zeitraum filtern">
+          <label for="activityFromDate">Von<input id="activityFromDate" type="date"></label>
+          <label for="activityToDate">Bis<input id="activityToDate" type="date"></label>
+          <button type="button" id="activityFilterReset" class="activity-filter-button clear">Filter zurücksetzen</button>
         </div>
         <div id="activityStats" class="activity-stats-summary" aria-label="Aktivitätsstatistik"></div>
         <div id="activityFilters" class="activity-filters" aria-label="Aktivitätstypen filtern"></div>
@@ -57,9 +68,14 @@
 
       <section id="workoutsPanel" class="panel" aria-label="Geplante Einheiten">
         <div class="section-heading">
-          <div><span class="eyebrow">KALENDER</span><h2>Geplant</h2></div>
+          <div><span class="eyebrow">KALENDER</span><h2>Geplant <span id="planningDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2><span id="planningSummary" class="tab-sync-detail"></span></div>
         </div>
+        <div id="remoteDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
         <div id="parallelCyclingWarning" class="parallel-warning" hidden></div>
+        <div id="adaptivePlanningNotice" class="adaptive-planning-notice" hidden role="status">
+          <div><strong>Adaptive Anpassung nötig</strong><small id="adaptivePlanningCaption">Die aktualisierte Planung wartet auf deine Prüfung.</small></div>
+          <button type="button" id="adaptivePlanningButton" class="adaptive-planning-button">Planung aktualisieren</button>
+        </div>
         <div id="weatherNotice" class="weather-notice" hidden></div>
         <div id="plannedCalendar" class="planned-calendar"></div>
         <details id="plannedCompetitionsSection" class="settings-section collapsible-section">
@@ -73,31 +89,28 @@
           <button type="button" id="addCompetitionButton" class="secondary-button">Wettkampf hinzufügen</button>
           <button type="submit" form="profileForm">Wettkämpfe speichern</button>
         </details>
-        <details id="plannedPlanningSection" class="settings-section collapsible-section">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Adaptive Planung</span><span id="planningSummaryCompact" class="collapsible-summary-meta">Lokale Bibliothek prüfen</span></summary>
-          <p id="planningSummary">Lokale zukünftige Bibliothekseinheiten können anhand deines Feedbacks überprüft werden.</p>
-          <div id="externalCalendarEvents" class="external-calendar-events" aria-live="polite"></div>
-          <div class="settings-section-heading">
-            <div><p class="fine-print">Die Vorschau verändert noch keine Einheiten. Erst die Freigabe wendet Änderungen auf lokale zukünftige Bibliothekseinheiten an.</p></div>
-            <button type="button" id="replanButton" class="secondary-button">Anpassung vorbereiten</button>
-          </div>
-          <div id="replanPreview" class="replan-preview" hidden></div>
-          <button type="button" id="applyReplanButton" class="secondary-button" hidden>Anpassung freigeben</button>
-        </details>
         <div class="library-heading">
-          <div><h3 class="subsection-title">Trainingsbibliothek</h3><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
+          <div><h3 class="subsection-title">Trainingsbibliothek <span id="libraryDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
           <button id="libraryLoadButton" class="secondary-button" type="button">Bibliothek synchronisieren</button>
         </div>
         <div id="library" class="library"></div>
+        <div class="library-toolbar">
+          <label>Anzeige<select id="libraryFilter"><option value="active">Aktive Einheiten</option><option value="templates">Vorlagen</option><option value="planned">Geplante lokale Einheiten</option><option value="archived">Archivierte Einheiten</option><option value="all">Alle Einheiten</option></select></label>
+          <span id="librarySummary" class="tab-sync-detail"></span>
+        </div>
+        <div id="trainingPlans" class="training-plans"></div>
       </section>
 
-      <section id="dataPanel" class="panel" aria-label="Dynamische Daten">
+      <section id="dataPanel" class="panel" aria-label="Leistungsdaten">
+        <div class="section-heading">
+          <div><span class="eyebrow">LEISTUNG</span><h2>Leistungsdaten</h2></div>
+        </div>
         <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
       </section>
 
       <section id="profilePanel" class="panel" aria-label="Athletenprofil">
         <div class="section-heading">
-          <div><span class="eyebrow">COACHING-PROFIL</span><h2>Athletenkontext</h2></div>
+          <div><span class="eyebrow">COACHING-PROFIL</span><h2>Athletenkontext <span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2></div>
         </div>
         <form id="profileForm" class="profile-form">
           <details class="profile-section collapsible-section" open>
@@ -117,7 +130,7 @@
             <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Intervals.icu stehen…"></textarea></label>
             <div class="form-grid">
               <label>Coaching-Stil<input name="coaching_style"></label>
-              <label>Zeitzone<input name="timezone"></label>
+              <label>Zeitzone<input name="timezone" placeholder="Europe/Berlin" autocomplete="off"><small>IANA-Zeitzone, zum Beispiel Europe/Berlin oder America/New_York</small></label>
             </div>
             <label>Wetter-/Urlaubsstandort<input name="weather_location" placeholder="Stadt oder PLZ, z. B. Münster"></label>
             <p class="fine-print profile-help">Diesen Standort kannst du jederzeit ändern, zum Beispiel für einen Urlaub. Eine Stadt oder PLZ reicht; konkrete Zeitvorschläge gibt es nur für die nächsten 5 Tage.</p>
@@ -125,6 +138,27 @@
 
           <button type="submit">Athletenkontext speichern</button>
         </form>
+        <section class="checkin-section" aria-labelledby="checkinTitle">
+          <div class="settings-section-heading">
+            <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in <span id="checkinDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><p>Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach fest. Ein Datum kann später bearbeitet werden, aber nicht in der Zukunft liegen.</p></div>
+          </div>
+          <form id="checkinForm" class="checkin-form">
+            <div class="form-grid">
+              <label>Datum<input name="checkin_date" type="date" required></label>
+              <label>Verfügbare Minuten<input name="available_minutes" type="number" min="0" max="1440" step="1" placeholder="Optional"></label>
+              <label>Muskelkater<input name="soreness" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+              <label>Stress<input name="stress" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+              <label>Motivation<input name="motivation" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+              <label>Session-RPE<input name="session_rpe" type="number" min="0" max="10" step="1" placeholder="0–10"></label>
+            </div>
+            <label>Krankheit<textarea name="illness" rows="2" placeholder="Zum Beispiel Erkältung, Symptome oder Medikamente"></textarea></label>
+            <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
+            <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
+            <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
+            <button type="submit">Tages-Check-in speichern</button>
+          </form>
+          <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
+        </section>
         <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
           <div class="context-preview-heading">
             <div><span class="eyebrow">TRANSPARENZ</span><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>
@@ -138,19 +172,21 @@
 
       <section id="settingsPanel" class="panel" aria-label="Systemeinstellungen">
         <div class="section-heading">
-          <div><span class="eyebrow">SYSTEM</span><h2>Anbindungen &amp; Server</h2></div>
+          <div><span class="eyebrow">EINSTELLUNGEN</span><h2>Anbindungen &amp; Server</h2></div>
         </div>
         <details class="settings-section collapsible-section">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="chatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="90"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="90"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="30"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine dienen als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine dienen als Zeit- und Erholungssignal</small><div id="externalCalendarEvents" class="external-calendar-events" aria-live="polite"></div></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
           </div>
           <p class="fine-print settings-message">Zugangsdaten und die Athlete ID müssen über Container-Umgebungsvariablen gesetzt werden (Unraid: Docker-Template &rarr; Environment variables). Erforderlich: <code>OPENAI_API_KEY</code>, <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code>; für Garmin zusätzlich <code>GARMIN_EMAIL</code>, <code>GARMIN_PASSWORD</code> und <code>GARMINTOKENS</code> (z. B. <code>/data/garmin_tokens</code>). Nach Änderungen den Container in Unraid neu erstellen.</p>
+          <article class="connection-card public-calendar-card"><div class="connection-card-info"><strong>Wettkampfkalender importieren</strong><small>Öffentliche iCalendar-Feeds werden nur lokal gespeichert und als Wettkampf-Kandidaten vorgeschlagen.</small><form id="publicCalendarImportForm" class="public-calendar-form"><label>Name<input id="publicCalendarName" maxlength="200" placeholder="z. B. NRW-Rennkalender"></label><label>HTTPS-iCalendar-URL<input id="publicCalendarUrl" type="url" inputmode="url" required placeholder="https://…/calendar.ics"></label><button id="publicCalendarImportButton" class="secondary-button" type="submit">Kalender durchsuchen</button></form><div id="publicCalendarCandidates" class="public-calendar-candidates" aria-live="polite"></div></div></article>
           <p id="garminDetail" class="fine-print settings-message"></p>
+          <p class="fine-print settings-message">Wetterdaten: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a> · Lizenz: CC BY 4.0.</p>
           <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend.</p>
         </details>
         <details class="settings-section collapsible-section">
@@ -168,11 +204,11 @@
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Coach-Modell &amp; Thinking</span><span id="modelSettingsSummary" class="collapsible-summary-meta">Auswahl wird geladen…</span></summary>
           <div id="modelSettingsTarget">
             <div class="model-selector">
-              <label for="modelSelect">Coach-Modell<select id="modelSelect"></select></label>
+              <label for="modelSelect">Coach-Modell<select id="modelSelect" aria-describedby="modelDescription"></select></label>
               <p id="modelDescription" class="fine-print">Wähle die Balance aus Qualität, Tempo und Kosten.</p>
             </div>
             <div class="model-selector">
-              <label for="thinkingLevelSelect">Thinking Level<select id="thinkingLevelSelect"></select></label>
+              <label for="thinkingLevelSelect">Thinking Level<select id="thinkingLevelSelect" aria-describedby="thinkingLevelDescription"></select></label>
               <p id="thinkingLevelDescription" class="fine-print">Thinking Level steuert, wie gründlich der Coach vor der Antwort überlegt.</p>
             </div>
           </div>
@@ -211,6 +247,7 @@
             <button id="privacyExportButton" type="button" class="secondary-button">Daten exportieren</button>
             <button id="privacyDeleteButton" type="button" class="secondary-button danger-button">Lokale Daten löschen</button>
           </div>
+          <div id="privacyDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
           <div class="settings-inline-action backup-actions">
             <div><strong>Verschlüsseltes Datenbank-Backup</strong><span>Die Datei kann nur mit demselben APP_PASSWORD wiederhergestellt werden.</span></div>
             <button id="backupDownloadButton" type="button" class="secondary-button">Backup herunterladen</button>
@@ -235,12 +272,12 @@
     </main>
 
     <nav class="bottom-nav" aria-label="Hauptnavigation">
-      <button class="nav-item active" data-panel="chatPanel"><span>●</span>Coach</button>
-      <button class="nav-item" data-panel="activitiesPanel"><span>✓</span>Aktivitäten</button>
-      <button class="nav-item" data-panel="workoutsPanel"><span>◇</span>Geplant</button>
-      <button class="nav-item" data-panel="dataPanel"><span>◌</span>Daten</button>
-      <button class="nav-item" data-panel="profilePanel"><span>○</span>Profil</button>
-      <button class="nav-item" data-panel="settingsPanel"><span>⚙</span>System</button>
+      <button type="button" class="nav-item active" aria-current="page" aria-label="Coach" data-panel="chatPanel"><span aria-hidden="true">●</span><span class="nav-label-full">Coach</span><span class="nav-label-short">Coach</span></button>
+      <button type="button" class="nav-item" aria-label="Aktivitäten" data-panel="activitiesPanel"><span aria-hidden="true">✓</span><span class="nav-label-full">Aktivitäten</span><span class="nav-label-short">Aktiv.</span></button>
+      <button type="button" class="nav-item" aria-label="Geplant" data-panel="workoutsPanel"><span aria-hidden="true">◇</span><span class="nav-label-full">Geplant</span><span class="nav-label-short">Plan</span></button>
+      <button type="button" class="nav-item" aria-label="Leistungsdaten" data-panel="dataPanel"><span aria-hidden="true">◌</span><span class="nav-label-full">Leistung</span><span class="nav-label-short">Leistung</span></button>
+      <button type="button" class="nav-item" aria-label="Profil" data-panel="profilePanel"><span aria-hidden="true">○</span><span class="nav-label-full">Profil</span><span class="nav-label-short">Profil</span></button>
+      <button type="button" class="nav-item" aria-label="Einstellungen" data-panel="settingsPanel"><span aria-hidden="true">⚙</span><span class="nav-label-full">Einstellungen</span><span class="nav-label-short">Mehr</span></button>
     </nav>
   </div>
 
@@ -259,6 +296,17 @@
       </button>
     </form>
   </dialog>
-  <script src="/app.js?v=93" defer></script>
+  <dialog id="adaptivePlanningDialog" aria-labelledby="adaptivePlanningDialogTitle">
+    <div class="adaptive-planning-dialog">
+      <span class="eyebrow">PLANUNGSVORSCHLAG</span>
+      <h2 id="adaptivePlanningDialogTitle">Adaptive Anpassung prüfen</h2>
+      <div id="adaptivePlanningPreview" class="replan-preview"></div>
+      <div class="dialog-actions">
+        <button type="button" id="cancelAdaptivePlanningButton" class="secondary-button">Später</button>
+        <button type="button" id="applyAdaptivePlanningButton" class="adaptive-planning-button">Anpassung anwenden</button>
+      </div>
+    </div>
+  </dialog>
+  <script src="/app.js?v=110" defer></script>
 </body>
 </html>

@@ -6,17 +6,32 @@ const state = {
   chatQueue: [],
   chatQueueSequence: 0,
   profileDirty: false,
+  checkinDirty: false,
+  chatDraftDirty: false,
+  checkinSelectedDate: null,
   activityTypes: new Set(),
+  activitySearch: "",
+  activityFromDate: "",
+  activityToDate: "",
+  activityVisibleCount: 250,
+  activityFeedbackDirty: new Set(),
+  planningEditDirty: new Set(),
+  libraryDateDirty: new Set(),
+  activityFeedbackDrafts: new Map(),
+  planningDrafts: new Map(),
+  libraryDateDrafts: new Map(),
   plannedWeekOpen: new Map(),
   voiceRecorder: null,
   voiceStream: null,
   voiceTimer: null,
   voiceStartedAt: 0,
   voiceTranscribing: false,
-  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, weather: false, performance: false, intervalsFull: false, garminFull: false },
+  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, weather: false, performance: false, intervalsFull: false, garminFull: false, adaptivePlanning: false },
   notificationKeys: new Set(),
   quickTemplatesVisible: false,
   activityTracked: false,
+  remoteDeleteFailure: null,
+  libraryFilter: "active",
 };
 const VOICE_MAX_DURATION_MS = 60_000;
 const VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
@@ -70,6 +85,22 @@ function cookie(name) {
 
 function showLogin() {
   state.data = null;
+  state.profileDirty = false;
+  state.checkinDirty = false;
+  state.chatDraftDirty = false;
+  state.activityFeedbackDirty.clear();
+  state.planningEditDirty.clear();
+  state.libraryDateDirty.clear();
+  state.activityFeedbackDrafts.clear();
+  state.planningDrafts.clear();
+  state.libraryDateDrafts.clear();
+  state.activitySearch = "";
+  state.activityFromDate = "";
+  state.activityToDate = "";
+  state.activityVisibleCount = 250;
+  setDirtyIndicator("activityDirtyIndicator", false);
+  setDirtyIndicator("planningDirtyIndicator", false);
+  setDirtyIndicator("libraryDirtyIndicator", false);
   $("#appShell").hidden = true;
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
@@ -80,7 +111,10 @@ function showLogin() {
 function showAppShellLoading() {
   const shell = $("#appShell");
   const statusCard = $("#statusCard");
-  shell.hidden = false;
+  const loader = $("#authLoading");
+  loader.hidden = false;
+  loader.textContent = "Trainingsbereich wird geladen…";
+  shell.hidden = true;
   shell.classList.add("is-loading");
   shell.setAttribute("aria-busy", "true");
   statusCard.hidden = false;
@@ -92,6 +126,8 @@ function showAppShellLoading() {
 
 function finishAppShellLoading() {
   const shell = $("#appShell");
+  $("#authLoading").hidden = true;
+  if (!$("#loginDialog")?.open) shell.hidden = false;
   shell.classList.remove("is-loading");
   shell.removeAttribute("aria-busy");
 }
@@ -128,8 +164,10 @@ async function apiAudio(path, blob) {
 }
 
 async function bootstrapAuth() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" });
+    const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store", signal: controller.signal });
     const status = await response.json();
     if (status.authenticated) {
       $("#authLoading").hidden = true;
@@ -141,7 +179,7 @@ async function bootstrapAuth() {
   } catch (_) {
     $("#loginError").textContent = "Server nicht erreichbar.";
     showLogin();
-  }
+  } finally { clearTimeout(timeout); }
 }
 
 async function login(event) {
@@ -370,29 +408,58 @@ function notifyState(data) {
   if (error) showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: String(error), tag: "sync-error" }, `error:${error}`);
 }
 
-function todayIso() { return new Date().toISOString().slice(0, 10); }
+function todayIso() { return timezoneDateKey(state.data?.profile?.timezone, new Date()); }
 
-function renderPlanning(data) {
+function adaptivePreviewMarkup(preview) {
+  const signals = preview.signals?.length
+    ? `Signale: ${preview.signals.map((signal) => escapeHtml(String(signal))).join(", ")}`
+    : "Keine kritischen lokalen Signale erkannt.";
+  const changes = (preview.changes || []).map((change) => `<div class="replan-change"><strong>${escapeHtml(String(change.date || ""))}: ${escapeHtml(String(change.name || "Einheit"))}</strong><br>${escapeHtml(String(change.before?.description || ""))}<br>→ ${escapeHtml(String(change.after?.description || ""))}</div>`).join("");
+  return `<div><strong>${escapeHtml(String(preview.message || "Adaptive Prüfung"))}</strong><br>${signals}</div>${changes || "<div>Es gibt keine lokalen Entwürfe, die angepasst werden müssen.</div>"}<small>${escapeHtml(String(preview.scope || ""))}</small>`;
+}
+
+function openAdaptivePlanningDialog(preview) {
+  const dialog = $("#adaptivePlanningDialog");
+  const node = $("#adaptivePlanningPreview");
+  const apply = $("#applyAdaptivePlanningButton");
+  if (!dialog || !node || !preview) return;
+  node.innerHTML = adaptivePreviewMarkup(preview);
+  if (apply) {
+    apply.hidden = !(preview.changes || []).length;
+    apply.dataset.adjustmentId = preview.id || "";
+  }
+  if (!dialog.open) dialog.showModal();
+}
+
+function renderAdaptivePlanning(data) {
   const planning = data.planning || {};
   const next = planning.season?.next_event;
   const summary = $("#planningSummary");
-  if (summary) summary.textContent = next ? `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${next.phase} · ${next.days_until} Tage` : "Noch kein zukünftiger Wettkampf gespeichert.";
-  const compact = $("#planningSummaryCompact");
-  if (compact) compact.textContent = next ? `${next.name} · ${next.days_until} Tage` : "Kein zukünftiger Wettkampf";
-  const preview = planning.latest_replan;
-  const node = $("#replanPreview");
-  const apply = $("#applyReplanButton");
-  if (!node) return;
-  if (!preview || preview.status !== "preview") {
-    node.hidden = true;
-    if (apply) apply.hidden = true;
-    return;
+  if (summary) {
+    summary.textContent = next
+      ? `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${next.phase} · ${next.days_until} Tage`
+      : "Noch kein zukünftiger Wettkampf gespeichert.";
   }
-  node.hidden = false;
-  const signals = preview.signals?.length ? `Signale: ${preview.signals.map(escapeHtml).join(", ")}` : "Keine kritischen lokalen Signale erkannt.";
-  const changes = (preview.changes || []).map(change => `<div class="replan-change"><strong>${escapeHtml(change.date || "")}: ${escapeHtml(change.name || "Einheit")}</strong><br>${escapeHtml(change.before?.description || "")}<br>→ ${escapeHtml(change.after?.description || "")}</div>`).join("");
-  node.innerHTML = `<div><strong>${escapeHtml(preview.message || "Adaptive Prüfung")}</strong><br>${signals}</div>${changes || "<div>Es gibt keine lokalen Entwürfe, die angepasst werden müssen.</div>"}<small>${escapeHtml(preview.scope || "")}</small>`;
-  if (apply) { apply.hidden = !(preview.changes || []).length; apply.dataset.adjustmentId = preview.id || ""; }
+  const preview = planning.latest_replan;
+  const changes = Array.isArray(preview?.changes) ? preview.changes : [];
+  const required = planning.needs_replan ?? Boolean(preview?.status === "preview" && changes.length);
+  const count = Number(planning.replan_changes || changes.length);
+  const caption = count === 1
+    ? "Ein zukünftiger Entwurf braucht eine Anpassung."
+    : `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
+  const notice = $("#adaptivePlanningNotice");
+  const coachNotice = $("#coachAdaptivePlanningNotice");
+  if (notice) {
+    notice.hidden = !required;
+    const captionNode = $("#adaptivePlanningCaption");
+    if (captionNode) captionNode.textContent = required ? caption : "";
+    const button = $("#adaptivePlanningButton");
+    if (button) {
+      button.disabled = Boolean(state.localSync.adaptivePlanning);
+      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : "Planung aktualisieren";
+    }
+  }
+  if (coachNotice) coachNotice.hidden = !required;
 }
 
 function renderExternalCalendar(data) {
@@ -427,18 +494,47 @@ function renderExternalCalendar(data) {
   root.innerHTML = `<div class="external-calendar-heading"><strong>Externe Termine</strong><span>nächste 8 Wochen · ${events.length} Einträge</span></div>${items}`;
 }
 
+function renderRemoteDeleteNotice() {
+  const root = $("#remoteDeleteNotice");
+  if (!root) return;
+  root.replaceChildren();
+  const failure = state.remoteDeleteFailure;
+  root.hidden = !failure;
+  if (!failure) return;
+  const title = document.createElement("strong");
+  title.textContent = `Remote-Löschung fehlgeschlagen: ${failure.name || "Geplante Einheit"}`;
+  const message = document.createElement("span");
+  message.textContent = `${failure.message || "Der Remote-Kalendereintrag wurde nicht bestätigt gelöscht."} Bitte synchronisieren und den Eintrag erneut prüfen.`;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "secondary-button";
+  close.textContent = "Hinweis schließen";
+  close.addEventListener("click", () => { state.remoteDeleteFailure = null; renderRemoteDeleteNotice(); });
+  root.append(title, message, close);
+}
+
 function renderPublicCalendar(data) {
-  return;
   const root = $("#publicCalendarCandidates");
   if (!root) return;
   root.replaceChildren();
-  const candidates = data.public_calendar?.candidates || [];
-  if (!candidates.length) return;
+  const calendar = data.public_calendar || {};
+  const candidates = calendar.candidates || [];
+  const sources = calendar.sources || [];
+  if (!candidates.length && !sources.length) {
+    root.textContent = "Noch kein öffentlicher Wettkampfkalender importiert.";
+    return;
+  }
+  if (sources.length) {
+    const sourceSummary = document.createElement("p");
+    sourceSummary.className = "fine-print";
+    sourceSummary.textContent = `${sources.length} lokaler Kalender${sources.length === 1 ? "" : "e"} · ${candidates.length} Kandidat${candidates.length === 1 ? "" : "en"}`;
+    root.append(sourceSummary);
+  }
   for (const candidate of candidates.slice(0, 30)) {
     const card = document.createElement("article");
     card.className = "public-calendar-candidate";
     const imported = Boolean(candidate.imported_competition_id);
-    card.innerHTML = `<div><strong>${escapeHtml(candidate.name)}</strong><span>${escapeHtml(candidate.event_date)} · ${escapeHtml(candidate.sport)}</span></div>${candidate.location ? `<span>${escapeHtml(candidate.location)}</span>` : ""}${candidate.description ? `<p>${escapeHtml(candidate.description)}</p>` : ""}`;
+    card.innerHTML = `<div><strong>${escapeHtml(String(candidate.name || "Veranstaltung"))}</strong><span>${escapeHtml(String(candidate.event_date || ""))} · ${escapeHtml(String(candidate.sport || ""))}</span></div>${candidate.location ? `<span>${escapeHtml(String(candidate.location))}</span>` : ""}${candidate.description ? `<p>${escapeHtml(String(candidate.description))}</p>` : ""}`;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary-button";
@@ -453,7 +549,47 @@ function renderPublicCalendar(data) {
 function formatTime(value) {
   if (!value) return "Noch nicht aktualisiert";
   const dt = new Date(value);
-  return Number.isNaN(dt.valueOf()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(dt);
+  if (Number.isNaN(dt.valueOf())) return value;
+  try {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: state.data?.profile?.timezone || undefined }).format(dt);
+  } catch (_) {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(dt);
+  }
+}
+
+function hasUnsavedChanges() {
+  return state.profileDirty
+    || state.checkinDirty
+    || state.chatDraftDirty
+    || Boolean($("#messageInput")?.value.trim())
+    || state.activityFeedbackDirty.size > 0
+    || state.planningEditDirty.size > 0
+    || state.libraryDateDirty.size > 0;
+}
+
+function setDirtyIndicator(id, dirty) {
+  const indicator = $(`#${id}`);
+  if (indicator) indicator.hidden = !dirty;
+}
+
+function confirmDiscardChanges() {
+  return !hasUnsavedChanges() || window.confirm("Ungespeicherte Änderungen verwerfen?");
+}
+
+function discardUnsavedChanges() {
+  state.profileDirty = false;
+  state.checkinDirty = false;
+  state.chatDraftDirty = false;
+  state.activityFeedbackDirty.clear();
+  state.planningEditDirty.clear();
+  state.libraryDateDirty.clear();
+  state.activityFeedbackDrafts.clear();
+  state.planningDrafts.clear();
+  state.libraryDateDrafts.clear();
+  setDirtyIndicator("activityDirtyIndicator", false);
+  setDirtyIndicator("planningDirtyIndicator", false);
+  setDirtyIndicator("libraryDirtyIndicator", false);
+  if (state.data) render(state.data);
 }
 
 function escapeHtml(value) {
@@ -548,14 +684,24 @@ function renderStatus(data) {
     : error ? "Coach benötigt Aufmerksamkeit" : "Coach ist bereit";
   $("#statusDetail").textContent = missing.length
     ? "Ergänze die fehlende Serverkonfiguration"
-    : error || (morning.status === "ready" ? `Morgen-Check-in abgeschlossen: ${formatTime(morning.date)}` : "Bereit für deine nächste Frage");
+    : error || (morning.status === "ready" ? `Morgen-Check-in abgeschlossen: ${dateLabel(morning.date)}` : "Bereit für deine nächste Frage");
   statusCard.classList.remove("working");
 }
 
 function dateLabel(value) {
   if (!value) return "—";
+  const raw = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [year, month, day] = raw.split("-").map(Number);
+    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(year, month - 1, day));
+  }
   const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? String(value).slice(0, 10) : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
+  if (Number.isNaN(parsed.valueOf())) return raw.slice(0, 10);
+  try {
+    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeZone: state.data?.profile?.timezone || undefined }).format(parsed);
+  } catch (_) {
+    return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(parsed);
+  }
 }
 
 const CALENDAR_DISPLAY_DEFAULTS = { past_weeks: 1, future_weeks: 4 };
@@ -567,12 +713,47 @@ function calendarDisplayValue(value, fallback) {
 }
 
 function localDateKey(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.valueOf())) return "";
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function timezoneDateKey(timeZone, instant = new Date()) {
+  if (!timeZone) return localDateKey(instant);
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(instant);
+    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  } catch (_) { return localDateKey(instant); }
+}
+
+function dateFromKey(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date(NaN);
+}
+
+function addDateKey(value, days) {
+  const date = dateFromKey(value);
+  if (Number.isNaN(date.valueOf())) return "";
+  date.setDate(date.getDate() + days);
+  return localDateKey(date);
+}
+
+function dateKeyDifference(left, right) {
+  const a = dateFromKey(left);
+  const b = dateFromKey(right);
+  if (Number.isNaN(a.valueOf()) || Number.isNaN(b.valueOf())) return 0;
+  return Math.round((Date.UTC(a.getFullYear(), a.getMonth(), a.getDate()) - Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())) / 86400000);
 }
 
 function plannedEventDate(event) {
   return String(event?.start_date_local || event?.date || "").slice(0, 10);
+}
+
+function isCoachOwnedWorkout(event) {
+  return String(event?.category || "").toUpperCase() === "WORKOUT"
+    && String(event?.external_id || "").startsWith("intervals-coach-");
 }
 
 function plannedDayLabel(date, offset) {
@@ -737,6 +918,7 @@ function renderActivityFilters(activities) {
     button.addEventListener("click", () => {
       if (state.activityTypes.has(type)) state.activityTypes.delete(type);
       else state.activityTypes.add(type);
+      state.activityVisibleCount = 250;
       renderActivities(state.data?.activities || []);
     });
     root.append(button);
@@ -748,20 +930,21 @@ function renderActivityFilters(activities) {
     clear.textContent = "Zurücksetzen";
     clear.addEventListener("click", () => {
       state.activityTypes.clear();
+      state.activityVisibleCount = 250;
       renderActivities(state.data?.activities || []);
     });
     root.append(clear);
   }
 }
 
-function renderActivityStats(activities) {
+function renderActivityStats(activities, filtered = false) {
   const root = $("#activityStats");
   if (!root) return;
   root.replaceChildren();
   const list = Array.isArray(activities) ? activities : [];
   const counts = new Map();
   list.forEach((activity) => counts.set(activitySportLabel(activity), (counts.get(activitySportLabel(activity)) || 0) + 1));
-  const entries = [["Einheiten gesamt", list.length], ...[...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([sport, count]) => [`${sport}`, count])];
+  const entries = [[filtered ? "Einheiten im Filter" : "Einheiten gesamt", list.length], ...[...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([sport, count]) => [`${sport}`, count])];
   entries.forEach(([label, value]) => {
     const card = document.createElement("div");
     const number = document.createElement("strong");
@@ -774,6 +957,7 @@ function renderActivityStats(activities) {
 }
 
 function renderActivities(activities) {
+  setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
   const list = Array.isArray(activities) ? activities : [];
   const syncDetail = $("#activitySyncDetail");
   const syncNotices = [];
@@ -787,22 +971,43 @@ function renderActivities(activities) {
       : refreshedAt ? `Letzte Aktualisierung: ${formatTime(refreshedAt)}` : "Noch nicht aktualisiert";
   }
   renderActivityFilters(list);
+  const dateFilteredActivities = list.filter((activity) => {
+    const activityDate = String(activity.start_date_local || activity.date || "").slice(0, 10);
+    if (state.activityFromDate && (!activityDate || activityDate < state.activityFromDate)) return false;
+    if (state.activityToDate && (!activityDate || activityDate > state.activityToDate)) return false;
+    return true;
+  });
   const filteredActivities = state.activityTypes.size
-    ? list.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))
-    : list;
-  renderActivityStats(filteredActivities);
+    ? dateFilteredActivities.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))
+    : dateFilteredActivities;
+  const query = state.activitySearch.trim().toLocaleLowerCase("de-DE");
+  const displayedActivities = query
+    ? filteredActivities.filter((activity) => [activity.name, activity.type, activity.sport, activity.sport_type].filter(Boolean).join(" ").toLocaleLowerCase("de-DE").includes(query))
+    : filteredActivities;
+  const isFiltered = Boolean(state.activityTypes.size || query || state.activityFromDate || state.activityToDate);
+  renderActivityStats(displayedActivities, isFiltered);
+  const stats = $("#activityStats");
+  if (stats) stats.setAttribute("aria-label", isFiltered ? "Gefilterte Aktivitätsstatistik" : "Aktivitätsstatistik");
   const root = $("#activities");
+  const search = $("#activitySearch");
+  const fromDate = $("#activityFromDate");
+  const toDate = $("#activityToDate");
+  if (search && search.value !== state.activitySearch) search.value = state.activitySearch;
+  if (fromDate && fromDate.value !== state.activityFromDate) fromDate.value = state.activityFromDate;
+  if (toDate && toDate.value !== state.activityToDate) toDate.value = state.activityToDate;
   root.replaceChildren();
-  if (!filteredActivities.length) {
+  if (!displayedActivities.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
     const title = document.createElement("strong");
     title.textContent = list.length ? "Keine passenden Einheiten" : "Noch keine absolvierten Einheiten";
-    empty.append(title, document.createTextNode(list.length ? "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück." : "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen."));
+    empty.append(title, document.createTextNode(list.length
+      ? query ? "Passe die Suche an oder setze sie zurück." : state.activityFromDate || state.activityToDate ? "Passe den Zeitraum an oder setze den Filter zurück." : "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück."
+      : "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen."));
     root.append(empty);
     return;
   }
-  filteredActivities.slice(0, 250).forEach((activity) => {
+  displayedActivities.slice(0, state.activityVisibleCount).forEach((activity) => {
     const card = document.createElement("article");
     card.className = "activity-card";
     const top = document.createElement("div");
@@ -823,6 +1028,7 @@ function renderActivities(activities) {
     meta.addEventListener("click", () => {
       if (state.activityTypes.has(type)) state.activityTypes.delete(type);
       else state.activityTypes.add(type);
+      state.activityVisibleCount = 250;
       renderActivities(state.data?.activities || []);
     });
     const stats = document.createElement("div");
@@ -863,23 +1069,36 @@ function renderActivities(activities) {
       feedbackInput.rows = 3;
       feedbackInput.maxLength = 4000;
       feedbackInput.placeholder = "Zum Beispiel Schmerzen, ungewohnte Müdigkeit oder etwas, das besonders gut lief …";
-      feedbackInput.value = feedback.notes || "";
+      feedbackInput.value = state.activityFeedbackDrafts.has(String(activityId))
+        ? state.activityFeedbackDrafts.get(String(activityId))
+        : feedback.notes || "";
       feedbackLabel.append(feedbackInput);
       const feedbackButton = document.createElement("button");
       feedbackButton.type = "submit";
       feedbackButton.textContent = "Besonderheiten speichern";
       feedbackForm.append(feedbackLabel, feedbackButton);
+      feedbackInput.addEventListener("input", () => {
+        const key = String(activityId);
+        state.activityFeedbackDrafts.set(key, feedbackInput.value);
+        state.activityFeedbackDirty.add(key);
+        setDirtyIndicator("activityDirtyIndicator", true);
+      });
       feedbackForm.addEventListener("submit", (event) => saveActivityFeedback(event, activity, feedbackButton));
       feedbackDetails.append(feedbackSummary, feedbackForm);
       card.append(feedbackDetails);
     }
     root.append(card);
   });
-  if (filteredActivities.length > 250) {
-    const note = document.createElement("p");
-    note.className = "fine-print";
-    note.textContent = "Es werden die 250 neuesten Einheiten angezeigt.";
-    root.append(note);
+  if (displayedActivities.length > state.activityVisibleCount) {
+    const loadMore = document.createElement("button");
+    loadMore.type = "button";
+    loadMore.className = "secondary-button activity-load-more";
+    loadMore.textContent = `Weitere Einheiten laden (${displayedActivities.length - state.activityVisibleCount} verbleibend)`;
+    loadMore.addEventListener("click", () => {
+      state.activityVisibleCount += 250;
+      renderActivities(state.data?.activities || []);
+    });
+    root.append(loadMore);
   }
 }
 
@@ -927,7 +1146,151 @@ function renderParallelCyclingWarning(groups) {
   });
 }
 
-function renderPlanned(planned) {
+function renderExternalCalendarMarker(event) {
+  const root = document.createElement("div");
+  root.className = "planned-calendar-marker";
+  root.setAttribute("role", "note");
+  const title = document.createElement("strong");
+  title.textContent = event.name || "Kalendereintrag";
+  const markers = [
+    Number(event.training_relevant) === 0 ? "Kein Training" : null,
+    Number(event.no_intensity) === 1 ? "Keine Intensität" : null,
+  ].filter(Boolean);
+  const label = document.createElement("span");
+  label.textContent = markers.join(" · ") || "Kalenderhinweis";
+  const time = event.all_day ? "Ganztägig" : `${formatTime(event.start_local)} – ${formatTime(event.end_local)}`;
+  const meta = document.createElement("small");
+  meta.textContent = `${time} · ${event.duration_minutes || 0} Min.`;
+  root.append(title, label, meta);
+  return root;
+}
+
+function renderLocalPlanningActions(event, body) {
+  if (!event?.is_local || !event.local_id) return;
+  const actions = document.createElement("div");
+  actions.className = "card-actions local-planning-actions";
+  const editor = document.createElement("details");
+  const editorSummary = document.createElement("summary");
+  editorSummary.textContent = "Lokale Planung bearbeiten oder verschieben";
+  const form = document.createElement("form");
+  form.className = "local-planning-form";
+  form.addEventListener("input", () => {
+    const key = String(event.local_id);
+    state.planningDrafts.set(key, {
+      date: dateInput.value,
+      name: nameInput.value,
+      duration: durationInput.value,
+      description: descriptionInput.value,
+    });
+    state.planningEditDirty.add(key);
+    setDirtyIndicator("planningDirtyIndicator", true);
+  });
+  const planningDraft = state.planningDrafts.get(String(event.local_id)) || {};
+  const dateLabel = document.createElement("label");
+  dateLabel.textContent = "Datum";
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.required = true;
+  dateInput.value = planningDraft.date ?? plannedEventDate(event);
+  dateLabel.append(dateInput);
+  const nameLabel = document.createElement("label");
+  nameLabel.textContent = "Name";
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.maxLength = 200;
+  nameInput.required = true;
+  nameInput.value = planningDraft.name ?? event.name ?? "Geplante Einheit";
+  nameLabel.append(nameInput);
+  const durationLabel = document.createElement("label");
+  durationLabel.textContent = "Dauer (Minuten)";
+  const durationInput = document.createElement("input");
+  durationInput.type = "number";
+  durationInput.min = "5";
+  durationInput.max = "600";
+  durationInput.required = true;
+  durationInput.value = planningDraft.duration ?? (event.duration_minutes || Math.round(Number(event.moving_time || 0) / 60) || 30);
+  durationLabel.append(durationInput);
+  const descriptionLabel = document.createElement("label");
+  descriptionLabel.textContent = "Workout-Text";
+  const descriptionInput = document.createElement("textarea");
+  descriptionInput.rows = 4;
+  descriptionInput.maxLength = 12000;
+  descriptionInput.required = true;
+  descriptionInput.value = planningDraft.description ?? event.description ?? "";
+  descriptionLabel.append(descriptionInput);
+  const saveButton = document.createElement("button");
+  saveButton.type = "submit";
+  saveButton.className = "secondary-button";
+  saveButton.textContent = "Lokale Planung speichern";
+  form.append(dateLabel, nameLabel, durationLabel, descriptionLabel, saveButton);
+  form.addEventListener("submit", async (submitEvent) => {
+    submitEvent.preventDefault();
+    saveButton.disabled = true;
+    saveButton.setAttribute("aria-busy", "true");
+    saveButton.textContent = "Lokale Planung wird gespeichert…";
+    try {
+      await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "update",
+          date: dateInput.value,
+          name: nameInput.value,
+          duration_minutes: Number(durationInput.value),
+          description: descriptionInput.value,
+        }),
+      });
+      state.planningEditDirty.delete(String(event.local_id));
+      state.planningDrafts.delete(String(event.local_id));
+      setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
+      toast("Lokale Planung gespeichert");
+      await load();
+    } catch (error) {
+      toast(error.message, true);
+      saveButton.disabled = false;
+      saveButton.removeAttribute("aria-busy");
+      saveButton.textContent = "Lokale Planung speichern";
+    }
+  });
+  editor.append(editorSummary, form);
+  actions.append(editor);
+  const archiveButton = document.createElement("button");
+  archiveButton.type = "button";
+  archiveButton.className = "secondary-button";
+  archiveButton.textContent = event.archived ? "Lokale Einheit wiederherstellen" : "Lokale Einheit archivieren";
+  archiveButton.addEventListener("click", async () => {
+    archiveButton.disabled = true;
+    try {
+      await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, { method: "POST", body: JSON.stringify({ action: event.archived ? "restore" : "archive" }) });
+      toast(event.archived ? "Lokale Einheit wiederhergestellt" : "Lokale Einheit archiviert");
+      await load();
+    } catch (error) { toast(error.message, true); archiveButton.disabled = false; }
+  });
+  actions.append(archiveButton);
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "secondary-button danger-button";
+  deleteButton.textContent = "Nur lokal entfernen";
+  deleteButton.addEventListener("click", async () => {
+    if (!window.confirm(`„${event.name || "Geplante Einheit"}“ wirklich nur aus der lokalen Planung entfernen?`)) return;
+    deleteButton.disabled = true;
+    try {
+      await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, {
+        method: "POST",
+        body: JSON.stringify({ action: "delete" }),
+      });
+      toast("Lokale Planung entfernt");
+      await load();
+    } catch (error) {
+      toast(error.message, true);
+      deleteButton.disabled = false;
+    }
+  });
+  actions.append(deleteButton);
+  body.append(actions);
+}
+
+function renderPlanned(planned, externalCalendarEvents = []) {
+  setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   renderWeatherNotice(state.data?.weather);
   const root = $("#plannedCalendar");
@@ -940,12 +1303,28 @@ function renderPlanned(planned) {
     if (!eventsByDate.has(date)) eventsByDate.set(date, []);
     eventsByDate.get(date).push(event);
   });
+  const calendarEventsByDate = new Map();
+  (externalCalendarEvents || [])
+    .filter((event) => event && (Number(event.training_relevant) === 0 || Number(event.no_intensity) === 1))
+    .forEach((event) => {
+      const date = String(event.event_date || "").slice(0, 10);
+      if (!date) return;
+      if (!calendarEventsByDate.has(date)) calendarEventsByDate.set(date, []);
+      calendarEventsByDate.get(date).push(event);
+    });
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
+  const today = dateFromKey(todayKey);
   const calendarDisplay = state.data?.calendar_display || {};
-  const pastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
-  const futureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
+  const configuredPastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
+  const configuredFutureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
+  const providerWindow = state.data?.planning_view?.provider_window || {};
+  const windowStartKey = String(providerWindow.start || "").slice(0, 10);
+  const windowEndKey = String(providerWindow.end || "").slice(0, 10);
+  const loadedPastWeeks = windowStartKey ? Math.max(0, Math.ceil(dateKeyDifference(todayKey, windowStartKey) / 7)) : configuredPastWeeks;
+  const loadedFutureWeeks = windowEndKey ? Math.max(0, Math.ceil(dateKeyDifference(windowEndKey, todayKey) / 7)) : configuredFutureWeeks;
+  const pastWeeks = Math.min(configuredPastWeeks, loadedPastWeeks);
+  const futureWeeks = Math.min(configuredFutureWeeks, loadedFutureWeeks);
   const historyStart = new Date(today);
   historyStart.setDate(today.getDate() - pastWeeks * 7);
   const firstWeek = plannedWeekStart(historyStart);
@@ -990,13 +1369,14 @@ function renderPlanned(planned) {
       day.setDate(weekStart.getDate() + dayIndex);
       const date = localDateKey(day);
       const events = eventsByDate.get(date) || [];
+      const calendarEvents = calendarEventsByDate.get(date) || [];
       const dayRoot = document.createElement("section");
       dayRoot.className = "planned-day";
 
       const heading = document.createElement("div");
       heading.className = "planned-day-heading";
       const title = document.createElement("h3");
-      title.textContent = plannedDayLabel(day, Math.round((day - today) / 86400000));
+      title.textContent = plannedDayLabel(day, dateKeyDifference(date, todayKey));
       const count = document.createElement("span");
       count.className = "planned-day-count";
       count.textContent = events.length ? `${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
@@ -1021,12 +1401,12 @@ function renderPlanned(planned) {
         dayRoot.append(weatherRoot);
       }
 
-      if (!events.length) {
+      if (!events.length && !calendarEvents.length) {
         const empty = document.createElement("p");
         empty.className = "planned-day-empty";
         empty.textContent = "Keine Einheit geplant";
         dayRoot.append(empty);
-      } else {
+      } else if (events.length) {
         const entries = document.createElement("div");
         entries.className = "planned-day-entries";
         events.forEach((event) => {
@@ -1041,7 +1421,12 @@ function renderPlanned(planned) {
           meta.className = "planned-meta";
           const compliance = event.compliance;
           const complianceSummary = compliance?.percentage != null ? `Umsetzung ${compliance.percentage}%` : compliance?.status === "missed" ? "Nicht umgesetzt" : compliance?.status === "completed" ? "Absolviert" : null;
-          meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null, complianceSummary].filter(Boolean).join(" · ");
+          const syncLabel = event.sync_source === "local+intervals"
+            ? "Lokal + Intervals.icu"
+            : event.sync_source === "local"
+              ? "Nur lokal"
+              : "Intervals.icu";
+          meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null, syncLabel, event.sync_status, complianceSummary].filter(Boolean).join(" · ");
           summaryMain.append(eventTitle, meta);
           const recommendation = event.weather_recommendation;
           if (recommendation) {
@@ -1111,7 +1496,22 @@ function renderPlanned(planned) {
             recommendation.append(icon, recommendationTitle, recommendationReason);
             body.append(recommendation);
           }
-          if (event.id != null) {
+          if (event.local_id) {
+            const identity = document.createElement("small");
+            identity.className = "planned-sync-identity";
+            identity.textContent = [
+              event.local_id ? `Lokal-ID: ${event.local_id}` : null,
+              event.remote_id ? `Remote-ID: ${event.remote_id}` : null,
+            ].filter(Boolean).join(" · ");
+            body.append(identity);
+          } else if (event.remote_id) {
+            const identity = document.createElement("small");
+            identity.className = "planned-sync-identity";
+            identity.textContent = `Remote-ID: ${event.remote_id}`;
+            body.append(identity);
+          }
+          renderLocalPlanningActions(event, body);
+          if (event.id != null && event.is_remote && isCoachOwnedWorkout(event)) {
             const actions = document.createElement("div");
             actions.className = "card-actions";
             const button = document.createElement("button");
@@ -1127,6 +1527,12 @@ function renderPlanned(planned) {
         });
         dayRoot.append(entries);
       }
+      if (calendarEvents.length) {
+        const calendarRoot = document.createElement("div");
+        calendarRoot.className = "planned-calendar-markers";
+        calendarEvents.forEach((event) => calendarRoot.append(renderExternalCalendarMarker(event)));
+        dayRoot.append(calendarRoot);
+      }
       weekDays.append(dayRoot);
     }
     weekRoot.append(weekDays);
@@ -1140,9 +1546,12 @@ async function deletePlanned(eventId, button, name) {
   button.textContent = "Wird gelöscht…";
   try {
     await api(`/api/planned/${encodeURIComponent(eventId)}`, { method: "DELETE" });
+    state.remoteDeleteFailure = null;
     toast("Geplante Einheit gelöscht");
     await load();
   } catch (error) {
+    state.remoteDeleteFailure = { name: name || "Geplante Einheit", message: error.message };
+    renderRemoteDeleteNotice();
     toast(error.message, true);
     button.disabled = false;
     button.textContent = "Einheit löschen";
@@ -1156,7 +1565,26 @@ function chatIsNearBottom() {
 function updateChatComposerVisibility() {
   const panel = $("#chatPanel");
   if (!panel) return;
-  panel.classList.toggle("chat-composer-hidden", !chatIsNearBottom());
+  const hidden = !chatIsNearBottom();
+  panel.classList.toggle("chat-composer-hidden", hidden);
+  const jump = $("#chatJumpToComposer");
+  if (jump) jump.hidden = !hidden || !panel.classList.contains("active");
+}
+
+function jumpToChatComposer() {
+  const input = $("#messageInput");
+  if (!input) return;
+  const reducedMotion = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  let focused = false;
+  const focusComposer = () => {
+    if (focused) return;
+    focused = true;
+    updateChatComposerVisibility();
+    input.focus({ preventScroll: true });
+  };
+  if (!reducedMotion && "onscrollend" in window) window.addEventListener("scrollend", focusComposer, { once: true });
+  window.setTimeout(focusComposer, reducedMotion ? 0 : 500);
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
 }
 
 function updateChatQueueStatus() {
@@ -1241,9 +1669,13 @@ function scrollChatToLatest() {
     const target = root.lastElementChild;
     if (!target) return;
     const composer = $("#chatForm");
-    const bottomOffset = (composer?.offsetHeight || 70) + 94 + (window.visualViewport?.offsetTop || 0);
-    const targetBottom = target.getBoundingClientRect().bottom + window.scrollY;
-    window.scrollTo({ top: Math.max(0, targetBottom - window.innerHeight + bottomOffset), behavior: "auto" });
+    const targetBottom = target.getBoundingClientRect().bottom;
+    const composerTop = composer?.getBoundingClientRect().top;
+    const targetGap = 12;
+    const desiredBottom = Number.isFinite(composerTop)
+      ? composerTop - targetGap
+      : window.innerHeight - targetGap;
+    window.scrollTo({ top: Math.max(0, window.scrollY + targetBottom - desiredBottom), behavior: "auto" });
   });
 }
 
@@ -1281,7 +1713,7 @@ function renderContextPreview(preview) {
     content.append(details);
   });
   status.classList.remove("error");
-  status.textContent = `Zuletzt erstellt: ${formatTime(preview.generated_at)}${preview.snapshot_truncated ? " (Snapshot im Coach-Kontext gekürzt)" : ""}`;
+  status.textContent = `Zuletzt erstellt: ${formatTime(preview.generated_at)}${preview.snapshot_compacted ? " (Snapshot für den Coach kompakt aufbereitet)" : preview.snapshot_truncated ? " (Snapshot im Coach-Kontext gekürzt)" : ""}`;
   content.hidden = false;
 }
 
@@ -1312,19 +1744,78 @@ async function loadContextPreview() {
   } finally { button.disabled = false; }
 }
 
+function renderTrainingPlans(plans, workouts) {
+  const root = $("#trainingPlans");
+  if (!root) return;
+  root.replaceChildren();
+  const entries = (workouts || []).filter((item) => item && item.plan_id && !item.archived);
+  if (!Array.isArray(plans) || !plans.length) return;
+  const heading = document.createElement("h3");
+  heading.className = "subsection-title";
+  heading.textContent = "Mehrwochenpläne";
+  root.append(heading);
+  plans.forEach((plan) => {
+    const planEntries = entries.filter((item) => String(item.plan_id) === String(plan.id));
+    const details = document.createElement("details");
+    details.className = "training-plan";
+    const summary = document.createElement("summary");
+    const title = document.createElement("strong");
+    title.textContent = plan.name || "Mehrwochenplan";
+    const meta = document.createElement("span");
+    meta.textContent = [plan.start_date && plan.end_date ? `${dateLabel(plan.start_date)} – ${dateLabel(plan.end_date)}` : null, `${planEntries.length} Einheiten`, plan.status].filter(Boolean).join(" · ");
+    summary.append(title, meta);
+    details.append(summary);
+    const body = document.createElement("div");
+    body.className = "training-plan-body";
+    if (plan.goal) {
+      const goal = document.createElement("p");
+      goal.textContent = plan.goal;
+      body.append(goal);
+    }
+    planEntries.sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))).forEach((entry) => {
+      const item = document.createElement("div");
+      item.className = "training-plan-entry";
+      item.textContent = `${entry.date ? dateLabel(entry.date) : "Ohne Datum"} · ${entry.name || "Einheit"} · ${entry.duration_minutes || Math.round(Number(entry.moving_time || 0) / 60) || "?"} Min.`;
+      body.append(item);
+    });
+    if (!planEntries.length) {
+      const empty = document.createElement("p");
+      empty.className = "fine-print";
+      empty.textContent = "Keine aktiven Einheiten zu diesem Plan vorhanden.";
+      body.append(empty);
+    }
+    details.append(body);
+    root.append(details);
+  });
+}
+
 function renderLibrary(workouts) {
   const root = $("#library");
   if (!root) return;
+  setDirtyIndicator("libraryDirtyIndicator", state.libraryDateDirty.size > 0);
   root.replaceChildren();
-  if (!Array.isArray(workouts) || !workouts.length) {
+  const allWorkouts = Array.isArray(workouts) ? workouts : [];
+  const filter = state.libraryFilter || "active";
+  const filterSelect = $("#libraryFilter");
+  if (filterSelect && filterSelect.value !== filter) filterSelect.value = filter;
+  const visible = allWorkouts.filter((workout) => {
+    if (filter === "archived") return Boolean(workout.archived);
+    if (filter === "all") return true;
+    if (filter === "templates") return !workout.archived && !workout.date;
+    if (filter === "planned") return !workout.archived && Boolean(workout.date);
+    return !workout.archived;
+  });
+  const librarySummary = $("#librarySummary");
+  if (librarySummary) librarySummary.textContent = `${visible.length} von ${allWorkouts.length} Einheiten`;
+  if (!visible.length) {
     const empty = document.createElement("p");
     empty.className = "context-empty";
-    empty.textContent = "Keine Einheiten in der lokalen Trainingsbibliothek gefunden.";
+    empty.textContent = filter === "archived" ? "Keine archivierten Einheiten vorhanden." : "Keine Einheiten für diesen Filter gefunden.";
     root.append(empty);
     return;
   }
   const groups = new Map();
-  workouts.forEach((workout) => {
+  visible.forEach((workout) => {
     const sport = activitySportLabel(workout);
     if (!groups.has(sport)) groups.set(sport, []);
     groups.get(sport).push(workout);
@@ -1344,6 +1835,7 @@ function renderLibrary(workouts) {
       sportWorkouts.forEach((workout) => {
         const card = document.createElement("article");
         card.className = "library-card";
+        if (workout.archived) card.classList.add("library-card-archived");
         const heading = document.createElement("div");
         const cardTitle = document.createElement("h4");
         cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
@@ -1369,7 +1861,16 @@ function renderLibrary(workouts) {
         dateLabelNode.textContent = "Datum";
         const dateInput = document.createElement("input");
         dateInput.type = "date";
-        dateInput.value = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+        dateInput.value = state.libraryDateDrafts.get(String(workout.id))
+          ?? addDateKey(timezoneDateKey(state.data?.profile?.timezone, new Date()), 1);
+        const markLibraryDateDirty = () => {
+          const key = String(workout.id);
+          state.libraryDateDrafts.set(key, dateInput.value);
+          state.libraryDateDirty.add(key);
+          setDirtyIndicator("libraryDirtyIndicator", true);
+        };
+        dateInput.addEventListener("input", markLibraryDateDirty);
+        dateInput.addEventListener("change", markLibraryDateDirty);
         dateLabelNode.append(dateInput);
         const button = document.createElement("button");
         button.type = "button";
@@ -1377,6 +1878,51 @@ function renderLibrary(workouts) {
         button.textContent = "Als lokale Einheit einplanen";
         button.addEventListener("click", () => planLibraryWorkout(workout.id, dateInput, button));
         controls.append(dateLabelNode, button);
+        if (!workout.date) {
+          const editor = document.createElement("details");
+          editor.className = "library-editor";
+          const editorSummary = document.createElement("summary");
+          editorSummary.textContent = "Vorlage bearbeiten";
+          const form = document.createElement("form");
+          form.className = "library-edit-form";
+          const nameInput = document.createElement("input");
+          nameInput.value = workout.name || "";
+          nameInput.maxLength = 200;
+          nameInput.required = true;
+          const descriptionInput = document.createElement("textarea");
+          descriptionInput.value = workout.description || "";
+          descriptionInput.maxLength = 12000;
+          descriptionInput.rows = 3;
+          const save = document.createElement("button");
+          save.type = "submit";
+          save.className = "secondary-button";
+          save.textContent = "Speichern";
+          form.append(nameInput, descriptionInput, save);
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            save.disabled = true;
+            try { await updateLibraryEntry(workout.id, { action: "update", name: nameInput.value, description: descriptionInput.value }); toast("Bibliothekseinheit gespeichert"); await load(); }
+            catch (error) { toast(error.message, true); save.disabled = false; }
+          });
+          editor.append(editorSummary, form);
+          controls.append(editor);
+          const archive = document.createElement("button");
+          archive.type = "button";
+          archive.className = "secondary-button";
+          archive.textContent = workout.archived ? "Wiederherstellen" : "Archivieren";
+          archive.addEventListener("click", () => updateLibraryEntry(workout.id, { action: workout.archived ? "restore" : "archive" }));
+          controls.append(archive);
+          if (!workout.external_id) {
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "secondary-button danger-button";
+            remove.textContent = "Löschen";
+            remove.addEventListener("click", () => {
+              if (window.confirm(`„${workout.name || "Bibliothekseinheit"}“ wirklich lokal löschen?`)) updateLibraryEntry(workout.id, { action: "delete" });
+            });
+            controls.append(remove);
+          }
+        }
         card.append(heading, description, controls);
         cards.append(card);
       });
@@ -1410,12 +1956,23 @@ async function loadLibrary() {
   }
 }
 
+async function updateLibraryEntry(id, payload) {
+  try {
+    await api(`/api/library/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(payload) });
+    toast(payload.action === "archive" ? "Bibliothekseinheit archiviert" : payload.action === "restore" ? "Bibliothekseinheit wiederhergestellt" : payload.action === "delete" ? "Bibliothekseinheit gelöscht" : "Bibliothekseinheit gespeichert");
+    await load();
+  } catch (error) { toast(error.message, true); }
+}
+
 async function planLibraryWorkout(workoutId, dateInput, button) {
   if (!dateInput.value) { toast("Bitte ein Datum auswählen", true); return; }
   button.disabled = true;
   button.textContent = "Lokale Einheit wird gespeichert…";
   try {
     await api("/api/library/" + encodeURIComponent(workoutId) + "/plan", { method: "POST", body: JSON.stringify({ date: dateInput.value }) });
+    state.libraryDateDirty.delete(String(workoutId));
+    state.libraryDateDrafts.delete(String(workoutId));
+    setDirtyIndicator("libraryDirtyIndicator", state.libraryDateDirty.size > 0);
     toast("Lokale Bibliothekseinheit gespeichert");
     await load();
   } catch (error) { toast(error.message, true); }
@@ -1423,6 +1980,7 @@ async function planLibraryWorkout(workoutId, dateInput, button) {
 }
 
 function renderProfile(profile) {
+  setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
   if (state.profileDirty) return;
   const form = $("#profileForm");
   for (const [key, value] of Object.entries(profile)) {
@@ -1432,6 +1990,64 @@ function renderProfile(profile) {
   if (summary) {
     const values = [profile.name, profile.sports, profile.typical_weekly_volume].filter(Boolean);
     summary.textContent = values.length ? values.join(" · ") : "Noch nicht ausgefüllt";
+  }
+}
+
+function populateCheckin(checkin, timeZone) {
+  const form = $("#checkinForm");
+  if (!form) return;
+  const values = checkin || { checkin_date: timezoneDateKey(timeZone) };
+  for (const field of ["checkin_date", "soreness", "stress", "motivation", "session_rpe", "available_minutes", "illness", "pain", "availability_notes", "notes"]) {
+    if (form.elements[field]) form.elements[field].value = values[field] ?? "";
+  }
+  state.checkinSelectedDate = values.checkin_date || null;
+  state.checkinDirty = false;
+}
+
+function renderCheckins(checkins, timeZone) {
+  const form = $("#checkinForm");
+  const history = $("#checkinHistory");
+  if (!form || !history) return;
+  setDirtyIndicator("checkinDirtyIndicator", state.checkinDirty);
+  const rows = Array.isArray(checkins) ? checkins : [];
+  if (!state.checkinDirty) {
+    const selected = rows.find((row) => row.checkin_date === state.checkinSelectedDate)
+      || rows.find((row) => row.checkin_date === timezoneDateKey(timeZone));
+    populateCheckin(selected, timeZone);
+  }
+  history.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "fine-print";
+    empty.textContent = "Noch kein Tages-Check-in gespeichert.";
+    history.append(empty);
+    return;
+  }
+  const heading = document.createElement("strong");
+  heading.textContent = "Gespeicherte Check-ins";
+  history.append(heading);
+  for (const row of rows) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "checkin-history-item";
+    button.classList.toggle("selected", row.checkin_date === state.checkinSelectedDate);
+    const title = document.createElement("strong");
+    title.textContent = dateLabel(row.checkin_date);
+    const values = [
+      row.soreness != null ? `Schmerz/Muskelkater ${row.soreness}/10` : null,
+      row.stress != null ? `Stress ${row.stress}/10` : null,
+      row.motivation != null ? `Motivation ${row.motivation}/10` : null,
+      row.illness ? "Krankheit notiert" : null,
+      row.pain ? "Schmerz notiert" : null,
+    ].filter(Boolean);
+    const summary = document.createElement("span");
+    summary.textContent = values.join(" · ") || "Ohne Bewertungen";
+    button.append(title, summary);
+    button.addEventListener("click", () => {
+      populateCheckin(row, timeZone);
+      renderCheckins(rows, timeZone);
+    });
+    history.append(button);
   }
 }
 
@@ -1460,6 +2076,10 @@ function renderGarmin(garmin) {
     return;
   }
   const performanceSources = [garmin.has_vo2max ? "VO2max" : null, garmin.has_estimated_run_times ? "Laufprognosen" : null, garmin.has_max_hr ? "Max HF" : null, garmin.has_weight ? "Gewicht" : null].filter(Boolean);
+  const paginationDetail = Object.entries(garmin.pagination || {})
+    .filter(([, value]) => value && (Number(value.windows) > 1 || value.complete === false))
+    .map(([name, value]) => `${name}: ${value.records || 0} Datensätze in ${value.windows || 0} Zeitfenstern${value.complete === false ? " · unvollständig" : ""}`)
+    .join(" · ");
   status.textContent = garmin.source === "fixture"
     ? "Lokale Garmin-Testdaten aktiv"
     : garmin.last_error ? "Mit Fehlern synchronisiert" : "Optionaler Direktabruf aktiv";
@@ -1468,6 +2088,7 @@ function renderGarmin(garmin) {
     : garmin.source === "fixture" ? "Testdatei ist konfiguriert; synchronisiere sie mit dem Button."
       : "Noch kein Garmin-Abruf durchgeführt.";
   if (performanceSources.length) detail.textContent += ` · ${performanceSources.join("/")} aus Garmin`;
+  if (paginationDetail) detail.textContent += ` · ${paginationDetail}`;
   if (fullButton) {
     fullButton.disabled = fullRunning || Boolean(state.data?.garmin_sync?.running || state.localSync.garmin);
     fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
@@ -1528,6 +2149,35 @@ function competitionEditor(competition = {}, index = 0) {
     state.profileDirty = true;
   });
   top.append(title, remove);
+
+  if (competition.sync_state === "conflict") {
+    const conflict = document.createElement("div");
+    conflict.className = "competition-conflict";
+    const remote = (() => {
+      try { return JSON.parse(competition.sync_conflict || "{}").remote || {}; } catch (_) { return {}; }
+    })();
+    const message = document.createElement("span");
+    message.textContent = remote.name
+      ? `Konflikt: Remote enthält „${remote.name}“ am ${dateLabel(remote.event_date || "")}.`
+      : "Konflikt: Das Remote-Event konnte nicht eindeutig zugeordnet werden.";
+    const actions = document.createElement("div");
+    actions.className = "competition-conflict-actions";
+    for (const [strategy, labelText] of [["keep_local", "Lokal behalten"], ["adopt_remote", "Remote übernehmen"]]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = labelText;
+      button.addEventListener("click", () => resolveCompetitionConflict(competition.id, strategy, button));
+      actions.append(button);
+    }
+    conflict.append(message, actions);
+    card.append(conflict);
+  } else if (competition.sync_state === "local_override") {
+    const status = document.createElement("small");
+    status.className = "competition-sync-state";
+    status.textContent = "Lokal priorisiert · beim nächsten Sync wird das Remote-Event aktualisiert";
+    card.append(status);
+  }
 
   const mainGrid = document.createElement("div");
   mainGrid.className = "form-grid";
@@ -1591,6 +2241,27 @@ function renderCompetitionSync(data) {
           ? `Letzte Aktualisierung: ${formatTime(sync.last_sync_at)}`
           : "Noch nicht synchronisiert";
     detail.classList.toggle("error", Boolean(sync.last_error));
+  }
+}
+
+async function resolveCompetitionConflict(competitionId, strategy, button) {
+  if (!competitionId) return;
+  if (state.profileDirty) {
+    toast("Bitte zuerst die lokalen Profiländerungen speichern oder verwerfen.", true);
+    return;
+  }
+  button.disabled = true;
+  try {
+    await api(`/api/competitions/${encodeURIComponent(competitionId)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ strategy }),
+    });
+    toast(strategy === "adopt_remote" ? "Remote-Wettkampf übernommen" : "Lokaler Wettkampf wird priorisiert");
+    invalidateContextPreview();
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
   }
 }
 
@@ -1968,7 +2639,44 @@ function renderSettings(data) {
           ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
           : "Noch kein API-Aufruf geprüft";
   }
-  setStatus("#intervalsConnectionStatus", configured.intervals, configured.intervals ? "Konfiguriert" : "Nicht konfiguriert");
+  const intervals = data.intervals || {
+    configured: Boolean(configured.intervals),
+    state: configured.intervals ? "configured" : "not_configured",
+  };
+  const intervalsHealthy = intervals.configured && intervals.state !== "error";
+  setStatus(
+    "#intervalsConnectionStatus",
+    intervalsHealthy,
+    !intervals.configured
+      ? "Nicht konfiguriert"
+      : intervals.state === "syncing"
+        ? "Synchronisierung läuft…"
+        : intervals.state === "error"
+          ? "Fehler bei letzter Aktualisierung"
+          : intervals.state === "connected"
+            ? "Verbunden"
+            : "Konfiguriert · noch nicht getestet",
+  );
+  const intervalsDetail = $("#intervalsConnectionDetail");
+  if (intervalsDetail) {
+    const librarySync = intervals.library_sync || {};
+    const libraryState = librarySync.state || {};
+    const libraryCount = Number(libraryState.synced || 0);
+    const paginationDetail = Object.entries(intervals.pagination || {})
+      .filter(([, value]) => value && (Number(value.pages) > 1 || value.complete === false))
+      .map(([name, value]) => `${name}: ${value.records || 0} Datensätze auf ${value.pages || 0} Seiten${value.complete === false ? " · unvollständig" : ""}`)
+      .join(" · ");
+    intervalsDetail.classList.toggle("error", Boolean(intervals.last_error));
+    intervalsDetail.textContent = !intervals.configured
+      ? "API-Schlüssel nicht konfiguriert"
+      : intervals.state === "syncing"
+        ? intervals.status || "Intervals.icu wird synchronisiert."
+        : intervals.last_error
+          ? intervals.last_error
+          : intervals.last_sync_at || librarySync.last_sync_at
+            ? `Letzte Aktualisierung: ${formatTime(intervals.last_sync_at || librarySync.last_sync_at)}${libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : ""}${paginationDetail ? ` · ${paginationDetail}` : ""}`
+            : "Noch keine Synchronisierung durchgeführt";
+  }
   setStatus("#garminConnectionStatus", garmin.configured, garmin.configured ? (garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert") : "Nicht konfiguriert");
   const weatherLocation = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
   setStatus("#weatherConnectionStatus", weather.configured, weather.configured ? (weather.loading ? "Wird geladen" : "Konfiguriert") : "Nicht konfiguriert");
@@ -1986,7 +2694,7 @@ function renderSettings(data) {
   }
   const connectionsSummary = $("#connectionsSummary");
   if (connectionsSummary) {
-    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Intervals", configured.intervals], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
+    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
       .map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
   }
   const intervalsDays = $("#intervalsSyncDays");
@@ -2002,6 +2710,13 @@ function renderSettings(data) {
   if (calendarFutureWeeks && document.activeElement !== calendarFutureWeeks) calendarFutureWeeks.value = futureWeeks;
   const calendarDisplaySummary = $("#calendarDisplaySummary");
   if (calendarDisplaySummary) calendarDisplaySummary.textContent = `${pastWeeks} zurück · ${futureWeeks} voraus`;
+  const calendarHorizonHint = $("#calendarHorizonHint");
+  if (calendarHorizonHint) {
+    const window = data.planning_view?.provider_window || {};
+    calendarHorizonHint.textContent = window.start && window.end
+      ? `Die Ansicht bleibt auf das lokal geladene Intervals.icu-Fenster ${window.start} bis ${window.end} begrenzt.`
+      : "Die Ansicht wird auf das lokal geladene Providerfenster begrenzt.";
+  }
   const intervalsSyncButton = $("#systemIntervalsSyncButton");
   const intervalsFullButton = $("#systemIntervalsFullResyncButton");
   const intervalsFullStatus = $("#intervalsFullResyncStatus");
@@ -2072,13 +2787,15 @@ function render(data) {
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);
+  renderRemoteDeleteNotice();
   renderQuickMessageTemplates();
   notifyState(data);
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
-  renderPlanned(data.planned || []);
+  renderPlanned(data.planned || [], data.external_calendar?.events || []);
   renderLibrary(data.library || []);
+  renderTrainingPlans(data.plans || [], data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
     const libraryState = data.library_sync?.state || {};
@@ -2096,10 +2813,12 @@ function render(data) {
     librarySyncDetail.classList.toggle("error", Boolean(data.library_sync?.last_error || libraryState.sync_error));
   }
   renderProfile(data.profile);
+  renderCheckins(data.checkins || data.local_feedback?.recent || [], data.profile?.timezone);
   renderGarmin(data.garmin);
   renderCompetitions(data.competitions || []);
-  renderPlanning(data);
+  renderAdaptivePlanning(data);
   renderExternalCalendar(data);
+  renderPublicCalendar(data);
   renderCompetitionSync(data);
   renderPerformance(data.performance);
   renderModel(data.model);
@@ -2122,7 +2841,7 @@ async function load(path = "/api/state") {
     $("#statusDetail").textContent = error.message;
     toast(error.message, true);
   } finally {
-    if (!$("#appShell").hidden) finishAppShellLoading();
+    if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
   }
 }
 
@@ -2139,6 +2858,7 @@ function queueChatMessage(message, mode) {
   });
   const input = $("#messageInput");
   input.value = "";
+  state.chatDraftDirty = false;
   input.style.height = "auto";
   renderMessages(state.data?.messages || [], true);
   updateChatControls();
@@ -2156,7 +2876,10 @@ async function requestCoachResponse(message, restoreInputOnError = false) {
     return true;
   } catch (error) {
     toast(error.message, true);
-    if (restoreInputOnError) $("#messageInput").value = message;
+    if (restoreInputOnError) {
+      $("#messageInput").value = message;
+      state.chatDraftDirty = true;
+    }
     await load();
     invalidateContextPreview();
     return false;
@@ -2185,6 +2908,7 @@ async function sendMessage(event) {
   state.quickTemplatesVisible = false;
   renderQuickMessageTemplates();
   input.value = "";
+  state.chatDraftDirty = false;
   input.style.height = "auto";
   updateChatControls();
   updateVoiceButton();
@@ -2237,7 +2961,7 @@ async function syncCompetitions() {
   try {
     const result = await api("/api/competitions/sync", { method: "POST", body: "{}" });
     if (result.status === "already_running") toast("Zielwettkämpfe werden bereits synchronisiert");
-    else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
+    else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.conflicts ? ` · ${result.conflicts} Konflikt(e) bitte prüfen` : ""}${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
@@ -2359,6 +3083,13 @@ async function resetCoachChat() {
 
 async function saveProfile(event) {
   event.preventDefault();
+  const button = event.submitter || event.currentTarget.querySelector("button[type=submit]");
+  const buttonLabel = button?.textContent || "Athletenkontext speichern";
+  if (button) {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.textContent = "Athletenkontext wird gespeichert…";
+  }
   const profile = { ...(state.data?.profile || {}), ...Object.fromEntries(new FormData(event.currentTarget)) };
   const payload = {
     profile,
@@ -2367,10 +3098,82 @@ async function saveProfile(event) {
   try {
     await api("/api/athlete-context", { method: "PUT", body: JSON.stringify(payload) });
     state.profileDirty = false;
+    setDirtyIndicator("profileDirtyIndicator", false);
     invalidateContextPreview();
     toast("Athletenkontext gespeichert und für den Coach aktiviert");
     await load();
   } catch (error) { toast(error.message, true); }
+  finally {
+    if (button) {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.textContent = buttonLabel;
+    }
+  }
+}
+
+let pwaReloadPending = false;
+
+function showPwaUpdate() {
+  const button = $("#pwaUpdateButton");
+  if (!button) return;
+  button.hidden = false;
+  button.title = "Neue App-Version laden";
+  button.setAttribute("aria-label", "Neue App-Version laden");
+}
+
+function setupPwaUpdates() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (pwaReloadPending) window.location.reload();
+  });
+  navigator.serviceWorker.register("/service-worker.js").then((registration) => {
+    if (registration.waiting) showPwaUpdate();
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      if (!worker) return;
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) showPwaUpdate();
+      });
+    });
+  }).catch(() => {});
+}
+
+async function applyPwaUpdate() {
+  if (!confirmDiscardChanges()) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration?.waiting) {
+      await registration?.update();
+      if (!registration?.waiting) return window.location.reload();
+    }
+    pwaReloadPending = true;
+    registration.waiting.postMessage({ type: "SKIP_WAITING" });
+  } catch (_) {
+    toast("App-Update konnte nicht geladen werden.", true);
+  }
+}
+
+async function saveCheckin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  for (const field of ["soreness", "stress", "motivation", "session_rpe", "available_minutes"]) {
+    values[field] = values[field] === "" ? null : Number(values[field]);
+  }
+  const button = form.querySelector("button[type=submit]");
+  if (button) { button.disabled = true; button.textContent = "Check-in wird gespeichert…"; }
+  try {
+    const result = await api("/api/feedback", { method: "POST", body: JSON.stringify(values) });
+    state.checkinDirty = false;
+    setDirtyIndicator("checkinDirtyIndicator", false);
+    state.checkinSelectedDate = result.checkin?.checkin_date || values.checkin_date;
+    toast("Tages-Check-in gespeichert");
+    await load();
+  } catch (error) { toast(error.message, true); }
+  finally {
+    if (button) { button.disabled = false; button.textContent = "Tages-Check-in speichern"; }
+  }
 }
 
 async function saveActivityFeedback(event, activity, button) {
@@ -2383,36 +3186,49 @@ async function saveActivityFeedback(event, activity, button) {
     notes: String(new FormData(form).get("notes") || ""),
   };
   button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.textContent = "Wird gespeichert…";
   try {
     await api(`/api/activities/${encodeURIComponent(String(activityId))}/feedback`, { method: "POST", body: JSON.stringify(payload) });
+    state.activityFeedbackDirty.delete(String(activityId));
+    state.activityFeedbackDrafts.delete(String(activityId));
+    setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
     toast(payload.notes.trim() ? "Besonderheiten gespeichert" : "Besonderheiten entfernt");
     await load();
   } catch (error) {
     toast(error.message, true);
     button.disabled = false;
+    button.removeAttribute("aria-busy");
+    button.textContent = "Besonderheiten speichern";
   }
 }
 
 async function prepareReplan() {
-  const button = $("#replanButton");
+  const button = $("#adaptivePlanningButton");
   if (!button) return;
+  state.localSync.adaptivePlanning = true;
   button.disabled = true;
-  button.textContent = "Wird vorbereitet…";
+  button.textContent = "Prüfung läuft…";
   try {
-    await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: false }) });
-    toast("Adaptive Anpassung vorbereitet");
+    const result = await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: false }) });
     await load();
+    if (result.changes?.length) openAdaptivePlanningDialog(result);
+    else toast("Keine Planungsanpassung nötig");
   } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Anpassung vorbereiten"; }
+  finally {
+    state.localSync.adaptivePlanning = false;
+    renderAdaptivePlanning(state.data || {});
+  }
 }
 
 async function applyReplan() {
-  const button = $("#applyReplanButton");
+  const button = $("#applyAdaptivePlanningButton");
   const adjustmentId = button?.dataset.adjustmentId;
-  if (!button || !adjustmentId || !window.confirm("Die vorgeschlagenen Änderungen auf lokale zukünftige Entwürfe anwenden? Intervals.icu wird dabei nicht verändert.")) return;
+  if (!button || !adjustmentId || !window.confirm("Die vorgeschlagenen Änderungen auf lokale zukünftige Einheiten anwenden? Intervals.icu wird dabei nicht verändert.")) return;
   button.disabled = true;
   try {
     await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: true, adjustment_id: adjustmentId }) });
+    $("#adaptivePlanningDialog")?.close();
     toast("Adaptive Anpassung angewendet");
     await load();
   } catch (error) { toast(error.message, true); }
@@ -2563,20 +3379,33 @@ async function downloadPrivacyExport() {
 async function deletePrivacyData() {
   if (!window.confirm("Alle lokalen Chats, Snapshots, Entwürfe und Profile löschen? Dieser Schritt kann nicht rückgängig gemacht werden.")) return;
   try {
-    await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: "DELETE" }) });
+    const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: "DELETE" }) });
+    const notice = $("#privacyDeleteNotice");
+    if (notice) {
+      notice.hidden = !(result.remote_delete_attempted && !result.remote_conversation_deleted);
+      notice.textContent = notice.hidden
+        ? ""
+        : "Lokale Daten wurden gelöscht, aber die OpenAI-Konversation konnte remote nicht bestätigt gelöscht werden. Prüfe den Anbieterstatus separat.";
+    }
     toast("Lokale Daten gelöscht");
     await load();
   } catch (error) { toast(error.message, true); }
 }
 
 async function logout() {
+  if (!confirmDiscardChanges()) return;
   try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
   showLogin();
 }
 
 document.querySelectorAll(".nav-item").forEach((button) => button.addEventListener("click", () => {
+  const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel;
+  if (currentPanel !== button.dataset.panel && !confirmDiscardChanges()) return;
+  if (currentPanel !== button.dataset.panel && hasUnsavedChanges()) discardUnsavedChanges();
   document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
   button.classList.add("active");
+  document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
+  button.setAttribute("aria-current", "page");
   $(`#${button.dataset.panel}`).classList.add("active");
   if (state.data) renderStatus(state.data);
   updateHeaderAction();
@@ -2598,6 +3427,10 @@ $("#quickMessageTemplates").addEventListener("click", (event) => {
   $("#chatForm").requestSubmit();
 });
 $("#voiceButton").addEventListener("click", toggleVoiceInput);
+$("#pwaUpdateButton").addEventListener("click", applyPwaUpdate);
+$("#chatJumpToComposer").addEventListener("click", () => {
+  jumpToChatComposer();
+});
 $("#headerActionButton").addEventListener("click", (event) => {
   if (event.currentTarget.dataset.action === "performance") refreshPerformance();
   else if (event.currentTarget.dataset.action === "activities") syncNow(event);
@@ -2610,10 +3443,14 @@ $("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar)
 $("#weatherSyncButton").addEventListener("click", syncWeather);
 $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
 $("#profileForm").addEventListener("submit", saveProfile);
-$("#replanButton").addEventListener("click", prepareReplan);
-$("#applyReplanButton").addEventListener("click", applyReplan);
-$("#profileForm").addEventListener("input", () => { state.profileDirty = true; });
-$("#competitionList").addEventListener("input", () => { state.profileDirty = true; });
+$("#checkinForm").addEventListener("submit", saveCheckin);
+$("#adaptivePlanningButton").addEventListener("click", prepareReplan);
+$("#applyAdaptivePlanningButton").addEventListener("click", applyReplan);
+$("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptivePlanningDialog")?.close());
+$("#coachAdaptivePlanningButton").addEventListener("click", () => document.querySelector('.nav-item[data-panel="workoutsPanel"]')?.click());
+$("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
+$("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
+$("#competitionList").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#addCompetitionButton").addEventListener("click", addCompetition);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
@@ -2628,11 +3465,14 @@ $("#backupDownloadButton").addEventListener("click", downloadDatabaseBackup);
 $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);
 $("#logoutButton").addEventListener("click", logout);
 $("#libraryLoadButton").addEventListener("click", loadLibrary);
+$("#libraryFilter").addEventListener("change", (event) => { state.libraryFilter = event.target.value; renderLibrary(state.data?.library || []); });
+$("#publicCalendarImportForm").addEventListener("submit", (event) => { event.preventDefault(); importPublicCalendar(); });
 $("#systemContextPreviewButton").addEventListener("click", () => {
   $("#systemContextPreviewButton").dataset.loaded = "false";
   loadContextPreview();
 });
 $("#messageInput").addEventListener("input", (event) => {
+  state.chatDraftDirty = Boolean(event.target.value.trim());
   event.target.style.height = "auto";
   event.target.style.height = `${Math.min(event.target.scrollHeight, 150)}px`;
 });
@@ -2642,6 +3482,29 @@ $("#messageInput").addEventListener("keydown", (event) => {
     $("#chatForm").requestSubmit();
   }
 });
+$("#activitySearch").addEventListener("input", (event) => {
+  state.activitySearch = event.target.value;
+  state.activityVisibleCount = 250;
+  renderActivities(state.data?.activities || []);
+});
+$("#activityFromDate").addEventListener("input", (event) => {
+  state.activityFromDate = event.target.value;
+  state.activityVisibleCount = 250;
+  renderActivities(state.data?.activities || []);
+});
+$("#activityToDate").addEventListener("input", (event) => {
+  state.activityToDate = event.target.value;
+  state.activityVisibleCount = 250;
+  renderActivities(state.data?.activities || []);
+});
+$("#activityFilterReset").addEventListener("click", () => {
+  state.activityTypes.clear();
+  state.activitySearch = "";
+  state.activityFromDate = "";
+  state.activityToDate = "";
+  state.activityVisibleCount = 250;
+  renderActivities(state.data?.activities || []);
+});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") savePwaActivity();
   else checkPwaReturn();
@@ -2650,7 +3513,12 @@ document.addEventListener("pointerdown", handlePwaInteraction, { passive: true }
 window.addEventListener("scroll", updateChatComposerVisibility, { passive: true });
 window.addEventListener("resize", updateChatComposerVisibility);
 window.addEventListener("pagehide", savePwaActivity);
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js");
+window.addEventListener("beforeunload", (event) => {
+  if (!hasUnsavedChanges()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+setupPwaUpdates();
 setInterval(() => {
   if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.weather || state.localSync.performance || state.localSync.intervalsFull || state.localSync.garminFull) load();
 }, 1500);

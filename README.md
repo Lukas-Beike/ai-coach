@@ -23,7 +23,7 @@ It is not intended to be exposed directly to the public internet.
   and indoor/virtual cycling.
 - Mobile-first profile and system sections can be collapsed; the planned
   calendar is grouped into collapsible full weeks with compact volume summaries.
-  The System tab controls how many past and future weeks are displayed.
+  The Einstellungen tab controls how many past and future weeks are displayed.
   Intervals.icu planned workouts are matched to completed activities through
   their pairing (with a conservative same-day/sport fallback) and show
   workout and weekly compliance percentages. The comparison uses training
@@ -33,10 +33,12 @@ It is not intended to be exposed directly to the public internet.
   that reason and the original versus adjusted duration after approval.
 - Google Calendar has no editable iCalendar category field. Add
   `[NO_TRAINING]` to the event description for informational appointments;
-  the event remains visible in the external-calendar list but is excluded
-  from coaching and adaptive planning.
+  the event remains visible in the external-calendar list and as a red marker
+  on its day in the planned calendar, but is excluded from coaching and
+  adaptive planning.
 - Add `[NO_INTENSITY]` to the description when a calendar event should allow
-  training but prevent hard sessions; other description tags have no effect.
+  training but prevent hard sessions; it is shown as a red marker on its day;
+  other description tags have no effect.
 - Optional weather integration via Open-Meteo: a city or postal code in the
   profile enables a cached 14-day forecast in the planned calendar. For
   outdoor runs and rides, the app suggests a weather-aware time window for
@@ -64,16 +66,47 @@ It is not intended to be exposed directly to the public internet.
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by
   a full Intervals.icu resync.
-- Multi-week plans are grouped in the local library.
+- Multi-week plans are grouped in the local library and shown with their date
+  range, goal, status, and active units. Library templates can be edited,
+  archived/restored, and local-only templates can be deleted. Synced templates
+  are intentionally archived instead of deleted; edits become pending local
+  changes until the explicit library synchronization.
+- The coach can explicitly apply saved library entries as local planned units.
+  Existing calendar dates are checked first. Intervals.icu calendar writes stay
+  disabled unless the athlete explicitly requests that synchronization.
 - Bidirectional synchronization of target competitions with Intervals.icu.
+- The coach can explicitly list, create, update, and locally delete target
+  competitions. Linked remote changes remain pending until an explicit
+  competition synchronization is requested.
 - Local athlete check-ins for subjective soreness, stress, motivation, session
   RPE, pain/illness notes, available training time, and day-specific constraints.
+  The Profile tab provides a dated check-in history; existing entries can be
+  selected and edited. Check-in dates and daily training boundaries use the
+  saved IANA profile timezone, and future check-ins are rejected.
+- After a completed activity, the coach can ask for a short subjective follow-up
+  and store the athlete's answer as activity feedback.
+- The coach can explicitly read the local workout library and planned units and
+  refresh Intervals.icu, current performance, Garmin, weather, the external
+  calendar, and the workout-library synchronization. Adaptive planning can be
+  previewed and, after explicit approval, applied to future local workouts.
 - Read-only shared iCalendar integration for the next 8 weeks. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local library entries on busy days can be proposed as short easy sessions.
-- Adaptive plan review that proposes changes to future local library entries
-  after a check-in. Changes are shown as a preview and require explicit local approval;
-  remote Intervals.icu calendar events are never changed by this process.
+  Invalid feeds are rejected without replacing the last good local calendar;
+  recurring events are reported as unsupported rather than partially expanded.
+- A separate public iCalendar import is available in the Einstellungen tab for
+  discovering competition candidates. Imported candidates remain local until
+  the athlete explicitly adopts one as a target competition.
+- The planned calendar never displays a provider horizon wider than the
+  Intervals.icu window actually loaded by the latest snapshot. The configured
+  display preference may therefore be reduced temporarily after a short sync.
+- Adaptive plan review that checks after a weather or shared-calendar refresh
+  whether future local library entries need adjustment. In the next two days,
+  persistent rain or snow can trigger a shorter easy replacement for a long
+  outdoor ride. A red update notice appears in the planned calendar and as a
+  compact hint on the Coach tab. Changes are shown as a preview and require
+  explicit local approval; remote Intervals.icu calendar events are never
+  changed by this process.
 - Annual event overview with base, build, peak, taper, and completed phases.
 - Optional PWA notifications for upcoming events and
   synchronization errors. Notifications are opt-in and are delivered by the
@@ -87,6 +120,10 @@ It is not intended to be exposed directly to the public internet.
   and the classified status of the last API call. Account dollar balances are
   available through the OpenAI billing dashboard or authorized organization
   access, not through this application.
+- Chat requests use a bounded queue, retry only structured conversation-lock
+  failures, and persist tool-call results so retried follow-ups do not repeat
+  local mutations. `OPENAI_DAILY_TOKEN_BUDGET` can stop new Responses requests
+  after a configurable local daily token limit; `0` disables that guard.
 
 ## Loading and synchronization
 
@@ -94,16 +131,19 @@ After login, the chat and all data already stored locally are rendered first.
 The browser then loads the current remote-enriched view in the background. The
 authentication request itself does not force a new Intervals.icu, Garmin, or
 calendar synchronization: those providers are synchronized at server
-startup, once per calendar day in the background, or on demand from the System
+startup, once per calendar day in the background, or on demand from the Einstellungen
 tab. The selected activity windows (Intervals.icu and Garmin) are retained
 locally and can be changed in that tab.
 
 The browser refreshes the local/remote view every minute while the PWA is
 visible and polls more frequently while a manual synchronization is running.
+Large Intervals.icu responses are fetched in bounded pages and the latest
+sync reports the fetched page/window counts; incomplete Garmin ranges remain
+visible as partial provider status instead of being presented as complete.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
-can be forced manually from the Open-Meteo card in the System tab.
+can be forced manually from the Open-Meteo card in the Einstellungen tab.
 GitHub release information is checked at most every 15 minutes. The morning
 check-in is generated at most once per local calendar day when its required
 integrations are configured.
@@ -125,11 +165,16 @@ from Intervals.icu are imported into the local database.
 Competition synchronization accepts strength training, running, outdoor
 cycling (`Ride`), and indoor/virtual cycling (`VirtualRide`). Other sports are
 skipped. Remote events that were previously linked but no longer exist are
-removed locally, and local deletions are propagated to Intervals.icu during the
-next synchronization.
+kept locally as a visible `remote_missing` conflict until an explicit local
+decision and a later reconciliation; local deletions are propagated to
+Intervals.icu during the next synchronization.
 The Intervals.icu event ID is stored locally after import or a successful push.
 Before creating a new event, synchronization also checks for an existing race
-with the same name, date, and sport to avoid creating duplicates.
+with the same name, date, and sport to avoid creating duplicates. A dirty local
+row that matches a remote race by identity only is never silently adopted:
+the UI exposes actions to keep the local version or adopt the remote version.
+Planned-workout conflicts use overlapping local start/duration windows when
+both sides provide times, and fall back to same-day conflicts otherwise.
 
 ## Configuration
 
@@ -182,7 +227,7 @@ URL stays in the server environment and is excluded from browser state,
 exports, and logs.
 
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
-in the System tab. A successful sync keeps events from today through the next
+in the Einstellungen tab. A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
 settings or bypass explicit library synchronization or planning approvals.
@@ -191,6 +236,7 @@ Other supported operational variables are:
 
 ```text
 OPENAI_MODEL=gpt-5.6-sol
+OPENAI_DAILY_TOKEN_BUDGET=100000
 DATA_RETENTION_DAYS=-1
 PORT=8090
 DATA_DIR=/data
@@ -207,7 +253,7 @@ remaining quotas when the API reports them.
 The application checks the latest non-draft, non-prerelease GitHub release on
 the server and caches the result for 15 minutes by default. A newer release is
 shown next to the application version and its release notes are available in
-the **System** tab. Set `GITHUB_TOKEN` only when the configured repository is
+the **Einstellungen** tab. Set `GITHUB_TOKEN` only when the configured repository is
 private; the token remains server-side and is never returned to the browser.
 
 ## Garmin authentication
@@ -236,8 +282,10 @@ particularly well. These activity-specific notes are stored separately from
 imported Garmin and Intervals.icu values and included in the AI context as
 local athlete data.
 
-The adaptive planning action reviews future dated local library entries and
-produces a change preview. Only after explicit approval are eligible local
+The adaptive planning action is surfaced as a red update notice in the planned
+calendar (and as a compact hint on the Coach tab) when a weather or shared
+calendar refresh finds future local library entries that need adjustment. It
+produces a change preview; only after explicit approval are eligible local
 library entries updated.
 It does not overwrite, delete, or reschedule remote Intervals.icu calendar
 events.
@@ -246,7 +294,7 @@ External calendar events are only planning signals. The heuristic uses the event
 date, start/end time, duration, and all-day status to identify library entries
 that are hard or long. It does not infer or diagnose an infection from a family event;
 illness must still be entered in the athlete check-in. Every suggested change
-remains a local preview and requires **Anpassung freigeben**.
+remains a local preview and requires **Anpassung anwenden**.
 
 
 ## Docker and Unraid
@@ -309,9 +357,12 @@ browser connection are handled as normal aborted requests rather than internal
 server failures.
 
 The **System** tab allows the athlete to export local data as JSON or delete
-local chats, snapshots, legacy drafts, library entries, competitions, and profile
-data. The database file itself remains in place. Chat reset and local cleanup
-also attempt to delete the stored OpenAI conversation; data held by external
+local chats, snapshots, legacy drafts, active and archived library entries,
+competitions, plans, check-ins, feedback, provider snapshots, calendar imports,
+and profile state. Session cookies and server credentials are never part of the
+export. The database file itself remains in place. Chat reset and local cleanup
+also attempt to delete the stored OpenAI conversation; if that remote deletion
+cannot be confirmed, the UI shows an explicit warning. Data held by external
 providers remains subject to their own policies.
 
 For Intervals.icu and Garmin, the System tab also offers a full local
@@ -319,14 +370,23 @@ resynchronization. It removes only the locally cached data for that provider
 and then fetches it again; cloud data, credentials, and Garmin tokens are not
 deleted. While this operation runs, syncs for the affected provider and
 Intervals.icu write operations are blocked.
+The Intervals.icu connection card also reports whether the provider is
+connected, synchronizing, or in error, including the time of the last
+successful update and a safe provider validation message when available.
 
-The **System** tab also provides an encrypted database backup download and a
+The **Einstellungen** tab also provides an encrypted database backup download and a
 validated restore action. Restoring requires the same `APP_PASSWORD` used by
 the backup database. Before replacement, the current database is retained as a
 `*.pre-restore-*` copy in `/data`. Keep both files protected.
 
 The login session cookie is valid for 30 days and is protected with `HttpOnly`
-and `SameSite=Strict` attributes.
+and `SameSite=Strict` attributes. For HTTPS reverse-proxy deployments, set
+`COOKIE_SECURE=true`; this adds the `Secure` attribute to the session and CSRF
+cookies. Keep it `false` for the documented local HTTP development flow.
+
+Open-Meteo failures are shown without exposing provider details and are retried
+with an increasing local backoff. A forced manual weather refresh bypasses that
+backoff.
 
 ## Development and testing
 
