@@ -390,7 +390,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Handover FT-008**
 
 - **Status:** abgeschlossen
-- **Branch und Commit:** `fix/ft-008-ui-regressions`, folgt nach Review
+- **Branch und Commit:** `fix/ft-008-ui-regressions`, `e7c1116`
 - **Geänderte Dateien:** `public/styles.css`, `public/index.html`, `public/service-worker.js`, `e2e/coach.spec.js`, `playwright.config.cjs`, dieses Handover-Dokument
 - **Verhaltensänderung:** Das `hidden`-Attribut wird global verbindlich durchgesetzt. Dirty-Indikatoren und leere Remote-Notices bleiben unsichtbar, bis sie Inhalt haben. Der Coach erhält einen festen UI-Puffer für Composer, Navigation und Safe Area. Der Tages-Check-in-Submit erfüllt die gemeinsame Primary-Mindesthöhe. Asset- und Service-Worker-Version wurden auf 116 aktualisiert.
 - **Validierung:** `docker build -t ai-coach:ft008 .` erfolgreich; 4 Playwright-Tests auf Desktop/Mobile erfolgreich, einschließlich 390×844 und 200%-Textskalierung; `python -m py_compile server.py tests/test_server.py tests/run_tests.py`; `git diff --check`.
