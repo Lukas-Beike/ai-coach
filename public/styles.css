@@ -19,13 +19,15 @@
   --danger: #ff453a;
   --shadow: 0 20px 60px rgba(0, 0, 0, .32);
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, .18);
+  --bottom-nav-clearance: 86px;
 }
 
 * { box-sizing: border-box; }
-html { background: var(--bg); }
+html { background: var(--bg); overscroll-behavior-y: contain; }
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--ink);
   background:
     radial-gradient(900px circle at 12% -18%, rgba(16, 163, 127, .15), transparent 42%),
@@ -43,8 +45,9 @@ button, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 .shell {
   width: min(100%, 820px);
   min-height: 100vh;
+  min-height: 100dvh;
   margin: auto;
-  padding: env(safe-area-inset-top) 18px calc(108px + env(safe-area-inset-bottom));
+  padding: env(safe-area-inset-top) 18px calc(var(--bottom-nav-clearance) + env(safe-area-inset-bottom));
 }
 
 .topbar {
@@ -144,8 +147,10 @@ h2 {
 .messages {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 12px;
   min-height: calc(100vh - 300px);
+  min-height: calc(100dvh - 300px);
   padding: 12px 0 56px;
   overflow-anchor: none;
 }
@@ -299,7 +304,9 @@ h2 {
 .composer button:active, .profile-form > button:active, .push-button:active { transform: scale(.97); }
 .composer button:disabled, .push-button:disabled { cursor: wait; opacity: .55; }
 .login-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
-.auth-loading { min-height: 100dvh; display: grid; place-items: center; padding: 24px; color: var(--subtle); font-size: .9rem; }
+.auth-loading { position: fixed; z-index: 20; inset: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px; color: var(--subtle); background: var(--bg); font-size: .9rem; }
+.auth-loading[hidden] { display: none !important; }
+#appShell.is-loading .composer, #appShell.is-loading .bottom-nav { visibility: hidden; }
 .button-spinner { display: none; width: 15px; height: 15px; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff; border-radius: 50%; }
 .login-button.is-loading .button-spinner { display: inline-block; animation: spin .7s linear infinite; }
 .voice-status { margin: 9px 4px 0; color: var(--muted); text-align: center; font-size: .72rem; }
