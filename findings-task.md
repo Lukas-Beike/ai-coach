@@ -552,7 +552,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-012.
 - **Folgetasks:** FT-013 ist entblockt.
 
-### - [ ] FT-013 – Session-Schreiblast drosseln und Semantik vereinheitlichen
+### - [x] FT-013 – Session-Schreiblast drosseln und Semantik vereinheitlichen
+
+**Status:** abgeschlossen
 
 **Quelle:** PERF-03
 **Ziel:** Reine GET-/Polling-Requests verursachen nicht bei jedem Aufruf einen SQLCipher-Write; Browser-Cookie und serverseitige Session haben eine verständliche Lebensdauer.
@@ -560,18 +562,30 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Session-Expiry/`last_seen` nur nach einem Mindestintervall aktualisieren.
-- [ ] Auth-Prüfung im Normalfall read-only halten.
-- [ ] Sliding versus feste Sessiondauer bewusst wählen und Cookie-Max-Age passend behandeln.
-- [ ] Abgelaufene Sessions periodisch begrenzt bereinigen.
-- [ ] Parallel-, Ablauf-, Logout- und CSRF-Tests ergänzen.
-- [ ] State-Latenz vor/nach Änderung mit leerer und großer Test-DB messen.
+- [x] Session-Expiry/`last_seen` nur nach einem Mindestintervall aktualisieren.
+- [x] Auth-Prüfung im Normalfall read-only halten.
+- [x] Sliding versus feste Sessiondauer bewusst wählen und Cookie-Max-Age passend behandeln.
+- [x] Abgelaufene Sessions periodisch begrenzt bereinigen.
+- [x] Parallel-, Ablauf-, Logout- und CSRF-Tests ergänzen.
+- [x] State-Latenz vor/nach Änderung mit leerer und großer Test-DB messen.
 
 **Abnahmekriterien**
 
-- [ ] Mehrere GETs im Drosselintervall erzeugen höchstens einen Session-Write.
-- [ ] Logout und Ablauf funktionieren weiterhin sofort und sicher.
-- [ ] Kein Cookie-/DB-Ablauf widerspricht der dokumentierten Semantik.
+- [x] Mehrere GETs im Drosselintervall erzeugen höchstens einen Session-Write.
+- [x] Logout und Ablauf funktionieren weiterhin sofort und sicher.
+- [x] Kein Cookie-/DB-Ablauf widerspricht der dokumentierten Semantik.
+
+**Handover FT-013**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `feat/ft-013-session-write-throttle`, `ea3460a`, PR folgt nach finalem Rebase
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
+- **Verhaltensänderung:** Sessions haben eine feste, mit dem Cookie synchronisierte 30-Tage-Lebensdauer. Gültige Authentifizierungen schreiben `last_seen` höchstens alle fünf Minuten; abgelaufene Sessions werden höchstens alle 15 Minuten und in Batches von maximal 100 Datensätzen bereinigt. Logout, Ablauf und CSRF bleiben sofort wirksam.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check`, `docker build -t ai-coach:ft013 .` und beschleunigte SQLCipher-Teststruktur mit 4 parallelen Shards erfolgreich: 60 + 60 + 59 + 59 = 238 Tests, alle `OK`. Auth-/State-Latenzbenchmark mit leerer und 5.000-Einträge-Sessiondatenbank: Baseline `develop` Median/P95 234,616/378,788 ms bzw. 241,817/393,901 ms; FT-013 242,526/408,661 ms bzw. 256,268/420,164 ms.
+- **Review:** Diff-Review ohne Findings; ein bestehender global-ID-abhängiger Pagination-Test wurde für shard-stabile Ausführung deterministisch gemacht; `git diff --check` sauber.
+- **Manuelle Prüfung:** Nicht erforderlich; Backend-Session- und Authentifizierungsverhalten ist durch Regressionstests abgedeckt, Frontend-Assets blieben unverändert.
+- **Offene Risiken:** Keine für FT-013.
+- **Folgetasks:** FT-014 ist entblockt.
 
 ### - [ ] FT-014 – Restore durch globalen Maintenance-Gate absichern
 
