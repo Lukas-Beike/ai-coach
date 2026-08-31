@@ -1,6 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 const state = {
   data: null,
+  route: null,
   loadSequence: 0,
   loadPromise: null,
   busy: false,
@@ -51,6 +52,63 @@ const SYNC_POLL_ACTIVE_MS = 1_500;
 const SYNC_POLL_IDLE_MS = 60_000;
 const SYNC_POLL_RETRY_MS = 5_000;
 const SYNC_POLL_LEASE_MS = 4_000;
+const NAV_ROUTES = Object.freeze({
+  coach: "chatPanel",
+  activities: "activitiesPanel",
+  planned: "workoutsPanel",
+  performance: "dataPanel",
+  profile: "profilePanel",
+  settings: "settingsPanel",
+});
+const DEFAULT_NAV_ROUTE = "coach";
+
+function routeFromHash(hash = window.location.hash) {
+  const route = String(hash || "").replace(/^#/, "").toLowerCase();
+  return Object.prototype.hasOwnProperty.call(NAV_ROUTES, route) ? route : DEFAULT_NAV_ROUTE;
+}
+
+function hashContainsKnownRoute(hash = window.location.hash) {
+  const route = String(hash || "").replace(/^#/, "").toLowerCase();
+  return Object.prototype.hasOwnProperty.call(NAV_ROUTES, route);
+}
+
+function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
+  const panelId = NAV_ROUTES[route] ? route : DEFAULT_NAV_ROUTE;
+  const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
+  if (currentPanel !== NAV_ROUTES[panelId] && !confirmDiscardChanges()) return false;
+  if (currentPanel !== NAV_ROUTES[panelId] && hasUnsavedChanges()) discardUnsavedChanges();
+  document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
+  const navigation = document.querySelector(`.nav-item[data-route="${panelId}"]`);
+  const panel = document.querySelector(`#${NAV_ROUTES[panelId]}`);
+  if (!navigation || !panel) return false;
+  navigation.classList.add("active");
+  document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
+  navigation.setAttribute("aria-current", "page");
+  panel.classList.add("active");
+  state.route = panelId;
+  const targetHash = `#${panelId}`;
+  if (window.location.hash !== targetHash) {
+    if (historyMode === "push") window.history.pushState({ route: panelId }, "", targetHash);
+    else if (historyMode === "replace") window.history.replaceState({ route: panelId }, "", targetHash);
+  }
+  if (state.data) renderStatus(state.data);
+  updateHeaderAction();
+  if (state.data && panelId === "settings") loadContextPreview();
+  if (state.data && panelId === "settings") loadLogs();
+  window.scrollTo({ top: 0, behavior: "auto" });
+  if (panelId === "coach") scrollChatToLatest(true);
+  if (focus && !$("#appShell")?.hidden) {
+    panel.setAttribute("tabindex", "-1");
+    panel.focus({ preventScroll: true });
+  }
+  return true;
+}
+
+function syncNavigationRoute() {
+  const route = routeFromHash();
+  const applied = applyNavigationRoute(route, { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
+  if (!applied && state.route) window.history.replaceState({ route: state.route }, "", `#${state.route}`);
+}
 
 function readLastPwaActivity() {
   try {
@@ -143,6 +201,7 @@ function finishAppShellLoading() {
   if (!$("#loginDialog")?.open) shell.hidden = false;
   shell.classList.remove("is-loading");
   shell.removeAttribute("aria-busy");
+  applyNavigationRoute(routeFromHash(), { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
 }
 
 async function api(path, options = {}) {
@@ -3768,22 +3827,12 @@ async function logout() {
   showLogin();
 }
 
-document.querySelectorAll(".nav-item").forEach((button) => button.addEventListener("click", () => {
-  const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel;
-  if (currentPanel !== button.dataset.panel && !confirmDiscardChanges()) return;
-  if (currentPanel !== button.dataset.panel && hasUnsavedChanges()) discardUnsavedChanges();
-  document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
-  button.classList.add("active");
-  document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
-  button.setAttribute("aria-current", "page");
-  $(`#${button.dataset.panel}`).classList.add("active");
-  if (state.data) renderStatus(state.data);
-  updateHeaderAction();
-  if (button.dataset.panel === "settingsPanel") loadContextPreview();
-  if (button.dataset.panel === "settingsPanel") loadLogs();
-  window.scrollTo({ top: 0, behavior: "auto" });
-  if (button.dataset.panel === "chatPanel") scrollChatToLatest(true);
+document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  applyNavigationRoute(link.dataset.route, { historyMode: "push" });
 }));
+window.addEventListener("hashchange", syncNavigationRoute);
 
 $("#loginForm").addEventListener("submit", login);
 $("#chatForm").addEventListener("submit", sendMessage);
@@ -3818,7 +3867,7 @@ $("#checkinCloseButton").addEventListener("click", () => $("#checkinDialog")?.cl
 $("#adaptivePlanningButton").addEventListener("click", prepareReplan);
 $("#applyAdaptivePlanningButton").addEventListener("click", applyReplan);
 $("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptivePlanningDialog")?.close());
-$("#coachAdaptivePlanningButton").addEventListener("click", () => document.querySelector('.nav-item[data-panel="workoutsPanel"]')?.click());
+$("#coachAdaptivePlanningButton").addEventListener("click", () => applyNavigationRoute("planned", { historyMode: "push" }));
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
 $("#competitionList").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
@@ -3886,4 +3935,5 @@ window.addEventListener("beforeunload", (event) => {
 setupPwaUpdates();
 renderNotificationStatus();
 setupSyncStatusMonitoring();
+syncNavigationRoute();
 bootstrapAuth();

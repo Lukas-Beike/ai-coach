@@ -161,6 +161,12 @@ GitHub release information is checked at most every 15 minutes. The morning
 check-in is generated at most once per local calendar day when its required
 integrations are configured.
 
+The six main views use stable hash links: `#coach`, `#activities`, `#planned`,
+`#performance`, `#profile`, and `#settings`. Navigation is implemented with
+real links, so direct links, reload, browser back/forward, keyboard access, and
+screen-reader announcements remain available. An unknown hash falls back to
+`#coach`; a deep link is retained through the login flow.
+
 Versioned JavaScript, CSS, and image assets with a `?v=...` query are served
 with a one-year immutable cache policy and an ETag. HTML, the manifest, and the
 service worker remain revalidatable with `no-cache`. The service worker uses

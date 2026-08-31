@@ -649,12 +649,12 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Handover FT-015**
 
 - **Status:** abgeschlossen
-- **Branch und Commits:** `feat/ft-015-asset-cache`, `b0075e8`, `ff2fd8f`, `08d7d3c`; PR folgt nach finalem Rebase
+- **Branch und Commits:** `feat/ft-015-asset-cache`, `b0075e8`, `ff2fd8f`, `08d7d3c`; PR #156 per Auto-Squash gemerged als `19409db`
 - **Geänderte Dateien:** `server.py`, `public/index.html`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, dieses Handover-Dokument
 - **Verhaltensänderung:** Versionierte JS/CSS/Bildassets verwenden `cache-first`, eine einjährige immutable Cache-Control-Policy und ETags. HTML, Manifest und Service Worker bleiben mit `no-cache` revalidierbar; der Service Worker lädt übrige Nicht-API-Anfragen network-first, löscht alte Cache-Versionen bei Aktivierung und ignoriert API-Anfragen.
 - **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check`, `docker build -t ai-coach:ft015 .` und vier parallele SQLCipher-Shards mit `62 + 61 + 61 + 61 = 245` Tests erfolgreich, alle `OK`.
 - **Review:** Diff-Review ohne offene Findings. Ein bestehender Test erwartete nach dem erforderlichen Asset-Bump noch `v119`; die Assertion wurde auf `v120` aktualisiert und der betroffene Shard erneut erfolgreich ausgeführt.
-- **Manuelle Prüfung:** CI-Browser-Smoke folgt im PR; Asset-Query-Versionen und Service-Worker-Cache wurden von v119 auf v120 aktualisiert. Gzip/Brotli bleibt auf dem vertrauenswürdigen HTTPS-Reverse-Proxy.
+- **Manuelle Prüfung:** CI-Browser-Smoke und Accessibility bestanden; Asset-Query-Versionen und Service-Worker-Cache wurden von v119 auf v120 aktualisiert. Gzip/Brotli bleibt auf dem vertrauenswürdigen HTTPS-Reverse-Proxy.
 - **Offene Risiken:** Keine für FT-015.
 - **Folgetasks:** FT-016 ist entblockt.
 
@@ -662,7 +662,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 ## 7. P2 – Tägliche UX, Navigation und Funktionslücken
 
-### - [ ] FT-016 – Semantische Navigation und Hash-Routing als Grundlage einführen
+### - [x] FT-016 – Semantische Navigation und Hash-Routing als Grundlage einführen
+
+**Status:** abgeschlossen
 
 **Quelle:** UX-02, A11Y-01
 **Ziel:** Hauptansichten besitzen stabile URLs, korrekte Semantik und funktionieren mit Reload, Zurück/Vor und Tastatur.
@@ -670,18 +672,30 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Bottom-Navigation als echte Links mit Hash-Routen umsetzen.
-- [ ] Eindeutige Routen für Hauptansichten und wichtige Unterbereiche definieren.
-- [ ] Aktiven Zustand mit `aria-current` und sichtbarer Markierung führen.
-- [ ] Fokus beim Viewwechsel sinnvoll setzen, ohne Screenreader-Kontext zu verlieren.
-- [ ] Reload, Back/Forward, unbekannte Route und Login-Redirect testen.
-- [ ] Deep Links nach Authentisierung zur ursprünglich gewünschten Route zurückführen.
+- [x] Bottom-Navigation als echte Links mit Hash-Routen umsetzen.
+- [x] Eindeutige Routen für Hauptansichten und wichtige Unterbereiche definieren.
+- [x] Aktiven Zustand mit `aria-current` und sichtbarer Markierung führen.
+- [x] Fokus beim Viewwechsel sinnvoll setzen, ohne Screenreader-Kontext zu verlieren.
+- [x] Reload, Back/Forward, unbekannte Route und Login-Redirect testen.
+- [x] Deep Links nach Authentisierung zur ursprünglich gewünschten Route zurückführen.
 
 **Abnahmekriterien**
 
-- [ ] Jede Hauptansicht ist direkt verlinkbar.
-- [ ] Browsernavigation ändert sichtbar die richtige Ansicht.
-- [ ] Navigation ist vollständig per Tastatur und Screenreader verständlich.
+- [x] Jede Hauptansicht ist direkt verlinkbar.
+- [x] Browsernavigation ändert sichtbar die richtige Ansicht.
+- [x] Navigation ist vollständig per Tastatur und Screenreader verständlich.
+
+**Handover FT-016**
+
+- **Status:** abgeschlossen
+- **Branch und Commits:** `feat/ft-016-semantic-navigation`, `4ab5df3`, `cc5db2d`; PR folgt nach finalem Rebase
+- **Geänderte Dateien:** `public/app.js`, `public/index.html`, `public/styles.css`, `public/service-worker.js`, `e2e/coach.spec.js`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
+- **Verhaltensänderung:** Die sechs Hauptansichten sind über stabile Hash-Routen (`#coach`, `#activities`, `#planned`, `#performance`, `#profile`, `#settings`) als echte Links erreichbar. `aria-current`, Fokus auf das aktive Panel, Reload, Back/Forward, unbekannte Route und Login-Deep-Links werden synchronisiert; ungespeicherte Änderungen behalten ihre bisherige Schutzabfrage.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check`, `docker build -t ai-coach:ft016 .` und vier parallele SQLCipher-Shards mit `62 + 62 + 61 + 61 = 246` Tests erfolgreich, alle `OK`.
+- **Review:** Diff-Review ohne offene Findings; fokussierte Routing-/Asset-Regressionstests erfolgreich. Native Node-/Playwright-Ausführung ist auf Windows nicht installiert und wird im PR-CI validiert.
+- **Manuelle Prüfung:** CI-Browser-Smoke folgt im PR; die erweiterten E2E-Prüfungen decken Navigation, Deep-Link, Browsernavigation, Fokus und WCAG-AA-Zustände ab. Asset-Query-Versionen und Service-Worker-Cache wurden von v120 auf v121 aktualisiert.
+- **Offene Risiken:** Keine für FT-016.
+- **Folgetasks:** FT-017 ist entblockt.
 
 ### - [ ] FT-017 – Neue mobile Hauptnavigation und „Heute“-Ansicht umsetzen
 
