@@ -66,7 +66,11 @@ It is not intended to be exposed directly to the public internet.
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by
   a full Intervals.icu resync.
-- Multi-week plans are grouped in the local library.
+- Multi-week plans are grouped in the local library and shown with their date
+  range, goal, status, and active units. Library templates can be edited,
+  archived/restored, and local-only templates can be deleted. Synced templates
+  are intentionally archived instead of deleted; edits become pending local
+  changes until the explicit library synchronization.
 - The coach can explicitly apply saved library entries as local planned units.
   Existing calendar dates are checked first. Intervals.icu calendar writes stay
   disabled unless the athlete explicitly requests that synchronization.
@@ -90,6 +94,12 @@ It is not intended to be exposed directly to the public internet.
   long local library entries on busy days can be proposed as short easy sessions.
   Invalid feeds are rejected without replacing the last good local calendar;
   recurring events are reported as unsupported rather than partially expanded.
+- A separate public iCalendar import is available in the System tab for
+  discovering competition candidates. Imported candidates remain local until
+  the athlete explicitly adopts one as a target competition.
+- The planned calendar never displays a provider horizon wider than the
+  Intervals.icu window actually loaded by the latest snapshot. The configured
+  display preference may therefore be reduced temporarily after a short sync.
 - Adaptive plan review that checks after a weather or shared-calendar refresh
   whether future local library entries need adjustment. In the next two days,
   persistent rain or snow can trigger a shorter easy replacement for a long

@@ -19,6 +19,7 @@ const state = {
   notificationKeys: new Set(),
   quickTemplatesVisible: false,
   activityTracked: false,
+  libraryFilter: "active",
 };
 const VOICE_MAX_DURATION_MS = 60_000;
 const VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
@@ -466,17 +467,27 @@ function renderExternalCalendar(data) {
 }
 
 function renderPublicCalendar(data) {
-  return;
   const root = $("#publicCalendarCandidates");
   if (!root) return;
   root.replaceChildren();
-  const candidates = data.public_calendar?.candidates || [];
-  if (!candidates.length) return;
+  const calendar = data.public_calendar || {};
+  const candidates = calendar.candidates || [];
+  const sources = calendar.sources || [];
+  if (!candidates.length && !sources.length) {
+    root.textContent = "Noch kein öffentlicher Wettkampfkalender importiert.";
+    return;
+  }
+  if (sources.length) {
+    const sourceSummary = document.createElement("p");
+    sourceSummary.className = "fine-print";
+    sourceSummary.textContent = `${sources.length} lokaler Kalender${sources.length === 1 ? "" : "e"} · ${candidates.length} Kandidat${candidates.length === 1 ? "" : "en"}`;
+    root.append(sourceSummary);
+  }
   for (const candidate of candidates.slice(0, 30)) {
     const card = document.createElement("article");
     card.className = "public-calendar-candidate";
     const imported = Boolean(candidate.imported_competition_id);
-    card.innerHTML = `<div><strong>${escapeHtml(candidate.name)}</strong><span>${escapeHtml(candidate.event_date)} · ${escapeHtml(candidate.sport)}</span></div>${candidate.location ? `<span>${escapeHtml(candidate.location)}</span>` : ""}${candidate.description ? `<p>${escapeHtml(candidate.description)}</p>` : ""}`;
+    card.innerHTML = `<div><strong>${escapeHtml(String(candidate.name || "Veranstaltung"))}</strong><span>${escapeHtml(String(candidate.event_date || ""))} · ${escapeHtml(String(candidate.sport || ""))}</span></div>${candidate.location ? `<span>${escapeHtml(String(candidate.location))}</span>` : ""}${candidate.description ? `<p>${escapeHtml(String(candidate.description))}</p>` : ""}`;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary-button";
@@ -1074,6 +1085,19 @@ function renderLocalPlanningActions(event, body) {
   });
   editor.append(editorSummary, form);
   actions.append(editor);
+  const archiveButton = document.createElement("button");
+  archiveButton.type = "button";
+  archiveButton.className = "secondary-button";
+  archiveButton.textContent = event.archived ? "Lokale Einheit wiederherstellen" : "Lokale Einheit archivieren";
+  archiveButton.addEventListener("click", async () => {
+    archiveButton.disabled = true;
+    try {
+      await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, { method: "POST", body: JSON.stringify({ action: event.archived ? "restore" : "archive" }) });
+      toast(event.archived ? "Lokale Einheit wiederhergestellt" : "Lokale Einheit archiviert");
+      await load();
+    } catch (error) { toast(error.message, true); archiveButton.disabled = false; }
+  });
+  actions.append(archiveButton);
   const deleteButton = document.createElement("button");
   deleteButton.type = "button";
   deleteButton.className = "secondary-button danger-button";
@@ -1123,8 +1147,16 @@ function renderPlanned(planned, externalCalendarEvents = []) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const calendarDisplay = state.data?.calendar_display || {};
-  const pastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
-  const futureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
+  const configuredPastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
+  const configuredFutureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
+  const providerWindow = state.data?.planning_view?.provider_window || {};
+  const windowStart = providerWindow.start ? new Date(`${providerWindow.start}T00:00:00`) : null;
+  const windowEnd = providerWindow.end ? new Date(`${providerWindow.end}T00:00:00`) : null;
+  const dayMs = 86400000;
+  const loadedPastWeeks = windowStart && !Number.isNaN(windowStart.valueOf()) ? Math.max(0, Math.ceil((today - windowStart) / dayMs / 7)) : configuredPastWeeks;
+  const loadedFutureWeeks = windowEnd && !Number.isNaN(windowEnd.valueOf()) ? Math.max(0, Math.ceil((windowEnd - today) / dayMs / 7)) : configuredFutureWeeks;
+  const pastWeeks = Math.min(configuredPastWeeks, loadedPastWeeks);
+  const futureWeeks = Math.min(configuredFutureWeeks, loadedFutureWeeks);
   const historyStart = new Date(today);
   historyStart.setDate(today.getDate() - pastWeeks * 7);
   const firstWeek = plannedWeekStart(historyStart);
@@ -1522,19 +1554,77 @@ async function loadContextPreview() {
   } finally { button.disabled = false; }
 }
 
+function renderTrainingPlans(plans, workouts) {
+  const root = $("#trainingPlans");
+  if (!root) return;
+  root.replaceChildren();
+  const entries = (workouts || []).filter((item) => item && item.plan_id && !item.archived);
+  if (!Array.isArray(plans) || !plans.length) return;
+  const heading = document.createElement("h3");
+  heading.className = "subsection-title";
+  heading.textContent = "Mehrwochenpläne";
+  root.append(heading);
+  plans.forEach((plan) => {
+    const planEntries = entries.filter((item) => String(item.plan_id) === String(plan.id));
+    const details = document.createElement("details");
+    details.className = "training-plan";
+    const summary = document.createElement("summary");
+    const title = document.createElement("strong");
+    title.textContent = plan.name || "Mehrwochenplan";
+    const meta = document.createElement("span");
+    meta.textContent = [plan.start_date && plan.end_date ? `${dateLabel(plan.start_date)} – ${dateLabel(plan.end_date)}` : null, `${planEntries.length} Einheiten`, plan.status].filter(Boolean).join(" · ");
+    summary.append(title, meta);
+    details.append(summary);
+    const body = document.createElement("div");
+    body.className = "training-plan-body";
+    if (plan.goal) {
+      const goal = document.createElement("p");
+      goal.textContent = plan.goal;
+      body.append(goal);
+    }
+    planEntries.sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))).forEach((entry) => {
+      const item = document.createElement("div");
+      item.className = "training-plan-entry";
+      item.textContent = `${entry.date ? dateLabel(entry.date) : "Ohne Datum"} · ${entry.name || "Einheit"} · ${entry.duration_minutes || Math.round(Number(entry.moving_time || 0) / 60) || "?"} Min.`;
+      body.append(item);
+    });
+    if (!planEntries.length) {
+      const empty = document.createElement("p");
+      empty.className = "fine-print";
+      empty.textContent = "Keine aktiven Einheiten zu diesem Plan vorhanden.";
+      body.append(empty);
+    }
+    details.append(body);
+    root.append(details);
+  });
+}
+
 function renderLibrary(workouts) {
   const root = $("#library");
   if (!root) return;
   root.replaceChildren();
-  if (!Array.isArray(workouts) || !workouts.length) {
+  const allWorkouts = Array.isArray(workouts) ? workouts : [];
+  const filter = state.libraryFilter || "active";
+  const filterSelect = $("#libraryFilter");
+  if (filterSelect && filterSelect.value !== filter) filterSelect.value = filter;
+  const visible = allWorkouts.filter((workout) => {
+    if (filter === "archived") return Boolean(workout.archived);
+    if (filter === "all") return true;
+    if (filter === "templates") return !workout.archived && !workout.date;
+    if (filter === "planned") return !workout.archived && Boolean(workout.date);
+    return !workout.archived;
+  });
+  const librarySummary = $("#librarySummary");
+  if (librarySummary) librarySummary.textContent = `${visible.length} von ${allWorkouts.length} Einheiten`;
+  if (!visible.length) {
     const empty = document.createElement("p");
     empty.className = "context-empty";
-    empty.textContent = "Keine Einheiten in der lokalen Trainingsbibliothek gefunden.";
+    empty.textContent = filter === "archived" ? "Keine archivierten Einheiten vorhanden." : "Keine Einheiten für diesen Filter gefunden.";
     root.append(empty);
     return;
   }
   const groups = new Map();
-  workouts.forEach((workout) => {
+  visible.forEach((workout) => {
     const sport = activitySportLabel(workout);
     if (!groups.has(sport)) groups.set(sport, []);
     groups.get(sport).push(workout);
@@ -1554,6 +1644,7 @@ function renderLibrary(workouts) {
       sportWorkouts.forEach((workout) => {
         const card = document.createElement("article");
         card.className = "library-card";
+        if (workout.archived) card.classList.add("library-card-archived");
         const heading = document.createElement("div");
         const cardTitle = document.createElement("h4");
         cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
@@ -1587,6 +1678,51 @@ function renderLibrary(workouts) {
         button.textContent = "Als lokale Einheit einplanen";
         button.addEventListener("click", () => planLibraryWorkout(workout.id, dateInput, button));
         controls.append(dateLabelNode, button);
+        if (!workout.date) {
+          const editor = document.createElement("details");
+          editor.className = "library-editor";
+          const editorSummary = document.createElement("summary");
+          editorSummary.textContent = "Vorlage bearbeiten";
+          const form = document.createElement("form");
+          form.className = "library-edit-form";
+          const nameInput = document.createElement("input");
+          nameInput.value = workout.name || "";
+          nameInput.maxLength = 200;
+          nameInput.required = true;
+          const descriptionInput = document.createElement("textarea");
+          descriptionInput.value = workout.description || "";
+          descriptionInput.maxLength = 12000;
+          descriptionInput.rows = 3;
+          const save = document.createElement("button");
+          save.type = "submit";
+          save.className = "secondary-button";
+          save.textContent = "Speichern";
+          form.append(nameInput, descriptionInput, save);
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            save.disabled = true;
+            try { await updateLibraryEntry(workout.id, { action: "update", name: nameInput.value, description: descriptionInput.value }); toast("Bibliothekseinheit gespeichert"); await load(); }
+            catch (error) { toast(error.message, true); save.disabled = false; }
+          });
+          editor.append(editorSummary, form);
+          controls.append(editor);
+          const archive = document.createElement("button");
+          archive.type = "button";
+          archive.className = "secondary-button";
+          archive.textContent = workout.archived ? "Wiederherstellen" : "Archivieren";
+          archive.addEventListener("click", () => updateLibraryEntry(workout.id, { action: workout.archived ? "restore" : "archive" }));
+          controls.append(archive);
+          if (!workout.external_id) {
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "secondary-button danger-button";
+            remove.textContent = "Löschen";
+            remove.addEventListener("click", () => {
+              if (window.confirm(`„${workout.name || "Bibliothekseinheit"}“ wirklich lokal löschen?`)) updateLibraryEntry(workout.id, { action: "delete" });
+            });
+            controls.append(remove);
+          }
+        }
         card.append(heading, description, controls);
         cards.append(card);
       });
@@ -1618,6 +1754,14 @@ async function loadLibrary() {
     button.disabled = false;
     button.textContent = "Bibliothek synchronisieren";
   }
+}
+
+async function updateLibraryEntry(id, payload) {
+  try {
+    await api(`/api/library/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(payload) });
+    toast(payload.action === "archive" ? "Bibliothekseinheit archiviert" : payload.action === "restore" ? "Bibliothekseinheit wiederhergestellt" : payload.action === "delete" ? "Bibliothekseinheit gelöscht" : "Bibliothekseinheit gespeichert");
+    await load();
+  } catch (error) { toast(error.message, true); }
 }
 
 async function planLibraryWorkout(workoutId, dateInput, button) {
@@ -2358,6 +2502,13 @@ function renderSettings(data) {
   if (calendarFutureWeeks && document.activeElement !== calendarFutureWeeks) calendarFutureWeeks.value = futureWeeks;
   const calendarDisplaySummary = $("#calendarDisplaySummary");
   if (calendarDisplaySummary) calendarDisplaySummary.textContent = `${pastWeeks} zurück · ${futureWeeks} voraus`;
+  const calendarHorizonHint = $("#calendarHorizonHint");
+  if (calendarHorizonHint) {
+    const window = data.planning_view?.provider_window || {};
+    calendarHorizonHint.textContent = window.start && window.end
+      ? `Die Ansicht bleibt auf das lokal geladene Intervals.icu-Fenster ${window.start} bis ${window.end} begrenzt.`
+      : "Die Ansicht wird auf das lokal geladene Providerfenster begrenzt.";
+  }
   const intervalsSyncButton = $("#systemIntervalsSyncButton");
   const intervalsFullButton = $("#systemIntervalsFullResyncButton");
   const intervalsFullStatus = $("#intervalsFullResyncStatus");
@@ -2435,6 +2586,7 @@ function render(data) {
   renderActivities(data.activities || []);
   renderPlanned(data.planned || [], data.external_calendar?.events || []);
   renderLibrary(data.library || []);
+  renderTrainingPlans(data.plans || [], data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
     const libraryState = data.library_sync?.state || {};
@@ -2457,6 +2609,7 @@ function render(data) {
   renderCompetitions(data.competitions || []);
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
+  renderPublicCalendar(data);
   renderCompetitionSync(data);
   renderPerformance(data.performance);
   renderModel(data.model);
@@ -3016,6 +3169,8 @@ $("#backupDownloadButton").addEventListener("click", downloadDatabaseBackup);
 $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);
 $("#logoutButton").addEventListener("click", logout);
 $("#libraryLoadButton").addEventListener("click", loadLibrary);
+$("#libraryFilter").addEventListener("change", (event) => { state.libraryFilter = event.target.value; renderLibrary(state.data?.library || []); });
+$("#publicCalendarImportForm").addEventListener("submit", (event) => { event.preventDefault(); importPublicCalendar(); });
 $("#systemContextPreviewButton").addEventListener("click", () => {
   $("#systemContextPreviewButton").dataset.loaded = "false";
   loadContextPreview();

@@ -366,6 +366,20 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(events[0]["location"], "Muenster")
         self.assertEqual(events[0]["description"], "Gran fondo, long route")
 
+    def test_public_calendar_import_persists_candidates_for_explicit_adoption(self):
+        payload = (
+            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:race-1\r\nDTSTART;VALUE=DATE:20260920\r\n"
+            b"SUMMARY:Local Race\r\nCATEGORIES:Cycling\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+        with patch.object(server, "fetch_public_calendar", return_value=payload):
+            result = server.import_public_calendar({"url": "https://93.184.216.34/calendar.ics", "name": "Race feed"})
+        self.assertEqual(result["events"], 1)
+        candidate = result["candidates"][0]
+        self.assertIsNone(candidate["imported_competition_id"])
+        adopted = server.import_public_event_candidate(candidate["id"])
+        self.assertEqual(adopted["status"], "ok")
+        self.assertEqual(adopted["competition"]["name"], "Local Race")
+
     def test_ical_calendar_parser_extracts_timing_and_duration(self):
         events = server.parse_ical_calendar(
             b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:family-1\r\n"
@@ -762,6 +776,10 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(updated["library_entry"]["name"], "Verschoben")
         self.assertEqual(updated["library_entry"]["date"], day_after)
         self.assertEqual(updated["library_entry"]["sync_status"], "local")
+        archived = server.update_local_planned_workout(local["id"], {"action": "archive"})
+        self.assertTrue(archived["library_entry"]["archived"])
+        restored = server.update_local_planned_workout(local["id"], {"action": "restore"})
+        self.assertFalse(restored["library_entry"]["archived"])
         removed = server.update_local_planned_workout(local["id"], {"action": "delete"})
         self.assertEqual(removed["status"], "deleted")
         self.assertEqual(server.list_dated_local_planned_workouts(), [])
@@ -1081,6 +1099,8 @@ class CoachTests(unittest.TestCase):
         event_call = next(params for path, params in calls if path.endswith("/events"))
         self.assertEqual(date.fromisoformat(event_call["oldest"]), server.local_now().date() - timedelta(days=server.PLANNED_CALENDAR_HISTORY_DAYS))
         self.assertEqual(date.fromisoformat(event_call["newest"]), server.local_now().date() + timedelta(days=server.PLANNED_CALENDAR_FUTURE_DAYS))
+        self.assertEqual(snapshot["provider_sync"]["calendar_window"]["start"], event_call["oldest"])
+        self.assertEqual(snapshot["provider_sync"]["calendar_window"]["end"], event_call["newest"])
         self.assertEqual({item["id"] for item in snapshot["recent_activities"]}, {"old", "new"})
 
     def test_library_is_cached_and_included_in_coach_context(self):
@@ -1097,6 +1117,39 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(updated["id"], imported["id"])
         self.assertEqual(server.list_workout_library()[0]["name"], "Locker Rad aktualisiert")
         self.assertIn("LOCAL TRAINING LIBRARY", server.build_training_context())
+
+    def test_local_library_template_can_be_edited_archived_restored_and_deleted(self):
+        entry = server.create_local_workout_library_entry({
+            "sport": "Ride", "name": "Lokale Vorlage", "description": "Easy ride", "duration_minutes": 45,
+        })
+        updated = server.update_workout_library_entry(entry["id"], {"action": "update", "name": "Neue Vorlage", "description": "Recovery ride"})
+        self.assertEqual(updated["library_entry"]["name"], "Neue Vorlage")
+        self.assertEqual(server.list_workout_library()[0]["name"], "Neue Vorlage")
+        server.update_workout_library_entry(entry["id"], {"action": "archive"})
+        self.assertEqual(server.list_workout_library(), [])
+        self.assertTrue(server.list_workout_library(include_archived=True)[0]["archived"])
+        server.update_workout_library_entry(entry["id"], {"action": "restore"})
+        self.assertEqual(len(server.list_workout_library()), 1)
+        server.update_workout_library_entry(entry["id"], {"action": "delete"})
+        self.assertEqual(server.list_workout_library(include_archived=True), [])
+
+    def test_synced_library_template_must_be_archived_instead_of_deleted(self):
+        entry = server.upsert_workout_library([{"id": "remote-1", "name": "Remote Vorlage", "type": "Ride", "description": "Easy ride"}])[0]
+        with self.assertRaises(server.AppError) as error:
+            server.update_workout_library_entry(entry["id"], {"action": "delete"})
+        self.assertEqual(error.exception.status, 409)
+        archived = server.update_workout_library_entry(entry["id"], {"action": "archive"})
+        self.assertTrue(archived["library_entry"]["archived"])
+
+    def test_public_state_exposes_provider_calendar_window(self):
+        today = server.local_now().date()
+        server.save_snapshot({
+            "synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [],
+            "provider_sync": {"calendar_window": {"start": (today - timedelta(days=10)).isoformat(), "end": (today + timedelta(days=20)).isoformat()}},
+        })
+        state = server.public_state(local_only=True)
+        self.assertEqual(state["planning_view"]["provider_window"]["end"], (today + timedelta(days=20)).isoformat())
+        self.assertIn("public_calendar", state)
 
     def test_legacy_library_rows_migrate_to_local_uuid_and_external_id(self):
         with tempfile.TemporaryDirectory() as temp_root:
