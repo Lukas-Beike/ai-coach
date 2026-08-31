@@ -987,6 +987,98 @@ function renderExternalCalendarMarker(event) {
   return root;
 }
 
+function renderLocalPlanningActions(event, body) {
+  if (!event?.is_local || !event.local_id) return;
+  const actions = document.createElement("div");
+  actions.className = "card-actions local-planning-actions";
+  const editor = document.createElement("details");
+  const editorSummary = document.createElement("summary");
+  editorSummary.textContent = "Lokale Planung bearbeiten oder verschieben";
+  const form = document.createElement("form");
+  form.className = "local-planning-form";
+  const dateLabel = document.createElement("label");
+  dateLabel.textContent = "Datum";
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.required = true;
+  dateInput.value = plannedEventDate(event);
+  dateLabel.append(dateInput);
+  const nameLabel = document.createElement("label");
+  nameLabel.textContent = "Name";
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.maxLength = 200;
+  nameInput.required = true;
+  nameInput.value = event.name || "Geplante Einheit";
+  nameLabel.append(nameInput);
+  const durationLabel = document.createElement("label");
+  durationLabel.textContent = "Dauer (Minuten)";
+  const durationInput = document.createElement("input");
+  durationInput.type = "number";
+  durationInput.min = "5";
+  durationInput.max = "600";
+  durationInput.required = true;
+  durationInput.value = event.duration_minutes || Math.round(Number(event.moving_time || 0) / 60) || 30;
+  durationLabel.append(durationInput);
+  const descriptionLabel = document.createElement("label");
+  descriptionLabel.textContent = "Workout-Text";
+  const descriptionInput = document.createElement("textarea");
+  descriptionInput.rows = 4;
+  descriptionInput.maxLength = 12000;
+  descriptionInput.required = true;
+  descriptionInput.value = event.description || "";
+  descriptionLabel.append(descriptionInput);
+  const saveButton = document.createElement("button");
+  saveButton.type = "submit";
+  saveButton.className = "secondary-button";
+  saveButton.textContent = "Lokale Planung speichern";
+  form.append(dateLabel, nameLabel, durationLabel, descriptionLabel, saveButton);
+  form.addEventListener("submit", async (submitEvent) => {
+    submitEvent.preventDefault();
+    saveButton.disabled = true;
+    try {
+      await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "update",
+          date: dateInput.value,
+          name: nameInput.value,
+          duration_minutes: Number(durationInput.value),
+          description: descriptionInput.value,
+        }),
+      });
+      toast("Lokale Planung gespeichert");
+      await load();
+    } catch (error) {
+      toast(error.message, true);
+      saveButton.disabled = false;
+    }
+  });
+  editor.append(editorSummary, form);
+  actions.append(editor);
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "secondary-button danger-button";
+  deleteButton.textContent = "Nur lokal entfernen";
+  deleteButton.addEventListener("click", async () => {
+    if (!window.confirm(`„${event.name || "Geplante Einheit"}“ wirklich nur aus der lokalen Planung entfernen?`)) return;
+    deleteButton.disabled = true;
+    try {
+      await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, {
+        method: "POST",
+        body: JSON.stringify({ action: "delete" }),
+      });
+      toast("Lokale Planung entfernt");
+      await load();
+    } catch (error) {
+      toast(error.message, true);
+      deleteButton.disabled = false;
+    }
+  });
+  actions.append(deleteButton);
+  body.append(actions);
+}
+
 function renderPlanned(planned, externalCalendarEvents = []) {
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   renderWeatherNotice(state.data?.weather);
@@ -1111,7 +1203,12 @@ function renderPlanned(planned, externalCalendarEvents = []) {
           meta.className = "planned-meta";
           const compliance = event.compliance;
           const complianceSummary = compliance?.percentage != null ? `Umsetzung ${compliance.percentage}%` : compliance?.status === "missed" ? "Nicht umgesetzt" : compliance?.status === "completed" ? "Absolviert" : null;
-          meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null, complianceSummary].filter(Boolean).join(" · ");
+          const syncLabel = event.sync_source === "local+intervals"
+            ? "Lokal + Intervals.icu"
+            : event.sync_source === "local"
+              ? "Nur lokal"
+              : "Intervals.icu";
+          meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null, syncLabel, event.sync_status, complianceSummary].filter(Boolean).join(" · ");
           summaryMain.append(eventTitle, meta);
           const recommendation = event.weather_recommendation;
           if (recommendation) {
@@ -1181,7 +1278,22 @@ function renderPlanned(planned, externalCalendarEvents = []) {
             recommendation.append(icon, recommendationTitle, recommendationReason);
             body.append(recommendation);
           }
-          if (event.id != null && isCoachOwnedWorkout(event)) {
+          if (event.local_id) {
+            const identity = document.createElement("small");
+            identity.className = "planned-sync-identity";
+            identity.textContent = [
+              event.local_id ? `Lokal-ID: ${event.local_id}` : null,
+              event.remote_id ? `Remote-ID: ${event.remote_id}` : null,
+            ].filter(Boolean).join(" · ");
+            body.append(identity);
+          } else if (event.remote_id) {
+            const identity = document.createElement("small");
+            identity.className = "planned-sync-identity";
+            identity.textContent = `Remote-ID: ${event.remote_id}`;
+            body.append(identity);
+          }
+          renderLocalPlanningActions(event, body);
+          if (event.id != null && event.is_remote && isCoachOwnedWorkout(event)) {
             const actions = document.createElement("div");
             actions.className = "card-actions";
             const button = document.createElement("button");
