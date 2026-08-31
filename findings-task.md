@@ -165,7 +165,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Startup-/Daily-Wettkampf-Push bleibt bis FT-003 durch `expectedFailure` charakterisiert.
 - **Folgetasks:** FT-003 entblockt; FT-004 kann den verbleibenden Chat-Mutationspfad ablösen.
 
-### - [ ] FT-003 – Automatische Wettkampfsynchronisation strikt read-only machen
+### - [x] FT-003 – Automatische Wettkampfsynchronisation strikt read-only machen
 
 **Quelle:** SYNC-02
 **Ziel:** Startup- und Daily-Sync lesen Wettkämpfe, übertragen aber keine lokalen Neuanlagen, Änderungen oder Löschvormerkungen.
@@ -173,20 +173,31 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] `safe_sync()` und alle automatischen Aufrufer explizit mit `push_local=False` führen.
-- [ ] Defaultparameter vermeiden, bei denen ein generischer Sync unbeabsichtigt schreibt.
-- [ ] Dedizierten Wettkampf-Sync als einzigen Push-Einstieg festlegen.
-- [ ] Vor Push Diff mit Erstellung, Änderung und Löschung anzeigen.
-- [ ] Verknüpfte und unverknüpfte Wettkämpfe sowie Tombstones separat testen.
-- [ ] Konfliktfall definieren: Remote wurde seit lokaler Bearbeitung geändert; niemals still überschreiben.
-- [ ] Zeitstempel und Syncstatus nach reinem Pull korrekt aktualisieren.
+- [x] `safe_sync()` und alle automatischen Aufrufer explizit mit `push_local=False` führen.
+- [x] Defaultparameter vermeiden, bei denen ein generischer Sync unbeabsichtigt schreibt.
+- [x] Dedizierten Wettkampf-Sync als einzigen UI-Push-Einstieg festlegen.
+- [x] Vor Push Diff mit Erstellung, Änderung und Löschung anzeigen.
+- [x] Verknüpfte und unverknüpfte Wettkämpfe sowie Tombstones separat testen.
+- [x] Konfliktfall definieren: Remote wurde seit lokaler Bearbeitung geändert; niemals still überschreiben.
+- [x] Zeitstempel und Syncstatus nach reinem Pull korrekt aktualisieren.
 
 **Abnahmekriterien**
 
-- [ ] App-Start und Tageswechsel können keine Wettkampfmutation senden.
-- [ ] Expliziter Pull überschreibt keine bestätigten lokalen Pending-Änderungen still.
-- [ ] Remote-Push/-Delete benötigt eine unmittelbare Bestätigung der angezeigten Änderung.
-- [ ] README und UI verwenden konsistente Begriffe für Pull, lokale Änderung und Remote-Sync.
+- [x] App-Start und Tageswechsel können keine Wettkampfmutation senden.
+- [x] Expliziter Pull überschreibt keine bestätigten lokalen Pending-Änderungen still.
+- [x] Remote-Push/-Delete benötigt eine unmittelbare Bestätigung der angezeigten Änderung.
+- [x] README und UI verwenden konsistente Begriffe für Pull, lokale Änderung und Remote-Sync.
+
+**Handover FT-003**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `fix/ft-003-readonly-competition-sync`, Implementierung `b59ce15`
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, dieses Handover-Dokument
+- **Verhaltensänderung:** Startup-, Daily- und allgemeine Wettkampf-Pulls verwenden read-only Defaults. Der dedizierte UI-Sync zeigt Create/Change/Delete/Conflict, verlangt `COMPETITION_SYNC` plus aktuellen zehnminütigen Fingerprint und schützt lokale Pending-Änderungen vor stillem Überschreiben.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py` erfolgreich; `docker build -t ai-coach:ft003 .` erfolgreich; vollständiger SQLCipher-Containerlauf `docker run --rm -v "${PWD}:/review:ro" -w /review ai-coach:ft003 python -m unittest discover -s tests -v`: 203 Tests in 868.794 Sekunden, `OK`, keine erwarteten oder unerwarteten Fehler.
+- **Manuelle Prüfung:** UI-Flow implementiert; Browser-Smoke-Test folgt mit FT-007.
+- **Offene Risiken:** FT-004 muss die verbleibenden mutierenden Coach-Chat-Werkzeuge aus dem normalen Chat entfernen.
+- **Folgetasks:** FT-004 entblockt; FT-007 bleibt für Browser-Smoke-Test erforderlich.
 
 ### - [ ] FT-004 – Zweistufige Coach-Autorisierung für alle Mutationen einführen
 

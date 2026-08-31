@@ -3022,9 +3022,26 @@ async function syncCompetitions() {
   if (!button) return;
   state.localSync.competitions = true;
   button.disabled = true;
-  button.textContent = "Synchronisierung läuft…";
+  button.textContent = "Vorschau wird erstellt…";
   try {
-    const result = await api("/api/competitions/sync", { method: "POST", body: "{}" });
+    const preview = await api("/api/competitions/sync/preview", { method: "POST", body: "{}" });
+    if (preview.status === "already_running") {
+      toast("Zielwettkämpfe werden bereits synchronisiert");
+      return;
+    }
+    const summary = preview.summary || {};
+    const actions = (preview.actions || []).map((action) => {
+      const label = action.type === "create" ? "Erstellen" : action.type === "change" ? "Ändern" : action.type === "delete" ? "Löschen" : "Konflikt";
+      return `${label}: ${action.name || action.local_id || action.remote_id || "Wettkampf"}${action.event_date ? ` (${action.event_date})` : ""}`;
+    });
+    const details = actions.length ? `\n\n${actions.join("\n")}` : "\n\nKeine Remote-Änderungen erforderlich.";
+    const message = `Intervals.icu-Wettkampf-Sync bestätigen?\n\nErstellen: ${summary.create || 0} · Ändern: ${summary.change || 0} · Löschen: ${summary.delete || 0} · Konflikte: ${summary.conflict || 0}${details}`;
+    if (!window.confirm(message)) return;
+    button.textContent = "Synchronisierung läuft…";
+    const result = await api("/api/competitions/sync", {
+      method: "POST",
+      body: JSON.stringify({ confirm: "COMPETITION_SYNC", fingerprint: preview.fingerprint }),
+    });
     if (result.status === "already_running") toast("Zielwettkämpfe werden bereits synchronisiert");
     else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.conflicts ? ` · ${result.conflicts} Konflikt(e) bitte prüfen` : ""}${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
     invalidateContextPreview();
