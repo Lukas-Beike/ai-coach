@@ -819,6 +819,101 @@ function renderWeatherNotice(weather) {
   notice.textContent = `${location ? `Wetter für ${location}` : "Wettervorhersage"} · ${weather.model || "Open-Meteo"} · Tageswerte bis 14 Tage · Zeitvorschläge bis 5 Tage · Quelle: Open-Meteo.com${weather.stale ? " · letzte verfügbare Daten" : ""}`;
 }
 
+function planningContextForDate(date) {
+  return (state.data?.daily_planning_context || []).find((item) => item.date === date) || { date };
+}
+
+function planningContextNumber(value, suffix = "") {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number % 1 ? number.toLocaleString("de-DE", { maximumFractionDigits: 1 }) : number}${suffix}` : null;
+}
+
+function renderDailyPlanningContext(date, todayKey) {
+  const context = planningContextForDate(date);
+  const weather = context.weather || weatherForDate(date);
+  const checkin = context.checkin;
+  const recovery = context.recovery;
+  const appointments = Array.isArray(context.appointments) ? context.appointments : [];
+  const hasSignals = weather || checkin || recovery || appointments.length;
+  if (!hasSignals && dateKeyDifference(date, todayKey) > 0) return document.createDocumentFragment();
+  const root = document.createElement("div");
+  root.className = "planned-day-context";
+  const heading = document.createElement("strong");
+  heading.textContent = "Tageskontext";
+  root.append(heading);
+  const signals = document.createElement("div");
+  signals.className = "planned-day-context-signals";
+  const addSignal = (label, value, className = "") => {
+    if (!value) return;
+    const signal = document.createElement("div");
+    signal.className = `planned-day-signal${className ? ` ${className}` : ""}`;
+    const title = document.createElement("span");
+    title.className = "planned-day-signal-label";
+    title.textContent = label;
+    const detail = document.createElement("span");
+    detail.textContent = value;
+    signal.append(title, detail);
+    signals.append(signal);
+  };
+  if (weather) {
+    const weatherValues = [
+      weather.condition || "Vorhersage",
+      [planningContextNumber(weather.temperature_min, " °C"), planningContextNumber(weather.temperature_max, " °C")].filter(Boolean).join(" bis "),
+      planningContextNumber(weather.precipitation_probability_max, " % Regen"),
+      planningContextNumber(weather.wind_speed_max, " km/h Wind"),
+    ].filter(Boolean);
+    addSignal(`${weatherIconFor(weather)} Wetter`, weatherValues.join(" · "));
+  }
+  if (recovery) {
+    const recoveryValues = [
+      planningContextNumber(recovery.sleep_hours, " h Schlaf"),
+      planningContextNumber(recovery.sleep_score, " Schlafscore"),
+      planningContextNumber(recovery.hrv, " ms HRV"),
+      planningContextNumber(recovery.readiness, " Readiness"),
+      planningContextNumber(recovery.resting_hr, " bpm Ruhepuls"),
+      planningContextNumber(recovery.body_battery, " Body Battery"),
+    ].filter(Boolean);
+    const recoverySources = [...new Set(Object.values(recovery.sources || {}))].filter(Boolean);
+    if (recoverySources.length) recoveryValues.push(`Quelle: ${recoverySources.join(", ")}`);
+    addSignal("Erholung", recoveryValues.join(" · "), "recovery");
+  }
+  if (checkin) {
+    const checkinValues = [
+      checkin.soreness != null ? `Muskelkater ${checkin.soreness}/10` : null,
+      checkin.stress != null ? `Stress ${checkin.stress}/10` : null,
+      checkin.motivation != null ? `Motivation ${checkin.motivation}/10` : null,
+      checkin.available_minutes != null ? `${checkin.available_minutes} Min. verfügbar` : null,
+      checkin.illness ? "Krankheit notiert" : null,
+      checkin.pain ? "Schmerz notiert" : null,
+      checkin.availability_notes || checkin.notes ? "Notizen vorhanden" : null,
+    ].filter(Boolean);
+    addSignal("Tages-Check-in", checkinValues.join(" · ") || "Gespeichert", "checkin");
+  }
+  if (appointments.length) {
+    const appointmentValues = appointments.map((event) => {
+      const time = event.all_day ? "ganztägig" : event.start_local ? formatTime(event.start_local) : "Termin";
+      return `${event.name || "Kalendereintrag"} (${time})`;
+    });
+    addSignal("Termine", appointmentValues.join(" · "), "appointments");
+  }
+  if (hasSignals) root.append(signals);
+  else {
+    const empty = document.createElement("span");
+    empty.className = "planned-day-context-empty";
+    empty.textContent = "Noch keine Tagesinfos hinterlegt.";
+    root.append(empty);
+  }
+  if (dateKeyDifference(date, todayKey) <= 0) {
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "planned-day-checkin-button";
+    editButton.textContent = checkin ? "Tages-Check-in bearbeiten" : "Tages-Check-in hinzufügen";
+    editButton.addEventListener("click", () => openCheckinEditor(date));
+    root.append(editButton);
+  }
+  return root;
+}
+
 function distanceLabel(value) {
   const distance = Number(value);
   if (!Number.isFinite(distance) || distance <= 0) return null;
@@ -1231,11 +1326,12 @@ function renderLocalPlanningActions(event, body) {
   body.append(actions);
 }
 
-function renderPlanned(planned, externalCalendarEvents = []) {
+function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContext = []) {
   setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   renderWeatherNotice(state.data?.weather);
   const root = $("#plannedCalendar");
+  state.data.daily_planning_context = Array.isArray(dailyPlanningContext) ? dailyPlanningContext : [];
   root.querySelectorAll("details.planned-week").forEach((week) => state.plannedWeekOpen.set(week.dataset.week, week.open));
   root.replaceChildren();
   const eventsByDate = new Map();
@@ -1325,8 +1421,9 @@ function renderPlanned(planned, externalCalendarEvents = []) {
       heading.append(title, count);
       dayRoot.append(heading);
 
+      dayRoot.append(renderDailyPlanningContext(date, todayKey));
       const weather = weatherForDate(date);
-      if (weather) {
+      if (weather && !planningContextForDate(date).weather) {
         const weatherRoot = document.createElement("div");
         weatherRoot.className = "planned-weather";
         const icon = document.createElement("span");
@@ -1959,6 +2056,20 @@ function populateCheckin(checkin, timeZone) {
   state.checkinDirty = false;
 }
 
+function openCheckinEditor(date) {
+  const dialog = $("#checkinDialog");
+  const form = $("#checkinForm");
+  if (!dialog || !form) return;
+  const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
+  if (date > todayKey) return;
+  const checkin = (state.data?.checkins || []).find((row) => row.checkin_date === date) || { checkin_date: date };
+  form.elements.checkin_date.max = todayKey;
+  populateCheckin(checkin, state.data?.profile?.timezone);
+  renderCheckins(state.data?.checkins || [], state.data?.profile?.timezone);
+  if (!dialog.open) dialog.showModal();
+  form.elements.soreness?.focus();
+}
+
 function renderCheckins(checkins, timeZone) {
   const form = $("#checkinForm");
   const history = $("#checkinHistory");
@@ -1967,8 +2078,8 @@ function renderCheckins(checkins, timeZone) {
   const rows = Array.isArray(checkins) ? checkins : [];
   if (!state.checkinDirty) {
     const selected = rows.find((row) => row.checkin_date === state.checkinSelectedDate)
-      || rows.find((row) => row.checkin_date === timezoneDateKey(timeZone));
-    populateCheckin(selected, timeZone);
+      || (!state.checkinSelectedDate ? rows.find((row) => row.checkin_date === timezoneDateKey(timeZone)) : null);
+    populateCheckin(selected || (state.checkinSelectedDate ? { checkin_date: state.checkinSelectedDate } : null), timeZone);
   }
   history.replaceChildren();
   if (!rows.length) {
@@ -2748,7 +2859,7 @@ function render(data) {
   renderStatus(data);
   renderMessages(data.messages, firstRender);
   renderActivities(data.activities || []);
-  renderPlanned(data.planned || [], data.external_calendar?.events || []);
+  renderPlanned(data.planned || [], data.external_calendar?.events || [], data.daily_planning_context || []);
   renderLibrary(data.library || []);
   renderTrainingPlans(data.plans || [], data.library || []);
   const librarySyncDetail = $("#librarySyncDetail");
@@ -3123,6 +3234,7 @@ async function saveCheckin(event) {
     setDirtyIndicator("checkinDirtyIndicator", false);
     state.checkinSelectedDate = result.checkin?.checkin_date || values.checkin_date;
     toast("Tages-Check-in gespeichert");
+    $("#checkinDialog")?.close();
     await load();
   } catch (error) { toast(error.message, true); }
   finally {
@@ -3374,6 +3486,7 @@ $("#weatherSyncButton").addEventListener("click", syncWeather);
 $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"));
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#checkinForm").addEventListener("submit", saveCheckin);
+$("#checkinCloseButton").addEventListener("click", () => $("#checkinDialog")?.close());
 $("#adaptivePlanningButton").addEventListener("click", prepareReplan);
 $("#applyAdaptivePlanningButton").addEventListener("click", applyReplan);
 $("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptivePlanningDialog")?.close());

@@ -371,13 +371,57 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["checkins"][0]["checkin_date"], "2026-08-30")
         self.assertEqual(state["checkins"][0]["motivation"], 8)
 
+    def test_daily_planning_context_combines_checkin_recovery_weather_and_appointments(self):
+        today = server.local_now().date().isoformat()
+        server.save_snapshot({
+            "synced_at": "2026-08-31T08:00:00+00:00",
+            "athlete": {},
+            "recent_activities": [],
+            "recent_wellness": [{"id": today, "sleepSecs": 25200, "sleepScore": 74, "readiness": 61}],
+            "upcoming_calendar": [{"id": "planned-1", "name": "Intervalle", "start_date_local": f"{today}T09:00:00", "moving_time": 3600}],
+        })
+        server.save_checkin({"checkin_date": today, "soreness": 6, "available_minutes": 45, "notes": "Nur locker möglich"})
+        server.set_kv("garmin_snapshot", json.dumps({
+            "sleep": [{"calendarDate": today, "sleepTimeSeconds": 28800, "sleepScore": 82}],
+            "hrv": [{"calendarDate": today, "lastNightAvg": 48}],
+            "readiness": [{"calendarDate": today, "trainingReadinessScore": 55}],
+        }))
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("appointment-1", "uid-1", "Familientermin", today, f"{today}T18:00:00", f"{today}T20:00:00", 120, 0, 1, 0, server.utc_now()),
+            )
+        context = server.daily_planning_context(
+            server.latest_snapshot(),
+            server.latest_snapshot()["upcoming_calendar"],
+            {"days": [{"date": today, "weather_code": 63, "condition": "Regen", "temperature_min": 8, "temperature_max": 13}]},
+        )
+        day = next(item for item in context if item["date"] == today)
+        self.assertEqual(day["checkin"]["available_minutes"], 45)
+        self.assertEqual(day["recovery"]["sleep_hours"], 7.0)
+        self.assertEqual(day["recovery"]["hrv"], 48)
+        self.assertEqual(day["recovery"]["sources"]["hrv"], "Garmin Connect")
+        self.assertEqual(day["weather"]["condition"], "Regen")
+        self.assertEqual(day["appointments"][0]["name"], "Familientermin")
+
+    def test_public_state_exposes_daily_planning_context(self):
+        today = server.local_now().date().isoformat()
+        server.save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"name": "Locker", "start_date_local": f"{today}T08:00:00"}]})
+        server.save_checkin({"checkin_date": today, "motivation": 8})
+        state = server.public_state(local_only=True)
+        self.assertEqual(state["daily_planning_context"][0]["date"], today)
+        self.assertEqual(state["daily_planning_context"][0]["checkin"]["motivation"], 8)
+
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
         self.assertIn('if (typeof value === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return value;', app)
         self.assertIn('function renderCheckins(checkins, timeZone)', app)
+        self.assertIn('function renderDailyPlanningContext(date, todayKey)', app)
         self.assertIn('id="checkinForm"', index)
         self.assertIn('id="checkinHistory"', index)
+        self.assertIn('id="checkinDialog"', index)
+        self.assertNotIn('class="checkin-section"', index)
 
     def test_activity_feedback_is_persisted_and_attached_to_activity(self):
         server.save_snapshot({
@@ -1889,12 +1933,12 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.list_workout_library(), [])
 
     def test_morning_checkin_prompt_is_not_a_workout_creation_request(self):
-        prompt = (
-            "Gib mir den heutigen Morgen-Check-in auf Basis des frisch aktualisierten Snapshots. "
-            "Bewerte Trainingsbelastung, Schlaf, Erholung und geplante Einheiten. Empfiehl das heutige Vorgehen "
-            "und nenne mögliche Anpassungen nur als Vorschlag; nimm keine Änderungen an Einheiten vor."
-        )
+        prompt = server.MORNING_CHECKIN_PROMPT
         self.assertFalse(server.prompt_requests_workout_creation(prompt))
+        self.assertIn("Muskelkater", prompt)
+        self.assertIn("schwere Beine", prompt)
+        self.assertIn("subjektives Empfinden oder Müdigkeit", prompt)
+        self.assertIn("optional", prompt)
 
     def test_output_text_falls_back_to_nested_content(self):
         response = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Hello"}]}]}
