@@ -342,9 +342,11 @@ class CoachTests(unittest.TestCase):
     def test_local_feedback_is_persisted_without_provider_values(self):
         result = server.save_checkin({
             "checkin_date": date.today().isoformat(), "soreness": "7", "stress": "4", "motivation": "8",
-            "available_minutes": "45", "pain": "left knee", "notes": "Short easy session preferred",
+            "available_minutes": "45", "day_form": "Schwere Beine und müde", "illness": "",
+            "pain": "left knee", "notes": "Short easy session preferred",
         })
         self.assertEqual(result["checkin"]["soreness"], 7)
+        self.assertEqual(result["checkin"]["day_form"], "Schwere Beine und müde")
         self.assertEqual(server.local_feedback_context()["today"]["pain"], "left knee")
         with self.assertRaises(server.AppError):
             server.save_checkin({"soreness": 11})
@@ -380,7 +382,7 @@ class CoachTests(unittest.TestCase):
             "recent_wellness": [{"id": today, "sleepSecs": 25200, "sleepScore": 74, "readiness": 61}],
             "upcoming_calendar": [{"id": "planned-1", "name": "Intervalle", "start_date_local": f"{today}T09:00:00", "moving_time": 3600}],
         })
-        server.save_checkin({"checkin_date": today, "soreness": 6, "available_minutes": 45, "notes": "Nur locker möglich"})
+        server.save_checkin({"checkin_date": today, "soreness": 6, "day_form": "Schwere Beine", "illness": "Erkältung", "available_minutes": 45, "notes": "Nur locker möglich"})
         server.set_kv("garmin_snapshot", json.dumps({
             "sleep": [{"calendarDate": today, "sleepTimeSeconds": 28800, "sleepScore": 82}],
             "hrv": [{"calendarDate": today, "lastNightAvg": 48}],
@@ -398,6 +400,8 @@ class CoachTests(unittest.TestCase):
         )
         day = next(item for item in context if item["date"] == today)
         self.assertEqual(day["checkin"]["available_minutes"], 45)
+        self.assertEqual(day["checkin"]["day_form"], "Schwere Beine")
+        self.assertEqual(day["checkin"]["illness"], "Erkältung")
         self.assertEqual(day["recovery"]["sleep_hours"], 7.0)
         self.assertEqual(day["recovery"]["hrv"], 48)
         self.assertEqual(day["recovery"]["sources"]["hrv"], "Garmin Connect")
@@ -421,6 +425,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('id="checkinForm"', index)
         self.assertIn('id="checkinHistory"', index)
         self.assertIn('id="checkinDialog"', index)
+        self.assertIn('name="day_form"', index)
+        self.assertIn('name="illness"', index)
         self.assertNotIn('class="checkin-section"', index)
 
     def test_activity_feedback_is_persisted_and_attached_to_activity(self):
@@ -1935,9 +1941,10 @@ class CoachTests(unittest.TestCase):
     def test_morning_checkin_prompt_is_not_a_workout_creation_request(self):
         prompt = server.MORNING_CHECKIN_PROMPT
         self.assertFalse(server.prompt_requests_workout_creation(prompt))
+        self.assertIn("Tagesform", prompt)
         self.assertIn("Muskelkater", prompt)
         self.assertIn("schwere Beine", prompt)
-        self.assertIn("subjektives Empfinden oder Müdigkeit", prompt)
+        self.assertIn("Krankheit", prompt)
         self.assertIn("optional", prompt)
 
     def test_output_text_falls_back_to_nested_content(self):

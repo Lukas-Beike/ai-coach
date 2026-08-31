@@ -405,6 +405,7 @@ h2 {
 .planned-day-signal > span:last-child { overflow-wrap: anywhere; }
 .planned-day-signal.recovery .planned-day-signal-label { color: #a8c7ff; }
 .planned-day-signal.checkin .planned-day-signal-label { color: #ffcc80; }
+.planned-day-signal.illness .planned-day-signal-label { color: #ff8078; }
 .planned-day-signal.appointments .planned-day-signal-label { color: #ffaaa3; }
 .planned-day-context-empty { color: var(--subtle); }
 .planned-day-checkin-button { justify-self: start; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); background: rgba(255, 255, 255, .06); font-size: .68rem; font-weight: 650; }
@@ -580,6 +581,7 @@ h2 {
 .context-preview-content summary::marker { color: var(--accent-bright); }
 .context-preview-content pre { max-height: 360px; margin: 0; overflow: auto; padding: 0 13px 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; font: .68rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .checkin-form { display: grid; gap: 12px; margin-top: 14px; }
+.checkin-critical-field { color: #ffb1aa; }
 .checkin-form button { justify-self: start; }
 .checkin-history { display: grid; gap: 8px; margin-top: 22px; }
 .checkin-history > strong { color: var(--ink); font-size: .82rem; }
