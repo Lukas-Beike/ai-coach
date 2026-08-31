@@ -1025,6 +1025,24 @@ class CoachTests(unittest.TestCase):
         server.save_snapshot({"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": [{"id": "existing", "name": "Existing", "start_date_local": tomorrow + "T08:00:00"}]})
         self.assertEqual(server.calendar_conflicts({"date": tomorrow})[0]["id"], "existing")
 
+    def test_calendar_conflicts_use_time_windows_when_both_events_are_timed(self):
+        day = (date.today() + timedelta(days=2)).isoformat()
+        server.save_snapshot({
+            "synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [],
+            "upcoming_calendar": [{"id": "later", "name": "Later", "start_date_local": day + "T12:00:00", "moving_time": 1800}],
+        })
+        self.assertEqual(server.calendar_conflicts({"date": day, "start_date_local": day + "T08:00:00", "duration_minutes": 60}), [])
+        conflict = server.calendar_conflicts({"date": day, "start_date_local": day + "T12:15:00", "duration_minutes": 30})[0]
+        self.assertEqual(conflict["id"], "later")
+        self.assertEqual(conflict["match"], "time_window")
+
+    def test_calendar_conflicts_include_local_competitions_with_date_fallback(self):
+        day = (date.today() + timedelta(days=3)).isoformat()
+        server.save_athlete_context({}, [{"name": "Local Race", "event_date": day, "sport": "Cycling", "start_date_local": day + "T10:00:00", "moving_time": 7200}])
+        conflict = server.calendar_conflicts({"date": day})[0]
+        self.assertEqual(conflict["source"], "local_competition")
+        self.assertEqual(conflict["match"], "date")
+
     def test_parallel_cycling_events_are_grouped_for_explicit_selection(self):
         groups = server.parallel_cycling_event_groups([
             {"id": "ride-1", "type": "Ride", "name": "Intervalle", "start_date_local": "2026-08-30T08:00:00", "moving_time": 3600},
@@ -2285,7 +2303,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(synced["intervals_event_id"], "12345")
         self.assertEqual(synced["sync_dirty"], 0)
 
-    def test_competition_sync_adopts_existing_remote_event_before_push(self):
+    def test_competition_sync_marks_dirty_identity_match_as_conflict(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
         server.save_athlete_context({}, [{
             "name": "Existing Race", "event_date": event_date, "priority": "A", "sport": "Cycling",
@@ -2315,11 +2333,57 @@ class CoachTests(unittest.TestCase):
             result = server.sync_competitions("test")
 
         self.assertEqual(result["pushed"], 0)
+        self.assertEqual(result["conflicts"], 1)
         self.assertEqual(result["imported"], 0)
         self.assertEqual(pushed, [])
         competition = server.list_competitions(include_sync=True)[0]
-        self.assertEqual(competition["intervals_event_id"], "54321")
-        self.assertEqual(competition["sync_dirty"], 0)
+        self.assertIsNone(competition["intervals_event_id"])
+        self.assertEqual(competition["sync_dirty"], 1)
+        self.assertEqual(competition["sync_state"], "conflict")
+        self.assertEqual(json.loads(competition["sync_conflict"])["remote"]["name"], "Existing Race")
+
+    def test_competition_conflict_can_adopt_remote_or_keep_local(self):
+        event_date = (date.today() + timedelta(days=61)).isoformat()
+        saved = server.save_athlete_context({}, [{"name": "Remote Race", "event_date": event_date, "sport": "Cycling"}])
+        competition_id = saved["competitions"][0]["id"]
+
+        class FakeIntervalsClient:
+            def __init__(self):
+                self.pushed = []
+            def fetch_competition_events(self):
+                return [{"id": 54322, "category": "RACE_A", "start_date_local": event_date + "T08:00:00", "type": "Ride", "name": "Remote Race"}]
+            def upsert_competition_events(self, events):
+                self.pushed.extend(events)
+                return [{**events[0], "id": 54323}] if events else []
+            def bulk_delete_events(self, identifiers):
+                return 0
+
+        client = FakeIntervalsClient()
+        with patch.object(server, "IntervalsClient", return_value=client), patch.object(
+            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+        ):
+            server.sync_competitions("test")
+            adopted = server.resolve_competition_conflict(competition_id, "adopt_remote")
+        self.assertEqual(adopted["competition"]["name"], "Remote Race")
+        self.assertEqual(adopted["competition"]["sync_state"], "synced")
+        self.assertEqual(adopted["competition"]["sync_dirty"], 0)
+
+        saved = server.save_coach_competition({
+            "competition_id": competition_id, "name": "Remote Race", "event_date": event_date,
+            "sport": "Cycling", "priority": "B",
+        })
+        self.assertEqual(saved["competition"]["sync_state"], "local")
+        with server.DB_LOCK, server.database() as db:
+            db.execute("UPDATE competitions SET intervals_event_id=NULL, sync_dirty=1, sync_state='local', sync_conflict='' WHERE id=?", (competition_id,))
+        with patch.object(server, "IntervalsClient", return_value=client), patch.object(
+            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+        ):
+            server.sync_competitions("test")
+            # Explicitly choosing the local version enables a provider update.
+            server.resolve_competition_conflict(competition_id, "keep_local")
+            result = server.sync_competitions("test")
+        self.assertEqual(result["pushed"], 1)
+        self.assertEqual(server.list_competitions(include_sync=True)[0]["sync_state"], "synced")
 
     def test_competition_sync_imports_remote_race_events(self):
         event_date = (date.today() + timedelta(days=45)).isoformat()

@@ -151,11 +151,16 @@ from Intervals.icu are imported into the local database.
 Competition synchronization accepts strength training, running, outdoor
 cycling (`Ride`), and indoor/virtual cycling (`VirtualRide`). Other sports are
 skipped. Remote events that were previously linked but no longer exist are
-removed locally, and local deletions are propagated to Intervals.icu during the
-next synchronization.
+kept locally as a visible `remote_missing` conflict until an explicit local
+decision and a later reconciliation; local deletions are propagated to
+Intervals.icu during the next synchronization.
 The Intervals.icu event ID is stored locally after import or a successful push.
 Before creating a new event, synchronization also checks for an existing race
-with the same name, date, and sport to avoid creating duplicates.
+with the same name, date, and sport to avoid creating duplicates. A dirty local
+row that matches a remote race by identity only is never silently adopted:
+the UI exposes actions to keep the local version or adopt the remote version.
+Planned-workout conflicts use overlapping local start/duration windows when
+both sides provide times, and fall back to same-day conflicts otherwise.
 
 ## Configuration
 

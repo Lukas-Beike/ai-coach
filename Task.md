@@ -82,9 +82,9 @@ Basis: `develop` / `45b5ca3`
 
 ### W9 – Wettbewerbs- und Konfliktauflösung
 
-- [ ] Identity-only-Matches dürfen lokale Änderungen nicht still verwerfen.
-- [ ] Konfliktstatus und klare Merge-/Adopt-Strategie ergänzen.
-- [ ] Wettbewerbs- und Kalenderkonflikte mit Zeitfenstern statt nur Datum bewerten,
+- [x] Identity-only-Matches dürfen lokale Änderungen nicht still verwerfen.
+- [x] Konfliktstatus und klare Merge-/Adopt-Strategie ergänzen.
+- [x] Wettbewerbs- und Kalenderkonflikte mit Zeitfenstern statt nur Datum bewerten,
   sofern die Providerdaten das zulassen.
 
 ### W10 – Chat-, Kosten- und Statuszuverlässigkeit

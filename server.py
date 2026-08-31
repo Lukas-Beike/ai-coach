@@ -97,6 +97,7 @@ DELETE_DRAFT_RE = re.compile(r"^/api/drafts/([0-9a-f-]+)$")
 PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
 LIBRARY_PLAN_BATCH_RE = re.compile(r"^/api/library/plan$")
 ACTIVITY_FEEDBACK_RE = re.compile(r"^/api/activities/([^/]+)/feedback$")
+COMPETITION_CONFLICT_RE = re.compile(r"^/api/competitions/([0-9a-f-]+)/resolve$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
 
@@ -1002,6 +1003,8 @@ def initialise_database() -> None:
                 intervals_event_id TEXT,
                 external_id TEXT,
                 sync_dirty INTEGER NOT NULL DEFAULT 1,
+                sync_state TEXT NOT NULL DEFAULT 'local',
+                sync_conflict TEXT NOT NULL DEFAULT '',
                 last_synced_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -1106,6 +1109,8 @@ def initialise_database() -> None:
             ("intervals_event_id", "TEXT"),
             ("external_id", "TEXT"),
             ("sync_dirty", "INTEGER NOT NULL DEFAULT 1"),
+            ("sync_state", "TEXT NOT NULL DEFAULT 'local'"),
+            ("sync_conflict", "TEXT NOT NULL DEFAULT ''"),
             ("last_synced_at", "TEXT"),
             ("category", "TEXT NOT NULL DEFAULT 'RACE_B'"),
             ("start_date_local", "TEXT"),
@@ -1115,6 +1120,11 @@ def initialise_database() -> None:
             existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(competitions)").fetchall()}
             if column not in existing_columns:
                 db.execute(f"ALTER TABLE competitions ADD COLUMN {column} {definition}")
+        db.execute(
+            "UPDATE competitions SET sync_state=CASE WHEN sync_dirty=0 THEN 'synced' ELSE 'local' END "
+            "WHERE sync_state IS NULL OR sync_state=''"
+        )
+        db.execute("UPDATE competitions SET sync_conflict='' WHERE sync_conflict IS NULL")
         library_columns = {row["name"] for row in db.execute("PRAGMA table_info(workout_library)").fetchall()}
         added_library_sync_state = False
         for column, definition in (
@@ -2425,7 +2435,8 @@ def normalize_competition(value: Any) -> dict[str, str]:
 def list_competitions(include_sync: bool = False) -> list[dict[str, Any]]:
     fields = (
         "id, name, event_date, start_date_local, sport, priority, category, distance, target, "
-        "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, last_synced_at"
+        "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
+        "sync_state, sync_conflict, last_synced_at"
     )
     with DB_LOCK, database() as db:
         rows = db.execute(
@@ -2961,13 +2972,13 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
         set_kv("profile", json.dumps(normalized_profile, ensure_ascii=False), db)
         for competition in normalized_competitions:
             db.execute(
-                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 1, ?, ?) "
+                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 1, 'local', '', ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET name=excluded.name, event_date=excluded.event_date, sport=excluded.sport, "
                 "priority=excluded.priority, distance=excluded.distance, target=excluded.target, "
                 "course_profile=excluded.course_profile, notes=excluded.notes, category=excluded.category, "
                 "start_date_local=excluded.start_date_local, description=excluded.description, moving_time=excluded.moving_time, "
-                "external_id=COALESCE(excluded.external_id, competitions.external_id), sync_dirty=1, updated_at=excluded.updated_at",
+                "external_id=COALESCE(excluded.external_id, competitions.external_id), sync_dirty=1, sync_state='local', sync_conflict='', updated_at=excluded.updated_at",
                 (
                     competition["id"], competition["name"], competition["event_date"], competition["sport"],
                     competition["priority"], competition["distance"], competition["target"],
@@ -3050,8 +3061,8 @@ def save_coach_competition(arguments: Any) -> dict[str, Any]:
             if count >= 20:
                 raise AppError(400, "Es können maximal 20 Wettkämpfe gespeichert werden.")
             db.execute(
-                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?, ?)",
+                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)",
                 (
                     normalized["id"], normalized["name"], normalized["event_date"], normalized["sport"],
                     normalized["priority"], normalized["distance"], normalized["target"], normalized["course_profile"],
@@ -3062,7 +3073,7 @@ def save_coach_competition(arguments: Any) -> dict[str, Any]:
             status = "created"
         else:
             db.execute(
-                "UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, updated_at=? WHERE id=?",
+                "UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?",
                 (
                     normalized["name"], normalized["event_date"], normalized["sport"], normalized["priority"],
                     normalized["distance"], normalized["target"], normalized["course_profile"], normalized["notes"],
@@ -3236,7 +3247,7 @@ def remote_competition_date(event: dict[str, Any]) -> str | None:
 def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
     event_date = remote_competition_date(event)
     name = str(event.get("name") or "").strip()[:COMPETITION_TEXT_LIMITS["name"]]
-    sport = supported_competition_sport(event.get("type") or "Ride")
+    sport = supported_competition_sport(event.get("type") or event.get("sport") or "Ride")
     if not event_date or not name or not sport:
         return None
     category = str(event.get("category") or "RACE_B").upper()
@@ -3253,7 +3264,7 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
         distance = competition_distance(distance)
     description = str(event.get("description") or "").strip()[:COMPETITION_TEXT_LIMITS["description"]]
     return {
-        "intervals_event_id": str(event.get("id") or "").strip() or None,
+        "intervals_event_id": str(event.get("id") or event.get("intervals_event_id") or "").strip() or None,
         "name": name,
         "event_date": event_date,
         "start_date_local": start_date_local,
@@ -3266,6 +3277,12 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
         "moving_time": moving_time,
         "notes": description[:COMPETITION_TEXT_LIMITS["notes"]],
     }
+
+
+def competition_conflict_payload(local: dict[str, Any], remote: dict[str, Any], conflict_type: str) -> str:
+    data = remote_competition_data(remote) or {}
+    data["external_id"] = str(remote.get("external_id") or data.get("external_id") or "").strip()[:COMPETITION_TEXT_LIMITS["external_id"]]
+    return json.dumps({"type": conflict_type, "remote": data, "detected_at": utc_now()}, ensure_ascii=False)
 
 
 def is_remote_competition_event(event: dict[str, Any], linked_event_ids: set[str]) -> bool:
@@ -3285,6 +3302,46 @@ def competition_sync_key(value: dict[str, Any]) -> tuple[str, str, str] | None:
     if not name or not event_date or not sport:
         return None
     return name, event_date, sport
+
+
+def resolve_competition_conflict(competition_id: Any, strategy: Any) -> dict[str, Any]:
+    normalized_id = _normalise_coach_competition_id(competition_id, required=True)
+    selected = str(strategy or "").strip().casefold()
+    if selected not in {"keep_local", "adopt_remote"}:
+        raise AppError(400, "Ungültige Konfliktstrategie.")
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT * FROM competitions WHERE id=?", (normalized_id,)).fetchone()
+        if not row:
+            raise AppError(404, "Wettkampf nicht gefunden.")
+        if row.get("sync_state") != "conflict" or not row.get("sync_conflict"):
+            raise AppError(409, "Für diesen Wettkampf liegt kein offener Synchronisierungskonflikt vor.")
+        try:
+            conflict = json.loads(row["sync_conflict"])
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise AppError(409, "Der gespeicherte Synchronisierungskonflikt ist nicht mehr gültig.") from exc
+        remote = conflict.get("remote") if isinstance(conflict, dict) else None
+        remote = remote if isinstance(remote, dict) else {}
+        if selected == "adopt_remote":
+            data = remote_competition_data(remote)
+            if not data or not data.get("intervals_event_id"):
+                raise AppError(409, "Das Remote-Event kann nicht übernommen werden.")
+            external_id = str(remote.get("external_id") or row.get("external_id") or competition_external_id(normalized_id))
+            db.execute(
+                "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
+                (
+                    data["name"], data["event_date"], data["start_date_local"], data["sport"], data["priority"],
+                    data["category"], data["distance"], data["target"], data["description"], data["moving_time"],
+                    data["notes"], data["intervals_event_id"], external_id, now, now, normalized_id,
+                ),
+            )
+        else:
+            db.execute(
+                "UPDATE competitions SET sync_dirty=1, sync_state='local_override', sync_conflict='', updated_at=? WHERE id=?",
+                (now, normalized_id),
+            )
+    saved = next(item for item in list_competitions(include_sync=True) if item["id"] == normalized_id)
+    return {"status": "resolved", "strategy": selected, "competition": saved, "competitions": list_competitions(include_sync=True)}
 
 
 @intervals_operation
@@ -3339,9 +3396,12 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
                 remote = remote_by_id.get(str(row["intervals_event_id"]))
             if remote is None and row.get("external_id"):
                 remote = remote_by_external.get(str(row["external_id"]))
-            if remote is None and not row.get("intervals_event_id"):
-                remote = remote_by_identity.get(competition_sync_key(row))
-            if remote is not None and remote.get("id") is not None and not row.get("intervals_event_id"):
+            identity_remote = remote_by_identity.get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
+            if remote is None:
+                remote = identity_remote
+            if remote is not None and remote.get("id") is not None and not row.get("intervals_event_id") and row.get("sync_state") != "local_override":
+                # An identity-only match is ambiguous when the local row is
+                # dirty. Keep both versions and require an explicit choice.
                 continue
             outbound.append(competition_event_payload(row))
         skipped = len(dirty_rows) - len(outbound)
@@ -3355,26 +3415,41 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
         imported = 0
         updated = 0
         removed = 0
+        conflicts = 0
         with DB_LOCK, database() as db:
             for row in local_rows:
                 external_id = str(row.get("external_id") or competition_external_id(str(row["id"])))
                 remote = pushed_by_external.get(external_id) or remote_by_external.get(external_id)
                 if not remote and row.get("intervals_event_id"):
                     remote = pushed_by_id.get(str(row["intervals_event_id"])) or remote_by_id.get(str(row["intervals_event_id"]))
-                if not remote and not row.get("intervals_event_id"):
-                    remote = remote_by_identity.get(competition_sync_key(row))
+                identity_remote = remote_by_identity.get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
+                if row.get("sync_dirty") and identity_remote and not remote and row.get("sync_state") != "local_override":
+                    db.execute(
+                        "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                        (competition_conflict_payload(row, identity_remote, "identity_only"), now, row["id"]),
+                    )
+                    conflicts += 1
+                    continue
+                if not remote:
+                    remote = identity_remote
                 if row.get("sync_dirty"):
                     if remote:
                         db.execute(
-                            "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0, last_synced_at=?, updated_at=? WHERE id=?",
+                            "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
                             (str(remote.get("id") or row.get("intervals_event_id") or "") or None, external_id, now, now, row["id"]),
                         )
+                    elif row.get("intervals_event_id"):
+                        db.execute(
+                            "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                            (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
+                        )
+                        conflicts += 1
                     continue
                 if remote:
                     data = remote_competition_data(remote)
                     if data:
                         db.execute(
-                            "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, last_synced_at=?, updated_at=? WHERE id=?",
+                            "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
                             (
                                 data["name"], data["event_date"], data["start_date_local"], data["sport"], data["priority"],
                                 data["category"], data["distance"], data["target"], data["description"], data["moving_time"],
@@ -3384,8 +3459,11 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
                         )
                         updated += 1
                 elif row.get("intervals_event_id") and push_local:
-                    db.execute("DELETE FROM competitions WHERE id=?", (row["id"],))
-                    removed += 1
+                    db.execute(
+                        "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                        (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
+                    )
+                    conflicts += 1
 
             existing = {str(row["id"]): row for row in db.execute("SELECT * FROM competitions").fetchall()}
             for remote in remote_events:
@@ -3408,7 +3486,7 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
                 local_id = str(uuid.uuid4())
                 adopted_external_id = external_id or competition_external_id(local_id)
                 db.execute(
-                    "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, intervals_event_id, external_id, sync_dirty, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                    "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, intervals_event_id, external_id, sync_dirty, sync_state, sync_conflict, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'synced', '', ?, ?, ?)",
                     (
                         local_id, data["name"], data["event_date"], data["sport"], data["priority"], data["distance"],
                         data["target"], "", data["notes"], data["category"], data["start_date_local"], data["description"],
@@ -3427,6 +3505,7 @@ def sync_competitions(reason: str = "manual", push_local: bool = True) -> dict[s
             "updated": updated,
             "pushed": len(outbound),
             "skipped": skipped,
+            "conflicts": conflicts,
             "removed": removed,
             "deleted_remote": deleted_remote,
             "total": len(list_competitions()),
@@ -4730,22 +4809,80 @@ def normalize_workout_draft(workout: Any) -> dict[str, Any]:
     return draft
 
 
+def _calendar_interval(value: dict[str, Any], default_minutes: int = 60) -> tuple[datetime, datetime, bool] | None:
+    raw_start = first_present(value, ("start_date_local", "start_local", "start", "date"))
+    if raw_start in (None, ""):
+        return None
+    raw_start = str(raw_start).strip()
+    try:
+        if len(raw_start) == 10:
+            start = datetime.combine(date.fromisoformat(raw_start[:10]), datetime.min.time())
+            return start, start + timedelta(days=1), False
+        start = datetime.fromisoformat(raw_start.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if start.tzinfo is not None:
+        start = start.replace(tzinfo=None)
+    raw_end = first_present(value, ("end_date_local", "end_local", "end"))
+    end = None
+    if raw_end not in (None, ""):
+        try:
+            end = datetime.fromisoformat(str(raw_end).strip().replace("Z", "+00:00"))
+            if end.tzinfo is not None:
+                end = end.replace(tzinfo=None)
+        except (TypeError, ValueError):
+            end = None
+    if end is None:
+        duration = value.get("duration_minutes")
+        if duration in (None, "") and value.get("moving_time") not in (None, ""):
+            duration = float(value["moving_time"]) / 60
+        try:
+            duration_minutes = max(1, int(float(duration))) if duration not in (None, "") else default_minutes
+        except (TypeError, ValueError):
+            duration_minutes = default_minutes
+        end = start + timedelta(minutes=duration_minutes)
+    return start, max(end, start + timedelta(minutes=1)), True
+
+
+def _calendar_items_conflict(candidate: dict[str, Any], existing: dict[str, Any]) -> tuple[bool, str]:
+    candidate_date = str(first_present(candidate, ("date", "event_date", "start_date_local", "start_local")) or "")[:10]
+    existing_date = str(first_present(existing, ("date", "event_date", "start_date_local", "start_local")) or "")[:10]
+    candidate_interval = _calendar_interval(candidate)
+    existing_interval = _calendar_interval(existing)
+    if candidate_interval and existing_interval and candidate_interval[2] and existing_interval[2]:
+        return candidate_interval[0] < existing_interval[1] and existing_interval[0] < candidate_interval[1], "time_window"
+    return bool(candidate_date and candidate_date == existing_date), "date"
+
+
+def _calendar_conflict_record(item: dict[str, Any], source: str, match: str) -> dict[str, Any]:
+    interval = _calendar_interval(item)
+    return {
+        "id": item.get("id") or item.get("local_id"),
+        "name": item.get("name") or "Einheit",
+        "date": str(first_present(item, ("date", "event_date", "start_date_local", "start_local")) or "")[:10],
+        "source": source,
+        "match": match,
+        "start_local": interval[0].isoformat(timespec="minutes") if interval and interval[2] else None,
+        "end_local": interval[1].isoformat(timespec="minutes") if interval and interval[2] else None,
+    }
+
+
 def calendar_conflicts(
     workout: dict[str, Any],
     exclude_library_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    target_date = str(workout.get("date") or "")
     snapshot = latest_snapshot() or {}
     conflicts = []
     for event in snapshot.get("upcoming_calendar", []):
         if not isinstance(event, dict):
             continue
-        event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
-        if event_date == target_date:
-            conflicts.append({"id": event.get("id"), "name": event.get("name") or "Einheit", "date": event_date})
+        matches, match = _calendar_items_conflict(workout, event)
+        if matches:
+            conflicts.append(_calendar_conflict_record(event, "provider_calendar", match))
     excluded = exclude_library_ids or set()
     with DB_LOCK, database() as db:
         rows = db.execute("SELECT local_id, payload FROM workout_library").fetchall()
+        competitions = [dict(row) for row in db.execute("SELECT id, name, event_date, start_date_local, moving_time FROM competitions").fetchall()]
     for row in rows:
         local_id = str(row.get("local_id") or "")
         if local_id in excluded:
@@ -4754,16 +4891,15 @@ def calendar_conflicts(
             library_entry = json.loads(row.get("payload") or "{}")
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        if not isinstance(library_entry, dict):
+        if not isinstance(library_entry, dict) or library_entry.get("source") not in {"coach", "library", "legacy-draft"}:
             continue
-        entry_date = str(library_entry.get("date") or "")[:10]
-        if entry_date == target_date and library_entry.get("source") in {"coach", "library", "legacy-draft"}:
-            conflicts.append({
-                "id": local_id,
-                "name": library_entry.get("name") or "Lokale Einheit",
-                "date": entry_date,
-                "source": "local_library",
-            })
+        matches, match = _calendar_items_conflict(workout, library_entry)
+        if matches:
+            conflicts.append(_calendar_conflict_record({**library_entry, "local_id": local_id}, "local_library", match))
+    for competition in competitions:
+        matches, match = _calendar_items_conflict(workout, competition)
+        if matches:
+            conflicts.append(_calendar_conflict_record(competition, "local_competition", match))
     return conflicts
 
 
@@ -8001,7 +8137,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "snapshots": {"id", "payload", "created_at"},
     "workout_drafts": {"id", "payload", "status", "intervals_event_id", "error", "created_at", "updated_at"},
     "workout_library": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "last_synced_at", "updated_at"},
-    "competitions": {"id", "name", "event_date", "sport", "priority", "distance", "target", "course_profile", "notes", "category", "start_date_local", "description", "moving_time", "intervals_event_id", "external_id", "sync_dirty", "last_synced_at", "created_at", "updated_at"},
+    "competitions": {"id", "name", "event_date", "sport", "priority", "distance", "target", "course_profile", "notes", "category", "start_date_local", "description", "moving_time", "intervals_event_id", "external_id", "sync_dirty", "sync_state", "sync_conflict", "last_synced_at", "created_at", "updated_at"},
     "competition_sync_tombstones": {"id", "intervals_event_id", "external_id", "created_at"},
     "training_plans": {"id", "name", "goal", "start_date", "end_date", "status", "created_at", "updated_at"},
     "athlete_checkins": {"checkin_date", "soreness", "stress", "motivation", "session_rpe", "illness", "pain", "available_minutes", "availability_notes", "notes", "created_at", "updated_at"},
@@ -8390,6 +8526,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if payload.get("confirm") != "FULL_RESYNC":
                     raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
                 self.send_json(200, full_provider_resync("intervals"))
+            elif match := COMPETITION_CONFLICT_RE.match(path):
+                payload = self.read_json()
+                self.send_json(200, resolve_competition_conflict(unquote(match.group(1)), payload.get("strategy")))
             elif path == "/api/competitions/sync":
                 self.send_json(200, sync_competitions("manuell"))
             elif path == "/api/performance/refresh":
