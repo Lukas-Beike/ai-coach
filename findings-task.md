@@ -472,11 +472,11 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Handover FT-010**
 
 - **Status:** abgeschlossen
-- **Branch und Commit:** `feat/ft-010-state-pagination`, `07bb021`, PR folgt nach finalem Rebase
+- **Branch und Commit:** `feat/ft-010-state-pagination`, fachlicher Squash-Commit `a35c246`, PR #150 gemerged; mobiler Initial-Ladefix `3189745`, Korrektur-PR folgt
 - **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
 - **Verhaltensänderung:** Der monolithische `/api/state`-Abruf ist durch einen begrenzten `/api/bootstrap` und fachliche Endpunkte für Aktivitäten, Chat-Historie, Plan, Bibliothek, Leistung, Profil und Feedback ersetzt. Aktivitäten, Chat-Historie und Bibliothek verwenden stabile Cursor; Chat unterstützt begrenzte Suche. Der Client lädt die Bereiche getrennt und kann Aktivitätsseiten nachladen.
-- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py` und `git diff --check` erfolgreich; `docker build -t ai-coach:ft010 .` erfolgreich; beschleunigter SQLCipher-Testlauf mit vier Shards, insgesamt 226 Tests, alle grün.
-- **Review:** Diff-Review ohne offene Findings.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py` und `git diff --check` erfolgreich; `docker build -t ai-coach:ft010 .` erfolgreich; beschleunigter SQLCipher-Testlauf mit vier Shards, insgesamt 226 Tests, alle grün. Der erste CI-Browserlauf bestand auf Desktop, blieb aber mobil während der initialen Bereichsladung im Ladezustand; der Korrektur-Commit rendert Bootstrap sofort und lässt die Bereichsdaten nachladen. Die vier lokalen Shards bleiben mit insgesamt 226 Tests grün.
+- **Review:** Diff-Review ohne offene Findings; mobiler Initial-Ladefehler als CI-Finding behoben, Korrektur-PR folgt.
 - **Manuelle Prüfung:** CI-Browser-Smoke folgt im PR; direkte App-Ladepfade bleiben über den bestehenden Root-Reload erhalten.
 - **Offene Risiken:** Keine für FT-010.
 - **Folgetasks:** FT-011 ist entblockt.
