@@ -6882,7 +6882,10 @@ def prompt_requests_competition_remote_sync(message: str) -> bool:
 def prompt_requests_explicit_tool(message: str, terms: str) -> bool:
     text = message.casefold()
     asks_to_refresh = bool(re.search(r"\b(aktualisier\w*|sync(?:hronisier\w*)?|lad\w*|hol\w*|abruf\w*|refresh\w*|fetch\w*)\b", text))
-    return asks_to_refresh and bool(re.search(terms, text))
+    # The callers pass static routing patterns. Extract their literal words
+    # instead of compiling a pattern supplied through a function argument.
+    keywords = tuple(word.casefold() for word in re.findall(r"[A-Za-z]{3,}", terms))
+    return asks_to_refresh and any(keyword in text for keyword in keywords)
 
 
 def prompt_requests_adaptive_preview(message: str) -> bool:
@@ -6930,7 +6933,7 @@ def requested_coach_tool(message: str) -> str | None:
         return "list_recent_activities"
     if re.search(r"\b(welche|zeig|liste|list)\w*\b.*\b(geplant|kalender|einheit|workout)\w*\b", message.casefold()):
         return "list_planned_workouts"
-    if re.search(r"\b(welche|zeig|liste|list)\w*\b.*\b(\w*bibliothek\w*|workout\w*|einheit\w*|training\w*)\b", message.casefold()):
+    if re.search(r"\b(welche|zeig|liste|list)\w*\b.*\b(bibliothek\w*|workout\w*|einheit\w*|training\w*)\b", message.casefold()):
         return "list_workout_library"
     return None
 
