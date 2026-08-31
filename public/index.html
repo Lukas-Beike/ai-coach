@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=120" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=120">
+  <link rel="icon" href="/icon.svg?v=121" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=121">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -275,12 +275,12 @@
     </main>
 
     <nav class="bottom-nav" aria-label="Hauptnavigation">
-      <button type="button" class="nav-item active" aria-current="page" aria-label="Coach" data-panel="chatPanel"><span aria-hidden="true">●</span><span class="nav-label-full">Coach</span><span class="nav-label-short">Coach</span></button>
-      <button type="button" class="nav-item" aria-label="Aktivitäten" data-panel="activitiesPanel"><span aria-hidden="true">✓</span><span class="nav-label-full">Aktivitäten</span><span class="nav-label-short">Aktiv.</span></button>
-      <button type="button" class="nav-item" aria-label="Geplant" data-panel="workoutsPanel"><span aria-hidden="true">◇</span><span class="nav-label-full">Geplant</span><span class="nav-label-short">Plan</span></button>
-      <button type="button" class="nav-item" aria-label="Leistungsdaten" data-panel="dataPanel"><span aria-hidden="true">◌</span><span class="nav-label-full">Leistung</span><span class="nav-label-short">Leistung</span></button>
-      <button type="button" class="nav-item" aria-label="Profil" data-panel="profilePanel"><span aria-hidden="true">○</span><span class="nav-label-full">Profil</span><span class="nav-label-short">Profil</span></button>
-      <button type="button" class="nav-item" aria-label="Einstellungen" data-panel="settingsPanel"><span aria-hidden="true">⚙</span><span class="nav-label-full">Einstellungen</span><span class="nav-label-short">Mehr</span></button>
+      <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><span aria-hidden="true">●</span><span class="nav-label-full">Coach</span><span class="nav-label-short">Coach</span></a>
+      <a class="nav-item" href="#activities" aria-controls="activitiesPanel" aria-label="Aktivitäten" data-panel="activitiesPanel" data-route="activities"><span aria-hidden="true">✓</span><span class="nav-label-full">Aktivitäten</span><span class="nav-label-short">Aktiv.</span></a>
+      <a class="nav-item" href="#planned" aria-controls="workoutsPanel" aria-label="Geplant" data-panel="workoutsPanel" data-route="planned"><span aria-hidden="true">◇</span><span class="nav-label-full">Geplant</span><span class="nav-label-short">Plan</span></a>
+      <a class="nav-item" href="#performance" aria-controls="dataPanel" aria-label="Leistungsdaten" data-panel="dataPanel" data-route="performance"><span aria-hidden="true">◌</span><span class="nav-label-full">Leistung</span><span class="nav-label-short">Leistung</span></a>
+      <a class="nav-item" href="#profile" aria-controls="profilePanel" aria-label="Profil" data-panel="profilePanel" data-route="profile"><span aria-hidden="true">○</span><span class="nav-label-full">Profil</span><span class="nav-label-short">Profil</span></a>
+      <a class="nav-item" href="#settings" aria-controls="settingsPanel" aria-label="Einstellungen" data-panel="settingsPanel" data-route="settings"><span aria-hidden="true">⚙</span><span class="nav-label-full">Einstellungen</span><span class="nav-label-short">Mehr</span></a>
     </nav>
   </div>
 
@@ -310,6 +310,6 @@
       </div>
     </div>
   </dialog>
-  <script src="/app.js?v=120" defer></script>
+  <script src="/app.js?v=121" defer></script>
 </body>
 </html>

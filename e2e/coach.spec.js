@@ -7,12 +7,12 @@ if (!APP_PASSWORD || APP_PASSWORD.length < 12) {
 }
 
 const navigation = [
-  ["Coach", "chatPanel"],
-  ["Aktivitäten", "activitiesPanel"],
-  ["Geplant", "workoutsPanel"],
-  ["Leistungsdaten", "dataPanel"],
-  ["Profil", "profilePanel"],
-  ["Einstellungen", "settingsPanel"],
+  ["Coach", "chatPanel", "coach"],
+  ["Aktivitäten", "activitiesPanel", "activities"],
+  ["Geplant", "workoutsPanel", "planned"],
+  ["Leistungsdaten", "dataPanel", "performance"],
+  ["Profil", "profilePanel", "profile"],
+  ["Einstellungen", "settingsPanel", "settings"],
 ];
 
 async function login(page) {
@@ -64,13 +64,14 @@ test.describe("critical browser states", () => {
     await expect(safetyHint).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("coach-core.png"), fullPage: true });
 
-    for (const [label, panelId] of navigation) {
-      await page.getByRole("button", { name: label, exact: true }).click();
+    for (const [label, panelId, route] of navigation) {
+      await page.getByRole("link", { name: label, exact: true }).click();
       await expect(page.locator(`#${panelId}`)).toHaveClass(/active/);
-      await expect(page.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-current", "page");
+      await expect(page.getByRole("link", { name: label, exact: true })).toHaveAttribute("aria-current", "page");
+      await expect(page.getByRole("link", { name: label, exact: true })).toHaveAttribute("href", `#${route}`);
     }
 
-    await page.getByRole("button", { name: "Geplant", exact: true }).click();
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
     const checkinButton = page.getByRole("button", { name: /Tages-Check-in/ }).first();
     await expect(checkinButton).toBeVisible();
     await checkinButton.click();
@@ -81,7 +82,7 @@ test.describe("critical browser states", () => {
     await checkinDialog.getByRole("button", { name: "Schließen" }).click();
     await expect(checkinDialog).toBeHidden();
 
-    await page.getByRole("button", { name: "Coach", exact: true }).click();
+    await page.getByRole("link", { name: "Coach", exact: true }).click();
     await safetyHint.scrollIntoViewIfNeeded();
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
     await safetyHint.scrollIntoViewIfNeeded();
@@ -94,7 +95,7 @@ test.describe("critical browser states", () => {
     expect(safetyLayout.hintBottom).toBeLessThanOrEqual(Math.min(safetyLayout.composerTop, safetyLayout.navigationTop));
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
 
-    await page.getByRole("button", { name: "Profil", exact: true }).click();
+    await page.getByRole("link", { name: "Profil", exact: true }).click();
     const profileName = page.getByLabel("Name");
     await profileName.fill("Fixture Athlete");
     await expect(page.locator("#profileDirtyIndicator")).toBeVisible();
@@ -114,7 +115,7 @@ test.describe("critical browser states", () => {
     await login(page);
 
     for (const [label, panelId] of navigation.filter(([name]) => ["Coach", "Profil", "Einstellungen"].includes(name))) {
-      await page.getByRole("button", { name: label, exact: true }).click();
+      await page.getByRole("link", { name: label, exact: true }).click();
       await expect(page.locator(`#${panelId}`)).toHaveClass(/active/);
       const results = await new AxeBuilder({ page })
         .include(`#${panelId}`)
@@ -125,5 +126,29 @@ test.describe("critical browser states", () => {
 
     await expectNoBrowserErrorsOrOverflow(page, browserErrors);
     await page.screenshot({ path: testInfo.outputPath("settings-core.png"), fullPage: true });
+  });
+
+  test("hash routes support deep links and browser history", async ({ page }) => {
+    await page.goto("/#profile");
+    await expect(page.locator("#loginDialog")).toBeVisible();
+    await page.getByLabel("Passwort").fill(APP_PASSWORD);
+    await page.getByRole("button", { name: "Anmelden" }).click();
+    await expect(page.locator("#loginDialog")).toBeHidden();
+    await expect(page.locator("#profilePanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#profile$/);
+    await expect(page.locator("#profilePanel")).toBeFocused();
+
+    await page.getByRole("link", { name: "Leistungsdaten", exact: true }).click();
+    await expect(page.locator("#dataPanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#performance$/);
+    await page.goBack();
+    await expect(page.locator("#profilePanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#profile$/);
+    await page.goForward();
+    await expect(page.locator("#dataPanel")).toHaveClass(/active/);
+
+    await page.goto("/#unknown-route");
+    await expect(page.locator("#chatPanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#coach$/);
   });
 });
