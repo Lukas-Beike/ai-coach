@@ -472,24 +472,6 @@ function renderExternalCalendar(data) {
     syncButton.disabled = Boolean(calendar.running || state.localSync.externalCalendar);
     syncButton.textContent = calendar.running || state.localSync.externalCalendar ? "Synchronisierung läuft…" : "Synchronisieren";
   }
-  const root = $("#externalCalendarEvents");
-  if (!root) return;
-  const events = calendar.events || [];
-  if (!calendar.configured) {
-    root.textContent = "Kein externer Kalender konfiguriert.";
-    return;
-  }
-  if (!events.length) {
-    root.textContent = calendar.last_error ? `Kalender: ${calendar.last_error}` : "Keine externen Termine in den nächsten 8 Wochen.";
-    return;
-  }
-  const items = events.slice(0, 12).map((event) => {
-    const time = event.all_day ? "Ganztägig" : `${formatTime(event.start_local)} – ${formatTime(event.end_local)}`;
-    const duration = `${event.duration_minutes || 0} Min.`;
-    const impact = event.training_relevant === 0 ? "nur Info" : event.no_intensity === 1 ? "keine Intensität" : "Trainingssignal";
-    return `<div class="external-calendar-event"><strong>${escapeHtml(String(event.name || "Kalendereintrag"))}</strong><span>${escapeHtml(String(event.event_date || ""))} · ${escapeHtml(time)} · ${escapeHtml(duration)} · ${escapeHtml(impact)}</span></div>`;
-  }).join("");
-  root.innerHTML = `<div class="external-calendar-heading"><strong>Externe Termine</strong><span>nächste 8 Wochen · ${events.length} Einträge</span></div>${items}`;
 }
 
 function renderRemoteDeleteNotice() {
@@ -509,39 +491,6 @@ function renderRemoteDeleteNotice() {
   close.textContent = "Hinweis schließen";
   close.addEventListener("click", () => { state.remoteDeleteFailure = null; renderRemoteDeleteNotice(); });
   root.append(title, message, close);
-}
-
-function renderPublicCalendar(data) {
-  const root = $("#publicCalendarCandidates");
-  if (!root) return;
-  root.replaceChildren();
-  const calendar = data.public_calendar || {};
-  const candidates = calendar.candidates || [];
-  const sources = calendar.sources || [];
-  if (!candidates.length && !sources.length) {
-    root.textContent = "Noch kein öffentlicher Wettkampfkalender importiert.";
-    return;
-  }
-  if (sources.length) {
-    const sourceSummary = document.createElement("p");
-    sourceSummary.className = "fine-print";
-    sourceSummary.textContent = `${sources.length} lokaler Kalender${sources.length === 1 ? "" : "e"} · ${candidates.length} Kandidat${candidates.length === 1 ? "" : "en"}`;
-    root.append(sourceSummary);
-  }
-  for (const candidate of candidates.slice(0, 30)) {
-    const card = document.createElement("article");
-    card.className = "public-calendar-candidate";
-    const imported = Boolean(candidate.imported_competition_id);
-    card.innerHTML = `<div><strong>${escapeHtml(String(candidate.name || "Veranstaltung"))}</strong><span>${escapeHtml(String(candidate.event_date || ""))} · ${escapeHtml(String(candidate.sport || ""))}</span></div>${candidate.location ? `<span>${escapeHtml(String(candidate.location))}</span>` : ""}${candidate.description ? `<p>${escapeHtml(String(candidate.description))}</p>` : ""}`;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "secondary-button";
-    button.textContent = imported ? "Als Wettkampf übernommen" : "Als Wettkampf übernehmen";
-    button.disabled = imported;
-    button.addEventListener("click", () => importPublicCandidate(candidate.id, button));
-    card.append(button);
-    root.append(card);
-  }
 }
 
 function formatTime(value) {
@@ -2811,7 +2760,6 @@ function render(data) {
   renderCompetitions(data.competitions || []);
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
-  renderPublicCalendar(data);
   renderCompetitionSync(data);
   renderPerformance(data.performance);
   renderModel(data.model);
@@ -3228,30 +3176,6 @@ async function applyReplan() {
   finally { button.disabled = false; }
 }
 
-async function importPublicCalendar() {
-  const button = $("#publicCalendarImportButton");
-  const url = $("#publicCalendarUrl")?.value.trim();
-  const name = $("#publicCalendarName")?.value.trim();
-  if (!url) { toast("Bitte eine HTTPS-iCalendar-URL eintragen", true); return; }
-  button.disabled = true;
-  button.textContent = "Kalender wird geladen…";
-  try {
-    const result = await api("/api/calendar/import", { method: "POST", body: JSON.stringify({ url, name }) });
-    toast(`${result.events || 0} Veranstaltungen gefunden`);
-    await load();
-  } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Kalender durchsuchen"; }
-}
-
-async function importPublicCandidate(id, button) {
-  button.disabled = true;
-  try {
-    await api(`/api/calendar/candidates/${encodeURIComponent(id)}/import`, { method: "POST", body: "{}" });
-    toast("Veranstaltung als Wettkampf übernommen");
-    await load();
-  } catch (error) { toast(error.message, true); button.disabled = false; }
-}
-
 async function downloadDatabaseBackup() {
   const button = $("#backupDownloadButton");
   if (button) button.disabled = true;
@@ -3459,7 +3383,6 @@ $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);
 $("#logoutButton").addEventListener("click", logout);
 $("#libraryLoadButton").addEventListener("click", loadLibrary);
 $("#libraryFilter").addEventListener("change", (event) => { state.libraryFilter = event.target.value; renderLibrary(state.data?.library || []); });
-$("#publicCalendarImportForm").addEventListener("submit", (event) => { event.preventDefault(); importPublicCalendar(); });
 $("#systemContextPreviewButton").addEventListener("click", () => {
   $("#systemContextPreviewButton").dataset.loaded = "false";
   loadContextPreview();

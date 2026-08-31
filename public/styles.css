@@ -531,15 +531,6 @@ h2 {
 .training-plan-body { display: grid; gap: 6px; padding: 0 14px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: .74rem; }
 .training-plan-body p { margin: 10px 0 2px; }
 .training-plan-entry { padding-top: 6px; }
-.public-calendar-card { grid-column: 1 / -1; }
-.public-calendar-form { display: grid; gap: 8px; margin-top: 10px; }
-.public-calendar-form label { display: grid; gap: 5px; color: var(--subtle); font-size: .68rem; }
-.public-calendar-form input { width: 100%; }
-.public-calendar-candidates { display: grid; gap: 8px; margin-top: 12px; }
-.public-calendar-candidate { display: grid; gap: 7px; padding: 10px; border: 1px solid rgba(255, 159, 10, .25); border-radius: 11px; background: rgba(255, 159, 10, .06); }
-.public-calendar-candidate > div { display: flex; justify-content: space-between; gap: 10px; }
-.public-calendar-candidate > div span { color: var(--subtle); font-size: .68rem; text-align: right; }
-.public-calendar-candidate p { margin: 0; color: var(--muted); font-size: .72rem; white-space: pre-wrap; }
 
 .profile-form { display: grid; gap: 18px; min-width: 0; padding-bottom: 24px; }
 .profile-section { display: grid; gap: 15px; min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: 18px; padding: 16px; background: rgba(28, 28, 30, .68); }
@@ -634,10 +625,6 @@ h2 {
 .adaptive-planning-dialog h2 { margin: 0; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .dialog-actions .adaptive-planning-button { padding: 9px 11px; font-size: .75rem; }
-.external-calendar-events { display: grid; gap: 7px; }
-.external-calendar-heading { display: flex; justify-content: space-between; gap: 10px; color: var(--subtle); font-size: .68rem; }
-.external-calendar-event { display: grid; gap: 3px; padding: 9px 11px; border: 1px solid rgba(255, 159, 10, .25); border-radius: 11px; color: var(--muted); background: rgba(255, 159, 10, .06); font-size: .7rem; }
-.external-calendar-event strong { overflow: hidden; color: var(--ink); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
 .replan-change { padding-top: 8px; border-top: 1px solid var(--line); }
 .replan-change strong { color: var(--ink); }
 .logs-output { max-height: 420px; min-height: 160px; margin: 0; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: #171719; white-space: pre-wrap; overflow-wrap: anywhere; font: .67rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
