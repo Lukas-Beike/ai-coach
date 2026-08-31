@@ -1,5 +1,5 @@
-const CACHE = "intervals-coach-v120";
-const ASSETS = ["/", "/styles.css?v=120", "/app.js?v=120", "/icon.svg?v=120", "/manifest.webmanifest"];
+const CACHE = "intervals-coach-v121";
+const ASSETS = ["/", "/styles.css?v=121", "/app.js?v=121", "/icon.svg?v=121", "/manifest.webmanifest"];
 const VERSIONED_ASSETS = new Set(["/app.js", "/styles.css", "/logo.png", "/icon.svg"]);
 self.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS))));
 self.addEventListener("activate", (event) => event.waitUntil((async () => {
