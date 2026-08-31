@@ -399,7 +399,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-008.
 - **Folgetasks:** FT-009 und die weiteren Pakete sind entblockt.
 
-### - [ ] FT-009 – Coach-Kontext kompakt und dedupliziert projizieren
+### - [x] FT-009 – Coach-Kontext kompakt und dedupliziert projizieren
+
+**Status:** abgeschlossen
 
 **Quelle:** COACH-02, PERF-01; spezielle Coach-Context-Grenze aus Abschnitt 2
 **Ziel:** Input-Tokens und Coach-Latenz sinken durch eine einzige, begrenzte Kontextprojektion; vollständige Garmin- und Intervals-Daten bleiben unverändert gespeichert und im allgemeinen State verfügbar.
@@ -407,25 +409,37 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Aktuellen Context Builder inventarisieren und jede Sektion mit Zeichen-/Tokenabschätzung vermessen.
-- [ ] Doppelte Serialisierung von `local_planned_workouts` entfernen.
-- [ ] Geplante Workouts auf relevanten Zeitraum und Felder reduzieren: ID, Datum, Sport, Dauer, Ziel/Intensität, Status.
-- [ ] Aktivitäten nach normalisierter Sportart gruppieren, absteigend sortieren und die fünf neuesten je Sportart projizieren.
-- [ ] Garmin-Felder gegen aktuelle Performance-Daten auf Redundanz und zusätzlichen Coachingwert prüfen.
-- [ ] Nur redundante Felder aus der Coach-Projektion entfernen; Rohsnapshot/-persistenz nicht anfassen.
-- [ ] Pro Sektion deterministische Größenbudgets und Gesamtbudget definieren.
-- [ ] Trunkierungsmetadaten ohne Athleteninhalt bereitstellen, damit Diagnose möglich bleibt.
-- [ ] Tests mit vielen Sportarten, gleichen Zeitstempeln, fehlenden Sportarten und langen Beschreibungen ergänzen.
-- [ ] Snapshot-/State-Regressionstest beweist Byte-/Objektgleichheit der vollständigen Quellen vor/nach Projektion.
-- [ ] Kontextvorschau und README an neue Projektion anpassen.
+- [x] Aktuellen Context Builder inventarisieren und jede Sektion mit Zeichen-/Tokenabschätzung vermessen.
+- [x] Doppelte Serialisierung von `local_planned_workouts` entfernen.
+- [x] Geplante Workouts auf relevanten Zeitraum und Felder reduzieren: ID, Datum, Sport, Dauer, Ziel/Intensität, Status.
+- [x] Aktivitäten nach normalisierter Sportart gruppieren, absteigend sortieren und die fünf neuesten je Sportart projizieren.
+- [x] Garmin-Felder gegen aktuelle Performance-Daten auf Redundanz und zusätzlichen Coachingwert prüfen.
+- [x] Nur redundante Felder aus der Coach-Projektion entfernen; Rohsnapshot/-persistenz nicht anfassen.
+- [x] Pro Sektion deterministische Größenbudgets und Gesamtbudget definieren.
+- [x] Trunkierungsmetadaten ohne Athleteninhalt bereitstellen, damit Diagnose möglich bleibt.
+- [x] Tests mit vielen Sportarten, gleichen Zeitstempeln, fehlenden Sportarten und langen Beschreibungen ergänzen.
+- [x] Snapshot-/State-Regressionstest beweist Byte-/Objektgleichheit der vollständigen Quellen vor/nach Projektion.
+- [x] Kontextvorschau und README an neue Projektion anpassen.
 
 **Abnahmekriterien**
 
-- [ ] `local_planned_workouts` erscheint genau einmal im finalen Kontext.
-- [ ] Höchstens fünf neueste Aktivitäten je Sportart werden an OpenAI übergeben.
-- [ ] Allgemeine Garmin-Daten und Intervals-Snapshots sind unverändert groß/vollständig.
-- [ ] Token-/Zeichen-Maximaltest ist deterministisch grün.
-- [ ] Quellenkennzeichnung und relevante aktuelle Performancewerte bleiben erhalten.
+- [x] `local_planned_workouts` erscheint genau einmal im finalen Kontext.
+- [x] Höchstens fünf neueste Aktivitäten je Sportart werden an OpenAI übergeben.
+- [x] Allgemeine Garmin-Daten und Intervals-Snapshots sind unverändert groß/vollständig.
+- [x] Token-/Zeichen-Maximaltest ist deterministisch grün.
+- [x] Quellenkennzeichnung und relevante aktuelle Performancewerte bleiben erhalten.
+
+**Handover FT-009**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `feat/ft-009-compact-coach-context`, `e93ddc4`, PR folgt nach finalem Rebase
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument
+- **Verhaltensänderung:** Der Coach erhält eine kompakte, einmalige Projektion lokaler Pläne; geplante Provider-Einheiten werden auf relevante Felder reduziert, Aktivitäten deterministisch nach Sportart gruppiert und auf fünf je Sportart begrenzt. Abschnitts- und Gesamtbudgets werden erfasst und bei Bedarf deterministisch angewendet. Garmin- und Intervals-Snapshots sowie der allgemeine State bleiben vollständig.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py` und `git diff --check` erfolgreich; `docker build -t ai-coach:ft009 .` erfolgreich; beschleunigter SQLCipher-Testlauf mit vier Shards, insgesamt 221 Tests, alle grün.
+- **Review:** Diff-Review ohne offene Findings.
+- **Manuelle Prüfung:** Nicht erforderlich; Backend-/Kontextprojektionspaket ohne Frontendänderung.
+- **Offene Risiken:** Keine für FT-009.
+- **Folgetasks:** FT-010 ist entblockt.
 
 ### - [ ] FT-010 – Monolithischen Public State fachlich teilen und Listen paginieren
 
