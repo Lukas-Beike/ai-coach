@@ -20,9 +20,11 @@
   --shadow: 0 20px 60px rgba(0, 0, 0, .32);
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, .18);
   --bottom-nav-clearance: 86px;
+  --chat-fixed-ui-clearance: 230px;
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { background: var(--bg); overscroll-behavior-y: contain; }
 body {
   margin: 0;
@@ -146,6 +148,7 @@ h2 {
 
 .panel { display: none; }
 .panel.active { display: block; }
+#chatPanel { padding-bottom: calc(var(--chat-fixed-ui-clearance) + env(safe-area-inset-bottom)); }
 .messages {
   display: flex;
   flex-direction: column;
@@ -586,7 +589,7 @@ h2 {
 .context-preview-content pre { max-height: 360px; margin: 0; overflow: auto; padding: 0 13px 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; font: .68rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .checkin-form { display: grid; gap: 12px; margin-top: 14px; }
 .checkin-critical-field { color: #ffb1aa; }
-.checkin-form button { justify-self: start; }
+.checkin-form > button { justify-self: start; min-height: 44px; }
 .checkin-history { display: grid; gap: 8px; margin-top: 22px; }
 .checkin-history > strong { color: var(--ink); font-size: .82rem; }
 .checkin-history-item { display: grid; gap: 3px; width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .025); color: var(--muted); text-align: left; cursor: pointer; }

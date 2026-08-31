@@ -56,6 +56,12 @@ test.describe("critical browser states", () => {
     await page.getByLabel("Passwort").fill("");
     await expect(page.locator("#loginDialog")).toBeHidden();
     await expect(page.locator("#appShell")).toBeVisible();
+    await expect(page.locator(".dirty-indicator")).toHaveCount(5);
+    const hiddenIndicators = await page.locator(".dirty-indicator").evaluateAll((nodes) => nodes.every((node) => node.hidden));
+    expect(hiddenIndicators).toBe(true);
+    await expect(page.locator("#remoteDeleteNotice")).toBeHidden();
+    const safetyHint = page.getByText("Trainingsempfehlungen dienen zur Orientierung", { exact: false });
+    await expect(safetyHint).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("coach-core.png"), fullPage: true });
 
     for (const [label, panelId] of navigation) {
@@ -74,6 +80,19 @@ test.describe("critical browser states", () => {
     await expect(checkinDialog.getByLabel("Tagesform")).toBeVisible();
     await checkinDialog.getByRole("button", { name: "Schließen" }).click();
     await expect(checkinDialog).toBeHidden();
+
+    await page.getByRole("button", { name: "Coach", exact: true }).click();
+    await safetyHint.scrollIntoViewIfNeeded();
+    await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+    await safetyHint.scrollIntoViewIfNeeded();
+    const safetyLayout = await page.evaluate(() => {
+      const hint = document.querySelector("#chatPanel .fine-print").getBoundingClientRect();
+      const composer = document.querySelector("#chatForm").getBoundingClientRect();
+      const navigation = document.querySelector(".bottom-nav").getBoundingClientRect();
+      return { hintBottom: hint.bottom, composerTop: composer.top, navigationTop: navigation.top };
+    });
+    expect(safetyLayout.hintBottom).toBeLessThanOrEqual(Math.min(safetyLayout.composerTop, safetyLayout.navigationTop));
+    await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
 
     await page.getByRole("button", { name: "Profil", exact: true }).click();
     const profileName = page.getByLabel("Name");
