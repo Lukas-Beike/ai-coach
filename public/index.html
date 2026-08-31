@@ -15,7 +15,7 @@
     <header class="topbar">
       <div>
         <span class="eyebrow">PRIVATER TRAININGSBEREICH</span>
-        <h1>Intervals Coach <small id="appVersion" class="app-version" aria-label="Version"></small><a id="appUpdateIndicator" class="app-update-indicator" href="#" target="_blank" rel="noopener noreferrer" hidden aria-label="Neuere Version verfügbar" title="Neuere Version verfügbar"><svg class="app-update-warning" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.5 21 20H3L12 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 9v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="17" r="1" fill="currentColor"></circle></svg></a></h1>
+        <h1>Intervals Coach <small id="appVersion" class="app-version" aria-label="Version"></small><a id="appUpdateIndicator" class="app-update-indicator" href="#" target="_blank" rel="noopener noreferrer" hidden aria-label="Neuere Version verfügbar" title="Neuere Version verfügbar"><svg class="app-update-warning" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.5 21 20H3L12 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 9v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="17" r="1" fill="currentColor"></circle></svg></a><button id="pwaUpdateButton" class="app-update-indicator pwa-update-button" type="button" hidden aria-label="Neue App-Version laden" title="Neue App-Version laden">↻</button></h1>
       </div>
       <button id="headerActionButton" class="secondary-button top-action" type="button" hidden></button>
     </header>
@@ -31,7 +31,7 @@
           <div><strong>Deine Planung braucht eine Anpassung</strong><small>Öffne „Geplant“, um die Vorschläge zu prüfen.</small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Geplant öffnen</button>
         </div>
-        <div id="messages" class="messages"></div>
+        <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
         <form id="chatForm" class="composer">
           <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
             <span class="quick-message-label">Schnellstart</span>
@@ -46,6 +46,7 @@
             <button type="submit" id="sendButton">Senden</button>
           </div>
         </form>
+        <button type="button" id="chatJumpToComposer" class="chat-jump" hidden>Neue Nachricht</button>
         <p id="voiceStatus" class="voice-status" aria-live="polite" hidden></p>
         <p class="fine-print">Trainingsempfehlungen dienen zur Orientierung und ersetzen keinen medizinischen Rat. Jede Kalenderänderung gibst du selbst frei.</p>
       </section>
@@ -54,6 +55,7 @@
         <div class="section-heading">
           <div><span class="eyebrow">TRAININGSVERLAUF</span><h2>Aktivitäten</h2><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
         </div>
+        <label class="activity-search" for="activitySearch">Aktivitäten durchsuchen<input id="activitySearch" type="search" placeholder="Name oder Sportart" autocomplete="off"></label>
         <div id="activityStats" class="activity-stats-summary" aria-label="Aktivitätsstatistik"></div>
         <div id="activityFilters" class="activity-filters" aria-label="Aktivitätstypen filtern"></div>
         <div id="activities" class="activities"></div>
@@ -93,13 +95,16 @@
         <div id="trainingPlans" class="training-plans"></div>
       </section>
 
-      <section id="dataPanel" class="panel" aria-label="Dynamische Daten">
+      <section id="dataPanel" class="panel" aria-label="Leistungsdaten">
+        <div class="section-heading">
+          <div><span class="eyebrow">LEISTUNG</span><h2>Leistungsdaten</h2></div>
+        </div>
         <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
       </section>
 
       <section id="profilePanel" class="panel" aria-label="Athletenprofil">
         <div class="section-heading">
-          <div><span class="eyebrow">COACHING-PROFIL</span><h2>Athletenkontext</h2></div>
+          <div><span class="eyebrow">COACHING-PROFIL</span><h2>Athletenkontext <span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2></div>
         </div>
         <form id="profileForm" class="profile-form">
           <details class="profile-section collapsible-section" open>
@@ -129,7 +134,7 @@
         </form>
         <section class="checkin-section" aria-labelledby="checkinTitle">
           <div class="settings-section-heading">
-            <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in</h3><p>Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach fest. Ein Datum kann später bearbeitet werden, aber nicht in der Zukunft liegen.</p></div>
+            <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in <span id="checkinDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><p>Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach fest. Ein Datum kann später bearbeitet werden, aber nicht in der Zukunft liegen.</p></div>
           </div>
           <form id="checkinForm" class="checkin-form">
             <div class="form-grid">
@@ -161,7 +166,7 @@
 
       <section id="settingsPanel" class="panel" aria-label="Systemeinstellungen">
         <div class="section-heading">
-          <div><span class="eyebrow">SYSTEM</span><h2>Anbindungen &amp; Server</h2></div>
+          <div><span class="eyebrow">EINSTELLUNGEN</span><h2>Anbindungen &amp; Server</h2></div>
         </div>
         <details class="settings-section collapsible-section">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
@@ -193,11 +198,11 @@
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Coach-Modell &amp; Thinking</span><span id="modelSettingsSummary" class="collapsible-summary-meta">Auswahl wird geladen…</span></summary>
           <div id="modelSettingsTarget">
             <div class="model-selector">
-              <label for="modelSelect">Coach-Modell<select id="modelSelect"></select></label>
+              <label for="modelSelect">Coach-Modell<select id="modelSelect" aria-describedby="modelDescription"></select></label>
               <p id="modelDescription" class="fine-print">Wähle die Balance aus Qualität, Tempo und Kosten.</p>
             </div>
             <div class="model-selector">
-              <label for="thinkingLevelSelect">Thinking Level<select id="thinkingLevelSelect"></select></label>
+              <label for="thinkingLevelSelect">Thinking Level<select id="thinkingLevelSelect" aria-describedby="thinkingLevelDescription"></select></label>
               <p id="thinkingLevelDescription" class="fine-print">Thinking Level steuert, wie gründlich der Coach vor der Antwort überlegt.</p>
             </div>
           </div>
@@ -260,12 +265,12 @@
     </main>
 
     <nav class="bottom-nav" aria-label="Hauptnavigation">
-      <button class="nav-item active" data-panel="chatPanel"><span>●</span>Coach</button>
-      <button class="nav-item" data-panel="activitiesPanel"><span>✓</span>Aktivitäten</button>
-      <button class="nav-item" data-panel="workoutsPanel"><span>◇</span>Geplant</button>
-      <button class="nav-item" data-panel="dataPanel"><span>◌</span>Daten</button>
-      <button class="nav-item" data-panel="profilePanel"><span>○</span>Profil</button>
-      <button class="nav-item" data-panel="settingsPanel"><span>⚙</span>System</button>
+      <button type="button" class="nav-item active" aria-current="page" aria-label="Coach" data-panel="chatPanel"><span aria-hidden="true">●</span><span class="nav-label-full">Coach</span><span class="nav-label-short">Coach</span></button>
+      <button type="button" class="nav-item" aria-label="Aktivitäten" data-panel="activitiesPanel"><span aria-hidden="true">✓</span><span class="nav-label-full">Aktivitäten</span><span class="nav-label-short">Aktiv.</span></button>
+      <button type="button" class="nav-item" aria-label="Geplant" data-panel="workoutsPanel"><span aria-hidden="true">◇</span><span class="nav-label-full">Geplant</span><span class="nav-label-short">Plan</span></button>
+      <button type="button" class="nav-item" aria-label="Leistungsdaten" data-panel="dataPanel"><span aria-hidden="true">◌</span><span class="nav-label-full">Leistung</span><span class="nav-label-short">Leistung</span></button>
+      <button type="button" class="nav-item" aria-label="Profil" data-panel="profilePanel"><span aria-hidden="true">○</span><span class="nav-label-full">Profil</span><span class="nav-label-short">Profil</span></button>
+      <button type="button" class="nav-item" aria-label="Einstellungen" data-panel="settingsPanel"><span aria-hidden="true">⚙</span><span class="nav-label-full">Einstellungen</span><span class="nav-label-short">Mehr</span></button>
     </nav>
   </div>
 
