@@ -2578,6 +2578,34 @@ def filter_garmin_activities(activities: Any, intervals_activities: Any) -> tupl
     return filtered, len(garmin_list) - len(filtered)
 
 
+def garmin_activity_max_hr(activities: Any) -> dict[str, float | int]:
+    """Keep sport-specific Garmin max-HR aggregates before activity dedupe."""
+    values: dict[str, list[float | int]] = {"cycling": [], "running": []}
+    if not isinstance(activities, list):
+        return {}
+    for activity in activities:
+        if not isinstance(activity, dict):
+            continue
+        kind = activity_kind(activity)
+        value = as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate")))
+        if kind in values and value is not None and 80 <= float(value) <= 260:
+            values[kind].append(value)
+    return {kind: max(items) for kind, items in values.items() if items}
+
+
+def merge_garmin_max_hr(current: Any, previous: Any) -> dict[str, float | int]:
+    """Retain the last known Garmin max-HR when a refresh has no activity value."""
+    merged: dict[str, float | int] = {}
+    for source in (previous, current):
+        if not isinstance(source, dict):
+            continue
+        for kind in ("cycling", "running"):
+            value = as_number(source.get(kind))
+            if value is not None and 80 <= float(value) <= 260:
+                merged[kind] = max(merged.get(kind, value), value)
+    return merged
+
+
 GARMIN_CONTEXT_FIELDS = {
     "date", "calendarDate", "start", "end", "sleepTimeSeconds", "sleepDuration", "sleepScore", "overallSleepScore",
     "deepSleepSeconds", "lightSleepSeconds", "remSleepSeconds", "awakeSleepSeconds", "value", "score", "status",
@@ -2744,13 +2772,36 @@ def _garmin_last_numeric(value: Any, keys: set[str]) -> float | int | None:
     return values[-1] if values else None
 
 
+def _garmin_last_value(value: Any, keys: set[str]) -> Any:
+    """Find the last value for exact Garmin field names, including strings."""
+    values: list[Any] = []
+
+    def visit(item: Any) -> None:
+        if isinstance(item, dict):
+            for key, child in item.items():
+                if _garmin_key(key) in keys:
+                    values.append(child)
+                visit(child)
+        elif isinstance(item, list):
+            for child in item[:500]:
+                visit(child)
+
+    visit(value)
+    return values[-1] if values else None
+
+
 def _garmin_bounded_metric(value: Any, minimum: float, maximum: float) -> float | int | None:
     number = as_number(value)
     return number if number is not None and minimum <= float(number) <= maximum else None
 
 
 def _garmin_pace_seconds(value: Any) -> float | int | None:
-    number = as_number(value)
+    if isinstance(value, str) and ":" in value:
+        parts = value.strip().split(":")
+        if len(parts) in (2, 3) and all(part.isdigit() for part in parts):
+            numbers = [int(part) for part in parts]
+            value = numbers[-1] + numbers[-2] * 60 + (numbers[-3] * 3600 if len(parts) == 3 else 0)
+    number = _garmin_numeric(value)
     if number is None or number <= 0:
         return None
     # Garmin's lactate-threshold speed is metres per second. Accept seconds
@@ -2822,9 +2873,13 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         50,
         800,
     )
-    running_pace = _garmin_pace_seconds(
-        _garmin_last_numeric(running_threshold, {"speed", "lactatethresholdspeed", "thresholdspeed", "pace"})
-    )
+    running_pace = _garmin_pace_seconds(_garmin_last_value(
+        running_threshold,
+        {
+            "speed", "speedinmeterspersecond", "speedmeterspersecond", "lactatethresholdspeed",
+            "thresholdspeed", "pace", "paceinsecondsperkilometer", "thresholdpace",
+        },
+    ))
     running_hr = _garmin_bounded_metric(
         _garmin_last_numeric(running_threshold, {"heartrate", "hearrate", "heartraterunning", "lthr"}),
         80,
@@ -2837,6 +2892,11 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         230,
     )
     max_hr_values: dict[str, list[float | int]] = {"cycling": [], "running": []}
+    stored_max_hr = snapshot.get("sport_max_hr") if isinstance(snapshot.get("sport_max_hr"), dict) else {}
+    for kind in max_hr_values:
+        stored_value = as_number(stored_max_hr.get(kind))
+        if stored_value is not None and 80 <= float(stored_value) <= 260:
+            max_hr_values[kind].append(stored_value)
     activities = snapshot.get("activities") if isinstance(snapshot.get("activities"), list) else []
     for activity in activities:
         if not isinstance(activity, dict):
@@ -3040,6 +3100,9 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
             previous = garmin_snapshot()
             payload = load_garmin_fixture(days)
             canonical = latest_snapshot()
+            payload["sport_max_hr"] = merge_garmin_max_hr(
+                garmin_activity_max_hr(payload.get("activities")), previous.get("sport_max_hr")
+            )
             payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
             payload.setdefault("provider_sync", {"pagination": {"fixture": {"windows": 1, "records": len(payload.get("activities") or []), "complete": True}}})
             append_garmin_performance_history(payload, previous)
@@ -3106,6 +3169,9 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
             status=lambda message: set_kv("garmin_sync_status", message),
         )
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
+        payload["sport_max_hr"] = merge_garmin_max_hr(
+            garmin_activity_max_hr(payload.get("activities")), previous.get("sport_max_hr")
+        )
         canonical = latest_snapshot()
         payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
         append_garmin_performance_history(payload, previous)
@@ -7573,6 +7639,7 @@ def state_versions() -> dict[str, str]:
     return {
         "activities": f"{snapshot.get('synced_at') or ''}:{len(snapshot.get('recent_activities', [])) if isinstance(snapshot.get('recent_activities'), list) else 0}",
         "performance": f"{get_kv('last_performance_refresh_at') or snapshot.get('synced_at') or ''}",
+        "garmin": f"{get_kv('last_garmin_sync_at') or ''}",
         "chat": f"{message['latest']}:{message['count']}",
         "library": f"{library['latest']}:{library['count']}",
         "checkins": f"{checkins['latest']}:{checkins['count']}",

@@ -240,6 +240,7 @@ function changedSyncAreas(nextVersions) {
   const areaMap = {
     activities: ["activities"],
     performance: ["performance"],
+    garmin: ["performance"],
     chat: ["chat"],
     library: ["library", "plan"],
     checkins: ["feedback"],

@@ -947,6 +947,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(bootstrap["messages"], [])
         self.assertEqual(bootstrap["activities"], [])
         self.assertIn("activities", bootstrap["state_versions"])
+        self.assertIn("garmin", bootstrap["state_versions"])
         self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 20_000)
 
     def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
@@ -959,6 +960,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('areas.push("weather")', app)
         self.assertIn('fetch("/api/chat/stream"', app)
         self.assertIn('api("/api/chat/status")', app)
+        self.assertIn('garmin: ["performance"]', app)
         self.assertIn("function scrollChatToResponseStart()", app)
         self.assertNotIn("restoreInputOnError", app)
         self.assertIn('aria-label="Zum Ende des Chats springen"', index)
@@ -1320,19 +1322,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=145', index)
-        self.assertIn('/navigation.js?v=145', index)
-        self.assertIn('/state.js?v=145', index)
-        self.assertIn('/views.js?v=145', index)
-        self.assertIn('/forms.js?v=145', index)
-        self.assertIn('/components.js?v=145', index)
-        self.assertIn('/app.js?v=145', index)
-        self.assertIn('intervals-coach-v145', service_worker)
-        self.assertIn('"/navigation.js?v=145"', service_worker)
-        self.assertIn('"/state.js?v=145"', service_worker)
-        self.assertIn('"/views.js?v=145"', service_worker)
-        self.assertIn('"/forms.js?v=145"', service_worker)
-        self.assertIn('"/components.js?v=145"', service_worker)
+        self.assertIn('/api.js?v=146', index)
+        self.assertIn('/navigation.js?v=146', index)
+        self.assertIn('/state.js?v=146', index)
+        self.assertIn('/views.js?v=146', index)
+        self.assertIn('/forms.js?v=146', index)
+        self.assertIn('/components.js?v=146', index)
+        self.assertIn('/app.js?v=146', index)
+        self.assertIn('intervals-coach-v146', service_worker)
+        self.assertIn('"/navigation.js?v=146"', service_worker)
+        self.assertIn('"/state.js?v=146"', service_worker)
+        self.assertIn('"/views.js?v=146"', service_worker)
+        self.assertIn('"/forms.js?v=146"', service_worker)
+        self.assertIn('"/components.js?v=146"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('window.addEventListener("offline"', app)
@@ -1349,8 +1351,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=145'), index.index('/components.js?v=145'))
-        self.assertLess(index.index('/components.js?v=145'), index.index('/app.js?v=145'))
+        self.assertLess(index.index('/forms.js?v=146'), index.index('/components.js?v=146'))
+        self.assertLess(index.index('/components.js?v=146'), index.index('/app.js?v=146'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
 
@@ -2354,6 +2356,23 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["running_max_hr_bpm"]["value"], 194)
         self.assertEqual(result["weight_kg"]["source"], "Garmin Connect")
 
+    def test_garmin_max_heart_rate_survives_activity_deduplication(self):
+        garmin = [
+            {"activityType": "cycling", "startTimeLocal": "2026-08-29T07:00:00", "duration": 3600, "distance": 30000, "maxHR": 188},
+            {"activityType": "running", "startTimeLocal": "2026-08-29T08:00:00", "duration": 1800, "distance": 5000, "maxHR": 193},
+        ]
+        intervals = [
+            {"type": "Ride", "start_date_local": "2026-08-29T07:00:00", "moving_time": 3600, "distance": 30000},
+            {"type": "Run", "start_date_local": "2026-08-29T08:00:00", "moving_time": 1800, "distance": 5000},
+        ]
+        kept, skipped = server.filter_garmin_activities(garmin, intervals)
+        self.assertEqual(skipped, 2)
+        self.assertEqual(kept, [])
+        metrics = server.garmin_performance_metrics({"activities": kept, "sport_max_hr": server.garmin_activity_max_hr(garmin)})
+        self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
+        self.assertEqual(metrics["running_max_hr_bpm"]["value"], 193)
+        self.assertEqual(metrics["cycling_max_hr_bpm"]["source"], "Garmin Connect")
+
     def test_garmin_threshold_metrics_are_used_without_confusing_ftp_and_eftp(self):
         today = server.local_now().date().isoformat()
         server.set_kv("garmin_snapshot", json.dumps({
@@ -2380,10 +2399,16 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["bike_threshold_hr_bpm"]["value"], 171)
         self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 176)
 
+    def test_garmin_threshold_pace_accepts_speed_alias_and_clock_format(self):
+        for key, value, expected in (("speedInMetersPerSecond", 3.8, 263), ("thresholdPace", "4:27", 267)):
+            metrics = server.garmin_performance_metrics({"running_threshold": {key: value}})
+            self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], expected)
+            self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["source"], "Garmin Connect")
+
     def test_garmin_recovery_values_take_precedence_and_keep_provenance(self):
         today = server.local_now().date().isoformat()
         server.set_kv("garmin_snapshot", json.dumps({
-            "sleep": [{"calendarDate": today, "sleepTimeSeconds": 28800, "sleepScore": 91}],
+            "sleep": [{"id": "sleep-wrapper", "dailySleepDTO": {"calendarDate": today, "sleepTimeSeconds": 28800, "sleepScore": 91}}],
             "resting_hr": [{"calendarDate": today, "restingHeartRate": 49}],
             "hrv": [{"calendarDate": today, "lastNightAvg": 63}],
         }))
@@ -5074,16 +5099,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=145"', source)
-        self.assertIn('"/navigation.js?v=145"', source)
-        self.assertIn('"/state.js?v=145"', source)
-        self.assertIn('"/views.js?v=145"', source)
-        self.assertIn('"/forms.js?v=145"', source)
-        self.assertIn('"/components.js?v=145"', source)
+        self.assertIn('"/api.js?v=146"', source)
+        self.assertIn('"/navigation.js?v=146"', source)
+        self.assertIn('"/state.js?v=146"', source)
+        self.assertIn('"/views.js?v=146"', source)
+        self.assertIn('"/forms.js?v=146"', source)
+        self.assertIn('"/components.js?v=146"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=145"', source)
-        self.assertIn('"/icon.svg?v=145"', source)
-        self.assertIn('"/styles.css?v=145"', source)
+        self.assertIn('"/app.js?v=146"', source)
+        self.assertIn('"/icon.svg?v=146"', source)
+        self.assertIn('"/styles.css?v=146"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -5844,7 +5869,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=145', index)
+        self.assertIn('v=146', index)
 
     def test_library_bulk_local_actions_preview_diff_and_hash_conflict(self):
         first = server.create_local_workout_library_entry({
@@ -5963,8 +5988,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("function runLibraryBulkRemoteSync()", app)
         self.assertIn("expected_payload_hash", (server.PUBLIC_DIR.parent / "server.py").read_text(encoding="utf-8"))
         self.assertIn("librarySelection", state)
-        self.assertIn("intervals-coach-v145", worker)
-        self.assertIn("/app.js?v=145", index)
+        self.assertIn("intervals-coach-v146", worker)
+        self.assertIn("/app.js?v=146", index)
 
 if __name__ == "__main__":
     unittest.main()
