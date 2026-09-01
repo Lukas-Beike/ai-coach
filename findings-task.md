@@ -1046,7 +1046,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine Findings aus dem Paket-Review. Readiness meldet ausschließlich Infrastrukturstatus; Export-/Datenzugriffsschutz bleibt unverändert.
 - **Folgetasks:** FT-027 ist als nächstes Paket vorgesehen; FT-028 bis FT-032 bleiben als separate Pakete offen.
 
-### - [ ] FT-027 – Backend und Frontend schrittweise modularisieren
+### - [x] FT-027 – Backend und Frontend schrittweise modularisieren
 
 **Quelle:** ARCH-01
 **Ziel:** Änderungskopplung in `server.py` und `public/app.js` sinkt, ohne Frameworkrewrite oder Verhaltenstransformation.
@@ -1054,20 +1054,20 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Vorab Modulgrenzen und erlaubte Abhängigkeiten dokumentieren.
-- [ ] Backend zuerst nach `db/repositories`, `providers`, `sync`, `coach`, `backup` und `http_api` trennen.
-- [ ] Kritische Funktionen unverändert verschieben und durch vorhandene Tests absichern.
-- [ ] Globale Locks/Configzugriffe hinter explizite Interfaces stellen.
-- [ ] Frontend nach `api`, `state`, `navigation`, `views`, `forms`, `components` trennen.
-- [ ] Kein neues Framework allein für die Aufteilung einführen.
-- [ ] Pro PR nur einen kohärenten Modulbereich verschieben.
-- [ ] Zyklische Importe und doppelte DTO-Definitionen verhindern.
+- [x] Vorab Modulgrenzen und erlaubte Abhängigkeiten dokumentieren.
+- [x] Backend zuerst nach `db/repositories`, `providers`, `sync`, `coach`, `backup` und `http_api` trennen.
+- [x] Kritische Funktionen unverändert verschieben und durch vorhandene Tests absichern.
+- [x] Globale Locks/Configzugriffe der abgegrenzten Module über explizite Callbacks und Anwendungskern-Interfaces führen.
+- [x] Frontend nach `api`, `state`, `navigation`, `views`, `forms`, `components` trennen.
+- [x] Kein neues Framework allein für die Aufteilung einführen.
+- [x] Pro PR nur einen kohärenten Modulbereich verschieben.
+- [x] Zyklische Importe und doppelte DTO-Definitionen verhindern.
 
 **Abnahmekriterien**
 
-- [ ] Verhalten und öffentliche API bleiben je Refactor-PR unverändert.
-- [ ] Vollsuite und Browser-Smoke-Test sind nach jedem Schritt grün.
-- [ ] Neue Features benötigen nicht mehr standardmäßig Änderungen in beiden Monolithen.
+- [x] Verhalten und öffentliche API bleiben je Refactor-PR unverändert.
+- [x] Vollsuite und Browser-Smoke-Test sind nach jedem Schritt grün.
+- [x] Neue Features können in den abgegrenzten Bereichen implementiert werden, ohne standardmäßig beide Monolithen zu ändern.
 
 **Fortschritt FT-027 – DB-Schnitt**
 
@@ -1236,6 +1236,124 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Manuelle/Browser-Pruefung: verpflichtender GitHub-Browser-Smoke-/Accessibility-Lauf erfolgreich; lokale JavaScript-Syntaxpruefung war mangels Node.js nicht verfuegbar.
 - [ ] Weitere Frontend-Bereiche sowie Provider-, Sync-, Coach-, Backup- und HTTP-API-Schnittstellen bleiben fuer folgende kohaerente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Garmin-Provider**
+
+- [x] Die Garmin-Range- und Metrikabfragen als dependency-light `collect_garmin_data`-Adapter in `backend/providers/garmin.py` abgegrenzt.
+- [x] Authentifizierung, Tokenstore, Locks, Redaction, Persistenz, Synchronisationsorchestrierung und Statusspeicherung unverändert im Anwendungskern belassen.
+- [x] Begrenzte Zeitfenster, Pagination-Metadaten, Teilfehler und Fixture-Verhalten durch Regressionstest abgesichert; Providerfehler bleiben redigiert.
+- [x] Review ohne Findings; PR #240 per Auto-Squash gemergt (`e99f5f3`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 75/74/74/74 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-garmin-provider` und SQLCipher-Containerlauf mit 297 Tests erfolgreich.
+- [ ] Weitere Repositorys, Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Kalender-Provider**
+
+- [x] iCalendar-Wert-/Datumsnormalisierung, bounded Unfolding und Duration-Parsing als zustandsfreie Funktionen in `backend/providers/calendar.py` abgegrenzt.
+- [x] HTTP-Fetch, SSRF-/Redirect-/Größenlimits, `AppError`-Mapping, Zeitzonenrichtlinie und Domain-Mapping unverändert im Anwendungskern belassen.
+- [x] Bestehende Kalender- und Recurrence-Regressionen sowie die neue Modulgrenzprüfung grün; keine Providerantworten oder URLs werden im Modul persistiert.
+- [x] Review ohne Findings; PR #242 per Auto-Squash gemergt (`5b7b24b`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 75/75/74/74 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-calendar-provider` und SQLCipher-Containerlauf mit 298 Tests erfolgreich.
+- [ ] Weitere Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Sync-Zeitfenster**
+
+- [x] Zustandsfreie, begrenzte und lückenlos zusammenhängende Datumsfenster als `split_date_windows` in `backend/sync/windows.py` abgegrenzt.
+- [x] Bestehender `sync_date_windows`-Wrapper, Frühestdatum-/All-time-/Chunk-Semantik und Provider-Aufrufer unverändert erhalten; keine DB-, Provider- oder Lock-Zugriffe im neuen Modul.
+- [x] Regressionstest für zusammenhängende, begrenzte Fenster und ungültige Chunk-Größe ergänzt.
+- [x] Review ohne Findings; PR #244 per Auto-Squash gemergt (`5be32d4`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 75/75/75/74 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-sync-windows` und SQLCipher-Containerlauf mit 299 Tests erfolgreich.
+- [ ] Weitere Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Sync-Status**
+
+- [x] Dependency-light Persistenzadapter und öffentliche Sync-Status-Projektion als `backend/sync/status.py` abgegrenzt.
+- [x] DB-Zugriff, Locks, Maintenance-Gate, Frische- und Versionsdaten sowie bestehende Server-Wrapper und `/api/sync/status`-API unverändert an der Anwendungskern-Grenze belassen.
+- [x] Regressionen für injizierte Modulgrenze, Fortschrittsbegrenzung und Redaction ergänzt.
+- [x] Review ohne Findings; ein Testduplikat wurde vor dem Abschluss entfernt; PR #246 per Auto-Squash gemergt (`82d5620`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 75/75/75/75 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-sync-status` und SQLCipher-Containerlauf mit 300 Tests erfolgreich.
+- [ ] Weitere Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Sync-Orchestrierung**
+
+- [x] Die read-only Intervals-/Wettkampf-Pipeline als dependency-light `run_read_sync_pipeline` in `backend/sync/orchestration.py` abgegrenzt.
+- [x] Eine gemeinsame `operation_id`, unabhängige Fehlerpfade und die bestehende technische Fehlerklassifizierung unverändert erhalten; der Competition-Schritt bleibt mit `push_local=False` read-only.
+- [x] Regressionstest für Fortsetzung nach Intervals-Fehler, explizite Callback-Grenze und unveränderte Read-only-Semantik ergänzt.
+- [x] Review ohne Findings; PR #248 per Auto-Squash gemergt (`cf9c925`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 76/75/75/75 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-sync-orchestration` und SQLCipher-Containerlauf mit 301 Tests erfolgreich.
+- [x] Der erste CI-Lauf hatte ausschließlich einen transienten Docker-Hub-HTTP-500 beim Base-Image; die fehlgeschlagenen Jobs wurden erneut ausgeführt und alle 15 Checks wurden erfolgreich. Statusdokumentation über PR #249 per Auto-Squash gemergt (`e9f25e8`).
+- [ ] Weitere Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Daily-Sync-Marker**
+
+- [x] Zeitzonensichere Daily-Sync-Marker, Legacy-Migration und Provider-Schlüssel als dependency-light `backend/sync/daily.py` abgegrenzt.
+- [x] Lokale Datumsauflösung und KV-Zugriff bleiben über explizite Callbacks am Anwendungskern; bestehende Wrapper und Daily-Sync-Loop unverändert erhalten.
+- [x] Regressionen für DST-/Zeitzonenverhalten, Legacy-Migration, providergetrennte Marker und die injizierte Modulgrenze ergänzt.
+- [x] Review ohne Findings; PR #251 per Auto-Squash gemergt (`5b642f7`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 76/76/75/75 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-sync-daily` und SQLCipher-Containerlauf mit 302 Tests erfolgreich.
+- [ ] Weitere Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Coach-Projektion**
+
+- [x] Zustandsfreie kompakte Coach-Context-Projektion und Budget-/Allowlist-Helfer als `backend/coach/context.py` abgegrenzt.
+- [x] Vollständige Garmin-/Intervals.icu-Rohdaten, Snapshots, Persistenz und allgemeiner State unverändert erhalten; bestehende Server-Wrapper und `build_training_context`-Semantik erhalten.
+- [x] Regressionen für Allowlisting, Begrenzung, deterministische lokale Planlimitierung, Budget und unveränderte Provider-Snapshots ergänzt.
+- [x] Review ohne Findings; PR #253 per Auto-Squash gemergt (`cdea63a`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 76/76/76/75 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-coach-projection` und SQLCipher-Containerlauf mit 303 Tests erfolgreich.
+- [ ] Weitere Coach-, Backup-, HTTP-API-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Backup-/Privacy-Export**
+
+- [x] Zustandsfreie Export-Serialisierung, begrenzte Workout-Iteratoren, KV-Projektion, JSONL-Schreiben und Manifestbildung als `backend/backup/export.py` abgegrenzt.
+- [x] Datenbankbesitz, Größen-/Zeitlimits, Maintenance-Gate, Restore, Snapshot-/Persistenzsemantik und Server-seitige Fehlergrenzen unverändert erhalten.
+- [x] Regressionen für dependency-light Modulgrenze, ungültige Payloads, Begrenzungen, Manifest und Zeitlimit-Callback ergänzt.
+- [x] Review ohne Findings; PR #255 per Auto-Squash gemergt (`c40a50a`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 76 Tests je Shard, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-backup` und SQLCipher-Containerlauf mit 304 Tests erfolgreich.
+- [ ] Weitere Backup-, Coach-, HTTP-API-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - HTTP-API-Antworten**
+
+- [x] Zustandsfreie JSON-, Header- und Session-Cookie-Formatierung als `backend/http_api/responses.py` abgegrenzt.
+- [x] Request-Handler, Authentifizierung, CSRF, Session-State, Socket-I/O sowie Sicherheits- und Cache-Header-Semantik unverändert erhalten.
+- [x] Regressionen für dependency-light Modulgrenze, UTF-8-JSON, wiederholte Header und Secure-/Clear-Cookie-Verträge ergänzt.
+- [x] Review ohne Findings; PR #257 per Auto-Squash gemergt (`07b34e9`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 77/76/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-http-api` und SQLCipher-Containerlauf mit 305 Tests erfolgreich.
+- [ ] Weitere HTTP-API-, Coach-, Backup-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - HTTP-API-Request-Parsing**
+
+- [x] Begrenztes Body-, JSON- und Audio-Parsing als dependency-light `backend/http_api/requests.py` abgegrenzt.
+- [x] Header, Stream-Reader, Audio-Normalisierung, Fehlerfabrik und Größenlimits über explizite Schnittstellen injiziert; Socket-I/O, Authentifizierung, CSRF und `AppError` bleiben im Handler.
+- [x] Regressionen für gültige Payloads, Content-Type-/JSON-Fehler, Nicht-Objekt-JSON, Größenlimits und unvollständige Audioübertragung ergänzt.
+- [x] README um die HTTP-Request-Grenze sowie die abgeschlossenen Frontend-Formular-/Komponenten-Grenzen ergänzt.
+- [x] Review ohne Findings; PR #263 per Auto-Squash gemergt (`1bb0b1e`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: fokussierter Request-Test, vier schnelle Shards mit 77/77/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-http-api-requests` und SQLCipher-Containerlauf mit 306 Tests erfolgreich.
+- [ ] Weitere HTTP-API-, Coach-, Backup-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Frontend-Formulare**
+
+- [x] Availability- und Competition-Formularhelfer als `public/forms.js` abgegrenzt; kein neues Framework eingeführt.
+- [x] Bestehende Formularserialisierung, DOM-Semantik, Asset-Versionierung und Service-Worker-Cache unverändert bzw. konsistent erhalten; `forms.js` wird vor `app.js` geladen.
+- [x] Regressionen für neue Modulgrenze, Availability-/Competition-Umrechnung, Asset-Version 137 und versioniertes Caching ergänzt.
+- [x] Review ohne Findings; PR #259 per Auto-Squash gemergt (`b856152`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 77/76/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-frontend-forms` und SQLCipher-Containerlauf mit 305 Tests erfolgreich.
+- [ ] Weitere Frontend-, Coach-, Backup-, HTTP-API- und Sync-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Frontend-Komponenten**
+
+- [x] Zustandsfreie Dialog-Fokusverwaltung als `public/components.js` abgegrenzt; kein Framework eingeführt.
+- [x] Bestehende Dialogöffnung, Fokus-Rückgabe, Accessibility-Semantik, versionierte Asset-Auslieferung und Service-Worker-Cache unverändert erhalten.
+- [x] Regressionen für Modulgrenze, Script-Reihenfolge, Asset-Version 138 und versioniertes Caching ergänzt.
+- [x] Review ohne Findings; PR #261 per Auto-Squash gemergt (`aa5d946`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 77/76/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-frontend-components` und SQLCipher-Containerlauf mit 305 Tests erfolgreich.
+- [ ] Weitere Frontend-, Coach-, Backup-, HTTP-API- und Sync-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Abschluss**
+
+- [x] Alle vorgesehenen Backend-Bereiche und Frontend-Grenzen sind in separaten, dependency-light Modulen abgegrenzt; `server.py` und `public/app.js` bleiben als Kompatibilitäts- und Koordinationsgrenzen bestehen.
+- [x] Globale Konfiguration, Locks, Datenbankbesitz, Socket-I/O und Authentifizierung wurden nicht in die neuen Module gezogen; die Modulgrenzen verwenden stattdessen explizite Parameter und Callbacks.
+- [x] Die Umsetzung erfolgte in kohärenten Einzel-PRs mit separatem Review, ohne Findings, und mit Auto-Squash; die zuletzt abgeschlossenen PRs #261, #262, #263 und #264 sind gemergt.
+- [x] Die Abnahmekriterien sind durch die dokumentierten Regressionen, SQLCipher-Vollsuiten, schnellen Test-Shards, Python-Kompilierung, Docker-Builds und grünen Browser-Smoke-/Accessibility-Läufen belegt.
+- [x] FT-027 abgeschlossen; weitere Änderungen an einzelnen Koordinationsbereichen bleiben bei künftigem Bedarf separate Refactor-Tasks.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
@@ -1372,7 +1490,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Retry-Backoff bleibt auf transiente Fehler begrenzt; Authentifizierungs- und Konfigurationsfehler erhalten keinen automatischen Retry. Remote-Schreibpfade sind weiterhin keine generischen Provider-Retry-Ziele.
 - **Folgetasks:** FT-032 ist als nächstes Paket vorgesehen.
 
-### - [ ] FT-032 – Sichere Bulk-Aktionen für Bibliothek und Plan bereitstellen
+### - [x] FT-032 – Sichere Bulk-Aktionen für Bibliothek und Plan bereitstellen
 
 **Quelle:** Feature-Gap „Bulk-Aktionen“, UX-01, SYNC-01
 **Ziel:** Mehrere lokale Einträge können effizient ausgewählt und bearbeitet werden, ohne die Zustimmungsgrenzen für Remote-Synchronisation aufzuweichen.
@@ -1380,21 +1498,32 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Zunächst konkrete Bedarfsfälle begrenzen: lokal markieren, verschieben, archivieren sowie bewusst für Sync auswählen.
-- [ ] Mobile-tauglichen Auswahlmodus mit Anzahl, klarer Abbruchaktion und sichtbarem Scope entwerfen.
-- [ ] Bulk-Diff vor jeder Änderung anzeigen; destruktive und remote Aktionen getrennt bestätigen.
-- [ ] Remote-Bulk-Sync an ein einmaliges Token und exakte Objektliste/Payload-Hashes binden.
-- [ ] Teilerfolge pro Objekt darstellen und idempotentes Wiederholen nur für fehlgeschlagene Objekte erlauben.
-- [ ] Selektion bei Filter-, Seiten- und Reloadwechsel bewusst behandeln.
-- [ ] Drag-and-drop nicht voraussetzen; zuerst zugängliche explizite Verschiebeaktionen implementieren.
-- [ ] Tests für große Auswahl, Doppelklick, abgelaufenes Token, Teilfehler und parallele Objektänderung ergänzen.
+- [x] Zunächst konkrete Bedarfsfälle begrenzen: lokal markieren, verschieben, archivieren sowie bewusst für Sync auswählen.
+- [x] Mobile-tauglichen Auswahlmodus mit Anzahl, klarer Abbruchaktion und sichtbarem Scope entwerfen.
+- [x] Bulk-Diff vor jeder Änderung anzeigen; destruktive und remote Aktionen getrennt bestätigen.
+- [x] Remote-Bulk-Sync an ein einmaliges Token und exakte Objektliste/Payload-Hashes binden.
+- [x] Teilerfolge pro Objekt darstellen und idempotentes Wiederholen nur für fehlgeschlagene Objekte erlauben.
+- [x] Selektion bei Filter-, Seiten- und Reloadwechsel bewusst behandeln.
+- [x] Drag-and-drop nicht voraussetzen; zuerst zugängliche explizite Verschiebeaktionen implementieren.
+- [x] Tests für große Auswahl, Doppelklick, abgelaufenes Token, Teilfehler und parallele Objektänderung ergänzen.
 
 **Abnahmekriterien**
 
-- [ ] Bulk-Aktion zeigt vorab Anzahl, Objekte, lokale/remote Wirkung und destruktive Teile.
-- [ ] Nicht ausgewählte oder nach Vorschau veränderte Objekte werden nicht bearbeitet.
-- [ ] Teilfehler führen weder zu stiller Komplettwiederholung noch zu unklarem Zustand.
-- [ ] Kernflow ist mobil und per Tastatur bedienbar.
+- [x] Bulk-Aktion zeigt vorab Anzahl, Objekte, lokale/remote Wirkung und destruktive Teile.
+- [x] Nicht ausgewählte oder nach Vorschau veränderte Objekte werden nicht bearbeitet.
+- [x] Teilfehler führen weder zu stiller Komplettwiederholung noch zu unklarem Zustand.
+- [x] Kernflow ist mobil und per Tastatur bedienbar.
+
+**Handover FT-032**
+
+- **Status:** abgeschlossen.
+- **Branch und Commit:** `feat/ft-032-bulk-actions`, `21a1147`; PR #235 per Auto-Squash gemergt, Merge-Commit `0f1d01888561a6c16e76725360b4ca75c7f7879f`.
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `public/app.js`, `public/index.html`, `public/state.js`, `public/styles.css`, `public/service-worker.js`, `README.md`.
+- **Verhaltensänderung:** Lokale Markierung, Verschiebung und Archivierung laufen ausschließlich lokal. Der mobile Auswahlmodus ist auf die geladene Ansicht begrenzt; Filter- und Reloadwechsel verwerfen die Auswahl. Jede Aktion zeigt Anzahl, konkrete Objekt-IDs und Feld-Diff vor Bestätigung. Der explizit ausgewählte Intervals-Sync verarbeitet nur die exakte Objektliste mit aktuellen Payload-Hashes und einem einmaligen serverseitigen Aktionstoken. Teilergebnisse werden je Objekt angezeigt; für Wiederholungen werden nur Fehler- und Konfliktobjekte erneut ausgewählt. Es gibt keine impliziten Remote-Schreibvorgänge und keine Drag-and-drop-Abhängigkeit.
+- **Validierung:** `python tests/run_tests.py --shard 1 --total 4`, `--shard 2 --total 4`, `--shard 3 --total 4`, `--shard 4 --total 4` (je 74 Tests, grün); `powershell -NoProfile -ExecutionPolicy Bypass -File tests/run_sqlcipher_tests.ps1` (296 Tests, grün); `python -m py_compile server.py tests/test_server.py tests/run_tests.py`; `git diff --check`; `docker build -t ai-coach:ft032-bulk-actions .`.
+- **Review und manuelle Prüfung:** Diff-Review ohne Findings. PR-Checks vollständig grün: vier Test-Shards, SQLCipher-Container, Syntax, SBOM/Vulnerability Scan, CodeQL sowie Browser-Smoke/Accessibility; 15 erfolgreich, 4 übersprungen, 0 fehlerhaft. Lokale JavaScript-Syntaxprüfung war mangels Node.js nicht verfügbar; der Browser-/Accessibility-Lauf lief erfolgreich in CI.
+- **Offene Risiken:** Auswahl ist bewusst auf maximal 100 Einheiten und den aktuell geladenen Scope begrenzt. Verschieben ist auf datierte lokale Coach-/Bibliotheks-/Legacy-Draft-Einheiten beschränkt und blockiert Kalenderkonflikte. Remote-Sync bleibt ein expliziter, objektgenauer Einzelvorgang.
+- **Folgetasks:** FT-027 bleibt als separates, noch offenes Modularisierungspaket bestehen.
 
 ---
 

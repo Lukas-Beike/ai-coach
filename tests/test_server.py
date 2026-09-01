@@ -971,8 +971,70 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(status["operation_id"], "operation-test")
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["progress"], 35)
+
+    def test_sync_status_projection_is_dependency_light(self):
+        from backend.sync.status import persist_sync_operation_state, project_sync_status
+
+        values = {}
+        persist_sync_operation_state(
+            "operation-test",
+            "running",
+            "fetching",
+            140,
+            "Daten werden gelesen",
+            "secret provider detail",
+            set_value=values.__setitem__,
+            redact=lambda value: f"redacted:{value}",
+        )
+        self.assertEqual(values["sync_operation_progress"], "100")
+        self.assertEqual(values["last_sync_error"], "redacted:secret provider detail")
+        status = project_sync_status(
+            running=True,
+            get_value=values.get,
+            state_versions={"activities": "v1"},
+            provider_freshness=[],
+            maintenance={"active": False, "running_operations": 0},
+        )
+        self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["state_versions"], {"activities": "v1"})
         self.assertNotIn("activities", json.dumps(status["message"]))
+
+    def test_read_sync_orchestration_is_dependency_light_and_read_only(self):
+        from backend.sync.orchestration import run_read_sync_pipeline
+
+        calls = []
+        failures = []
+
+        class Scope:
+            def __enter__(self):
+                return {"operation_id": "operation-test", "trigger": "manual"}
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+        def observe(*args):
+            return Scope()
+
+        def intervals(*args, **kwargs):
+            calls.append(("intervals", args, kwargs))
+            raise RuntimeError("intervals failure")
+
+        def competitions(*args, **kwargs):
+            calls.append(("competitions", args, kwargs))
+
+        run_read_sync_pipeline(
+            "manual",
+            7,
+            "operation-input",
+            observe=observe,
+            sync_intervals=intervals,
+            sync_competitions=competitions,
+            record_failure=lambda scope, provider, phase, error: failures.append((scope, provider, phase, str(error))),
+        )
+
+        self.assertEqual([call[0] for call in calls], ["intervals", "competitions"])
+        self.assertEqual(calls[1][2], {"push_local": False, "operation_id": "operation-test"})
+        self.assertEqual(failures[0][1:], ("intervals", "sync", "intervals failure"))
 
     def test_start_sync_operation_claims_one_operation(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
@@ -1016,6 +1078,24 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.daily_sync_due("garmin", local_day))
         self.assertTrue(server.daily_sync_due("calendar", local_day))
 
+    def test_daily_sync_marker_module_is_dependency_light(self):
+        from backend.sync.daily import daily_sync_is_due, mark_daily_sync
+
+        values = {"last_sync_at": "2026-03-30T00:30:00+00:00"}
+        writes = []
+        local_date = lambda value: value[:10] if value else None
+        current = datetime(2026, 3, 30, 0, 30, tzinfo=timezone.utc)
+        legacy = {"intervals": "last_sync_at"}
+
+        self.assertFalse(daily_sync_is_due(
+            "intervals", current, legacy_keys=legacy, get_value=values.get,
+            set_value=lambda key, value: (values.__setitem__(key, value), writes.append((key, value))),
+            local_date=local_date,
+        ))
+        self.assertEqual(writes, [("daily_sync_intervals_local_date", "2026-03-30")])
+        mark_daily_sync("intervals", current, legacy_keys=legacy, set_value=values.__setitem__, local_date=local_date)
+        self.assertEqual(values["daily_sync_intervals_local_date"], "2026-03-30")
+
     def test_daily_sync_loop_uses_local_provider_markers(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
         loop = source[source.index("def daily_sync_loop"):source.index("def safe_garmin_sync")]
@@ -1023,6 +1103,140 @@ class CoachTests(unittest.TestCase):
         self.assertIn('daily_sync_due("garmin")', loop)
         self.assertIn('daily_sync_due("intervals")', loop)
         self.assertNotIn('[:10]', loop)
+
+    def test_coach_projection_helpers_are_dependency_light_and_bounded(self):
+        from backend.coach.context import (
+            bounded_coach_context_value,
+            compact_coach_activity,
+            compact_coach_local_planned_workouts,
+        )
+
+        select = lambda value, fields: {key: value[key] for key in fields if key in value}
+        activity = compact_coach_activity({"id": "a" * 300, "name": "n" * 300, "secret": "must not pass"}, select=select)
+        self.assertEqual(len(activity["id"]), 200)
+        self.assertNotIn("secret", activity)
+        workouts = compact_coach_local_planned_workouts(
+            [{"id": "2", "date": "2026-09-02", "name": "later"}, {"id": "1", "date": "2026-09-01", "name": "earlier"}],
+            limit=1,
+            select=select,
+        )
+        self.assertEqual([item["id"] for item in workouts], ["1"])
+        self.assertLessEqual(len(json.dumps(bounded_coach_context_value({"text": "x" * 1000}, 100), ensure_ascii=False, separators=(",", ":"))), 100)
+
+    def test_backup_export_helpers_are_dependency_light_and_preserve_bounds(self):
+        from backend.backup import export as backup_export
+        from backend.backup.export import application_state, iter_workout_drafts, manifest, write_jsonl_rows
+
+        source = Path(backup_export.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("import server", source)
+
+        class Rows:
+            def execute(self, query):
+                if query.startswith("SELECT key, value FROM kv"):
+                    return [{"key": "visible", "value": "{\"enabled\":true}"}, {"key": "raw", "value": "not-json"}, {"key": "job_status", "value": "running"}]
+                if query.startswith("SELECT id, status"):
+                    return [{"id": "draft-1", "status": "local", "intervals_event_id": None, "error": None, "created_at": "2026-09-01", "updated_at": "2026-09-01", "payload": "{\"name\":\"Easy\"}"}]
+                raise AssertionError(query)
+
+        db = Rows()
+        self.assertEqual(application_state(db, excluded_keys={"profile"}), {"raw": "not-json", "visible": {"enabled": True}})
+        self.assertEqual(list(iter_workout_drafts(db))[0]["name"], "Easy")
+
+        archive_buffer = BytesIO()
+        with zipfile.ZipFile(archive_buffer, "w") as archive:
+            write_jsonl_rows(archive, "rows.jsonl", [{"id": "one"}], 10, now=lambda: 1, timeout_error=lambda: RuntimeError("timeout"))
+            self.assertEqual(manifest(["rows.jsonl", "profile.json"], schema_version=4, exported_at="now", format_version=1, jsonl_files={"rows.jsonl"})["categories"], ["profile", "rows"])
+        with self.assertRaises(RuntimeError):
+            with zipfile.ZipFile(BytesIO(), "w") as archive:
+                write_jsonl_rows(archive, "rows.jsonl", [{"id": "one"}], 0, now=lambda: 1, timeout_error=lambda: RuntimeError("timeout"))
+
+    def test_http_response_helpers_are_dependency_light_and_preserve_headers(self):
+        from backend.http_api import responses
+
+        source = Path(responses.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("import server", source)
+        self.assertEqual(responses.json_bytes({"text": "ä"}), b'{"text": "\xc3\xa4"}')
+        self.assertEqual(
+            list(responses.header_items({"Set-Cookie": ["one", "two"], "X-Test": "value"})),
+            [("Set-Cookie", "one"), ("Set-Cookie", "two"), ("X-Test", "value")],
+        )
+        self.assertEqual(
+            responses.response_headers("application/json", 12),
+            (("Content-Type", "application/json"), ("Content-Length", "12"), ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "DENY")),
+        )
+        self.assertEqual(
+            responses.session_cookies("session", "csrf", "token", "csrf-token", ttl_seconds=60, secure=True),
+            ["session=token; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=60", "csrf=csrf-token; Path=/; SameSite=Strict; Secure; Max-Age=60"],
+        )
+        self.assertEqual(
+            responses.session_cookies("session", "csrf", "token", "csrf-token", ttl_seconds=60, clear=True),
+            ["session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", "csrf=; Path=/; SameSite=Strict; Max-Age=0"],
+        )
+
+    def test_http_request_helpers_are_dependency_light_and_preserve_limits(self):
+        from backend.http_api import requests
+
+        source = Path(requests.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("import server", source)
+        headers = {"Content-Length": "7"}
+        self.assertEqual(requests.read_body(headers, BytesIO(b"payload").read, 10, error=server.AppError), b"payload")
+        self.assertEqual(
+            requests.read_json(
+                {"Content-Type": "application/json; charset=utf-8", "Content-Length": "12"},
+                BytesIO(b'{"ok": true}').read,
+                100,
+                error=server.AppError,
+            ),
+            {"ok": True},
+        )
+        self.assertEqual(
+            requests.read_audio_body(
+                {"Content-Type": "audio/webm;codecs=opus", "Content-Length": "5"},
+                BytesIO(b"audio").read,
+                allowed_types={"audio/webm": ".webm"},
+                normalize_type=lambda value: value.split(";", 1)[0],
+                max_bytes=10,
+                error=server.AppError,
+            ),
+            b"audio",
+        )
+        with self.assertRaises(server.AppError) as oversized:
+            requests.read_body({"Content-Length": "11"}, BytesIO(b"x" * 11).read, 10, error=server.AppError)
+        self.assertEqual(oversized.exception.status, 413)
+        with self.assertRaises(server.AppError) as malformed:
+            requests.read_json(
+                {"Content-Type": "application/json", "Content-Length": "9"},
+                BytesIO(b"not-json!").read,
+                100,
+                error=server.AppError,
+            )
+        self.assertEqual(malformed.exception.status, 400)
+        with self.assertRaises(server.AppError) as wrong_type:
+            requests.read_json(
+                {"Content-Type": "text/plain", "Content-Length": "7"},
+                BytesIO(b'{"ok":1}').read,
+                100,
+                error=server.AppError,
+            )
+        self.assertEqual(wrong_type.exception.status, 415)
+        with self.assertRaises(server.AppError) as non_object:
+            requests.read_json(
+                {"Content-Type": "application/json", "Content-Length": "2"},
+                BytesIO(b"[]").read,
+                100,
+                error=server.AppError,
+            )
+        self.assertEqual(non_object.exception.status, 400)
+        with self.assertRaises(server.AppError) as incomplete:
+            requests.read_audio_body(
+                {"Content-Type": "audio/webm", "Content-Length": "5"},
+                BytesIO(b"aud").read,
+                allowed_types={"audio/webm": ".webm"},
+                normalize_type=lambda value: value.split(";", 1)[0],
+                max_bytes=10,
+                error=server.AppError,
+            )
+        self.assertEqual(incomplete.exception.status, 400)
 
     def test_maintenance_gate_blocks_new_operations_and_waits_for_running_one(self):
         gate = server.MaintenanceGate()
@@ -1074,20 +1288,26 @@ class CoachTests(unittest.TestCase):
         service_worker = (Path(__file__).resolve().parents[1] / "public" / "service-worker.js").read_text(encoding="utf-8")
         state = (Path(__file__).resolve().parents[1] / "public" / "state.js").read_text(encoding="utf-8")
         views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(encoding="utf-8")
+        forms = (Path(__file__).resolve().parents[1] / "public" / "forms.js").read_text(encoding="utf-8")
+        components = (Path(__file__).resolve().parents[1] / "public" / "components.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=136', index)
-        self.assertIn('/navigation.js?v=136', index)
-        self.assertIn('/state.js?v=136', index)
-        self.assertIn('/views.js?v=136', index)
-        self.assertIn('/app.js?v=136', index)
-        self.assertIn('intervals-coach-v136', service_worker)
-        self.assertIn('"/navigation.js?v=136"', service_worker)
-        self.assertIn('"/state.js?v=136"', service_worker)
-        self.assertIn('"/views.js?v=136"', service_worker)
+        self.assertIn('/api.js?v=138', index)
+        self.assertIn('/navigation.js?v=138', index)
+        self.assertIn('/state.js?v=138', index)
+        self.assertIn('/views.js?v=138', index)
+        self.assertIn('/forms.js?v=138', index)
+        self.assertIn('/components.js?v=138', index)
+        self.assertIn('/app.js?v=138', index)
+        self.assertIn('intervals-coach-v138', service_worker)
+        self.assertIn('"/navigation.js?v=138"', service_worker)
+        self.assertIn('"/state.js?v=138"', service_worker)
+        self.assertIn('"/views.js?v=138"', service_worker)
+        self.assertIn('"/forms.js?v=138"', service_worker)
+        self.assertIn('"/components.js?v=138"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('window.addEventListener("offline"', app)
@@ -1095,6 +1315,18 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn('const state = {', app)
         self.assertIn('function markdownToHtml(markdown)', views)
         self.assertNotIn('function markdownToHtml(markdown)', app)
+        self.assertIn('function availabilityInput(', forms)
+        self.assertIn('function contextField(', forms)
+        self.assertIn('function collectCompetitions()', forms)
+        self.assertNotIn('function availabilityInput(', app)
+        self.assertNotIn('function contextField(', app)
+        self.assertNotIn('function collectCompetitions()', app)
+        self.assertIn('function showAccessibleDialog(', components)
+        self.assertIn('function restoreDialogFocus(', components)
+        self.assertNotIn('function showAccessibleDialog(', app)
+        self.assertNotIn('function restoreDialogFocus(', app)
+        self.assertLess(index.index('/forms.js?v=138'), index.index('/components.js?v=138'))
+        self.assertLess(index.index('/components.js?v=138'), index.index('/app.js?v=138'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
 
@@ -1130,6 +1362,7 @@ class CoachTests(unittest.TestCase):
 
     def test_more_segments_group_settings_and_localize_sensitive_inputs(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        forms = (Path(__file__).resolve().parents[1] / "public" / "forms.js").read_text(encoding="utf-8")
         navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
         for segment in ("profile", "connections", "coach", "privacy", "operations"):
@@ -1138,8 +1371,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function moreSegmentFromRoute(route = state.route)', navigation)
         self.assertIn('function renderMoreSegments(segment = moreSegmentFromRoute())', app)
         self.assertIn('formData.getAll("sports")', app)
-        self.assertIn('hours * 3600 + minutes * 60', app)
-        self.assertIn('Math.round(kilometers * 1000)', app)
+        self.assertIn('hours * 3600 + minutes * 60', forms)
+        self.assertIn('Math.round(kilometers * 1000)', forms)
         self.assertIn('name="sports" multiple', index)
         self.assertIn('name="timezone" autocomplete="off"', index)
         self.assertIn('id="profileContextNotice"', index)
@@ -1360,6 +1593,19 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(events[3]["training_relevant"])
         self.assertFalse(events[4]["no_intensity"])
         self.assertTrue(events[4]["training_relevant"])
+
+    def test_calendar_provider_primitives_unfold_and_validate_without_server_dependency(self):
+        from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
+
+        payload = b"BEGIN:VCALENDAR\r\nDESCRIPTION:First\r\n continuation\r\nEND:VCALENDAR\r\n"
+        lines = unfold_ical(payload, max_bytes=1024, error=lambda status, message: ValueError(f"{status}: {message}"))
+
+        self.assertIn("DESCRIPTION:Firstcontinuation", lines)
+        self.assertEqual(parse_ics_value(r"Name\, with\; escaped\\text"), "Name, with; escaped\\text")
+        self.assertEqual(parse_ics_date("VALUE=DATE:20260901"), "2026-09-01")
+        self.assertEqual(ical_duration("PT1H30M"), timedelta(hours=1, minutes=30))
+        with self.assertRaisesRegex(ValueError, "400"):
+            unfold_ical(b"BEGIN:VEVENT\r\nEND:VEVENT\r\n", max_bytes=1024, error=lambda status, message: ValueError(f"{status}: {message}"))
 
     def test_ical_parser_rejects_incomplete_and_unsupported_recurring_feeds(self):
         with self.assertRaises(server.AppError):
@@ -2527,6 +2773,60 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(request.call_args_list[1].args[3], headers)
         self.assertEqual(request.call_args_list[2].kwargs, {"headers": headers, "service": "intervals"})
 
+    def test_garmin_provider_collector_keeps_ranges_bounded_and_errors_redacted(self):
+        from backend.providers.garmin import collect_garmin_data
+
+        class FakeGarmin:
+            def get_sleep_daily(self, start, end):
+                return [{"date": start, "end": end}]
+
+            def get_hrv_data_range(self, start, end):
+                raise RuntimeError("secret provider detail")
+
+            def get_body_battery(self, start, end):
+                return [{"date": start, "battery": 80}]
+
+            def get_activities_by_date(self, start, end):
+                return [{"start": start, "end": end}]
+
+            def get_training_readiness(self, current):
+                return {"date": current, "score": 75}
+
+            def get_race_predictions(self):
+                return [{"race": "local fixture"}]
+
+            def get_max_metrics(self, current):
+                return {"date": current}
+
+            def get_weigh_ins(self, start, end):
+                return [{"date": end, "weight": 70}]
+
+        calls = []
+        statuses = []
+
+        def external_call(service, source, operation, details):
+            calls.append((service, source, details))
+            return operation()
+
+        result = collect_garmin_data(
+            FakeGarmin(),
+            [(date(2026, 8, 30), date(2026, 8, 31))],
+            start=date(2026, 8, 30),
+            today=date(2026, 8, 31),
+            synced_at="2026-09-01T00:00:00+00:00",
+            external_call=external_call,
+            redact=lambda _value: "[redacted]",
+            status=statuses.append,
+        )
+
+        self.assertEqual(result["start"], "2026-08-30")
+        self.assertEqual(result["end"], "2026-08-31")
+        self.assertEqual(len(result["activities"]), 1)
+        self.assertEqual(result["errors"], [{"source": "hrv", "message": "[redacted]"}])
+        self.assertFalse(result["provider_sync"]["pagination"]["hrv"]["complete"])
+        self.assertEqual(statuses, ["Garmin: Zeitraum 1/1 wird synchronisiert…"])
+        self.assertTrue(any(source == "weight" for _service, source, _details in calls))
+
     def test_intervals_collection_rejects_repeated_full_page(self):
         client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         page = [{"id": f"activity-{index}"} for index in range(500)]
@@ -3175,6 +3475,25 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.set_sync_period("garmin", -1), -1)
         self.assertEqual(server.sync_period("garmin"), -1)
         self.assertGreater(len(server.sync_date_windows(-1, date(2026, 8, 29))), 1)
+
+    def test_sync_window_helper_is_bounded_and_contiguous_without_app_globals(self):
+        from backend.sync.windows import split_date_windows
+
+        windows = split_date_windows(
+            5,
+            end_date=date(2026, 8, 29),
+            earliest_date=date(2020, 1, 1),
+            chunk_days=2,
+            all_days=-1,
+        )
+
+        self.assertEqual(windows, [
+            (date(2026, 8, 25), date(2026, 8, 26)),
+            (date(2026, 8, 27), date(2026, 8, 28)),
+            (date(2026, 8, 29), date(2026, 8, 29)),
+        ])
+        with self.assertRaises(ValueError):
+            split_date_windows(1, end_date=date(2026, 8, 29), earliest_date=date(2020, 1, 1), chunk_days=0, all_days=-1)
 
     def test_sync_intervals_uses_saved_period_when_not_explicitly_given(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
@@ -4485,13 +4804,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=136"', source)
-        self.assertIn('"/navigation.js?v=136"', source)
-        self.assertIn('"/state.js?v=136"', source)
-        self.assertIn('"/views.js?v=136"', source)
-        self.assertIn('"/app.js?v=136"', source)
-        self.assertIn('"/icon.svg?v=136"', source)
-        self.assertIn('"/styles.css?v=136"', source)
+        self.assertIn('"/api.js?v=138"', source)
+        self.assertIn('"/navigation.js?v=138"', source)
+        self.assertIn('"/state.js?v=138"', source)
+        self.assertIn('"/views.js?v=138"', source)
+        self.assertIn('"/forms.js?v=138"', source)
+        self.assertIn('"/components.js?v=138"', source)
+        self.assertIn('"/forms.js"', source)
+        self.assertIn('"/app.js?v=138"', source)
+        self.assertIn('"/icon.svg?v=138"', source)
+        self.assertIn('"/styles.css?v=138"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -5218,7 +5540,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=136', index)
+        self.assertIn('v=138', index)
 
     def test_library_bulk_local_actions_preview_diff_and_hash_conflict(self):
         first = server.create_local_workout_library_entry({
@@ -5314,8 +5636,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("function runLibraryBulkRemoteSync()", app)
         self.assertIn("expected_payload_hash", (server.PUBLIC_DIR.parent / "server.py").read_text(encoding="utf-8"))
         self.assertIn("librarySelection", state)
-        self.assertIn("intervals-coach-v136", worker)
-        self.assertIn("/app.js?v=136", index)
+        self.assertIn("intervals-coach-v138", worker)
+        self.assertIn("/app.js?v=138", index)
 
 if __name__ == "__main__":
     unittest.main()

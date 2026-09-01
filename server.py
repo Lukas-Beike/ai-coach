@@ -42,6 +42,42 @@ from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
+from backend.providers.garmin import collect_garmin_data
+from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
+from backend.sync.windows import split_date_windows
+from backend.sync.status import persist_sync_operation_state, project_sync_status
+from backend.sync.orchestration import run_read_sync_pipeline
+from backend.sync.daily import daily_marker_key, daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
+from backend.coach.context import (
+    COACH_ACTIVITY_FIELDS,
+    bounded_coach_context_sections as bounded_coach_context_sections_value,
+    bounded_coach_context_value as bounded_coach_context_value_value,
+    coach_context_json_size as coach_context_json_size_value,
+    coach_context_projection_meta as coach_context_projection_meta_value,
+    compact_coach_activity as compact_coach_activity_value,
+    compact_coach_local_planned_workout as compact_coach_local_planned_workout_value,
+    compact_coach_local_planned_workouts as compact_coach_local_planned_workouts_value,
+    compact_coach_planned_event as compact_coach_planned_event_value,
+)
+from backend.http_api.responses import (
+    header_items as response_header_items,
+    json_bytes as response_json_bytes,
+    response_headers,
+    session_cookies,
+)
+from backend.http_api.requests import (
+    read_audio_body as read_request_audio_body,
+    read_body as read_request_body,
+    read_json as read_request_json,
+)
+from backend.backup.export import (
+    application_state as export_application_state,
+    decode_payload as export_decode_payload,
+    iter_workout_drafts as export_workout_drafts,
+    iter_workout_library as export_workout_library,
+    manifest as export_manifest,
+    write_jsonl_rows as export_jsonl_rows,
+)
 
 try:
     from garminconnect import Garmin
@@ -68,16 +104,18 @@ STATIC_TARGETS = {
     "navigation.js": PUBLIC_DIR / "navigation.js",
     "state.js": PUBLIC_DIR / "state.js",
     "views.js": PUBLIC_DIR / "views.js",
+    "forms.js": PUBLIC_DIR / "forms.js",
+    "components.js": PUBLIC_DIR / "components.js",
     "styles.css": PUBLIC_DIR / "styles.css",
     "service-worker.js": PUBLIC_DIR / "service-worker.js",
     "manifest.webmanifest": PUBLIC_DIR / "manifest.webmanifest",
     "logo.png": PUBLIC_DIR / "logo.png",
     "icon.svg": PUBLIC_DIR / "icon.svg",
 }
-VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "app.js", "styles.css", "logo.png", "icon.svg"}
+VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.3.4"
+APP_VERSION = "1.4.0"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -2437,15 +2475,13 @@ def set_sync_period(source: str, value: Any) -> int:
 
 def sync_date_windows(days: int, end_date: date | None = None) -> list[tuple[date, date]]:
     """Split long/all-time syncs into API-safe date windows."""
-    newest = end_date or local_now().date()
-    oldest = SYNC_EARLIEST_DATE if days == ALL_SYNC_DAYS else newest - timedelta(days=max(1, days) - 1)
-    windows: list[tuple[date, date]] = []
-    cursor = oldest
-    while cursor <= newest:
-        window_end = min(newest, cursor + timedelta(days=SYNC_CHUNK_DAYS - 1))
-        windows.append((cursor, window_end))
-        cursor = window_end + timedelta(days=1)
-    return windows
+    return split_date_windows(
+        days,
+        end_date=end_date or local_now().date(),
+        earliest_date=SYNC_EARLIEST_DATE,
+        chunk_days=SYNC_CHUNK_DAYS,
+        all_days=ALL_SYNC_DAYS,
+    )
 
 
 def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
@@ -3038,72 +3074,24 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
                 extra={"event": "garmin_mfa_required", "context": {"service": "garmin", "operation": "login"}},
             )
             raise AppError(401, "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb des Servers eingerichtet werden.")
-        payload: dict[str, Any] = {"synced_at": utc_now(), "start": start.isoformat(), "end": today.isoformat(), "errors": []}
-        pagination: dict[str, dict[str, Any]] = {}
         set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
 
-        def fetch_range(key: str, fetch: Any, window_start: date, window_end: date) -> None:
-            stats = pagination.setdefault(key, {"windows": len(windows), "records": 0, "complete": True})
-            try:
-                value = external_call(
-                    "garmin",
-                    key,
-                    lambda: fetch(window_start.isoformat(), window_end.isoformat()),
-                    {"window_start": window_start.isoformat(), "window_end": window_end.isoformat()},
-                )
-                if isinstance(value, list):
-                    payload.setdefault(key, []).extend(value)
-                    stats["records"] = int(stats["records"]) + len(value)
-                elif value is not None and key not in payload:
-                    payload[key] = value
-            except Exception as exc:
-                stats["complete"] = False
-                stats["error"] = redact_text(str(exc))[:500]
-                payload["errors"].append({"source": key, "message": redact_text(str(exc))[:500]})
-                LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": key}}, exc_info=True)
-
-        for index, (window_start, window_end) in enumerate(windows, 1):
-            set_kv("garmin_sync_status", f"Garmin: Zeitraum {index}/{len(windows)} wird synchronisiert…")
-            fetch_range("sleep", client.get_sleep_daily, window_start, window_end)
-            fetch_range("hrv", client.get_hrv_data_range, window_start, window_end)
-            fetch_range("body_battery", client.get_body_battery, window_start, window_end)
-            fetch_range("activities", client.get_activities_by_date, window_start, window_end)
-        max_metrics_start = today - timedelta(days=89)
-        max_metrics_range = getattr(client, "get_max_metrics_range", None)
-        max_metrics_fetch = (
-            (lambda: max_metrics_range(max_metrics_start.isoformat(), today.isoformat()))
-            if callable(max_metrics_range)
-            else (lambda: client.get_max_metrics(today.isoformat()))
+        payload = collect_garmin_data(
+            client,
+            windows,
+            start=start,
+            today=today,
+            synced_at=utc_now(),
+            external_call=external_call,
+            redact=redact_text,
+            warn=lambda source, _message, exc: LOGGER.warning(
+                "Garmin data request failed",
+                extra={"event": "garmin_request_failed", "context": {"source": source}},
+                exc_info=(type(exc), exc, exc.__traceback__),
+            ),
+            status=lambda message: set_kv("garmin_sync_status", message),
         )
-        max_metrics_context = {
-            "window_start": max_metrics_start.isoformat(),
-            "window_end": today.isoformat(),
-            "range_supported": callable(max_metrics_range),
-        }
-        for key, fetch, details in (
-            ("readiness", lambda: client.get_training_readiness(today.isoformat()), {"date": today.isoformat()}),
-            ("race_predictions", client.get_race_predictions, None),
-            ("max_metrics", max_metrics_fetch, max_metrics_context),
-        ):
-            try:
-                payload[key] = external_call("garmin", key, fetch, details)
-            except Exception as exc:
-                payload["errors"].append({"source": key, "message": redact_text(str(exc))[:500]})
-                LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": key}}, exc_info=True)
-        weight_fetch = getattr(client, "get_weigh_ins", None) or getattr(client, "get_body_composition", None)
-        if callable(weight_fetch):
-            try:
-                weight_start = today - timedelta(days=89)
-                payload["weight"] = external_call(
-                    "garmin", "weight",
-                    lambda: weight_fetch(weight_start.isoformat(), today.isoformat()),
-                    {"window_start": weight_start.isoformat(), "window_end": today.isoformat()},
-                )
-            except Exception as exc:
-                payload["errors"].append({"source": "weight", "message": redact_text(str(exc))[:500]})
-                LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": "weight"}}, exc_info=True)
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
-        payload["provider_sync"] = {"pagination": pagination}
         canonical = latest_snapshot()
         payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
         append_garmin_performance_history(payload, previous)
@@ -3111,7 +3099,7 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
         set_kv("last_garmin_sync_at", payload["synced_at"])
         mark_daily_sync("garmin")
         set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
-        return {"status": "partial" if payload["errors"] else "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": pagination}
+        return {"status": "partial" if payload["errors"] else "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
         set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
@@ -3576,61 +3564,6 @@ def fetch_calendar_feed(url: str) -> bytes:
     raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.")
 
 
-def parse_ics_value(value: str) -> str:
-    return (
-        value.replace("\\N", "\n").replace("\\n", "\n")
-        .replace("\\,", ",").replace("\\;", ";").replace("\\\\", "\\")
-        .strip()
-    )
-
-
-def parse_ics_date(value: str) -> str | None:
-    raw = value.strip()
-    match = re.search(r"(\d{8})", raw)
-    if not match:
-        return None
-    try:
-        return date.fromisoformat(f"{match.group(1)[:4]}-{match.group(1)[4:6]}-{match.group(1)[6:8]}").isoformat()
-    except ValueError:
-        return None
-
-
-def _unfold_ical(payload: bytes) -> list[str]:
-    if not isinstance(payload, (bytes, bytearray)) or len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
-        raise AppError(413, "Der Kalender-Feed ist zu groß.")
-    try:
-        text = payload.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise AppError(400, "Der Kalender-Feed ist keine gültige UTF-8-iCalendar-Datei.") from exc
-    unfolded: list[str] = []
-    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        if len(line) > 20000:
-            raise AppError(400, "Der Kalender-Feed enthält eine zu lange Zeile.")
-        if line.startswith((" ", "\t")) and unfolded:
-            unfolded[-1] += line[1:]
-        else:
-            unfolded.append(line)
-    nonempty = [line for line in unfolded if line]
-    if not nonempty or nonempty[0].upper() != "BEGIN:VCALENDAR" or nonempty[-1].upper() != "END:VCALENDAR":
-        raise AppError(400, "Der Kalender-Feed muss ein vollständiges VCALENDAR-Dokument sein.")
-    stack: list[str] = []
-    for line in nonempty:
-        upper = line.upper()
-        if upper.startswith("BEGIN:"):
-            stack.append(upper[6:])
-            continue
-        if upper.startswith("END:"):
-            component = upper[4:]
-            if not stack or stack.pop() != component:
-                raise AppError(400, "Der Kalender-Feed enthält ungültige Komponenten.")
-            continue
-        if ":" not in line:
-            raise AppError(400, "Der Kalender-Feed enthält eine ungültige Eigenschaft.")
-    if stack:
-        raise AppError(400, "Der Kalender-Feed enthält nicht geschlossene Komponenten.")
-    return unfolded
-
-
 def _ical_temporal_value(raw: str, parameters: dict[str, str]) -> tuple[datetime, bool] | None:
     value = raw.strip()
     is_date = parameters.get("VALUE", "").upper() == "DATE" or bool(re.fullmatch(r"\d{8}", value))
@@ -3659,15 +3592,6 @@ def _ical_temporal_value(raw: str, parameters: dict[str, str]) -> tuple[datetime
         return parsed.astimezone(local_zone), False
     except (TypeError, ValueError):
         return None
-
-
-def _ical_duration(raw: str) -> timedelta | None:
-    match = re.fullmatch(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?", raw.strip().upper())
-    if not match:
-        return None
-    days, hours, minutes, seconds = (int(value or 0) for value in match.groups())
-    duration = timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
-    return duration if duration.total_seconds() > 0 else None
 
 
 ICAL_NO_TRAINING_MARKER = re.compile(r"(?<![A-Z0-9_])\[NO_TRAINING\](?![A-Z0-9_])", re.IGNORECASE)
@@ -3823,7 +3747,7 @@ def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, win
         raise AppError(400, "Das Kalenderfenster ist ungültig oder zu groß.")
     events_by_key: dict[tuple[str, str], dict[str, Any]] = {}
     current: dict[str, Any] | None = None
-    for line in _unfold_ical(payload):
+    for line in unfold_ical(payload, max_bytes=MAX_EXTERNAL_CALENDAR_BYTES, error=lambda status, message: AppError(status, message)):
         upper = line.upper()
         if upper == "BEGIN:VEVENT":
             current = {}
@@ -3859,7 +3783,7 @@ def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, win
                 current["all_day"] = temporal[1] if key == "DTSTART" else current.get("all_day", temporal[1])
                 current["start" if key == "DTSTART" else "end"] = temporal[0]
         elif key == "DURATION":
-            duration = _ical_duration(raw_value)
+            duration = ical_duration(raw_value)
             if duration:
                 current["duration"] = duration
         elif key == "DESCRIPTION":
@@ -7877,36 +7801,27 @@ def set_sync_operation_state(
     error: str | None = None,
 ) -> None:
     """Persist bounded, non-athlete-facing status for the active read sync."""
-    set_kv("sync_operation_id", operation_id)
-    set_kv("sync_operation_status", status)
-    set_kv("sync_operation_phase", phase)
-    set_kv("sync_operation_progress", str(max(0, min(progress, 100))))
-    set_kv("sync_operation_message", message)
-    if error is not None:
-        set_kv("last_sync_error", redact_text(error)[:1000])
+    persist_sync_operation_state(
+        operation_id,
+        status,
+        phase,
+        progress,
+        message,
+        error,
+        set_value=set_kv,
+        redact=redact_text,
+    )
 
 
 def sync_status_state() -> dict[str, Any]:
     running = SYNC_LOCK.locked() or get_kv("sync_running") == "1"
-    status = get_kv("sync_operation_status") or ("running" if running else "idle")
-    try:
-        progress = max(0, min(int(get_kv("sync_operation_progress") or 0), 100))
-    except (TypeError, ValueError):
-        progress = 0
-    return {
-        "status": status,
-        "phase": get_kv("sync_operation_phase") or ("running" if running else "idle"),
-        "progress": progress,
-        "operation_id": get_kv("sync_operation_id"),
-        "running": running,
-        "message": get_kv("sync_operation_message") or None,
-        "started_at": get_kv("sync_operation_started_at"),
-        "finished_at": get_kv("sync_operation_finished_at"),
-        "last_error": get_kv("last_sync_error") or None,
-        "state_versions": state_versions(),
-        "provider_freshness": provider_freshness_state(),
-        "maintenance": MAINTENANCE_GATE.state(),
-    }
+    return project_sync_status(
+        running=running,
+        get_value=get_kv,
+        state_versions=state_versions(),
+        provider_freshness=provider_freshness_state(),
+        maintenance=MAINTENANCE_GATE.state(),
+    )
 
 
 def start_sync_operation(activity_days: int, reason: str = "manual") -> dict[str, Any]:
@@ -9207,104 +9122,33 @@ def activity_sport(activity: dict[str, Any]) -> str:
     return raw[:80]
 
 
-COACH_ACTIVITY_FIELDS = (
-    "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain",
-    "icu_training_load", "icu_intensity", "average_heartrate", "max_heartrate", "average_watts",
-    "weighted_average_watts", "average_speed", "icu_weighted_avg_speed", "icu_pace", "icu_rpe", "feel",
-)
-
-
 def compact_coach_activity(activity: Any) -> dict[str, Any]:
-    compacted = selected(activity, COACH_ACTIVITY_FIELDS)
-    for key, limit in (("id", 200), ("name", 200), ("type", 80), ("feel", 120)):
-        if key in compacted:
-            compacted[key] = str(compacted[key])[:limit]
-    return compacted
+    return compact_coach_activity_value(activity, select=selected)
 
 
 def compact_coach_planned_event(event: Any) -> dict[str, Any]:
-    compacted = selected(event, (
-        "id", "start_date_local", "name", "type", "moving_time", "target", "icu_intensity", "status", "sync_status",
-    ))
-    for key, limit in (("id", 200), ("start_date_local", 40), ("name", 200), ("type", 80), ("target", 1000), ("status", 80), ("sync_status", 80)):
-        if key in compacted:
-            compacted[key] = str(compacted[key])[:limit]
-    return compacted
+    return compact_coach_planned_event_value(event, select=selected)
 
 
 def compact_coach_local_planned_workout(workout: Any) -> dict[str, Any]:
     """Project local plans for the prompt without exposing stored descriptions."""
-    compacted = selected(workout, (
-        "id", "date", "name", "type", "duration_minutes", "target", "icu_intensity", "status", "sync_status",
-    ))
-    for key, limit in (("id", 80), ("date", 20), ("name", 200), ("type", 80), ("target", 1000), ("status", 80), ("sync_status", 80)):
-        if key in compacted:
-            compacted[key] = str(compacted[key])[:limit]
-    return compacted
+    return compact_coach_local_planned_workout_value(workout, select=selected)
 
 
 def compact_coach_local_planned_workouts(workouts: Any) -> list[dict[str, Any]]:
-    if not isinstance(workouts, list):
-        return []
-    return [
-        compact_coach_local_planned_workout(workout)
-        for workout in sorted(
-            (item for item in workouts if isinstance(item, dict)),
-            key=lambda item: (str(item.get("date") or ""), str(item.get("id") or "")),
-        )[:COACH_LOCAL_PLANNED_LIMIT]
-    ]
+    return compact_coach_local_planned_workouts_value(workouts, limit=COACH_LOCAL_PLANNED_LIMIT, select=selected)
 
 
 def coach_context_json_size(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    return coach_context_json_size_value(value)
 
 
 def bounded_coach_context_value(value: Any, limit: int) -> Any:
-    """Keep a JSON value valid while deterministically fitting a character limit."""
-    if limit <= 0:
-        return None
-    if coach_context_json_size(value) <= limit:
-        return value
-    if isinstance(value, str):
-        low, high = 0, len(value)
-        while low < high:
-            middle = (low + high + 1) // 2
-            if coach_context_json_size(value[:middle]) <= limit:
-                low = middle
-            else:
-                high = middle - 1
-        return value[:low]
-    if isinstance(value, list):
-        result: list[Any] = []
-        for item in value:
-            candidate = result + [bounded_coach_context_value(item, limit)]
-            if coach_context_json_size(candidate) > limit:
-                break
-            result = candidate
-        return result
-    if isinstance(value, dict):
-        result: dict[str, Any] = {}
-        for key, item in value.items():
-            candidate = dict(result)
-            candidate[str(key)] = bounded_coach_context_value(item, limit)
-            if coach_context_json_size(candidate) > limit:
-                break
-            result = candidate
-        return result
-    return None
+    return bounded_coach_context_value_value(value, limit)
 
 
 def bounded_coach_context_sections(context: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, int | str]]]:
-    projected = dict(context)
-    truncations: list[dict[str, int | str]] = []
-    for section, limit in COACH_CONTEXT_SECTION_LIMITS.items():
-        original_size = coach_context_json_size(projected.get(section))
-        projected_value = bounded_coach_context_value(projected.get(section), limit)
-        projected[section] = projected_value
-        projected_size = coach_context_json_size(projected_value)
-        if projected_size < original_size:
-            truncations.append({"section": section, "original_characters": original_size, "projected_characters": projected_size})
-    return projected, truncations
+    return bounded_coach_context_sections_value(context, section_limits=COACH_CONTEXT_SECTION_LIMITS)
 
 
 def coach_context_projection_meta(
@@ -9313,25 +9157,17 @@ def coach_context_projection_meta(
     library_count: int,
     truncations: list[dict[str, int | str]] | None = None,
 ) -> dict[str, Any]:
-    section_sizes = {
-        section: coach_context_json_size(context.get(section))
-        for section in sorted(COACH_CONTEXT_SECTION_LIMITS)
-    }
-    return {
-        "version": 1,
-        "budgets": {**COACH_CONTEXT_SECTION_LIMITS, "total": COACH_CONTEXT_TOTAL_CHAR_LIMIT},
-        "section_characters": section_sizes,
-        "over_budget_sections": [
-            section for section in sorted(section_sizes)
-            if section_sizes[section] > COACH_CONTEXT_SECTION_LIMITS[section]
-        ],
-        "truncated_sections": truncations or [],
-        "planned_local_items": local_planned_count,
-        "library_items": library_count,
-        "activity_limit_per_sport": COACH_RECENT_ACTIVITIES_PER_SPORT,
-        "planned_event_limit": COACH_PLANNED_EVENT_LIMIT,
-        "local_planned_limit": COACH_LOCAL_PLANNED_LIMIT,
-    }
+    return coach_context_projection_meta_value(
+        context,
+        local_planned_count,
+        library_count,
+        section_limits=COACH_CONTEXT_SECTION_LIMITS,
+        total_limit=COACH_CONTEXT_TOTAL_CHAR_LIMIT,
+        local_activity_limit=COACH_RECENT_ACTIVITIES_PER_SPORT,
+        planned_event_limit=COACH_PLANNED_EVENT_LIMIT,
+        local_planned_limit=COACH_LOCAL_PLANNED_LIMIT,
+        truncations=truncations,
+    )
 
 
 def coach_intervals_context(snapshot: dict[str, Any] | None) -> dict[str, Any]:
@@ -10733,28 +10569,28 @@ def local_date_from_timestamp(value: Any, timezone_value: Any = None) -> str | N
 
 
 def daily_sync_marker_key(source: str) -> str:
-    if source not in DAILY_SYNC_LEGACY_KEYS:
-        raise ValueError(f"unknown daily sync source: {source}")
-    return f"daily_sync_{source}_local_date"
+    return daily_marker_key(source, DAILY_SYNC_LEGACY_KEYS)
 
 
 def daily_sync_due(source: str, now: datetime | None = None) -> bool:
-    current_date = local_date_from_timestamp((now or local_now()).isoformat())
-    marker = get_kv(daily_sync_marker_key(source))
-    if marker:
-        return marker != current_date
-    # Migrate lazily from the old UTC instant. This is safe at startup and
-    # avoids treating a UTC date prefix as an athlete-local calendar date.
-    legacy_date = local_date_from_timestamp(get_kv(DAILY_SYNC_LEGACY_KEYS[source]))
-    if legacy_date:
-        set_kv(daily_sync_marker_key(source), legacy_date)
-        return legacy_date != current_date
-    return True
+    return daily_sync_is_due(
+        source,
+        now or local_now(),
+        legacy_keys=DAILY_SYNC_LEGACY_KEYS,
+        get_value=get_kv,
+        set_value=set_kv,
+        local_date=local_date_from_timestamp,
+    )
 
 
 def mark_daily_sync(source: str, now: datetime | None = None) -> None:
-    local_date = local_date_from_timestamp((now or local_now()).isoformat())
-    set_kv(daily_sync_marker_key(source), local_date)
+    mark_daily_sync_value(
+        source,
+        now or local_now(),
+        legacy_keys=DAILY_SYNC_LEGACY_KEYS,
+        set_value=set_kv,
+        local_date=local_date_from_timestamp,
+    )
 
 
 def morning_checkin_date() -> str | None:
@@ -11275,63 +11111,34 @@ PRIVACY_EXPORT_JSONL_FILES = {
 
 
 def _export_payload(value: Any) -> Any:
-    try:
-        decoded = json.loads(value)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return {}
-    return decoded
+    return export_decode_payload(value)
 
 
 def _export_jsonl_rows(archive: zipfile.ZipFile, name: str, rows: Any, deadline: float) -> None:
-    with archive.open(name, "w", force_zip64=True) as output:
-        for row in rows:
-            if time.monotonic() > deadline:
-                raise AppError(408, "Der Export überschreitet das Zeitlimit.")
-            output.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
+    export_jsonl_rows(
+        archive,
+        name,
+        rows,
+        deadline,
+        now=time.monotonic,
+        timeout_error=lambda: AppError(408, "Der Export überschreitet das Zeitlimit."),
+    )
 
 
 def _export_workout_drafts(db: Any) -> Any:
-    for row in db.execute(
-        "SELECT id, status, intervals_event_id, error, created_at, updated_at, payload "
-        "FROM workout_drafts ORDER BY created_at DESC LIMIT 50"
-    ):
-        payload = _export_payload(row["payload"])
-        if not isinstance(payload, dict):
-            payload = {}
-        yield {
-            "id": row["id"],
-            "status": row["status"],
-            "intervals_event_id": row["intervals_event_id"],
-            "error": row["error"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-            **payload,
-        }
+    yield from export_workout_drafts(db, decode=_export_payload)
 
 
 def _export_workout_library(db: Any) -> Any:
-    for row in db.execute(
-        "SELECT payload FROM workout_library "
-        "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT 1000"
-    ):
-        payload = _export_payload(row["payload"])
-        if isinstance(payload, dict):
-            yield payload
+    yield from export_workout_library(db, decode=_export_payload)
 
 
 def _export_application_state(db: Any) -> dict[str, Any]:
-    excluded_state = {"profile", "garmin_snapshot", WEATHER_CACHE_KEY}
-    application_state: dict[str, Any] = {}
-    for row in db.execute("SELECT key, value FROM kv ORDER BY key"):
-        key = str(row["key"])
-        if key in excluded_state or key.endswith("_running") or key.endswith("_status"):
-            continue
-        value = row["value"]
-        try:
-            application_state[key] = json.loads(value)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            application_state[key] = value
-    return application_state
+    return export_application_state(
+        db,
+        excluded_keys={"profile", "garmin_snapshot", WEATHER_CACHE_KEY},
+        decode=_export_payload,
+    )
 
 
 def _privacy_export_file() -> Path:
@@ -11428,15 +11235,13 @@ def _privacy_export_file() -> Path:
             archive.writestr(
                 "manifest.json",
                 json.dumps(
-                    {
-                        "format": "intervals-coach-privacy-export",
-                        "format_version": PRIVACY_EXPORT_FORMAT_VERSION,
-                        "schema_version": database_schema_version(db),
-                        "exported_at": utc_now(),
-                        "status": "complete",
-                        "categories": sorted(name.rsplit(".", 1)[0] for name in archive.namelist() if name != "manifest.json"),
-                        "jsonl_files": sorted(PRIVACY_EXPORT_JSONL_FILES),
-                    },
+                    export_manifest(
+                        archive.namelist(),
+                        schema_version=database_schema_version(db),
+                        exported_at=utc_now(),
+                        format_version=PRIVACY_EXPORT_FORMAT_VERSION,
+                        jsonl_files=PRIVACY_EXPORT_JSONL_FILES,
+                    ),
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ),
@@ -11877,16 +11682,15 @@ def require_csrf(handler: BaseHTTPRequestHandler, session: dict[str, Any]) -> No
 
 def session_cookie_headers(token: str = "", csrf: str = "", *, clear: bool = False) -> list[str]:
     """Create hardened session cookies without duplicating flag logic."""
-    secure = "; Secure" if getattr(CONFIG, "secure_cookies", False) else ""
-    if clear:
-        max_age = "; Max-Age=0"
-        token = csrf = ""
-    else:
-        max_age = f"; Max-Age={SESSION_TTL_SECONDS}"
-    return [
-        f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict{secure}{max_age}",
-        f"{CSRF_COOKIE}={csrf}; Path=/; SameSite=Strict{secure}{max_age}",
-    ]
+    return session_cookies(
+        SESSION_COOKIE,
+        CSRF_COOKIE,
+        token,
+        csrf,
+        ttl_seconds=SESSION_TTL_SECONDS,
+        secure=bool(getattr(CONFIG, "secure_cookies", False)),
+        clear=clear,
+    )
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -12308,54 +12112,40 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(500, {"error": "Interner Serverfehler."})
 
     def read_body(self, max_bytes: int = MAX_BODY_BYTES) -> bytes:
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-        except ValueError as exc:
-            raise AppError(400, "Ungültige Content-Length.") from exc
-        if size <= 0 or size > max_bytes:
-            raise AppError(413 if size > MAX_BODY_BYTES else 400, "Ungültige Größe des Anfrageinhalts.")
-        return self.rfile.read(size)
+        return read_request_body(
+            self.headers,
+            self.rfile.read,
+            max_bytes,
+            error=AppError,
+            too_large_status_threshold=MAX_BODY_BYTES,
+        )
 
     def read_audio_body(self) -> bytes:
-        content_type = normalized_audio_type(self.headers.get("Content-Type", ""))
-        if content_type not in VOICE_AUDIO_TYPES:
-            raise AppError(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-        except ValueError as exc:
-            raise AppError(400, "Ungültige Content-Length.") from exc
-        if size <= 0 or size > MAX_AUDIO_BODY_BYTES:
-            raise AppError(413 if size > MAX_AUDIO_BODY_BYTES else 400, "Ungültige Größe der Audioaufnahme.")
-        audio = self.rfile.read(size)
-        if len(audio) != size:
-            raise AppError(400, "Die Audioaufnahme wurde unvollständig übertragen.")
-        return audio
+        return read_request_audio_body(
+            self.headers,
+            self.rfile.read,
+            allowed_types=VOICE_AUDIO_TYPES,
+            normalize_type=normalized_audio_type,
+            max_bytes=MAX_AUDIO_BODY_BYTES,
+            error=AppError,
+        )
 
     def read_json(self) -> dict[str, Any]:
-        if "application/json" not in self.headers.get("Content-Type", ""):
-            raise AppError(415, "Content-Type muss application/json sein.")
-        try:
-            payload = json.loads(self.read_body())
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise AppError(400, "Ungültiges JSON.") from exc
-        if not isinstance(payload, dict):
-            raise AppError(400, "Der JSON-Inhalt muss ein Objekt sein.")
-        return payload
+        return read_request_json(
+            self.headers,
+            self.rfile.read,
+            MAX_BODY_BYTES,
+            error=AppError,
+            too_large_status_threshold=MAX_BODY_BYTES,
+        )
 
     def send_json(self, status: int, payload: Any, headers: dict[str, str | list[str]] | None = None) -> None:
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        data = response_json_bytes(payload)
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        for key, value in (headers or {}).items():
-            if isinstance(value, (list, tuple)):
-                for item in value:
-                    self.send_header(key, str(item))
-            else:
-                self.send_header(key, value)
+        for key, value in response_headers("application/json; charset=utf-8", len(data)):
+            self.send_header(key, value)
+        for key, value in response_header_items(headers):
+            self.send_header(key, value)
         try:
             self.end_headers()
             self.wfile.write(data)
@@ -12403,17 +12193,10 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def send_bytes(self, status: int, data: bytes, content_type: str, headers: dict[str, str | list[str]] | None = None) -> None:
         self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        for key, value in (headers or {}).items():
-            if isinstance(value, (list, tuple)):
-                for item in value:
-                    self.send_header(key, str(item))
-            else:
-                self.send_header(key, value)
+        for key, value in response_headers(content_type, len(data)):
+            self.send_header(key, value)
+        for key, value in response_header_items(headers):
+            self.send_header(key, value)
         try:
             self.end_headers()
             self.wfile.write(data)
@@ -12466,40 +12249,37 @@ class CoachHTTPServer(ThreadingHTTPServer):
 
 
 def safe_sync(reason: str, activity_days: int | None = None, operation_id: str | None = None) -> None:
-    with observed_operation("sync", reason, operation_id) as scope:
-        current_operation_id = scope["operation_id"]
-        try:
-            sync_intervals(reason, activity_days=activity_days, operation_id=current_operation_id)
-        except Exception as exc:
-            LOGGER.error(
-                "Background synchronization failed",
-                extra={
-                    "event": "background_sync_failed",
-                    "context": {
-                        "operation_id": current_operation_id,
-                        "trigger": scope["trigger"],
-                        "provider": "intervals",
-                        "phase": "sync",
-                        "error_code": operation_error_code(exc),
-                    },
-                },
-            )
-        try:
-            sync_competitions(reason, push_local=False, operation_id=current_operation_id)
-        except Exception as exc:
-            LOGGER.error(
-                "Background competition synchronization failed",
-                extra={
-                    "event": "background_competition_sync_failed",
-                    "context": {
-                        "operation_id": current_operation_id,
-                        "trigger": scope["trigger"],
-                        "provider": "intervals",
-                        "phase": "competitions",
-                        "error_code": operation_error_code(exc),
-                    },
-                },
-            )
+    run_read_sync_pipeline(
+        reason,
+        activity_days,
+        operation_id,
+        observe=observed_operation,
+        sync_intervals=sync_intervals,
+        sync_competitions=sync_competitions,
+        record_failure=_log_background_sync_failure,
+    )
+
+
+def _log_background_sync_failure(
+    scope: dict[str, Any],
+    provider: str,
+    phase: str,
+    error: BaseException,
+) -> None:
+    competition = phase == "competitions"
+    LOGGER.error(
+        "Background competition synchronization failed" if competition else "Background synchronization failed",
+        extra={
+            "event": "background_competition_sync_failed" if competition else "background_sync_failed",
+            "context": {
+                "operation_id": scope["operation_id"],
+                "trigger": scope["trigger"],
+                "provider": provider,
+                "phase": phase,
+                "error_code": operation_error_code(error),
+            },
+        },
+    )
 
 
 def daily_sync_loop() -> None:
