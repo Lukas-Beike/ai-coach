@@ -11271,62 +11271,66 @@ def add_private_calendar_context_to_planned(
 
 def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
     """Return only bounded metadata needed before domain areas are loaded."""
-    snapshot = latest_snapshot()
-    return {
-        "schema_version": 2,
-        "state_versions": state_versions(),
-        "app": {"name": "Intervals Coach", "version": APP_VERSION, "github_release": github_release_status(refresh=not local_only)},
-        "messages": [],
-        "plans": [],
-        "library": [],
-        "activities": [],
-        "planned": [],
-        "planning_view": {"source": "canonical", "local_count": 0, "remote_count": 0, "items": [], "provider_window": {}},
-        "planning_compliance": [],
-        "weather": {},
-        "parallel_cycling": [],
-        "profile": get_profile(),
-        "competitions": list_competitions(limit=100),
-        "checkins": [],
-        "local_feedback": {"today": None, "recent": [], "scope": "Only athlete-entered subjective feedback and constraints; wearable/provider values remain in their source sections."},
-        "activity_feedback": {"recent": [], "scope": "Only athlete-entered notes about completed activities; this feedback is separate from daily check-ins and provider values."},
-        "planning": {},
-        "external_calendar": external_calendar_state(),
-        "daily_planning_context": [],
-        "performance": {},
-        "garmin": garmin_public_state(),
-        "intervals": intervals_public_state(snapshot),
-        "provider_freshness": provider_freshness_state(),
-        "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
-        "provider_resync": {"intervals": provider_resync_state("intervals"), "garmin": provider_resync_state("garmin")},
-        "sync": {
-            "last_sync_at": get_kv("last_sync_at"), "last_error": get_kv("last_sync_error") or None,
-            "running": get_kv("sync_running") == "1", "status": get_kv("sync_status") or None,
-            "last_window_start": get_kv("last_sync_window_start"), "last_window_end": get_kv("last_sync_window_end"),
-        },
-        "library_sync": {"last_sync_at": get_kv("last_library_sync_at"), "last_error": get_kv("last_library_sync_error") or None, "state": workout_library_sync_summary()},
-        "sync_settings": {"intervals_days": sync_period("intervals"), "garmin_days": sync_period("garmin")},
-        "calendar_display": calendar_display_settings(),
-        "competition_sync": {
-            "last_sync_at": get_kv("last_competition_sync_at"), "last_error": get_kv("last_competition_sync_error") or None,
-            "running": get_kv("competition_sync_running") == "1", "status": get_kv("competition_sync_status") or None,
-        },
-        "performance_refresh": {
-            "last_refresh_at": get_kv("last_performance_refresh_at"), "last_error": get_kv("last_performance_error") or None,
-            "running": get_kv("performance_refresh_running") == "1",
-        },
-        "morning_checkin": {
-            "status": get_kv("morning_checkin_status") or "waiting", "running": get_kv("morning_checkin_running") == "1",
-            "date": get_kv("morning_checkin_date"), "last_error": get_kv("morning_checkin_error") or None,
-        },
-        "model": {"selected": selected_model(), "options": available_model_options()},
-        "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
-        "configured": {
-            "openai": bool(CONFIG.openai_api_key), "intervals": bool(CONFIG.intervals_api_key),
-            "weather": bool(get_profile().get("weather_location")), "external_calendar": bool(CONFIG.calendar_ical_url),
-        },
-        "usage": openai_usage_summary(),
-    }
+    # The startup screen waits for this response. Keep all of its local reads
+    # on one connection so SQLCipher is keyed once instead of once per helper.
+    # The nested helpers reuse the active DATABASE_CONTEXT connection.
+    with DB_LOCK, database():
+        snapshot = latest_snapshot()
+        return {
+            "schema_version": 2,
+            "state_versions": state_versions(),
+            "app": {"name": "Intervals Coach", "version": APP_VERSION, "github_release": github_release_status(refresh=not local_only)},
+            "messages": [],
+            "plans": [],
+            "library": [],
+            "activities": [],
+            "planned": [],
+            "planning_view": {"source": "canonical", "local_count": 0, "remote_count": 0, "items": [], "provider_window": {}},
+            "planning_compliance": [],
+            "weather": {},
+            "parallel_cycling": [],
+            "profile": get_profile(),
+            "competitions": list_competitions(limit=100),
+            "checkins": [],
+            "local_feedback": {"today": None, "recent": [], "scope": "Only athlete-entered subjective feedback and constraints; wearable/provider values remain in their source sections."},
+            "activity_feedback": {"recent": [], "scope": "Only athlete-entered notes about completed activities; this feedback is separate from daily check-ins and provider values."},
+            "planning": {},
+            "external_calendar": external_calendar_state(),
+            "daily_planning_context": [],
+            "performance": {},
+            "garmin": garmin_public_state(),
+            "intervals": intervals_public_state(snapshot),
+            "provider_freshness": provider_freshness_state(),
+            "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
+            "provider_resync": {"intervals": provider_resync_state("intervals"), "garmin": provider_resync_state("garmin")},
+            "sync": {
+                "last_sync_at": get_kv("last_sync_at"), "last_error": get_kv("last_sync_error") or None,
+                "running": get_kv("sync_running") == "1", "status": get_kv("sync_status") or None,
+                "last_window_start": get_kv("last_sync_window_start"), "last_window_end": get_kv("last_sync_window_end"),
+            },
+            "library_sync": {"last_sync_at": get_kv("last_library_sync_at"), "last_error": get_kv("last_library_sync_error") or None, "state": workout_library_sync_summary()},
+            "sync_settings": {"intervals_days": sync_period("intervals"), "garmin_days": sync_period("garmin")},
+            "calendar_display": calendar_display_settings(),
+            "competition_sync": {
+                "last_sync_at": get_kv("last_competition_sync_at"), "last_error": get_kv("last_competition_sync_error") or None,
+                "running": get_kv("competition_sync_running") == "1", "status": get_kv("competition_sync_status") or None,
+            },
+            "performance_refresh": {
+                "last_refresh_at": get_kv("last_performance_refresh_at"), "last_error": get_kv("last_performance_error") or None,
+                "running": get_kv("performance_refresh_running") == "1",
+            },
+            "morning_checkin": {
+                "status": get_kv("morning_checkin_status") or "waiting", "running": get_kv("morning_checkin_running") == "1",
+                "date": get_kv("morning_checkin_date"), "last_error": get_kv("morning_checkin_error") or None,
+            },
+            "model": {"selected": selected_model(), "options": available_model_options()},
+            "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
+            "configured": {
+                "openai": bool(CONFIG.openai_api_key), "intervals": bool(CONFIG.intervals_api_key),
+                "weather": bool(get_profile().get("weather_location")), "external_calendar": bool(CONFIG.calendar_ical_url),
+            },
+            "usage": openai_usage_summary(),
+        }
 
 
 def public_plan_state(local_only: bool = False) -> dict[str, Any]:
