@@ -45,6 +45,7 @@ from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTr
 from backend.providers.garmin import collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 from backend.sync.windows import split_date_windows
+from backend.sync.status import persist_sync_operation_state, project_sync_status
 
 try:
     from garminconnect import Garmin
@@ -7766,36 +7767,27 @@ def set_sync_operation_state(
     error: str | None = None,
 ) -> None:
     """Persist bounded, non-athlete-facing status for the active read sync."""
-    set_kv("sync_operation_id", operation_id)
-    set_kv("sync_operation_status", status)
-    set_kv("sync_operation_phase", phase)
-    set_kv("sync_operation_progress", str(max(0, min(progress, 100))))
-    set_kv("sync_operation_message", message)
-    if error is not None:
-        set_kv("last_sync_error", redact_text(error)[:1000])
+    persist_sync_operation_state(
+        operation_id,
+        status,
+        phase,
+        progress,
+        message,
+        error,
+        set_value=set_kv,
+        redact=redact_text,
+    )
 
 
 def sync_status_state() -> dict[str, Any]:
     running = SYNC_LOCK.locked() or get_kv("sync_running") == "1"
-    status = get_kv("sync_operation_status") or ("running" if running else "idle")
-    try:
-        progress = max(0, min(int(get_kv("sync_operation_progress") or 0), 100))
-    except (TypeError, ValueError):
-        progress = 0
-    return {
-        "status": status,
-        "phase": get_kv("sync_operation_phase") or ("running" if running else "idle"),
-        "progress": progress,
-        "operation_id": get_kv("sync_operation_id"),
-        "running": running,
-        "message": get_kv("sync_operation_message") or None,
-        "started_at": get_kv("sync_operation_started_at"),
-        "finished_at": get_kv("sync_operation_finished_at"),
-        "last_error": get_kv("last_sync_error") or None,
-        "state_versions": state_versions(),
-        "provider_freshness": provider_freshness_state(),
-        "maintenance": MAINTENANCE_GATE.state(),
-    }
+    return project_sync_status(
+        running=running,
+        get_value=get_kv,
+        state_versions=state_versions(),
+        provider_freshness=provider_freshness_state(),
+        maintenance=MAINTENANCE_GATE.state(),
+    )
 
 
 def start_sync_operation(activity_days: int, reason: str = "manual") -> dict[str, Any]:
