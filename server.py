@@ -48,6 +48,17 @@ from backend.sync.windows import split_date_windows
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.orchestration import run_read_sync_pipeline
 from backend.sync.daily import daily_marker_key, daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
+from backend.coach.context import (
+    COACH_ACTIVITY_FIELDS,
+    bounded_coach_context_sections as bounded_coach_context_sections_value,
+    bounded_coach_context_value as bounded_coach_context_value_value,
+    coach_context_json_size as coach_context_json_size_value,
+    coach_context_projection_meta as coach_context_projection_meta_value,
+    compact_coach_activity as compact_coach_activity_value,
+    compact_coach_local_planned_workout as compact_coach_local_planned_workout_value,
+    compact_coach_local_planned_workouts as compact_coach_local_planned_workouts_value,
+    compact_coach_planned_event as compact_coach_planned_event_value,
+)
 
 try:
     from garminconnect import Garmin
@@ -9090,104 +9101,33 @@ def activity_sport(activity: dict[str, Any]) -> str:
     return raw[:80]
 
 
-COACH_ACTIVITY_FIELDS = (
-    "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain",
-    "icu_training_load", "icu_intensity", "average_heartrate", "max_heartrate", "average_watts",
-    "weighted_average_watts", "average_speed", "icu_weighted_avg_speed", "icu_pace", "icu_rpe", "feel",
-)
-
-
 def compact_coach_activity(activity: Any) -> dict[str, Any]:
-    compacted = selected(activity, COACH_ACTIVITY_FIELDS)
-    for key, limit in (("id", 200), ("name", 200), ("type", 80), ("feel", 120)):
-        if key in compacted:
-            compacted[key] = str(compacted[key])[:limit]
-    return compacted
+    return compact_coach_activity_value(activity, select=selected)
 
 
 def compact_coach_planned_event(event: Any) -> dict[str, Any]:
-    compacted = selected(event, (
-        "id", "start_date_local", "name", "type", "moving_time", "target", "icu_intensity", "status", "sync_status",
-    ))
-    for key, limit in (("id", 200), ("start_date_local", 40), ("name", 200), ("type", 80), ("target", 1000), ("status", 80), ("sync_status", 80)):
-        if key in compacted:
-            compacted[key] = str(compacted[key])[:limit]
-    return compacted
+    return compact_coach_planned_event_value(event, select=selected)
 
 
 def compact_coach_local_planned_workout(workout: Any) -> dict[str, Any]:
     """Project local plans for the prompt without exposing stored descriptions."""
-    compacted = selected(workout, (
-        "id", "date", "name", "type", "duration_minutes", "target", "icu_intensity", "status", "sync_status",
-    ))
-    for key, limit in (("id", 80), ("date", 20), ("name", 200), ("type", 80), ("target", 1000), ("status", 80), ("sync_status", 80)):
-        if key in compacted:
-            compacted[key] = str(compacted[key])[:limit]
-    return compacted
+    return compact_coach_local_planned_workout_value(workout, select=selected)
 
 
 def compact_coach_local_planned_workouts(workouts: Any) -> list[dict[str, Any]]:
-    if not isinstance(workouts, list):
-        return []
-    return [
-        compact_coach_local_planned_workout(workout)
-        for workout in sorted(
-            (item for item in workouts if isinstance(item, dict)),
-            key=lambda item: (str(item.get("date") or ""), str(item.get("id") or "")),
-        )[:COACH_LOCAL_PLANNED_LIMIT]
-    ]
+    return compact_coach_local_planned_workouts_value(workouts, limit=COACH_LOCAL_PLANNED_LIMIT, select=selected)
 
 
 def coach_context_json_size(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    return coach_context_json_size_value(value)
 
 
 def bounded_coach_context_value(value: Any, limit: int) -> Any:
-    """Keep a JSON value valid while deterministically fitting a character limit."""
-    if limit <= 0:
-        return None
-    if coach_context_json_size(value) <= limit:
-        return value
-    if isinstance(value, str):
-        low, high = 0, len(value)
-        while low < high:
-            middle = (low + high + 1) // 2
-            if coach_context_json_size(value[:middle]) <= limit:
-                low = middle
-            else:
-                high = middle - 1
-        return value[:low]
-    if isinstance(value, list):
-        result: list[Any] = []
-        for item in value:
-            candidate = result + [bounded_coach_context_value(item, limit)]
-            if coach_context_json_size(candidate) > limit:
-                break
-            result = candidate
-        return result
-    if isinstance(value, dict):
-        result: dict[str, Any] = {}
-        for key, item in value.items():
-            candidate = dict(result)
-            candidate[str(key)] = bounded_coach_context_value(item, limit)
-            if coach_context_json_size(candidate) > limit:
-                break
-            result = candidate
-        return result
-    return None
+    return bounded_coach_context_value_value(value, limit)
 
 
 def bounded_coach_context_sections(context: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, int | str]]]:
-    projected = dict(context)
-    truncations: list[dict[str, int | str]] = []
-    for section, limit in COACH_CONTEXT_SECTION_LIMITS.items():
-        original_size = coach_context_json_size(projected.get(section))
-        projected_value = bounded_coach_context_value(projected.get(section), limit)
-        projected[section] = projected_value
-        projected_size = coach_context_json_size(projected_value)
-        if projected_size < original_size:
-            truncations.append({"section": section, "original_characters": original_size, "projected_characters": projected_size})
-    return projected, truncations
+    return bounded_coach_context_sections_value(context, section_limits=COACH_CONTEXT_SECTION_LIMITS)
 
 
 def coach_context_projection_meta(
@@ -9196,25 +9136,17 @@ def coach_context_projection_meta(
     library_count: int,
     truncations: list[dict[str, int | str]] | None = None,
 ) -> dict[str, Any]:
-    section_sizes = {
-        section: coach_context_json_size(context.get(section))
-        for section in sorted(COACH_CONTEXT_SECTION_LIMITS)
-    }
-    return {
-        "version": 1,
-        "budgets": {**COACH_CONTEXT_SECTION_LIMITS, "total": COACH_CONTEXT_TOTAL_CHAR_LIMIT},
-        "section_characters": section_sizes,
-        "over_budget_sections": [
-            section for section in sorted(section_sizes)
-            if section_sizes[section] > COACH_CONTEXT_SECTION_LIMITS[section]
-        ],
-        "truncated_sections": truncations or [],
-        "planned_local_items": local_planned_count,
-        "library_items": library_count,
-        "activity_limit_per_sport": COACH_RECENT_ACTIVITIES_PER_SPORT,
-        "planned_event_limit": COACH_PLANNED_EVENT_LIMIT,
-        "local_planned_limit": COACH_LOCAL_PLANNED_LIMIT,
-    }
+    return coach_context_projection_meta_value(
+        context,
+        local_planned_count,
+        library_count,
+        section_limits=COACH_CONTEXT_SECTION_LIMITS,
+        total_limit=COACH_CONTEXT_TOTAL_CHAR_LIMIT,
+        local_activity_limit=COACH_RECENT_ACTIVITIES_PER_SPORT,
+        planned_event_limit=COACH_PLANNED_EVENT_LIMIT,
+        local_planned_limit=COACH_LOCAL_PLANNED_LIMIT,
+        truncations=truncations,
+    )
 
 
 def coach_intervals_context(snapshot: dict[str, Any] | None) -> dict[str, Any]:

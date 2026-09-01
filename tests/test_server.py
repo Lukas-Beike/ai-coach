@@ -1104,6 +1104,25 @@ class CoachTests(unittest.TestCase):
         self.assertIn('daily_sync_due("intervals")', loop)
         self.assertNotIn('[:10]', loop)
 
+    def test_coach_projection_helpers_are_dependency_light_and_bounded(self):
+        from backend.coach.context import (
+            bounded_coach_context_value,
+            compact_coach_activity,
+            compact_coach_local_planned_workouts,
+        )
+
+        select = lambda value, fields: {key: value[key] for key in fields if key in value}
+        activity = compact_coach_activity({"id": "a" * 300, "name": "n" * 300, "secret": "must not pass"}, select=select)
+        self.assertEqual(len(activity["id"]), 200)
+        self.assertNotIn("secret", activity)
+        workouts = compact_coach_local_planned_workouts(
+            [{"id": "2", "date": "2026-09-02", "name": "later"}, {"id": "1", "date": "2026-09-01", "name": "earlier"}],
+            limit=1,
+            select=select,
+        )
+        self.assertEqual([item["id"] for item in workouts], ["1"])
+        self.assertLessEqual(len(json.dumps(bounded_coach_context_value({"text": "x" * 1000}, 100), ensure_ascii=False, separators=(",", ":"))), 100)
+
     def test_maintenance_gate_blocks_new_operations_and_waits_for_running_one(self):
         gate = server.MaintenanceGate()
         started = threading.Event()
