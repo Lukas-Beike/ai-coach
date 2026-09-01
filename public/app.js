@@ -104,6 +104,7 @@ function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}
   updateHeaderAction();
   if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadContextPreview();
   if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadLogs();
+  if (state.data && mainRoute === "more") loadChangeHistory();
   const targetScroll = mainRoute === "planned" ? (state.planSegmentScroll[state.planSegment] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo({ top: targetScroll, behavior: "auto" }));
   if (mainRoute === "coach") scrollChatToLatest(true);
@@ -3199,6 +3200,80 @@ function renderSettings(data) {
   renderNotificationStatus();
 }
 
+const CHANGE_HISTORY_LABELS = {
+  profile: "Profil",
+  workout_library: "Workout-Bibliothek",
+  competition: "Wettkampf",
+  training_plan: "Trainingsplan",
+};
+
+function renderChangeHistory(changes = []) {
+  const root = $("#changeHistoryList");
+  if (!root) return;
+  root.replaceChildren();
+  if (!changes.length) {
+    root.textContent = "Noch keine lokalen Änderungen aufgezeichnet.";
+    return;
+  }
+  changes.forEach((change) => {
+    const item = document.createElement("article");
+    item.className = "change-history-item";
+    const header = document.createElement("div");
+    header.className = "change-history-item-header";
+    const title = document.createElement("strong");
+    const action = change.action === "create" ? "erstellt" : change.action === "delete" ? "gelöscht" : change.action === "undo" ? "zurückgenommen" : "geändert";
+    title.textContent = `${CHANGE_HISTORY_LABELS[change.entity_type] || "Lokales Objekt"} ${action}`;
+    const time = document.createElement("time");
+    time.dateTime = change.created_at || "";
+    time.textContent = formatTime(change.created_at);
+    header.append(title, time);
+    const detail = document.createElement("span");
+    const fields = Object.keys(change.diff?.fields || {});
+    detail.textContent = `${fields.length ? `Felder: ${fields.join(", ")}` : "Keine Felddetails"} · Nur lokal · Quelle: ${change.source || "local"}`;
+    item.append(header, detail);
+    if (change.action !== "undo") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = "Änderung zurücknehmen";
+      button.addEventListener("click", () => undoChange(change.id, button));
+      item.append(button);
+    }
+    root.append(item);
+  });
+}
+
+async function loadChangeHistory() {
+  const status = $("#changeHistoryStatus");
+  const button = $("#changeHistoryRefreshButton");
+  if (button) button.disabled = true;
+  if (status) status.textContent = "Änderungshistorie wird geladen…";
+  try {
+    const result = await api("/api/change-history?limit=100");
+    renderChangeHistory(result.changes || []);
+    if (status) status.textContent = `${(result.changes || []).length} lokale Änderungen · Aufbewahrung begrenzt`;
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function undoChange(changeId, button) {
+  if (!window.confirm("Diese Änderung lokal zurücknehmen? Es wird kein Remote-Provider beschrieben. Neuere Änderungen führen zu einem Konflikt.")) return;
+  button.disabled = true;
+  try {
+    const preview = await api("/api/change-history/undo/preview", { method: "POST", body: JSON.stringify({ change_id: changeId }) });
+    if (!window.confirm("Undo-Vorschau bestätigen? Die Mutation bleibt lokal; ein späterer Remote-Sync muss separat geprüft werden.")) return;
+    const confirmed = await api("/api/coach/actions/confirm", { method: "POST", body: JSON.stringify({ proposal_id: preview.proposed_action.id }) });
+    await api("/api/coach/actions/execute", { method: "POST", body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }) });
+    toast("Lokale Änderung zurückgenommen");
+    await load();
+    await loadChangeHistory();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+}
+
 function formatLogEntry(entry) {
   const timestamp = entry.timestamp ? `[${formatTime(entry.timestamp)}] ` : "";
   const level = entry.level ? `${entry.level} ` : "";
@@ -4093,6 +4168,7 @@ $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#chatResetButton").addEventListener("click", resetCoachChat);
 $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);
 $("#privacyDeleteButton").addEventListener("click", deletePrivacyData);
+$("#changeHistoryRefreshButton").addEventListener("click", loadChangeHistory);
 $("#notificationEnableButton").addEventListener("click", enableNotifications);
 $("#backupDownloadButton").addEventListener("click", downloadDatabaseBackup);
 $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);

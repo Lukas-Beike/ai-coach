@@ -1216,7 +1216,28 @@ def migrate_plaintext_database() -> None:
 # The outer caller still owns DB_LOCK; nested database() calls only reuse it.
 DATABASE_CONTEXT: ContextVar[Any | None] = ContextVar("database_context", default=None)
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_context", default=None)
-CURRENT_DATABASE_SCHEMA_VERSION = 2
+CURRENT_DATABASE_SCHEMA_VERSION = 3
+
+CHANGE_HISTORY_RETENTION_DAYS = 180
+CHANGE_HISTORY_MAX_ROWS = 500
+CHANGE_HISTORY_TTL_SECONDS = 10 * 60
+CHANGE_HISTORY_ENTITY_TYPES = {"profile", "workout_library", "competition", "training_plan"}
+CHANGE_HISTORY_ACTIONS = {"create", "update", "delete", "undo"}
+CHANGE_HISTORY_PROFILE_FIELDS = {
+    "name", "goals", "sports", "training_background", "typical_weekly_volume", "availability",
+    "availability_schedule", "constraints", "equipment", "training_preferences", "coaching_style",
+    "timezone", "weather_location", "weight_kg", "body_fat_pct", "height_cm", "performance_notes",
+}
+CHANGE_HISTORY_LIBRARY_FIELDS = {
+    "id", "type", "name", "description", "duration_minutes", "moving_time", "target", "date",
+    "source", "rationale", "plan_id", "plan_name", "archived", "private_calendar_adjustment",
+    "sync_status",
+}
+CHANGE_HISTORY_COMPETITION_FIELDS = {
+    "id", "name", "event_date", "start_date_local", "sport", "priority", "category", "distance",
+    "target", "course_profile", "notes", "description", "moving_time", "sync_state",
+}
+CHANGE_HISTORY_PLAN_FIELDS = {"id", "name", "goal", "start_date", "end_date", "status"}
 
 
 OPERATION_CLEANUP_REASONS = {
@@ -1541,6 +1562,19 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 used_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS change_history (
+                id TEXT PRIMARY KEY,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                before_hash TEXT NOT NULL,
+                after_hash TEXT NOT NULL,
+                diff TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_change_history_created_at ON change_history(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_change_history_entity ON change_history(entity_type, entity_id, created_at DESC);
             CREATE TABLE IF NOT EXISTS public_event_sources (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -1816,8 +1850,303 @@ def initialise_database() -> None:
                 db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
                 db.execute(f"RELEASE SAVEPOINT {savepoint}")
                 raise
+        if migration_version < 3:
+            _record_database_migration(db, 3, "local-change-history")
         if _foreign_key_violations(db):
             raise RuntimeError("Die Datenbank enthält verwaiste Fremdschlüssel-Datensätze; Restore erforderlich.")
+
+
+def _audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:
+    """Return the small, local-only representation allowed in change history."""
+    if value is None:
+        return None
+    if entity_type == "profile":
+        fields = CHANGE_HISTORY_PROFILE_FIELDS
+    elif entity_type == "workout_library":
+        fields = CHANGE_HISTORY_LIBRARY_FIELDS
+        if isinstance(value, dict) and isinstance(value.get("payload"), str):
+            try:
+                payload = json.loads(value["payload"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            value = {**payload, "sync_status": value.get("sync_state") or payload.get("sync_status")}
+    elif entity_type == "competition":
+        fields = CHANGE_HISTORY_COMPETITION_FIELDS
+    elif entity_type == "training_plan":
+        fields = CHANGE_HISTORY_PLAN_FIELDS
+    else:
+        raise ValueError("unsupported change-history entity")
+    if not isinstance(value, dict):
+        return None
+    result: dict[str, Any] = {}
+    for field in sorted(fields):
+        if field not in value:
+            continue
+        candidate = value[field]
+        try:
+            encoded = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"), default=str)
+        except (TypeError, ValueError):
+            continue
+        if len(encoded) > 4000:
+            continue
+        result[field] = candidate
+    return result
+
+
+def _audit_hash(value: dict[str, Any] | None) -> str:
+    payload = json.dumps(value or {}, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _audit_diff(before: dict[str, Any] | None, after: dict[str, Any] | None) -> dict[str, Any]:
+    before = before or {}
+    after = after or {}
+    fields: dict[str, dict[str, Any]] = {}
+    for field in sorted(set(before) | set(after)):
+        old = before.get(field)
+        new = after.get(field)
+        if old != new:
+            fields[field] = {"before": old, "after": new}
+    return {"fields": fields, "before_present": bool(before), "after_present": bool(after)}
+
+
+def _cleanup_change_history(db: Any) -> None:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=CHANGE_HISTORY_RETENTION_DAYS)).isoformat()
+    db.execute("DELETE FROM change_history WHERE created_at < ?", (cutoff,))
+    db.execute(
+        "DELETE FROM change_history WHERE id NOT IN "
+        "(SELECT id FROM change_history ORDER BY created_at DESC LIMIT ?)",
+        (CHANGE_HISTORY_MAX_ROWS,),
+    )
+
+
+def _record_change(
+    db: Any,
+    entity_type: str,
+    entity_id: str,
+    action: str,
+    before: Any,
+    after: Any,
+    *,
+    source: str = "local",
+) -> dict[str, str] | None:
+    if entity_type not in CHANGE_HISTORY_ENTITY_TYPES or action not in CHANGE_HISTORY_ACTIONS:
+        raise ValueError("unsupported change-history record")
+    before_projection = _audit_projection(entity_type, before)
+    after_projection = _audit_projection(entity_type, after)
+    before_hash = _audit_hash(before_projection)
+    after_hash = _audit_hash(after_projection)
+    if before_hash == after_hash and action != "undo":
+        return None
+    record = {
+        "id": str(uuid.uuid4()),
+        "entity_type": entity_type,
+        "entity_id": str(entity_id),
+        "action": action,
+        "source": str(source)[:40] or "local",
+        "created_at": utc_now(),
+        "before_hash": before_hash,
+        "after_hash": after_hash,
+        "diff": json.dumps(_audit_diff(before_projection, after_projection), ensure_ascii=False, separators=(",", ":")),
+    }
+    _cleanup_change_history(db)
+    db.execute(
+        "INSERT INTO change_history(id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        tuple(record[key] for key in ("id", "entity_type", "entity_id", "action", "source", "created_at", "before_hash", "after_hash", "diff")),
+    )
+    return record
+
+
+def _change_history_view(row: dict[str, Any]) -> dict[str, Any]:
+    try:
+        diff = json.loads(row.get("diff") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        diff = {"fields": {}}
+    safe_fields = {
+        field: {"changed": True}
+        for field in (diff.get("fields") or {})
+        if isinstance(field, str) and re.fullmatch(r"[a-z_]+", field)
+    }
+    safe_diff = {
+        "fields": safe_fields,
+        "before_present": bool(diff.get("before_present")),
+        "after_present": bool(diff.get("after_present")),
+    }
+    return {
+        "id": row["id"],
+        "entity_type": row["entity_type"],
+        "entity_id": row["entity_id"],
+        "action": row["action"],
+        "source": row["source"],
+        "created_at": row["created_at"],
+        "before_hash": row["before_hash"],
+        "after_hash": row["after_hash"],
+        # Values are retained only in the encrypted local record for a
+        # confirmed undo; the history API exposes field names and presence,
+        # never athlete-entered raw values.
+        "diff": safe_diff,
+        "remote_sync": "local_only",
+    }
+
+
+def list_change_history(limit: int = 100) -> list[dict[str, Any]]:
+    with DB_LOCK, database() as db:
+        _cleanup_change_history(db)
+        rows = db.execute(
+            "SELECT id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff "
+            "FROM change_history ORDER BY created_at DESC LIMIT ?",
+            (max(1, min(int(limit), CHANGE_HISTORY_MAX_ROWS)),),
+        ).fetchall()
+    return [_change_history_view(dict(row)) for row in rows]
+
+
+def _history_current(db: Any, entity_type: str, entity_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if entity_type == "profile":
+        payload = PROFILE_REPOSITORY.get(db)
+        try:
+            value = normalize_profile(json.loads(payload or "{}"))
+        except (TypeError, json.JSONDecodeError):
+            value = dict(DEFAULT_PROFILE)
+        return value, _audit_projection(entity_type, value)
+    if entity_type == "workout_library":
+        row = db.execute("SELECT * FROM workout_library WHERE local_id=?", (entity_id,)).fetchone()
+        value = dict(row) if row else None
+        return value, _audit_projection(entity_type, value)
+    if entity_type == "competition":
+        row = db.execute("SELECT * FROM competitions WHERE id=?", (entity_id,)).fetchone()
+        value = dict(row) if row else None
+        return value, _audit_projection(entity_type, value)
+    if entity_type == "training_plan":
+        row = db.execute("SELECT * FROM training_plans WHERE id=?", (entity_id,)).fetchone()
+        value = dict(row) if row else None
+        return value, _audit_projection(entity_type, value)
+    raise AppError(400, "Unbekannte lokale Änderung.")
+
+
+def _history_target(row: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        diff = json.loads(row.get("diff") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise AppError(409, "Die Änderungshistorie ist beschädigt.") from exc
+    fields = diff.get("fields") if isinstance(diff, dict) else None
+    if not isinstance(fields, dict):
+        raise AppError(409, "Die Änderungshistorie enthält keinen wiederherstellbaren Diff.")
+    if row.get("action") == "create":
+        return None, None
+    if row.get("action") not in {"update", "delete"}:
+        raise AppError(409, "Diese Änderung kann nicht erneut zurückgenommen werden.")
+    target = {field: change.get("before") for field, change in fields.items() if isinstance(change, dict) and "before" in change}
+    return target, target
+
+
+def _history_preview(change_id: Any, session_csrf_hash: str) -> dict[str, Any]:
+    normalized_id = str(change_id or "").strip()
+    if not re.fullmatch(r"[0-9a-f-]{36}", normalized_id):
+        raise AppError(400, "Ungültige Änderungshistorie-ID.")
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT * FROM change_history WHERE id=?", (normalized_id,)).fetchone()
+        if not row:
+            raise AppError(404, "Änderung nicht gefunden.")
+        history = dict(row)
+        if history["action"] not in {"create", "update", "delete"}:
+            raise AppError(409, "Eine Undo-Aktion kann nicht erneut zurückgenommen werden.")
+        _, current_projection = _history_current(db, history["entity_type"], history["entity_id"])
+        current_hash = _audit_hash(current_projection)
+        if current_hash != history["after_hash"]:
+            raise AppError(409, "Die lokale Änderung wurde inzwischen weiter geändert; Undo wurde abgebrochen.")
+        _, target_projection = _history_target(history)
+        diff = _change_history_view(history)["diff"]
+        proposal_id = str(uuid.uuid4())
+        expires_at = time.time() + CHANGE_HISTORY_TTL_SECONDS
+        payload = {"change_id": normalized_id, "expected_current_hash": current_hash}
+        db.execute(
+            "INSERT INTO coach_action_proposals(id, session_csrf_hash, action_type, target_system, object_ids, diff, payload, payload_hash, status, expires_at, created_at) "
+            "VALUES (?, ?, 'undo_change', 'local', ?, ?, ?, ?, 'preview', ?, ?)",
+            (
+                proposal_id, str(session_csrf_hash), json.dumps({"change_id": normalized_id}, separators=(",", ":")),
+                json.dumps(diff, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(payload, separators=(",", ":")), _coach_action_hash(payload), expires_at, utc_now(),
+            ),
+        )
+        proposal = db.execute("SELECT * FROM coach_action_proposals WHERE id=?", (proposal_id,)).fetchone()
+    return {
+        "status": "preview",
+        "change": _change_history_view(history),
+        "undo_target_hash": _audit_hash(target_projection),
+        "proposed_action": _coach_action_view(dict(proposal)),
+    }
+
+
+def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
+    change_id = str(payload.get("change_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-f-]{36}", change_id):
+        raise AppError(400, "Ungültige Änderungshistorie-ID.")
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT * FROM change_history WHERE id=?", (change_id,)).fetchone()
+        if not row:
+            raise AppError(404, "Änderung nicht gefunden.")
+        history = dict(row)
+        if history["action"] not in {"create", "update", "delete"}:
+            raise AppError(409, "Eine Undo-Aktion kann nicht erneut zurückgenommen werden.")
+        current, current_projection = _history_current(db, history["entity_type"], history["entity_id"])
+        expected = str(payload.get("expected_current_hash") or "")
+        if expected != history["after_hash"] or _audit_hash(current_projection) != expected:
+            raise AppError(409, "Die lokale Änderung wurde inzwischen weiter geändert; Undo wurde abgebrochen.")
+        target, _ = _history_target(history)
+        entity_type = history["entity_type"]
+        entity_id = history["entity_id"]
+        if entity_type == "profile":
+            if target is None:
+                target = dict(DEFAULT_PROFILE)
+            restored = dict(current or DEFAULT_PROFILE)
+            restored.update(target)
+            PROFILE_REPOSITORY.set(db, json.dumps(normalize_profile(restored), ensure_ascii=False))
+            after = normalize_profile(restored)
+        elif entity_type == "workout_library":
+            if target is None:
+                db.execute("DELETE FROM workout_library WHERE local_id=?", (entity_id,))
+                after = None
+            elif current:
+                try:
+                    restored = normalize_library_workout({**json.loads(current["payload"]), **target}, local_id=entity_id, external_id=current.get("external_id"), sync_status="local")
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise AppError(409, "Die Bibliothekseinheit kann nicht wiederhergestellt werden.") from exc
+                db.execute("UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?", (json.dumps(restored, ensure_ascii=False), utc_now(), entity_id))
+                after = {**restored, "sync_status": "local"}
+            else:
+                restored = normalize_library_workout(target, local_id=entity_id, external_id=None, sync_status="local")
+                now = utc_now()
+                db.execute("INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)", (entity_id, entity_id, json.dumps(restored, ensure_ascii=False), now))
+                after = restored
+        elif entity_type == "competition":
+            if target is None:
+                db.execute("DELETE FROM competitions WHERE id=?", (entity_id,))
+                after = None
+            elif current:
+                normalized = normalize_competition({**current, **target, "id": entity_id})
+                db.execute("UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?", (normalized["name"], normalized["event_date"], normalized["sport"], normalized["priority"], normalized["distance"], normalized["target"], normalized["course_profile"], normalized["notes"], normalized["category"], normalized["start_date_local"], normalized["description"], normalized["moving_time"], utc_now(), entity_id))
+                after = {**normalized, "sync_state": "local"}
+            else:
+                normalized = normalize_competition({**target, "id": entity_id})
+                now = utc_now()
+                db.execute("INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)", (entity_id, normalized["name"], normalized["event_date"], normalized["sport"], normalized["priority"], normalized["distance"], normalized["target"], normalized["course_profile"], normalized["notes"], normalized["category"], normalized["start_date_local"], normalized["description"], normalized["moving_time"], now, now))
+                after = {**normalized, "sync_state": "local"}
+        elif entity_type == "training_plan":
+            if target is None:
+                db.execute("DELETE FROM training_plans WHERE id=?", (entity_id,))
+                after = None
+            elif current:
+                db.execute("UPDATE training_plans SET name=?, goal=?, start_date=?, end_date=?, status=?, updated_at=? WHERE id=?", (target.get("name", current["name"]), target.get("goal", current["goal"]), target.get("start_date", current["start_date"]), target.get("end_date", current["end_date"]), target.get("status", current["status"]), utc_now(), entity_id))
+                after = {**current, **target}
+            else:
+                now = utc_now()
+                db.execute("INSERT INTO training_plans(id, name, goal, start_date, end_date, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (entity_id, target.get("name", ""), target.get("goal", ""), target.get("start_date", ""), target.get("end_date", ""), target.get("status", "draft"), now, now))
+                after = target
+        else:
+            raise AppError(400, "Unbekannte lokale Änderung.")
+        _record_change(db, entity_type, entity_id, "undo", current, after, source="undo")
+    return {"status": "undone", "change_id": change_id, "entity_type": entity_type, "entity_id": entity_id, "remote_untouched": True}
 
 
 def get_kv(key: str, db: sqlite3.Connection | None = None) -> str | None:
@@ -2668,10 +2997,15 @@ def get_profile() -> dict[str, Any]:
 
 
 def save_profile(profile: dict[str, Any]) -> dict[str, str]:
-    previous = get_profile()
     normalized = normalize_profile(profile, validate_timezone=True)
     with DB_LOCK, database() as db:
+        previous_payload = PROFILE_REPOSITORY.get(db)
+        try:
+            previous = normalize_profile(json.loads(previous_payload or "{}"))
+        except (TypeError, json.JSONDecodeError):
+            previous = dict(DEFAULT_PROFILE)
         PROFILE_REPOSITORY.set(db, json.dumps(normalized, ensure_ascii=False))
+        _record_change(db, "profile", "profile", "update", previous, normalized)
     if previous.get("weather_location", "") != normalized.get("weather_location", ""):
         # A changed holiday/training location must never keep showing the
         # forecast for the previous place until the normal cache expires.
@@ -3637,7 +3971,7 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
     with DB_LOCK, database() as db:
         existing = {
             row["id"]: row
-            for row in db.execute("SELECT id, intervals_event_id, external_id FROM competitions").fetchall()
+            for row in db.execute("SELECT * FROM competitions").fetchall()
         }
         retained_ids = set(competition_ids)
         for removed_id, row in existing.items():
@@ -3646,7 +3980,13 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
                     "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)",
                     (str(uuid.uuid4()), row.get("intervals_event_id"), row.get("external_id"), now),
                 )
+        previous_profile_payload = PROFILE_REPOSITORY.get(db)
+        try:
+            previous_profile = normalize_profile(json.loads(previous_profile_payload or "{}"))
+        except (TypeError, json.JSONDecodeError):
+            previous_profile = dict(DEFAULT_PROFILE)
         set_kv("profile", json.dumps(normalized_profile, ensure_ascii=False), db)
+        _record_change(db, "profile", "profile", "update", previous_profile, normalized_profile)
         for competition in normalized_competitions:
             db.execute(
                 "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
@@ -3664,10 +4004,20 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
                     competition["external_id"], now, now,
                 ),
             )
+            _record_change(
+                db, "competition", competition["id"],
+                "create" if competition["id"] not in existing else "update",
+                existing.get(competition["id"]), {**competition, "sync_state": "local"},
+            )
         if competition_ids:
             placeholders = ",".join("?" for _ in competition_ids)
+            for removed_id, row in existing.items():
+                if removed_id not in retained_ids:
+                    _record_change(db, "competition", removed_id, "delete", dict(row), None)
             db.execute(f"DELETE FROM competitions WHERE id NOT IN ({placeholders})", competition_ids)
         else:
+            for removed_id, row in existing.items():
+                _record_change(db, "competition", removed_id, "delete", dict(row), None)
             db.execute("DELETE FROM competitions")
     return {"profile": normalized_profile, "competitions": list_competitions()}
 
@@ -3748,6 +4098,7 @@ def save_coach_competition(arguments: Any) -> dict[str, Any]:
                 ),
             )
             status = "created"
+            before = None
         else:
             db.execute(
                 "UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?",
@@ -3759,6 +4110,8 @@ def save_coach_competition(arguments: Any) -> dict[str, Any]:
                 ),
             )
             status = "updated"
+            before = existing
+        _record_change(db, "competition", normalized["id"], "create" if status == "created" else "update", before, {**normalized, "sync_state": "local"})
     saved = next(item for item in list_competitions(include_sync=True) if item["id"] == normalized["id"])
     return {"status": status, "competition": saved, "competitions": list_competitions(include_sync=True)}
 
@@ -3768,7 +4121,7 @@ def delete_coach_competition(competition_id: Any) -> dict[str, Any]:
     now = utc_now()
     with DB_LOCK, database() as db:
         row = db.execute(
-            "SELECT id, name, intervals_event_id, external_id FROM competitions WHERE id=?",
+            "SELECT * FROM competitions WHERE id=?",
             (normalized_id,),
         ).fetchone()
         if not row:
@@ -3784,6 +4137,7 @@ def delete_coach_competition(competition_id: Any) -> dict[str, Any]:
             "UPDATE public_event_candidates SET imported_competition_id=NULL, updated_at=? WHERE imported_competition_id=?",
             (now, normalized_id),
         )
+        _record_change(db, "competition", normalized_id, "delete", dict(row), None)
     return {
         "status": "deleted",
         "competition_id": normalized_id,
@@ -5859,6 +6213,10 @@ def save_workout_drafts(
             TRAINING_PLAN_REPOSITORY.create(
                 db, plan_id, plan_name.strip()[:200], goal.strip()[:2000], dates[0], dates[-1], "draft", now
             )
+            _record_change(db, "training_plan", plan_id, "create", None, {
+                "id": plan_id, "name": plan_name.strip()[:200], "goal": goal.strip()[:2000],
+                "start_date": dates[0], "end_date": dates[-1], "status": "draft",
+            })
         for workout in normalized_workouts:
             if plan_id:
                 workout = {**workout, "plan_id": plan_id, "plan_name": plan_name.strip()[:200]}
@@ -5892,6 +6250,10 @@ def save_workout_library_entries(
             TRAINING_PLAN_REPOSITORY.create(
                 db, plan_id, plan_name.strip()[:200], goal.strip()[:2000], dates[0], dates[-1], "planned", now
             )
+            _record_change(db, "training_plan", plan_id, "create", None, {
+                "id": plan_id, "name": plan_name.strip()[:200], "goal": goal.strip()[:2000],
+                "start_date": dates[0], "end_date": dates[-1], "status": "planned",
+            })
         for workout in normalized_workouts:
             if plan_id:
                 workout = {**workout, "plan_id": plan_id, "plan_name": plan_name.strip()[:200]}
@@ -6299,6 +6661,7 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
             if not isinstance(current, dict) or not expected_fingerprint or adaptive_workout_fingerprint(current) != expected_fingerprint:
                 stale.append({"library_workout_id": draft_id, "reason": "changed"})
                 continue
+            before = {**current, "sync_status": draft.get("sync_state") or current.get("sync_status")}
             replacement = {
                 **replacement,
                 "id": draft_id,
@@ -6309,6 +6672,7 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
                 "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
                 (json.dumps(replacement, ensure_ascii=False), now, draft_id),
             )
+            _record_change(db, "workout_library", draft_id, "update", before, {**replacement, "sync_status": "local"}, source="adaptive_replan")
             updated += 1
         if active_illness_pause:
             updated_checkins = _fill_illness_checkins(db, active_illness_pause, now)
@@ -6543,12 +6907,14 @@ def create_local_workout_library_entry(workout: dict[str, Any], db: Any | None =
             "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)",
             (local_id, local_id, json.dumps(entry, ensure_ascii=False), now),
         )
+        _record_change(db, "workout_library", local_id, "create", None, entry)
     else:
         with DB_LOCK, database() as own_db:
             own_db.execute(
                 "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)",
                 (local_id, local_id, json.dumps(entry, ensure_ascii=False), now),
             )
+            _record_change(own_db, "workout_library", local_id, "create", None, entry)
     return entry
 
 
@@ -7142,10 +7508,12 @@ def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
             raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.")
         if current.get("date"):
             raise AppError(409, "Geplante lokale Einheiten werden im Kalender bearbeitet.")
+        before = {**current, "sync_status": row.get("sync_state") or current.get("sync_status")}
         if action == "delete":
             if row.get("external_id"):
                 raise AppError(409, "Synchronisierte Bibliothekseinheiten können nicht lokal gelöscht werden. Archiviere sie stattdessen.")
             db.execute("DELETE FROM workout_library WHERE local_id=?", (normalized_id,))
+            _record_change(db, "workout_library", normalized_id, "delete", before, None)
             add_message("event", f"Bibliothekseinheit „{current.get('name') or 'Einheit'}“ wurde lokal gelöscht.")
             return {"status": "deleted", "local_id": normalized_id}
         candidate = dict(current)
@@ -7173,6 +7541,7 @@ def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
             "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
             (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
         )
+        _record_change(db, "workout_library", normalized_id, "update", before, {**normalized, "sync_status": "local"})
     add_message("event", f"Bibliothekseinheit „{normalized.get('name') or 'Einheit'}“ wurde aktualisiert.")
     return {"status": "local", "local_id": normalized_id, "library_entry": normalized}
 
@@ -7559,8 +7928,10 @@ def update_local_planned_workout(local_id: str, values: Any) -> dict[str, Any]:
             raise AppError(500, "Die lokale Planung ist beschädigt.") from exc
         if not isinstance(current, dict) or not current.get("date") or current.get("source") not in {"coach", "library", "legacy-draft"}:
             raise AppError(403, "Nur datierte lokale Trainingsbibliothekseinheiten können bearbeitet werden.")
+        before = {**current, "sync_status": row.get("sync_state") or current.get("sync_status")}
         if action == "delete":
             db.execute("DELETE FROM workout_library WHERE local_id = ?", (normalized_id,))
+            _record_change(db, "workout_library", normalized_id, "delete", before, None)
             updated = None
         elif action in {"archive", "restore", "update"}:
             candidate = dict(current)
@@ -7596,6 +7967,7 @@ def update_local_planned_workout(local_id: str, values: Any) -> dict[str, Any]:
                 "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
                 (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
             )
+            _record_change(db, "workout_library", normalized_id, "update", before, {**normalized, "sync_status": "local"})
             updated = normalized
         else:
             raise AppError(400, "Unbekannte Aktion für lokale Planung.")
@@ -9373,6 +9745,7 @@ COACH_ACTION_TYPES = {
     "sync_competitions",
     "sync_workout_library",
     "apply_adaptive_replan",
+    "undo_change",
 }
 
 
@@ -9513,6 +9886,8 @@ def _execute_coach_action(action_type: str, payload: dict[str, Any]) -> dict[str
             payload.get("adjustment_id"),
             sync_illness_to_intervals=bool(payload.get("sync_illness_to_intervals")),
         )}
+    if action_type == "undo_change":
+        return _apply_change_undo(payload)
     raise AppError(400, "Unbekannte Coach-Aktion.")
 
 
@@ -10388,6 +10763,7 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "workout_library.jsonl",
     "training_plans.jsonl",
     "plan_adjustments.jsonl",
+    "change_history.jsonl",
 }
 
 
@@ -10521,6 +10897,12 @@ def _privacy_export_file() -> Path:
                 (dict(row) for row in db.execute("SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at")),
                 deadline,
             )
+            _export_jsonl_rows(
+                archive,
+                "change_history.jsonl",
+                (_change_history_view(dict(row)) for row in db.execute("SELECT id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff FROM change_history ORDER BY created_at")),
+                deadline,
+            )
             archive.writestr("local_feedback.json", json.dumps(local_feedback_context(), ensure_ascii=False, separators=(",", ":")))
             archive.writestr("activity_feedback.json", json.dumps(activity_feedback_context(), ensure_ascii=False, separators=(",", ":")))
             archive.writestr("planning.json", json.dumps(planning_state(), ensure_ascii=False, separators=(",", ":")))
@@ -10572,6 +10954,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "activity_feedback": {"activity_id", "activity_name", "activity_date", "notes", "created_at", "updated_at"},
     "plan_adjustments": {"id", "payload", "status", "created_at", "applied_at"},
     "coach_action_proposals": {"id", "session_csrf_hash", "action_type", "target_system", "object_ids", "diff", "payload", "payload_hash", "action_token_hash", "status", "expires_at", "created_at", "used_at"},
+    "change_history": {"id", "entity_type", "entity_id", "action", "source", "created_at", "before_hash", "after_hash", "diff"},
     "public_event_sources": {"id", "name", "url", "last_sync_at", "last_error", "created_at", "updated_at"},
     "public_event_candidates": {"id", "source_id", "uid", "name", "event_date", "sport", "distance", "location", "url", "description", "imported_competition_id", "created_at", "updated_at"},
     "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "updated_at"},
@@ -10727,6 +11110,7 @@ PRIVACY_DELETE_SCOPE = (
     ("calendars", "Kalenderquellen, Kandidaten und lokale Kalenderereignisse", ("public_event_sources", "public_event_candidates", "external_calendar_events")),
     ("sessions", "Anmeldesitzungen", ("sessions",)),
     ("settings", "Profil, Einstellungen, Syncstatus und lokale Caches", ("kv",)),
+    ("history", "Lokale Änderungshistorie", ("change_history",)),
 )
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
@@ -11088,6 +11472,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/privacy/delete/preview":
                 require_auth(self)
                 self.send_json(200, privacy_delete_preview())
+            elif path == "/api/change-history":
+                require_auth(self)
+                raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["100"])[0]
+                try:
+                    limit = max(1, min(int(raw_limit), CHANGE_HISTORY_MAX_ROWS))
+                except ValueError:
+                    limit = 100
+                self.send_json(200, {"changes": list_change_history(limit)})
             elif path == "/api/privacy/backup":
                 require_auth(self)
                 stream_database_backup(self)
@@ -11229,6 +11621,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
             elif path == "/api/coach/actions/preview":
                 self.send_json(200, create_coach_action_preview(self.read_json(), session["csrf_hash"]))
+            elif path == "/api/change-history/undo/preview":
+                self.send_json(200, _history_preview(self.read_json().get("change_id"), session["csrf_hash"]))
             elif path == "/api/coach/actions/confirm":
                 self.send_json(200, confirm_coach_action_preview(self.read_json().get("proposal_id"), session["csrf_hash"]))
             elif path == "/api/coach/actions/execute":

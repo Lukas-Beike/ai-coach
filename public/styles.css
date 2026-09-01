@@ -857,3 +857,23 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
     transition-duration: .01ms !important;
   }
 }
+.change-history-list {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.change-history-item {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line, #d9e0e8);
+  border-radius: 0.7rem;
+}
+
+.change-history-item-header {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
