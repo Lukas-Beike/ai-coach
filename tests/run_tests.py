@@ -8,10 +8,9 @@ import time
 import unittest
 from pathlib import Path
 
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import test_server  # noqa: E402
+import test_server
 
 
 def iter_tests(suite: unittest.TestSuite):
@@ -28,7 +27,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--total", type=int, default=1, help="number of total shards")
     args = parser.parse_args()
     if args.total < 1 or not 1 <= args.shard <= args.total:
-        parser.error("--shard must be between 1 and --total, and --total must be positive")
+        parser.error(
+            "--shard must be between 1 and --total, and --total must be positive"
+        )
     return args
 
 
@@ -36,7 +37,9 @@ def main() -> int:
     args = parse_args()
     loaded = unittest.defaultTestLoader.loadTestsFromModule(test_server)
     tests = sorted(iter_tests(loaded), key=lambda test: test.id())
-    selected = [test for index, test in enumerate(tests) if index % args.total == args.shard - 1]
+    selected = [
+        test for index, test in enumerate(tests) if index % args.total == args.shard - 1
+    ]
     if not selected:
         raise SystemExit(f"shard {args.shard}/{args.total} contains no tests")
 

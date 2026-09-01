@@ -1,41 +1,126 @@
 const $ = (selector) => document.querySelector(selector);
-const state = {
-  data: null,
-  loadSequence: 0,
-  busy: false,
-  chatQueue: [],
-  chatQueueSequence: 0,
-  profileDirty: false,
-  checkinDirty: false,
-  chatDraftDirty: false,
-  checkinSelectedDate: null,
-  activityTypes: new Set(),
-  activityFromDate: "",
-  activityToDate: "",
-  activityVisibleCount: 250,
-  activityFeedbackDirty: new Set(),
-  planningEditDirty: new Set(),
-  libraryDateDirty: new Set(),
-  activityFeedbackDrafts: new Map(),
-  planningDrafts: new Map(),
-  libraryDateDrafts: new Map(),
-  plannedWeekOpen: new Map(),
-  voiceRecorder: null,
-  voiceStream: null,
-  voiceTimer: null,
-  voiceStartedAt: 0,
-  voiceTranscribing: false,
-  localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, weather: false, performance: false, intervalsFull: false, garminFull: false, adaptivePlanning: false },
-  notificationKeys: new Set(),
-  quickTemplatesVisible: false,
-  activityTracked: false,
-  remoteDeleteFailure: null,
-  libraryFilter: "active",
-};
 const VOICE_MAX_DURATION_MS = 60_000;
 const VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 const QUICK_TEMPLATES_INACTIVITY_MS = 6 * 60 * 60 * 1000;
 const LAST_PWA_ACTIVITY_KEY = "intervals-coach-last-pwa-activity";
+const SYNC_POLL_LEASE_KEY = "intervals-coach-sync-poll-lease";
+const SYNC_POLL_CHANNEL = "intervals-coach-sync-status";
+const SYNC_POLL_ACTIVE_MS = 1_500;
+const SYNC_POLL_IDLE_MS = 60_000;
+const SYNC_POLL_RETRY_MS = 5_000;
+const SYNC_POLL_LEASE_MS = 4_000;
+const dialogFocusReturn = new WeakMap();
+
+function showAccessibleDialog(dialog, initialFocus = null) {
+  if (!dialog) return;
+  const active = document.activeElement;
+  dialogFocusReturn.set(dialog, active instanceof HTMLElement && active !== document.body ? active : null);
+  if (!dialog.open) dialog.showModal();
+  const target = initialFocus || dialog.querySelector("button, input, textarea, select, [tabindex]:not([tabindex='-1'])");
+  if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+}
+
+function restoreDialogFocus(dialog) {
+  const target = dialogFocusReturn.get(dialog);
+  dialogFocusReturn.delete(dialog);
+  if (target instanceof HTMLElement && target.isConnected && !target.disabled && !target.closest("[hidden]")) {
+    target.focus({ preventScroll: true });
+  }
+}
+
+function renderMoreSegments(segment = moreSegmentFromRoute()) {
+  const selected = ["profile", "connections", "coach", "privacy", "operations"].includes(segment) ? segment : "connections";
+  document.querySelectorAll("[data-more-segment-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.moreSegmentPanel !== selected;
+  });
+  document.querySelectorAll("[data-more-segment]").forEach((link) => {
+    const active = link.dataset.moreSegment === selected;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+}
+
+function renderPlanSegments(segment = state.planSegment) {
+  const selected = ["calendar", "library", "goals"].includes(segment) ? segment : "calendar";
+  state.planSegment = selected;
+  document.querySelectorAll("[data-plan-segment-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.planSegmentPanel !== selected;
+  });
+  document.querySelectorAll("[data-plan-segment]").forEach((link) => {
+    const active = link.dataset.planSegment === selected;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+}
+
+function currentPlanLoadAreas() {
+  const areas = new Set(["chat", "activities", "performance", "feedback", "profile"]);
+  const route = baseRoute();
+  if (route === "today" || (route === "planned" && state.planSegment !== "library")) areas.add("plan");
+  if (route === "planned" && state.planSegment === "library") areas.add("library");
+  return [...areas];
+}
+
+function ensureRouteData(route = state.route) {
+  if (!state.data || state.loadPromise) return;
+  const requested = [];
+  const panelRoute = baseRoute(route);
+  if ((panelRoute === "today" || (panelRoute === "planned" && state.planSegment !== "library")) && !state.loadedAreas.has("plan")) requested.push("plan");
+  if (panelRoute === "planned" && state.planSegment === "library" && !state.loadedAreas.has("library")) requested.push("library");
+  if (requested.length) load("/api/bootstrap", requested);
+}
+
+function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
+  const panelRoute = NAV_ROUTES[route] ? route : DEFAULT_NAV_ROUTE;
+  const mainRoute = baseRoute(panelRoute);
+  const navigationRoute = NAV_LINK_ROUTES[mainRoute] || mainRoute;
+  const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
+  if (currentPanel !== NAV_ROUTES[panelRoute] && !confirmDiscardChanges()) return false;
+  if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges()) discardUnsavedChanges();
+  if (currentPanel === "workoutsPanel" && mainRoute !== "planned") state.planSegmentScroll[state.planSegment] = window.scrollY;
+  if (currentPanel === "workoutsPanel" && mainRoute === "planned" && state.planSegment !== planSegmentFromRoute(panelRoute)) state.planSegmentScroll[state.planSegment] = window.scrollY;
+  document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
+  const navigation = document.querySelector(`.nav-item[data-route="${navigationRoute}"]`);
+  const panel = document.querySelector(`#${NAV_ROUTES[panelRoute]}`);
+  if (!navigation || !panel) return false;
+  navigation.classList.add("active");
+  document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
+  navigation.setAttribute("aria-current", "page");
+  panel.classList.add("active");
+  state.route = panelRoute;
+  if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
+  if (mainRoute === "planned") {
+    renderPlanSegments(planSegmentFromRoute(panelRoute));
+    renderActivePlanSegment(state.data);
+  }
+  const targetHash = `#${panelRoute}`;
+  if (window.location.hash !== targetHash) {
+    if (historyMode === "push") window.history.pushState({ route: panelRoute }, "", targetHash);
+    else if (historyMode === "replace") window.history.replaceState({ route: panelRoute }, "", targetHash);
+  }
+  if (state.data) renderStatus(state.data);
+  updateHeaderAction();
+  if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadContextPreview();
+  if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadLogs();
+  if (state.data && mainRoute === "more") loadChangeHistory();
+  const targetScroll = mainRoute === "planned" ? (state.planSegmentScroll[state.planSegment] || 0) : 0;
+  requestAnimationFrame(() => window.scrollTo({ top: targetScroll, behavior: "auto" }));
+  if (mainRoute === "coach") scrollChatToLatest(true);
+  ensureRouteData(panelRoute);
+  if (focus && !$("#appShell")?.hidden) {
+    panel.setAttribute("tabindex", "-1");
+    panel.focus({ preventScroll: true });
+  }
+  return true;
+}
+
+function syncNavigationRoute() {
+  const route = routeFromHash();
+  const applied = applyNavigationRoute(route, { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
+  if (!applied && state.route) window.history.replaceState({ route: state.route }, "", `#${state.route}`);
+}
 
 function readLastPwaActivity() {
   try {
@@ -84,6 +169,8 @@ function cookie(name) {
 
 function showLogin() {
   state.data = null;
+  state.loadedAreas.clear();
+  state.planSegment = "calendar";
   state.profileDirty = false;
   state.checkinDirty = false;
   state.chatDraftDirty = false;
@@ -102,8 +189,7 @@ function showLogin() {
   $("#appShell").hidden = true;
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
-  if (!dialog.open) dialog.showModal();
-  $("#loginPassword").focus();
+  showAccessibleDialog(dialog, $("#loginPassword"));
 }
 
 function showAppShellLoading() {
@@ -128,37 +214,173 @@ function finishAppShellLoading() {
   if (!$("#loginDialog")?.open) shell.hidden = false;
   shell.classList.remove("is-loading");
   shell.removeAttribute("aria-busy");
+  applyNavigationRoute(routeFromHash(), { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.method && options.method !== "GET" ? { "X-CSRF-Token": cookie("ic_csrf") } : {}), ...(options.headers || {}) },
-  });
-  let payload = {};
-  try { payload = await response.json(); } catch (_) {}
-  if (!response.ok) {
-    if (response.status === 401) showLogin();
-    throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
+  return window.AppApi.request(path, options, showLogin);
+}
+
+function syncPollLeaseAvailable() {
+  try {
+    const current = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
+    if (current && current.expires_at > Date.now() && current.token !== state.syncPoll.leaseToken) return false;
+    const lease = { token: state.syncPoll.leaseToken, expires_at: Date.now() + SYNC_POLL_LEASE_MS };
+    localStorage.setItem(SYNC_POLL_LEASE_KEY, JSON.stringify(lease));
+    const verified = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
+    return verified?.token === state.syncPoll.leaseToken;
+  } catch (_) {
+    return true;
   }
-  return payload;
+}
+
+function releaseSyncPollLease() {
+  try {
+    const current = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
+    if (current?.token === state.syncPoll.leaseToken) localStorage.removeItem(SYNC_POLL_LEASE_KEY);
+  } catch (_) {}
+}
+
+function broadcastSyncMessage(message) {
+  try { state.syncPoll.channel?.postMessage(message); } catch (_) {}
+}
+
+function changedSyncAreas(nextVersions) {
+  const previous = state.data?.state_versions || {};
+  const areaMap = {
+    activities: ["activities"],
+    performance: ["performance"],
+    chat: ["chat"],
+    library: ["library", "plan"],
+    checkins: ["feedback"],
+    activity_feedback: ["feedback"],
+    profile: ["profile"],
+    plan: ["plan"],
+  };
+  const areas = new Set();
+  Object.entries(areaMap).forEach(([version, mappedAreas]) => {
+    if (nextVersions?.[version] !== undefined && nextVersions[version] !== previous[version]) mappedAreas.forEach((area) => areas.add(area));
+  });
+  return [...areas];
+}
+
+function renderSyncStatus(status) {
+  renderMaintenanceStatus(status.maintenance);
+  if (!state.data) return;
+  state.data.sync = {
+    ...(state.data.sync || {}),
+    running: Boolean(status.running),
+    status: status.message || null,
+    last_error: status.last_error || null,
+  };
+  renderActivities(state.data.activities || []);
+  renderToday(state.data);
+  renderPerformance(state.data.performance || {});
+  renderSettings(state.data);
+  updateHeaderAction();
+}
+
+function renderMaintenanceStatus(maintenance) {
+  const active = Boolean(maintenance?.active);
+  const statusCard = $("#statusCard");
+  if (!statusCard) return;
+  if (!active) {
+    if ($("#statusTitle").textContent === "Wartungsmodus aktiv") statusCard.hidden = true;
+    return;
+  }
+  statusCard.hidden = false;
+  statusCard.classList.remove("working");
+  statusCard.classList.add("warning");
+  $("#statusTitle").textContent = "Wartungsmodus aktiv";
+  $("#statusDetail").textContent = "Die Datenbank wird wiederhergestellt; Änderungen sind vorübergehend pausiert.";
+}
+
+function handleSyncStatus(status, broadcast = false) {
+  if (!status || typeof status !== "object") return;
+  if (broadcast) broadcastSyncMessage({ type: "status", status });
+  if (status.operation_id && status.running) {
+    state.syncPoll.operationId = status.operation_id;
+    state.localSync.intervals = true;
+  }
+  renderSyncStatus(status);
+  const changedAreas = changedSyncAreas(status.state_versions);
+  if (changedAreas.length && state.data) {
+    load("/api/bootstrap?local=1", changedAreas).catch(() => {});
+  } else if (state.data && status.state_versions) {
+    state.data.state_versions = { ...state.data.state_versions, ...status.state_versions };
+  }
+  if (!status.running && status.operation_id && status.operation_id === state.syncPoll.operationId) {
+    state.localSync.intervals = false;
+    state.syncPoll.operationId = null;
+    const waiters = state.syncPoll.waiters.splice(0);
+    waiters.forEach((resolve) => resolve(status));
+  }
+}
+
+function scheduleSyncPoll(delay = SYNC_POLL_IDLE_MS) {
+  if (state.syncPoll.timer) clearTimeout(state.syncPoll.timer);
+  state.syncPoll.timer = setTimeout(() => { state.syncPoll.timer = null; pollSyncStatus(); }, delay);
+}
+
+async function pollSyncStatus() {
+  if (!state.data || document.visibilityState !== "visible" || !navigator.onLine) {
+    scheduleSyncPoll(SYNC_POLL_RETRY_MS);
+    return;
+  }
+  if (!syncPollLeaseAvailable()) {
+    scheduleSyncPoll(SYNC_POLL_RETRY_MS);
+    return;
+  }
+  if (state.syncPoll.controller) return;
+  const controller = new AbortController();
+  state.syncPoll.controller = controller;
+  try {
+    const status = await api("/api/sync/status", { signal: controller.signal });
+    handleSyncStatus(status, true);
+    scheduleSyncPoll(status.running ? SYNC_POLL_ACTIVE_MS : SYNC_POLL_IDLE_MS);
+  } catch (error) {
+    if (error.name !== "AbortError") scheduleSyncPoll(SYNC_POLL_RETRY_MS);
+  } finally {
+    if (state.syncPoll.controller === controller) state.syncPoll.controller = null;
+    releaseSyncPollLease();
+  }
+}
+
+function waitForSync(operationId) {
+  if (!operationId) return Promise.resolve({ status: "unknown" });
+  state.syncPoll.operationId = operationId;
+  state.localSync.intervals = true;
+  broadcastSyncMessage({ type: "started", operation_id: operationId });
+  scheduleSyncPoll(0);
+  return new Promise((resolve) => state.syncPoll.waiters.push(resolve));
+}
+
+function setupSyncStatusMonitoring() {
+  if ("BroadcastChannel" in window) {
+    state.syncPoll.channel = new BroadcastChannel(SYNC_POLL_CHANNEL);
+    state.syncPoll.channel.addEventListener("message", (event) => {
+      const message = event.data || {};
+      if (message.type === "started" && message.operation_id) {
+        state.syncPoll.operationId = message.operation_id;
+        state.localSync.intervals = true;
+        scheduleSyncPoll(0);
+      } else if (message.type === "status") handleSyncStatus(message.status);
+    });
+  }
+  scheduleSyncPoll(0);
+}
+
+function handleSyncVisibility() {
+  if (document.visibilityState !== "visible") {
+    state.syncPoll.controller?.abort();
+    releaseSyncPollLease();
+    return;
+  }
+  scheduleSyncPoll(0);
 }
 
 async function apiAudio(path, blob) {
-  const response = await fetch(path, {
-    method: "POST",
-    credentials: "same-origin",
-    body: blob,
-    headers: { "Content-Type": blob.type || "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") },
-  });
-  let payload = {};
-  try { payload = await response.json(); } catch (_) {}
-  if (!response.ok) {
-    if (response.status === 401) showLogin();
-    throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
-  }
-  return payload;
+  return window.AppApi.audio(path, blob, showLogin);
 }
 
 async function bootstrapAuth() {
@@ -167,6 +389,7 @@ async function bootstrapAuth() {
   try {
     const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store", signal: controller.signal });
     const status = await response.json();
+    renderMaintenanceStatus(status.maintenance);
     if (status.authenticated) {
       $("#authLoading").hidden = true;
       $("#loginDialog").close();
@@ -215,6 +438,19 @@ function toast(message, error = false) {
   toast.timer = setTimeout(() => { node.className = "toast"; }, 3000);
 }
 
+function renderConnectivityStatus(online = navigator.onLine) {
+  const notice = $("#connectivityNotice");
+  if (!notice) return;
+  notice.hidden = online;
+  notice.textContent = online ? "" : "Offline: Nur bereits geladene Daten sind verfügbar. Synchronisierung und Speichern warten auf die Verbindung.";
+}
+
+function setupConnectivityStatus() {
+  renderConnectivityStatus();
+  window.addEventListener("online", () => renderConnectivityStatus(true));
+  window.addEventListener("offline", () => renderConnectivityStatus(false));
+}
+
 function setVoiceStatus(message = "", error = false) {
   const node = $("#voiceStatus");
   if (!node) return;
@@ -260,6 +496,7 @@ function updateVoiceButton() {
 function updateChatControls() {
   const sendButton = $("#sendButton");
   const steerButton = $("#steerButton");
+  const cancelButton = $("#cancelChatButton");
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
   if (sendButton) {
     sendButton.disabled = !inputAvailable;
@@ -268,6 +505,11 @@ function updateChatControls() {
   if (steerButton) {
     steerButton.hidden = !state.busy;
     steerButton.disabled = !inputAvailable;
+  }
+  if (cancelButton) {
+    cancelButton.hidden = !state.busy;
+    cancelButton.disabled = !state.chatStream || state.chatStream.cancelRequested;
+    cancelButton.textContent = state.chatStream?.cancelRequested ? "Wird abgebrochen…" : "Abbrechen";
   }
   updateChatQueueStatus();
 }
@@ -428,7 +670,7 @@ function openAdaptivePlanningDialog(preview) {
     apply.hidden = !(preview.changes || []).length && !(preview.illness_pause && !preview.illness_pause.approved);
     apply.dataset.adjustmentId = preview.id || "";
   }
-  if (!dialog.open) dialog.showModal();
+  showAccessibleDialog(dialog, $("#cancelAdaptivePlanningButton"));
 }
 
 function renderAdaptivePlanning(data) {
@@ -462,7 +704,7 @@ function renderAdaptivePlanning(data) {
     const button = $("#adaptivePlanningButton");
     if (button) {
       button.disabled = Boolean(state.localSync.adaptivePlanning);
-      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : illnessNeedsForecast ? "Krankheitspause prüfen" : "Planung aktualisieren";
+      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : illnessNeedsForecast ? "Krankheitspause prüfen" : "Vorschau prüfen";
     }
   }
   if (coachNotice) coachNotice.hidden = !required;
@@ -479,6 +721,81 @@ function renderExternalCalendar(data) {
   if (syncButton) {
     syncButton.disabled = Boolean(calendar.running || state.localSync.externalCalendar);
     syncButton.textContent = calendar.running || state.localSync.externalCalendar ? "Synchronisierung läuft…" : "Synchronisieren";
+  }
+}
+
+const PROVIDER_FRESHNESS_STATUS = {
+  fresh: "Frisch",
+  partial: "Teilweise erfolgreich",
+  stale: "Veraltet, aber nutzbar",
+  syncing: "Wird aktualisiert",
+  error: "Fehler",
+  never_loaded: "Noch nie geladen",
+  not_configured: "Nicht konfiguriert",
+};
+
+const PROVIDER_FRESHNESS_ERRORS = {
+  auth_required: "Erneute Anmeldung erforderlich",
+  rate_limited: "Rate Limit erreicht",
+  network_error: "Netzwerkfehler",
+  invalid_configuration: "Ungültige Konfiguration",
+  provider_error: "Providerfehler",
+};
+
+function renderProviderFreshness(data) {
+  const root = $("#providerFreshnessTimeline");
+  if (!root) return;
+  root.replaceChildren();
+  const entries = Array.isArray(data.provider_freshness) ? data.provider_freshness : [];
+  if (!entries.length) {
+    root.textContent = "Noch kein Provider-Status verfügbar.";
+    return;
+  }
+  entries.forEach((entry) => {
+    const item = document.createElement("article");
+    item.className = "provider-freshness-item";
+    const header = document.createElement("div");
+    header.className = "provider-freshness-header";
+    const title = document.createElement("strong");
+    title.textContent = entry.label || entry.provider || "Provider";
+    const status = document.createElement("span");
+    status.className = entry.state === "fresh" || entry.state === "partial" ? "configured" : "not-configured";
+    status.textContent = PROVIDER_FRESHNESS_STATUS[entry.state] || "Unbekannter Status";
+    header.append(title, status);
+    const meta = document.createElement("span");
+    meta.className = "provider-freshness-meta";
+    const attempt = entry.last_attempt_at ? `Letzter Versuch: ${formatTime(entry.last_attempt_at)}` : "Noch kein Versuch";
+    const success = entry.last_success_at ? `Letzter Erfolg: ${formatTime(entry.last_success_at)}` : "Noch kein erfolgreicher Abruf";
+    const retry = entry.next_retry_at ? `Nächster Versuch ab: ${formatTime(entry.next_retry_at)}` : "Kein automatischer Retry terminiert";
+    meta.textContent = `${attempt} · ${success} · ${retry}`;
+    item.append(header, meta);
+    if (entry.error_code) {
+      const error = document.createElement("span");
+      error.className = "error";
+      error.textContent = PROVIDER_FRESHNESS_ERRORS[entry.error_code] || "Providerfehler";
+      item.append(error);
+    }
+    if (entry.read_only && entry.configured && ["error", "stale"].includes(entry.state)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = "Erneut versuchen";
+      button.addEventListener("click", () => retryProvider(entry.provider, button));
+      item.append(button);
+    }
+    root.append(item);
+  });
+}
+
+async function retryProvider(provider, button) {
+  if (button) button.disabled = true;
+  try {
+    if (provider === "intervals") await syncNow({ currentTarget: $("#systemIntervalsSyncButton") });
+    else if (provider === "garmin") await syncGarmin();
+    else if (provider === "weather") await syncWeather();
+    else if (provider === "calendar") await syncExternalCalendar();
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -547,78 +864,6 @@ function discardUnsavedChanges() {
   if (state.data) render(state.data);
 }
 
-function escapeHtml(value) {
-  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
-}
-
-function inlineMarkdown(value) {
-  let html = escapeHtml(value);
-  const codeSpans = [];
-  html = html.replace(/`([^`\n]+)`/g, (_, code) => {
-    const token = `\u0000code${codeSpans.length}\u0000`;
-    codeSpans.push(`<code>${code}</code>`);
-    return token;
-  });
-  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
-  html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
-  html = html.replace(/_([^_\n]+)_/g, "<em>$1</em>");
-  return html.replace(/\u0000code(\d+)\u0000/g, (_, index) => codeSpans[Number(index)]);
-}
-
-function markdownToHtml(markdown) {
-  const lines = String(markdown || "").replace(/\r/g, "").split("\n");
-  const output = [];
-  let paragraph = [];
-  let listType = null;
-  let inCode = false;
-  let codeLines = [];
-
-  const closeList = () => {
-    if (listType) output.push(`</${listType}>`);
-    listType = null;
-  };
-  const flushParagraph = () => {
-    if (paragraph.length) {
-      output.push(`<p>${inlineMarkdown(paragraph.join("\n")).replace(/\n/g, "<br>")}</p>`);
-      paragraph = [];
-    }
-  };
-
-  for (const line of lines) {
-    if (/^\s*```/.test(line)) {
-      flushParagraph(); closeList();
-      if (inCode) {
-        output.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-        codeLines = [];
-      }
-      inCode = !inCode;
-      continue;
-    }
-    if (inCode) { codeLines.push(line); continue; }
-    if (!line.trim()) { flushParagraph(); closeList(); continue; }
-    const heading = line.match(/^\s*(#{1,3})\s+(.+?)\s*#*\s*$/);
-    if (heading) { flushParagraph(); closeList(); output.push(`<h${heading[1].length}>${inlineMarkdown(heading[2])}</h${heading[1].length}>`); continue; }
-    if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) { flushParagraph(); closeList(); output.push("<hr>"); continue; }
-    const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
-    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
-    if (unordered || ordered) {
-      flushParagraph();
-      const nextType = unordered ? "ul" : "ol";
-      if (listType !== nextType) { closeList(); output.push(`<${nextType}>`); listType = nextType; }
-      output.push(`<li>${inlineMarkdown((unordered || ordered)[1])}</li>`);
-      continue;
-    }
-    const quote = line.match(/^\s*>\s?(.*)$/);
-    if (quote) { flushParagraph(); closeList(); output.push(`<blockquote>${inlineMarkdown(quote[1])}</blockquote>`); continue; }
-    closeList(); paragraph.push(line);
-  }
-  if (inCode) output.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-  flushParagraph(); closeList();
-  return output.join("");
-}
-
 function renderStatus(data) {
   const configured = data.configured;
   const morning = data.morning_checkin || {};
@@ -660,71 +905,6 @@ function dateLabel(value) {
 }
 
 const CALENDAR_DISPLAY_DEFAULTS = { past_weeks: 1, future_weeks: 4 };
-const CALENDAR_DISPLAY_MAX_WEEKS = 52;
-
-function calendarDisplayValue(value, fallback) {
-  const number = Number(value);
-  return Number.isInteger(number) && number >= 0 && number <= CALENDAR_DISPLAY_MAX_WEEKS ? number : fallback;
-}
-
-function localDateKey(value) {
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.valueOf())) return "";
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function timezoneDateKey(timeZone, instant = new Date()) {
-  if (!timeZone) return localDateKey(instant);
-  try {
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(instant);
-    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-    return `${values.year}-${values.month}-${values.day}`;
-  } catch (_) { return localDateKey(instant); }
-}
-
-function dateFromKey(value) {
-  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date(NaN);
-}
-
-function addDateKey(value, days) {
-  const date = dateFromKey(value);
-  if (Number.isNaN(date.valueOf())) return "";
-  date.setDate(date.getDate() + days);
-  return localDateKey(date);
-}
-
-function dateKeyDifference(left, right) {
-  const a = dateFromKey(left);
-  const b = dateFromKey(right);
-  if (Number.isNaN(a.valueOf()) || Number.isNaN(b.valueOf())) return 0;
-  return Math.round((Date.UTC(a.getFullYear(), a.getMonth(), a.getDate()) - Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())) / 86400000);
-}
-
-function plannedEventDate(event) {
-  return String(event?.start_date_local || event?.date || "").slice(0, 10);
-}
-
-function isCoachOwnedWorkout(event) {
-  return String(event?.category || "").toUpperCase() === "WORKOUT"
-    && String(event?.external_id || "").startsWith("intervals-coach-");
-}
-
-function plannedDayLabel(date, offset) {
-  const formatted = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(date);
-  if (offset === 0) return `Heute · ${formatted}`;
-  if (offset === 1) return `Morgen · ${formatted}`;
-  return formatted;
-}
-
-function plannedWeekStart(date) {
-  const start = new Date(date);
-  const day = start.getDay();
-  start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
-  start.setHours(0, 0, 0, 0);
-  return start;
-}
 
 function complianceMetricLabel(compliance) {
   if (!compliance || compliance.planned_value == null || compliance.actual_value == null) return "";
@@ -773,38 +953,6 @@ function weatherForDate(date) {
   return (state.data?.weather?.days || []).find((item) => item.date === date) || null;
 }
 
-function weatherIcon(code) {
-  const number = Number(code);
-  if (!Number.isFinite(number)) return "🌡️";
-  if (number === 0) return "☀️";
-  if (number === 1) return "🌤️";
-  if (number === 2) return "⛅";
-  if (number === 3) return "☁️";
-  if ([45, 48].includes(number)) return "🌫️";
-  if (number >= 51 && number <= 57) return "🌦️";
-  if (number >= 61 && number <= 67) return "🌧️";
-  if (number >= 71 && number <= 77) return number === 75 ? "❄️" : "🌨️";
-  if (number >= 80 && number <= 82) return number === 80 ? "🌦️" : "🌧️";
-  if (number >= 85 && number <= 86) return "🌨️";
-  if (number >= 95) return "⛈️";
-  return "🌤️";
-}
-
-function weatherIconFor(item) {
-  return item?.icon || weatherIcon(item?.weather_code);
-}
-
-function weatherNumber(value, suffix = "") {
-  const number = Number(value);
-  return Number.isFinite(number) ? `${Math.round(number)}${suffix}` : "–";
-}
-
-function weatherDirection(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "";
-  return ["N", "NO", "O", "SO", "S", "SW", "W", "NW"][Math.round(number / 45) % 8];
-}
-
 function renderWeatherNotice(weather) {
   const notice = $("#weatherNotice");
   if (!notice) return;
@@ -825,6 +973,132 @@ function renderWeatherNotice(weather) {
   }
   const location = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
   notice.textContent = `${location ? `Wetter für ${location}` : "Wettervorhersage"} · ${weather.model || "Open-Meteo"} · Tageswerte bis 14 Tage · Zeitvorschläge bis 5 Tage · Quelle: Open-Meteo.com${weather.stale ? " · letzte verfügbare Daten" : ""}`;
+}
+
+function todayCard(title, className = "") {
+  const card = document.createElement("section");
+  card.className = `today-card${className ? ` ${className}` : ""}`;
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  card.append(heading);
+  return card;
+}
+
+function todayCardText(card, text, className = "today-empty") {
+  const node = document.createElement("p");
+  node.className = className;
+  node.textContent = text;
+  card.append(node);
+  return node;
+}
+
+function todayAction(text, handler, className = "secondary-button") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = text;
+  button.addEventListener("click", handler);
+  return button;
+}
+
+function todayActivityDate(activity) {
+  return String(activity?.start_date_local || activity?.date || activity?.activity_date || "").slice(0, 10);
+}
+
+function renderToday(data) {
+  const root = $("#todaySummary");
+  const status = $("#todayStatus");
+  const detail = $("#todaySyncDetail");
+  if (!root || !status) return;
+  root.replaceChildren();
+  status.className = "today-status";
+  status.textContent = "";
+  if (!data) {
+    status.textContent = "Heute wird geladen…";
+    return;
+  }
+  const todayKey = timezoneDateKey(data.profile?.timezone, new Date());
+  const context = (data.daily_planning_context || []).find((item) => item.date === todayKey) || {};
+  const checkin = data.local_feedback?.today || data.checkins?.find((item) => item.checkin_date === todayKey) || context.checkin;
+  const recovery = context.recovery || data.performance?.recovery || {};
+  const todayWorkouts = (data.planned || []).filter((event) => plannedEventDate(event) === todayKey);
+  const weather = context.weather || (data.weather?.days || []).find((item) => item.date === todayKey);
+  const syncMessages = [];
+  if ($("#appShell")?.classList.contains("is-loading")) syncMessages.push("Heute wird geladen…");
+  if (data.sync?.running || state.localSync.intervals) syncMessages.push(data.sync?.status || "Synchronisierung läuft…");
+  if (data.garmin_sync?.running || state.localSync.garmin) syncMessages.push(data.garmin_sync?.status || "Garmin wird synchronisiert…");
+  if (data.performance_refresh?.running || state.localSync.performance) syncMessages.push("Leistungsdaten werden aktualisiert…");
+  if (!navigator.onLine) syncMessages.push("Offline: Es werden nur bereits geladene Daten angezeigt.");
+  if (data.sync?.last_error) {
+    status.classList.add("error");
+    syncMessages.push(`Letzte Synchronisierung fehlgeschlagen: ${data.sync.last_error}`);
+  } else if (syncMessages.length) status.classList.add("working");
+  status.textContent = syncMessages.join(" · ");
+  if (detail) detail.textContent = syncMessages.length ? syncMessages.join(" · ") : `Stand: ${dateLabel(todayKey)}`;
+
+  const checkinCard = todayCard("Tages-Check-in", "today-checkin");
+  if (checkin) {
+    const values = [
+      checkin.day_form,
+      checkin.soreness != null ? `Muskelkater ${checkin.soreness}/10` : null,
+      checkin.stress != null ? `Stress ${checkin.stress}/10` : null,
+      checkin.motivation != null ? `Motivation ${checkin.motivation}/10` : null,
+      checkin.available_minutes != null ? `${checkin.available_minutes} Min. verfügbar` : null,
+      checkin.illness ? `Krankheit: ${checkin.illness}` : null,
+    ].filter(Boolean);
+    todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
+  } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
+  checkinCard.append(todayAction(checkin ? "Check-in bearbeiten" : "Check-in ausfüllen", () => openCheckinEditor(todayKey)));
+  root.append(checkinCard);
+
+  const readinessCard = todayCard("Readiness & Erholung", "today-readiness");
+  const recoveryValues = [
+    recovery.readiness != null ? `Readiness ${recovery.readiness}` : null,
+    recovery.sleep_hours != null ? `${recovery.sleep_hours} h Schlaf` : null,
+    recovery.hrv != null ? `${recovery.hrv} ms HRV` : null,
+    recovery.resting_hr != null ? `${recovery.resting_hr} bpm Ruhepuls` : null,
+  ].filter(Boolean);
+  todayCardText(readinessCard, recoveryValues.join(" · ") || "Keine Erholungsdaten für heute geladen.", recoveryValues.length ? "today-card-summary" : "today-empty");
+  if (recovery.readiness_source) todayCardText(readinessCard, `Quelle: ${recovery.readiness_source}`, "today-source");
+  root.append(readinessCard);
+
+  const workoutCard = todayCard("Heutiges Training", "today-workout");
+  if (!todayWorkouts.length) todayCardText(workoutCard, "Für heute ist keine geplante Einheit geladen.");
+  todayWorkouts.forEach((event) => {
+    const item = document.createElement("div");
+    item.className = "today-item";
+    const title = document.createElement("strong");
+    title.textContent = event.name || "Geplante Einheit";
+    const meta = document.createElement("span");
+    meta.textContent = [event.type || event.category, formatDuration(event.moving_time), distanceLabel(event.distance)].filter(Boolean).join(" · ") || "Details in Plan";
+    item.append(title, meta);
+    workoutCard.append(item);
+  });
+  workoutCard.append(todayAction("Plan öffnen", () => applyNavigationRoute("planned", { historyMode: "push" })));
+  root.append(workoutCard);
+
+  const weatherCard = todayCard("Wetter", "today-weather");
+  if (!data.weather?.configured) todayCardText(weatherCard, "Kein Wetterort hinterlegt. Du kannst ihn im Profil ergänzen.");
+  else if (data.weather?.error && !data.weather?.days?.length) todayCardText(weatherCard, data.weather.error, "today-empty today-error");
+  else if (!weather) todayCardText(weatherCard, "Für heute ist noch keine Wettervorhersage geladen.");
+  else todayCardText(weatherCard, [weatherIconFor(weather), weather.condition || "Vorhersage", weatherNumber(weather.temperature_min, " °C"), weatherNumber(weather.temperature_max, " °C"), weatherNumber(weather.precipitation_probability_max, " % Regen")].join(" · "), "today-card-summary");
+  root.append(weatherCard);
+
+  const feedbackCard = todayCard("Offene Rückmeldung", "today-feedback");
+  const openFeedback = (data.activities || []).find((activity) => todayActivityDate(activity) && !activity.activity_feedback);
+  if (openFeedback) {
+    todayCardText(feedbackCard, `Rückmeldung zu „${openFeedback.name || "letzter Aktivität"}“ ergänzen.`, "today-card-summary");
+    feedbackCard.append(todayAction("Verlauf öffnen", () => applyNavigationRoute("activities", { historyMode: "push" })));
+  } else todayCardText(feedbackCard, "Keine offene Rückmeldung zu den geladenen Aktivitäten.");
+  root.append(feedbackCard);
+
+  const adjustment = data.planning?.latest_replan;
+  if (adjustment && (adjustment.changes?.length || adjustment.illness_pause)) {
+    const adjustmentCard = todayCard("Aktuelle Plananpassung", "today-adjustment");
+    todayCardText(adjustmentCard, "Eine Planänderung wartet auf deine Prüfung.", "today-card-summary");
+    adjustmentCard.append(todayAction("Plananpassung prüfen", () => applyNavigationRoute("planned", { historyMode: "push" })));
+    root.append(adjustmentCard);
+  }
 }
 
 function planningContextForDate(date) {
@@ -1135,14 +1409,30 @@ function renderActivities(activities) {
     }
     root.append(card);
   });
-  if (displayedActivities.length > state.activityVisibleCount) {
+  if (displayedActivities.length > state.activityVisibleCount || state.data?.activities_next_cursor) {
     const loadMore = document.createElement("button");
     loadMore.type = "button";
     loadMore.className = "secondary-button activity-load-more";
-    loadMore.textContent = `Weitere Einheiten laden (${displayedActivities.length - state.activityVisibleCount} verbleibend)`;
-    loadMore.addEventListener("click", () => {
-      state.activityVisibleCount += 250;
-      renderActivities(state.data?.activities || []);
+    loadMore.textContent = displayedActivities.length > state.activityVisibleCount
+      ? `Weitere Einheiten laden (${displayedActivities.length - state.activityVisibleCount} verbleibend)`
+      : "Weitere Einheiten laden";
+    loadMore.addEventListener("click", async () => {
+      if (displayedActivities.length > state.activityVisibleCount) {
+        state.activityVisibleCount += 250;
+        renderActivities(state.data?.activities || []);
+        return;
+      }
+      loadMore.disabled = true;
+      try {
+        const page = await api(`/api/activities?limit=250&cursor=${encodeURIComponent(state.data.activities_next_cursor)}`);
+        state.data.activities = [...(state.data.activities || []), ...(page.activities || [])];
+        state.data.activities_next_cursor = page.next_cursor;
+        state.activityVisibleCount += 250;
+        renderActivities(state.data.activities);
+      } catch (error) {
+        toast(error.message, true);
+        loadMore.disabled = false;
+      }
     });
     root.append(loadMore);
   }
@@ -1681,6 +1971,7 @@ function renderMessages(messages, forceScroll = false) {
   const signature = JSON.stringify([
     visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content]),
     state.busy,
+    state.chatStreamText,
     state.chatQueue.map((entry) => [entry.id, entry.mode, entry.message]),
   ]);
   if (root.dataset.signature === signature) return;
@@ -1703,6 +1994,12 @@ function renderMessages(messages, forceScroll = false) {
     root.append(node);
   }
   for (const entry of state.chatQueue) root.append(createPendingMessage(entry));
+  if (state.busy && state.chatStreamText) {
+    const node = document.createElement("div");
+    node.className = "message assistant streaming";
+    node.innerHTML = markdownToHtml(state.chatStreamText);
+    root.append(node);
+  }
   if (state.busy) root.append(createCoachWorkingIndicator());
   updateChatQueueStatus();
   updateChatComposerVisibility();
@@ -1855,6 +2152,7 @@ function renderLibrary(workouts) {
   });
   const librarySummary = $("#librarySummary");
   if (librarySummary) librarySummary.textContent = `${visible.length} von ${allWorkouts.length} Einheiten`;
+  renderLibraryPagination();
   if (!visible.length) {
     const empty = document.createElement("p");
     empty.className = "context-empty";
@@ -1979,6 +2277,36 @@ function renderLibrary(workouts) {
     });
 }
 
+function renderLibraryPagination() {
+  const pagination = $("#libraryPagination");
+  if (!pagination) return;
+  pagination.replaceChildren();
+  if (!state.data?.library_next_cursor) return;
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "secondary-button";
+  more.textContent = "Weitere lokale Vorlagen laden";
+  more.addEventListener("click", loadMoreLibrary);
+  pagination.append(more);
+}
+
+async function loadMoreLibrary() {
+  const pagination = $("#libraryPagination");
+  const cursor = state.data?.library_next_cursor;
+  if (!pagination || !cursor) return;
+  const button = pagination.querySelector("button");
+  if (button) { button.disabled = true; button.textContent = "Weitere Vorlagen werden geladen…"; }
+  try {
+    const result = await api(`/api/library?limit=100&cursor=${encodeURIComponent(cursor)}`);
+    state.data.library = [...(state.data.library || []), ...(result.workouts || [])];
+    state.data.library_next_cursor = result.next_cursor;
+    renderLibrary(state.data.library);
+  } catch (error) {
+    toast(error.message, true);
+    if (button) button.disabled = false;
+  }
+}
+
 async function loadLibrary() {
   const button = $("#libraryLoadButton");
   const root = $("#library");
@@ -2027,7 +2355,7 @@ async function loadLibrary() {
     root.append(message);
   } finally {
     button.disabled = false;
-    button.textContent = "Bibliothek synchronisieren";
+    button.textContent = "Vorschau für Remote-Sync öffnen";
   }
 }
 
@@ -2059,13 +2387,96 @@ function renderProfile(profile) {
   if (state.profileDirty) return;
   const form = $("#profileForm");
   for (const [key, value] of Object.entries(profile)) {
-    if (form.elements[key]) form.elements[key].value = value || "";
+    const field = form.elements[key];
+    if (!field) continue;
+    if (key === "sports" && field.multiple) {
+      const selectedSports = String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+      [...field.options].forEach((option) => { option.selected = selectedSports.includes(option.value); });
+      continue;
+    }
+    if (key === "timezone" && field.tagName === "SELECT") {
+      if (value && ![...field.options].some((option) => option.value === value)) field.append(new Option(`${value} (gespeichert)`, value));
+      field.value = value || "";
+      continue;
+    }
+    field.value = value || "";
   }
+  renderWeeklyAvailability(profile.availability_schedule);
+  if (form.elements.coaching_style?.value === "Supportive, direct, and evidence-aware") form.elements.coaching_style.value = "Unterstützend, direkt und evidenzbasiert";
   const summary = $("#profileSummary");
   if (summary) {
     const values = [profile.name, profile.sports, profile.typical_weekly_volume].filter(Boolean);
     summary.textContent = values.length ? values.join(" · ") : "Noch nicht ausgefüllt";
   }
+}
+
+const WEEKDAY_LABELS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
+
+function availabilityInput(labelText, name, type, value, attributes = {}) {
+  const label = document.createElement("label");
+  label.textContent = labelText;
+  const input = document.createElement(type === "select" ? "select" : "input");
+  input.name = name;
+  input.type = type === "select" ? "text" : type;
+  input.value = value || "";
+  Object.entries(attributes).forEach(([key, attributeValue]) => input.setAttribute(key, attributeValue));
+  label.append(input);
+  return label;
+}
+
+function renderWeeklyAvailability(schedule = []) {
+  const root = $("#weeklyAvailabilityEditor");
+  if (!root) return;
+  const entries = Array.isArray(schedule) ? schedule : [];
+  root.className = "weekly-availability";
+  root.replaceChildren();
+  WEEKDAY_LABELS.forEach((dayLabel, weekday) => {
+    const entry = entries.find((item) => Number(item?.weekday) === weekday) || {};
+    const periods = entry.periods || {};
+    const day = document.createElement("div");
+    day.className = "availability-day";
+    day.dataset.availabilityDay = String(weekday);
+    const heading = document.createElement("strong");
+    heading.textContent = dayLabel;
+    const fields = document.createElement("div");
+    fields.className = "availability-day-fields";
+    for (const [period, label] of [["early", "Früh"], ["late", "Spät"]]) {
+      const window = periods[period] || {};
+      fields.append(
+        availabilityInput(`${label} von`, `availability-${weekday}-${period}-start`, "time", window.start),
+        availabilityInput(`${label} bis`, `availability-${weekday}-${period}-end`, "time", window.end)
+      );
+    }
+    fields.append(availabilityInput("Max. Minuten", `availability-${weekday}-max`, "number", entry.max_minutes, { min: "0", max: "1440", step: "1", placeholder: "Optional" }));
+    const environment = availabilityInput("Umgebung", `availability-${weekday}-environment`, "select", entry.environment || "either");
+    environment.querySelector("select").replaceChildren(
+      new Option("Drinnen oder draußen", "either"),
+      new Option("Nur drinnen", "indoor"),
+      new Option("Nur draußen", "outdoor")
+    );
+    environment.querySelector("select").value = entry.environment || "either";
+    fields.append(environment);
+    fields.append(availabilityInput("Notiz", `availability-${weekday}-note`, "text", entry.note, { maxlength: "500", placeholder: "Optional" }));
+    day.append(heading, fields);
+    root.append(day);
+  });
+}
+
+function collectWeeklyAvailability() {
+  return [...document.querySelectorAll("[data-availability-day]")].map((day) => {
+    const weekday = Number(day.dataset.availabilityDay);
+    const value = (name) => day.querySelector(`[name="availability-${weekday}-${name}"]`)?.value.trim() || "";
+    const periods = {};
+    for (const period of ["early", "late"]) {
+      const start = value(`${period}-start`);
+      const end = value(`${period}-end`);
+      if (start || end) periods[period] = { start, end };
+    }
+    const max = value("max");
+    const note = value("note");
+    if (!Object.keys(periods).length && !max && !note) return null;
+    return { weekday, periods, max_minutes: max, environment: value("environment") || "either", note };
+  }).filter(Boolean);
 }
 
 function populateCheckin(checkin, timeZone) {
@@ -2089,8 +2500,11 @@ function openCheckinEditor(date) {
   form.elements.checkin_date.max = todayKey;
   populateCheckin(checkin, state.data?.profile?.timezone);
   renderCheckins(state.data?.checkins || [], state.data?.profile?.timezone);
-  if (!dialog.open) dialog.showModal();
-  form.elements.soreness?.focus();
+  if (state.route !== "today") applyNavigationRoute("today", { historyMode: "push", focus: false });
+  // The dialog may still be nested in a hidden panel in older cached markup.
+  // Move it to the document root before opening so that panel cannot suppress the modal.
+  if (dialog.parentElement?.classList.contains("panel")) document.body.append(dialog);
+  showAccessibleDialog(dialog, form.elements.soreness);
 }
 
 function renderCheckins(checkins, timeZone) {
@@ -2203,8 +2617,8 @@ function contextField(labelText, field, value = "", options = {}) {
     input = document.createElement("select");
     for (const choice of options.choices) {
       const option = document.createElement("option");
-      option.value = choice;
-      option.textContent = choice;
+      option.value = typeof choice === "string" ? choice : choice.value;
+      option.textContent = typeof choice === "string" ? choice : choice.label;
       input.append(option);
     }
   } else if (options.multiline) {
@@ -2275,10 +2689,10 @@ function competitionEditor(competition = {}, index = 0) {
     contextField("Name", "name", competition.name, { placeholder: "Münsterland Giro" }),
     contextField("Datum", "event_date", competition.event_date, { type: "date" }),
     contextField("Startzeit (lokal)", "start_date_local", (competition.start_date_local || "").slice(0, 16), { type: "datetime-local" }),
-    contextField("Sportart", "sport", competition.sport || "Radfahren", { placeholder: "Radfahren, Rad indoor, Laufen oder Krafttraining" }),
-    contextField("Kategorie", "category", competition.category || `RACE_${competition.priority || "B"}`, { choices: ["RACE_A", "RACE_B", "RACE_C"] }),
-    contextField("Dauer (Sekunden)", "moving_time", competition.moving_time, { type: "number", placeholder: "14400" }),
-    contextField("Distanz (Meter)", "distance", competition.distance, { placeholder: "125000" }),
+    contextField("Sportart", "sport", competition.sport || "Cycling", { choices: [{ value: "Cycling", label: "Radfahren" }, { value: "Ride", label: "Radfahren (Provider)" }, { value: "VirtualRide", label: "Rad indoor" }, { value: "Running", label: "Laufen" }, { value: "Run", label: "Laufen (Provider)" }, { value: "Swim", label: "Schwimmen" }, { value: "Strength", label: "Krafttraining" }, { value: "Other", label: "Andere" }] }),
+    contextField("Kategorie", "category", competition.category || `RACE_${competition.priority || "B"}`, { choices: [{ value: "RACE_A", label: "A · Hauptwettkampf" }, { value: "RACE_B", label: "B · Aufbauwettkampf" }, { value: "RACE_C", label: "C · Trainingswettkampf" }] }),
+    contextField("Dauer (hh:mm)", "moving_time", competition.moving_time == null ? "" : `${String(Math.floor(Number(competition.moving_time) / 3600)).padStart(2, "0")}:${String(Math.floor(Number(competition.moving_time) % 3600 / 60)).padStart(2, "0")}`, { type: "time", step: 60 }),
+    contextField("Distanz (km)", "distance", competition.distance ? String((Number(competition.distance) / 1000).toLocaleString("en-US", { maximumFractionDigits: 3 })) : "", { type: "number", step: "0.001", min: "0", placeholder: "125" }),
     contextField("Externe ID", "external_id", competition.external_id, { placeholder: "Wird automatisch vergeben" })
   );
   card.append(
@@ -2320,7 +2734,7 @@ function renderCompetitionSync(data) {
   const detail = $("#competitionSyncDetail");
   if (button) {
     button.disabled = Boolean(sync.running || state.localSync.competitions || fullRunning);
-    button.textContent = sync.running || state.localSync.competitions ? "Synchronisierung läuft…" : "Mit Intervals.icu synchronisieren";
+    button.textContent = sync.running || state.localSync.competitions ? "Remote-Sync läuft…" : "Vorschau für Wettkampf-Push";
   }
   if (detail) {
     detail.textContent = sync.last_error
@@ -2329,7 +2743,7 @@ function renderCompetitionSync(data) {
         ? (sync.status || "Zielwettkämpfe werden synchronisiert…")
         : sync.last_sync_at
           ? `Letzte Aktualisierung: ${formatTime(sync.last_sync_at)}`
-          : "Noch nicht synchronisiert";
+          : "Status: noch nicht synchronisiert";
     detail.classList.toggle("error", Boolean(sync.last_error));
   }
 }
@@ -2358,7 +2772,17 @@ async function resolveCompetitionConflict(competitionId, strategy, button) {
 function collectCompetitions() {
   return [...document.querySelectorAll(".competition-editor")].map((card) => {
     const competition = { id: card.dataset.id || "" };
-    card.querySelectorAll("[data-field]").forEach((input) => { competition[input.dataset.field] = input.value.trim(); });
+    card.querySelectorAll("[data-field]").forEach((input) => {
+      const field = input.dataset.field;
+      const value = input.value.trim();
+      if (field === "moving_time") {
+        const [hours, minutes] = value.split(":").map(Number);
+        competition[field] = value && Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 3600 + minutes * 60 : "";
+      } else if (field === "distance") {
+        const kilometers = Number(value.replace(",", "."));
+        competition[field] = value && Number.isFinite(kilometers) ? String(Math.round(kilometers * 1000)) : "";
+      } else competition[field] = value;
+    });
     return competition;
   });
 }
@@ -2849,6 +3273,81 @@ function renderSettings(data) {
   if (privacySummary) privacySummary.textContent = `${usage.requests || 0} OpenAI-Anfragen heute`;
   renderGithubRelease(data.app);
   renderNotificationStatus();
+  renderProviderFreshness(data);
+}
+
+const CHANGE_HISTORY_LABELS = {
+  profile: "Profil",
+  workout_library: "Workout-Bibliothek",
+  competition: "Wettkampf",
+  training_plan: "Trainingsplan",
+};
+
+function renderChangeHistory(changes = []) {
+  const root = $("#changeHistoryList");
+  if (!root) return;
+  root.replaceChildren();
+  if (!changes.length) {
+    root.textContent = "Noch keine lokalen Änderungen aufgezeichnet.";
+    return;
+  }
+  changes.forEach((change) => {
+    const item = document.createElement("article");
+    item.className = "change-history-item";
+    const header = document.createElement("div");
+    header.className = "change-history-item-header";
+    const title = document.createElement("strong");
+    const action = change.action === "create" ? "erstellt" : change.action === "delete" ? "gelöscht" : change.action === "undo" ? "zurückgenommen" : "geändert";
+    title.textContent = `${CHANGE_HISTORY_LABELS[change.entity_type] || "Lokales Objekt"} ${action}`;
+    const time = document.createElement("time");
+    time.dateTime = change.created_at || "";
+    time.textContent = formatTime(change.created_at);
+    header.append(title, time);
+    const detail = document.createElement("span");
+    const fields = Object.keys(change.diff?.fields || {});
+    detail.textContent = `${fields.length ? `Felder: ${fields.join(", ")}` : "Keine Felddetails"} · Nur lokal · Quelle: ${change.source || "local"}`;
+    item.append(header, detail);
+    if (change.action !== "undo") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = "Änderung zurücknehmen";
+      button.addEventListener("click", () => undoChange(change.id, button));
+      item.append(button);
+    }
+    root.append(item);
+  });
+}
+
+async function loadChangeHistory() {
+  const status = $("#changeHistoryStatus");
+  const button = $("#changeHistoryRefreshButton");
+  if (button) button.disabled = true;
+  if (status) status.textContent = "Änderungshistorie wird geladen…";
+  try {
+    const result = await api("/api/change-history?limit=100");
+    renderChangeHistory(result.changes || []);
+    if (status) status.textContent = `${(result.changes || []).length} lokale Änderungen · Aufbewahrung begrenzt`;
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function undoChange(changeId, button) {
+  if (!window.confirm("Diese Änderung lokal zurücknehmen? Es wird kein Remote-Provider beschrieben. Neuere Änderungen führen zu einem Konflikt.")) return;
+  button.disabled = true;
+  try {
+    const preview = await api("/api/change-history/undo/preview", { method: "POST", body: JSON.stringify({ change_id: changeId }) });
+    if (!window.confirm("Undo-Vorschau bestätigen? Die Mutation bleibt lokal; ein späterer Remote-Sync muss separat geprüft werden.")) return;
+    const confirmed = await api("/api/coach/actions/confirm", { method: "POST", body: JSON.stringify({ proposal_id: preview.proposed_action.id }) });
+    await api("/api/coach/actions/execute", { method: "POST", body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }) });
+    toast("Lokale Änderung zurückgenommen");
+    await load();
+    await loadChangeHistory();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
 }
 
 function formatLogEntry(entry) {
@@ -2882,10 +3381,10 @@ function render(data) {
   notifyState(data);
   renderStatus(data);
   renderMessages(data.messages, firstRender);
+  renderToday(data);
   renderActivities(data.activities || []);
   renderPlanned(data.planned || [], data.external_calendar?.events || [], data.daily_planning_context || []);
-  renderLibrary(data.library || []);
-  renderTrainingPlans(data.plans || [], data.library || []);
+  renderActivePlanSegment(data);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
     const libraryState = data.library_sync?.state || {};
@@ -2905,7 +3404,7 @@ function render(data) {
   renderProfile(data.profile);
   renderCheckins(data.checkins || data.local_feedback?.recent || [], data.profile?.timezone);
   renderGarmin(data.garmin);
-  renderCompetitions(data.competitions || []);
+  if (state.planSegment === "goals") renderCompetitions(data.competitions || []);
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
   renderCompetitionSync(data);
@@ -2916,10 +3415,44 @@ function render(data) {
   updateHeaderAction();
 }
 
-async function load(path = "/api/state") {
+async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
+  const initialLoad = $("#appShell").classList.contains("is-loading");
   try {
-    const payload = await api(path);
+    const localOnly = path.includes("local=1");
+    const query = localOnly ? "?local=1" : "";
+    const bootstrap = await api(path);
+    const existing = state.data || {};
+    const payload = { ...existing, ...bootstrap };
+    ["messages", "messages_next_cursor", "activities", "activities_next_cursor", "library", "library_next_cursor", "plans", "planned", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", "garmin", "checkins", "local_feedback", "activity_feedback"].forEach((key) => {
+      if (existing[key] !== undefined) payload[key] = existing[key];
+    });
+    const areas = new Set(requestedAreas || ["chat", "activities", "plan", "library", "performance", "feedback", "profile"]);
+    const requests = [];
+    if (areas.has("chat")) requests.push(["chat", api("/api/chat/history?limit=100")]);
+    if (areas.has("activities")) requests.push(["activities", api("/api/activities?limit=250")]);
+    if (areas.has("plan")) requests.push(["plan", api(`/api/plan${query}`)]);
+    if (areas.has("library")) requests.push(["library", api("/api/library?limit=100")]);
+    if (areas.has("performance")) requests.push(["performance", api("/api/performance")]);
+    if (areas.has("feedback")) requests.push(["feedback", api("/api/feedback")]);
+    if (areas.has("profile")) requests.push(["profile", api("/api/profile")]);
+    const domainData = Promise.all(requests.map(async ([area, request]) => [area, await request]));
+    if (initialLoad && requestSequence === state.loadSequence) {
+      render(payload);
+      finishAppShellLoading();
+    }
+    const results = await domainData;
+    results.forEach(([area, result]) => {
+      state.loadedAreas.add(area);
+      if (area === "chat") Object.assign(payload, { messages: result.messages || [], messages_next_cursor: result.next_cursor });
+      if (area === "activities") Object.assign(payload, { activities: result.activities || [], activities_next_cursor: result.next_cursor });
+      if (area === "plan") Object.assign(payload, result);
+      if (area === "library") Object.assign(payload, { library: result.workouts || [], library_next_cursor: result.next_cursor });
+      if (area === "performance") Object.assign(payload, result);
+      if (area === "feedback") Object.assign(payload, result);
+      if (area === "profile") Object.assign(payload, { profile: result.profile || bootstrap.profile, competitions: result.competitions || bootstrap.competitions });
+    });
+    payload.state_versions = bootstrap.state_versions || payload.state_versions;
     if (requestSequence === state.loadSequence) render(payload);
   } catch (error) {
     if (/Authentication/.test(error.message)) return;
@@ -2934,9 +3467,34 @@ async function load(path = "/api/state") {
   }
 }
 
+function load(path = "/api/bootstrap", requestedAreas = null) {
+  if (state.loadPromise) return state.loadPromise;
+  const areas = requestedAreas || currentPlanLoadAreas();
+  const promise = loadState(path, areas);
+  const tracked = promise.finally(() => {
+    if (state.loadPromise === tracked) state.loadPromise = null;
+  });
+  state.loadPromise = tracked;
+  return tracked;
+}
+
 async function loadInitialState() {
-  await load("/api/state/local");
-  if (state.data) load();
+  const route = routeFromHash();
+  const segment = planSegmentFromRoute(route);
+  const areas = ["chat", "activities", "performance", "feedback", "profile"];
+  if (route === "today" || (baseRoute(route) === "planned" && segment !== "library")) areas.push("plan");
+  if (baseRoute(route) === "planned" && segment === "library") areas.push("library");
+  await load("/api/bootstrap?local=1", areas);
+}
+
+function renderActivePlanSegment(data = state.data) {
+  if (!data) return;
+  renderPlanSegments(state.planSegment);
+  if (state.planSegment === "library") renderLibrary(data.library || []);
+  if (state.planSegment === "goals") {
+    renderCompetitions(data.competitions || []);
+    renderTrainingPlans(data.plans || [], data.library || []);
+  }
 }
 
 function queueChatMessage(message, mode) {
@@ -2958,13 +3516,66 @@ async function requestCoachResponse(message, restoreInputOnError = false) {
     state.data.messages.push({ role: "user", content: message });
     renderMessages(state.data.messages, true);
   }
+  state.chatStreamText = "";
+  const stream = { controller: new AbortController(), operationId: null, cancelRequested: false };
+  state.chatStream = stream;
+  updateChatControls();
+  renderMessages(state.data?.messages || [], true);
+  let completed = false;
   try {
-    await api("/api/chat", { method: "POST", body: JSON.stringify({ message }) });
+    const response = await fetch("/api/chat/stream", {
+      method: "POST",
+      credentials: "same-origin",
+      signal: stream.controller.signal,
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": cookie("ic_csrf") },
+      body: JSON.stringify({ message }),
+    });
+    if (!response.ok) {
+      let payload = {};
+      try { payload = await response.json(); } catch (_) {}
+      if (response.status === 401) showLogin();
+      throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
+    }
+    if (!response.body) throw new Error("Der Browser unterstützt keinen Antwort-Stream.");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const consume = (block) => {
+      let event = "message";
+      const data = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+      }
+      if (!data.length) return;
+      const payload = JSON.parse(data.join("\n"));
+      if (event === "started") stream.operationId = payload.operation_id || null;
+      else if (event === "delta") {
+        state.chatStreamText += payload.text || "";
+        renderMessages(state.data?.messages || [], true);
+      } else if (event === "error") {
+        const error = new Error(payload.message || "Die Coach-Anfrage ist fehlgeschlagen.");
+        error.reason = payload.reason;
+        throw error;
+      } else if (event === "completed") completed = true;
+    };
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() || "";
+      for (const block of blocks) consume(block);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consume(buffer);
+    if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
     await load();
     invalidateContextPreview();
-    return true;
+    return completed;
   } catch (error) {
-    toast(error.message, true);
+    const cancelled = stream.cancelRequested || error?.name === "AbortError" || error?.reason === "chat_cancelled";
+    if (!cancelled) toast(error.message, true);
     if (restoreInputOnError) {
       $("#messageInput").value = message;
       state.chatDraftDirty = true;
@@ -2972,16 +3583,31 @@ async function requestCoachResponse(message, restoreInputOnError = false) {
     await load();
     invalidateContextPreview();
     return false;
+  } finally {
+    if (state.chatStream === stream) state.chatStream = null;
+    state.chatStreamText = "";
+    updateChatControls();
   }
 }
 
 async function drainChatQueue(firstMessage) {
-  await requestCoachResponse(firstMessage, true);
+  if (!await requestCoachResponse(firstMessage, true)) return;
   while (state.chatQueue.length) {
     const next = state.chatQueue.shift();
     renderMessages(state.data?.messages || [], true);
-    await requestCoachResponse(next.message);
+    if (!await requestCoachResponse(next.message)) return;
   }
+}
+
+async function cancelChat() {
+  const stream = state.chatStream;
+  if (!stream) return;
+  stream.cancelRequested = true;
+  await api("/api/chat/cancel", {
+    method: "POST",
+    body: JSON.stringify({ operation_id: stream.operationId }),
+  }).catch(() => {});
+  stream.controller.abort();
 }
 
 async function sendMessage(event) {
@@ -3029,10 +3655,12 @@ async function syncNow(event) {
   button.disabled = true; button.classList.add("busy"); button.textContent = compactButton ? "Synchronisierung läuft…" : "Aktivitäten werden aktualisiert…";
   try {
     const result = await api("/api/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
-    const periodLabel = result.activity_days === -1 ? "aller verfügbaren Daten" : `der letzten ${result.activity_days} Tage`;
-    toast(result.status === "ok" ? `${result.activities} Aktivitäten ${periodLabel} aktualisiert` : "Aktualisierung läuft bereits");
-    invalidateContextPreview();
-    await load();
+    if (result.operation_id) {
+      const completed = await waitForSync(result.operation_id);
+      if (completed.status === "error") throw new Error(completed.last_error || "Synchronisierung fehlgeschlagen.");
+      toast(result.status === "already_running" ? "Aktualisierung läuft bereits" : "Aktualisierung abgeschlossen");
+      invalidateContextPreview();
+    } else toast("Aktualisierung läuft bereits");
   } catch (error) { toast(error.message, true); await load(); }
   finally { state.localSync.intervals = false; button.disabled = false; button.classList.remove("busy"); button.textContent = defaultCaption; updateHeaderAction(); }
 }
@@ -3210,7 +3838,13 @@ async function saveProfile(event) {
     button.setAttribute("aria-busy", "true");
     button.textContent = "Athletenkontext wird gespeichert…";
   }
-  const profile = { ...(state.data?.profile || {}), ...Object.fromEntries(new FormData(event.currentTarget)) };
+  const formData = new FormData(event.currentTarget);
+  const profile = {
+    ...(state.data?.profile || {}),
+    ...Object.fromEntries(formData),
+    sports: formData.getAll("sports").map((value) => String(value).trim()).filter(Boolean).join(", "),
+    availability_schedule: collectWeeklyAvailability(),
+  };
   const payload = {
     profile,
     competitions: collectCompetitions(),
@@ -3282,6 +3916,8 @@ async function saveCheckin(event) {
     values[field] = values[field] === "" ? null : Number(values[field]);
   }
   const button = form.querySelector("button[type=submit]");
+  const errorNode = $("#checkinError");
+  if (errorNode) errorNode.textContent = "";
   if (button) { button.disabled = true; button.textContent = "Check-in wird gespeichert…"; }
   try {
     const result = await api("/api/feedback", { method: "POST", body: JSON.stringify(values) });
@@ -3291,7 +3927,10 @@ async function saveCheckin(event) {
     toast("Tages-Check-in gespeichert");
     $("#checkinDialog")?.close();
     await load();
-  } catch (error) { toast(error.message, true); }
+  } catch (error) {
+    if (errorNode) errorNode.textContent = error.message;
+    toast(error.message, true);
+  }
   finally {
     if (button) { button.disabled = false; button.textContent = "Tages-Check-in speichern"; }
   }
@@ -3485,11 +4124,16 @@ async function downloadDiagnostics() {
 
 async function downloadPrivacyExport() {
   try {
-    const payload = await api("/api/privacy/export");
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const response = await fetch("/api/privacy/export", { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) {
+      let message = "Privacy-Export konnte nicht erstellt werden.";
+      try { message = (await response.json()).error || message; } catch (_) { /* keep safe fallback */ }
+      throw new Error(message);
+    }
+    const blob = await response.blob();
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "intervals-coach-export.json";
+    link.download = `intervals-coach-export-${todayIso()}.zip`;
     link.click();
     URL.revokeObjectURL(link.href);
     toast("Datenexport erstellt");
@@ -3535,26 +4179,28 @@ async function logout() {
   showLogin();
 }
 
-document.querySelectorAll(".nav-item").forEach((button) => button.addEventListener("click", () => {
-  const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel;
-  if (currentPanel !== button.dataset.panel && !confirmDiscardChanges()) return;
-  if (currentPanel !== button.dataset.panel && hasUnsavedChanges()) discardUnsavedChanges();
-  document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
-  button.classList.add("active");
-  document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
-  button.setAttribute("aria-current", "page");
-  $(`#${button.dataset.panel}`).classList.add("active");
-  if (state.data) renderStatus(state.data);
-  updateHeaderAction();
-  if (button.dataset.panel === "settingsPanel") loadContextPreview();
-  if (button.dataset.panel === "settingsPanel") loadLogs();
-  window.scrollTo({ top: 0, behavior: "auto" });
-  if (button.dataset.panel === "chatPanel") scrollChatToLatest(true);
+document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  applyNavigationRoute(link.dataset.route, { historyMode: "push" });
 }));
+document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  applyNavigationRoute(`planned/${link.dataset.planSegment}`, { historyMode: "push" });
+}));
+document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  applyNavigationRoute(`more/${link.dataset.moreSegment}`, { historyMode: "push" });
+}));
+document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("close", () => restoreDialogFocus(dialog)));
+window.addEventListener("hashchange", syncNavigationRoute);
 
 $("#loginForm").addEventListener("submit", login);
 $("#chatForm").addEventListener("submit", sendMessage);
 $("#steerButton").addEventListener("click", steerCurrentChat);
+$("#cancelChatButton").addEventListener("click", cancelChat);
 $("#quickMessageTemplates").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-message]");
   if (!button || state.busy) return;
@@ -3585,7 +4231,7 @@ $("#checkinCloseButton").addEventListener("click", () => $("#checkinDialog")?.cl
 $("#adaptivePlanningButton").addEventListener("click", prepareReplan);
 $("#applyAdaptivePlanningButton").addEventListener("click", applyReplan);
 $("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptivePlanningDialog")?.close());
-$("#coachAdaptivePlanningButton").addEventListener("click", () => document.querySelector('.nav-item[data-panel="workoutsPanel"]')?.click());
+$("#coachAdaptivePlanningButton").addEventListener("click", () => applyNavigationRoute("planned", { historyMode: "push" }));
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
 $("#competitionList").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
@@ -3598,6 +4244,7 @@ $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#chatResetButton").addEventListener("click", resetCoachChat);
 $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);
 $("#privacyDeleteButton").addEventListener("click", deletePrivacyData);
+$("#changeHistoryRefreshButton").addEventListener("click", loadChangeHistory);
 $("#notificationEnableButton").addEventListener("click", enableNotifications);
 $("#backupDownloadButton").addEventListener("click", downloadDatabaseBackup);
 $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);
@@ -3639,6 +4286,7 @@ $("#activityFilterReset").addEventListener("click", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") savePwaActivity();
   else checkPwaReturn();
+  handleSyncVisibility();
 });
 document.addEventListener("pointerdown", handlePwaInteraction, { passive: true });
 window.addEventListener("scroll", updateChatComposerVisibility, { passive: true });
@@ -3650,11 +4298,8 @@ window.addEventListener("beforeunload", (event) => {
   event.returnValue = "";
 });
 setupPwaUpdates();
-setInterval(() => {
-  if (state.localSync.intervals || state.localSync.competitions || state.localSync.garmin || state.localSync.weather || state.localSync.performance || state.localSync.intervalsFull || state.localSync.garminFull) load();
-}, 1500);
-setInterval(() => {
-  if (state.data && document.visibilityState === "visible") load();
-}, 60_000);
+setupConnectivityStatus();
 renderNotificationStatus();
+setupSyncStatusMonitoring();
+syncNavigationRoute();
 bootstrapAuth();
