@@ -1011,27 +1011,40 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine Findings aus dem Paket-Review. Exportdateien enthalten bewusst exportierte Athletendaten und müssen wie andere Exporte geschützt werden.
 - **Folgetasks:** FT-026 ist nach dem grünen Merge von PR #181 entblockt.
 
-### - [ ] FT-026 – Readiness, Operation-Korrelation und Housekeeping verbessern
+### - [x] FT-026 – Readiness, Operation-Korrelation und Housekeeping verbessern
 
 **Quelle:** OPS-01, OBS-01, REC-03
 **Ziel:** Betrieb kann Prozesslebendigkeit, echte Bereitschaft und Sync-Ursache unterscheiden, ohne Athleteninhalte zu loggen.
 **Abhängigkeiten:** Operation-ID aus FT-011 wiederverwenden
 
+**Status:** abgeschlossen; Folgepaket FT-027 ist nach dem grünen Merge entblockt.
+
 **Umsetzung**
 
-- [ ] Liveness und Readiness trennen.
-- [ ] Readiness prüft harmlose DB-Leseoperation, Schemaversion, `/data`-Schreibbarkeit und Maintenance-Status.
-- [ ] Keine Secrets, Pfade oder Athletenwerte im Health-Response ausgeben.
-- [ ] `operation_id` durch HTTP-Auslöser, Sync-Orchestrierung, Providerphasen und Abschluss führen.
-- [ ] Nur Auslöserklasse, Provider, Phase, Dauer, Anzahl und sicheren Fehlercode loggen.
-- [ ] Begrenzte periodische Bereinigung abgelaufener Sessions und alter Rate-Limit-Buckets ergänzen.
-- [ ] Tests für DB-unavailable, read-only `/data`, Maintenance und parallele Operationen ergänzen.
+- [x] Liveness und Readiness trennen.
+- [x] Readiness prüft harmlose DB-Leseoperation, Schemaversion, `/data`-Schreibbarkeit und Maintenance-Status.
+- [x] Keine Secrets, Pfade oder Athletenwerte im Health-Response ausgeben.
+- [x] `operation_id` durch HTTP-Auslöser, Sync-Orchestrierung, Providerphasen und Abschluss führen.
+- [x] Nur Auslöserklasse, Provider, Phase, Dauer, Anzahl und sicheren Fehlercode loggen.
+- [x] Begrenzte periodische Bereinigung abgelaufener Sessions und alter Rate-Limit-Buckets ergänzen.
+- [x] Tests für DB-unavailable, read-only `/data`, Maintenance und parallele Operationen ergänzen.
 
 **Abnahmekriterien**
 
-- [ ] Liveness bleibt bei fachlicher Nichtbereitschaft getrennt interpretierbar.
-- [ ] Readiness schlägt bei nicht nutzbarer DB oder `/data` fehl.
-- [ ] Eine Syncoperation ist über technische Logs Ende-zu-Ende korrelierbar.
+- [x] Liveness bleibt bei fachlicher Nichtbereitschaft getrennt interpretierbar.
+- [x] Readiness schlägt bei nicht nutzbarer DB oder `/data` fehl.
+- [x] Eine Syncoperation ist über technische Logs Ende-zu-Ende korrelierbar.
+
+**Handover FT-026**
+
+- **Status:** abgeschlossen.
+- **Branch und Commit:** `feat/ft-026-readiness-observability`, `eebd1e5`; PR #183 per Auto-Squash nach `develop` gemergt (`51d6295`).
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument.
+- **Verhaltensänderung:** `/api/health` bleibt ein reiner Liveness-Probe; `/api/readiness` prüft sicher DB-Lesezugriff, aktuelle Schema-Version, temporäre Schreibbarkeit von `/data` und Maintenance-Status und liefert bei Nichtbereitschaft HTTP 503. Sync- und Full-Resync-Abläufe teilen eine technische `operation_id` über Trigger, Provider, Phasen und Abschluss; Logs führen nur sichere technische Metadaten. Veraltete In-Memory-Rate-Limit-Buckets werden zusätzlich periodisch und begrenzt entfernt.
+- **Validierung:** Native Vollsuite grün (271 Tests, 3 erwartete SQLCipher-Skips); vier schnelle Shards grün (68/68/68/67); `python -m py_compile server.py tests/test_server.py`; `git diff --check`; `docker build -t ai-coach:ft026 .`; SQLCipher-Containersuite grün (271 Tests); PR #183 vollständig grün einschließlich Browser-Smoke/Accessibility, aller vier Shards, Syntax, Validate, Analyse und CodeQL.
+- **Manuelle Prüfung:** Nicht erforderlich; Readiness- und technische Logging-Fehlerpfade sind mit temporären Daten und gemockten Providern regressionsgeprüft.
+- **Offene Risiken:** Keine Findings aus dem Paket-Review. Readiness meldet ausschließlich Infrastrukturstatus; Export-/Datenzugriffsschutz bleibt unverändert.
+- **Folgetasks:** FT-027 ist als nächstes Paket vorgesehen; FT-028 bis FT-032 bleiben als separate Pakete offen.
 
 ### - [ ] FT-027 – Backend und Frontend schrittweise modularisieren
 
