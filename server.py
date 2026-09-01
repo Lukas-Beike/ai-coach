@@ -2816,10 +2816,38 @@ def _garmin_pace_seconds(value: Any) -> float | int | None:
     number = _garmin_numeric(value)
     if number is None or number <= 0:
         return None
-    # Garmin's lactate-threshold speed is metres per second. Accept seconds
-    # per kilometre as a defensive fallback for fixture/API variants.
-    pace = 1000 / number if number < 20 else number
+    scaled_garmin_speed = number < 1
+    # Garmin's profile/latestLactateThreshold payload currently exposes the
+    # running threshold speed in a decimetre-per-second-like scale (for
+    # example 0.35833233 represents roughly 3.58 m/s, or 4:40/km). The
+    # fixture and some API variants expose the regular m/s value instead.
+    pace = 100 / number if scaled_garmin_speed else 1000 / number if number < 20 else number
+    if scaled_garmin_speed:
+        # Garmin displays this profile pace in five-second steps.
+        pace = round(pace / 5) * 5
     return round(pace) if 120 <= pace <= 900 else None
+
+
+def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:
+    """Read max-HR values from Garmin's heart-rate-zone profile payload."""
+    values: dict[str, list[float | int]] = {"cycling": [], "running": [], "generic": []}
+    zones = snapshot.get("heart_rate_zones")
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            max_hr = as_number(first_present(value, ("maxHeartRateUsed", "maxHeartRate", "maxHR")))
+            if max_hr is not None and 80 <= float(max_hr) <= 260:
+                sport = _garmin_key(first_present(value, ("sport", "sportType", "activityType")))
+                kind = "cycling" if any(term in sport for term in ("cycling", "cycl", "bike", "ride")) else "running" if any(term in sport for term in ("running", "run")) else "generic"
+                values[kind].append(max_hr)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value[:100]:
+                visit(child)
+
+    visit(zones)
+    return {kind: max(items) for kind, items in values.items() if items}
 
 
 def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -2903,25 +2931,29 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         80,
         230,
     )
+    profile_max_hr = garmin_profile_max_hr(snapshot)
     max_hr_values: dict[str, list[float | int]] = {"cycling": [], "running": []}
     stored_max_hr = snapshot.get("sport_max_hr") if isinstance(snapshot.get("sport_max_hr"), dict) else {}
+    activities = snapshot.get("activities") if isinstance(snapshot.get("activities"), list) else []
     for kind in max_hr_values:
+        profile_value = profile_max_hr.get(kind) or profile_max_hr.get("generic")
+        if profile_value is not None:
+            max_hr_values[kind].append(profile_value)
+            continue
         stored_value = as_number(stored_max_hr.get(kind))
         if stored_value is not None and 80 <= float(stored_value) <= 260:
             max_hr_values[kind].append(stored_value)
-    activities = snapshot.get("activities") if isinstance(snapshot.get("activities"), list) else []
-    for activity in activities:
-        if not isinstance(activity, dict):
-            continue
-        value = as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate")))
-        kind = activity_kind(activity)
-        if value is not None and 80 <= float(value) <= 260 and kind in max_hr_values:
-            max_hr_values[kind].append(value)
+        for activity in activities:
+            if not isinstance(activity, dict):
+                continue
+            value = as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate")))
+            if value is not None and 80 <= float(value) <= 260 and activity_kind(activity) == kind:
+                max_hr_values[kind].append(value)
     weight = garmin_weight_metric(snapshot)
     units = {
         "weight_kg": (weight["value"], "kg", "Garmin Connect KÃ¶rpergewicht"),
-        "cycling_max_hr_bpm": (max(max_hr_values["cycling"], default=None), "bpm", "Garmin Connect RadaktivitÃ¤ten"),
-        "running_max_hr_bpm": (max(max_hr_values["running"], default=None), "bpm", "Garmin Connect LaufaktivitÃ¤ten"),
+        "cycling_max_hr_bpm": (max(max_hr_values["cycling"], default=None), "bpm", "Garmin Connect Herzfrequenzzonen" if profile_max_hr else "Garmin Connect RadaktivitÃ¤ten"),
+        "running_max_hr_bpm": (max(max_hr_values["running"], default=None), "bpm", "Garmin Connect Herzfrequenzzonen" if profile_max_hr else "Garmin Connect LaufaktivitÃ¤ten"),
         "cycling_vo2max_ml_kg_min": (cycling_vo2, "ml/kg/min", "Garmin Connect max metrics"),
         "running_vo2max_ml_kg_min": (running_vo2, "ml/kg/min", "Garmin Connect max metrics"),
         "run_5k_seconds": (race_values["run_5k_seconds"], "s", "Garmin Connect Laufprognose"),
@@ -4330,7 +4362,7 @@ def _garmin_daily_health_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str
         for metric_name, keys in GARMIN_DAILY_HEALTH_FIELDS.items():
             value = as_number(first_present(record, keys))
             if value is not None:
-                health[metric_name] = value
+                health[metric_name] = int(round(float(value))) if metric_name in {"steps", "floors"} else value
         if health:
             health["source"] = GARMIN_PERFORMANCE_SOURCE
     return health_by_date
@@ -4354,7 +4386,7 @@ def garmin_daily_health_metrics(snapshot: dict[str, Any], days: int, end_date: d
     units = {"steps": "Schritte/Tag", "floors": "Stockwerke/Tag", "calories": "kcal/Tag"}
     return {
         f"{metric_name}_7d": metric(
-            round(sum(numbers) / len(numbers), 2) if numbers else None,
+            int(round(sum(numbers) / len(numbers))) if numbers and metric_name in {"steps", "floors"} else round(sum(numbers) / len(numbers), 2) if numbers else None,
             units[metric_name],
             GARMIN_PERFORMANCE_SOURCE,
             "Durchschnitt der letzten 7 Tage",
@@ -9466,6 +9498,7 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
     wellness_run = sport_info_setting(latest_wellness, "run")
     latest_ride_activity = next((activity for activity in sorted(activities, key=lambda item: str(item.get("start_date_local") or ""), reverse=True)
                                  if isinstance(activity, dict) and any(term in str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold() for term in ("ride", "rad", "bike", "cycling"))), {})
+    latest_ride_eftp = first_present(latest_ride_activity, ("icu_ftp",))
     generic_lthr = first_present(athlete, ("lthr",))
     profile = get_profile()
     garmin_metrics = garmin_performance_metrics(garmin_snapshot())
@@ -9521,7 +9554,7 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         # never be populated from Intervals.icu eFTP; the fallback only uses an
         # explicitly labelled FTP field.
         **garmin_threshold_metrics,
-        "cycling_eftp_watts": metric(first_present(ride, ("eftp", "eFTP")) or first_present(wellness_ride, ("eftp", "eFTP")) or first_present(latest_ride_activity, ("icu_ftp", "eftp", "eFTP")), "W", "Intervals.icu"),
+        "cycling_eftp_watts": metric(latest_ride_eftp or first_present(wellness_ride, ("eftp", "eFTP")) or first_present(ride, ("eftp", "eFTP")), "W", "Intervals.icu"),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
         "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),

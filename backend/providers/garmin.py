@@ -128,6 +128,15 @@ def collect_garmin_data(
                     add_error("resting_hr", exc)
                 current += timedelta(days=1)
 
+    heart_rate_zones_fetch = getattr(client, "get_heart_rate_zones", None)
+    if callable(heart_rate_zones_fetch):
+        try:
+            payload["heart_rate_zones"] = external_call(
+                "garmin", "heart_rate_zones", heart_rate_zones_fetch, None
+            )
+        except Exception as exc:
+            add_error("heart_rate_zones", exc)
+
     max_metrics_start = today - timedelta(days=89)
     max_metrics_range = getattr(client, "get_max_metrics_range", None)
     max_metrics_fetch = (
