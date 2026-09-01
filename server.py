@@ -131,6 +131,13 @@ EXPORT_TIME_LIMIT_SECONDS = 120
 STREAM_CHUNK_BYTES = 64 * 1024
 MAX_EXTERNAL_CALENDAR_BYTES = 5_000_000
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
+# The Responses API counts both visible output and reasoning tokens against
+# max_output_tokens. Keep ordinary replies bounded, but leave enough room for
+# an explicitly requested multi-week training plan.
+COACH_DEFAULT_MAX_OUTPUT_TOKENS = 6_000
+COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
+COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
+OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
 DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
 SYNC_START_LOCK = threading.Lock()
@@ -9973,7 +9980,7 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         "https://api.openai.com/v1" + path,
         request_payload,
         {"Authorization": f"Bearer {CONFIG.openai_api_key}"},
-        timeout=90,
+        timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
         service="openai",
     )
     result = _validate_openai_response(path, result)
@@ -10116,7 +10123,7 @@ def openai_stream_request(
         "method": "POST",
         "host": "api.openai.com",
         "path": "/v1/responses",
-        "timeout_seconds": 90,
+        "timeout_seconds": OPENAI_RESPONSE_TIMEOUT_SECONDS,
         "request_bytes": len(body),
     }
     LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": context})
@@ -10153,7 +10160,7 @@ def openai_stream_request(
 
     try:
         _raise_chat_cancelled(cancel_event)
-        with urlopen(request, timeout=90) as response:
+        with urlopen(request, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS) as response:
             if cancel_event is not None:
                 cancel_event._openai_response = response
             record_openai_rate_limits(getattr(response, "headers", None))
@@ -10340,6 +10347,24 @@ def prompt_requests_workout_creation(message: str) -> bool:
         or re.search(r"\bleg\w*\b.*\ban\b", text)
     )
     return asks_for_workout and asks_to_create
+
+
+def prompt_requests_long_plan(message: str) -> bool:
+    """Recognise a multi-week plan that needs a larger response budget."""
+    text = message.casefold()
+    asks_for_duration = bool(re.search(
+        r"\b(?:[2-9]|[1-9]\d+)\s*(?:wochen?|weeks?|week)\b"
+        r"|\b(?:monat|monate|month|monthly)\b",
+        text,
+    ))
+    asks_for_plan = bool(re.search(r"\b(?:trainingsplan|plan)\b", text))
+    return asks_for_duration and asks_for_plan and prompt_requests_workout_creation(message)
+
+
+def coach_output_token_budget(message: str, *, followup: bool = False) -> int:
+    if prompt_requests_long_plan(message):
+        return COACH_LONG_PLAN_MAX_OUTPUT_TOKENS
+    return COACH_FOLLOWUP_MAX_OUTPUT_TOKENS if followup else COACH_DEFAULT_MAX_OUTPUT_TOKENS
 
 
 def prompt_contains_activity_feedback(message: str) -> bool:
@@ -10782,7 +10807,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         "tools": coach_tools,
         "tool_choice": tool_choice,
         "parallel_tool_calls": False,
-        "max_output_tokens": 6000,
+        "max_output_tokens": coach_output_token_budget(message),
         "truncation": "auto",
     }
     response = responses_stream_request(request_payload, on_text_delta, cancel_event) if on_text_delta is not None else responses_request(request_payload)
@@ -10945,7 +10970,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             "input": tool_outputs,
             "tools": coach_tools,
             "tool_choice": "none",
-            "max_output_tokens": 2500,
+            "max_output_tokens": coach_output_token_budget(message, followup=True),
             "truncation": "auto",
         }
         response = responses_stream_request(followup_payload, on_text_delta, cancel_event) if on_text_delta is not None else responses_request(followup_payload)
@@ -12369,7 +12394,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 client_connected = False
 
         try:
-            self.connection.settimeout(120)
+            self.connection.settimeout(OPENAI_RESPONSE_TIMEOUT_SECONDS + 30)
             try:
                 self.send_sse_headers()
                 send_event("started", {"operation_id": operation_id})
