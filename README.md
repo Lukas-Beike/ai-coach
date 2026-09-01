@@ -289,6 +289,13 @@ the application migrates it to SQLCipher and keeps a file named
 `*.plaintext-backup-*` in the data directory. Protect this backup like any
 other unencrypted copy of the database.
 
+The database schema has a monotone version recorded in `schema_migrations`.
+Startup applies supported migrations idempotently and validates declared
+foreign keys on every connection. Existing orphaned relations or an unknown
+schema version stop startup and require the documented restore workflow; the
+database file is not replaced automatically. The public-calendar candidate
+relation explicitly cascades when its source is deleted.
+
 Optional Garmin Connect configuration:
 
 ```text
@@ -502,7 +509,9 @@ During database restore, the process enters a maintenance mode. Running
 provider and coach operations are allowed to finish before the database is
 validated and exchanged; new mutations receive a temporary maintenance error.
 Read-only status endpoints remain available, and the browser displays the
-maintenance state. A failed restore leaves the current database in place.
+maintenance state. Restore accepts only a backup with the current schema
+version and valid foreign-key/integrity checks. A failed restore leaves the
+current database in place.
 
 Open-Meteo failures are shown without exposing provider details and are retried
 with an increasing local backoff. A forced manual weather refresh bypasses that

@@ -1149,6 +1149,7 @@ def migrate_plaintext_database() -> None:
     backup = DATA_DIR / f"{DB_PATH.name}.plaintext-backup-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     temporary = DATA_DIR / f".{DB_PATH.name}.{secrets.token_hex(8)}.encrypted"
     source = sqlite3.connect(DB_PATH, timeout=20)
+    source.execute("PRAGMA foreign_keys = ON")
     target = None
     try:
         # Include pending WAL content in both the migration and the recovery
@@ -1159,6 +1160,7 @@ def migrate_plaintext_database() -> None:
         shutil.copy2(DB_PATH, backup)
         target = sqlite_backend.connect(temporary, timeout=20)
         _configure_cipher(target, CONFIG.app_password)
+        target.execute("PRAGMA foreign_keys = ON")
         target.executescript("\n".join(source.iterdump()))
         target.commit()
         target.close()
@@ -1190,6 +1192,74 @@ def database_row_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
 # A request-scoped connection lets composite reads reuse one SQLCipher setup.
 # The outer caller still owns DB_LOCK; nested database() calls only reuse it.
 DATABASE_CONTEXT: ContextVar[Any | None] = ContextVar("database_context", default=None)
+CURRENT_DATABASE_SCHEMA_VERSION = 2
+
+
+def database_schema_version(db: Any) -> int:
+    try:
+        row = db.execute("SELECT MAX(version) AS version FROM schema_migrations").fetchone()
+    except Exception:
+        return 0
+    try:
+        if not row:
+            return 0
+        try:
+            value = row["version"]
+        except (KeyError, TypeError, IndexError):
+            value = row[0]
+        return int(value or 0)
+    except (KeyError, TypeError, IndexError, ValueError):
+        return 0
+
+
+def _record_database_migration(db: Any, version: int, name: str) -> None:
+    db.execute(
+        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+        (version, name, utc_now()),
+    )
+
+
+def _foreign_key_violations(db: Any) -> int:
+    return len(db.execute("PRAGMA foreign_key_check").fetchall())
+
+
+def _migrate_public_calendar_foreign_key(db: Any) -> None:
+    foreign_keys = db.execute("PRAGMA foreign_key_list(public_event_candidates)").fetchall()
+    if any(str(row.get("on_delete") or "").upper() == "CASCADE" for row in foreign_keys):
+        return
+    db.execute(
+        """
+        CREATE TABLE public_event_candidates_migration (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            uid TEXT NOT NULL,
+            name TEXT NOT NULL,
+            event_date TEXT NOT NULL,
+            sport TEXT NOT NULL,
+            distance TEXT NOT NULL DEFAULT '',
+            location TEXT NOT NULL DEFAULT '',
+            url TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            imported_competition_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(source_id, uid),
+            FOREIGN KEY(source_id) REFERENCES public_event_sources(id) ON DELETE CASCADE
+        )
+        """
+    )
+    db.execute(
+        """
+        INSERT INTO public_event_candidates_migration
+        (id, source_id, uid, name, event_date, sport, distance, location, url,
+         description, imported_competition_id, created_at, updated_at)
+        SELECT id, source_id, uid, name, event_date, sport, distance, location,
+               url, description, imported_competition_id, created_at, updated_at
+        FROM public_event_candidates
+        """
+    )
+    db.execute("DROP TABLE public_event_candidates")
+    db.execute("ALTER TABLE public_event_candidates_migration RENAME TO public_event_candidates")
 
 
 @contextmanager
@@ -1207,6 +1277,7 @@ def database():
         _configure_cipher(db, CONFIG.app_password)
     else:
         db = sqlite3.connect(DB_PATH, timeout=20)
+    db.execute("PRAGMA foreign_keys = ON")
     db.row_factory = database_row_factory
     context_token = DATABASE_CONTEXT.set(db)
     try:
@@ -1219,6 +1290,17 @@ def database():
 
 def initialise_database() -> None:
     with DB_LOCK, database() as db:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations ("
+            "version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)"
+        )
+        migration_version = database_schema_version(db)
+        if migration_version > CURRENT_DATABASE_SCHEMA_VERSION:
+            raise RuntimeError("Die Datenbank verwendet eine nicht unterstützte Schema-Version.")
+        # Refuse legacy databases with orphaned relations before any
+        # compatibility migration can change their contents.
+        if _foreign_key_violations(db):
+            raise RuntimeError("Die Datenbank enthält verwaiste Fremdschlüssel-Datensätze; Restore erforderlich.")
         db.executescript(
             """
             PRAGMA journal_mode=WAL;
@@ -1372,7 +1454,7 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 UNIQUE(source_id, uid),
-                FOREIGN KEY(source_id) REFERENCES public_event_sources(id)
+                FOREIGN KEY(source_id) REFERENCES public_event_sources(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS external_calendar_events (
                 id TEXT PRIMARY KEY,
@@ -1605,6 +1687,26 @@ def initialise_database() -> None:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
             db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
             db.execute("DELETE FROM snapshots WHERE created_at < ?", (cutoff,))
+        migration_version = database_schema_version(db)
+        if migration_version > CURRENT_DATABASE_SCHEMA_VERSION:
+            raise RuntimeError("Die Datenbank verwendet eine nicht unterstützte Schema-Version.")
+        if migration_version < 1:
+            _record_database_migration(db, 1, "legacy-schema-baseline")
+        if migration_version < 2:
+            if _foreign_key_violations(db):
+                raise RuntimeError("Die Datenbank enthält verwaiste Fremdschlüssel-Datensätze; Restore erforderlich.")
+            savepoint = "schema_migration_2"
+            db.execute(f"SAVEPOINT {savepoint}")
+            try:
+                _migrate_public_calendar_foreign_key(db)
+                _record_database_migration(db, 2, "public-calendar-foreign-key-cascade")
+                db.execute(f"RELEASE SAVEPOINT {savepoint}")
+            except Exception:
+                db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                db.execute(f"RELEASE SAVEPOINT {savepoint}")
+                raise
+        if _foreign_key_violations(db):
+            raise RuntimeError("Die Datenbank enthält verwaiste Fremdschlüssel-Datensätze; Restore erforderlich.")
 
 
 def get_kv(key: str, db: sqlite3.Connection | None = None) -> str | None:
@@ -10220,6 +10322,7 @@ def privacy_export() -> dict[str, Any]:
 
 
 CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
+    "schema_migrations": {"version", "name", "applied_at"},
     "kv": {"key", "value", "updated_at"},
     "messages": {"id", "role", "content", "created_at"},
     "chat_tool_calls": {"call_id", "tool_name", "result", "created_at"},
@@ -10282,6 +10385,10 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
         try:
             if CONFIG.app_password:
                 _configure_cipher(connection, CONFIG.app_password)
+            connection.execute("PRAGMA foreign_keys = ON")
+            schema_version = database_schema_version(connection)
+            if schema_version != CURRENT_DATABASE_SCHEMA_VERSION:
+                raise AppError(400, "Das Backup verwendet eine nicht unterstützte Datenbank-Schema-Version.")
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
             if set(CURRENT_DATABASE_SCHEMA) - tables:
                 raise AppError(400, "Das Backup verwendet kein vollständiges aktuelles Datenbankschema.")
@@ -10293,6 +10400,8 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
             if missing_columns:
                 raise AppError(400, "Das Backup verwendet unvollständige Datenbanktabellen.")
             integrity = connection.execute("PRAGMA integrity_check").fetchone()
+            if connection.execute("PRAGMA foreign_key_check").fetchall():
+                raise AppError(400, "Das Backup enthält ungültige Fremdschlüssel.")
             if not integrity or str(integrity[0]).casefold() != "ok":
                 raise AppError(400, "Die Integritätsprüfung des Backups ist fehlgeschlagen.")
             # Never restore sessions captured in a backup. The current browser
