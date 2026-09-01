@@ -884,7 +884,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Harte Grenzen für Zeitraum und Anzahl expandierter Vorkommen definieren.
 - [x] `EXDATE`, Zeitzone und ganztägige Termine bewusst behandeln oder klar ablehnen.
 - [x] Nicht unterstützte Regeln mit sicherer, verständlicher Fehlermeldung ablehnen.
-- [ ] Bestehenden SSRF-, TLS-, Redirect- und Größen-Schutz unverändert erhalten.
+- [x] Bestehenden SSRF-, TLS-, Redirect- und Größen-Schutz unverändert erhalten.
 - [x] Tests für Endlosschleifen, extreme Counts, DST und doppelte Instanzen ergänzen.
 
 **Abnahmekriterien**
