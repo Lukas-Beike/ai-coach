@@ -1143,6 +1143,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 ### - [ ] FT-028 – PWA-/Notification-Versprechen präzisieren und Produktentscheidung treffen
 
+**Fortschritt FT-027 - Profile-Repository**
+
+- [x] Die serialisierte lokale Profil-Persistenz als `ProfileRepository` in `backend/db/repositories.py` abgegrenzt.
+- [x] Bestehende Profilnormalisierung, Zeitzonenvalidierung, Wetter-Cache-Invalidierung, Connection Ownership, `DB_LOCK` und die öffentliche Server-API unverändert erhalten.
+- [x] Regressionstest für Lesen/Schreiben der Profil-Payload ergänzt; die vorhandene `KeyValueRepository`-Abhängigkeit verhindert doppelte Persistenzlogik.
+- [x] Review ohne Findings; PR #203 per Auto-Squash gemergt (`355a637`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 70/70, 70/70, 69/69 und 69/69 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-profile-repository` erfolgreich.
+- [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
