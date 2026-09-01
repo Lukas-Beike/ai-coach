@@ -143,6 +143,8 @@ h2 {
 .pulse { width: 8px; height: 8px; border-radius: 999px; background: var(--accent-bright); box-shadow: 0 0 0 5px var(--accent-soft); }
 .status-card.warning .pulse { background: var(--orange); box-shadow: 0 0 0 5px rgba(255, 159, 10, .14); }
 .status-card.working .pulse { animation: pulse 1.2s ease-in-out infinite; }
+.connectivity-notice { margin: -4px 0 16px; padding: 10px 13px; border: 1px solid rgba(255, 159, 10, .45); border-radius: 12px; background: rgba(255, 159, 10, .1); color: var(--orange); font-size: .76rem; line-height: 1.4; }
+.connectivity-notice[hidden] { display: none; }
 #appShell.is-loading main, #appShell.is-loading .bottom-nav { pointer-events: none; opacity: .72; }
 @keyframes pulse { 50% { transform: scale(1.55); box-shadow: 0 0 0 8px transparent; } }
 
