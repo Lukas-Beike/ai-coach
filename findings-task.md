@@ -1179,6 +1179,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 71/70/70/70 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-plan-adjustment-repository` erfolgreich.
 - [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Intervals-Provider-Pagination**
+
+- [x] Die zustandsfreie, begrenzte Intervals.icu-Collection-Pagination als `fetch_paged_collection` in `backend/providers/intervals.py` abgegrenzt.
+- [x] Transport, Authentifizierung, Anwendungsfehler und Operationsmetadaten werden ueber explizite Parameter injiziert; keine Abhaengigkeit auf `server.py`, Locks, Konfiguration oder Persistenz eingefuehrt.
+- [x] Bestehende `IntervalsClient`-Kompatibilitaetsgrenze, Seitenlimit, Duplicate-Page-Schutz, Fehlerstatus 502 und Pagination-Metadaten unveraendert erhalten.
+- [x] Review ohne Findings; PR #211 per Auto-Squash gemergt (`0699477`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards gruen.
+- [x] Validierung: vier schnelle Shards mit 71/70/70/70 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-intervals-provider-pagination` erfolgreich.
+- [ ] Weitere Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben fuer folgende kohaerente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
