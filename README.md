@@ -71,9 +71,11 @@ It is not intended to be exposed directly to the public internet.
 - The normal Coach chat is read-only: durable local changes and every remote
   sync require a separate preview, an exact UI confirmation, and a short-lived
   single-use server-side action token bound to the session and payload.
-- The coach stores every dated planned workout directly in the local training
-  library. Similar workouts are not deduplicated, so the library can grow into
-  a complete local training history. Every library entry has its own local
+- For an explicit workout or plan request, the coach creates a structured
+  preview first. The athlete must approve it in the Coach view before every
+  dated workout is stored in the local training library. Similar workouts are
+  not deduplicated, so the library can grow into a complete local training
+  history. Every library entry has its own local
   UUID. Imported Intervals.icu templates additionally retain their provider ID
   as `external_id`; local entries remain local until the library is explicitly
    synchronized.

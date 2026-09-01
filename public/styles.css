@@ -161,6 +161,16 @@ h2 {
   padding: 12px 0 56px;
   overflow-anchor: none;
 }
+.coach-action-review { display: grid; gap: 12px; margin: 0 0 14px; padding: 14px; border: 1px solid rgba(52, 207, 161, .48); border-radius: 16px; background: rgba(52, 207, 161, .08); box-shadow: var(--shadow-soft); }
+.coach-action-review[hidden] { display: none; }
+.coach-action-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.coach-action-review-heading h2 { margin: 2px 0 0; font-size: 1rem; }
+.coach-action-review-status { color: var(--accent); font-size: .7rem; font-weight: 700; text-align: right; }
+.coach-action-card { display: grid; gap: 10px; }
+.coach-action-card p { margin: 0; color: var(--ink); font-size: .82rem; line-height: 1.45; }
+.coach-action-card ul { display: grid; gap: 6px; margin: 0; padding-left: 18px; color: var(--muted); font-size: .76rem; }
+.coach-action-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.coach-action-card-actions button { min-height: 42px; }
 .message {
   max-width: min(91%, 670px);
   padding: 13px 15px;
