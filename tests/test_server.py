@@ -1385,6 +1385,15 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(index.count('id="libraryLoadButton"'), 1)
         self.assertEqual(index.count('id="libraryDirtyIndicator"'), 1)
 
+    def test_performance_refresh_timestamp_and_initial_loading_state_are_rendered(self):
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        self.assertIn(
+            "const refreshedAt = performance.as_of || state.data?.performance_refresh?.last_refresh_at || state.data?.sync?.last_sync_at;",
+            app,
+        )
+        self.assertIn('!state.loadedAreas.has("performance") && state.loadPromise', app)
+        self.assertIn('"Leistungsdaten werden geladen…"', app)
+
     def test_more_segments_group_settings_and_localize_sensitive_inputs(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         forms = (Path(__file__).resolve().parents[1] / "public" / "forms.js").read_text(encoding="utf-8")
