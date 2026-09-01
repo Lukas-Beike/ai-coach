@@ -1173,6 +1173,71 @@ class CoachTests(unittest.TestCase):
             ["session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", "csrf=; Path=/; SameSite=Strict; Max-Age=0"],
         )
 
+    def test_http_request_helpers_are_dependency_light_and_preserve_limits(self):
+        from backend.http_api import requests
+
+        source = Path(requests.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("import server", source)
+        headers = {"Content-Length": "7"}
+        self.assertEqual(requests.read_body(headers, BytesIO(b"payload").read, 10, error=server.AppError), b"payload")
+        self.assertEqual(
+            requests.read_json(
+                {"Content-Type": "application/json; charset=utf-8", "Content-Length": "12"},
+                BytesIO(b'{"ok": true}').read,
+                100,
+                error=server.AppError,
+            ),
+            {"ok": True},
+        )
+        self.assertEqual(
+            requests.read_audio_body(
+                {"Content-Type": "audio/webm;codecs=opus", "Content-Length": "5"},
+                BytesIO(b"audio").read,
+                allowed_types={"audio/webm": ".webm"},
+                normalize_type=lambda value: value.split(";", 1)[0],
+                max_bytes=10,
+                error=server.AppError,
+            ),
+            b"audio",
+        )
+        with self.assertRaises(server.AppError) as oversized:
+            requests.read_body({"Content-Length": "11"}, BytesIO(b"x" * 11).read, 10, error=server.AppError)
+        self.assertEqual(oversized.exception.status, 413)
+        with self.assertRaises(server.AppError) as malformed:
+            requests.read_json(
+                {"Content-Type": "application/json", "Content-Length": "9"},
+                BytesIO(b"not-json!").read,
+                100,
+                error=server.AppError,
+            )
+        self.assertEqual(malformed.exception.status, 400)
+        with self.assertRaises(server.AppError) as wrong_type:
+            requests.read_json(
+                {"Content-Type": "text/plain", "Content-Length": "7"},
+                BytesIO(b'{"ok":1}').read,
+                100,
+                error=server.AppError,
+            )
+        self.assertEqual(wrong_type.exception.status, 415)
+        with self.assertRaises(server.AppError) as non_object:
+            requests.read_json(
+                {"Content-Type": "application/json", "Content-Length": "2"},
+                BytesIO(b"[]").read,
+                100,
+                error=server.AppError,
+            )
+        self.assertEqual(non_object.exception.status, 400)
+        with self.assertRaises(server.AppError) as incomplete:
+            requests.read_audio_body(
+                {"Content-Type": "audio/webm", "Content-Length": "5"},
+                BytesIO(b"aud").read,
+                allowed_types={"audio/webm": ".webm"},
+                normalize_type=lambda value: value.split(";", 1)[0],
+                max_bytes=10,
+                error=server.AppError,
+            )
+        self.assertEqual(incomplete.exception.status, 400)
+
     def test_maintenance_gate_blocks_new_operations_and_waits_for_running_one(self):
         gate = server.MaintenanceGate()
         started = threading.Event()

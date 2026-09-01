@@ -342,21 +342,26 @@ boundary. The Intervals.icu provider's bounded, duplicate-page-safe collection
 pagination is isolated in `backend/providers/intervals.py`; it receives the
 transport and error factory explicitly and has no dependency on application
 state. Further provider operations, synchronization, coaching,
-backup, and HTTP routing are moved in separate cohesive steps. These modules
-are copied into the container as application code and do not change the
+backup, and HTTP routing are moved in separate cohesive steps. The HTTP
+boundary also isolates bounded request-body, JSON, and audio parsing in
+`backend/http_api/requests.py`; socket I/O, authentication, and application
+error types remain in the handler. These modules are copied into the container
+as application code and do not change the
 SQLCipher, authentication, or persistence contracts.
 
 The first frontend boundary is `public/api.js`. It owns same-origin JSON and
 audio requests, CSRF headers, and common HTTP error handling; `app.js` keeps
 the existing compatibility wrappers and supplies the login callback. The API
 client has no dependency on application state or views. Future frontend
-boundaries (`state`, `navigation`, `views`, `forms`, and `components`) must
-depend on this client through explicit interfaces, with no new framework and
-no duplicate DTO definitions. The route constants and pure hash parsers are
+boundaries (`state`, `navigation`, `views`, `forms`, and `components`) depend
+on this client through explicit interfaces, with no new framework and no
+duplicate DTO definitions. The route constants and pure hash parsers are
 isolated in `public/navigation.js`, the shared mutable UI state is isolated in
 `public/state.js`, and state-free display/formatting helpers are isolated in
-`public/views.js`; DOM- and data-loading coordination remains in `app.js` and
-the script order is explicit.
+`public/views.js`; availability/competition form helpers and dialog focus
+components are isolated in `public/forms.js` and `public/components.js`.
+DOM- and data-loading coordination remains in `app.js` and the script order is
+explicit.
 
 Optional Garmin Connect configuration:
 

@@ -65,6 +65,11 @@ from backend.http_api.responses import (
     response_headers,
     session_cookies,
 )
+from backend.http_api.requests import (
+    read_audio_body as read_request_audio_body,
+    read_body as read_request_body,
+    read_json as read_request_json,
+)
 from backend.backup.export import (
     application_state as export_application_state,
     decode_payload as export_decode_payload,
@@ -12107,39 +12112,32 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(500, {"error": "Interner Serverfehler."})
 
     def read_body(self, max_bytes: int = MAX_BODY_BYTES) -> bytes:
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-        except ValueError as exc:
-            raise AppError(400, "Ungültige Content-Length.") from exc
-        if size <= 0 or size > max_bytes:
-            raise AppError(413 if size > MAX_BODY_BYTES else 400, "Ungültige Größe des Anfrageinhalts.")
-        return self.rfile.read(size)
+        return read_request_body(
+            self.headers,
+            self.rfile.read,
+            max_bytes,
+            error=AppError,
+            too_large_status_threshold=MAX_BODY_BYTES,
+        )
 
     def read_audio_body(self) -> bytes:
-        content_type = normalized_audio_type(self.headers.get("Content-Type", ""))
-        if content_type not in VOICE_AUDIO_TYPES:
-            raise AppError(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-        except ValueError as exc:
-            raise AppError(400, "Ungültige Content-Length.") from exc
-        if size <= 0 or size > MAX_AUDIO_BODY_BYTES:
-            raise AppError(413 if size > MAX_AUDIO_BODY_BYTES else 400, "Ungültige Größe der Audioaufnahme.")
-        audio = self.rfile.read(size)
-        if len(audio) != size:
-            raise AppError(400, "Die Audioaufnahme wurde unvollständig übertragen.")
-        return audio
+        return read_request_audio_body(
+            self.headers,
+            self.rfile.read,
+            allowed_types=VOICE_AUDIO_TYPES,
+            normalize_type=normalized_audio_type,
+            max_bytes=MAX_AUDIO_BODY_BYTES,
+            error=AppError,
+        )
 
     def read_json(self) -> dict[str, Any]:
-        if "application/json" not in self.headers.get("Content-Type", ""):
-            raise AppError(415, "Content-Type muss application/json sein.")
-        try:
-            payload = json.loads(self.read_body())
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise AppError(400, "Ungültiges JSON.") from exc
-        if not isinstance(payload, dict):
-            raise AppError(400, "Der JSON-Inhalt muss ein Objekt sein.")
-        return payload
+        return read_request_json(
+            self.headers,
+            self.rfile.read,
+            MAX_BODY_BYTES,
+            error=AppError,
+            too_large_status_threshold=MAX_BODY_BYTES,
+        )
 
     def send_json(self, status: int, payload: Any, headers: dict[str, str | list[str]] | None = None) -> None:
         data = response_json_bytes(payload)
