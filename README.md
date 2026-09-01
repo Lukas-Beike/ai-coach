@@ -309,6 +309,14 @@ are moved in separate cohesive steps. These modules are copied into the
 container as application code and do not change the SQLCipher, authentication,
 or persistence contracts.
 
+The first frontend boundary is `public/api.js`. It owns same-origin JSON and
+audio requests, CSRF headers, and common HTTP error handling; `app.js` keeps
+the existing compatibility wrappers and supplies the login callback. The API
+client has no dependency on application state or views. Future frontend
+boundaries (`state`, `navigation`, `views`, `forms`, and `components`) must
+depend on this client through explicit interfaces, with no new framework and
+no duplicate DTO definitions.
+
 Optional Garmin Connect configuration:
 
 ```text

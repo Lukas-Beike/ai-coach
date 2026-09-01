@@ -61,6 +61,7 @@ DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
 STATIC_TARGETS = {
     "index.html": PUBLIC_DIR / "index.html",
+    "api.js": PUBLIC_DIR / "api.js",
     "app.js": PUBLIC_DIR / "app.js",
     "styles.css": PUBLIC_DIR / "styles.css",
     "service-worker.js": PUBLIC_DIR / "service-worker.js",
@@ -68,7 +69,7 @@ STATIC_TARGETS = {
     "logo.png": PUBLIC_DIR / "logo.png",
     "icon.svg": PUBLIC_DIR / "icon.svg",
 }
-VERSIONED_STATIC_ASSETS = {"app.js", "styles.css", "logo.png", "icon.svg"}
+VERSIONED_STATIC_ASSETS = {"api.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 APP_VERSION = "1.3.2"
