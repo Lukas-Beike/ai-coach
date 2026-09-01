@@ -872,7 +872,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Die lokale WCAG-Ausführung im Disposable-Container konnte wegen eines bestehenden 30-Sekunden-Login-/Bootstrap-Wartefensters nicht vollständig abschließen; der verpflichtende GitHub-Browser-/Accessibility-Check ist grün.
 - **Folgetasks:** FT-022 bis FT-032 bleiben als separate Pakete offen; FT-022 ist als nächstes Paket vorgesehen.
 
-### - [ ] FT-022 – Begrenzte Wiederholungsregeln für iCalendar unterstützen
+### - [x] FT-022 – Begrenzte Wiederholungsregeln für iCalendar unterstützen
 
 **Quelle:** EXT-01
 **Ziel:** Sichere tägliche/wöchentliche Wiederholungen können innerhalb des Syncfensters expandiert werden, ohne unbeschränkte Verarbeitung.
@@ -880,18 +880,29 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Unterstützte RRULE-Untermenge dokumentieren: zunächst DAILY/WEEKLY mit `COUNT` oder `UNTIL`.
-- [ ] Harte Grenzen für Zeitraum und Anzahl expandierter Vorkommen definieren.
-- [ ] `EXDATE`, Zeitzone und ganztägige Termine bewusst behandeln oder klar ablehnen.
-- [ ] Nicht unterstützte Regeln mit sicherer, verständlicher Fehlermeldung ablehnen.
+- [x] Unterstützte RRULE-Untermenge dokumentieren: zunächst DAILY/WEEKLY mit `COUNT` oder `UNTIL`.
+- [x] Harte Grenzen für Zeitraum und Anzahl expandierter Vorkommen definieren.
+- [x] `EXDATE`, Zeitzone und ganztägige Termine bewusst behandeln oder klar ablehnen.
+- [x] Nicht unterstützte Regeln mit sicherer, verständlicher Fehlermeldung ablehnen.
 - [ ] Bestehenden SSRF-, TLS-, Redirect- und Größen-Schutz unverändert erhalten.
-- [ ] Tests für Endlosschleifen, extreme Counts, DST und doppelte Instanzen ergänzen.
+- [x] Tests für Endlosschleifen, extreme Counts, DST und doppelte Instanzen ergänzen.
 
 **Abnahmekriterien**
 
-- [ ] Keine Regel kann außerhalb des Syncfensters unbeschränkt expandieren.
-- [ ] Last-Good-Daten bleiben bei ungültiger Quelle erhalten.
-- [ ] Wiederholungen werden deterministisch dedupliziert.
+- [x] Keine Regel kann außerhalb des Syncfensters unbeschränkt expandieren.
+- [x] Last-Good-Daten bleiben bei ungültiger Quelle erhalten.
+- [x] Wiederholungen werden deterministisch dedupliziert.
+
+**Handover FT-022**
+
+- **Status:** abgeschlossen; Folgepakete ab FT-023 sind entblockt.
+- **Branch und Commit:** `feat/ft-022-rrule`, `3b18391`; PR #174 per Auto-Squash nach `develop` gemergt.
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument.
+- **Verhaltensänderung:** Read-only iCalendar-Synchronisierung expandiert DAILY/WEEKLY-Regeln mit COUNT oder UNTIL ausschließlich innerhalb des bestehenden 56-Tage-Fensters. EXDATE, lokale Zeitzone/DST, wöchentliche BYDAY-Regeln und deterministische Deduplizierung werden berücksichtigt. Nicht unterstützte Regeln werden mit sicherem Fehler abgelehnt; Last-Good-Kalenderdaten bleiben bei ungültigem Feed erhalten. SSRF-, TLS-, Redirect- und Größenlimits bleiben bestehen.
+- **Validierung:** `python tests/run_tests.py --shard 1 --total 4`, `--shard 2 --total 4`, `--shard 3 --total 4`, `--shard 4 --total 4` jeweils erfolgreich (63/63/62/62 Tests); `python -m py_compile server.py tests/test_server.py tests/run_tests.py` erfolgreich; `docker build -t ai-coach:ft022 .` erfolgreich; GitHub-Pflichtchecks für PR #174 einschließlich Browser Smoke/Accessibility, Syntax, Validate, CodeQL und aller vier Shards erfolgreich.
+- **Manuelle Prüfung:** Parser- und Syncfehlerpfade sowie die bestehenden kalenderbezogenen Flows wurden mit temporären, gemockten Testdaten geprüft; keine Secrets, Providerkonten, Live-Datenbanken oder Runtime-Dateien verwendet.
+- **Offene Risiken:** Nicht unterstützte RFC-5545-Erweiterungen wie RDATE, EXRULE und RECURRENCE-ID bleiben bewusst abgelehnt; die unterstützte Untermenge ist in README dokumentiert.
+- **Folgetasks:** FT-023 ist als nächstes Paket vorgesehen; FT-024 bleibt als abhängiger späterer Architektur-Task offen.
 
 ### - [ ] FT-023 – Coach-Streaming und echtes Abbrechen umsetzen
 
