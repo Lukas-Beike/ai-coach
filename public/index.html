@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=124" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=124">
+  <link rel="icon" href="/icon.svg?v=125" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=125">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -93,10 +93,10 @@
         <div id="weatherNotice" class="weather-notice" hidden></div>
         <div id="plannedCalendar" class="planned-calendar"></div>
         </section>
-        <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle">
+        <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle" aria-describedby="checkinDescription">
           <div class="checkin-dialog-content">
             <div class="settings-section-heading">
-              <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in <span id="checkinDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><p>Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach am ausgewählten Tag fest.</p></div>
+              <div><span class="eyebrow">TAGESFORM</span><h3 id="checkinTitle">Tages-Check-in <span id="checkinDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><p id="checkinDescription">Halte Befinden, Verfügbarkeit und wichtige Hinweise für den Coach am ausgewählten Tag fest.</p></div>
               <button type="button" id="checkinCloseButton" class="secondary-button">Schließen</button>
             </div>
             <form id="checkinForm" class="checkin-form">
@@ -113,6 +113,7 @@
               <label>Schmerz<textarea name="pain" rows="2" placeholder="Ort, Intensität und Bewegungen, die Beschwerden auslösen"></textarea></label>
               <label>Hinweise zur Verfügbarkeit<textarea name="availability_notes" rows="2" placeholder="Zum Beispiel Reise, wenig Schlaf oder nur Indoor möglich"></textarea></label>
               <label>Notizen<textarea name="notes" rows="3" placeholder="Alles, was der Coach heute wissen sollte"></textarea></label>
+              <p id="checkinError" class="error" role="alert" aria-live="assertive"></p>
               <button type="submit">Tages-Check-in speichern</button>
             </form>
             <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
@@ -351,6 +352,6 @@
       </div>
     </div>
   </dialog>
-  <script src="/app.js?v=124" defer></script>
+  <script src="/app.js?v=125" defer></script>
 </body>
 </html>

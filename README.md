@@ -614,6 +614,12 @@ The CI job uploads Playwright traces, screenshots, videos, and the HTML report
 only when the browser checks fail. These artifacts are generated from the
 empty fixture and are retained for seven days.
 
+The accessibility baseline covers the core landmarks, headings, labels, modal
+descriptions, live status/error announcements, visible focus, keyboard-only
+navigation, 200% text zoom, reduced motion, and 44 CSS-pixel touch targets.
+Dialogs return focus to the control that opened them; the browser check also
+reviews the login, check-in, navigation, and core coach flows with axe-core.
+
 ## Releases and container publishing
 
 The container image is published to
