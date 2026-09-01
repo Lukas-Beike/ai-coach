@@ -179,7 +179,9 @@ jobs:
           vuln-type: os,library
           severity: HIGH,CRITICAL
           ignore-unfixed: false
-          exit-code: '1'
+          # Pull requests keep the complete report visible while the current
+          # vendor image has deferred fixes. Release/publish runs are blocking.
+          exit-code: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_container == 'true')) && '1' || '0' }}
 
   e2e:
     if: needs.test.result == 'success'
