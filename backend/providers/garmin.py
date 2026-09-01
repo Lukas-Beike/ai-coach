@@ -78,6 +78,32 @@ def collect_garmin_data(
         fetch_range("body_battery", client.get_body_battery, window_start, window_end)
         fetch_range("activities", client.get_activities_by_date, window_start, window_end)
 
+    daily_stats_fetch = getattr(client, "get_user_summary", None) or getattr(client, "get_stats", None)
+    if callable(daily_stats_fetch):
+        stats = pagination.setdefault("daily_stats", {"windows": len(windows), "records": 0, "complete": True})
+        for window_start, window_end in windows:
+            current = window_start
+            while current <= window_end:
+                try:
+                    value = external_call(
+                        "garmin",
+                        "daily_stats",
+                        lambda current=current: daily_stats_fetch(current.isoformat()),
+                        {"date": current.isoformat()},
+                    )
+                    records = value if isinstance(value, list) else [value]
+                    for record in records:
+                        if isinstance(record, dict):
+                            if not any(key in record for key in ("calendarDate", "summaryDate", "date")):
+                                record = {"calendarDate": current.isoformat(), **record}
+                            payload.setdefault("daily_stats", []).append(record)
+                            stats["records"] = int(stats["records"]) + 1
+                except Exception as exc:
+                    stats["complete"] = False
+                    stats["error"] = redact(str(exc))[:500]
+                    add_error("daily_stats", exc)
+                current += timedelta(days=1)
+
     heart_rate_fetch = getattr(client, "get_heart_rates", None)
     if callable(heart_rate_fetch):
         stats = pagination.setdefault("resting_hr", {"windows": len(windows), "records": 0, "complete": True})
