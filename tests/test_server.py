@@ -173,6 +173,85 @@ class CoachTests(unittest.TestCase):
             )
         return token
 
+    def test_database_enables_foreign_keys_and_records_idempotent_migrations(self):
+        server.initialise_database()
+        with server.DB_LOCK, server.database() as db:
+            self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
+            migrations = db.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
+        self.assertEqual([row["version"] for row in migrations], [1, 2])
+        self.assertEqual(migrations[0]["name"], "legacy-schema-baseline")
+        self.assertEqual(migrations[1]["name"], "public-calendar-foreign-key-cascade")
+
+        server.initialise_database()
+        with server.DB_LOCK, server.database() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 2)
+
+    def test_public_calendar_source_delete_cascades_to_candidates(self):
+        now = server.utc_now()
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO public_event_sources(id, name, url, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                ("source", "Source", "https://example.test/calendar", now, now),
+            )
+            db.execute(
+                "INSERT INTO public_event_candidates(id, source_id, uid, name, event_date, sport, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("candidate", "source", "uid", "Event", "2026-09-01", "run", now, now),
+            )
+            db.execute("DELETE FROM public_event_sources WHERE id = ?", ("source",))
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM public_event_candidates").fetchone()["count"], 0)
+            with self.assertRaises(server.sqlite3.IntegrityError):
+                db.execute(
+                    "INSERT INTO public_event_candidates(id, source_id, uid, name, event_date, sport, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("invalid", "missing-source", "uid", "Event", "2026-09-01", "run", now, now),
+                )
+
+    def test_initialise_rejects_orphaned_foreign_keys_without_replacing_data(self):
+        connection = server.sqlite3.connect(server.DB_PATH, timeout=20)
+        try:
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.execute(
+                "INSERT INTO public_event_candidates(id, source_id, uid, name, event_date, sport, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("orphan", "missing-source", "uid", "Event", "2026-09-01", "run", "now", "now"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        try:
+            with self.assertRaises(RuntimeError):
+                server.initialise_database()
+            connection = server.sqlite3.connect(server.DB_PATH, timeout=20)
+            try:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM public_event_candidates WHERE id = 'orphan'").fetchone()[0], 1)
+            finally:
+                connection.close()
+        finally:
+            connection = server.sqlite3.connect(server.DB_PATH, timeout=20)
+            try:
+                connection.execute("PRAGMA foreign_keys = OFF")
+                connection.execute("DELETE FROM public_event_candidates WHERE id = 'orphan'")
+                connection.commit()
+            finally:
+                connection.close()
+        server.initialise_database()
+
+    def test_initialise_rejects_unknown_database_schema_version(self):
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                (99, "future", server.utc_now()),
+            )
+        try:
+            with self.assertRaises(RuntimeError):
+                server.initialise_database()
+        finally:
+            with server.DB_LOCK, server.database() as db:
+                db.execute("DELETE FROM schema_migrations WHERE version = 99")
+        server.initialise_database()
+
     def test_profile_only_accepts_known_fields_and_trims(self):
         profile = server.normalize_profile({"name": "  Ada  ", "goals": "Finish strong", "admin": True})
         self.assertEqual(profile["name"], "Ada")
@@ -409,7 +488,9 @@ class CoachTests(unittest.TestCase):
         self.assertIn("remote_untouched", result)
 
     def test_privacy_delete_preview_covers_every_durable_table_and_reports_counts(self):
-        expected_tables = set(server.CURRENT_DATABASE_SCHEMA)
+        # Schema history is operational metadata, not athlete data, and must
+        # survive a privacy wipe so the database remains auditable.
+        expected_tables = set(server.CURRENT_DATABASE_SCHEMA) - {"schema_migrations"}
         scoped_tables = {table for _category, _label, tables in server.PRIVACY_DELETE_SCOPE for table in tables}
         self.assertEqual(scoped_tables, expected_tables)
         server.set_kv("openai_conversation_id", "conv-test")
@@ -424,6 +505,7 @@ class CoachTests(unittest.TestCase):
         with server.DB_LOCK, server.database() as db:
             for table in expected_tables - {"kv"}:
                 self.assertEqual(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 2)
 
     def test_weather_refresh_rechecks_adaptive_planning(self):
         server.save_profile({"weather_location": "Berlin"})
