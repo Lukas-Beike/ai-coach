@@ -311,7 +311,10 @@ Backend modularization starts with dependency-light database primitives in the
 `ActivityFeedbackRepository`, `SnapshotRepository`, and
 `WorkoutDraftRepository` interfaces in
 `backend/db/repositories.py`. The HTTP application remains the compatibility
-boundary while further repositories, providers, synchronization, coaching,
+boundary. The Intervals.icu provider's bounded, duplicate-page-safe collection
+pagination is isolated in `backend/providers/intervals.py`; it receives the
+transport and error factory explicitly and has no dependency on application
+state. Further provider operations, synchronization, coaching,
 backup, and HTTP routing are moved in separate cohesive steps. These modules
 are copied into the container as application code and do not change the
 SQLCipher, authentication, or persistence contracts.

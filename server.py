@@ -41,6 +41,7 @@ from urllib.request import Request, urlopen
 from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
+from backend.providers.intervals import fetch_paged_collection
 
 try:
     from garminconnect import Garmin
@@ -5354,33 +5355,19 @@ class IntervalsClient:
         collection: str,
         page_size: int = 500,
     ) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-        offset = 0
-        pages = 0
-        fingerprints: set[str] = set()
-        while True:
-            page = self.get(path, {**(params or {}), "limit": page_size, "offset": offset})
-            if not isinstance(page, list):
-                raise AppError(502, f"Intervals.icu hat keine gültige {collection}-Seite zurückgegeben.")
-            page_rows = [item for item in page if isinstance(item, dict)]
-            if len(page_rows) != len(page):
-                raise AppError(502, f"Intervals.icu liefert ungültige Datensätze in der {collection}-Seite.")
-            pages += 1
-            fingerprint = hashlib.sha256(json.dumps(page_rows, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
-            if fingerprint in fingerprints and page_rows:
-                raise AppError(502, f"Intervals.icu liefert wiederholt dieselbe {collection}-Seite.")
-            fingerprints.add(fingerprint)
-            rows.extend(page_rows)
-            if len(page) < page_size:
-                break
-            offset += len(page)
-            if pages >= 100:
-                raise AppError(502, f"Die {collection}-Synchronisierung überschreitet das Seitenlimit.")
+        rows, page_metadata = fetch_paged_collection(
+            self.get,
+            path,
+            params,
+            collection,
+            error=lambda message: AppError(502, message),
+            page_size=page_size,
+        )
         previous = self.pagination.get(collection) or {"pages": 0, "records": 0, "complete": True}
         self.pagination[collection] = {
-            "pages": int(previous.get("pages") or 0) + pages,
-            "records": int(previous.get("records") or 0) + len(rows),
-            "complete": bool(previous.get("complete", True)),
+            "pages": int(previous.get("pages") or 0) + int(page_metadata["pages"]),
+            "records": int(previous.get("records") or 0) + int(page_metadata["records"]),
+            "complete": bool(previous.get("complete", True)) and bool(page_metadata["complete"]),
         }
         return rows
 
