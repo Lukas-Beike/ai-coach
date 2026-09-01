@@ -2134,12 +2134,39 @@ function renderTrainingPlans(plans, workouts) {
   });
 }
 
+function selectedLibraryWorkouts() {
+  const workouts = Array.isArray(state.data?.library) ? state.data.library : [];
+  return workouts.filter((workout) => state.librarySelection.has(String(workout.id)));
+}
+
+function updateLibraryBulkControls() {
+  const count = state.librarySelection.size;
+  const summary = $("#librarySelectionSummary");
+  if (summary) summary.textContent = count ? `${count} Einheit${count === 1 ? "" : "en"} ausgewählt · lokale und Remote-Wirkung vorab prüfen` : "Keine Einheiten ausgewählt";
+  const clear = $("#libraryClearSelectionButton");
+  if (clear) clear.hidden = count === 0;
+  ["libraryMarkButton", "libraryUnmarkButton", "libraryMoveButton", "libraryArchiveButton", "librarySyncSelectedButton"].forEach((id) => {
+    const button = $("#" + id);
+    if (button) button.disabled = count === 0 || state.libraryBulkBusy;
+  });
+  const dateLabel = $("#libraryBulkDateLabel");
+  if (dateLabel) dateLabel.hidden = count === 0;
+}
+
+function clearLibrarySelection() {
+  state.librarySelection.clear();
+  updateLibraryBulkControls();
+  document.querySelectorAll(".library-select-checkbox").forEach((checkbox) => { checkbox.checked = false; });
+}
+
 function renderLibrary(workouts) {
   const root = $("#library");
   if (!root) return;
   setDirtyIndicator("libraryDirtyIndicator", state.libraryDateDirty.size > 0);
   root.replaceChildren();
   const allWorkouts = Array.isArray(workouts) ? workouts : [];
+  const knownIds = new Set(allWorkouts.map((workout) => String(workout.id)));
+  state.librarySelection = new Set([...state.librarySelection].filter((id) => knownIds.has(id)));
   const filter = state.libraryFilter || "active";
   const filterSelect = $("#libraryFilter");
   if (filterSelect && filterSelect.value !== filter) filterSelect.value = filter;
@@ -2152,6 +2179,7 @@ function renderLibrary(workouts) {
   });
   const librarySummary = $("#librarySummary");
   if (librarySummary) librarySummary.textContent = `${visible.length} von ${allWorkouts.length} Einheiten`;
+  updateLibraryBulkControls();
   renderLibraryPagination();
   if (!visible.length) {
     const empty = document.createElement("p");
@@ -2182,6 +2210,21 @@ function renderLibrary(workouts) {
         const card = document.createElement("article");
         card.className = "library-card";
         if (workout.archived) card.classList.add("library-card-archived");
+        const selectLabel = document.createElement("label");
+        selectLabel.className = "library-select-label";
+        selectLabel.textContent = "Auswählen";
+        const checkbox = document.createElement("input");
+        checkbox.className = "library-select-checkbox";
+        checkbox.type = "checkbox";
+        checkbox.checked = state.librarySelection.has(String(workout.id));
+        checkbox.setAttribute("aria-label", `${workout.name || "Bibliothekseinheit"} auswählen`);
+        checkbox.addEventListener("change", () => {
+          const key = String(workout.id);
+          if (checkbox.checked) state.librarySelection.add(key);
+          else state.librarySelection.delete(key);
+          updateLibraryBulkControls();
+        });
+        selectLabel.prepend(checkbox);
         const heading = document.createElement("div");
         const cardTitle = document.createElement("h4");
         cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
@@ -2197,7 +2240,7 @@ function renderLibrary(workouts) {
                 : workout.external_id
                   ? "Mit Intervals.icu synchronisiert"
                   : "Lokal";
-        meta.textContent = [workout.date ? `Geplant: ${dateLabel(workout.date)}` : null, workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, syncLabel].filter(Boolean).join(" - ");
+        meta.textContent = [workout.date ? `Geplant: ${dateLabel(workout.date)}` : null, workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, workout.local_marked ? "Lokal markiert" : null, syncLabel].filter(Boolean).join(" - ");
         heading.append(cardTitle, meta);
         const description = document.createElement("p");
         description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
@@ -2269,7 +2312,7 @@ function renderLibrary(workouts) {
             controls.append(remove);
           }
         }
-        card.append(heading, description, controls);
+        card.append(selectLabel, heading, description, controls);
         cards.append(card);
       });
       section.append(cards);
@@ -2305,6 +2348,112 @@ async function loadMoreLibrary() {
     toast(error.message, true);
     if (button) button.disabled = false;
   }
+}
+
+function describeLibraryBulkPreview(preview, remote = false) {
+  const entries = Array.isArray(preview.entries) ? preview.entries : [];
+  const lines = entries.slice(0, 8).map((entry) => {
+    if (remote) return `${entry.name || "Einheit"} · Status: ${entry.sync_status || "lokal"}`;
+    const fields = Object.entries(entry.fields || {}).map(([key, value]) => `${key}: ${value.before} → ${value.after}`);
+    return `${entry.name || "Einheit"}${fields.length ? ` · ${fields.join(", ")}` : " · keine Änderung"}`;
+  });
+  if (entries.length > lines.length) lines.push(`… und ${entries.length - lines.length} weitere`);
+  return lines.join("\n");
+}
+
+async function executeLibraryActionPreview(preview, message) {
+  if (!window.confirm(message + "\n\n" + describeLibraryBulkPreview(preview, preview.target_system === "intervals"))) return null;
+  const actionPreview = await api("/api/coach/actions/preview", {
+    method: "POST",
+    body: JSON.stringify({
+      action_type: preview.action === "sync_selected_workout_library" ? preview.action : "bulk_update_workout_library",
+      target_system: preview.target_system,
+      object_ids: preview.object_ids,
+      diff: preview.entries,
+      payload: preview.payload,
+    }),
+  });
+  const confirmed = await api("/api/coach/actions/confirm", {
+    method: "POST",
+    body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
+  });
+  return api("/api/coach/actions/execute", {
+    method: "POST",
+    body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
+  });
+}
+
+function renderLibraryBulkResult(result) {
+  const root = $("#libraryBulkResult");
+  if (!root) return;
+  root.replaceChildren();
+  if (!result) return;
+  const summary = document.createElement("strong");
+  summary.textContent = result.status === "partial" ? "Teilweise ausgeführt" : result.status === "error" ? "Nicht ausgeführt" : "Bulk-Aktion abgeschlossen";
+  root.append(summary);
+  if (Array.isArray(result.results)) {
+    const list = document.createElement("ul");
+    result.results.forEach((item) => {
+      const row = document.createElement("li");
+      row.textContent = `${item.library_workout_id}: ${item.status}${item.error ? ` · ${item.error}` : ""}`;
+      list.append(row);
+    });
+    root.append(list);
+  }
+  if (Array.isArray(result.failed_object_ids) && result.failed_object_ids.length) {
+    const retry = document.createElement("span");
+    retry.textContent = "Die fehlgeschlagenen Einheiten sind wieder ausgewählt und können nach erneuter Vorschau wiederholt werden.";
+    root.append(retry);
+  }
+}
+
+async function runLibraryBulkLocalAction(action) {
+  const selected = selectedLibraryWorkouts();
+  if (!selected.length) return;
+  const entries = selected.map((workout) => ({ library_workout_id: String(workout.id) }));
+  if (action === "move") {
+    const daysInput = $("#libraryBulkDays");
+    const offset = Number(daysInput?.value);
+    if (!Number.isInteger(offset) || offset < -365 || offset > 365 || offset === 0) { toast("Bitte eine Verschiebung zwischen -365 und 365 Tagen (außer 0) auswählen.", true); return; }
+    selected.forEach((workout, index) => { entries[index].date = addDateKey(String(workout.date || ""), offset); });
+  }
+  state.libraryBulkBusy = true;
+  updateLibraryBulkControls();
+  try {
+    const preview = await api("/api/library/bulk/preview", { method: "POST", body: JSON.stringify({ action, entries }) });
+    const message = action === "archive"
+      ? `Nur lokal archivieren? ${selected.length} Einheit(en) werden nicht gelöscht und kein Remote-System wird beschrieben.`
+      : action === "move"
+        ? `Nur lokal verschieben? ${selected.length} Einheit(en) werden um ${entries[0].date ? $("#libraryBulkDays").value : "?"} Tag(e) verschoben.`
+        : `Nur lokal ${action === "mark" ? "markieren" : "die Markierung entfernen"}? ${selected.length} Einheit(en) werden geändert.`;
+    const result = await executeLibraryActionPreview(preview, message);
+    if (!result) return;
+    renderLibraryBulkResult(result);
+    toast("Lokale Bulk-Aktion abgeschlossen");
+    clearLibrarySelection();
+    await load();
+  } catch (error) { toast(error.message, true); }
+  finally { state.libraryBulkBusy = false; updateLibraryBulkControls(); }
+}
+
+async function runLibraryBulkRemoteSync() {
+  const selected = selectedLibraryWorkouts();
+  if (!selected.length) return;
+  state.libraryBulkBusy = true;
+  updateLibraryBulkControls();
+  try {
+    const preview = await api("/api/library/bulk-sync/preview", {
+      method: "POST",
+      body: JSON.stringify({ entries: selected.map((workout) => ({ library_workout_id: String(workout.id) })) }),
+    });
+    const result = await executeLibraryActionPreview(preview, `Remote-Sync zu Intervals.icu für exakt ${selected.length} ausgewählte Einheit(en) freigeben?`);
+    if (!result) return;
+    renderLibraryBulkResult(result);
+    state.librarySelection = new Set(result.failed_object_ids || []);
+    toast(result.status === "partial" ? "Remote-Sync teilweise abgeschlossen" : "Remote-Sync abgeschlossen");
+    await load();
+  } catch (error) { toast(error.message, true); }
+  finally { state.libraryBulkBusy = false; updateLibraryBulkControls(); }
 }
 
 async function loadLibrary() {
@@ -4250,7 +4399,16 @@ $("#backupDownloadButton").addEventListener("click", downloadDatabaseBackup);
 $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);
 $("#logoutButton").addEventListener("click", logout);
 $("#libraryLoadButton").addEventListener("click", loadLibrary);
-$("#libraryFilter").addEventListener("change", (event) => { state.libraryFilter = event.target.value; renderLibrary(state.data?.library || []); });
+$("#libraryFilter").addEventListener("change", (event) => { state.libraryFilter = event.target.value; clearLibrarySelection(); renderLibrary(state.data?.library || []); });
+$("#librarySelectVisibleButton").addEventListener("click", () => {
+  document.querySelectorAll(".library-select-checkbox").forEach((checkbox) => { checkbox.checked = true; checkbox.dispatchEvent(new Event("change")); });
+});
+$("#libraryClearSelectionButton").addEventListener("click", clearLibrarySelection);
+$("#libraryMarkButton").addEventListener("click", () => runLibraryBulkLocalAction("mark"));
+$("#libraryUnmarkButton").addEventListener("click", () => runLibraryBulkLocalAction("unmark"));
+$("#libraryMoveButton").addEventListener("click", () => runLibraryBulkLocalAction("move"));
+$("#libraryArchiveButton").addEventListener("click", () => runLibraryBulkLocalAction("archive"));
+$("#librarySyncSelectedButton").addEventListener("click", runLibraryBulkRemoteSync);
 $("#systemContextPreviewButton").addEventListener("click", () => {
   $("#systemContextPreviewButton").dataset.loaded = "false";
   loadContextPreview();

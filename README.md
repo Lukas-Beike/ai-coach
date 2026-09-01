@@ -253,6 +253,15 @@ remain separate explicit actions. The same safe freshness metadata is included
 in the diagnostics report. The timeline retains at most 200 attempts for 30
 days and never stores provider responses or calendar URLs.
 
+The workout library also supports a mobile-friendly, keyboard-accessible
+multi-selection for local marking, date shifting, archiving, and explicitly
+selected Intervals.icu synchronization. Every bulk operation shows a bounded
+server-side diff first. Local actions remain local; selected remote sync uses
+the existing one-time confirmation token, exact object IDs, and payload hashes.
+Each remote object reports its own result, and only failed or conflicting
+objects remain selected for a deliberate retry. Filter and reload changes
+discard the selection visibly.
+
 ## Target competitions and Intervals.icu
 
 Target competitions are entered manually in the profile with the Intervals.icu

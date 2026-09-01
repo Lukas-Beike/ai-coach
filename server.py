@@ -77,7 +77,7 @@ STATIC_TARGETS = {
 VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.3.3"
+APP_VERSION = "1.3.4"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -1076,6 +1076,8 @@ MUTATING_COACH_TOOL_NAMES = {
     "delete_competition",
     "sync_competitions",
     "apply_adaptive_replan",
+    "bulk_update_workout_library",
+    "sync_selected_workout_library",
 }
 
 COACH_TOOLS = [
@@ -1251,7 +1253,7 @@ CHANGE_HISTORY_PROFILE_FIELDS = {
 }
 CHANGE_HISTORY_LIBRARY_FIELDS = {
     "id", "type", "name", "description", "duration_minutes", "moving_time", "target", "date",
-    "source", "rationale", "plan_id", "plan_name", "archived", "private_calendar_adjustment",
+    "source", "rationale", "plan_id", "plan_name", "archived", "local_marked", "private_calendar_adjustment",
     "sync_status",
 }
 CHANGE_HISTORY_COMPETITION_FIELDS = {
@@ -1259,6 +1261,10 @@ CHANGE_HISTORY_COMPETITION_FIELDS = {
     "target", "course_profile", "notes", "description", "moving_time", "sync_state",
 }
 CHANGE_HISTORY_PLAN_FIELDS = {"id", "name", "goal", "start_date", "end_date", "status"}
+
+LIBRARY_BULK_MAX_ENTRIES = 100
+LIBRARY_BULK_PREVIEW_TTL_SECONDS = 10 * 60
+LIBRARY_BULK_LOCAL_ACTIONS = {"mark", "unmark", "move", "archive"}
 
 
 OPERATION_CLEANUP_REASONS = {
@@ -6998,7 +7004,7 @@ def normalize_library_workout(
         if key in {
             "name", "description", "type", "moving_time", "duration_minutes", "distance", "target",
             "workout_doc", "icu_training_load", "icu_intensity", "indoor", "tags", "folder_id",
-            "date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_deleted",
+            "date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_marked", "local_deleted",
             "remote_event_id", "remote_event_external_id",
         }
     }
@@ -7022,6 +7028,7 @@ def normalize_library_workout(
     if result.get("source"):
         result["source"] = str(result["source"])[:40]
     result["archived"] = bool(result.get("archived"))
+    result["local_marked"] = bool(result.get("local_marked"))
     result["local_deleted"] = bool(result.get("local_deleted"))
     return result
 
@@ -7198,7 +7205,7 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
                 except (TypeError, ValueError, KeyError, json.JSONDecodeError):
                     existing_payload = {}
                 if isinstance(existing_payload, dict):
-                    for metadata_key in ("date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_deleted"):
+                    for metadata_key in ("date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_marked", "local_deleted"):
                         if existing_payload.get(metadata_key) is not None:
                             entry[metadata_key] = existing_payload[metadata_key]
             normalized.append(entry)
@@ -8114,6 +8121,248 @@ def apply_workout_library_plan(
         "remote_errors": remote_errors,
         "synced_to_intervals": sync_to_intervals and not remote_errors,
     }
+
+
+def _library_bulk_request_entries(entries: Any, *, require_hash: bool = False) -> list[dict[str, Any]]:
+    if not isinstance(entries, list) or not entries:
+        raise AppError(400, "Mindestens eine Bibliothekseinheit muss ausgewählt werden.")
+    if len(entries) > LIBRARY_BULK_MAX_ENTRIES:
+        raise AppError(400, f"Es können höchstens {LIBRARY_BULK_MAX_ENTRIES} Bibliothekseinheiten gleichzeitig ausgewählt werden.")
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in entries:
+        if not isinstance(item, dict):
+            raise AppError(400, "Jede Bulk-Auswahl muss ein Objekt sein.")
+        try:
+            local_id = str(uuid.UUID(str(item.get("library_workout_id") or item.get("id") or "")))
+        except (ValueError, AttributeError) as exc:
+            raise AppError(400, "Ungültige Bibliothekseinheiten-ID in der Auswahl.") from exc
+        if local_id in seen:
+            raise AppError(400, "Eine Bibliothekseinheit darf nur einmal ausgewählt werden.")
+        seen.add(local_id)
+        selected = {"library_workout_id": local_id}
+        if "date" in item:
+            plan_date = str(item.get("date") or "").strip()
+            try:
+                date.fromisoformat(plan_date)
+            except (TypeError, ValueError) as exc:
+                raise AppError(400, "Das Bulk-Datum muss das Format JJJJ-MM-TT haben.") from exc
+            selected["date"] = plan_date[:10]
+        expected_hash = str(item.get("expected_payload_hash") or "").strip().lower()
+        if require_hash and not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+            raise AppError(400, "Die Bulk-Aktion benötigt aktuelle Payload-Hashes.")
+        if expected_hash:
+            if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+                raise AppError(400, "Ungültiger Payload-Hash in der Bulk-Auswahl.")
+            selected["expected_payload_hash"] = expected_hash
+        result.append(selected)
+    return result
+
+
+def _library_payload_hash(raw_payload: Any) -> str:
+    return hashlib.sha256(str(raw_payload or "").encode("utf-8")).hexdigest()
+
+
+def _library_bulk_preview(action: str, entries: Any) -> dict[str, Any]:
+    action = str(action or "").strip().casefold()
+    if action not in LIBRARY_BULK_LOCAL_ACTIONS:
+        raise AppError(400, "Unbekannte lokale Bulk-Aktion.")
+    requested = _library_bulk_request_entries(entries)
+    preview_entries: list[dict[str, Any]] = []
+    target_dates: set[str] = set()
+    with DB_LOCK, database() as db:
+        for item in requested:
+            row = db.execute(
+                "SELECT local_id, external_id, sync_state, payload FROM workout_library WHERE local_id=?",
+                (item["library_workout_id"],),
+            ).fetchone()
+            if not row:
+                raise AppError(404, "Eine ausgewählte Bibliothekseinheit wurde nicht gefunden.")
+            try:
+                current = json.loads(row["payload"])
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise AppError(500, "Eine ausgewählte Bibliothekseinheit ist beschädigt.") from exc
+            if not isinstance(current, dict):
+                raise AppError(500, "Eine ausgewählte Bibliothekseinheit ist beschädigt.")
+            if action == "move":
+                if not current.get("date") or current.get("source") not in {"coach", "library", "legacy-draft"}:
+                    raise AppError(409, "Nur datierte lokale Einheiten können gesammelt verschoben werden.")
+                target_date = str(item.get("date") or "")
+                if target_date in target_dates:
+                    raise AppError(409, "Jede ausgewählte Einheit benötigt beim Verschieben ein eigenes Datum.")
+                target_dates.add(target_date)
+                if target_date != str(current.get("date") or "")[:10]:
+                    conflicts = calendar_conflicts({"date": target_date}, {entry["library_workout_id"] for entry in requested})
+                    if conflicts:
+                        raise AppError(409, f"Die Auswahl kann wegen einer bestehenden Kalendereinheit am {target_date} nicht verschoben werden.")
+            before = {
+                "date": current.get("date"),
+                "archived": bool(current.get("archived")),
+                "local_marked": bool(current.get("local_marked")),
+                "sync_status": row.get("sync_state") or current.get("sync_status"),
+            }
+            after = dict(before)
+            if action == "mark":
+                after["local_marked"] = True
+            elif action == "unmark":
+                after["local_marked"] = False
+            elif action == "archive":
+                after["archived"] = True
+            elif action == "move":
+                after["date"] = item["date"]
+            preview_entries.append({
+                "library_workout_id": item["library_workout_id"],
+                "name": str(current.get("name") or "Bibliothekseinheit")[:200],
+                "expected_payload_hash": _library_payload_hash(row["payload"]),
+                "fields": {key: {"before": before[key], "after": after[key]} for key in before if before[key] != after[key]},
+            })
+    payload_entries = [
+        {"library_workout_id": item["library_workout_id"], "expected_payload_hash": item["expected_payload_hash"], **({"date": requested[index]["date"]} if "date" in requested[index] else {})}
+        for index, item in enumerate(preview_entries)
+    ]
+    return {
+        "status": "preview",
+        "action": action,
+        "target_system": "local",
+        "object_ids": [item["library_workout_id"] for item in preview_entries],
+        "entries": preview_entries,
+        "payload": {"action": action, "entries": payload_entries},
+        "expires_at": datetime.fromtimestamp(time.time() + LIBRARY_BULK_PREVIEW_TTL_SECONDS, timezone.utc).isoformat(),
+    }
+
+
+def library_bulk_preview(values: Any) -> dict[str, Any]:
+    if not isinstance(values, dict):
+        raise AppError(400, "Die Bulk-Vorschau muss ein Objekt sein.")
+    return _library_bulk_preview(values.get("action"), values.get("entries"))
+
+
+def _apply_bulk_local_library_action(payload: dict[str, Any]) -> dict[str, Any]:
+    preview = _library_bulk_preview(payload.get("action"), payload.get("entries"))
+    requested = _library_bulk_request_entries(payload.get("entries"), require_hash=True)
+    expected = {item["library_workout_id"]: item["expected_payload_hash"] for item in requested}
+    actual = {item["library_workout_id"]: item["expected_payload_hash"] for item in preview["entries"]}
+    if expected != actual:
+        raise AppError(409, "Die Bulk-Vorschau ist nicht mehr aktuell. Bitte erneut prüfen.")
+    with DB_LOCK, database() as db:
+        for item in requested:
+            row = db.execute(
+                "SELECT payload, external_id, sync_state FROM workout_library WHERE local_id=?",
+                (item["library_workout_id"],),
+            ).fetchone()
+            if not row or _library_payload_hash(row.get("payload")) != item["expected_payload_hash"]:
+                raise AppError(409, "Mindestens eine ausgewählte Einheit wurde seit der Vorschau geändert.")
+        for item in requested:
+            row = db.execute(
+                "SELECT payload, external_id, sync_state FROM workout_library WHERE local_id=?",
+                (item["library_workout_id"],),
+            ).fetchone()
+            current = json.loads(row["payload"])
+            before = {**current, "sync_status": row.get("sync_state") or current.get("sync_status")}
+            candidate = dict(current)
+            action = preview["action"]
+            if action == "mark":
+                candidate["local_marked"] = True
+            elif action == "unmark":
+                candidate["local_marked"] = False
+            elif action == "archive":
+                candidate["archived"] = True
+            elif action == "move":
+                candidate["date"] = item["date"]
+            normalized = normalize_library_workout(
+                candidate,
+                local_id=item["library_workout_id"],
+                external_id=str(row.get("external_id") or "") or None,
+                sync_status="local",
+            )
+            for key in ("source", "rationale", "plan_id", "plan_name", "private_calendar_adjustment", "remote_event_id", "remote_event_external_id"):
+                if current.get(key) is not None:
+                    normalized[key] = current[key]
+            now = utc_now()
+            db.execute(
+                "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
+                (json.dumps(normalized, ensure_ascii=False), now, item["library_workout_id"]),
+            )
+            _record_change(db, "workout_library", item["library_workout_id"], "update", before, {**normalized, "sync_status": "local"}, source="bulk")
+    add_message("event", f"{len(requested)} Bibliothekseinheit(en) wurden lokal gesammelt aktualisiert.")
+    return {"ok": True, "status": "local", "action": preview["action"], "updated": len(requested), "object_ids": [item["library_workout_id"] for item in requested]}
+
+
+def _selected_library_sync_preview(entries: Any) -> dict[str, Any]:
+    requested = _library_bulk_request_entries(entries)
+    preview_entries: list[dict[str, Any]] = []
+    with DB_LOCK, database() as db:
+        for item in requested:
+            row = db.execute(
+                "SELECT payload, external_id, sync_state FROM workout_library WHERE local_id=?",
+                (item["library_workout_id"],),
+            ).fetchone()
+            if not row:
+                raise AppError(404, "Eine ausgewählte Bibliothekseinheit wurde nicht gefunden.")
+            try:
+                current = json.loads(row["payload"])
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise AppError(500, "Eine ausgewählte Bibliothekseinheit ist beschädigt.") from exc
+            if not isinstance(current, dict):
+                raise AppError(500, "Eine ausgewählte Bibliothekseinheit ist beschädigt.")
+            preview_entries.append({
+                "library_workout_id": item["library_workout_id"],
+                "name": str(current.get("name") or "Bibliothekseinheit")[:200],
+                "sync_status": str(row.get("sync_state") or current.get("sync_status") or "local"),
+                "has_remote_id": bool(row.get("external_id")),
+                "expected_payload_hash": _library_payload_hash(row["payload"]),
+            })
+    payload_entries = [
+        {"library_workout_id": item["library_workout_id"], "expected_payload_hash": item["expected_payload_hash"]}
+        for item in preview_entries
+    ]
+    return {
+        "status": "preview",
+        "action": "sync_selected_workout_library",
+        "target_system": "intervals",
+        "object_ids": [item["library_workout_id"] for item in preview_entries],
+        "entries": preview_entries,
+        "payload": {"entries": payload_entries},
+        "expires_at": datetime.fromtimestamp(time.time() + LIBRARY_BULK_PREVIEW_TTL_SECONDS, timezone.utc).isoformat(),
+    }
+
+
+def selected_library_sync_preview(values: Any) -> dict[str, Any]:
+    if not isinstance(values, dict):
+        raise AppError(400, "Die Remote-Bulk-Vorschau muss ein Objekt sein.")
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    return _selected_library_sync_preview(values.get("entries"))
+
+
+def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    requested = _library_bulk_request_entries(payload.get("entries"), require_hash=True)
+    results: list[dict[str, Any]] = []
+    for item in requested:
+        with DB_LOCK, database() as db:
+            row = db.execute(
+                "SELECT payload, sync_state FROM workout_library WHERE local_id=?",
+                (item["library_workout_id"],),
+            ).fetchone()
+        if not row:
+            results.append({"library_workout_id": item["library_workout_id"], "status": "conflict", "error": "Einheit nicht gefunden"})
+            continue
+        if _library_payload_hash(row["payload"]) != item["expected_payload_hash"]:
+            results.append({"library_workout_id": item["library_workout_id"], "status": "conflict", "error": "Seit der Vorschau geändert"})
+            continue
+        if row.get("sync_state") == "synced":
+            results.append({"library_workout_id": item["library_workout_id"], "status": "already_synced"})
+            continue
+        try:
+            synced = sync_local_workout_library_entry(item["library_workout_id"])
+            results.append({"library_workout_id": item["library_workout_id"], "status": "synced", "external_id": bool(synced.get("external_id"))})
+        except Exception as exc:
+            results.append({"library_workout_id": item["library_workout_id"], "status": "error", "error": redact_text(str(exc))[:500]})
+    failed = [item["library_workout_id"] for item in results if item["status"] in {"error", "conflict"}]
+    status = "ok" if not failed else "partial" if len(failed) < len(results) else "error"
+    return {"ok": not failed, "status": status, "results": results, "failed_object_ids": failed, "retry_scope": "Nur fehlgeschlagene Objekte erneut auswählen." if failed else None}
 
 
 def create_local_library_plan(workout_id: str, plan_date: str) -> dict[str, Any]:
@@ -9984,6 +10233,8 @@ COACH_ACTION_TYPES = {
     "sync_workout_library",
     "apply_adaptive_replan",
     "undo_change",
+    "bulk_update_workout_library",
+    "sync_selected_workout_library",
 }
 
 
@@ -10041,6 +10292,8 @@ def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str
         "sync_competitions": {"intervals"},
         "sync_workout_library": {"intervals"},
         "apply_adaptive_replan": {"local"},
+        "bulk_update_workout_library": {"local"},
+        "sync_selected_workout_library": {"intervals"},
     }
     if action_type in {"apply_workout_library_plan", "save_competition", "delete_competition"}:
         expected_targets[action_type] = {"local+intervals"} if payload.get("sync_to_intervals") else {"local"}
@@ -10055,6 +10308,14 @@ def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str
     if action_type == "sync_workout_library":
         fingerprint = str(payload.get("fingerprint") or "")
         _require_current_coach_sync_preview("library_sync_preview", fingerprint, "Bibliotheks")
+    if action_type == "bulk_update_workout_library":
+        current = _library_bulk_preview(payload.get("action"), payload.get("entries"))
+        if object_ids != current["object_ids"] or diff != current["entries"]:
+            raise AppError(409, "Die lokale Bulk-Vorschau ist nicht mehr aktuell. Bitte erneut prüfen.")
+    if action_type == "sync_selected_workout_library":
+        current = _selected_library_sync_preview(payload.get("entries"))
+        if object_ids != current["object_ids"] or diff != current["entries"]:
+            raise AppError(409, "Die Remote-Bulk-Vorschau ist nicht mehr aktuell. Bitte erneut prüfen.")
     if action_type == "apply_adaptive_replan":
         expected_targets[action_type] = {"local+intervals"} if payload.get("sync_illness_to_intervals") else {"local"}
         adjustment_id = str(payload.get("adjustment_id") or "")
@@ -10124,6 +10385,10 @@ def _execute_coach_action(action_type: str, payload: dict[str, Any]) -> dict[str
             payload.get("adjustment_id"),
             sync_illness_to_intervals=bool(payload.get("sync_illness_to_intervals")),
         )}
+    if action_type == "bulk_update_workout_library":
+        return _apply_bulk_local_library_action(payload)
+    if action_type == "sync_selected_workout_library":
+        return _sync_selected_workout_library(payload)
     if action_type == "undo_change":
         return _apply_change_undo(payload)
     raise AppError(400, "Unbekannte Coach-Aktion.")
@@ -11936,6 +12201,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/library/sync/preview":
                 self.read_json()
                 self.send_json(200, workout_library_sync_preview())
+            elif path == "/api/library/bulk/preview":
+                self.send_json(200, library_bulk_preview(self.read_json()))
+            elif path == "/api/library/bulk-sync/preview":
+                self.send_json(200, selected_library_sync_preview(self.read_json()))
             elif path == "/api/library/sync":
                 raise AppError(410, "Bibliotheks-Remote-Sync benötigt die separate Coach-Aktionsbestätigung.")
             elif match := LIBRARY_ENTRY_RE.match(path):
