@@ -121,3 +121,24 @@ class SnapshotRepository:
     def latest_payload(self, db: Any) -> str | None:
         row = db.execute("SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1").fetchone()
         return row["payload"] if row else None
+
+
+class WorkoutDraftRepository:
+    """Persist and retrieve local workout drafts without owning a connection."""
+
+    def create(self, db: Any, draft_id: str, payload: str, created_at: str) -> None:
+        db.execute(
+            "INSERT INTO workout_drafts(id, payload, status, created_at, updated_at) VALUES (?, ?, 'draft', ?, ?)",
+            (draft_id, payload, created_at, created_at),
+        )
+
+    def list(self, db: Any, limit: int = 50) -> list[dict[str, Any]]:
+        rows = db.execute("SELECT * FROM workout_drafts ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def get(self, db: Any, draft_id: str) -> dict[str, Any] | None:
+        row = db.execute("SELECT * FROM workout_drafts WHERE id = ?", (draft_id,)).fetchone()
+        return dict(row) if row else None
+
+    def delete(self, db: Any, draft_id: str) -> None:
+        db.execute("DELETE FROM workout_drafts WHERE id = ?", (draft_id,))

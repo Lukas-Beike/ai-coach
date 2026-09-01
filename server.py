@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
-from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, KeyValueRepository, SnapshotRepository
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, KeyValueRepository, SnapshotRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
 
 try:
@@ -1127,6 +1127,7 @@ CHAT_REPOSITORY = ChatRepository(utc_now)
 CHECKIN_REPOSITORY = CheckinRepository(utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
 SNAPSHOT_REPOSITORY = SnapshotRepository()
+WORKOUT_DRAFT_REPOSITORY = WorkoutDraftRepository()
 
 
 def security_configuration_error() -> str | None:
@@ -5864,10 +5865,7 @@ def save_workout_drafts(
                 workout = {**workout, "plan_id": plan_id, "plan_name": plan_name.strip()[:200]}
             draft_id = str(uuid.uuid4())
             workout_event_payload(draft_id, workout)
-            db.execute(
-                "INSERT INTO workout_drafts(id, payload, status, created_at, updated_at) VALUES (?, ?, 'draft', ?, ?)",
-                (draft_id, json.dumps(workout, ensure_ascii=False), now, now),
-            )
+            WORKOUT_DRAFT_REPOSITORY.create(db, draft_id, json.dumps(workout, ensure_ascii=False), now)
             created.append({"id": draft_id, "status": "draft", **workout, "created_at": now, "updated_at": now})
     return created
 
@@ -5916,9 +5914,7 @@ def list_training_plans(limit: int = 30) -> list[dict[str, Any]]:
 
 def list_workout_drafts(limit: int = 50) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT * FROM workout_drafts ORDER BY created_at DESC LIMIT ?", (limit,)
-        ).fetchall()
+        rows = WORKOUT_DRAFT_REPOSITORY.list(db, limit)
     drafts = []
     for row in rows:
         drafts.append({
@@ -7082,10 +7078,10 @@ def delete_workout_draft(draft_id: str) -> dict[str, Any]:
     except (ValueError, AttributeError) as exc:
         raise AppError(400, "UngÃ¼ltige Entwurfs-ID.") from exc
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT id, payload, status FROM workout_drafts WHERE id = ?", (normalized_id,)).fetchone()
+        row = WORKOUT_DRAFT_REPOSITORY.get(db, normalized_id)
         if not row:
             raise AppError(404, "Trainingsentwurf nicht gefunden.")
-        db.execute("DELETE FROM workout_drafts WHERE id = ?", (normalized_id,))
+        WORKOUT_DRAFT_REPOSITORY.delete(db, normalized_id)
     name = "Einheit"
     try:
         name = str(json.loads(row["payload"]).get("name") or name)
@@ -7630,7 +7626,7 @@ def push_draft(draft_id: str) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT * FROM workout_drafts WHERE id = ?", (draft_id,)).fetchone()
+        row = WORKOUT_DRAFT_REPOSITORY.get(db, draft_id)
     if not row:
         raise AppError(404, "Trainingsentwurf nicht gefunden.")
     workout = json.loads(row["payload"])
