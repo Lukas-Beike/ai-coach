@@ -1042,17 +1042,47 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(events[4]["no_intensity"])
         self.assertTrue(events[4]["training_relevant"])
 
-    def test_ical_parser_rejects_incomplete_and_recurring_feeds(self):
+    def test_ical_parser_rejects_incomplete_and_unsupported_recurring_feeds(self):
         with self.assertRaises(server.AppError):
             server.parse_ical_calendar(b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:broken\r\nEND:VEVENT\r\n")
-        recurring = (
+        missing_bound = (
             b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:recurring\r\n"
             b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY\r\n"
             b"SUMMARY:Repeated\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
         with self.assertRaises(server.AppError) as raised:
-            server.parse_ical_calendar(recurring)
+            server.parse_ical_calendar(missing_bound)
         self.assertEqual(raised.exception.status, 400)
+        unsupported = missing_bound.replace(b"FREQ=WEEKLY", b"FREQ=MONTHLY;COUNT=2")
+        with self.assertRaises(server.AppError):
+            server.parse_ical_calendar(unsupported)
+
+    def test_ical_parser_expands_bounded_daily_weekly_rules_with_exdates_and_dst(self):
+        server.save_profile({"timezone": "Europe/Berlin"})
+        daily = (
+            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:daily\r\n"
+            b"DTSTART;TZID=Europe/Berlin:20261024T100000\r\nDTEND;TZID=Europe/Berlin:20261024T110000\r\n"
+            b"RRULE:FREQ=DAILY;COUNT=5\r\nEXDATE;TZID=Europe/Berlin:20261025T100000\r\nSUMMARY:Daily\r\n"
+            b"END:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+        daily_events = server.parse_ical_calendar(daily, window_start=date(2026, 10, 24), window_end=date(2026, 10, 30))
+        self.assertEqual([event["event_date"] for event in daily_events], ["2026-10-24", "2026-10-26", "2026-10-27", "2026-10-28"])
+        self.assertTrue(daily_events[0]["start_local"].endswith("+02:00"))
+        self.assertTrue(daily_events[1]["start_local"].endswith("+01:00"))
+
+        weekly = (
+            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID=weekly\r\n"
+            b"DTSTART;TZID=Europe/Berlin:20260901T090000\r\nDTEND;TZID=Europe/Berlin:20260901T100000\r\n"
+            b"RRULE:FREQ=WEEKLY;UNTIL=20260922T235959;BYDAY=MO,WE\r\n"
+            b"EXDATE;TZID=Europe/Berlin:20260909T090000\r\nSUMMARY:Weekly\r\n"
+            b"END:VEVENT\r\nBEGIN:VEVENT\r\nUID=weekly\r\nDTSTART;TZID=Europe/Berlin:20260902T090000\r\nSUMMARY:Duplicate\r\nEND:VEVENT\r\n"
+            b"END:VCALENDAR\r\n"
+        ).replace(b"UID=", b"UID:").replace(b"SUMMARY=", b"SUMMARY:")
+        weekly_events = server.parse_ical_calendar(weekly, window_start=date(2026, 8, 31), window_end=date(2026, 9, 30))
+        self.assertEqual([event["event_date"] for event in weekly_events], ["2026-09-02", "2026-09-07", "2026-09-14", "2026-09-16", "2026-09-21"])
+        self.assertEqual(len({event["start_local"] for event in weekly_events}), len(weekly_events))
+        with self.assertRaises(server.AppError):
+            server.parse_ical_calendar(daily.replace(b"COUNT=5", b"COUNT=1001"), window_start=date(2026, 10, 24), window_end=date(2026, 10, 30))
 
     def test_external_calendar_keeps_last_good_events_on_invalid_feed(self):
         today = server.local_now().date().isoformat()
