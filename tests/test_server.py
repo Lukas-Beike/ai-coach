@@ -1079,15 +1079,15 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=135', index)
-        self.assertIn('/navigation.js?v=135', index)
-        self.assertIn('/state.js?v=135', index)
-        self.assertIn('/views.js?v=135', index)
-        self.assertIn('/app.js?v=135', index)
-        self.assertIn('intervals-coach-v135', service_worker)
-        self.assertIn('"/navigation.js?v=135"', service_worker)
-        self.assertIn('"/state.js?v=135"', service_worker)
-        self.assertIn('"/views.js?v=135"', service_worker)
+        self.assertIn('/api.js?v=136', index)
+        self.assertIn('/navigation.js?v=136', index)
+        self.assertIn('/state.js?v=136', index)
+        self.assertIn('/views.js?v=136', index)
+        self.assertIn('/app.js?v=136', index)
+        self.assertIn('intervals-coach-v136', service_worker)
+        self.assertIn('"/navigation.js?v=136"', service_worker)
+        self.assertIn('"/state.js?v=136"', service_worker)
+        self.assertIn('"/views.js?v=136"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('window.addEventListener("offline"', app)
@@ -4485,13 +4485,13 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=135"', source)
-        self.assertIn('"/navigation.js?v=135"', source)
-        self.assertIn('"/state.js?v=135"', source)
-        self.assertIn('"/views.js?v=135"', source)
-        self.assertIn('"/app.js?v=135"', source)
-        self.assertIn('"/icon.svg?v=135"', source)
-        self.assertIn('"/styles.css?v=135"', source)
+        self.assertIn('"/api.js?v=136"', source)
+        self.assertIn('"/navigation.js?v=136"', source)
+        self.assertIn('"/state.js?v=136"', source)
+        self.assertIn('"/views.js?v=136"', source)
+        self.assertIn('"/app.js?v=136"', source)
+        self.assertIn('"/icon.svg?v=136"', source)
+        self.assertIn('"/styles.css?v=136"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -5218,7 +5218,104 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=135', index)
+        self.assertIn('v=136', index)
+
+    def test_library_bulk_local_actions_preview_diff_and_hash_conflict(self):
+        first = server.create_local_workout_library_entry({
+            "date": (date.today() + timedelta(days=2)).isoformat(), "sport": "Ride", "name": "Bulk eins",
+            "description": "- 30m Z2", "duration_minutes": 30, "source": "library",
+        })
+        second = server.create_local_workout_library_entry({
+            "date": (date.today() + timedelta(days=3)).isoformat(), "sport": "Run", "name": "Bulk zwei",
+            "description": "- 25m Easy", "duration_minutes": 25, "source": "library",
+        })
+        entries = [{"library_workout_id": first["id"]}, {"library_workout_id": second["id"]}]
+        preview = server.library_bulk_preview({"action": "mark", "entries": entries})
+        self.assertEqual(preview["target_system"], "local")
+        self.assertEqual(len(preview["entries"]), 2)
+        self.assertEqual(preview["entries"][0]["fields"]["local_marked"]["after"], True)
+        result = server._apply_bulk_local_library_action(preview["payload"])
+        self.assertEqual(result["updated"], 2)
+        self.assertTrue(all(item["local_marked"] for item in server.list_workout_library(include_archived=True)))
+        move = server.library_bulk_preview({"action": "move", "entries": [
+            {"library_workout_id": first["id"], "date": (date.today() + timedelta(days=4)).isoformat()},
+            {"library_workout_id": second["id"], "date": (date.today() + timedelta(days=5)).isoformat()},
+        ]})
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute("SELECT payload FROM workout_library WHERE local_id=?", (first["id"],)).fetchone()
+            changed = json.loads(row["payload"])
+            changed["name"] = "Zwischenzeitlich geändert"
+            db.execute("UPDATE workout_library SET payload=? WHERE local_id=?", (json.dumps(changed), first["id"]))
+        with self.assertRaises(server.AppError) as conflict:
+            server._apply_bulk_local_library_action(move["payload"])
+        self.assertEqual(conflict.exception.status, 409)
+        current_by_id = {item["id"]: item for item in server.list_workout_library(include_archived=True)}
+        self.assertEqual(current_by_id[first["id"]]["date"], first["date"])
+
+    def test_selected_library_sync_is_exact_and_reports_per_object(self):
+        first = server.create_local_workout_library_entry({"sport": "Ride", "name": "Remote eins", "description": "- 30m Z2", "duration_minutes": 30})
+        second = server.create_local_workout_library_entry({"sport": "Run", "name": "Remote zwei", "description": "- 20m Easy", "duration_minutes": 20})
+        config = replace(server.CONFIG, intervals_api_key="fake-intervals-key")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server, "sync_local_workout_library_entry",
+            side_effect=[{"id": first["id"], "external_id": "remote-1"}, server.AppError(502, "provider unavailable")],
+        ) as sync_entry:
+            preview = server.selected_library_sync_preview({"entries": [
+                {"library_workout_id": first["id"]}, {"library_workout_id": second["id"]},
+            ]})
+            self.assertEqual(preview["target_system"], "intervals")
+            result = server._sync_selected_workout_library(preview["payload"])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(result["results"][0]["status"], "synced")
+        self.assertEqual(result["results"][1]["status"], "error")
+        self.assertEqual(result["failed_object_ids"], [second["id"]])
+        self.assertEqual([call.args[0] for call in sync_entry.call_args_list], [first["id"], second["id"]])
+
+    def test_library_bulk_selection_is_bounded_and_remote_conflicts_are_skipped(self):
+        entries = [server.create_local_workout_library_entry({"sport": "Ride", "name": f"Bulk {index}", "description": "- 10m Z2", "duration_minutes": 10}) for index in range(2)]
+        with self.assertRaises(server.AppError) as too_many:
+            server.library_bulk_preview({"action": "mark", "entries": [{"library_workout_id": item["id"]} for item in entries] * 51})
+        self.assertEqual(too_many.exception.status, 400)
+        preview = server.selected_library_sync_preview({"entries": [{"library_workout_id": entries[0]["id"]}]})
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute("SELECT payload FROM workout_library WHERE local_id=?", (entries[0]["id"],)).fetchone()
+            changed = json.loads(row["payload"])
+            changed["name"] = "Parallel geändert"
+            db.execute("UPDATE workout_library SET payload=? WHERE local_id=?", (json.dumps(changed), entries[0]["id"]))
+        config = replace(server.CONFIG, intervals_api_key="fake-intervals-key")
+        with patch.object(server, "CONFIG", config), patch.object(server, "sync_local_workout_library_entry") as sync_entry:
+            result = server._sync_selected_workout_library(preview["payload"])
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["results"][0]["status"], "conflict")
+        self.assertFalse(sync_entry.called)
+
+    def test_bulk_action_preview_requires_exact_objects_and_token(self):
+        entry = server.create_local_workout_library_entry({"sport": "Ride", "name": "Token test", "description": "- 30m Z2", "duration_minutes": 30})
+        preview = server.library_bulk_preview({"action": "archive", "entries": [{"library_workout_id": entry["id"]}]})
+        action = server.create_coach_action_preview({
+            "action_type": "bulk_update_workout_library", "target_system": "local",
+            "object_ids": preview["object_ids"], "diff": preview["entries"], "payload": preview["payload"],
+        }, "csrf-hash")
+        confirmed = server.confirm_coach_action_preview(action["proposed_action"]["id"], "csrf-hash")
+        result = server.execute_coach_action(confirmed["action_token"], "csrf-hash", confirmed["proposed_action"]["payload_hash"])
+        self.assertEqual(result["updated"], 1)
+        with self.assertRaises(server.AppError) as reused:
+            server.execute_coach_action(confirmed["action_token"], "csrf-hash", confirmed["proposed_action"]["payload_hash"])
+        self.assertEqual(reused.exception.status, 409)
+
+    def test_bulk_library_ui_has_scoped_selection_and_versioned_assets(self):
+        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        app = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+        state = (server.PUBLIC_DIR / "state.js").read_text(encoding="utf-8")
+        worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
+        self.assertIn('id="librarySelectVisibleButton"', index)
+        self.assertIn('id="librarySyncSelectedButton"', index)
+        self.assertIn("function runLibraryBulkRemoteSync()", app)
+        self.assertIn("expected_payload_hash", (server.PUBLIC_DIR.parent / "server.py").read_text(encoding="utf-8"))
+        self.assertIn("librarySelection", state)
+        self.assertIn("intervals-coach-v136", worker)
+        self.assertIn("/app.js?v=136", index)
 
 if __name__ == "__main__":
     unittest.main()

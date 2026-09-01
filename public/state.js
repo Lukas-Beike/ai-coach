@@ -37,6 +37,8 @@ const state = {
   activityTracked: false,
   remoteDeleteFailure: null,
   libraryFilter: "active",
+  librarySelection: new Set(),
+  libraryBulkBusy: false,
   syncPoll: {
     controller: null,
     timer: null,
