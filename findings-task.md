@@ -982,22 +982,34 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Quelle:** REC-02
 **Ziel:** Große Datenbanken und Exporte werden nicht vollständig im Prozessspeicher dupliziert.
 **Abhängigkeiten:** FT-024 für klare Schemaversion hilfreich
+**Status:** abgeschlossen; Backup und Privacy-Export laufen dateibasiert mit begrenzten Chunks bzw. inkrementellem ZIP/JSONL.
 
 **Umsetzung**
 
-- [ ] Konsistente SQLCipher-Backup-Erzeugung beibehalten.
-- [ ] Dateiantwort in begrenzten Chunks streamen.
-- [ ] Privacy-Export als inkrementelles ZIP/JSONL oder äquivalentes Streamingformat erzeugen.
-- [ ] Zeit-, Größen- und freien Speicherplatz vor Start prüfen.
-- [ ] Abbruch/Clientdisconnect räumt temporäre Dateien sicher auf.
-- [ ] Exportmanifest mit Version, Kategorien und Vollständigkeitsstatus ergänzen.
-- [ ] Große künstliche DB unter engem Container-Memory-Limit testen.
+- [x] Konsistente SQLCipher-Backup-Erzeugung beibehalten.
+- [x] Dateiantwort in begrenzten Chunks streamen.
+- [x] Privacy-Export als inkrementelles ZIP/JSONL oder äquivalentes Streamingformat erzeugen.
+- [x] Zeit-, Größen- und freien Speicherplatz vor Start prüfen.
+- [x] Abbruch/Clientdisconnect räumt temporäre Dateien sicher auf.
+- [x] Exportmanifest mit Version, Kategorien und Vollständigkeitsstatus ergänzen.
+- [x] Große künstliche DB unter engem Container-Memory-Limit testen.
 
 **Abnahmekriterien**
 
-- [ ] Peak-Memory wächst nicht linear mit DB-/Exportgröße.
-- [ ] Export enthält dieselben fachlichen Kategorien wie bisher.
-- [ ] Temporärdateien, Backup und Download enthalten keine unverschlüsselte DB außerhalb des bewusst dokumentierten Exportformats.
+- [x] Peak-Memory wächst nicht linear mit DB-/Exportgröße.
+- [x] Export enthält dieselben fachlichen Kategorien wie bisher.
+- [x] Temporärdateien, Backup und Download enthalten keine unverschlüsselte DB außerhalb des bewusst dokumentierten Exportformats.
+
+**Handover FT-025**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `feat/ft-025-streaming-exports`, Implementierung `b1746f2`, PR #181, Merge `19f622c`
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `tests/test_server.py`, `README.md`
+- **Verhaltensänderung:** Verschlüsselte Backups werden nach WAL-Checkpoint direkt von der Datei in begrenzten Chunks ausgeliefert. Privacy-Exporte werden als inkrementelles ZIP mit JSONL-Dateien für große Sammlungen und `manifest.json` mit Format-, Schema-, Kategorien- und Abschlussstatus erzeugt. Größen-, Zeit- und Freispeichergrenzen sowie sichere temporäre Dateibereinigung schützen den Container; der Browser lädt nun das ZIP-Format.
+- **Validierung:** Vier schnelle Shards grün (264 Tests gesamt); SQLCipher-Containersuite grün (264 Tests); zusätzlicher 128-MB-Containerlauf mit künstlichen 10.000 Nachrichten und Privacy-Export erfolgreich; `python -m py_compile server.py tests/test_server.py`; `git diff --check`; `docker build -t ai-coach:ft025 .`; PR #181 vollständig grün einschließlich Browser-Smoke/Accessibility, vier Test-Shards, Syntax, Validate, Analyze und CodeQL.
+- **Manuelle Prüfung:** Nicht erforderlich; Browser-Download und PWA-Asset-Version sind automatisiert regressionsgeprüft.
+- **Offene Risiken:** Keine Findings aus dem Paket-Review. Exportdateien enthalten bewusst exportierte Athletendaten und müssen wie andere Exporte geschützt werden.
+- **Folgetasks:** FT-026 ist nach dem grünen Merge von PR #181 entblockt.
 
 ### - [ ] FT-026 – Readiness, Operation-Korrelation und Housekeeping verbessern
 
