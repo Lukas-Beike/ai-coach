@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=122" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=122">
+  <link rel="icon" href="/icon.svg?v=123" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=123">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -77,14 +77,22 @@
         <div class="section-heading">
           <div><span class="eyebrow">KALENDER</span><h2>Plan <span id="planningDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2><span id="planningSummary" class="tab-sync-detail"></span></div>
         </div>
+        <nav class="plan-segment-nav" aria-label="Planbereiche">
+          <a href="#planned/calendar" data-plan-segment="calendar" aria-current="page">Kalender</a>
+          <a href="#planned/library" data-plan-segment="library">Bibliothek</a>
+          <a href="#planned/goals" data-plan-segment="goals">Ziele &amp; Pläne</a>
+        </nav>
+        <section id="planCalendarSegment" class="plan-segment" data-plan-segment-panel="calendar" aria-labelledby="planCalendarTitle">
+          <div class="plan-segment-heading"><div><span class="eyebrow">LOKALE PLANUNG</span><h3 id="planCalendarTitle">Kalender</h3></div><span class="segment-status">Lokal gespeichert · Remote-Daten nur als Quelle</span></div>
         <div id="remoteDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
         <div id="parallelCyclingWarning" class="parallel-warning" hidden></div>
         <div id="adaptivePlanningNotice" class="adaptive-planning-notice" hidden role="status">
           <div><strong>Adaptive Anpassung nötig</strong><small id="adaptivePlanningCaption">Die aktualisierte Planung wartet auf deine Prüfung.</small></div>
-          <button type="button" id="adaptivePlanningButton" class="adaptive-planning-button">Planung aktualisieren</button>
+          <button type="button" id="adaptivePlanningButton" class="adaptive-planning-button">Vorschau prüfen</button>
         </div>
         <div id="weatherNotice" class="weather-notice" hidden></div>
         <div id="plannedCalendar" class="planned-calendar"></div>
+        </section>
         <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle">
           <div class="checkin-dialog-content">
             <div class="settings-section-heading">
@@ -110,27 +118,38 @@
             <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
           </div>
         </dialog>
+        <section id="planGoalsSegment" class="plan-segment" data-plan-segment-panel="goals" aria-labelledby="planGoalsTitle" hidden>
+          <div class="plan-segment-heading"><div><span class="eyebrow">ZIELE UND MEHRWOCHENPLÄNE</span><h3 id="planGoalsTitle">Ziele &amp; Pläne</h3></div><span class="segment-status">Lokal gespeichert · Wettkampf-Push separat</span></div>
         <details id="plannedCompetitionsSection" class="settings-section collapsible-section">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Zielwettkämpfe</span><span id="plannedCompetitionsSummary" class="collapsible-summary-meta">Noch keine Wettkämpfe</span></summary>
-          <p>Trage Wettkämpfe manuell mit den Intervals.icu-Feldern ein. Änderungen werden mit Intervals.icu bidirektional synchronisiert.</p>
+          <p>Trage Wettkämpfe lokal ein. Der separate Remote-Push zu Intervals.icu erfordert eine Vorschau und Bestätigung.</p>
           <div id="competitionList" class="competition-list"></div>
           <div class="settings-inline-action competition-sync-actions">
-            <div><strong>Intervals.icu-Zielwettkämpfe</strong><span id="competitionSyncDetail">Noch nicht synchronisiert</span></div>
-            <button type="button" id="competitionSyncButton" class="secondary-button">Mit Intervals.icu synchronisieren</button>
+            <div><strong>Remote-Ziel: Intervals.icu</strong><span id="competitionSyncDetail">Status: noch nicht synchronisiert</span></div>
+            <button type="button" id="competitionSyncButton" class="secondary-button">Vorschau für Wettkampf-Push</button>
           </div>
           <button type="button" id="addCompetitionButton" class="secondary-button">Wettkampf hinzufügen</button>
           <button type="submit" form="profileForm">Wettkämpfe speichern</button>
         </details>
+          <div id="trainingPlans" class="training-plans"></div>
+        </section>
+        <section id="planLibrarySegment" class="plan-segment" data-plan-segment-panel="library" aria-labelledby="planLibraryTitle" hidden>
+          <div class="plan-segment-heading"><div><span class="eyebrow">LOKALE VORLAGEN</span><h3 id="planLibraryTitle">Bibliothek <span id="libraryDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3></div><span class="segment-status">Lokal speichern · Remote-Sync nur mit Vorschau</span></div>
+        <div class="local-remote-card">
+          <div><strong>Remote-Aktion: Intervals.icu</strong><span class="tab-sync-detail">Vorschau erforderlich · Status wird nach dem Lauf aktualisiert</span></div>
+          <small>Lokale Vorlagen und lokale Planung bleiben ohne Remote-Schreibvorgang. Nur die Bibliotheksaktion darunter kann nach Vorschau und Bestätigung synchronisieren.</small>
+        </div>
         <div class="library-heading">
-          <div><h3 class="subsection-title">Trainingsbibliothek <span id="libraryDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
-          <button id="libraryLoadButton" class="secondary-button" type="button">Bibliothek synchronisieren</button>
+          <div><h4 class="subsection-title">Lokale Vorlagen</h4><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
+          <button id="libraryLoadButton" class="secondary-button" type="button">Vorschau für Remote-Sync öffnen</button>
         </div>
         <div id="library" class="library"></div>
         <div class="library-toolbar">
           <label>Anzeige<select id="libraryFilter"><option value="active">Aktive Einheiten</option><option value="templates">Vorlagen</option><option value="planned">Geplante lokale Einheiten</option><option value="archived">Archivierte Einheiten</option><option value="all">Alle Einheiten</option></select></label>
           <span id="librarySummary" class="tab-sync-detail"></span>
         </div>
-        <div id="trainingPlans" class="training-plans"></div>
+        <div id="libraryPagination" class="library-pagination"></div>
+        </section>
       </section>
 
       <section id="dataPanel" class="panel" aria-label="Leistungsdaten">
@@ -318,6 +337,6 @@
       </div>
     </div>
   </dialog>
-  <script src="/app.js?v=122" defer></script>
+  <script src="/app.js?v=123" defer></script>
 </body>
 </html>

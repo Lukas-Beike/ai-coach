@@ -753,8 +753,8 @@ class CoachTests(unittest.TestCase):
         service_worker = (Path(__file__).resolve().parents[1] / "public" / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
-        self.assertIn('/app.js?v=122', index)
-        self.assertIn('intervals-coach-v122', service_worker)
+        self.assertIn('/app.js?v=123', index)
+        self.assertIn('intervals-coach-v123', service_worker)
 
     def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -766,6 +766,23 @@ class CoachTests(unittest.TestCase):
         self.assertIn("panel.focus({ preventScroll: true })", app)
         self.assertIn('today: "todayPanel"', app)
         self.assertIn('function renderToday(data)', app)
+
+    def test_plan_segments_are_deep_linked_and_library_is_lazy_paginated(self):
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('"planned/library": "workoutsPanel"', app)
+        self.assertIn('"planned/goals": "workoutsPanel"', app)
+        self.assertIn('function ensureRouteData(route = state.route)', app)
+        self.assertIn('api("/api/library?limit=100")', app)
+        self.assertIn('function loadMoreLibrary()', app)
+        self.assertIn('id="planCalendarSegment"', index)
+        self.assertIn('id="planLibrarySegment"', index)
+        self.assertIn('id="planGoalsSegment"', index)
+        self.assertIn('href="#planned/calendar"', index)
+        self.assertIn('href="#planned/library"', index)
+        self.assertIn('href="#planned/goals"', index)
+        self.assertEqual(index.count('id="libraryLoadButton"'), 1)
+        self.assertEqual(index.count('id="libraryDirtyIndicator"'), 1)
 
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -4023,8 +4040,8 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/app.js?v=122"', source)
-        self.assertIn('"/icon.svg?v=122"', source)
+        self.assertIn('"/app.js?v=123"', source)
+        self.assertIn('"/icon.svg?v=123"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
