@@ -1254,6 +1254,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 75/75/74/74 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-calendar-provider` und SQLCipher-Containerlauf mit 298 Tests erfolgreich.
 - [ ] Weitere Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Sync-Zeitfenster**
+
+- [x] Zustandsfreie, begrenzte und lückenlos zusammenhängende Datumsfenster als `split_date_windows` in `backend/sync/windows.py` abgegrenzt.
+- [x] Bestehender `sync_date_windows`-Wrapper, Frühestdatum-/All-time-/Chunk-Semantik und Provider-Aufrufer unverändert erhalten; keine DB-, Provider- oder Lock-Zugriffe im neuen Modul.
+- [x] Regressionstest für zusammenhängende, begrenzte Fenster und ungültige Chunk-Größe ergänzt.
+- [x] Review ohne Findings; PR #244 per Auto-Squash gemergt (`5be32d4`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 75/75/75/74 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-sync-windows` und SQLCipher-Containerlauf mit 299 Tests erfolgreich.
+- [ ] Weitere Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
