@@ -43,6 +43,7 @@ from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, 
 from backend.db import schema_version as database_schema_version
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 from backend.providers.garmin import collect_garmin_data
+from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 
 try:
     from garminconnect import Garmin
@@ -3529,61 +3530,6 @@ def fetch_calendar_feed(url: str) -> bytes:
     raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.")
 
 
-def parse_ics_value(value: str) -> str:
-    return (
-        value.replace("\\N", "\n").replace("\\n", "\n")
-        .replace("\\,", ",").replace("\\;", ";").replace("\\\\", "\\")
-        .strip()
-    )
-
-
-def parse_ics_date(value: str) -> str | None:
-    raw = value.strip()
-    match = re.search(r"(\d{8})", raw)
-    if not match:
-        return None
-    try:
-        return date.fromisoformat(f"{match.group(1)[:4]}-{match.group(1)[4:6]}-{match.group(1)[6:8]}").isoformat()
-    except ValueError:
-        return None
-
-
-def _unfold_ical(payload: bytes) -> list[str]:
-    if not isinstance(payload, (bytes, bytearray)) or len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
-        raise AppError(413, "Der Kalender-Feed ist zu groß.")
-    try:
-        text = payload.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise AppError(400, "Der Kalender-Feed ist keine gültige UTF-8-iCalendar-Datei.") from exc
-    unfolded: list[str] = []
-    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        if len(line) > 20000:
-            raise AppError(400, "Der Kalender-Feed enthält eine zu lange Zeile.")
-        if line.startswith((" ", "\t")) and unfolded:
-            unfolded[-1] += line[1:]
-        else:
-            unfolded.append(line)
-    nonempty = [line for line in unfolded if line]
-    if not nonempty or nonempty[0].upper() != "BEGIN:VCALENDAR" or nonempty[-1].upper() != "END:VCALENDAR":
-        raise AppError(400, "Der Kalender-Feed muss ein vollständiges VCALENDAR-Dokument sein.")
-    stack: list[str] = []
-    for line in nonempty:
-        upper = line.upper()
-        if upper.startswith("BEGIN:"):
-            stack.append(upper[6:])
-            continue
-        if upper.startswith("END:"):
-            component = upper[4:]
-            if not stack or stack.pop() != component:
-                raise AppError(400, "Der Kalender-Feed enthält ungültige Komponenten.")
-            continue
-        if ":" not in line:
-            raise AppError(400, "Der Kalender-Feed enthält eine ungültige Eigenschaft.")
-    if stack:
-        raise AppError(400, "Der Kalender-Feed enthält nicht geschlossene Komponenten.")
-    return unfolded
-
-
 def _ical_temporal_value(raw: str, parameters: dict[str, str]) -> tuple[datetime, bool] | None:
     value = raw.strip()
     is_date = parameters.get("VALUE", "").upper() == "DATE" or bool(re.fullmatch(r"\d{8}", value))
@@ -3612,15 +3558,6 @@ def _ical_temporal_value(raw: str, parameters: dict[str, str]) -> tuple[datetime
         return parsed.astimezone(local_zone), False
     except (TypeError, ValueError):
         return None
-
-
-def _ical_duration(raw: str) -> timedelta | None:
-    match = re.fullmatch(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?", raw.strip().upper())
-    if not match:
-        return None
-    days, hours, minutes, seconds = (int(value or 0) for value in match.groups())
-    duration = timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
-    return duration if duration.total_seconds() > 0 else None
 
 
 ICAL_NO_TRAINING_MARKER = re.compile(r"(?<![A-Z0-9_])\[NO_TRAINING\](?![A-Z0-9_])", re.IGNORECASE)
@@ -3776,7 +3713,7 @@ def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, win
         raise AppError(400, "Das Kalenderfenster ist ungültig oder zu groß.")
     events_by_key: dict[tuple[str, str], dict[str, Any]] = {}
     current: dict[str, Any] | None = None
-    for line in _unfold_ical(payload):
+    for line in unfold_ical(payload, max_bytes=MAX_EXTERNAL_CALENDAR_BYTES, error=lambda status, message: AppError(status, message)):
         upper = line.upper()
         if upper == "BEGIN:VEVENT":
             current = {}
@@ -3812,7 +3749,7 @@ def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, win
                 current["all_day"] = temporal[1] if key == "DTSTART" else current.get("all_day", temporal[1])
                 current["start" if key == "DTSTART" else "end"] = temporal[0]
         elif key == "DURATION":
-            duration = _ical_duration(raw_value)
+            duration = ical_duration(raw_value)
             if duration:
                 current["duration"] = duration
         elif key == "DESCRIPTION":
