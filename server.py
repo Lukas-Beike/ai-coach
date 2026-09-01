@@ -46,6 +46,7 @@ from backend.providers.garmin import collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 from backend.sync.windows import split_date_windows
 from backend.sync.status import persist_sync_operation_state, project_sync_status
+from backend.sync.orchestration import run_read_sync_pipeline
 
 try:
     from garminconnect import Garmin
@@ -12347,40 +12348,37 @@ class CoachHTTPServer(ThreadingHTTPServer):
 
 
 def safe_sync(reason: str, activity_days: int | None = None, operation_id: str | None = None) -> None:
-    with observed_operation("sync", reason, operation_id) as scope:
-        current_operation_id = scope["operation_id"]
-        try:
-            sync_intervals(reason, activity_days=activity_days, operation_id=current_operation_id)
-        except Exception as exc:
-            LOGGER.error(
-                "Background synchronization failed",
-                extra={
-                    "event": "background_sync_failed",
-                    "context": {
-                        "operation_id": current_operation_id,
-                        "trigger": scope["trigger"],
-                        "provider": "intervals",
-                        "phase": "sync",
-                        "error_code": operation_error_code(exc),
-                    },
-                },
-            )
-        try:
-            sync_competitions(reason, push_local=False, operation_id=current_operation_id)
-        except Exception as exc:
-            LOGGER.error(
-                "Background competition synchronization failed",
-                extra={
-                    "event": "background_competition_sync_failed",
-                    "context": {
-                        "operation_id": current_operation_id,
-                        "trigger": scope["trigger"],
-                        "provider": "intervals",
-                        "phase": "competitions",
-                        "error_code": operation_error_code(exc),
-                    },
-                },
-            )
+    run_read_sync_pipeline(
+        reason,
+        activity_days,
+        operation_id,
+        observe=observed_operation,
+        sync_intervals=sync_intervals,
+        sync_competitions=sync_competitions,
+        record_failure=_log_background_sync_failure,
+    )
+
+
+def _log_background_sync_failure(
+    scope: dict[str, Any],
+    provider: str,
+    phase: str,
+    error: BaseException,
+) -> None:
+    competition = phase == "competitions"
+    LOGGER.error(
+        "Background competition synchronization failed" if competition else "Background synchronization failed",
+        extra={
+            "event": "background_competition_sync_failed" if competition else "background_sync_failed",
+            "context": {
+                "operation_id": scope["operation_id"],
+                "trigger": scope["trigger"],
+                "provider": provider,
+                "phase": phase,
+                "error_code": operation_error_code(error),
+            },
+        },
+    )
 
 
 def daily_sync_loop() -> None:
