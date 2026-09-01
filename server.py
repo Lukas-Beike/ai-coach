@@ -3231,12 +3231,18 @@ def save_profile(profile: dict[str, Any]) -> dict[str, str]:
             previous = dict(DEFAULT_PROFILE)
         PROFILE_REPOSITORY.set(db, json.dumps(normalized, ensure_ascii=False))
         _record_change(db, "profile", "profile", "update", previous, normalized)
+    _invalidate_weather_cache_if_location_changed(previous, normalized)
+    return normalized
+
+
+def _invalidate_weather_cache_if_location_changed(
+    previous: dict[str, Any], normalized: dict[str, Any], db: sqlite3.Connection | None = None,
+) -> None:
     if previous.get("weather_location", "") != normalized.get("weather_location", ""):
         # A changed holiday/training location must never keep showing the
         # forecast for the previous place until the normal cache expires.
-        set_kv(WEATHER_CACHE_KEY, "")
-        set_kv(WEATHER_FAILURE_KEY, "")
-    return normalized
+        set_kv(WEATHER_CACHE_KEY, "", db)
+        set_kv(WEATHER_FAILURE_KEY, "", db)
 
 
 CHECKIN_TEXT_LIMITS = {
@@ -4201,6 +4207,7 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
         except (TypeError, json.JSONDecodeError):
             previous_profile = dict(DEFAULT_PROFILE)
         set_kv("profile", json.dumps(normalized_profile, ensure_ascii=False), db)
+        _invalidate_weather_cache_if_location_changed(previous_profile, normalized_profile, db)
         _record_change(db, "profile", "profile", "update", previous_profile, normalized_profile)
         for competition in normalized_competitions:
             db.execute(
@@ -10909,6 +10916,13 @@ def public_feedback_state() -> dict[str, Any]:
     return {"checkins": list_checkins(30), "local_feedback": local_feedback_context(), "activity_feedback": activity_feedback_context()}
 
 
+def public_weather_state(local_only: bool = False) -> dict[str, Any]:
+    """Return the configured forecast without loading the complete plan state."""
+    result = weather_state(refresh=not local_only)
+    result.pop("_refreshed", None)
+    return result
+
+
 def public_state(local_only: bool = False) -> dict[str, Any]:
     # Build the local part under one connection. SQLCipher setup is relatively
     # expensive, and the composite state otherwise opened the encrypted DB for
@@ -11881,6 +11895,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 require_auth(self)
                 query = parse_qs(urlparse(self.path).query)
                 self.send_json(200, public_plan_state(local_only=query.get("local", ["0"])[0] == "1"))
+            elif path == "/api/weather":
+                require_auth(self)
+                query = parse_qs(urlparse(self.path).query)
+                self.send_json(200, public_weather_state(local_only=query.get("local", ["0"])[0] == "1"))
             elif path == "/api/library":
                 require_auth(self)
                 query = parse_qs(urlparse(self.path).query)
