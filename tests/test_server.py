@@ -3243,6 +3243,25 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.sync_period("garmin"), -1)
         self.assertGreater(len(server.sync_date_windows(-1, date(2026, 8, 29))), 1)
 
+    def test_sync_window_helper_is_bounded_and_contiguous_without_app_globals(self):
+        from backend.sync.windows import split_date_windows
+
+        windows = split_date_windows(
+            5,
+            end_date=date(2026, 8, 29),
+            earliest_date=date(2020, 1, 1),
+            chunk_days=2,
+            all_days=-1,
+        )
+
+        self.assertEqual(windows, [
+            (date(2026, 8, 25), date(2026, 8, 26)),
+            (date(2026, 8, 27), date(2026, 8, 28)),
+            (date(2026, 8, 29), date(2026, 8, 29)),
+        ])
+        with self.assertRaises(ValueError):
+            split_date_windows(1, end_date=date(2026, 8, 29), earliest_date=date(2020, 1, 1), chunk_days=0, all_days=-1)
+
     def test_sync_intervals_uses_saved_period_when_not_explicitly_given(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
         config = replace(server.CONFIG, intervals_api_key="test-key")

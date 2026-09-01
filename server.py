@@ -44,6 +44,7 @@ from backend.db import schema_version as database_schema_version
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 from backend.providers.garmin import collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
+from backend.sync.windows import split_date_windows
 
 try:
     from garminconnect import Garmin
@@ -2439,15 +2440,13 @@ def set_sync_period(source: str, value: Any) -> int:
 
 def sync_date_windows(days: int, end_date: date | None = None) -> list[tuple[date, date]]:
     """Split long/all-time syncs into API-safe date windows."""
-    newest = end_date or local_now().date()
-    oldest = SYNC_EARLIEST_DATE if days == ALL_SYNC_DAYS else newest - timedelta(days=max(1, days) - 1)
-    windows: list[tuple[date, date]] = []
-    cursor = oldest
-    while cursor <= newest:
-        window_end = min(newest, cursor + timedelta(days=SYNC_CHUNK_DAYS - 1))
-        windows.append((cursor, window_end))
-        cursor = window_end + timedelta(days=1)
-    return windows
+    return split_date_windows(
+        days,
+        end_date=end_date or local_now().date(),
+        earliest_date=SYNC_EARLIEST_DATE,
+        chunk_days=SYNC_CHUNK_DAYS,
+        all_days=ALL_SYNC_DAYS,
+    )
 
 
 def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
