@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=125" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=125">
+  <link rel="icon" href="/icon.svg?v=126" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=126">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -183,6 +183,11 @@
             <label>Typischer Wochenumfang<input name="typical_weekly_volume" placeholder="Zum Beispiel: 8–10 Stunden, 5 Trainingstage"></label>
             <label>Langfristige Ziele<textarea name="goals" rows="4" placeholder="Saisonziele und Wettkampfziele…"></textarea></label>
             <label>Verfügbarkeit pro Woche<textarea name="availability" rows="3" placeholder="Tage, Zeiten, bevorzugter Ruhetag…"></textarea></label>
+            <fieldset class="availability-editor">
+              <legend>Strukturierte Wochenverfügbarkeit</legend>
+              <p>Optional: bestätigte Zeitfenster für die Planung. Der bisherige Freitext bleibt erhalten; nur diese gespeicherten Fenster steuern konkrete Zeit- und Wettervorschläge.</p>
+              <div id="weeklyAvailabilityEditor"></div>
+            </fieldset>
             <label>Rahmenbedingungen<textarea name="constraints" rows="3" placeholder="Verletzungen, Reisen, feste Grenzen…"></textarea></label>
             <label>Ausrüstung<textarea name="equipment" rows="2" placeholder="Rad, Smarttrainer, Gym, Powermeter…"></textarea></label>
             <label>Trainingspräferenzen<textarea name="training_preferences" rows="3" placeholder="Drinnen/draußen, bevorzugte Einheiten, Ruhetage…"></textarea></label>
@@ -352,6 +357,6 @@
       </div>
     </div>
   </dialog>
-  <script src="/app.js?v=125" defer></script>
+  <script src="/app.js?v=126" defer></script>
 </body>
 </html>

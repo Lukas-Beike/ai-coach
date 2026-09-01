@@ -2591,12 +2591,82 @@ function renderProfile(profile) {
     }
     field.value = value || "";
   }
+  renderWeeklyAvailability(profile.availability_schedule);
   if (form.elements.coaching_style?.value === "Supportive, direct, and evidence-aware") form.elements.coaching_style.value = "Unterstützend, direkt und evidenzbasiert";
   const summary = $("#profileSummary");
   if (summary) {
     const values = [profile.name, profile.sports, profile.typical_weekly_volume].filter(Boolean);
     summary.textContent = values.length ? values.join(" · ") : "Noch nicht ausgefüllt";
   }
+}
+
+const WEEKDAY_LABELS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
+
+function availabilityInput(labelText, name, type, value, attributes = {}) {
+  const label = document.createElement("label");
+  label.textContent = labelText;
+  const input = document.createElement(type === "select" ? "select" : "input");
+  input.name = name;
+  input.type = type === "select" ? "text" : type;
+  input.value = value || "";
+  Object.entries(attributes).forEach(([key, attributeValue]) => input.setAttribute(key, attributeValue));
+  label.append(input);
+  return label;
+}
+
+function renderWeeklyAvailability(schedule = []) {
+  const root = $("#weeklyAvailabilityEditor");
+  if (!root) return;
+  const entries = Array.isArray(schedule) ? schedule : [];
+  root.className = "weekly-availability";
+  root.replaceChildren();
+  WEEKDAY_LABELS.forEach((dayLabel, weekday) => {
+    const entry = entries.find((item) => Number(item?.weekday) === weekday) || {};
+    const periods = entry.periods || {};
+    const day = document.createElement("div");
+    day.className = "availability-day";
+    day.dataset.availabilityDay = String(weekday);
+    const heading = document.createElement("strong");
+    heading.textContent = dayLabel;
+    const fields = document.createElement("div");
+    fields.className = "availability-day-fields";
+    for (const [period, label] of [["early", "Früh"], ["late", "Spät"]]) {
+      const window = periods[period] || {};
+      fields.append(
+        availabilityInput(`${label} von`, `availability-${weekday}-${period}-start`, "time", window.start),
+        availabilityInput(`${label} bis`, `availability-${weekday}-${period}-end`, "time", window.end)
+      );
+    }
+    fields.append(availabilityInput("Max. Minuten", `availability-${weekday}-max`, "number", entry.max_minutes, { min: "0", max: "1440", step: "1", placeholder: "Optional" }));
+    const environment = availabilityInput("Umgebung", `availability-${weekday}-environment`, "select", entry.environment || "either");
+    environment.querySelector("select").replaceChildren(
+      new Option("Drinnen oder draußen", "either"),
+      new Option("Nur drinnen", "indoor"),
+      new Option("Nur draußen", "outdoor")
+    );
+    environment.querySelector("select").value = entry.environment || "either";
+    fields.append(environment);
+    fields.append(availabilityInput("Notiz", `availability-${weekday}-note`, "text", entry.note, { maxlength: "500", placeholder: "Optional" }));
+    day.append(heading, fields);
+    root.append(day);
+  });
+}
+
+function collectWeeklyAvailability() {
+  return [...document.querySelectorAll("[data-availability-day]")].map((day) => {
+    const weekday = Number(day.dataset.availabilityDay);
+    const value = (name) => day.querySelector(`[name="availability-${weekday}-${name}"]`)?.value.trim() || "";
+    const periods = {};
+    for (const period of ["early", "late"]) {
+      const start = value(`${period}-start`);
+      const end = value(`${period}-end`);
+      if (start || end) periods[period] = { start, end };
+    }
+    const max = value("max");
+    const note = value("note");
+    if (!Object.keys(periods).length && !max && !note) return null;
+    return { weekday, periods, max_minutes: max, environment: value("environment") || "either", note };
+  }).filter(Boolean);
 }
 
 function populateCheckin(checkin, timeZone) {
@@ -3820,6 +3890,7 @@ async function saveProfile(event) {
     ...(state.data?.profile || {}),
     ...Object.fromEntries(formData),
     sports: formData.getAll("sports").map((value) => String(value).trim()).filter(Boolean).join(", "),
+    availability_schedule: collectWeeklyAvailability(),
   };
   const payload = {
     profile,

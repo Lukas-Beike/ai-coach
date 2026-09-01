@@ -513,6 +513,31 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(profile["timezone"], "UTC")
         self.assertEqual(getattr(server.local_now().tzinfo, "key", None), "UTC")
 
+    def test_weekly_availability_is_normalized_and_projected_without_losing_free_text(self):
+        profile = server.normalize_profile({
+            "availability": "Dienstag abends möglich",
+            "availability_schedule": [{
+                "weekday": 1,
+                "periods": {"late": {"start": "17:30", "end": "20:00"}},
+                "environment": "outdoor",
+                "max_minutes": "90",
+                "note": "Nur locker nach Familienzeit",
+            }],
+        }, validate_timezone=True)
+        self.assertEqual(profile["availability"], "Dienstag abends möglich")
+        self.assertEqual(profile["availability_schedule"][0]["periods"]["late"]["start"], "17:30")
+        self.assertEqual(profile["availability_schedule"][0]["max_minutes"], 90)
+        self.assertEqual(server.compact_availability_schedule(profile["availability_schedule"])[0]["day"], "Dienstag")
+        server.save_profile({
+            "availability": profile["availability"],
+            "availability_schedule": profile["availability_schedule"],
+        })
+        context = server.structured_athlete_context({"recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
+        self.assertNotIn("availability_schedule", context["durable_profile"])
+        self.assertEqual(context["weekly_availability"][0]["max_minutes"], 90)
+        with self.assertRaises(server.AppError):
+            server.normalize_profile({"availability_schedule": [{"weekday": 1, "early": {"start": "20:00", "end": "19:00"}}]})
+
     def test_checkin_uses_local_date_and_rejects_future_dates(self):
         fixed_now = datetime(2026, 8, 31, 23, 30)
         with patch.object(server, "local_now", return_value=fixed_now):
@@ -753,8 +778,8 @@ class CoachTests(unittest.TestCase):
         service_worker = (Path(__file__).resolve().parents[1] / "public" / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
-        self.assertIn('/app.js?v=125', index)
-        self.assertIn('intervals-coach-v125', service_worker)
+        self.assertIn('/app.js?v=126', index)
+        self.assertIn('intervals-coach-v126', service_worker)
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
 
@@ -3906,7 +3931,15 @@ class CoachTests(unittest.TestCase):
             {"id": "indoor-1", "name": "Trainer", "type": "VirtualRide", "start_date_local": tomorrow + "T18:00:00", "moving_time": 3600},
             {"id": "ride-2", "name": "Spätere Ausfahrt", "type": "Ride", "start_date_local": day_six + "T09:00:00", "moving_time": 3600},
         ]
-        server.save_profile({"weather_location": "Münster"})
+        server.save_profile({
+            "weather_location": "Münster",
+            "availability_schedule": [{
+                "weekday": date.fromisoformat(tomorrow).weekday(),
+                "late": {"start": "16:00", "end": "20:00"},
+                "environment": "outdoor",
+                "max_minutes": 180,
+            }],
+        })
         with patch.object(server, "http_json", side_effect=[
             {"results": [{"name": "Münster", "country": "Deutschland", "country_code": "DE", "latitude": 51.96, "longitude": 7.63, "timezone": "Europe/Berlin"}]},
             forecast,
@@ -3921,16 +3954,20 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(len(weather["recommendations"]), 1)
         self.assertEqual(weather["recommendations"][0]["event_id"], "ride-1")
         self.assertTrue(weather["recommendations"][0]["suggested_time"].startswith("16:00"))
-        self.assertEqual(weather["recommendations"][0]["availability"], "nach der Arbeit")
+        self.assertEqual(weather["recommendations"][0]["availability"], "spätes Fenster")
         self.assertEqual(weather["days"][0]["icon"], server.WEATHER_ICONS[1])
         enriched = server.add_weather_to_planned(planned, weather)
         self.assertIn("weather_recommendation", enriched[0])
         self.assertNotIn("weather_recommendation", enriched[1])
         self.assertNotIn("weather_recommendation", enriched[2])
 
-    def test_weather_recommendation_respects_weekday_work_and_friday_hours(self):
+    def test_weather_recommendation_uses_confirmed_weekly_availability(self):
         monday = date(2026, 8, 31)
         friday = date(2026, 9, 4)
+        server.save_profile({"availability_schedule": [
+            {"weekday": 0, "early": {"start": "06:00", "end": "10:00"}, "late": {"start": "16:00", "end": "20:00"}, "environment": "either", "max_minutes": 180},
+            {"weekday": 4, "early": {"start": "06:00", "end": "10:00"}, "late": {"start": "14:00", "end": "20:00"}, "environment": "outdoor", "max_minutes": 180},
+        ]})
 
         def forecast_for(target, low_hours):
             times = [f"{target.isoformat()}T{hour:02d}:00" for hour in range(24)]
@@ -3953,15 +3990,15 @@ class CoachTests(unittest.TestCase):
             {"id": "monday", "type": "Ride", "start_date_local": f"{monday}T08:00:00", "moving_time": 7200},
             forecast_for(monday, {8, 9, 16, 17}),
         )
-        self.assertEqual(monday_result["suggested_time"], "16:00–18:00 Uhr")
-        self.assertEqual(monday_result["availability"], "nach der Arbeit")
+        self.assertEqual(monday_result["suggested_time"], "08:00–10:00 Uhr")
+        self.assertEqual(monday_result["availability"], "frühes Fenster")
 
         friday_result = server._weather_recommendation(
             {"id": "friday", "type": "Run", "start_date_local": f"{friday}T08:00:00", "moving_time": 3600},
-            forecast_for(friday, {8, 14}),
+            forecast_for(friday, {14}),
         )
         self.assertEqual(friday_result["suggested_time"], "14:00–15:00 Uhr")
-        self.assertEqual(friday_result["availability"], "nach der Arbeit")
+        self.assertEqual(friday_result["availability"], "spätes Fenster")
     def test_github_latest_release_is_normalized_and_compared_without_exposing_token(self):
         captured = {}
         current_major, current_minor, current_patch = server.version_tuple(server.APP_VERSION)
@@ -4061,8 +4098,8 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/app.js?v=125"', source)
-        self.assertIn('"/icon.svg?v=125"', source)
+        self.assertIn('"/app.js?v=126"', source)
+        self.assertIn('"/icon.svg?v=126"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
