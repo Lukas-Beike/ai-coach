@@ -1372,7 +1372,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Retry-Backoff bleibt auf transiente Fehler begrenzt; Authentifizierungs- und Konfigurationsfehler erhalten keinen automatischen Retry. Remote-Schreibpfade sind weiterhin keine generischen Provider-Retry-Ziele.
 - **Folgetasks:** FT-032 ist als nächstes Paket vorgesehen.
 
-### - [ ] FT-032 – Sichere Bulk-Aktionen für Bibliothek und Plan bereitstellen
+### - [x] FT-032 – Sichere Bulk-Aktionen für Bibliothek und Plan bereitstellen
 
 **Quelle:** Feature-Gap „Bulk-Aktionen“, UX-01, SYNC-01
 **Ziel:** Mehrere lokale Einträge können effizient ausgewählt und bearbeitet werden, ohne die Zustimmungsgrenzen für Remote-Synchronisation aufzuweichen.
@@ -1380,21 +1380,32 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Zunächst konkrete Bedarfsfälle begrenzen: lokal markieren, verschieben, archivieren sowie bewusst für Sync auswählen.
-- [ ] Mobile-tauglichen Auswahlmodus mit Anzahl, klarer Abbruchaktion und sichtbarem Scope entwerfen.
-- [ ] Bulk-Diff vor jeder Änderung anzeigen; destruktive und remote Aktionen getrennt bestätigen.
-- [ ] Remote-Bulk-Sync an ein einmaliges Token und exakte Objektliste/Payload-Hashes binden.
-- [ ] Teilerfolge pro Objekt darstellen und idempotentes Wiederholen nur für fehlgeschlagene Objekte erlauben.
-- [ ] Selektion bei Filter-, Seiten- und Reloadwechsel bewusst behandeln.
-- [ ] Drag-and-drop nicht voraussetzen; zuerst zugängliche explizite Verschiebeaktionen implementieren.
-- [ ] Tests für große Auswahl, Doppelklick, abgelaufenes Token, Teilfehler und parallele Objektänderung ergänzen.
+- [x] Zunächst konkrete Bedarfsfälle begrenzen: lokal markieren, verschieben, archivieren sowie bewusst für Sync auswählen.
+- [x] Mobile-tauglichen Auswahlmodus mit Anzahl, klarer Abbruchaktion und sichtbarem Scope entwerfen.
+- [x] Bulk-Diff vor jeder Änderung anzeigen; destruktive und remote Aktionen getrennt bestätigen.
+- [x] Remote-Bulk-Sync an ein einmaliges Token und exakte Objektliste/Payload-Hashes binden.
+- [x] Teilerfolge pro Objekt darstellen und idempotentes Wiederholen nur für fehlgeschlagene Objekte erlauben.
+- [x] Selektion bei Filter-, Seiten- und Reloadwechsel bewusst behandeln.
+- [x] Drag-and-drop nicht voraussetzen; zuerst zugängliche explizite Verschiebeaktionen implementieren.
+- [x] Tests für große Auswahl, Doppelklick, abgelaufenes Token, Teilfehler und parallele Objektänderung ergänzen.
 
 **Abnahmekriterien**
 
-- [ ] Bulk-Aktion zeigt vorab Anzahl, Objekte, lokale/remote Wirkung und destruktive Teile.
-- [ ] Nicht ausgewählte oder nach Vorschau veränderte Objekte werden nicht bearbeitet.
-- [ ] Teilfehler führen weder zu stiller Komplettwiederholung noch zu unklarem Zustand.
-- [ ] Kernflow ist mobil und per Tastatur bedienbar.
+- [x] Bulk-Aktion zeigt vorab Anzahl, Objekte, lokale/remote Wirkung und destruktive Teile.
+- [x] Nicht ausgewählte oder nach Vorschau veränderte Objekte werden nicht bearbeitet.
+- [x] Teilfehler führen weder zu stiller Komplettwiederholung noch zu unklarem Zustand.
+- [x] Kernflow ist mobil und per Tastatur bedienbar.
+
+**Handover FT-032**
+
+- **Status:** abgeschlossen.
+- **Branch und Commit:** `feat/ft-032-bulk-actions`, `21a1147`; PR #235 per Auto-Squash gemergt, Merge-Commit `0f1d01888561a6c16e76725360b4ca75c7f7879f`.
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `public/app.js`, `public/index.html`, `public/state.js`, `public/styles.css`, `public/service-worker.js`, `README.md`.
+- **Verhaltensänderung:** Lokale Markierung, Verschiebung und Archivierung laufen ausschließlich lokal. Der mobile Auswahlmodus ist auf die geladene Ansicht begrenzt; Filter- und Reloadwechsel verwerfen die Auswahl. Jede Aktion zeigt Anzahl, konkrete Objekt-IDs und Feld-Diff vor Bestätigung. Der explizit ausgewählte Intervals-Sync verarbeitet nur die exakte Objektliste mit aktuellen Payload-Hashes und einem einmaligen serverseitigen Aktionstoken. Teilergebnisse werden je Objekt angezeigt; für Wiederholungen werden nur Fehler- und Konfliktobjekte erneut ausgewählt. Es gibt keine impliziten Remote-Schreibvorgänge und keine Drag-and-drop-Abhängigkeit.
+- **Validierung:** `python tests/run_tests.py --shard 1 --total 4`, `--shard 2 --total 4`, `--shard 3 --total 4`, `--shard 4 --total 4` (je 74 Tests, grün); `powershell -NoProfile -ExecutionPolicy Bypass -File tests/run_sqlcipher_tests.ps1` (296 Tests, grün); `python -m py_compile server.py tests/test_server.py tests/run_tests.py`; `git diff --check`; `docker build -t ai-coach:ft032-bulk-actions .`.
+- **Review und manuelle Prüfung:** Diff-Review ohne Findings. PR-Checks vollständig grün: vier Test-Shards, SQLCipher-Container, Syntax, SBOM/Vulnerability Scan, CodeQL sowie Browser-Smoke/Accessibility; 15 erfolgreich, 4 übersprungen, 0 fehlerhaft. Lokale JavaScript-Syntaxprüfung war mangels Node.js nicht verfügbar; der Browser-/Accessibility-Lauf lief erfolgreich in CI.
+- **Offene Risiken:** Auswahl ist bewusst auf maximal 100 Einheiten und den aktuell geladenen Scope begrenzt. Verschieben ist auf datierte lokale Coach-/Bibliotheks-/Legacy-Draft-Einheiten beschränkt und blockiert Kalenderkonflikte. Remote-Sync bleibt ein expliziter, objektgenauer Einzelvorgang.
+- **Folgetasks:** FT-027 bleibt als separates, noch offenes Modularisierungspaket bestehen.
 
 ---
 
