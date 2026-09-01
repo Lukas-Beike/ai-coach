@@ -44,3 +44,36 @@ class ChatRepository:
             "SELECT id, role, content, created_at FROM messages ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(row) for row in reversed(rows)]
+
+
+class CheckinRepository:
+    """Persist and retrieve athlete check-ins without owning a connection."""
+
+    def __init__(self, now: Callable[[], str]):
+        self._now = now
+
+    def list(self, db: Any, limit: int = 30) -> list[dict[str, Any]]:
+        rows = db.execute(
+            "SELECT checkin_date, soreness, stress, motivation, session_rpe, day_form, illness, pain, "
+            "available_minutes, availability_notes, notes, created_at, updated_at "
+            "FROM athlete_checkins ORDER BY checkin_date DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def upsert(self, db: Any, checkin: dict[str, Any]) -> None:
+        now = self._now()
+        db.execute(
+            "INSERT INTO athlete_checkins(checkin_date, soreness, stress, motivation, session_rpe, day_form, illness, pain, "
+            "available_minutes, availability_notes, notes, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(checkin_date) DO UPDATE SET soreness=excluded.soreness, stress=excluded.stress, "
+            "motivation=excluded.motivation, session_rpe=excluded.session_rpe, day_form=excluded.day_form, illness=excluded.illness, "
+            "pain=excluded.pain, available_minutes=excluded.available_minutes, "
+            "availability_notes=excluded.availability_notes, notes=excluded.notes, updated_at=excluded.updated_at",
+            (
+                checkin["checkin_date"], checkin["soreness"], checkin["stress"], checkin["motivation"],
+                checkin["session_rpe"], checkin["day_form"], checkin["illness"], checkin["pain"], checkin["available_minutes"],
+                checkin["availability_notes"], checkin["notes"], now, now,
+            ),
+        )

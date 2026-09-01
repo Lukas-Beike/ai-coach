@@ -273,6 +273,23 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(first["content"], "first")
             self.assertEqual([row["id"] for row in repository.list(db)], [first["id"], second["id"]])
 
+    def test_checkin_repository_preserves_upsert_and_date_order_contract(self):
+        repository = server.CheckinRepository(lambda: "2026-09-01T00:00:00+00:00")
+        older = {
+            "checkin_date": "2026-08-30", "soreness": 2, "stress": 3, "motivation": 4, "session_rpe": 5,
+            "day_form": "good", "illness": "", "pain": "", "available_minutes": 60,
+            "availability_notes": "", "notes": "older",
+        }
+        newer = dict(older, checkin_date="2026-08-31", notes="newer")
+        with server.database() as db:
+            repository.upsert(db, older)
+            repository.upsert(db, newer)
+            repository.upsert(db, dict(newer, notes="updated"))
+            rows = repository.list(db)
+        self.assertEqual([row["checkin_date"] for row in rows], ["2026-08-31", "2026-08-30"])
+        self.assertEqual(rows[0]["notes"], "updated")
+        self.assertEqual(rows[0]["created_at"], "2026-09-01T00:00:00+00:00")
+
     def test_profile_only_accepts_known_fields_and_trims(self):
         profile = server.normalize_profile({"name": "  Ada  ", "goals": "Finish strong", "admin": True})
         self.assertEqual(profile["name"], "Ada")

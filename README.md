@@ -304,7 +304,7 @@ safe booleans and status values, never paths, secrets, or athlete data.
 
 Backend modularization starts with dependency-light database primitives in the
 `backend.db` package; its first repository is the explicit
-`KeyValueRepository` and `ChatRepository` interfaces in
+`KeyValueRepository`, `ChatRepository`, and `CheckinRepository` interfaces in
 `backend/db/repositories.py`. The HTTP application remains the compatibility
 boundary while further repositories, providers, synchronization, coaching,
 backup, and HTTP routing are moved in separate cohesive steps. These modules
