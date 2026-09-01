@@ -1318,6 +1318,16 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 77/76/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-http-api` und SQLCipher-Containerlauf mit 305 Tests erfolgreich.
 - [ ] Weitere HTTP-API-, Coach-, Backup-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - HTTP-API-Request-Parsing**
+
+- [x] Begrenztes Body-, JSON- und Audio-Parsing als dependency-light `backend/http_api/requests.py` abgegrenzt.
+- [x] Header, Stream-Reader, Audio-Normalisierung, Fehlerfabrik und Größenlimits über explizite Schnittstellen injiziert; Socket-I/O, Authentifizierung, CSRF und `AppError` bleiben im Handler.
+- [x] Regressionen für gültige Payloads, Content-Type-/JSON-Fehler, Nicht-Objekt-JSON, Größenlimits und unvollständige Audioübertragung ergänzt.
+- [x] README um die HTTP-Request-Grenze sowie die abgeschlossenen Frontend-Formular-/Komponenten-Grenzen ergänzt.
+- [x] Review ohne Findings; PR #263 per Auto-Squash gemergt (`1bb0b1e`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: fokussierter Request-Test, vier schnelle Shards mit 77/77/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-http-api-requests` und SQLCipher-Containerlauf mit 306 Tests erfolgreich.
+- [ ] Weitere HTTP-API-, Coach-, Backup-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Fortschritt FT-027 - Frontend-Formulare**
 
 - [x] Availability- und Competition-Formularhelfer als `public/forms.js` abgegrenzt; kein neues Framework eingeführt.
