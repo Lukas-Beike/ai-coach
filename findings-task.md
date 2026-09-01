@@ -947,23 +947,35 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Quelle:** ARCH-02, ARCH-03
 **Ziel:** Schemaänderungen sind versioniert, transaktional und nachvollziehbar; deklarierte Fremdschlüssel werden auf jeder Verbindung geprüft.
 **Abhängigkeiten:** kritische Verhaltensfixes abgeschlossen
+**Status:** abgeschlossen; Schema-Versionen, Foreign-Key-Enforcement, sichere Orphan-Erkennung und Restore-Kompatibilität sind implementiert und geprüft.
 
 **Umsetzung**
 
-- [ ] Migrationstabelle und monotone Schemaversion definieren.
-- [ ] Bestehende ad-hoc-Migrationen in getestete, idempotente Schritte überführen.
-- [ ] `PRAGMA foreign_keys = ON` unmittelbar nach jeder Verbindung aktivieren.
-- [ ] `foreign_key_check` gegen migrierte Testdaten ausführen.
-- [ ] Delete-/Cascade-/Restrict-Verhalten je Beziehung explizit festlegen.
-- [ ] Verwaiste Alt-Testdaten sicher erkennen und Migrationsstrategie definieren.
-- [ ] Restore-Kompatibilität über Schemaversion statt manuell duplizierter Listen prüfen.
-- [ ] Plaintext-zu-SQLCipher-Migration unverändert sicher und recoverable halten.
+- [x] Migrationstabelle und monotone Schemaversion definieren.
+- [x] Bestehende ad-hoc-Migrationen in getestete, idempotente Schritte überführen.
+- [x] `PRAGMA foreign_keys = ON` unmittelbar nach jeder Verbindung aktivieren.
+- [x] `foreign_key_check` gegen migrierte Testdaten ausführen.
+- [x] Delete-/Cascade-/Restrict-Verhalten je Beziehung explizit festlegen.
+- [x] Verwaiste Alt-Testdaten sicher erkennen und Migrationsstrategie definieren.
+- [x] Restore-Kompatibilität über Schemaversion statt manuell duplizierter Listen prüfen.
+- [x] Plaintext-zu-SQLCipher-Migration unverändert sicher und recoverable halten.
 
 **Abnahmekriterien**
 
-- [ ] Frische DB und jede unterstützte Vorversion migrieren deterministisch zum selben Schema.
-- [ ] Fremdschlüsselverletzungen werden in allen Verbindungen abgewiesen.
-- [ ] Fehlgeschlagene Migration lässt eine recoverable Ausgangsdatei zurück.
+- [x] Frische DB und jede unterstützte Vorversion migrieren deterministisch zum selben Schema.
+- [x] Fremdschlüsselverletzungen werden in allen Verbindungen abgewiesen.
+- [x] Fehlgeschlagene Migration lässt eine recoverable Ausgangsdatei zurück.
+
+**Handover FT-024**
+
+- **Status:** abgeschlossen
+- **Branch und Commit:** `feat/ft-024-db-migrations`, Implementierung `a10dbf2`, PR #179, Merge `fe9cf71`
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `README.md`
+- **Verhaltensänderung:** Die Datenbank führt eine monotone `schema_migrations`-Historie mit Legacy-Baseline und idempotenter FK-Migration. Alle Anwendung-, Restore- und Plaintext-zu-SQLCipher-Verbindungen aktivieren Foreign Keys unmittelbar; Orphans und unbekannte Versionen stoppen sicher. `public_event_candidates.source_id` verwendet explizit `ON DELETE CASCADE`. Restore akzeptiert nur die aktuelle Version sowie gültige Integritäts- und FK-Prüfungen; die Privacy-Löschung bewahrt die Schema-Historie als Betriebsmetadaten.
+- **Validierung:** Vier schnelle Shards grün (262 Tests gesamt); native Vollsuite `262 Tests, OK, 3 erwartete SQLCipher-Skips`; `python -m py_compile server.py tests/test_server.py`; `git diff --check`; `docker build -t ai-coach:ft024 .`; SQLCipher-Containersuite `262 Tests, OK`; PR #179 vollständig grün einschließlich Browser-Smoke/Accessibility, vier Test-Shards, Syntax, Validate, Analyze und CodeQL.
+- **Manuelle Prüfung:** nicht erforderlich; Backend-/Datenbankpaket ohne Frontend-Verhaltensänderung.
+- **Offene Risiken:** Keine Findings aus dem Paket-Review. Die bestehenden Restore-/SQLCipher-Pfade bleiben abhängig von der Laufzeitverfügbarkeit des gepinnten SQLCipher-Pakets.
+- **Folgetasks:** FT-025 ist nach dem grünen Merge von PR #179 entblockt.
 
 ### - [ ] FT-025 – Backup und Privacy-Export speicherschonend streamen
 
