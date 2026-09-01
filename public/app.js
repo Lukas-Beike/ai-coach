@@ -3960,6 +3960,13 @@ async function saveProfile(event) {
     setDirtyIndicator("profileDirtyIndicator", false);
     invalidateContextPreview();
     toast("Athletenkontext gespeichert und für den Coach aktiviert");
+    // Do not keep the successful save action in its loading state while the
+    // follow-up refresh loads the rest of the application state.
+    if (button) {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.textContent = buttonLabel;
+    }
     await load();
   } catch (error) { toast(error.message, true); }
   finally {
