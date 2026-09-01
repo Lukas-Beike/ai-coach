@@ -657,6 +657,9 @@ class CoachTests(unittest.TestCase):
         self.assertIn('async function loadState(path = "/api/bootstrap", requestedAreas = null)', app)
         self.assertIn('function load(path = "/api/bootstrap", requestedAreas = null)', app)
         self.assertIn('api("/api/chat/history?limit=100")', app)
+        self.assertIn('fetch("/api/chat/stream"', app)
+        self.assertIn('async function cancelChat()', app)
+        self.assertIn('markdownToHtml(state.chatStreamText)', app)
         self.assertIn('api("/api/activities?limit=250")', app)
         self.assertIn('api(`/api/plan${query}`)', app)
         self.assertIn('render(payload);\n      finishAppShellLoading();', app)
@@ -778,8 +781,8 @@ class CoachTests(unittest.TestCase):
         service_worker = (Path(__file__).resolve().parents[1] / "public" / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
-        self.assertIn('/app.js?v=126', index)
-        self.assertIn('intervals-coach-v126', service_worker)
+        self.assertIn('/app.js?v=127', index)
+        self.assertIn('intervals-coach-v127', service_worker)
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
 
@@ -4128,8 +4131,8 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/app.js?v=126"', source)
-        self.assertIn('"/icon.svg?v=126"', source)
+        self.assertIn('"/app.js?v=127"', source)
+        self.assertIn('"/icon.svg?v=127"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -4433,6 +4436,155 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["output_text"], "ok")
         self.assertEqual(calls, ["/responses", "/responses"])
         sleep.assert_called_once_with(1)
+
+    def test_openai_stream_request_emits_deltas_and_validates_only_final_response(self):
+        response_payload = {
+            "id": "resp-test",
+            "status": "completed",
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": "Hallo"}]}],
+            "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+        }
+
+        class FakeResponse:
+            status = 200
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def __iter__(self):
+                stream = (
+                    'event: response.output_text.delta\n'
+                    'data: {"type":"response.output_text.delta","delta":"Hal"}\n\n'
+                    'event: response.output_text.delta\n'
+                    'data: {"type":"response.output_text.delta","delta":"lo"}\n\n'
+                    + "event: response.completed\ndata: "
+                    + json.dumps({"type": "response.completed", "response": response_payload})
+                    + "\n\n"
+                    + "data: [DONE]\n\n"
+                )
+                yield from (line.encode() for line in stream.splitlines(keepends=True))
+
+        deltas = []
+        with patch.object(server, "urlopen", return_value=FakeResponse()) as urlopen:
+            result = server.openai_stream_request({"model": "gpt-5.6-sol"}, deltas.append)
+        self.assertEqual("".join(deltas), "Hallo")
+        self.assertEqual(result["id"], "resp-test")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(json.loads(request.data)["stream"], True)
+        self.assertEqual(request.get_header("Accept"), "text/event-stream")
+        self.assertNotIn("Hallo", json.dumps(server.recent_log_entries(), ensure_ascii=False))
+        self.assertEqual(server.openai_usage_summary()["total_tokens"], 6)
+
+    def test_openai_stream_request_cancel_before_provider_call_records_cancelled_usage(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+        with patch.object(server, "urlopen") as urlopen:
+            with self.assertRaises(server.AppError) as raised:
+                server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None, cancel_event)
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        urlopen.assert_not_called()
+        self.assertEqual(server.openai_usage_summary()["last_operation"], "responses_stream_cancelled")
+
+    def test_openai_stream_request_timeout_is_safe_and_records_provider_failure(self):
+        class TimeoutResponse:
+            headers = {}
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def __iter__(self):
+                raise TimeoutError("test timeout")
+                yield b""
+
+        with patch.object(server, "urlopen", return_value=TimeoutResponse()):
+            with self.assertRaises(server.AppError) as raised:
+                server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+        self.assertEqual(raised.exception.reason, "provider_unavailable")
+        self.assertEqual(server.openai_usage_summary()["status"]["reason"], "provider_unavailable")
+
+    def test_openai_stream_request_client_disconnect_records_cancelled_usage(self):
+        class DisconnectResponse:
+            headers = {}
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def __iter__(self):
+                yield b'event: response.output_text.delta\n'
+                yield b'data: {"delta":"partial"}\n'
+                yield b'\n'
+
+        with patch.object(server, "urlopen", return_value=DisconnectResponse()):
+            with self.assertRaises(server.ClientDisconnected):
+                server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: (_ for _ in ()).throw(server.ClientDisconnected()))
+        self.assertEqual(server.openai_usage_summary()["last_operation"], "responses_stream_cancelled")
+
+    def test_stream_conversation_lock_retry_is_bounded_and_reconnects(self):
+        responses = [server.AppError(409, "locked", reason="conversation_locked"), {"status": "completed"}]
+
+        with patch.object(server, "openai_stream_request", side_effect=responses) as request, patch.object(server.time, "sleep") as sleep:
+            result = server.responses_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(request.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_cancelled_stream_cannot_execute_a_partial_mutating_tool_call(self):
+        cancel_event = threading.Event()
+
+        def fake_stream(*args):
+            cancel_event.set()
+            return {
+                "status": "completed",
+                "output": [{"type": "function_call", "name": "save_workout_library_entries", "call_id": "partial-call", "arguments": "{}"}],
+            }
+
+        server.set_kv("openai_conversation_id", "conversation-test")
+        with patch.object(server, "responses_stream_request", side_effect=fake_stream), patch.object(server, "save_workout_library_entries") as save:
+            with self.assertRaises(server.AppError) as raised:
+                server.chat_with_coach("Plane eine Einheit.", cancel_event=cancel_event, on_text_delta=lambda _: None)
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        save.assert_not_called()
+
+    def test_chat_stream_registration_rejects_duplicate_stream_and_wrong_operation_id(self):
+        session_key = "session-stream-test"
+        operation_id, cancel_event = server.register_chat_stream(session_key)
+        try:
+            with self.assertRaises(server.AppError) as duplicate:
+                server.register_chat_stream(session_key)
+            self.assertEqual(duplicate.exception.reason, "chat_already_running")
+            with self.assertRaises(server.AppError) as raised:
+                server.cancel_chat_stream(session_key, "other-operation")
+            self.assertEqual(raised.exception.status, 409)
+            result = server.cancel_chat_stream(session_key, operation_id)
+            self.assertEqual(result["status"], "cancelling")
+            self.assertTrue(cancel_event.is_set())
+        finally:
+            server.unregister_chat_stream(session_key, operation_id)
+
+    def test_chat_stream_cancel_closes_the_active_provider_response(self):
+        session_key = "session-stream-close-test"
+        operation_id, cancel_event = server.register_chat_stream(session_key)
+        response = Mock()
+        cancel_event._openai_response = response
+        try:
+            result = server.cancel_chat_stream(session_key, operation_id)
+            self.assertEqual(result["status"], "cancelling")
+            response.close.assert_called_once_with()
+            self.assertTrue(cancel_event.is_set())
+        finally:
+            server.unregister_chat_stream(session_key, operation_id)
 
     def test_chat_queue_is_bounded_instead_of_waiting_indefinitely(self):
         acquired = [server.CHAT_QUEUE.acquire(blocking=False) for _ in range(server.CHAT_QUEUE_LIMIT)]

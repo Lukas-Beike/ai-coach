@@ -5,6 +5,8 @@ const state = {
   loadSequence: 0,
   loadPromise: null,
   busy: false,
+  chatStream: null,
+  chatStreamText: "",
   chatQueue: [],
   chatQueueSequence: 0,
   profileDirty: false,
@@ -605,6 +607,7 @@ function updateVoiceButton() {
 function updateChatControls() {
   const sendButton = $("#sendButton");
   const steerButton = $("#steerButton");
+  const cancelButton = $("#cancelChatButton");
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
   if (sendButton) {
     sendButton.disabled = !inputAvailable;
@@ -613,6 +616,11 @@ function updateChatControls() {
   if (steerButton) {
     steerButton.hidden = !state.busy;
     steerButton.disabled = !inputAvailable;
+  }
+  if (cancelButton) {
+    cancelButton.hidden = !state.busy;
+    cancelButton.disabled = !state.chatStream || state.chatStream.cancelRequested;
+    cancelButton.textContent = state.chatStream?.cancelRequested ? "Wird abgebrochen…" : "Abbrechen";
   }
   updateChatQueueStatus();
 }
@@ -2168,6 +2176,7 @@ function renderMessages(messages, forceScroll = false) {
   const signature = JSON.stringify([
     visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content]),
     state.busy,
+    state.chatStreamText,
     state.chatQueue.map((entry) => [entry.id, entry.mode, entry.message]),
   ]);
   if (root.dataset.signature === signature) return;
@@ -2190,6 +2199,12 @@ function renderMessages(messages, forceScroll = false) {
     root.append(node);
   }
   for (const entry of state.chatQueue) root.append(createPendingMessage(entry));
+  if (state.busy && state.chatStreamText) {
+    const node = document.createElement("div");
+    node.className = "message assistant streaming";
+    node.innerHTML = markdownToHtml(state.chatStreamText);
+    root.append(node);
+  }
   if (state.busy) root.append(createCoachWorkingIndicator());
   updateChatQueueStatus();
   updateChatComposerVisibility();
@@ -3631,13 +3646,66 @@ async function requestCoachResponse(message, restoreInputOnError = false) {
     state.data.messages.push({ role: "user", content: message });
     renderMessages(state.data.messages, true);
   }
+  state.chatStreamText = "";
+  const stream = { controller: new AbortController(), operationId: null, cancelRequested: false };
+  state.chatStream = stream;
+  updateChatControls();
+  renderMessages(state.data?.messages || [], true);
+  let completed = false;
   try {
-    await api("/api/chat", { method: "POST", body: JSON.stringify({ message }) });
+    const response = await fetch("/api/chat/stream", {
+      method: "POST",
+      credentials: "same-origin",
+      signal: stream.controller.signal,
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": cookie("ic_csrf") },
+      body: JSON.stringify({ message }),
+    });
+    if (!response.ok) {
+      let payload = {};
+      try { payload = await response.json(); } catch (_) {}
+      if (response.status === 401) showLogin();
+      throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
+    }
+    if (!response.body) throw new Error("Der Browser unterstützt keinen Antwort-Stream.");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const consume = (block) => {
+      let event = "message";
+      const data = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+      }
+      if (!data.length) return;
+      const payload = JSON.parse(data.join("\n"));
+      if (event === "started") stream.operationId = payload.operation_id || null;
+      else if (event === "delta") {
+        state.chatStreamText += payload.text || "";
+        renderMessages(state.data?.messages || [], true);
+      } else if (event === "error") {
+        const error = new Error(payload.message || "Die Coach-Anfrage ist fehlgeschlagen.");
+        error.reason = payload.reason;
+        throw error;
+      } else if (event === "completed") completed = true;
+    };
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() || "";
+      for (const block of blocks) consume(block);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consume(buffer);
+    if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
     await load();
     invalidateContextPreview();
-    return true;
+    return completed;
   } catch (error) {
-    toast(error.message, true);
+    const cancelled = stream.cancelRequested || error?.name === "AbortError" || error?.reason === "chat_cancelled";
+    if (!cancelled) toast(error.message, true);
     if (restoreInputOnError) {
       $("#messageInput").value = message;
       state.chatDraftDirty = true;
@@ -3645,16 +3713,31 @@ async function requestCoachResponse(message, restoreInputOnError = false) {
     await load();
     invalidateContextPreview();
     return false;
+  } finally {
+    if (state.chatStream === stream) state.chatStream = null;
+    state.chatStreamText = "";
+    updateChatControls();
   }
 }
 
 async function drainChatQueue(firstMessage) {
-  await requestCoachResponse(firstMessage, true);
+  if (!await requestCoachResponse(firstMessage, true)) return;
   while (state.chatQueue.length) {
     const next = state.chatQueue.shift();
     renderMessages(state.data?.messages || [], true);
-    await requestCoachResponse(next.message);
+    if (!await requestCoachResponse(next.message)) return;
   }
+}
+
+async function cancelChat() {
+  const stream = state.chatStream;
+  if (!stream) return;
+  stream.cancelRequested = true;
+  await api("/api/chat/cancel", {
+    method: "POST",
+    body: JSON.stringify({ operation_id: stream.operationId }),
+  }).catch(() => {});
+  stream.controller.abort();
 }
 
 async function sendMessage(event) {
@@ -4242,6 +4325,7 @@ window.addEventListener("hashchange", syncNavigationRoute);
 $("#loginForm").addEventListener("submit", login);
 $("#chatForm").addEventListener("submit", sendMessage);
 $("#steerButton").addEventListener("click", steerCurrentChat);
+$("#cancelChatButton").addEventListener("click", cancelChat);
 $("#quickMessageTemplates").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-message]");
   if (!button || state.busy) return;

@@ -86,6 +86,8 @@ COMPETITION_SYNC_LOCK = threading.Lock()
 COMPETITION_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
 PERFORMANCE_LOCK = threading.Lock()
 OPENAI_CONVERSATION_LOCK = threading.Lock()
+CHAT_STREAM_LOCK = threading.Lock()
+CHAT_STREAMS: dict[str, dict[str, Any]] = {}
 CHAT_QUEUE_LIMIT = 3
 CHAT_QUEUE = threading.BoundedSemaphore(CHAT_QUEUE_LIMIT)
 CHAT_LOCK_TIMEOUT_SECONDS = 30
@@ -1081,6 +1083,10 @@ class AppError(Exception):
         self.status = status
         self.message = message
         self.reason = reason
+
+
+class ClientDisconnected(Exception):
+    pass
 
 
 def serialise_conversation(function):
@@ -8795,6 +8801,148 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     raise AppError(502, "Die OpenAI-Konversationsanfrage konnte nicht abgeschlossen werden.")
 
 
+def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled")
+
+
+def openai_stream_request(
+    payload: dict[str, Any],
+    on_text_delta: Any,
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    if not CONFIG.openai_api_key:
+        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+    request_payload = {**payload, "stream": True}
+    request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
+    body = json.dumps(request_payload).encode("utf-8")
+    request = Request(
+        "https://api.openai.com/v1/responses",
+        data=body,
+        headers={
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {CONFIG.openai_api_key}",
+            "User-Agent": f"IntervalsCoach/{APP_VERSION}",
+        },
+        method="POST",
+    )
+    started = time.perf_counter()
+    context = {
+        "service": "openai",
+        "method": "POST",
+        "host": "api.openai.com",
+        "path": "/v1/responses",
+        "timeout_seconds": 90,
+        "request_bytes": len(body),
+    }
+    LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": context})
+    final_response: dict[str, Any] | None = None
+    stream_bytes = 0
+    event_name = ""
+    data_lines: list[str] = []
+
+    def handle_event() -> None:
+        nonlocal final_response, event_name, data_lines
+        if not data_lines:
+            event_name = ""
+            return
+        raw_event = "\n".join(data_lines)
+        if raw_event.strip() == "[DONE]":
+            event_name = ""
+            data_lines = []
+            return
+        try:
+            event = json.loads(raw_event)
+        except json.JSONDecodeError as exc:
+            raise AppError(502, "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.", reason="invalid_response") from exc
+        kind = event_name or str(event.get("type") or "")
+        if kind == "response.output_text.delta":
+            delta = event.get("delta")
+            if isinstance(delta, str) and delta:
+                on_text_delta(delta)
+        elif kind in {"response.completed", "response.incomplete", "response.failed"}:
+            candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+            if isinstance(candidate, dict):
+                final_response = candidate
+        event_name = ""
+        data_lines = []
+
+    try:
+        _raise_chat_cancelled(cancel_event)
+        with urlopen(request, timeout=90) as response:
+            if cancel_event is not None:
+                cancel_event._openai_response = response
+            record_openai_rate_limits(getattr(response, "headers", None))
+            record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
+            for raw_line in response:
+                _raise_chat_cancelled(cancel_event)
+                stream_bytes += len(raw_line)
+                if stream_bytes > MAX_EXTERNAL_RESPONSE_BYTES:
+                    raise AppError(502, "Die Streaming-Antwort von OpenAI ist zu groß.", reason="response_too_large")
+                line = raw_line.decode("utf-8").rstrip("\r\n")
+                if not line:
+                    handle_event()
+                elif line.startswith("event:"):
+                    event_name = line[6:].strip()
+                elif line.startswith("data:"):
+                    data_lines.append(line[5:].lstrip())
+            handle_event()
+        _raise_chat_cancelled(cancel_event)
+        if final_response is None:
+            raise AppError(502, "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.", reason="invalid_response")
+        final_response = _validate_openai_response("/responses", final_response)
+        record_openai_usage(final_response, "responses_stream")
+        LOGGER.info(
+            "External HTTP request completed",
+            extra={"event": "external_request_completed", "context": {**context, "status": 200, "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes}},
+        )
+        return final_response
+    except AppError:
+        if cancel_event is not None and cancel_event.is_set() and final_response is None:
+            record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        raise
+    except ClientDisconnected:
+        if final_response is None:
+            record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        raise
+    except HTTPError as exc:
+        try:
+            raw_error = exc.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
+        except TypeError:
+            raw_error = exc.read()
+        status = int(getattr(exc, "code", 502) or 502)
+        details = openai_error_details(status, raw_error)
+        record_openai_status(details)
+        raise AppError(status, details["message"], reason=details["reason"]) from exc
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        if cancel_event is not None and cancel_event.is_set():
+            record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
+        record_openai_status({"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503})
+        raise AppError(503, "OpenAI ist vorübergehend nicht verfügbar.", reason="provider_unavailable") from exc
+
+
+def responses_stream_request(
+    payload: dict[str, Any],
+    on_text_delta: Any,
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    request_payload = dict(payload)
+    request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
+    for attempt in range(3):
+        try:
+            return openai_stream_request(request_payload, on_text_delta, cancel_event)
+        except AppError as exc:
+            if exc.reason != "conversation_locked" or attempt == 2:
+                raise
+            _raise_chat_cancelled(cancel_event)
+            delay = 2 ** attempt
+            LOGGER.warning("OpenAI streaming conversation is temporarily locked; retrying", extra={"event": "openai_conversation_locked", "context": {"attempt": attempt + 1, "retry_in_seconds": delay}})
+            time.sleep(delay)
+    raise AppError(502, "Die OpenAI-Konversationsanfrage konnte nicht abgeschlossen werden.")
+
+
 def ensure_conversation() -> str:
     existing = get_kv("openai_conversation_id")
     if existing:
@@ -9240,9 +9388,45 @@ def execute_coach_action(token: Any, session_csrf_hash: str, payload_hash: Any =
     return result
 
 
+def register_chat_stream(session_csrf_hash: str) -> tuple[str, threading.Event]:
+    operation_id = uuid.uuid4().hex
+    cancel_event = threading.Event()
+    with CHAT_STREAM_LOCK:
+        if session_csrf_hash in CHAT_STREAMS:
+            raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
+        CHAT_STREAMS[session_csrf_hash] = {"operation_id": operation_id, "cancel_event": cancel_event}
+    return operation_id, cancel_event
+
+
+def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:
+    with CHAT_STREAM_LOCK:
+        stream = CHAT_STREAMS.get(session_csrf_hash)
+        if not stream:
+            return {"status": "not_running"}
+        if operation_id and str(operation_id) != stream["operation_id"]:
+            raise AppError(409, "Die angegebene Coach-Anfrage ist nicht mehr aktiv.")
+        stream["cancel_event"].set()
+        response = getattr(stream["cancel_event"], "_openai_response", None)
+        result = {"status": "cancelling", "operation_id": stream["operation_id"]}
+    if response is not None:
+        try:
+            response.close()
+        except (OSError, ValueError):
+            pass
+    return result
+
+
+def unregister_chat_stream(session_csrf_hash: str, operation_id: str) -> None:
+    with CHAT_STREAM_LOCK:
+        stream = CHAT_STREAMS.get(session_csrf_hash)
+        if stream and stream["operation_id"] == operation_id:
+            CHAT_STREAMS.pop(session_csrf_hash, None)
+
+
 @maintenance_operation
 @serialise_conversation
-def chat_with_coach(message: str, *, allow_mutations: bool = True) -> dict[str, Any]:
+def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None) -> dict[str, Any]:
+    _raise_chat_cancelled(cancel_event)
     message = message.strip()
     if not message:
         raise AppError(400, "Die Nachricht darf nicht leer sein.")
@@ -9282,25 +9466,25 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True) -> dict[str, 
         else "auto"
     )
     coach_tools = COACH_TOOLS if allow_mutations else []
-    response = responses_request(
-        {
-            "model": selected_model(),
-            "conversation": conversation_id,
-            "instructions": build_training_context(),
-            "input": model_message,
-            "tools": coach_tools,
-            "tool_choice": tool_choice,
-            "parallel_tool_calls": False,
-            "max_output_tokens": 6000,
-            "truncation": "auto",
-        },
-    )
+    request_payload = {
+        "model": selected_model(),
+        "conversation": conversation_id,
+        "instructions": build_training_context(),
+        "input": model_message,
+        "tools": coach_tools,
+        "tool_choice": tool_choice,
+        "parallel_tool_calls": False,
+        "max_output_tokens": 6000,
+        "truncation": "auto",
+    }
+    response = responses_stream_request(request_payload, on_text_delta, cancel_event) if on_text_delta is not None else responses_request(request_payload)
     created_library_entries: list[dict[str, Any]] = []
     planned_library_entries: list[dict[str, Any]] = []
     saved_activity_feedback: list[dict[str, Any]] = []
     tool_outputs = []
     blocked_mutation = False
     for item in response.get("output", []):
+        _raise_chat_cancelled(cancel_event)
         if not isinstance(item, dict) or item.get("type") != "function_call":
             continue
         call_id = str(item.get("call_id") or "").strip()
@@ -9446,18 +9630,18 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True) -> dict[str, 
         remember_chat_tool_result(call_id, item.get("name"), result)
         tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result)})
     if tool_outputs:
-        response = responses_request(
-            {
-                "model": selected_model(),
-                "conversation": conversation_id,
-                "instructions": build_training_context(),
-                "input": tool_outputs,
-                "tools": coach_tools,
-                "tool_choice": "none",
-                "max_output_tokens": 2500,
-                "truncation": "auto",
-            },
-        )
+        followup_payload = {
+            "model": selected_model(),
+            "conversation": conversation_id,
+            "instructions": build_training_context(),
+            "input": tool_outputs,
+            "tools": coach_tools,
+            "tool_choice": "none",
+            "max_output_tokens": 2500,
+            "truncation": "auto",
+        }
+        response = responses_stream_request(followup_payload, on_text_delta, cancel_event) if on_text_delta is not None else responses_request(followup_payload)
+    _raise_chat_cancelled(cancel_event)
     text = output_text(response)
     if blocked_mutation:
         text = "Ich habe keine Änderung ausgeführt. Dauerhafte Coach-Aktionen benötigen eine separate Vorschau und Bestätigung in der Oberfläche."
@@ -10518,8 +10702,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             else:
                 session = require_auth(self)
                 require_csrf(self, session)
-                with MAINTENANCE_GATE.operation():
-                    self.handle_authenticated_post(path, session)
+                if path == "/api/chat/cancel":
+                    # Cancellation must remain reachable while the streaming
+                    # request holds the maintenance gate for its lifetime.
+                    payload = self.read_json()
+                    self.send_json(200, cancel_chat_stream(session["csrf_hash"], payload.get("operation_id")))
+                else:
+                    with MAINTENANCE_GATE.operation():
+                        self.handle_authenticated_post(path, session)
         except AppError as exc:
             if exc.status >= 500:
                 LOGGER.error(
@@ -10537,6 +10727,63 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
             self.send_json(500, {"error": "Interner Serverfehler."})
 
+    def send_sse_headers(self) -> None:
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            self.wfile.flush()
+        except self.client_disconnect_errors as exc:
+            self.log_client_disconnect()
+            raise ClientDisconnected() from exc
+
+    def send_sse_event(self, event: str, payload: Any) -> None:
+        data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        try:
+            self.wfile.write(f"event: {event}\ndata: {data}\n\n".encode("utf-8"))
+            self.wfile.flush()
+        except self.client_disconnect_errors as exc:
+            self.log_client_disconnect()
+            raise ClientDisconnected() from exc
+
+    def handle_chat_stream(self, session: dict[str, Any]) -> None:
+        payload = self.read_json()
+        operation_id, cancel_event = register_chat_stream(session["csrf_hash"])
+        try:
+            self.connection.settimeout(120)
+            self.send_sse_headers()
+            self.send_sse_event("started", {"operation_id": operation_id})
+            result = chat_with_coach(
+                str(payload.get("message", "")),
+                on_text_delta=lambda delta: self.send_sse_event("delta", {"text": delta}),
+                cancel_event=cancel_event,
+            )
+            self.send_sse_event("completed", result)
+        except ClientDisconnected:
+            cancel_event.set()
+        except AppError as exc:
+            try:
+                self.send_sse_event("error", {"reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000]})
+            except ClientDisconnected:
+                pass
+        except Exception:
+            LOGGER.error(
+                "Unhandled coach stream error",
+                extra={"event": "chat_stream_error", "context": {"request_id": self.request_id}},
+                exc_info=True,
+            )
+            try:
+                self.send_sse_event("error", {"reason": "internal_error", "message": "Interner Serverfehler."})
+            except ClientDisconnected:
+                pass
+        finally:
+            unregister_chat_stream(session["csrf_hash"], operation_id)
+
     def handle_authenticated_post(self, path: str, session: dict[str, Any]) -> None:
             if path == "/api/transcribe":
                 content_type = self.headers.get("Content-Type", "")
@@ -10548,6 +10795,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/coach/actions/execute":
                 payload = self.read_json()
                 self.send_json(200, execute_coach_action(payload.get("action_token"), session["csrf_hash"], payload.get("payload_hash")))
+            elif path == "/api/chat/stream":
+                self.handle_chat_stream(session)
             elif path == "/api/chat":
                 payload = self.read_json()
                 self.send_json(200, chat_with_coach(str(payload.get("message", ""))))
