@@ -1188,6 +1188,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 71/70/70/70 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-intervals-provider-pagination` erfolgreich.
 - [ ] Weitere Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben fuer folgende kohaerente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Intervals-Read-Transport**
+
+- [x] Den authentifizierten read-only GET-Transport als `IntervalsReadTransport` in `backend/providers/intervals.py` abgegrenzt.
+- [x] URL-/Query-/Header-Aufbau und Service-Metadaten ueber ein explizit injiziertes Request-Interface gekapselt; die `IntervalsClient`-Kompatibilitaetsgrenze bleibt erhalten.
+- [x] Regressionstest fuer Query-Encoding, Header-Weitergabe und Provider-Service-Metadaten ergaenzt.
+- [x] Review ohne Findings; PR #213 per Auto-Squash gemergt (`c73a604`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards gruen.
+- [x] Validierung: vier schnelle Shards mit 71/71/70/70 Tests, gezielter Transporttest, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-intervals-provider-read-transport` erfolgreich.
+- [ ] Weitere Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben fuer folgende kohaerente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
