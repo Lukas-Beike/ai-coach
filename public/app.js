@@ -50,7 +50,7 @@ function ensureRouteData(route = state.route) {
   const panelRoute = baseRoute(route);
   if ((panelRoute === "today" || (panelRoute === "planned" && state.planSegment !== "library")) && !state.loadedAreas.has("plan")) requested.push("plan");
   if (panelRoute === "planned" && state.planSegment === "library" && !state.loadedAreas.has("library")) requested.push("library");
-  if (requested.length) load("/api/bootstrap", requested);
+  if (requested.length) load("/api/bootstrap?local=1", requested);
 }
 
 function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
