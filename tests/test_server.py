@@ -3630,6 +3630,40 @@ class CoachTests(unittest.TestCase):
             server.responses_request({"model": "gpt-5.6-sol", "input": "test"})
         self.assertEqual(captured["reasoning"], {"effort": "low"})
 
+    def test_multi_week_training_plan_gets_room_for_reasoning_and_output(self):
+        self.assertTrue(server.prompt_requests_long_plan(
+            "Lege einen Trainingsplan für die kommenden 4 Wochen an."
+        ))
+        self.assertFalse(server.prompt_requests_long_plan(
+            "Was soll ich morgen trainieren?"
+        ))
+        self.assertEqual(
+            server.coach_output_token_budget("Lege einen Trainingsplan für die kommenden 4 Wochen an."),
+            server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
+        )
+        self.assertEqual(
+            server.coach_output_token_budget("Was soll ich morgen trainieren?"),
+            server.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
+        )
+
+    def test_chat_passes_long_plan_budget_to_responses_api(self):
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv-long-plan"}
+            return {"status": "completed", "output_text": "Der Plan ist erstellt.", "output": []}
+
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ):
+            result = server.chat_with_coach("Lege einen Trainingsplan für die kommenden 4 Wochen an.")
+
+        response_payloads = [payload for path, payload in calls if path == "/responses"]
+        self.assertEqual(response_payloads[0]["max_output_tokens"], server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+        self.assertEqual(result["message"]["content"], "Der Plan ist erstellt.")
+
     def test_sync_period_supports_all_available_data_marker(self):
         self.assertEqual(server.set_sync_period("intervals", -1), -1)
         self.assertEqual(server.sync_period("intervals"), -1)
