@@ -22,3 +22,25 @@ class KeyValueRepository:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
             (key, value, self._now()),
         )
+
+
+class ChatRepository:
+    """Persist and retrieve local chat messages without owning a connection."""
+
+    def __init__(self, now: Callable[[], str]):
+        self._now = now
+
+    def add(self, db: Any, role: str, content: str) -> dict[str, Any]:
+        created_at = self._now()
+        clean_content = content.strip()
+        cursor = db.execute(
+            "INSERT INTO messages(role, content, created_at) VALUES (?, ?, ?)",
+            (role, clean_content, created_at),
+        )
+        return {"id": cursor.lastrowid, "role": role, "content": clean_content, "created_at": created_at}
+
+    def list(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
+        rows = db.execute(
+            "SELECT id, role, content, created_at FROM messages ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(row) for row in reversed(rows)]

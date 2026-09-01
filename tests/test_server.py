@@ -265,6 +265,14 @@ class CoachTests(unittest.TestCase):
             repository.set(db, "repository-test", "second")
             self.assertEqual(repository.get(db, "repository-test"), "second")
 
+    def test_chat_repository_preserves_trimmed_insert_and_order_contract(self):
+        repository = server.ChatRepository(lambda: "2026-09-01T00:00:00+00:00")
+        with server.database() as db:
+            first = repository.add(db, "user", "  first  ")
+            second = repository.add(db, "assistant", "second")
+            self.assertEqual(first["content"], "first")
+            self.assertEqual([row["id"] for row in repository.list(db)], [first["id"], second["id"]])
+
     def test_profile_only_accepts_known_fields_and_trims(self):
         profile = server.normalize_profile({"name": "  Ada  ", "goals": "Finish strong", "admin": True})
         self.assertEqual(profile["name"], "Ada")
