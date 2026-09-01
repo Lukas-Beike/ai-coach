@@ -115,7 +115,7 @@ STATIC_TARGETS = {
 VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -6002,8 +6002,10 @@ class IntervalsClient:
             "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
         }
         folder_id = self._folder_id(workout.get("folder_id"))
-        if folder_id is not None:
-            payload["folder_id"] = folder_id
+        # Intervals.icu requires folder_id for workout updates as well as
+        # creates. Older locally cached entries may not have retained the
+        # remote folder, so use the private Coach folder as a safe fallback.
+        payload["folder_id"] = folder_id if folder_id is not None else self.get_or_create_workout_folder()
         result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", payload)
         if not isinstance(result, dict):
             raise AppError(502, "Intervals.icu returned no updated library workout.")
@@ -10295,6 +10297,15 @@ def unregister_chat_stream(session_csrf_hash: str, operation_id: str) -> None:
             CHAT_STREAMS.pop(session_csrf_hash, None)
 
 
+def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
+    """Return the status of the chat operation belonging to this session."""
+    with CHAT_STREAM_LOCK:
+        stream = CHAT_STREAMS.get(session_csrf_hash)
+        if not stream:
+            return {"status": "idle", "operation_id": None}
+        return {"status": "running", "operation_id": stream["operation_id"]}
+
+
 @maintenance_operation
 @serialise_conversation
 def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None) -> dict[str, Any]:
@@ -11754,6 +11765,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 require_auth(self)
                 query = parse_qs(urlparse(self.path).query)
                 self.send_json(200, paged_chat_history(query.get("cursor", [None])[0], query.get("limit", [None])[0], query.get("q", [None])[0]))
+            elif path == "/api/chat/status":
+                session = require_auth(self)
+                self.send_json(200, chat_stream_status(session["csrf_hash"]))
             elif path == "/api/plan":
                 require_auth(self)
                 query = parse_qs(urlparse(self.path).query)
@@ -11904,33 +11918,42 @@ class RequestHandler(BaseHTTPRequestHandler):
     def handle_chat_stream(self, session: dict[str, Any]) -> None:
         payload = self.read_json()
         operation_id, cancel_event = register_chat_stream(session["csrf_hash"])
+        client_connected = True
+
+        def send_event(event: str, data: Any) -> None:
+            nonlocal client_connected
+            if not client_connected:
+                return
+            try:
+                self.send_sse_event(event, data)
+            except ClientDisconnected:
+                # The browser may be reloaded or moved to another tab while
+                # the provider request is still running. The chat operation
+                # must finish and persist its answer independently of SSE.
+                client_connected = False
+
         try:
             self.connection.settimeout(120)
-            self.send_sse_headers()
-            self.send_sse_event("started", {"operation_id": operation_id})
+            try:
+                self.send_sse_headers()
+                send_event("started", {"operation_id": operation_id})
+            except ClientDisconnected:
+                client_connected = False
             result = chat_with_coach(
                 str(payload.get("message", "")),
-                on_text_delta=lambda delta: self.send_sse_event("delta", {"text": delta}),
+                on_text_delta=lambda delta: send_event("delta", {"text": delta}),
                 cancel_event=cancel_event,
             )
-            self.send_sse_event("completed", result)
-        except ClientDisconnected:
-            cancel_event.set()
+            send_event("completed", result)
         except AppError as exc:
-            try:
-                self.send_sse_event("error", {"reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000]})
-            except ClientDisconnected:
-                pass
+            send_event("error", {"reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000]})
         except Exception:
             LOGGER.error(
                 "Unhandled coach stream error",
                 extra={"event": "chat_stream_error", "context": {"request_id": self.request_id}},
                 exc_info=True,
             )
-            try:
-                self.send_sse_event("error", {"reason": "internal_error", "message": "Interner Serverfehler."})
-            except ClientDisconnected:
-                pass
+            send_event("error", {"reason": "internal_error", "message": "Interner Serverfehler."})
         finally:
             unregister_chat_stream(session["csrf_hash"], operation_id)
 

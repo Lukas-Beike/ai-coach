@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=138" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=138">
+  <link rel="icon" href="/icon.svg?v=141" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=141">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -48,7 +48,9 @@
             <button type="submit" id="sendButton">Senden</button>
           </div>
         </form>
-        <button type="button" id="chatJumpToComposer" class="chat-jump" hidden>Neue Nachricht</button>
+        <button type="button" id="chatJumpToComposer" class="chat-jump" hidden aria-label="Zum Ende des Chats springen" title="Zum Ende des Chats springen">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14m0 0 5-5m-5 5-5-5"></path></svg>
+        </button>
         <p id="voiceStatus" class="voice-status" aria-live="polite" hidden></p>
         <p class="fine-print">Trainingsempfehlungen dienen zur Orientierung und ersetzen keinen medizinischen Rat. Jede Kalenderänderung gibst du selbst frei.</p>
       </section>
@@ -383,12 +385,12 @@
       </div>
     </div>
   </dialog>
-  <script src="/api.js?v=138" defer></script>
-  <script src="/navigation.js?v=138" defer></script>
-  <script src="/state.js?v=138" defer></script>
-  <script src="/views.js?v=138" defer></script>
-  <script src="/forms.js?v=138" defer></script>
-  <script src="/components.js?v=138" defer></script>
-  <script src="/app.js?v=138" defer></script>
+  <script src="/api.js?v=141" defer></script>
+  <script src="/navigation.js?v=141" defer></script>
+  <script src="/state.js?v=141" defer></script>
+  <script src="/views.js?v=141" defer></script>
+  <script src="/forms.js?v=141" defer></script>
+  <script src="/components.js?v=141" defer></script>
+  <script src="/app.js?v=141" defer></script>
 </body>
 </html>

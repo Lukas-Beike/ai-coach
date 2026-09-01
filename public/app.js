@@ -50,7 +50,7 @@ function ensureRouteData(route = state.route) {
   const panelRoute = baseRoute(route);
   if ((panelRoute === "today" || (panelRoute === "planned" && state.planSegment !== "library")) && !state.loadedAreas.has("plan")) requested.push("plan");
   if (panelRoute === "planned" && state.planSegment === "library" && !state.loadedAreas.has("library")) requested.push("library");
-  if (requested.length) load("/api/bootstrap", requested);
+  if (requested.length) load("/api/bootstrap?local=1", requested);
 }
 
 function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
@@ -88,7 +88,10 @@ function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}
   if (state.data && mainRoute === "more") loadChangeHistory();
   const targetScroll = mainRoute === "planned" ? (state.planSegmentScroll[state.planSegment] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo({ top: targetScroll, behavior: "auto" }));
-  if (mainRoute === "coach") scrollChatToLatest(true);
+  if (mainRoute === "coach") {
+    if (state.chatResponseScrollPending) scrollChatToResponseStart();
+    else scrollChatToLatest(true);
+  }
   ensureRouteData(panelRoute);
   if (focus && !$("#appShell")?.hidden) {
     panel.setAttribute("tabindex", "-1");
@@ -149,7 +152,13 @@ function cookie(name) {
 }
 
 function showLogin() {
+  if (state.chatStatusTimer) clearTimeout(state.chatStatusTimer);
+  state.chatStatusTimer = null;
   state.data = null;
+  state.busy = false;
+  state.chatServerOperationId = null;
+  state.chatResponseStarted = false;
+  state.chatResponseScrollPending = false;
   state.loadedAreas.clear();
   state.planSegment = "calendar";
   state.profileDirty = false;
@@ -479,13 +488,14 @@ function updateChatControls() {
   const steerButton = $("#steerButton");
   const cancelButton = $("#cancelChatButton");
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
+  const chatIsResuming = Boolean(state.chatServerOperationId && !state.chatStream);
   if (sendButton) {
-    sendButton.disabled = !inputAvailable;
-    sendButton.textContent = state.busy ? "Einreihen" : "Senden";
+    sendButton.disabled = !inputAvailable || chatIsResuming;
+    sendButton.textContent = chatIsResuming ? "Coach antwortet…" : state.busy ? "Einreihen" : "Senden";
   }
   if (steerButton) {
-    steerButton.hidden = !state.busy;
-    steerButton.disabled = !inputAvailable;
+    steerButton.hidden = !state.busy || chatIsResuming;
+    steerButton.disabled = !inputAvailable || chatIsResuming;
   }
   if (cancelButton) {
     cancelButton.hidden = !state.busy;
@@ -1953,6 +1963,8 @@ function renderMessages(messages, forceScroll = false) {
     visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content]),
     state.busy,
     state.chatStreamText,
+    state.chatServerOperationId,
+    state.chatResponseStarted,
     state.chatQueue.map((entry) => [entry.id, entry.mode, entry.message]),
   ]);
   if (root.dataset.signature === signature) return;
@@ -1984,7 +1996,32 @@ function renderMessages(messages, forceScroll = false) {
   if (state.busy) root.append(createCoachWorkingIndicator());
   updateChatQueueStatus();
   updateChatComposerVisibility();
-  if (shouldScroll) scrollChatToLatest();
+  if (shouldScroll && !state.chatResponseStarted) scrollChatToLatest();
+}
+
+function scrollChatToResponseStart() {
+  const panel = $("#chatPanel");
+  const root = $("#messages");
+  if (!panel?.classList.contains("active") || !root) {
+    state.chatResponseScrollPending = true;
+    return;
+  }
+  state.chatResponseScrollPending = false;
+  requestAnimationFrame(() => {
+    if (!panel.classList.contains("active")) {
+      state.chatResponseScrollPending = true;
+      return;
+    }
+    const assistants = root.querySelectorAll(".message.assistant");
+    const target = root.querySelector(".message.assistant.streaming")
+      || assistants[assistants.length - 1];
+    if (!target) {
+      state.chatResponseScrollPending = true;
+      return;
+    }
+    const topGap = 16;
+    window.scrollTo({ top: Math.max(0, window.scrollY + target.getBoundingClientRect().top - topGap), behavior: "auto" });
+  });
 }
 
 function scrollChatToLatest() {
@@ -3533,6 +3570,47 @@ function load(path = "/api/bootstrap", requestedAreas = null) {
   return tracked;
 }
 
+function scheduleChatStatusPoll(delay = 1_500) {
+  if (state.chatStatusTimer) clearTimeout(state.chatStatusTimer);
+  state.chatStatusTimer = setTimeout(() => {
+    state.chatStatusTimer = null;
+    pollChatStatus();
+  }, delay);
+}
+
+async function pollChatStatus() {
+  if (!state.data || document.visibilityState !== "visible" || !navigator.onLine) {
+    scheduleChatStatusPoll(5_000);
+    return;
+  }
+  try {
+    const status = await api("/api/chat/status");
+    const running = status.status === "running";
+    if (running) {
+      state.chatServerOperationId = status.operation_id || null;
+      if (!state.busy) {
+        state.busy = true;
+        renderQuickMessageTemplates();
+        updateChatControls();
+        renderMessages(state.data.messages || [], true);
+      }
+    } else {
+      const resumedOperation = Boolean(state.chatServerOperationId);
+      state.chatServerOperationId = null;
+      if (resumedOperation && !state.chatStream) {
+        state.busy = false;
+        await load();
+        renderMessages(state.data?.messages || [], true);
+        scrollChatToResponseStart();
+        updateChatControls();
+      }
+    }
+    scheduleChatStatusPoll(running ? 1_500 : 5_000);
+  } catch (error) {
+    if (!/Authentication/.test(error.message)) scheduleChatStatusPoll(5_000);
+  }
+}
+
 async function loadInitialState() {
   const route = routeFromHash();
   const segment = planSegmentFromRoute(route);
@@ -3540,6 +3618,7 @@ async function loadInitialState() {
   if (route === "today" || (baseRoute(route) === "planned" && segment !== "library")) areas.push("plan");
   if (baseRoute(route) === "planned" && segment === "library") areas.push("library");
   await load("/api/bootstrap?local=1", areas);
+  scheduleChatStatusPoll(0);
 }
 
 function renderActivePlanSegment(data = state.data) {
@@ -3566,7 +3645,7 @@ function queueChatMessage(message, mode) {
   updateChatControls();
 }
 
-async function requestCoachResponse(message, restoreInputOnError = false) {
+async function requestCoachResponse(message) {
   if (state.data) {
     state.data.messages.push({ role: "user", content: message });
     renderMessages(state.data.messages, true);
@@ -3604,10 +3683,17 @@ async function requestCoachResponse(message, restoreInputOnError = false) {
       }
       if (!data.length) return;
       const payload = JSON.parse(data.join("\n"));
-      if (event === "started") stream.operationId = payload.operation_id || null;
+      if (event === "started") {
+        stream.operationId = payload.operation_id || null;
+        state.chatServerOperationId = stream.operationId;
+      }
       else if (event === "delta") {
+        const responseJustStarted = !state.chatStreamText;
         state.chatStreamText += payload.text || "";
-        renderMessages(state.data?.messages || [], true);
+        state.chatResponseStarted = state.chatResponseStarted || responseJustStarted;
+        if (responseJustStarted) state.chatResponseScrollPending = true;
+        renderMessages(state.data?.messages || [], false);
+        if (responseJustStarted) scrollChatToResponseStart();
       } else if (event === "error") {
         const error = new Error(payload.message || "Die Coach-Anfrage ist fehlgeschlagen.");
         error.reason = payload.reason;
@@ -3626,27 +3712,27 @@ async function requestCoachResponse(message, restoreInputOnError = false) {
     if (buffer.trim()) consume(buffer);
     if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
     await load();
+    if (completed) scrollChatToResponseStart();
     invalidateContextPreview();
     return completed;
   } catch (error) {
     const cancelled = stream.cancelRequested || error?.name === "AbortError" || error?.reason === "chat_cancelled";
     if (!cancelled) toast(error.message, true);
-    if (restoreInputOnError) {
-      $("#messageInput").value = message;
-      state.chatDraftDirty = true;
-    }
     await load();
     invalidateContextPreview();
     return false;
   } finally {
     if (state.chatStream === stream) state.chatStream = null;
     state.chatStreamText = "";
+    if (!completed) state.chatResponseScrollPending = false;
+    state.chatResponseStarted = false;
+    state.chatServerOperationId = null;
     updateChatControls();
   }
 }
 
 async function drainChatQueue(firstMessage) {
-  if (!await requestCoachResponse(firstMessage, true)) return;
+  if (!await requestCoachResponse(firstMessage)) return;
   while (state.chatQueue.length) {
     const next = state.chatQueue.shift();
     renderMessages(state.data?.messages || [], true);
@@ -3670,6 +3756,7 @@ async function sendMessage(event) {
   const input = $("#messageInput");
   const message = input.value.trim();
   if (!message || voiceIsRecording() || state.voiceTranscribing) return;
+  if (state.chatServerOperationId && !state.chatStream) return;
   if (state.busy) {
     queueChatMessage(message, "queue");
     return;
@@ -3877,6 +3964,9 @@ async function resetCoachChat() {
     if (state.data) {
       state.data.messages = [];
       state.chatQueue = [];
+      state.chatServerOperationId = null;
+      state.chatResponseStarted = false;
+      state.chatResponseScrollPending = false;
       renderMessages([], true);
     }
     toast("Neuer Coach-Chat gestartet");
@@ -4349,7 +4439,10 @@ $("#activityFilterReset").addEventListener("click", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") savePwaActivity();
-  else checkPwaReturn();
+  else {
+    checkPwaReturn();
+    scheduleChatStatusPoll(0);
+  }
   handleSyncVisibility();
 });
 document.addEventListener("pointerdown", handlePwaInteraction, { passive: true });

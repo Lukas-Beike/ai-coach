@@ -237,16 +237,20 @@ h2 {
   position: fixed;
   z-index: 4;
   right: max(18px, calc((100vw - 784px) / 2));
-  bottom: calc(148px + env(safe-area-inset-bottom));
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
   border: 1px solid rgba(52, 207, 161, .55);
   border-radius: 999px;
-  padding: 9px 13px;
+  padding: 0;
   color: var(--ink);
   background: rgba(30, 30, 32, .94);
   box-shadow: var(--shadow-soft);
-  font-size: .72rem;
   font-weight: 700;
 }
+.chat-jump svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
 .chat-jump:hover { border-color: var(--accent-bright); background: var(--surface-raised); }
 .chat-jump[hidden] { display: none; }
 .quick-message-templates {

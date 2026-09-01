@@ -58,7 +58,9 @@ It is not intended to be exposed directly to the public internet.
   queueing while the coach is responding. Responses are streamed through a
   credential-free server-side SSE bridge; the chat view renders safe partial
   Markdown, and **Abbrechen** cancels the active request while **Steuern**
-  remains a separate queued follow-up action.
+  remains a separate queued follow-up action. Reloading the page or losing the
+  streaming connection does not cancel the server-side coach request; its
+  persisted answer appears in the chat after the next load.
 - The normal Coach chat is read-only: durable local changes and every remote
   sync require a separate preview, an exact UI confirmation, and a short-lived
   single-use server-side action token bound to the session and payload.
@@ -146,8 +148,9 @@ It is not intended to be exposed directly to the public internet.
   failures, and persist tool-call results so retried follow-ups do not repeat
   local mutations. The application does not impose a local daily request or
   token budget; requests continue until OpenAI rejects them because the
-  account or project quota is exhausted. A cancelled or disconnected stream
-  records a separate usage operation and never executes a partial tool call.
+  account or project quota is exhausted. An explicitly cancelled stream never
+  executes a partial tool call; a lost browser connection leaves the request
+  running so its completed answer can be recovered after reload.
 
 ## Loading and synchronization
 

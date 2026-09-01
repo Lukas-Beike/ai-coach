@@ -946,10 +946,20 @@ class CoachTests(unittest.TestCase):
 
     def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
         self.assertIn('async function loadState(path = "/api/bootstrap", requestedAreas = null)', app)
         self.assertIn('function load(path = "/api/bootstrap", requestedAreas = null)', app)
         self.assertIn('api("/api/chat/history?limit=100")', app)
         self.assertIn('fetch("/api/chat/stream"', app)
+        self.assertIn('api("/api/chat/status")', app)
+        self.assertIn("function scrollChatToResponseStart()", app)
+        self.assertNotIn("restoreInputOnError", app)
+        self.assertIn('aria-label="Zum Ende des Chats springen"', index)
+        self.assertIn('<svg viewBox="0 0 24 24"', index)
+        self.assertNotIn(">Neue Nachricht<", index)
+        styles = (Path(__file__).resolve().parents[1] / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn(".chat-jump", styles)
+        self.assertIn("bottom: calc(84px + env(safe-area-inset-bottom))", styles)
         self.assertIn('async function cancelChat()', app)
         self.assertIn('markdownToHtml(state.chatStreamText)', app)
         self.assertIn('api("/api/activities?limit=250")', app)
@@ -1295,19 +1305,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=138', index)
-        self.assertIn('/navigation.js?v=138', index)
-        self.assertIn('/state.js?v=138', index)
-        self.assertIn('/views.js?v=138', index)
-        self.assertIn('/forms.js?v=138', index)
-        self.assertIn('/components.js?v=138', index)
-        self.assertIn('/app.js?v=138', index)
-        self.assertIn('intervals-coach-v138', service_worker)
-        self.assertIn('"/navigation.js?v=138"', service_worker)
-        self.assertIn('"/state.js?v=138"', service_worker)
-        self.assertIn('"/views.js?v=138"', service_worker)
-        self.assertIn('"/forms.js?v=138"', service_worker)
-        self.assertIn('"/components.js?v=138"', service_worker)
+        self.assertIn('/api.js?v=141', index)
+        self.assertIn('/navigation.js?v=141', index)
+        self.assertIn('/state.js?v=141', index)
+        self.assertIn('/views.js?v=141', index)
+        self.assertIn('/forms.js?v=141', index)
+        self.assertIn('/components.js?v=141', index)
+        self.assertIn('/app.js?v=141', index)
+        self.assertIn('intervals-coach-v141', service_worker)
+        self.assertIn('"/navigation.js?v=141"', service_worker)
+        self.assertIn('"/state.js?v=141"', service_worker)
+        self.assertIn('"/views.js?v=141"', service_worker)
+        self.assertIn('"/forms.js?v=141"', service_worker)
+        self.assertIn('"/components.js?v=141"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('window.addEventListener("offline"', app)
@@ -1325,8 +1335,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=138'), index.index('/components.js?v=138'))
-        self.assertLess(index.index('/components.js?v=138'), index.index('/app.js?v=138'))
+        self.assertLess(index.index('/forms.js?v=141'), index.index('/components.js?v=141'))
+        self.assertLess(index.index('/components.js?v=141'), index.index('/app.js?v=141'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
 
@@ -1349,6 +1359,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('"planned/library": "workoutsPanel"', navigation)
         self.assertIn('"planned/goals": "workoutsPanel"', navigation)
         self.assertIn('function ensureRouteData(route = state.route)', app)
+        self.assertIn('load("/api/bootstrap?local=1", requested)', app)
         self.assertIn('api("/api/library?limit=100")', app)
         self.assertIn('function loadMoreLibrary()', app)
         self.assertIn('id="planCalendarSegment"', index)
@@ -2524,6 +2535,24 @@ class CoachTests(unittest.TestCase):
             "/athlete/athlete-1/workouts",
             {"name": "Easy", "description": "- 30m Z2", "type": "Ride", "folder_id": 77},
         )
+
+    def test_library_update_always_sends_required_folder(self):
+        client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        with patch.object(client, "get_or_create_workout_folder", return_value=12345) as folder, patch.object(
+            client, "put", return_value={"id": "remote-1"}
+        ) as put:
+            client.update_library_workout("remote-1", {
+                "name": "Easy",
+                "description": "- 30m Z2",
+                "type": "Ride",
+            })
+        folder.assert_called_once_with()
+        self.assertEqual(put.call_args.args[1], {
+            "name": "Easy",
+            "description": "- 30m Z2",
+            "type": "Ride",
+            "folder_id": 12345,
+        })
 
     def test_unknown_workout_sport_falls_back_to_provider_other_type(self):
         client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
@@ -4804,16 +4833,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=138"', source)
-        self.assertIn('"/navigation.js?v=138"', source)
-        self.assertIn('"/state.js?v=138"', source)
-        self.assertIn('"/views.js?v=138"', source)
-        self.assertIn('"/forms.js?v=138"', source)
-        self.assertIn('"/components.js?v=138"', source)
+        self.assertIn('"/api.js?v=141"', source)
+        self.assertIn('"/navigation.js?v=141"', source)
+        self.assertIn('"/state.js?v=141"', source)
+        self.assertIn('"/views.js?v=141"', source)
+        self.assertIn('"/forms.js?v=141"', source)
+        self.assertIn('"/components.js?v=141"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=138"', source)
-        self.assertIn('"/icon.svg?v=138"', source)
-        self.assertIn('"/styles.css?v=138"', source)
+        self.assertIn('"/app.js?v=141"', source)
+        self.assertIn('"/icon.svg?v=141"', source)
+        self.assertIn('"/styles.css?v=141"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -5349,6 +5378,40 @@ class CoachTests(unittest.TestCase):
         finally:
             server.unregister_chat_stream(session_key, operation_id)
 
+    def test_chat_stream_status_is_scoped_to_the_session(self):
+        session_key = "session-stream-status-test"
+        self.assertEqual(server.chat_stream_status(session_key), {"status": "idle", "operation_id": None})
+        operation_id, cancel_event = server.register_chat_stream(session_key)
+        try:
+            self.assertEqual(server.chat_stream_status(session_key), {"status": "running", "operation_id": operation_id})
+            self.assertEqual(server.chat_stream_status("other-session"), {"status": "idle", "operation_id": None})
+            self.assertFalse(cancel_event.is_set())
+        finally:
+            server.unregister_chat_stream(session_key, operation_id)
+
+    def test_disconnected_chat_stream_continues_and_does_not_cancel_provider_work(self):
+        session_key = "session-stream-disconnect-test"
+        operation_id = "operation-disconnect-test"
+        cancel_event = threading.Event()
+        handler = server.RequestHandler.__new__(server.RequestHandler)
+        handler.read_json = Mock(return_value={"message": "Bleibt bestehen"})
+        handler.connection = Mock()
+        handler.send_sse_headers = Mock()
+        handler.send_sse_event = Mock(side_effect=[None, server.ClientDisconnected()])
+
+        def complete_chat(*args, **kwargs):
+            kwargs["on_text_delta"]("Antwort bleibt gespeichert")
+            return {"message": {"id": 2}}
+
+        with patch.object(server, "register_chat_stream", return_value=(operation_id, cancel_event)), \
+                patch.object(server, "unregister_chat_stream") as unregister, \
+                patch.object(server, "chat_with_coach", side_effect=complete_chat) as chat:
+            handler.handle_chat_stream({"csrf_hash": session_key})
+
+        chat.assert_called_once()
+        self.assertFalse(cancel_event.is_set())
+        unregister.assert_called_once_with(session_key, operation_id)
+
     def test_chat_stream_cancel_closes_the_active_provider_response(self):
         session_key = "session-stream-close-test"
         operation_id, cancel_event = server.register_chat_stream(session_key)
@@ -5540,7 +5603,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=138', index)
+        self.assertIn('v=141', index)
 
     def test_library_bulk_local_actions_preview_diff_and_hash_conflict(self):
         first = server.create_local_workout_library_entry({
@@ -5636,8 +5699,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("function runLibraryBulkRemoteSync()", app)
         self.assertIn("expected_payload_hash", (server.PUBLIC_DIR.parent / "server.py").read_text(encoding="utf-8"))
         self.assertIn("librarySelection", state)
-        self.assertIn("intervals-coach-v138", worker)
-        self.assertIn("/app.js?v=138", index)
+        self.assertIn("intervals-coach-v141", worker)
+        self.assertIn("/app.js?v=141", index)
 
 if __name__ == "__main__":
     unittest.main()
