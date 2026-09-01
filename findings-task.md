@@ -1206,6 +1206,16 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 71/71/71/70 Tests, gezielter Transporttest, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-intervals-provider-write-transport` erfolgreich.
 - [ ] Weitere Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben fuer folgende kohaerente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Frontend-Navigation**
+
+- [x] Route-Konstanten und reine Hash-Parser ohne neues Framework in `public/navigation.js` abgegrenzt; DOM-, State- und Data-Loading-Koordination verbleibt in `public/app.js`.
+- [x] Static-Serving, versionierte PWA-Assets und Service-Worker-Cache fuer das neue Modul ergaenzt; bestehende Navigation, Authentifizierung und API-Vertraege unveraendert erhalten.
+- [x] Regressionstests auf die neue Modulgrenze aktualisiert; keine doppelten DTOs oder zyklischen Abhaengigkeiten eingefuehrt.
+- [x] Review ohne Findings; PR #218 per Auto-Squash gemergt (`c05c393`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL, Analyse und vier Test-Shards gruen.
+- [x] Validierung: vier schnelle Shards mit 71/71/71/70 Tests, drei gezielte Navigationstests, `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check` und Docker-Build `ai-coach:ft027-frontend-navigation` erfolgreich.
+- [x] Manuelle/Browser-Pruefung: verpflichtender GitHub-Browser-Smoke-/Accessibility-Lauf erfolgreich; lokale JavaScript-Syntaxpruefung war mangels Node.js nicht verfuegbar.
+- [ ] Weitere Frontend-Bereiche sowie Provider-, Sync-, Coach-, Backup- und HTTP-API-Schnittstellen bleiben fuer folgende kohaerente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
