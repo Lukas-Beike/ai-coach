@@ -4473,6 +4473,87 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["state"], "error")
         self.assertIn("422", state["last_error"])
 
+    def test_readiness_is_safe_and_separate_from_liveness(self):
+        readiness = server.readiness_state()
+        self.assertEqual(readiness["status"], "ready")
+        self.assertTrue(readiness["ready"])
+        self.assertEqual(set(readiness["checks"]), {"database", "schema", "data_directory", "maintenance"})
+        self.assertNotIn("path", json.dumps(readiness).casefold())
+        self.assertNotIn("athlete", json.dumps(readiness).casefold())
+        self.assertNotIn("password", json.dumps(readiness).casefold())
+
+    def test_readiness_fails_when_database_is_unavailable(self):
+        with patch.object(server, "database", side_effect=OSError("database unavailable")):
+            readiness = server.readiness_state()
+        self.assertEqual(readiness["status"], "not_ready")
+        self.assertFalse(readiness["ready"])
+        self.assertFalse(readiness["checks"]["database"])
+        self.assertFalse(readiness["checks"]["schema"])
+
+    def test_readiness_fails_when_data_directory_is_read_only(self):
+        with patch.object(server.tempfile, "NamedTemporaryFile", side_effect=OSError("read-only")):
+            readiness = server.readiness_state()
+        self.assertEqual(readiness["status"], "not_ready")
+        self.assertFalse(readiness["ready"])
+        self.assertFalse(readiness["checks"]["data_directory"])
+
+    def test_readiness_fails_during_database_maintenance(self):
+        with server.MAINTENANCE_GATE.restore():
+            readiness = server.readiness_state()
+        self.assertEqual(readiness["status"], "not_ready")
+        self.assertFalse(readiness["ready"])
+        self.assertFalse(readiness["checks"]["maintenance"])
+        self.assertTrue(readiness["maintenance"]["active"])
+
+    def test_rate_limit_cleanup_removes_old_bounded_buckets(self):
+        with server.RATE_LIMIT_LOCK:
+            server.RATE_LIMITS.clear()
+            server.RATE_LIMITS["expired"] = [0.0]
+            server.RATE_LIMIT_LAST_CLEANUP_MONOTONIC = 0.0
+        with patch.object(server.time, "monotonic", return_value=20 * 60):
+            server.allow_rate("fresh", 1, 60)
+        with server.RATE_LIMIT_LOCK:
+            self.assertNotIn("expired", server.RATE_LIMITS)
+            self.assertIn("fresh", server.RATE_LIMITS)
+
+    def test_parallel_operations_keep_distinct_safe_correlation_ids(self):
+        barrier = threading.Barrier(2)
+        operation_ids = []
+
+        def worker():
+            with server.observed_operation("test", "manual") as scope:
+                operation_ids.append(scope["operation_id"])
+                barrier.wait(timeout=5)
+                self.assertEqual(server.OPERATION_CONTEXT.get()["operation_id"], scope["operation_id"])
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+        self.assertEqual(len(operation_ids), 2)
+        self.assertEqual(len(set(operation_ids)), 2)
+
+    def test_sync_logs_end_to_end_operation_id_without_athlete_content(self):
+        snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        operation_id = "operation-test-026"
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        server.initialise_logging()
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", return_value=snapshot
+        ):
+            server.sync_intervals("manual", activity_days=1, operation_id=operation_id)
+        for handler in server.LOGGER.handlers:
+            handler.flush()
+        entries = server.recent_log_entries(200)
+        correlated = [entry for entry in entries if entry.get("context", {}).get("operation_id") == operation_id]
+        events = {entry.get("event") for entry in correlated}
+        self.assertTrue({"operation_started", "operation_completed", "operation_count"}.issubset(events))
+        for entry in correlated:
+            context = entry.get("context", {})
+            self.assertIn(context.get("trigger"), {"manual", "background"})
+            self.assertNotIn("athlete", json.dumps(entry).casefold())
+
     def test_external_http_calls_log_start_and_completion_without_payload(self):
         class FakeResponse:
             status = 200

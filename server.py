@@ -592,6 +592,9 @@ def external_call(
     """Log a non-HTTP SDK call and return its result without exposing payloads."""
     initialise_logging()
     context = {"service": service, "operation": operation, **(details or {})}
+    operation_context = OPERATION_CONTEXT.get()
+    if operation_context:
+        context.update({"operation_id": operation_context["operation_id"], "trigger": operation_context["trigger"], "phase": operation})
     started = time.perf_counter()
     LOGGER.info("External call started", extra={"event": "external_call_started", "context": context})
     try:
@@ -602,8 +605,7 @@ def external_call(
         failure_context = {
             **context,
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-            "error_type": type(exc).__name__,
-            "error": redact_text(str(exc))[:500],
+            "error_code": operation_error_code(exc),
         }
         LOGGER.error("External call failed", extra={"event": "external_call_failed", "context": failure_context}, exc_info=True)
         raise provider_error(service, "client") from exc
@@ -1197,7 +1199,112 @@ def database_row_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
 # A request-scoped connection lets composite reads reuse one SQLCipher setup.
 # The outer caller still owns DB_LOCK; nested database() calls only reuse it.
 DATABASE_CONTEXT: ContextVar[Any | None] = ContextVar("database_context", default=None)
+OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_context", default=None)
 CURRENT_DATABASE_SCHEMA_VERSION = 2
+
+
+OPERATION_CLEANUP_REASONS = {
+    "startup": "startup",
+    "manuell": "manual",
+    "manual": "manual",
+    "chat-anfrage": "chat",
+    "morgen-check-in": "checkin",
+    "vollständiger resync": "full_resync",
+    "background": "background",
+}
+
+
+def operation_trigger(reason: Any) -> str:
+    """Reduce an internal reason to a safe, bounded operation class."""
+    normalized = str(reason or "background").strip().casefold()
+    return OPERATION_CLEANUP_REASONS.get(normalized, "background")
+
+
+def operation_error_code(error: BaseException) -> str:
+    """Return a stable technical code without logging exception contents."""
+    if isinstance(error, AppError) and error.reason:
+        return re.sub(r"[^a-z0-9_]+", "_", str(error.reason).casefold()).strip("_")[:80] or "application_error"
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    return "internal_error"
+
+
+def operation_result_count(result: Any) -> int | None:
+    if not isinstance(result, dict):
+        return None
+    for key in ("activities", "records", "events", "wellness", "total", "imported", "updated", "pushed"):
+        value = result.get(key)
+        if isinstance(value, int) and value >= 0:
+            return value
+    return None
+
+
+def log_operation_event(
+    event: str,
+    operation_id: str,
+    trigger: str,
+    provider: str,
+    phase: str,
+    started: float,
+    *,
+    count: int | None = None,
+    error_code: str | None = None,
+) -> None:
+    context: dict[str, Any] = {
+        "operation_id": operation_id,
+        "trigger": trigger,
+        "provider": provider,
+        "phase": phase,
+        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+    }
+    if count is not None:
+        context["count"] = count
+    if error_code:
+        context["error_code"] = error_code
+    level = logging.ERROR if error_code else logging.INFO
+    LOGGER.log(level, "Synchronization operation", extra={"event": event, "context": context})
+
+
+@contextmanager
+def observed_operation(provider: str, reason: Any = "background", operation_id: str | None = None):
+    current = OPERATION_CONTEXT.get()
+    operation_id = operation_id or (current or {}).get("operation_id") or uuid.uuid4().hex
+    trigger = (current or {}).get("trigger") or operation_trigger(reason)
+    token = OPERATION_CONTEXT.set({"operation_id": operation_id, "trigger": trigger})
+    started = time.perf_counter()
+    log_operation_event("operation_started", operation_id, trigger, provider, "start", started)
+    try:
+        yield {"operation_id": operation_id, "trigger": trigger, "started": started}
+    except Exception as exc:
+        log_operation_event(
+            "operation_failed", operation_id, trigger, provider, "failed", started,
+            error_code=operation_error_code(exc),
+        )
+        raise
+    else:
+        log_operation_event("operation_completed", operation_id, trigger, provider, "complete", started)
+    finally:
+        OPERATION_CONTEXT.reset(token)
+
+
+def observed_sync(provider: str):
+    """Correlate a sync function and its provider calls with one operation."""
+    def decorator(function: Any) -> Any:
+        @wraps(function)
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            reason = kwargs.get("reason")
+            if reason is None and args:
+                reason = args[0]
+            operation_id = kwargs.get("operation_id")
+            with observed_operation(provider, reason, operation_id) as scope:
+                result = function(*args, **kwargs)
+                log_operation_event(
+                    "operation_count", scope["operation_id"], scope["trigger"],
+                    provider, "complete", scope["started"], count=operation_result_count(result),
+                )
+                return result
+        return wrapped
+    return decorator
 
 
 def database_schema_version(db: Any) -> int:
@@ -2317,9 +2424,10 @@ def persist_garmin_error(message: Any, source: str = "sync") -> None:
     set_kv("last_garmin_error", json.dumps([{"source": source, "message": safe_message}], ensure_ascii=False))
 
 
+@observed_sync("garmin")
 @maintenance_operation
 @garmin_operation
-def sync_garmin(days: int = 30) -> dict[str, Any]:
+def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "background") -> dict[str, Any]:
     fixture = garmin_fixture_path()
     if Garmin is None and fixture is None:
         LOGGER.warning(
@@ -3318,8 +3426,9 @@ def external_calendar_state() -> dict[str, Any]:
     }
 
 
+@observed_sync("calendar")
 @maintenance_operation
-def sync_external_calendar(reason: str = "manual") -> dict[str, Any]:
+def sync_external_calendar(reason: str = "manual", operation_id: str | None = None) -> dict[str, Any]:
     if not CONFIG.calendar_ical_url:
         raise AppError(503, "CALENDAR_ICAL_URL ist nicht konfiguriert.")
     if not EXTERNAL_CALENDAR_LOCK.acquire(blocking=False):
@@ -4091,12 +4200,14 @@ def competition_sync_preview() -> dict[str, Any]:
         COMPETITION_SYNC_LOCK.release()
 
 
+@observed_sync("intervals")
 @maintenance_operation
 @intervals_operation
 def sync_competitions(
     reason: str = "manual",
     push_local: bool = False,
     expected_fingerprint: str | None = None,
+    operation_id: str | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
@@ -4425,6 +4536,9 @@ def http_json(
         "timeout_seconds": timeout,
         "request_bytes": len(body or b""),
     }
+    operation_context = OPERATION_CONTEXT.get()
+    if operation_context:
+        request_context.update({"operation_id": operation_context["operation_id"], "trigger": operation_context["trigger"], "phase": parsed_url.path.rsplit("/", 1)[-1] or "request"})
     if parsed_url.query:
         request_context["query_keys"] = sorted(parse_qs(parsed_url.query, keep_blank_values=True))
     started = time.perf_counter()
@@ -4994,8 +5108,9 @@ def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict
     return f"Wetterprognose für {event_date}: {condition}{detail_text}; lange Outdoor-Ausfahrt nicht sinnvoll"
 
 
+@observed_sync("weather")
 @maintenance_operation
-def sync_weather(reason: str = "background", force: bool = False) -> dict[str, Any]:
+def sync_weather(reason: str = "background", force: bool = False, operation_id: str | None = None) -> dict[str, Any]:
     """Refresh the configured location's forecast without creating a chat event."""
     if not get_profile().get("weather_location", "").strip():
         return {"status": "not_configured"}
@@ -7662,7 +7777,7 @@ def provider_resync_state(provider: str) -> dict[str, Any]:
     }
 
 
-def full_provider_resync(provider: str) -> dict[str, Any]:
+def full_provider_resync(provider: str, operation_id: str | None = None) -> dict[str, Any]:
     if provider not in PROVIDER_RESYNC_KEYS:
         raise AppError(400, "Unbekannte Anbindung.")
     if provider == "intervals" and not CONFIG.intervals_api_key:
@@ -7678,6 +7793,13 @@ def full_provider_resync(provider: str) -> dict[str, Any]:
         return {"status": "already_running", "source": provider}
     keys = PROVIDER_RESYNC_KEYS[provider]
     label = "Intervals.icu" if provider == "intervals" else "Garmin"
+    operation_id = operation_id or uuid.uuid4().hex
+    operation_token = OPERATION_CONTEXT.set({"operation_id": operation_id, "trigger": "full_resync"})
+    operation_started = time.perf_counter()
+    operation_succeeded = False
+    operation_result: Any = None
+    operation_failure_code: str | None = None
+    log_operation_event("operation_started", operation_id, "full_resync", provider, "resync", operation_started)
     try:
         set_kv(keys["running"], "1")
         set_kv(keys["status"], f"{label}: bestehende Daten bleiben erhalten, Resync läuft…")
@@ -7687,19 +7809,22 @@ def full_provider_resync(provider: str) -> dict[str, Any]:
         # good snapshot and all athlete-owned records remain recoverable.
         set_kv(keys["status"], f"{label}: vollständiger Resync läuft…")
         if provider == "intervals":
-            result = sync_intervals("Vollständiger Resync", activity_days=ALL_SYNC_DAYS)
-            competition_result = sync_competitions("Vollständiger Resync", push_local=False)
+            result = sync_intervals("Vollständiger Resync", activity_days=ALL_SYNC_DAYS, operation_id=operation_id)
+            competition_result = sync_competitions("Vollständiger Resync", push_local=False, operation_id=operation_id)
             result = {
                 **result,
                 "competitions": competition_result,
             }
         else:
-            result = sync_garmin(days=ALL_SYNC_DAYS)
+            result = sync_garmin(days=ALL_SYNC_DAYS, operation_id=operation_id, reason="Vollständiger Resync")
         finished_at = utc_now()
         set_kv(keys["last_at"], finished_at)
         set_kv(keys["error"], "")
+        operation_result = result
+        operation_succeeded = True
         return {"status": "ok", "source": provider, "resynced_at": finished_at, **result}
     except Exception as exc:
+        operation_failure_code = operation_error_code(exc)
         set_kv(keys["error"], redact_text(str(exc))[:1000])
         LOGGER.error(
             "Full provider resynchronization failed",
@@ -7712,9 +7837,15 @@ def full_provider_resync(provider: str) -> dict[str, Any]:
             set_kv(keys["running"], "0")
             set_kv(keys["status"], "")
         finally:
+            if operation_succeeded:
+                log_operation_event("operation_completed", operation_id, "full_resync", provider, "resync", operation_started, count=operation_result_count(operation_result))
+            else:
+                log_operation_event("operation_failed", operation_id, "full_resync", provider, "resync", operation_started, error_code=operation_failure_code or "internal_error")
+            OPERATION_CONTEXT.reset(operation_token)
             gate.end_reset()
 
 
+@observed_sync("intervals")
 @maintenance_operation
 @intervals_operation
 def sync_intervals(
@@ -10739,6 +10870,10 @@ SESSION_TOUCH_INTERVAL_SECONDS = 5 * 60
 SESSION_CLEANUP_INTERVAL_SECONDS = 15 * 60
 SESSION_CLEANUP_BATCH_SIZE = 100
 SESSION_LAST_CLEANUP_MONOTONIC = 0.0
+RATE_LIMIT_CLEANUP_INTERVAL_SECONDS = 15 * 60
+RATE_LIMIT_CLEANUP_BATCH_SIZE = 100
+RATE_LIMIT_BUCKET_MAX_AGE_SECONDS = 15 * 60
+RATE_LIMIT_LAST_CLEANUP_MONOTONIC = 0.0
 
 
 def client_ip(handler: BaseHTTPRequestHandler) -> str:
@@ -10746,8 +10881,21 @@ def client_ip(handler: BaseHTTPRequestHandler) -> str:
 
 
 def allow_rate(key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
+    global RATE_LIMIT_LAST_CLEANUP_MONOTONIC
     now = time.monotonic()
     with RATE_LIMIT_LOCK:
+        if now - RATE_LIMIT_LAST_CLEANUP_MONOTONIC >= RATE_LIMIT_CLEANUP_INTERVAL_SECONDS:
+            inspected = 0
+            for bucket_key in list(RATE_LIMITS):
+                if inspected >= RATE_LIMIT_CLEANUP_BATCH_SIZE:
+                    break
+                inspected += 1
+                recent_bucket = [stamp for stamp in RATE_LIMITS[bucket_key] if now - stamp < RATE_LIMIT_BUCKET_MAX_AGE_SECONDS]
+                if recent_bucket:
+                    RATE_LIMITS[bucket_key] = recent_bucket
+                else:
+                    RATE_LIMITS.pop(bucket_key, None)
+            RATE_LIMIT_LAST_CLEANUP_MONOTONIC = now
         recent = [stamp for stamp in RATE_LIMITS.get(key, []) if now - stamp < window_seconds]
         allowed = len(recent) < limit
         if allowed:
@@ -10793,6 +10941,48 @@ def cleanup_expired_sessions(db: Any, now: float, *, force: bool = False) -> int
     )
     SESSION_LAST_CLEANUP_MONOTONIC = current_monotonic
     return cursor.rowcount
+
+
+def readiness_state() -> dict[str, Any]:
+    """Return only safe infrastructure checks for the unauthenticated probe."""
+    checks = {
+        "database": False,
+        "schema": False,
+        "data_directory": False,
+        "maintenance": False,
+    }
+    try:
+        with DB_LOCK, database() as db:
+            checks["database"] = bool(db.execute("SELECT 1").fetchone())
+            checks["schema"] = database_schema_version(db) == CURRENT_DATABASE_SCHEMA_VERSION
+    except Exception:
+        pass
+    probe: Path | None = None
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="wb", prefix=".readiness-", suffix=".probe", dir=DATA_DIR, delete=False
+        ) as handle:
+            probe = Path(handle.name)
+            handle.write(b"ok")
+        checks["data_directory"] = True
+    except (OSError, IOError):
+        pass
+    finally:
+        if probe is not None:
+            try:
+                probe.unlink(missing_ok=True)
+            except OSError:
+                pass
+    maintenance = MAINTENANCE_GATE.state()
+    checks["maintenance"] = not bool(maintenance.get("active"))
+    ready = all(checks.values())
+    return {
+        "status": "ready" if ready else "not_ready",
+        "ready": ready,
+        "checks": checks,
+        "maintenance": {"active": bool(maintenance.get("active"))},
+    }
 
 
 def authenticated_session(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
@@ -10916,6 +11106,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path
             if path == "/api/health":
                 self.send_json(200, {"status": "ok", "maintenance": MAINTENANCE_GATE.state()})
+            elif path == "/api/readiness":
+                readiness = readiness_state()
+                self.send_json(200 if readiness["ready"] else 503, readiness)
             elif path == "/api/auth/status":
                 session = authenticated_session(self)
                 result = {"authenticated": bool(session), "maintenance": MAINTENANCE_GATE.state()}
@@ -11136,7 +11329,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 if payload.get("confirm") != "FULL_RESYNC":
                     raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
-                self.send_json(200, full_provider_resync("intervals"))
+                self.send_json(200, full_provider_resync("intervals", operation_id=uuid.uuid4().hex))
             elif match := COMPETITION_CONFLICT_RE.match(path):
                 payload = self.read_json()
                 self.send_json(200, resolve_competition_conflict(unquote(match.group(1)), payload.get("strategy")))
@@ -11150,16 +11343,16 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/garmin/sync":
                 payload = self.read_json()
                 days = set_sync_period("garmin", payload.get("days", sync_period("garmin")))
-                self.send_json(200, sync_garmin(days=days))
+                self.send_json(200, sync_garmin(days=days, reason="manual", operation_id=uuid.uuid4().hex))
             elif path == "/api/external-calendar/sync":
-                self.send_json(200, sync_external_calendar(reason="manuell"))
+                self.send_json(200, sync_external_calendar(reason="manuell", operation_id=uuid.uuid4().hex))
             elif path == "/api/weather/sync":
-                self.send_json(200, sync_weather(reason="manuell", force=True))
+                self.send_json(200, sync_weather(reason="manuell", force=True, operation_id=uuid.uuid4().hex))
             elif path == "/api/garmin/full-resync":
                 payload = self.read_json()
                 if payload.get("confirm") != "FULL_RESYNC":
                     raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
-                self.send_json(200, full_provider_resync("garmin"))
+                self.send_json(200, full_provider_resync("garmin", operation_id=uuid.uuid4().hex))
             elif path == "/api/chat/reset":
                 self.send_json(200, reset_coach_chat())
             elif path == "/api/privacy/delete":
@@ -11440,22 +11633,40 @@ class CoachHTTPServer(ThreadingHTTPServer):
 
 
 def safe_sync(reason: str, activity_days: int | None = None, operation_id: str | None = None) -> None:
-    try:
-        sync_intervals(reason, activity_days=activity_days, operation_id=operation_id)
-    except Exception:
-        LOGGER.error(
-            "Background synchronization failed",
-            extra={"event": "background_sync_failed", "context": {"reason": reason}},
-            exc_info=True,
-        )
-    try:
-        sync_competitions(reason, push_local=False)
-    except Exception:
-        LOGGER.error(
-            "Background competition synchronization failed",
-            extra={"event": "background_competition_sync_failed", "context": {"reason": reason}},
-            exc_info=True,
-        )
+    with observed_operation("sync", reason, operation_id) as scope:
+        current_operation_id = scope["operation_id"]
+        try:
+            sync_intervals(reason, activity_days=activity_days, operation_id=current_operation_id)
+        except Exception as exc:
+            LOGGER.error(
+                "Background synchronization failed",
+                extra={
+                    "event": "background_sync_failed",
+                    "context": {
+                        "operation_id": current_operation_id,
+                        "trigger": scope["trigger"],
+                        "provider": "intervals",
+                        "phase": "sync",
+                        "error_code": operation_error_code(exc),
+                    },
+                },
+            )
+        try:
+            sync_competitions(reason, push_local=False, operation_id=current_operation_id)
+        except Exception as exc:
+            LOGGER.error(
+                "Background competition synchronization failed",
+                extra={
+                    "event": "background_competition_sync_failed",
+                    "context": {
+                        "operation_id": current_operation_id,
+                        "trigger": scope["trigger"],
+                        "provider": "intervals",
+                        "phase": "competitions",
+                        "error_code": operation_error_code(exc),
+                    },
+                },
+            )
 
 
 def daily_sync_loop() -> None:
@@ -11476,25 +11687,52 @@ def daily_sync_loop() -> None:
         safe_sync("tägliche automatische Aktualisierung", activity_days=sync_period("intervals"))
 
 
-def safe_garmin_sync(reason: str) -> None:
+def safe_garmin_sync(reason: str, operation_id: str | None = None) -> None:
     try:
-        sync_garmin()
-    except Exception:
-        LOGGER.error("Garmin synchronization failed", extra={"event": "garmin_sync_failed", "context": {"reason": reason}}, exc_info=True)
+        sync_garmin(reason=reason, operation_id=operation_id)
+    except Exception as exc:
+        LOGGER.error(
+            "Garmin synchronization failed",
+            extra={"event": "garmin_sync_failed", "context": {
+                "operation_id": operation_id or (OPERATION_CONTEXT.get() or {}).get("operation_id"),
+                "trigger": operation_trigger(reason),
+                "provider": "garmin",
+                "phase": "sync",
+                "error_code": operation_error_code(exc),
+            }},
+        )
 
 
-def safe_external_calendar_sync(reason: str) -> None:
+def safe_external_calendar_sync(reason: str, operation_id: str | None = None) -> None:
     try:
-        sync_external_calendar(reason)
-    except Exception:
-        LOGGER.error("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
+        sync_external_calendar(reason, operation_id=operation_id)
+    except Exception as exc:
+        LOGGER.error(
+            "External calendar synchronization failed",
+            extra={"event": "external_calendar_sync_failed", "context": {
+                "operation_id": operation_id or (OPERATION_CONTEXT.get() or {}).get("operation_id"),
+                "trigger": operation_trigger(reason),
+                "provider": "calendar",
+                "phase": "sync",
+                "error_code": operation_error_code(exc),
+            }},
+        )
 
 
-def safe_weather_sync(reason: str) -> None:
+def safe_weather_sync(reason: str, operation_id: str | None = None) -> None:
     try:
-        sync_weather(reason)
-    except Exception:
-        LOGGER.error("Weather synchronization failed", extra={"event": "weather_background_sync_failed", "context": {"reason": reason}}, exc_info=True)
+        sync_weather(reason, operation_id=operation_id)
+    except Exception as exc:
+        LOGGER.error(
+            "Weather synchronization failed",
+            extra={"event": "weather_background_sync_failed", "context": {
+                "operation_id": operation_id or (OPERATION_CONTEXT.get() or {}).get("operation_id"),
+                "trigger": operation_trigger(reason),
+                "provider": "weather",
+                "phase": "sync",
+                "error_code": operation_error_code(exc),
+            }},
+        )
 
 
 def main() -> None:
