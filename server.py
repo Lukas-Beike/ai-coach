@@ -100,13 +100,14 @@ STATIC_TARGETS = {
     "state.js": PUBLIC_DIR / "state.js",
     "views.js": PUBLIC_DIR / "views.js",
     "forms.js": PUBLIC_DIR / "forms.js",
+    "components.js": PUBLIC_DIR / "components.js",
     "styles.css": PUBLIC_DIR / "styles.css",
     "service-worker.js": PUBLIC_DIR / "service-worker.js",
     "manifest.webmanifest": PUBLIC_DIR / "manifest.webmanifest",
     "logo.png": PUBLIC_DIR / "logo.png",
     "icon.svg": PUBLIC_DIR / "icon.svg",
 }
-VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "app.js", "styles.css", "logo.png", "icon.svg"}
+VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 APP_VERSION = "1.3.4"
