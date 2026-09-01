@@ -214,7 +214,14 @@ The Plan view is split into the deep-linked segments `#planned/calendar`,
 weather, and confirmation-required adaptive previews. The library loads only
 when opened, uses bounded pages for large collections, and keeps local template
 actions separate from the explicit Intervals.icu sync preview. Goals & Plans
-contains competitions and multi-week plans; competition push is shown as its+own remote action. Segment scroll positions are restored when navigating back.
+contains competitions and multi-week plans; competition push is shown as its own remote action. Segment scroll positions are restored when navigating back.
+
+The More view is organized into the deep-linked segments `#more/profile`,
+`#more/connections`, `#more/coach`, `#more/privacy`, and `#more/operations`.
+Profile fields show when they may be included in requests to OpenAI. Sports and
+time zone use controlled selections, while competition duration and distance are
+entered as `hh:mm` and kilometers and normalized before local storage. Privacy,
+backup/restore, and diagnostics remain available within two navigation levels.
 
 Manual Intervals.icu synchronization starts in the background and exposes only
 the bounded `/api/sync/status` response while it runs. The browser uses one

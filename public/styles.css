@@ -550,6 +550,12 @@ h2 {
 .local-remote-card strong { color: var(--ink); font-size: .76rem; }
 .local-remote-card small { color: var(--muted); font-size: .68rem; line-height: 1.4; }
 .library-pagination { display: flex; justify-content: center; margin: 14px 0 4px; }
+.more-segment-nav { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .025); }
+.more-segment-nav a { flex: 1 1 145px; padding: 9px 10px; border-radius: 10px; color: var(--muted); font-size: .72rem; font-weight: 700; text-align: center; text-decoration: none; }
+.more-segment-nav a:hover, .more-segment-nav a.active { color: var(--ink); background: var(--accent-soft); }
+.more-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.context-sharing-notice { margin: 0 0 14px; padding: 10px 12px; border: 1px solid rgba(255, 193, 7, .3); border-radius: 12px; color: var(--muted); background: rgba(255, 193, 7, .06); font-size: .74rem; line-height: 1.45; }
+.profile-form select[multiple] { min-height: 112px; }
 .library-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; }
 .library-heading > div { display: grid; gap: 4px; }
 .library-heading .subsection-title { margin: 0; }
