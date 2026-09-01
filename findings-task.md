@@ -1072,7 +1072,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Fortschritt FT-027 – DB-Schnitt**
 
 - [x] Modulgrenzen und der schrittweise Ablauf sind in `README.md` dokumentiert.
-- [x] Dependency-light DB-Primitiven aus `server.py` nach `backend/db.py` verschoben.
+- [x] Dependency-light DB-Primitiven aus `server.py` in das `backend.db`-Package verschoben.
 - [x] Containerpaketierung und Regressionstest für den DB-Schnitt ergänzt.
 - [x] Review ohne Findings; PR #185 per Auto-Squash gemergt (`4e449f9`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility grün.
 - [ ] Repositorys, Provider, Sync, Coach, Backup, HTTP-API sowie Frontend-Bereiche bleiben für die folgenden kohärenten Refactor-PRs offen.
@@ -1088,6 +1088,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [ ] Backend-Repositorys/-Provider/-Sync/-Coach/-Backup/-HTTP-API sowie weitere Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
 ### - [ ] FT-028 – PWA-/Notification-Versprechen präzisieren und Produktentscheidung treffen
+
+**Fortschritt FT-027 - Key-Value-Repository**
+
+- [x] `backend.db` als Package strukturiert und `KeyValueRepository` als erstes explizites Repository-Interface ergänzt.
+- [x] Bestehende `get_kv`-/`set_kv`-Wrapper, Connection Ownership, `DB_LOCK` und SQLCipher-Verhalten unverändert erhalten.
+- [x] Upsert-, Readback- und Schema-Regressionen mit temporären Testdaten abgesichert.
+- [x] Review ohne Findings; PR #189 per Auto-Squash gemergt (`b852948`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 272 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-repositories` erfolgreich.
+- [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
