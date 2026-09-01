@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
-from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, KeyValueRepository
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, KeyValueRepository, SnapshotRepository
 from backend.db import schema_version as database_schema_version
 
 try:
@@ -1126,6 +1126,7 @@ KEY_VALUE_REPOSITORY = KeyValueRepository(utc_now)
 CHAT_REPOSITORY = ChatRepository(utc_now)
 CHECKIN_REPOSITORY = CheckinRepository(utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
+SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
 def security_configuration_error() -> str | None:
@@ -7097,11 +7098,7 @@ def delete_workout_draft(draft_id: str) -> dict[str, Any]:
 def save_snapshot_view(snapshot: dict[str, Any]) -> None:
     """Persist a local view change without changing synchronization timestamps."""
     with DB_LOCK, database() as db:
-        db.execute(
-            "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
-            (json.dumps(snapshot, ensure_ascii=False), snapshot.get("synced_at") or utc_now()),
-        )
-        db.execute("DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT 12)")
+        SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot.get("synced_at") or utc_now())
 
 
 @maintenance_operation
@@ -7675,17 +7672,13 @@ def push_draft(draft_id: str) -> dict[str, Any]:
 
 def latest_snapshot() -> dict[str, Any] | None:
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1").fetchone()
-    return json.loads(row["payload"]) if row else None
+        payload = SNAPSHOT_REPOSITORY.latest_payload(db)
+    return json.loads(payload) if payload else None
 
 
 def save_snapshot(snapshot: dict[str, Any], update_full_sync: bool = True) -> None:
     with DB_LOCK, database() as db:
-        db.execute(
-            "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
-            (json.dumps(snapshot, ensure_ascii=False), snapshot["synced_at"]),
-        )
-        db.execute("DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT 12)")
+        SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
         if update_full_sync:
             set_kv("last_sync_at", snapshot["synced_at"], db)
             set_kv("last_sync_error", "", db)

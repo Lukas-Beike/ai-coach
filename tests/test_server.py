@@ -303,6 +303,16 @@ class CoachTests(unittest.TestCase):
             repository.delete(db, "activity-new")
             self.assertEqual([row["activity_id"] for row in repository.list(db)], ["activity-old"])
 
+    def test_snapshot_repository_preserves_latest_payload_and_retention_contract(self):
+        repository = server.SnapshotRepository()
+        with server.database() as db:
+            for index in range(13):
+                repository.save(db, {"synced_at": f"2026-09-{index + 1:02d}", "index": index}, f"2026-09-{index + 1:02d}")
+            payload = repository.latest_payload(db)
+            count = db.execute("SELECT COUNT(*) AS count FROM snapshots").fetchone()["count"]
+        self.assertEqual(json.loads(payload)["index"], 12)
+        self.assertEqual(count, 12)
+
     def test_profile_only_accepts_known_fields_and_trims(self):
         profile = server.normalize_profile({"name": "  Ada  ", "goals": "Finish strong", "admin": True})
         self.assertEqual(profile["name"], "Ada")
