@@ -2527,6 +2527,60 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(request.call_args_list[1].args[3], headers)
         self.assertEqual(request.call_args_list[2].kwargs, {"headers": headers, "service": "intervals"})
 
+    def test_garmin_provider_collector_keeps_ranges_bounded_and_errors_redacted(self):
+        from backend.providers.garmin import collect_garmin_data
+
+        class FakeGarmin:
+            def get_sleep_daily(self, start, end):
+                return [{"date": start, "end": end}]
+
+            def get_hrv_data_range(self, start, end):
+                raise RuntimeError("secret provider detail")
+
+            def get_body_battery(self, start, end):
+                return [{"date": start, "battery": 80}]
+
+            def get_activities_by_date(self, start, end):
+                return [{"start": start, "end": end}]
+
+            def get_training_readiness(self, current):
+                return {"date": current, "score": 75}
+
+            def get_race_predictions(self):
+                return [{"race": "local fixture"}]
+
+            def get_max_metrics(self, current):
+                return {"date": current}
+
+            def get_weigh_ins(self, start, end):
+                return [{"date": end, "weight": 70}]
+
+        calls = []
+        statuses = []
+
+        def external_call(service, source, operation, details):
+            calls.append((service, source, details))
+            return operation()
+
+        result = collect_garmin_data(
+            FakeGarmin(),
+            [(date(2026, 8, 30), date(2026, 8, 31))],
+            start=date(2026, 8, 30),
+            today=date(2026, 8, 31),
+            synced_at="2026-09-01T00:00:00+00:00",
+            external_call=external_call,
+            redact=lambda _value: "[redacted]",
+            status=statuses.append,
+        )
+
+        self.assertEqual(result["start"], "2026-08-30")
+        self.assertEqual(result["end"], "2026-08-31")
+        self.assertEqual(len(result["activities"]), 1)
+        self.assertEqual(result["errors"], [{"source": "hrv", "message": "[redacted]"}])
+        self.assertFalse(result["provider_sync"]["pagination"]["hrv"]["complete"])
+        self.assertEqual(statuses, ["Garmin: Zeitraum 1/1 wird synchronisiert…"])
+        self.assertTrue(any(source == "weight" for _service, source, _details in calls))
+
     def test_intervals_collection_rejects_repeated_full_page(self):
         client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         page = [{"id": f"activity-{index}"} for index in range(500)]

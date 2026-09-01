@@ -42,6 +42,7 @@ from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
+from backend.providers.garmin import collect_garmin_data
 
 try:
     from garminconnect import Garmin
@@ -3038,72 +3039,24 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
                 extra={"event": "garmin_mfa_required", "context": {"service": "garmin", "operation": "login"}},
             )
             raise AppError(401, "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb des Servers eingerichtet werden.")
-        payload: dict[str, Any] = {"synced_at": utc_now(), "start": start.isoformat(), "end": today.isoformat(), "errors": []}
-        pagination: dict[str, dict[str, Any]] = {}
         set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
 
-        def fetch_range(key: str, fetch: Any, window_start: date, window_end: date) -> None:
-            stats = pagination.setdefault(key, {"windows": len(windows), "records": 0, "complete": True})
-            try:
-                value = external_call(
-                    "garmin",
-                    key,
-                    lambda: fetch(window_start.isoformat(), window_end.isoformat()),
-                    {"window_start": window_start.isoformat(), "window_end": window_end.isoformat()},
-                )
-                if isinstance(value, list):
-                    payload.setdefault(key, []).extend(value)
-                    stats["records"] = int(stats["records"]) + len(value)
-                elif value is not None and key not in payload:
-                    payload[key] = value
-            except Exception as exc:
-                stats["complete"] = False
-                stats["error"] = redact_text(str(exc))[:500]
-                payload["errors"].append({"source": key, "message": redact_text(str(exc))[:500]})
-                LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": key}}, exc_info=True)
-
-        for index, (window_start, window_end) in enumerate(windows, 1):
-            set_kv("garmin_sync_status", f"Garmin: Zeitraum {index}/{len(windows)} wird synchronisiert…")
-            fetch_range("sleep", client.get_sleep_daily, window_start, window_end)
-            fetch_range("hrv", client.get_hrv_data_range, window_start, window_end)
-            fetch_range("body_battery", client.get_body_battery, window_start, window_end)
-            fetch_range("activities", client.get_activities_by_date, window_start, window_end)
-        max_metrics_start = today - timedelta(days=89)
-        max_metrics_range = getattr(client, "get_max_metrics_range", None)
-        max_metrics_fetch = (
-            (lambda: max_metrics_range(max_metrics_start.isoformat(), today.isoformat()))
-            if callable(max_metrics_range)
-            else (lambda: client.get_max_metrics(today.isoformat()))
+        payload = collect_garmin_data(
+            client,
+            windows,
+            start=start,
+            today=today,
+            synced_at=utc_now(),
+            external_call=external_call,
+            redact=redact_text,
+            warn=lambda source, _message, exc: LOGGER.warning(
+                "Garmin data request failed",
+                extra={"event": "garmin_request_failed", "context": {"source": source}},
+                exc_info=(type(exc), exc, exc.__traceback__),
+            ),
+            status=lambda message: set_kv("garmin_sync_status", message),
         )
-        max_metrics_context = {
-            "window_start": max_metrics_start.isoformat(),
-            "window_end": today.isoformat(),
-            "range_supported": callable(max_metrics_range),
-        }
-        for key, fetch, details in (
-            ("readiness", lambda: client.get_training_readiness(today.isoformat()), {"date": today.isoformat()}),
-            ("race_predictions", client.get_race_predictions, None),
-            ("max_metrics", max_metrics_fetch, max_metrics_context),
-        ):
-            try:
-                payload[key] = external_call("garmin", key, fetch, details)
-            except Exception as exc:
-                payload["errors"].append({"source": key, "message": redact_text(str(exc))[:500]})
-                LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": key}}, exc_info=True)
-        weight_fetch = getattr(client, "get_weigh_ins", None) or getattr(client, "get_body_composition", None)
-        if callable(weight_fetch):
-            try:
-                weight_start = today - timedelta(days=89)
-                payload["weight"] = external_call(
-                    "garmin", "weight",
-                    lambda: weight_fetch(weight_start.isoformat(), today.isoformat()),
-                    {"window_start": weight_start.isoformat(), "window_end": today.isoformat()},
-                )
-            except Exception as exc:
-                payload["errors"].append({"source": "weight", "message": redact_text(str(exc))[:500]})
-                LOGGER.warning("Garmin data request failed", extra={"event": "garmin_request_failed", "context": {"source": "weight"}}, exc_info=True)
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
-        payload["provider_sync"] = {"pagination": pagination}
         canonical = latest_snapshot()
         payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
         append_garmin_performance_history(payload, previous)
@@ -3111,7 +3064,7 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
         set_kv("last_garmin_sync_at", payload["synced_at"])
         mark_daily_sync("garmin")
         set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
-        return {"status": "partial" if payload["errors"] else "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": pagination}
+        return {"status": "partial" if payload["errors"] else "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
         set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
