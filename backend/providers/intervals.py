@@ -32,6 +32,44 @@ class IntervalsReadTransport:
         )
 
 
+class IntervalsWriteTransport:
+    """Build explicit authenticated write requests without application state."""
+
+    def __init__(self, base: str, headers: Mapping[str, str], request: Request):
+        self._base = base
+        self._headers = headers
+        self._request = request
+
+    def post(self, path: str, payload: Any, params: Mapping[str, Any] | None = None) -> Any:
+        query = "?" + urlencode(params, doseq=True) if params else ""
+        return self._request(
+            "POST",
+            self._base + path + query,
+            payload,
+            self._headers,
+            service="intervals",
+        )
+
+    def put(self, path: str, payload: Any, params: Mapping[str, Any] | None = None) -> Any:
+        query = "?" + urlencode(params, doseq=True) if params else ""
+        return self._request(
+            "PUT",
+            self._base + path + query,
+            payload,
+            self._headers,
+            service="intervals",
+        )
+
+    def delete(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
+        query = "?" + urlencode(params, doseq=True) if params else ""
+        return self._request(
+            "DELETE",
+            self._base + path + query,
+            headers=self._headers,
+            service="intervals",
+        )
+
+
 def fetch_paged_collection(
     get: JsonGetter,
     path: str,

@@ -2465,6 +2465,24 @@ class CoachTests(unittest.TestCase):
             service="intervals",
         )
 
+    def test_intervals_write_transport_injects_request_for_each_method(self):
+        from backend.providers.intervals import IntervalsWriteTransport
+
+        request = Mock(side_effect=[{"id": "post"}, {"id": "put"}, {"deleted": True}])
+        headers = {"Authorization": "Basic test"}
+        transport = IntervalsWriteTransport("https://intervals.icu/api/v1", headers, request)
+
+        self.assertEqual(transport.post("/events", [{"id": "one"}], {"upsert": "true"}), {"id": "post"})
+        self.assertEqual(transport.put("/events/bulk-delete", [{"id": "one"}]), {"id": "put"})
+        self.assertEqual(transport.delete("/events/one", {"force": "true"}), {"deleted": True})
+
+        self.assertEqual(request.call_args_list[0].args[:3], ("POST", "https://intervals.icu/api/v1/events?upsert=true", [{"id": "one"}]))
+        self.assertEqual(request.call_args_list[1].args[:3], ("PUT", "https://intervals.icu/api/v1/events/bulk-delete", [{"id": "one"}]))
+        self.assertEqual(request.call_args_list[2].args[:2], ("DELETE", "https://intervals.icu/api/v1/events/one?force=true"))
+        self.assertEqual(request.call_args_list[0].args[3], headers)
+        self.assertEqual(request.call_args_list[1].args[3], headers)
+        self.assertEqual(request.call_args_list[2].kwargs, {"headers": headers, "service": "intervals"})
+
     def test_intervals_collection_rejects_repeated_full_page(self):
         client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         page = [{"id": f"activity-{index}"} for index in range(500)]
