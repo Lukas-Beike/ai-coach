@@ -1279,6 +1279,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Regressionstest für Fortsetzung nach Intervals-Fehler, explizite Callback-Grenze und unveränderte Read-only-Semantik ergänzt.
 - [x] Review ohne Findings; PR #248 per Auto-Squash gemergt (`cf9c925`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
 - [x] Validierung: vier schnelle Shards mit 76/75/75/75 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-sync-orchestration` und SQLCipher-Containerlauf mit 301 Tests erfolgreich.
+- [x] Der erste CI-Lauf hatte ausschließlich einen transienten Docker-Hub-HTTP-500 beim Base-Image; die fehlgeschlagenen Jobs wurden erneut ausgeführt und alle 15 Checks wurden erfolgreich. Statusdokumentation über PR #249 per Auto-Squash gemergt (`e9f25e8`).
 - [ ] Weitere Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
 **Quelle:** PWA-01, PWA-02
