@@ -59,6 +59,14 @@ from backend.coach.context import (
     compact_coach_local_planned_workouts as compact_coach_local_planned_workouts_value,
     compact_coach_planned_event as compact_coach_planned_event_value,
 )
+from backend.backup.export import (
+    application_state as export_application_state,
+    decode_payload as export_decode_payload,
+    iter_workout_drafts as export_workout_drafts,
+    iter_workout_library as export_workout_library,
+    manifest as export_manifest,
+    write_jsonl_rows as export_jsonl_rows,
+)
 
 try:
     from garminconnect import Garmin
@@ -11090,63 +11098,34 @@ PRIVACY_EXPORT_JSONL_FILES = {
 
 
 def _export_payload(value: Any) -> Any:
-    try:
-        decoded = json.loads(value)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return {}
-    return decoded
+    return export_decode_payload(value)
 
 
 def _export_jsonl_rows(archive: zipfile.ZipFile, name: str, rows: Any, deadline: float) -> None:
-    with archive.open(name, "w", force_zip64=True) as output:
-        for row in rows:
-            if time.monotonic() > deadline:
-                raise AppError(408, "Der Export überschreitet das Zeitlimit.")
-            output.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
+    export_jsonl_rows(
+        archive,
+        name,
+        rows,
+        deadline,
+        now=time.monotonic,
+        timeout_error=lambda: AppError(408, "Der Export überschreitet das Zeitlimit."),
+    )
 
 
 def _export_workout_drafts(db: Any) -> Any:
-    for row in db.execute(
-        "SELECT id, status, intervals_event_id, error, created_at, updated_at, payload "
-        "FROM workout_drafts ORDER BY created_at DESC LIMIT 50"
-    ):
-        payload = _export_payload(row["payload"])
-        if not isinstance(payload, dict):
-            payload = {}
-        yield {
-            "id": row["id"],
-            "status": row["status"],
-            "intervals_event_id": row["intervals_event_id"],
-            "error": row["error"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-            **payload,
-        }
+    yield from export_workout_drafts(db, decode=_export_payload)
 
 
 def _export_workout_library(db: Any) -> Any:
-    for row in db.execute(
-        "SELECT payload FROM workout_library "
-        "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT 1000"
-    ):
-        payload = _export_payload(row["payload"])
-        if isinstance(payload, dict):
-            yield payload
+    yield from export_workout_library(db, decode=_export_payload)
 
 
 def _export_application_state(db: Any) -> dict[str, Any]:
-    excluded_state = {"profile", "garmin_snapshot", WEATHER_CACHE_KEY}
-    application_state: dict[str, Any] = {}
-    for row in db.execute("SELECT key, value FROM kv ORDER BY key"):
-        key = str(row["key"])
-        if key in excluded_state or key.endswith("_running") or key.endswith("_status"):
-            continue
-        value = row["value"]
-        try:
-            application_state[key] = json.loads(value)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            application_state[key] = value
-    return application_state
+    return export_application_state(
+        db,
+        excluded_keys={"profile", "garmin_snapshot", WEATHER_CACHE_KEY},
+        decode=_export_payload,
+    )
 
 
 def _privacy_export_file() -> Path:
@@ -11243,15 +11222,13 @@ def _privacy_export_file() -> Path:
             archive.writestr(
                 "manifest.json",
                 json.dumps(
-                    {
-                        "format": "intervals-coach-privacy-export",
-                        "format_version": PRIVACY_EXPORT_FORMAT_VERSION,
-                        "schema_version": database_schema_version(db),
-                        "exported_at": utc_now(),
-                        "status": "complete",
-                        "categories": sorted(name.rsplit(".", 1)[0] for name in archive.namelist() if name != "manifest.json"),
-                        "jsonl_files": sorted(PRIVACY_EXPORT_JSONL_FILES),
-                    },
+                    export_manifest(
+                        archive.namelist(),
+                        schema_version=database_schema_version(db),
+                        exported_at=utc_now(),
+                        format_version=PRIVACY_EXPORT_FORMAT_VERSION,
+                        jsonl_files=PRIVACY_EXPORT_JSONL_FILES,
+                    ),
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ),
