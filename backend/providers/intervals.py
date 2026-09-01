@@ -6,10 +6,30 @@ from collections.abc import Callable, Mapping
 import hashlib
 import json
 from typing import Any
+from urllib.parse import urlencode
 
 
 JsonGetter = Callable[[str, dict[str, Any]], Any]
 ErrorFactory = Callable[[str], Exception]
+Request = Callable[..., Any]
+
+
+class IntervalsReadTransport:
+    """Build authenticated read requests without owning application state."""
+
+    def __init__(self, base: str, headers: Mapping[str, str], request: Request):
+        self._base = base
+        self._headers = headers
+        self._request = request
+
+    def get(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
+        query = "?" + urlencode(params, doseq=True) if params else ""
+        return self._request(
+            "GET",
+            self._base + path + query,
+            headers=self._headers,
+            service="intervals",
+        )
 
 
 def fetch_paged_collection(

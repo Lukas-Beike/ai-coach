@@ -41,7 +41,7 @@ from urllib.request import Request, urlopen
 from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
-from backend.providers.intervals import fetch_paged_collection
+from backend.providers.intervals import IntervalsReadTransport, fetch_paged_collection
 
 try:
     from garminconnect import Garmin
@@ -5341,12 +5341,16 @@ class IntervalsClient:
         credentials = base64.b64encode(f"API_KEY:{config.intervals_api_key}".encode()).decode()
         self.headers = {"Authorization": f"Basic {credentials}"}
         self.base = "https://intervals.icu/api/v1"
+        self._read_transport = IntervalsReadTransport(
+            self.base,
+            self.headers,
+            lambda *args, **kwargs: http_json(*args, **kwargs),
+        )
         self.pagination: dict[str, dict[str, Any]] = {}
         self._workout_folder_id: int | None = None
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        query = "?" + urlencode(params, doseq=True) if params else ""
-        return http_json("GET", self.base + path + query, headers=self.headers, service="intervals")
+        return self._read_transport.get(path, params)
 
     def get_paged_collection(
         self,
