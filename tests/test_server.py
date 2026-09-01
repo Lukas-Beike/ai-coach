@@ -175,10 +175,13 @@ class CoachTests(unittest.TestCase):
         return token
 
     def test_database_enables_foreign_keys_and_records_idempotent_migrations(self):
+        from backend import db as backend_db
+
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
             migrations = db.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
+            self.assertEqual(backend_db.schema_version(db), server.CURRENT_DATABASE_SCHEMA_VERSION)
         self.assertEqual([row["version"] for row in migrations], [1, 2])
         self.assertEqual(migrations[0]["name"], "legacy-schema-baseline")
         self.assertEqual(migrations[1]["name"], "public-calendar-foreign-key-cascade")

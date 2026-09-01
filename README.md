@@ -302,6 +302,13 @@ answer. `/api/readiness` is a separate infrastructure probe and returns HTTP
 `/data`, and the maintenance gate are all usable. Its response contains only
 safe booleans and status values, never paths, secrets, or athlete data.
 
+Backend modularization starts with dependency-light database primitives in
+`backend/db.py`; the HTTP application remains the compatibility boundary while
+repositories, providers, synchronization, coaching, backup, and HTTP routing
+are moved in separate cohesive steps. These modules are copied into the
+container as application code and do not change the SQLCipher, authentication,
+or persistence contracts.
+
 Optional Garmin Connect configuration:
 
 ```text
