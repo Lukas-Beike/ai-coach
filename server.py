@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
-from backend.db.repositories import ChatRepository, KeyValueRepository
+from backend.db.repositories import ChatRepository, CheckinRepository, KeyValueRepository
 from backend.db import schema_version as database_schema_version
 
 try:
@@ -1124,6 +1124,7 @@ def utc_now() -> str:
 
 KEY_VALUE_REPOSITORY = KeyValueRepository(utc_now)
 CHAT_REPOSITORY = ChatRepository(utc_now)
+CHECKIN_REPOSITORY = CheckinRepository(utc_now)
 
 
 def security_configuration_error() -> str | None:
@@ -2721,33 +2722,13 @@ def normalize_checkin(value: Any) -> dict[str, Any]:
 
 def list_checkins(limit: int = 30) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT checkin_date, soreness, stress, motivation, session_rpe, day_form, illness, pain, "
-            "available_minutes, availability_notes, notes, created_at, updated_at "
-            "FROM athlete_checkins ORDER BY checkin_date DESC LIMIT ?",
-            (max(1, min(int(limit), 365)),),
-        ).fetchall()
-    return [dict(row) for row in rows]
+        return CHECKIN_REPOSITORY.list(db, max(1, min(int(limit), 365)))
 
 
 def save_checkin(value: Any) -> dict[str, Any]:
     checkin = normalize_checkin(value)
-    now = utc_now()
     with DB_LOCK, database() as db:
-        db.execute(
-            "INSERT INTO athlete_checkins(checkin_date, soreness, stress, motivation, session_rpe, day_form, illness, pain, "
-            "available_minutes, availability_notes, notes, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(checkin_date) DO UPDATE SET soreness=excluded.soreness, stress=excluded.stress, "
-            "motivation=excluded.motivation, session_rpe=excluded.session_rpe, day_form=excluded.day_form, illness=excluded.illness, "
-            "pain=excluded.pain, available_minutes=excluded.available_minutes, "
-            "availability_notes=excluded.availability_notes, notes=excluded.notes, updated_at=excluded.updated_at",
-            (
-                checkin["checkin_date"], checkin["soreness"], checkin["stress"], checkin["motivation"],
-                checkin["session_rpe"], checkin["day_form"], checkin["illness"], checkin["pain"], checkin["available_minutes"],
-                checkin["availability_notes"], checkin["notes"], now, now,
-            ),
-        )
+        CHECKIN_REPOSITORY.upsert(db, checkin)
     saved = next((item for item in list_checkins(365) if item["checkin_date"] == checkin["checkin_date"]), checkin)
     return {"status": "ok", "checkin": saved}
 
