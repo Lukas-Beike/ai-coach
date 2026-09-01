@@ -497,6 +497,15 @@ validated restore action. Restoring requires the same `APP_PASSWORD` used by
 the backup database. Before replacement, the current database is retained as a
 `*.pre-restore-*` copy in `/data`. Keep both files protected.
 
+Database backups are checkpointed and downloaded in bounded file chunks. The
+privacy export is an incrementally written ZIP archive: large collections are
+JSONL entries and `manifest.json` records the export format, schema version,
+categories, and complete status. Temporary export files are removed after the
+download, including after a client disconnect. Export generation enforces a
+100 MB size limit, a 120-second time limit, and a free-space check before it
+starts. The archive is an intentional, athlete-readable export format; it is
+not a database copy.
+
 The login session has a fixed 30-day lifetime; its cookie `Max-Age` and the
 server-side expiry use the same duration. The cookie is protected with `HttpOnly`
 and `SameSite=Strict` attributes. Activity metadata is written at most once per

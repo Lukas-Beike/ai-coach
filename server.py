@@ -22,6 +22,7 @@ import threading
 import tempfile
 import time
 import uuid
+import zipfile
 from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -76,6 +77,10 @@ GITHUB_RELEASE_CACHE: dict[str, Any] = {"repository": "", "checked_at": 0.0, "st
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
+MAX_PRIVACY_EXPORT_BYTES = 100_000_000
+MIN_EXPORT_FREE_BYTES = 10_000_000
+EXPORT_TIME_LIMIT_SECONDS = 120
+STREAM_CHUNK_BYTES = 64 * 1024
 MAX_EXTERNAL_CALENDAR_BYTES = 5_000_000
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 DB_LOCK = threading.RLock()
@@ -10321,6 +10326,186 @@ def privacy_export() -> dict[str, Any]:
     }
 
 
+PRIVACY_EXPORT_FORMAT_VERSION = 1
+PRIVACY_EXPORT_JSONL_FILES = {
+    "competitions.jsonl",
+    "competition_sync_tombstones.jsonl",
+    "messages.jsonl",
+    "chat_tool_calls.jsonl",
+    "snapshots.jsonl",
+    "legacy_workout_drafts.jsonl",
+    "workout_library.jsonl",
+    "training_plans.jsonl",
+    "plan_adjustments.jsonl",
+}
+
+
+def _export_payload(value: Any) -> Any:
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return decoded
+
+
+def _export_jsonl_rows(archive: zipfile.ZipFile, name: str, rows: Any, deadline: float) -> None:
+    with archive.open(name, "w", force_zip64=True) as output:
+        for row in rows:
+            if time.monotonic() > deadline:
+                raise AppError(408, "Der Export überschreitet das Zeitlimit.")
+            output.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
+
+
+def _export_workout_drafts(db: Any) -> Any:
+    for row in db.execute(
+        "SELECT id, status, intervals_event_id, error, created_at, updated_at, payload "
+        "FROM workout_drafts ORDER BY created_at DESC LIMIT 50"
+    ):
+        payload = _export_payload(row["payload"])
+        if not isinstance(payload, dict):
+            payload = {}
+        yield {
+            "id": row["id"],
+            "status": row["status"],
+            "intervals_event_id": row["intervals_event_id"],
+            "error": row["error"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            **payload,
+        }
+
+
+def _export_workout_library(db: Any) -> Any:
+    for row in db.execute(
+        "SELECT payload FROM workout_library "
+        "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT 1000"
+    ):
+        payload = _export_payload(row["payload"])
+        if isinstance(payload, dict):
+            yield payload
+
+
+def _export_application_state(db: Any) -> dict[str, Any]:
+    excluded_state = {"profile", "garmin_snapshot", WEATHER_CACHE_KEY}
+    application_state: dict[str, Any] = {}
+    for row in db.execute("SELECT key, value FROM kv ORDER BY key"):
+        key = str(row["key"])
+        if key in excluded_state or key.endswith("_running") or key.endswith("_status"):
+            continue
+        value = row["value"]
+        try:
+            application_state[key] = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            application_state[key] = value
+    return application_state
+
+
+def _privacy_export_file() -> Path:
+    started = time.monotonic()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        database_size = DB_PATH.stat().st_size
+        free_bytes = shutil.disk_usage(DATA_DIR).free
+    except OSError as exc:
+        raise AppError(503, "Der Export-Speicher ist nicht verfügbar.") from exc
+    required_free = max(MIN_EXPORT_FREE_BYTES, min(MAX_PRIVACY_EXPORT_BYTES, database_size * 2))
+    if free_bytes < required_free:
+        raise AppError(507, "Für den Export ist nicht ausreichend freier Speicher verfügbar.")
+    descriptor, temporary_path = tempfile.mkstemp(prefix=".intervals-coach-export-", suffix=".zip", dir=DATA_DIR)
+    os.close(descriptor)
+    temporary = Path(temporary_path)
+    deadline = started + EXPORT_TIME_LIMIT_SECONDS
+    try:
+        with DB_LOCK, database() as db, zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+            archive.writestr("profile.json", json.dumps(get_profile(), ensure_ascii=False, separators=(",", ":")))
+            archive.writestr("application_state.json", json.dumps(_export_application_state(db), ensure_ascii=False, separators=(",", ":")))
+            _export_jsonl_rows(
+                archive,
+                "competitions.jsonl",
+                (dict(row) for row in db.execute(
+                    "SELECT id, name, event_date, start_date_local, sport, priority, category, distance, target, "
+                    "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
+                    "sync_state, sync_conflict, last_synced_at FROM competitions ORDER BY event_date, priority, name"
+                )),
+                deadline,
+            )
+            _export_jsonl_rows(
+                archive,
+                "competition_sync_tombstones.jsonl",
+                (dict(row) for row in db.execute("SELECT intervals_event_id, external_id, created_at FROM competition_sync_tombstones ORDER BY created_at")),
+                deadline,
+            )
+            _export_jsonl_rows(
+                archive,
+                "messages.jsonl",
+                (dict(row) for row in db.execute("SELECT role, content, created_at FROM messages ORDER BY id")),
+                deadline,
+            )
+            _export_jsonl_rows(
+                archive,
+                "chat_tool_calls.jsonl",
+                (dict(row) for row in db.execute("SELECT call_id, tool_name, result, created_at FROM chat_tool_calls ORDER BY created_at")),
+                deadline,
+            )
+            _export_jsonl_rows(
+                archive,
+                "snapshots.jsonl",
+                (_export_payload(row["payload"]) for row in db.execute("SELECT payload FROM snapshots ORDER BY id")),
+                deadline,
+            )
+            _export_jsonl_rows(archive, "legacy_workout_drafts.jsonl", _export_workout_drafts(db), deadline)
+            _export_jsonl_rows(archive, "workout_library.jsonl", _export_workout_library(db), deadline)
+            _export_jsonl_rows(
+                archive,
+                "training_plans.jsonl",
+                (dict(row) for row in db.execute(
+                    "SELECT id, name, goal, start_date, end_date, status, created_at, updated_at "
+                    "FROM training_plans ORDER BY created_at DESC LIMIT 30"
+                )),
+                deadline,
+            )
+            _export_jsonl_rows(
+                archive,
+                "plan_adjustments.jsonl",
+                (dict(row) for row in db.execute("SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at")),
+                deadline,
+            )
+            archive.writestr("local_feedback.json", json.dumps(local_feedback_context(), ensure_ascii=False, separators=(",", ":")))
+            archive.writestr("activity_feedback.json", json.dumps(activity_feedback_context(), ensure_ascii=False, separators=(",", ":")))
+            archive.writestr("planning.json", json.dumps(planning_state(), ensure_ascii=False, separators=(",", ":")))
+            archive.writestr("external_calendar.json", json.dumps(list_external_calendar_events(), ensure_ascii=False, separators=(",", ":")))
+            archive.writestr("public_calendar.json", json.dumps(public_calendar_state(db), ensure_ascii=False, separators=(",", ":")))
+            archive.writestr("garmin_snapshot.json", json.dumps(_export_payload(get_kv("garmin_snapshot", db)), ensure_ascii=False, separators=(",", ":")))
+            archive.writestr("weather_cache.json", json.dumps(_export_payload(get_kv(WEATHER_CACHE_KEY, db)), ensure_ascii=False, separators=(",", ":")))
+            if time.monotonic() > deadline:
+                raise AppError(408, "Der Export überschreitet das Zeitlimit.")
+            archive.writestr(
+                "manifest.json",
+                json.dumps(
+                    {
+                        "format": "intervals-coach-privacy-export",
+                        "format_version": PRIVACY_EXPORT_FORMAT_VERSION,
+                        "schema_version": database_schema_version(db),
+                        "exported_at": utc_now(),
+                        "status": "complete",
+                        "categories": sorted(name.rsplit(".", 1)[0] for name in archive.namelist() if name != "manifest.json"),
+                        "jsonl_files": sorted(PRIVACY_EXPORT_JSONL_FILES),
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            )
+        if temporary.stat().st_size > MAX_PRIVACY_EXPORT_BYTES:
+            raise AppError(413, "Der Export überschreitet das Größenlimit.")
+        return temporary
+    except Exception:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "schema_migrations": {"version", "name", "applied_at"},
     "kv": {"key", "value", "updated_at"},
@@ -10363,6 +10548,38 @@ def database_backup_bytes() -> bytes:
             return DB_PATH.read_bytes()
         except OSError as exc:
             raise AppError(500, "Die Datenbank konnte nicht als Backup gelesen werden.") from exc
+
+
+def stream_database_backup(handler: Any) -> None:
+    started = time.monotonic()
+    with DB_LOCK:
+        _checkpoint_database_locked()
+        try:
+            size = DB_PATH.stat().st_size
+            free_bytes = shutil.disk_usage(DATA_DIR).free
+        except OSError as exc:
+            raise AppError(503, "Der Backup-Speicher ist nicht verfügbar.") from exc
+        if size > MAX_BACKUP_BYTES:
+            raise AppError(413, "Das Datenbank-Backup überschreitet das Größenlimit.")
+        if free_bytes < max(MIN_EXPORT_FREE_BYTES, size):
+            raise AppError(507, "Für den Backup-Download ist nicht ausreichend freier Speicher verfügbar.")
+        handler.send_file_stream(
+            DB_PATH,
+            "application/octet-stream",
+            "intervals-coach-database.backup",
+            deadline=started + EXPORT_TIME_LIMIT_SECONDS,
+        )
+
+
+def stream_privacy_export(handler: Any) -> None:
+    temporary = _privacy_export_file()
+    handler.send_file_stream(
+        temporary,
+        "application/zip",
+        "intervals-coach-export.zip",
+        deadline=time.monotonic() + EXPORT_TIME_LIMIT_SECONDS,
+        cleanup=True,
+    )
 
 
 def restore_database_backup(payload: bytes) -> dict[str, Any]:
@@ -10754,13 +10971,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, diagnostic_report())
             elif path == "/api/privacy/export":
                 require_auth(self)
-                self.send_json(200, privacy_export(), {"Content-Disposition": "attachment; filename=intervals-coach-export.json"})
+                stream_privacy_export(self)
             elif path == "/api/privacy/delete/preview":
                 require_auth(self)
                 self.send_json(200, privacy_delete_preview())
             elif path == "/api/privacy/backup":
                 require_auth(self)
-                self.send_bytes(200, database_backup_bytes(), "application/octet-stream", {"Content-Disposition": "attachment; filename=intervals-coach-database.backup"})
+                stream_database_backup(self)
             elif path.startswith("/api/"):
                 raise AppError(404, "Nicht gefunden.")
             else:
@@ -11118,6 +11335,45 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(data)
         except self.client_disconnect_errors:
             self.log_client_disconnect()
+
+    def send_file_stream(
+        self,
+        path: Path,
+        content_type: str,
+        filename: str,
+        *,
+        deadline: float | None = None,
+        cleanup: bool = False,
+    ) -> None:
+        try:
+            size = path.stat().st_size
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.end_headers()
+            with path.open("rb") as source:
+                while True:
+                    if deadline is not None and time.monotonic() > deadline:
+                        LOGGER.warning("File stream exceeded time limit", extra={"event": "file_stream_timeout"})
+                        break
+                    chunk = source.read(STREAM_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except self.client_disconnect_errors:
+            self.log_client_disconnect()
+        except OSError:
+            LOGGER.warning("File stream failed", extra={"event": "file_stream_failed"}, exc_info=True)
+        finally:
+            if cleanup:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    LOGGER.warning("Temporary export cleanup failed", extra={"event": "export_cleanup_failed"})
 
     def send_bytes(self, status: int, data: bytes, content_type: str, headers: dict[str, str | list[str]] | None = None) -> None:
         self.send_response(status)
