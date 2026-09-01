@@ -424,8 +424,6 @@ h2 {
 .illness-pause-preview strong { color: #ffb1aa; }
 .illness-pause-preview label { display: flex; align-items: flex-start; gap: 8px; color: var(--ink); }
 .illness-pause-preview input { margin-top: 2px; }
-.weather-notice { margin: 0 0 12px; padding: 11px 13px; border: 1px solid rgba(52, 207, 161, .25); border-radius: 13px; color: var(--muted); background: rgba(52, 207, 161, .07); font-size: .72rem; line-height: 1.4; }
-.weather-notice.error { border-color: rgba(255, 159, 10, .45); background: rgba(255, 159, 10, .08); }
 .adaptive-planning-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 14px; padding: 12px 13px; border: 1px solid rgba(255, 69, 58, .5); border-radius: 14px; color: var(--ink); background: rgba(255, 69, 58, .1); box-shadow: var(--shadow-soft); }
 .today-status { min-height: 1.2em; margin: -5px 0 12px; color: var(--muted); font-size: .74rem; line-height: 1.4; }
 .today-status.working { color: var(--accent-bright); }

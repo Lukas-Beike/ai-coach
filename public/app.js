@@ -944,28 +944,6 @@ function weatherForDate(date) {
   return (state.data?.weather?.days || []).find((item) => item.date === date) || null;
 }
 
-function renderWeatherNotice(weather) {
-  const notice = $("#weatherNotice");
-  if (!notice) return;
-  notice.hidden = false;
-  notice.className = "weather-notice";
-  if (!weather?.configured) {
-    notice.textContent = "Wetterhinweise: Hinterlege im Profil einen Wetterort (Stadt oder PLZ).";
-    return;
-  }
-  if (weather.loading) {
-    notice.textContent = weather.message || "Wetterdaten werden nachgeladen.";
-    return;
-  }
-  if (weather.error && !weather.days?.length) {
-    notice.classList.add("error");
-    notice.textContent = weather.error;
-    return;
-  }
-  const location = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
-  notice.textContent = `${location ? `Wetter für ${location}` : "Wettervorhersage"} · ${weather.model || "Open-Meteo"} · Tageswerte bis 14 Tage · Zeitvorschläge bis 5 Tage · Quelle: Open-Meteo.com${weather.stale ? " · letzte verfügbare Daten" : ""}`;
-}
-
 function todayCard(title, className = "") {
   const card = document.createElement("section");
   card.className = `today-card${className ? ` ${className}` : ""}`;
@@ -1612,7 +1590,6 @@ function renderLocalPlanningActions(event, body) {
 function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContext = []) {
   setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
-  renderWeatherNotice(state.data?.weather);
   const root = $("#plannedCalendar");
   state.data.daily_planning_context = Array.isArray(dailyPlanningContext) ? dailyPlanningContext : [];
   root.querySelectorAll("details.planned-week").forEach((week) => state.plannedWeekOpen.set(week.dataset.week, week.open));
