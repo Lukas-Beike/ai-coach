@@ -1141,7 +1141,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 273 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-chat-repository` erfolgreich.
 - [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
-### - [ ] FT-028 – PWA-/Notification-Versprechen präzisieren und Produktentscheidung treffen
+### - [x] FT-028 – PWA-/Notification-Versprechen präzisieren und Produktentscheidung treffen
 
 **Fortschritt FT-027 - Profile-Repository**
 
@@ -1242,18 +1242,29 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Aktuellen Zustand klar benennen: Offline-Shell, keine vollständige Offline-Datenansicht, kein verlässlicher Background-Push.
-- [ ] Offline-/Reconnect-Status in der UI anzeigen.
-- [ ] Keine authentisierten Athletendaten still im Service Worker cachen.
-- [ ] Produktentscheidung dokumentieren: read-only Offlinecache, lokale Queue, echter Web Push oder bewusst kein Ausbau.
-- [ ] Bei Ausbau Threat Model, Browserverschlüsselung, Opt-in/Widerruf und Notification-Inhalte vor Implementierung festlegen.
-- [ ] Service-Worker-Upgrade, Cachebereinigung und Offlinefallback testen.
+- [x] Aktuellen Zustand klar benennen: Offline-Shell, keine vollständige Offline-Datenansicht, kein verlässlicher Background-Push.
+- [x] Offline-/Reconnect-Status in der UI anzeigen.
+- [x] Keine authentisierten Athletendaten still im Service Worker cachen.
+- [x] Produktentscheidung dokumentieren: bewusster Ausbauverzicht auf Offlinecache, lokale Queue und Web Push.
+- [x] Für einen späteren Ausbau bleiben Threat Model, Browserverschlüsselung, Opt-in/Widerruf und Notification-Inhalte als Vorbedingungen dokumentiert.
+- [x] Service-Worker-Upgrade, Cachebereinigung und Offlinefallback testen.
 
 **Abnahmekriterien**
 
-- [ ] Nutzer kann Offline-Shell nicht mit vollständiger Offlinefunktion verwechseln.
-- [ ] Notification-Text behauptet keinen Hintergrund-Push, solange keiner existiert.
-- [ ] Keine sensible API-Antwort liegt unbeabsichtigt im Cache Storage.
+- [x] Nutzer kann Offline-Shell nicht mit vollständiger Offlinefunktion verwechseln.
+- [x] Notification-Text behauptet keinen Hintergrund-Push, solange keiner existiert.
+- [x] Keine sensible API-Antwort liegt unbeabsichtigt im Cache Storage.
+
+**Handover FT-028**
+
+- **Status:** abgeschlossen.
+- **Branch und Commit:** `fix/ft-028-pwa-promises`, Implementierung `110b3c0`; PR #224 per Auto-Squash nach `develop` gemergt (`85d139a`).
+- **Geänderte Dateien:** `public/app.js`, `public/index.html`, `public/styles.css`, `public/service-worker.js`, `README.md`, `tests/test_server.py`.
+- **Verhaltensänderung:** Die Oberfläche zeigt Offline-/Reconnect-Zustand explizit und beschränkt die Erwartung auf bereits geladene Daten. Der Service Worker cached weiterhin keine API-Antworten. Notifications bleiben opt-in und werden nicht als garantierter Background-Push dargestellt; Offlinequeue und Offline-Datencache werden bewusst nicht ausgebaut.
+- **Validierung:** Vier schnelle Shards grün (71/71/71/70 Tests); drei gezielte PWA-/Asset-Tests; `python -m py_compile server.py tests/test_server.py tests/run_tests.py`; `git diff --check`; `docker build -t ai-coach:ft028-pwa-promises .`; PR #224 vollständig grün inklusive Browser-Smoke/Accessibility, vier Test-Shards, Syntax, Validate, Analyse und CodeQL.
+- **Manuelle Prüfung:** Verpflichtender GitHub-Browser-Smoke-/Accessibility-Lauf erfolgreich; Offline-/Reconnect-Hinweis ist semantisch als Statusmeldung ausgezeichnet. Lokale JavaScript-Syntaxprüfung war mangels Node.js nicht verfügbar.
+- **Offene Risiken:** Ein echter Offline-Datencache, eine lokale Schreibqueue oder garantierter Web Push bleiben bewusst außerhalb des Umfangs und erfordern eine separate Datenschutz-/Threat-Model-Entscheidung.
+- **Folgetasks:** FT-029 ist als nächstes Paket vorgesehen; FT-030 bis FT-032 bleiben separate Pakete.
 
 ### - [ ] FT-029 – Testlauf, Supply Chain und Containerhärtung vervollständigen
 
