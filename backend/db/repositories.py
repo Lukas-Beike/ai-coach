@@ -25,6 +25,21 @@ class KeyValueRepository:
         )
 
 
+class ProfileRepository:
+    """Persist the serialized athlete profile through the key/value store."""
+
+    _KEY = "profile"
+
+    def __init__(self, key_value: KeyValueRepository):
+        self._key_value = key_value
+
+    def get(self, db: Any) -> str | None:
+        return self._key_value.get(db, self._KEY)
+
+    def set(self, db: Any, payload: str) -> None:
+        self._key_value.set(db, self._KEY, payload)
+
+
 class ChatRepository:
     """Persist and retrieve local chat messages without owning a connection."""
 

@@ -290,6 +290,14 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(rows[0]["notes"], "updated")
         self.assertEqual(rows[0]["created_at"], "2026-09-01T00:00:00+00:00")
 
+    def test_profile_repository_preserves_serialized_profile_contract(self):
+        repository = server.ProfileRepository(server.KeyValueRepository(lambda: "2026-09-01T00:00:00+00:00"))
+        payload = json.dumps({"name": "Ada", "timezone": "Europe/Berlin"}, ensure_ascii=False)
+        with server.database() as db:
+            self.assertIsInstance(repository.get(db), str)
+            repository.set(db, payload)
+            self.assertEqual(repository.get(db), payload)
+
     def test_activity_feedback_repository_preserves_upsert_delete_and_order_contract(self):
         repository = server.ActivityFeedbackRepository(lambda: "2026-09-01T00:00:00+00:00")
         older = {"activity_id": "activity-old", "activity_name": "Run", "activity_date": "2026-08-30", "notes": "older"}
