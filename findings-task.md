@@ -1309,6 +1309,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 76 Tests je Shard, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-backup` und SQLCipher-Containerlauf mit 304 Tests erfolgreich.
 - [ ] Weitere Backup-, Coach-, HTTP-API-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - HTTP-API-Antworten**
+
+- [x] Zustandsfreie JSON-, Header- und Session-Cookie-Formatierung als `backend/http_api/responses.py` abgegrenzt.
+- [x] Request-Handler, Authentifizierung, CSRF, Session-State, Socket-I/O sowie Sicherheits- und Cache-Header-Semantik unverändert erhalten.
+- [x] Regressionen für dependency-light Modulgrenze, UTF-8-JSON, wiederholte Header und Secure-/Clear-Cookie-Verträge ergänzt.
+- [x] Review ohne Findings; PR #257 per Auto-Squash gemergt (`07b34e9`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 77/76/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-http-api` und SQLCipher-Containerlauf mit 305 Tests erfolgreich.
+- [ ] Weitere HTTP-API-, Coach-, Backup-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
