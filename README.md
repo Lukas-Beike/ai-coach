@@ -279,7 +279,7 @@ APP_PASSWORD=replace-with-at-least-12-random-characters
 ```
 
 `APP_PASSWORD` protects the web interface and all API endpoints except the
-health check, login, and authentication-status endpoints. The same password
+liveness/readiness probes, login, and authentication-status endpoints. The same password
 is used as the SQLCipher database key. It is never stored by the application
 and cannot be recovered if lost. The password must be at least 12 characters
 long.
@@ -295,6 +295,12 @@ foreign keys on every connection. Existing orphaned relations or an unknown
 schema version stop startup and require the documented restore workflow; the
 database file is not replaced automatically. The public-calendar candidate
 relation explicitly cascades when its source is deleted.
+
+`/api/health` is a liveness probe: it only confirms that the HTTP process can
+answer. `/api/readiness` is a separate infrastructure probe and returns HTTP
+503 until a harmless database read, the current schema, a temporary write in
+`/data`, and the maintenance gate are all usable. Its response contains only
+safe booleans and status values, never paths, secrets, or athlete data.
 
 Optional Garmin Connect configuration:
 
@@ -509,7 +515,10 @@ not a database copy.
 The login session has a fixed 30-day lifetime; its cookie `Max-Age` and the
 server-side expiry use the same duration. The cookie is protected with `HttpOnly`
 and `SameSite=Strict` attributes. Activity metadata is written at most once per
-five minutes, while expired sessions are cleaned up in bounded periodic batches.
+five minutes, while expired sessions and stale in-memory rate-limit buckets are
+cleaned up periodically in bounded batches. Synchronization logs correlate a
+technical operation ID across trigger, provider, phase, duration, counts, and
+safe error codes; they do not log provider payloads or athlete content.
 For HTTPS reverse-proxy deployments, set
 `COOKIE_SECURE=true`; this adds the `Secure` attribute to the session and CSRF
 cookies. Keep it `false` for the documented local HTTP development flow.
