@@ -179,6 +179,7 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM plan_adjustments")
             db.execute("DELETE FROM coach_action_proposals")
             db.execute("DELETE FROM change_history")
+            db.execute("DELETE FROM provider_refresh_history")
             db.execute("DELETE FROM public_event_candidates")
             db.execute("DELETE FROM public_event_sources")
             db.execute("DELETE FROM external_calendar_events")
@@ -204,14 +205,15 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
             migrations = db.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
             self.assertEqual(backend_db.schema_version(db), server.CURRENT_DATABASE_SCHEMA_VERSION)
-        self.assertEqual([row["version"] for row in migrations], [1, 2, 3])
+        self.assertEqual([row["version"] for row in migrations], [1, 2, 3, 4])
         self.assertEqual(migrations[0]["name"], "legacy-schema-baseline")
         self.assertEqual(migrations[1]["name"], "public-calendar-foreign-key-cascade")
         self.assertEqual(migrations[2]["name"], "local-change-history")
+        self.assertEqual(migrations[3]["name"], "provider-refresh-history")
 
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 3)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 4)
 
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = server.utc_now()
@@ -713,7 +715,7 @@ class CoachTests(unittest.TestCase):
         with server.DB_LOCK, server.database() as db:
             for table in expected_tables - {"kv"}:
                 self.assertEqual(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"], 0)
-            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 3)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 4)
 
     def test_weather_refresh_rechecks_adaptive_planning(self):
         server.save_profile({"weather_location": "Berlin"})
@@ -1077,15 +1079,15 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=134', index)
-        self.assertIn('/navigation.js?v=134', index)
-        self.assertIn('/state.js?v=134', index)
-        self.assertIn('/views.js?v=134', index)
-        self.assertIn('/app.js?v=134', index)
-        self.assertIn('intervals-coach-v134', service_worker)
-        self.assertIn('"/navigation.js?v=134"', service_worker)
-        self.assertIn('"/state.js?v=134"', service_worker)
-        self.assertIn('"/views.js?v=134"', service_worker)
+        self.assertIn('/api.js?v=135', index)
+        self.assertIn('/navigation.js?v=135', index)
+        self.assertIn('/state.js?v=135', index)
+        self.assertIn('/views.js?v=135', index)
+        self.assertIn('/app.js?v=135', index)
+        self.assertIn('intervals-coach-v135', service_worker)
+        self.assertIn('"/navigation.js?v=135"', service_worker)
+        self.assertIn('"/state.js?v=135"', service_worker)
+        self.assertIn('"/views.js?v=135"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('window.addEventListener("offline"', app)
@@ -4483,13 +4485,13 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=134"', source)
-        self.assertIn('"/navigation.js?v=134"', source)
-        self.assertIn('"/state.js?v=134"', source)
-        self.assertIn('"/views.js?v=134"', source)
-        self.assertIn('"/app.js?v=134"', source)
-        self.assertIn('"/icon.svg?v=134"', source)
-        self.assertIn('"/styles.css?v=134"', source)
+        self.assertIn('"/api.js?v=135"', source)
+        self.assertIn('"/navigation.js?v=135"', source)
+        self.assertIn('"/state.js?v=135"', source)
+        self.assertIn('"/views.js?v=135"', source)
+        self.assertIn('"/app.js?v=135"', source)
+        self.assertIn('"/icon.svg?v=135"', source)
+        self.assertIn('"/styles.css?v=135"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -5164,6 +5166,59 @@ class CoachTests(unittest.TestCase):
             server.execute_coach_action(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
         self.assertEqual(conflict.exception.status, 409)
         self.assertEqual(server.get_workout_library()[0]["name"], "Recovery")
+
+    def test_provider_freshness_distinguishes_never_loaded_and_stale_last_good(self):
+        config = replace(
+            server.CONFIG,
+            intervals_api_key="fake-intervals-key",
+            garmin_fixture_path="",
+            garmin_email="",
+            garmin_tokenstore=str(self._class_data_dir / "missing-garmin-tokens"),
+            calendar_ical_url="",
+        )
+        with patch.object(server, "CONFIG", config):
+            server.save_profile({"weather_location": "Berlin"})
+            initial = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            self.assertEqual(initial[("intervals", "activities")]["state"], "never_loaded")
+            self.assertEqual(initial[("weather", "forecast")]["state"], "never_loaded")
+            refresh_id = server._provider_refresh_start("intervals", "activities", "operation-test", "manual")
+            server._provider_refresh_finish(refresh_id, "error", "failed", error_code="network_error")
+            failed = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            self.assertEqual(failed[("intervals", "activities")]["state"], "error")
+            self.assertEqual(failed[("intervals", "activities")]["error_code"], "network_error")
+            self.assertTrue(failed[("intervals", "activities")]["next_retry_at"])
+            refresh_id = server._provider_refresh_start("intervals", "activities", "operation-test-2", "manual")
+            server._provider_refresh_finish(refresh_id, "success", "complete")
+            with server.DB_LOCK, server.database() as db:
+                stale_at = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+                db.execute(
+                    "UPDATE provider_refresh_history SET started_at=?, finished_at=? WHERE id=?",
+                    (stale_at, stale_at, refresh_id),
+                )
+            stale = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            self.assertEqual(stale[("intervals", "activities")]["state"], "stale")
+            self.assertTrue(stale[("intervals", "activities")]["has_last_good"])
+
+    def test_provider_refresh_history_is_bounded_and_diagnostic_safe(self):
+        for index in range(server.PROVIDER_REFRESH_MAX_ROWS + 5):
+            refresh_id = server._provider_refresh_start("garmin", "data", f"operation-{index}", "manual")
+            server._provider_refresh_finish(refresh_id, "success", "complete")
+        with server.DB_LOCK, server.database() as db:
+            count = db.execute("SELECT COUNT(*) AS count FROM provider_refresh_history").fetchone()["count"]
+        self.assertEqual(count, server.PROVIDER_REFRESH_MAX_ROWS)
+        report = server.diagnostic_report()
+        self.assertIn("provider_freshness", report)
+        self.assertNotIn("operation-", json.dumps(report))
+
+    def test_provider_refresh_ui_exposes_safe_retry_and_versioned_assets(self):
+        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        app = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="providerFreshnessTimeline"', index)
+        self.assertIn("function renderProviderFreshness(data)", app)
+        self.assertIn("async function retryProvider(provider, button)", app)
+        self.assertIn('provider === "intervals"', app)
+        self.assertIn('provider === "weather"', app)
+        self.assertIn('v=135', index)
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=134" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=134">
+  <link rel="icon" href="/icon.svg?v=135" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=135">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -235,6 +235,10 @@
             <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="30"><small>-1 = alle verfügbaren Daten</small></label><div class="connection-actions"><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine erscheinen im Tab „Plan“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
           </div>
+          <section class="provider-freshness" aria-labelledby="providerFreshnessTitle">
+            <div class="settings-section-heading"><div><h3 id="providerFreshnessTitle">Datenfrische &amp; Retry-Verlauf</h3><p>Nur technische Zeitpunkte, Phasen und sichere Fehlerklassen; Providerantworten und private URLs werden nicht gespeichert.</p></div></div>
+            <div id="providerFreshnessTimeline" class="provider-freshness-list" aria-live="polite">Status wird geladen…</div>
+          </section>
           <p class="fine-print settings-message">Zugangsdaten und die Athlete ID müssen über Container-Umgebungsvariablen gesetzt werden (Unraid: Docker-Template &rarr; Environment variables). Erforderlich: <code>OPENAI_API_KEY</code>, <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code>; für Garmin zusätzlich <code>GARMIN_EMAIL</code>, <code>GARMIN_PASSWORD</code> und <code>GARMINTOKENS</code> (z. B. <code>/data/garmin_tokens</code>). Nach Änderungen den Container in Unraid neu erstellen.</p>
           <p id="garminDetail" class="fine-print settings-message"></p>
           <p class="fine-print settings-message">Wetterdaten: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a> · Lizenz: CC BY 4.0.</p>
@@ -365,10 +369,10 @@
       </div>
     </div>
   </dialog>
-  <script src="/api.js?v=134" defer></script>
-  <script src="/navigation.js?v=134" defer></script>
-  <script src="/state.js?v=134" defer></script>
-  <script src="/views.js?v=134" defer></script>
-  <script src="/app.js?v=134" defer></script>
+  <script src="/api.js?v=135" defer></script>
+  <script src="/navigation.js?v=135" defer></script>
+  <script src="/state.js?v=135" defer></script>
+  <script src="/views.js?v=135" defer></script>
+  <script src="/app.js?v=135" defer></script>
 </body>
 </html>

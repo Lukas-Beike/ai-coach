@@ -877,3 +877,32 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   justify-content: space-between;
   align-items: baseline;
 }
+
+.provider-freshness {
+  margin-top: 1rem;
+}
+
+.provider-freshness-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.provider-freshness-item {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.7rem;
+  border: 1px solid var(--line, #d9e0e8);
+  border-radius: 0.7rem;
+}
+
+.provider-freshness-header {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.provider-freshness-meta {
+  color: var(--muted, #667085);
+  font-size: 0.9rem;
+}

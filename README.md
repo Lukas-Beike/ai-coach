@@ -243,6 +243,16 @@ status poll at a time, coordinates visible tabs through a short-lived local
 lease, pauses polling while hidden or offline, and reloads only domains whose
 state version changed after completion.
 
+The connections view shows a bounded, sanitized freshness timeline for
+Intervals.icu, Garmin, Open-Meteo, and the read-only shared calendar. It
+separates never-loaded, fresh, partial, stale-but-usable, and failed states,
+records only technical timestamps/phases/error classes, and calculates a
+bounded retry time after transient failures. Retry buttons are limited to the
+corresponding read-only provider path; competition and workout-library writes
+remain separate explicit actions. The same safe freshness metadata is included
+in the diagnostics report. The timeline retains at most 200 attempts for 30
+days and never stores provider responses or calendar URLs.
+
 ## Target competitions and Intervals.icu
 
 Target competitions are entered manually in the profile with the Intervals.icu

@@ -1216,7 +1216,28 @@ def migrate_plaintext_database() -> None:
 # The outer caller still owns DB_LOCK; nested database() calls only reuse it.
 DATABASE_CONTEXT: ContextVar[Any | None] = ContextVar("database_context", default=None)
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_context", default=None)
-CURRENT_DATABASE_SCHEMA_VERSION = 3
+CURRENT_DATABASE_SCHEMA_VERSION = 4
+
+PROVIDER_REFRESH_RETENTION_DAYS = 30
+PROVIDER_REFRESH_MAX_ROWS = 200
+PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
+PROVIDER_REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
+PROVIDER_REFRESH_STALE_SECONDS = {
+    ("intervals", "activities"): 48 * 60 * 60,
+    ("intervals", "competitions"): 48 * 60 * 60,
+    ("intervals", "performance"): 48 * 60 * 60,
+    ("garmin", "data"): 48 * 60 * 60,
+    ("weather", "forecast"): WEATHER_CACHE_SECONDS if "WEATHER_CACHE_SECONDS" in globals() else 3 * 60 * 60,
+    ("calendar", "events"): 48 * 60 * 60,
+}
+PROVIDER_REFRESH_LABELS = {
+    ("intervals", "activities"): "Intervals.icu · Training",
+    ("intervals", "competitions"): "Intervals.icu · Wettkämpfe",
+    ("intervals", "performance"): "Intervals.icu · Leistung",
+    ("garmin", "data"): "Garmin",
+    ("weather", "forecast"): "Open-Meteo",
+    ("calendar", "events"): "Gemeinsamer Kalender",
+}
 
 CHANGE_HISTORY_RETENTION_DAYS = 180
 CHANGE_HISTORY_MAX_ROWS = 500
@@ -1324,7 +1345,7 @@ def observed_operation(provider: str, reason: Any = "background", operation_id: 
         OPERATION_CONTEXT.reset(token)
 
 
-def observed_sync(provider: str):
+def observed_sync(provider: str, area: str = "default"):
     """Correlate a sync function and its provider calls with one operation."""
     def decorator(function: Any) -> Any:
         @wraps(function)
@@ -1334,7 +1355,15 @@ def observed_sync(provider: str):
                 reason = args[0]
             operation_id = kwargs.get("operation_id")
             with observed_operation(provider, reason, operation_id) as scope:
-                result = function(*args, **kwargs)
+                refresh_id = _provider_refresh_start(provider, area, scope["operation_id"], scope["trigger"])
+                try:
+                    result = function(*args, **kwargs)
+                except Exception as exc:
+                    _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
+                    raise
+                result_status = result.get("status") if isinstance(result, dict) else None
+                refresh_status = "skipped" if result_status == "not_configured" else "partial" if result_status == "partial" else "success"
+                _provider_refresh_finish(refresh_id, refresh_status, "complete")
                 log_operation_event(
                     "operation_count", scope["operation_id"], scope["trigger"],
                     provider, "complete", scope["started"], count=operation_result_count(result),
@@ -1575,6 +1604,21 @@ def initialise_database() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_change_history_created_at ON change_history(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_change_history_entity ON change_history(entity_type, entity_id, created_at DESC);
+            CREATE TABLE IF NOT EXISTS provider_refresh_history (
+                id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                area TEXT NOT NULL,
+                operation_id TEXT NOT NULL,
+                trigger TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                phase TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error_code TEXT,
+                next_retry_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_provider_refresh_created_at ON provider_refresh_history(started_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_provider_refresh_area ON provider_refresh_history(provider, area, started_at DESC);
             CREATE TABLE IF NOT EXISTS public_event_sources (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -1852,8 +1896,181 @@ def initialise_database() -> None:
                 raise
         if migration_version < 3:
             _record_database_migration(db, 3, "local-change-history")
+        if migration_version < 4:
+            _record_database_migration(db, 4, "provider-refresh-history")
         if _foreign_key_violations(db):
             raise RuntimeError("Die Datenbank enthält verwaiste Fremdschlüssel-Datensätze; Restore erforderlich.")
+
+
+def _provider_refresh_cleanup(db: Any) -> None:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=PROVIDER_REFRESH_RETENTION_DAYS)).isoformat()
+    db.execute("DELETE FROM provider_refresh_history WHERE started_at < ?", (cutoff,))
+    db.execute(
+        "DELETE FROM provider_refresh_history WHERE id NOT IN "
+        "(SELECT id FROM provider_refresh_history ORDER BY started_at DESC LIMIT ?)",
+        (PROVIDER_REFRESH_MAX_ROWS,),
+    )
+
+
+def _provider_refresh_start(provider: str, area: str, operation_id: str, trigger: str) -> str:
+    refresh_id = uuid.uuid4().hex
+    with DB_LOCK, database() as db:
+        _provider_refresh_cleanup(db)
+        db.execute(
+            "INSERT INTO provider_refresh_history(id, provider, area, operation_id, trigger, started_at, phase, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'queued', 'running')",
+            (refresh_id, provider, area, operation_id, trigger, utc_now()),
+        )
+    return refresh_id
+
+
+def _provider_refresh_retry_at(
+    db: Any,
+    provider: str,
+    area: str,
+    current_error_code: str | None = None,
+) -> str | None:
+    rows = db.execute(
+        "SELECT status, error_code FROM provider_refresh_history "
+        "WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 20",
+        (provider, area),
+    ).fetchall()
+    failures = 1 if current_error_code else 0
+    if current_error_code in {"auth_required", "invalid_configuration"}:
+        return None
+    for row in rows:
+        if row["status"] in {"success", "partial", "skipped"}:
+            break
+        if row["status"] != "error":
+            continue
+        if row["error_code"] in {"auth_required", "invalid_configuration"}:
+            return None
+        failures += 1
+    if not failures:
+        return None
+    delay = min(PROVIDER_REFRESH_RETRY_BASE_SECONDS * (2 ** min(failures - 1, 5)), PROVIDER_REFRESH_RETRY_MAX_SECONDS)
+    return (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
+
+
+def _provider_refresh_finish(
+    refresh_id: str,
+    status: str,
+    phase: str,
+    *,
+    error_code: str | None = None,
+) -> None:
+    finished_at = utc_now()
+    with DB_LOCK, database() as db:
+        row = db.execute(
+            "SELECT provider, area FROM provider_refresh_history WHERE id=?",
+            (refresh_id,),
+        ).fetchone()
+        if not row:
+            return
+        next_retry_at = _provider_refresh_retry_at(db, row["provider"], row["area"], error_code) if status == "error" else None
+        db.execute(
+            "UPDATE provider_refresh_history SET finished_at=?, phase=?, status=?, error_code=?, next_retry_at=? WHERE id=?",
+            (finished_at, phase, status, error_code, next_retry_at, refresh_id),
+        )
+        _provider_refresh_cleanup(db)
+
+
+def _provider_refresh_error_code(error: BaseException) -> str:
+    reason = str(getattr(error, "reason", "") or "").casefold()
+    status = getattr(error, "status", None)
+    message = str(getattr(error, "message", "") or "").casefold()
+    if status == 429 or "rate" in reason or "rate limit" in message:
+        return "rate_limited"
+    if status in {401, 403} or any(token in reason for token in ("auth", "unauthorized", "forbidden")) or any(code in message for code in ("http 401", "http 403")):
+        return "auth_required"
+    if status == 400 or "configur" in message or "not_configured" in reason:
+        return "invalid_configuration"
+    if "network" in reason or isinstance(error, TimeoutError):
+        return "network_error"
+    return "provider_error"
+
+
+def provider_freshness_state() -> list[dict[str, Any]]:
+    fallbacks = {
+        ("intervals", "activities"): get_kv("last_sync_at"),
+        ("intervals", "competitions"): get_kv("last_competition_sync_at"),
+        ("intervals", "performance"): get_kv("last_performance_refresh_at"),
+        ("garmin", "data"): get_kv("last_garmin_sync_at"),
+        ("weather", "forecast"): None,
+        ("calendar", "events"): get_kv("last_external_calendar_sync_at"),
+    }
+    fallback_errors = {
+        ("intervals", "activities"): get_kv("last_sync_error"),
+        ("intervals", "competitions"): get_kv("last_competition_sync_error"),
+        ("intervals", "performance"): get_kv("last_performance_error"),
+        ("garmin", "data"): get_kv("last_garmin_error"),
+        ("weather", "forecast"): get_kv(WEATHER_FAILURE_KEY),
+        ("calendar", "events"): get_kv("last_external_calendar_sync_error"),
+    }
+    try:
+        cached_weather = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
+        if isinstance(cached_weather, dict):
+            fallbacks[("weather", "forecast")] = cached_weather.get("fetched_at")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    configured = {
+        ("intervals", "activities"): bool(CONFIG.intervals_api_key),
+        ("intervals", "competitions"): bool(CONFIG.intervals_api_key),
+        ("intervals", "performance"): bool(CONFIG.intervals_api_key),
+        ("garmin", "data"): bool(CONFIG.garmin_fixture_path or CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()),
+        ("weather", "forecast"): bool(get_profile().get("weather_location")),
+        ("calendar", "events"): bool(CONFIG.calendar_ical_url),
+    }
+    result: list[dict[str, Any]] = []
+    with DB_LOCK, database() as db:
+        _provider_refresh_cleanup(db)
+        for key, label in PROVIDER_REFRESH_LABELS.items():
+            provider, area = key
+            row = db.execute(
+                "SELECT * FROM provider_refresh_history WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 1",
+                (provider, area),
+            ).fetchone()
+            last_success = db.execute(
+                "SELECT finished_at FROM provider_refresh_history WHERE provider=? AND area=? AND status IN ('success','partial') "
+                "ORDER BY finished_at DESC LIMIT 1",
+                (provider, area),
+            ).fetchone()
+            row = dict(row) if row else None
+            fallback = fallbacks[key]
+            fallback_error = bool(fallback_errors[key])
+            last_attempt = row.get("started_at") if row else fallback
+            last_good = (last_success["finished_at"] if last_success else None) or fallback
+            state = "not_configured" if not configured[key] else "never_loaded"
+            if configured[key] and row and row["status"] == "running":
+                state = "syncing"
+            elif configured[key] and row and row["status"] == "error":
+                state = "stale" if last_good else "error"
+            elif configured[key] and row and row["status"] == "partial":
+                state = "partial"
+            elif configured[key] and last_good:
+                try:
+                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_good.replace("Z", "+00:00"))).total_seconds()
+                except (TypeError, ValueError):
+                    age = float("inf")
+                state = "stale" if age > PROVIDER_REFRESH_STALE_SECONDS[key] else "fresh"
+            elif configured[key] and fallback_error:
+                state = "stale" if last_good else "error"
+            result.append({
+                "provider": provider,
+                "area": area,
+                "label": label,
+                "configured": configured[key],
+                "read_only": key != ("intervals", "competitions"),
+                "state": state,
+                "phase": row.get("phase") if row else None,
+                "last_attempt_at": last_attempt,
+                "last_success_at": last_good,
+                "error_code": row.get("error_code") if row and row["status"] == "error" else "provider_error" if fallback_error else None,
+                "next_retry_at": row.get("next_retry_at") if row else None,
+                "stale": state == "stale",
+                "has_last_good": bool(last_good),
+            })
+    return result
 
 
 def _audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:
@@ -2747,7 +2964,7 @@ def persist_garmin_error(message: Any, source: str = "sync") -> None:
     set_kv("last_garmin_error", json.dumps([{"source": source, "message": safe_message}], ensure_ascii=False))
 
 
-@observed_sync("garmin")
+@observed_sync("garmin", "data")
 @maintenance_operation
 @garmin_operation
 def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "background") -> dict[str, Any]:
@@ -3706,7 +3923,7 @@ def external_calendar_state() -> dict[str, Any]:
     }
 
 
-@observed_sync("calendar")
+@observed_sync("calendar", "events")
 @maintenance_operation
 def sync_external_calendar(reason: str = "manual", operation_id: str | None = None) -> dict[str, Any]:
     if not CONFIG.calendar_ical_url:
@@ -4500,7 +4717,7 @@ def competition_sync_preview() -> dict[str, Any]:
         COMPETITION_SYNC_LOCK.release()
 
 
-@observed_sync("intervals")
+@observed_sync("intervals", "competitions")
 @maintenance_operation
 @intervals_operation
 def sync_competitions(
@@ -5261,7 +5478,13 @@ def _fetch_weather_forecast(query: str) -> dict[str, Any]:
     return {"query": query[:200], "location": location, "model": model, "forecast": forecast, "fetched_at": utc_now()}
 
 
-def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = True, force: bool = False) -> dict[str, Any]:
+def weather_state(
+    planned: list[dict[str, Any]] | None = None,
+    refresh: bool = True,
+    force: bool = False,
+    *,
+    track_refresh: bool = True,
+) -> dict[str, Any]:
     query = get_profile().get("weather_location", "").strip()[:200]
     if not query:
         return {"configured": False, "provider": "Open-Meteo", "days": [], "recommendations": [], "message": "Hinterlege im Profil einen Wetterort (Stadt oder PLZ)."}
@@ -5296,6 +5519,13 @@ def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = T
         if retry_wait > 0 and not force:
             error = "Wetterdaten konnten nach einem Fehler noch nicht erneut geladen werden."
         else:
+            refresh_id = None
+            if track_refresh:
+                operation = OPERATION_CONTEXT.get() or {}
+                refresh_id = _provider_refresh_start(
+                    "weather", "forecast", operation.get("operation_id") or uuid.uuid4().hex,
+                    operation.get("trigger") or operation_trigger("background"),
+                )
             try:
                 with WEATHER_LOCK:
                     cached = _fetch_weather_forecast(query)
@@ -5303,13 +5533,19 @@ def weather_state(planned: list[dict[str, Any]] | None = None, refresh: bool = T
                     set_kv(WEATHER_FAILURE_KEY, "")
                     cache_matches = True
                     refreshed = True
+                if refresh_id:
+                    _provider_refresh_finish(refresh_id, "success", "complete")
             except AppError as exc:
+                if refresh_id:
+                    _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
                 error = exc.message if exc.status == 400 else "Wetterdaten konnten derzeit nicht aktualisiert werden."
                 failure_count = previous_failure_count + 1
                 delay = min(WEATHER_RETRY_BASE_SECONDS * (2 ** min(failure_count - 1, 5)), WEATHER_RETRY_MAX_SECONDS)
                 set_kv(WEATHER_FAILURE_KEY, json.dumps({"count": failure_count, "failed_at": utc_now(), "retry_at": (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()}, ensure_ascii=False))
                 LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
             except Exception as exc:
+                if refresh_id:
+                    _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
                 error = "Wetterdaten konnten derzeit nicht aktualisiert werden."
                 failure_count = previous_failure_count + 1
                 delay = min(WEATHER_RETRY_BASE_SECONDS * (2 ** min(failure_count - 1, 5)), WEATHER_RETRY_MAX_SECONDS)
@@ -5416,13 +5652,13 @@ def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict
     return f"Wetterprognose für {event_date}: {condition}{detail_text}; lange Outdoor-Ausfahrt nicht sinnvoll"
 
 
-@observed_sync("weather")
+@observed_sync("weather", "forecast")
 @maintenance_operation
 def sync_weather(reason: str = "background", force: bool = False, operation_id: str | None = None) -> dict[str, Any]:
     """Refresh the configured location's forecast without creating a chat event."""
     if not get_profile().get("weather_location", "").strip():
         return {"status": "not_configured"}
-    result = weather_state(refresh=True, force=force)
+    result = weather_state(refresh=True, force=force, track_refresh=False)
     if result.get("error") and not result.get("days"):
         raise AppError(502, str(result["error"]))
     replan = check_adaptive_replan("weather") if result.get("_refreshed") else current_adaptive_replan_status()
@@ -7661,6 +7897,7 @@ def sync_status_state() -> dict[str, Any]:
         "finished_at": get_kv("sync_operation_finished_at"),
         "last_error": get_kv("last_sync_error") or None,
         "state_versions": state_versions(),
+        "provider_freshness": provider_freshness_state(),
         "maintenance": MAINTENANCE_GATE.state(),
     }
 
@@ -8140,7 +8377,7 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
             gate.end_reset()
 
 
-@observed_sync("intervals")
+@observed_sync("intervals", "activities")
 @maintenance_operation
 @intervals_operation
 def sync_intervals(
@@ -8212,6 +8449,7 @@ def sync_intervals(
             SYNC_LOCK.release()
 
 
+@observed_sync("intervals", "performance")
 @maintenance_operation
 @intervals_operation
 def refresh_current_performance() -> dict[str, Any]:
@@ -10375,6 +10613,7 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
         "performance": {},
         "garmin": garmin_public_state(),
         "intervals": intervals_public_state(snapshot),
+        "provider_freshness": provider_freshness_state(),
         "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
         "provider_resync": {"intervals": provider_resync_state("intervals"), "garmin": provider_resync_state("garmin")},
         "sync": {
@@ -10518,6 +10757,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "performance": current_performance_context(snapshot),
             "garmin": garmin_public_state(),
             "intervals": intervals_public_state(snapshot),
+            "provider_freshness": provider_freshness_state(),
             "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
             "provider_resync": {
                 "intervals": provider_resync_state("intervals"),
@@ -10679,6 +10919,7 @@ def diagnostic_report() -> dict[str, Any]:
             "running": get_kv("performance_refresh_running") == "1",
         },
         "garmin": garmin_status,
+        "provider_freshness": provider_freshness_state(),
         "external_calendar": {
             "configured": bool(CONFIG.calendar_ical_url),
             "last_sync_at": get_kv("last_external_calendar_sync_at"),
@@ -10764,6 +11005,7 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "training_plans.jsonl",
     "plan_adjustments.jsonl",
     "change_history.jsonl",
+    "provider_refresh_history.jsonl",
 }
 
 
@@ -10903,6 +11145,12 @@ def _privacy_export_file() -> Path:
                 (_change_history_view(dict(row)) for row in db.execute("SELECT id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff FROM change_history ORDER BY created_at")),
                 deadline,
             )
+            _export_jsonl_rows(
+                archive,
+                "provider_refresh_history.jsonl",
+                (dict(row) for row in db.execute("SELECT id, provider, area, operation_id, trigger, started_at, finished_at, phase, status, error_code, next_retry_at FROM provider_refresh_history ORDER BY started_at")),
+                deadline,
+            )
             archive.writestr("local_feedback.json", json.dumps(local_feedback_context(), ensure_ascii=False, separators=(",", ":")))
             archive.writestr("activity_feedback.json", json.dumps(activity_feedback_context(), ensure_ascii=False, separators=(",", ":")))
             archive.writestr("planning.json", json.dumps(planning_state(), ensure_ascii=False, separators=(",", ":")))
@@ -10955,6 +11203,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "plan_adjustments": {"id", "payload", "status", "created_at", "applied_at"},
     "coach_action_proposals": {"id", "session_csrf_hash", "action_type", "target_system", "object_ids", "diff", "payload", "payload_hash", "action_token_hash", "status", "expires_at", "created_at", "used_at"},
     "change_history": {"id", "entity_type", "entity_id", "action", "source", "created_at", "before_hash", "after_hash", "diff"},
+    "provider_refresh_history": {"id", "provider", "area", "operation_id", "trigger", "started_at", "finished_at", "phase", "status", "error_code", "next_retry_at"},
     "public_event_sources": {"id", "name", "url", "last_sync_at", "last_error", "created_at", "updated_at"},
     "public_event_candidates": {"id", "source_id", "uid", "name", "event_date", "sport", "distance", "location", "url", "description", "imported_competition_id", "created_at", "updated_at"},
     "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "updated_at"},
@@ -11111,6 +11360,7 @@ PRIVACY_DELETE_SCOPE = (
     ("sessions", "Anmeldesitzungen", ("sessions",)),
     ("settings", "Profil, Einstellungen, Syncstatus und lokale Caches", ("kv",)),
     ("history", "Lokale Änderungshistorie", ("change_history",)),
+    ("provider_status", "Bereinigter Provider-Refresh-Verlauf", ("provider_refresh_history",)),
 )
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
