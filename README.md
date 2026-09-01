@@ -673,8 +673,9 @@ cannot enter the test container:
 ./tests/run_sqlcipher_tests.ps1
 ```
 
-Native Python syntax checks and container unit tests are separate CI jobs. The
-container job uses the same bounded test runner as the four fast native shards.
+Native Python syntax checks, container unit tests, and image security are
+separate CI jobs aggregated by the required `test` check. The container job
+uses the same bounded test runner as the four fast native shards.
 An advisory quality job records a coverage baseline and runs pinned Ruff
 formatter/linter and MyPy checks; it is intentionally non-blocking while the
 existing large module is brought under those tools incrementally.
