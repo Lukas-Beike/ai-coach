@@ -1123,6 +1123,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 69/69, 69/69, 69/69 und 69/69 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-snapshot-repository` erfolgreich.
 - [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Workout-Draft-Repository**
+
+- [x] Die lokale Workout-Draft-Persistenz als `WorkoutDraftRepository` in `backend/db/repositories.py` abgegrenzt.
+- [x] Lokale Draft-Payloads, Status, Listen-/Get-/Delete-Verhalten, Connection Ownership, `DB_LOCK` und explizite Remote-Freigabe unverändert erhalten.
+- [x] Regressionstest für Create, List, Get und Delete sowie die bestehenden lokalen/remote-Approval-Flows ergänzt.
+- [x] Review ohne Findings; PR #201 per Auto-Squash gemergt (`f896937`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 70/70, 69/69, 69/69 und 69/69 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-workout-draft-repository` erfolgreich.
+- [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Fortschritt FT-027 - Chat-Repository**
 
 - [x] Lokale Chat-Reads/Writes als `ChatRepository` in `backend/db/repositories.py` abgegrenzt.
