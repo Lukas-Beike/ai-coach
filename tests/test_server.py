@@ -6,6 +6,7 @@ import unittest
 import json
 import uuid
 import sqlite3
+import shutil
 import zipfile
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
@@ -132,16 +133,36 @@ class CoachTests(unittest.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._original_config = server.CONFIG
+        cls._original_data_dir = server.DATA_DIR
+        cls._original_db_path = server.DB_PATH
+        cls._original_log_path = server.LOG_PATH
         # Most tests exercise application behaviour, not the encryption
-        # implementation. Keep those tests isolated but use plain SQLite so
-        # the dedicated SQLCipher tests remain the only expensive setup path.
+        # implementation. Build one empty schema template, then copy it into
+        # this class's private data directory so setup does not migrate a new
+        # database for every test or share state with another test process.
         server.CONFIG = replace(server.CONFIG, app_password="")
+        cls._template_dir = Path(tempfile.mkdtemp(prefix="intervals-coach-test-template-"))
+        cls._class_data_dir = Path(tempfile.mkdtemp(prefix="intervals-coach-test-class-"))
+        server.DATA_DIR = cls._template_dir
+        server.DB_PATH = cls._template_dir / "intervals-coach.db"
+        server.LOG_PATH = cls._template_dir / "intervals-coach.log"
+        server.initialise_database()
+        class_db_path = cls._class_data_dir / "intervals-coach.db"
+        shutil.copy2(server.DB_PATH, class_db_path)
+        server.DATA_DIR = cls._class_data_dir
+        server.DB_PATH = class_db_path
+        server.LOG_PATH = cls._class_data_dir / "intervals-coach.log"
         server.initialise_database()
         cls.addClassCleanup(cls._restore_test_config)
 
     @classmethod
     def _restore_test_config(cls):
         server.CONFIG = cls._original_config
+        server.DATA_DIR = cls._original_data_dir
+        server.DB_PATH = cls._original_db_path
+        server.LOG_PATH = cls._original_log_path
+        shutil.rmtree(cls._template_dir, ignore_errors=True)
+        shutil.rmtree(cls._class_data_dir, ignore_errors=True)
 
     def setUp(self):
         with server.DB_LOCK, server.database() as db:
@@ -4610,6 +4631,20 @@ class CoachTests(unittest.TestCase):
         log_text = json.dumps(server.recent_log_entries(), ensure_ascii=False)
         self.assertNotIn("do-not-log-request-body", log_text)
         self.assertNotIn("do-not-log-response-body", log_text)
+
+    def test_http_error_response_body_is_closed_after_reading(self):
+        response_body = BytesIO(b'{"error":{"message":"temporary failure"}}')
+        upstream_error = server.HTTPError(
+            "https://intervals.icu/api/v1/athlete/0",
+            503,
+            "Service Unavailable",
+            {},
+            response_body,
+        )
+        with patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError):
+                server.http_json("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
+        self.assertTrue(response_body.closed)
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.initialise_logging()

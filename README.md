@@ -664,10 +664,42 @@ with `python tests/run_tests.py --shard <number> --total 4`. General tests use
 an isolated fast SQLite fixture; the dedicated encryption checks retain their
 SQLCipher setup.
 
+The canonical Windows SQLCipher/container run builds an isolated image and
+mounts only the test inputs (`tests/` and `public/`) read-only. It never mounts
+the repository root, so `.env`, `data/`, token stores, databases, and backups
+cannot enter the test container:
+
+```powershell
+./tests/run_sqlcipher_tests.ps1
+```
+
+Native Python syntax checks and container unit tests are separate CI jobs. The
+container job uses the same bounded test runner as the four fast native shards.
+An advisory quality job records a coverage baseline and runs pinned Ruff
+formatter/linter and MyPy checks; it is intentionally non-blocking while the
+existing large module is brought under those tools incrementally.
+
 Pull requests run the unit tests and syntax checks. The conventional-commit
 workflow validates pull-request titles and commit subjects. Dependabot manages
 Python, Docker, and GitHub Actions dependencies and can automatically squash
 merge successful update pull requests.
+
+### Image supply chain and runtime boundary
+
+The test-and-publish workflow emits an SPDX image SBOM and scans both OS/base
+image packages and Python libraries. High and critical findings, including
+unfixed findings, fail the scan; no vulnerability is silently ignored. A
+finding exception must be proposed in a separate reviewed change with the
+identifier, affected image, rationale, owner, mitigation, and expiry date.
+Until that change is explicitly accepted, the scan remains blocking.
+
+Published image digests receive a keyless Sigstore/Cosign signature through
+GitHub OIDC. The local runtime remains private: use a trusted LAN or private
+VPN and a trusted HTTPS reverse proxy, never expose `http.server` directly to
+the public internet. Keep the documented read-only root filesystem, and add
+`--cap-drop=ALL`, `--pids-limit`, `--memory`, and `--cpus` only when the
+explicit `/data` mount has been compatibility-tested. A rootless container
+host is recommended.
 
 ### Browser smoke and accessibility checks
 

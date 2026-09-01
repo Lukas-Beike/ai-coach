@@ -4454,6 +4454,17 @@ def upstream_http_error_message(status: int, raw_body: bytes, service: str | Non
     return f"Anfrage an externen Dienst fehlgeschlagen ({status})."
 
 
+def _read_http_error_body(error: HTTPError) -> bytes:
+    """Read an HTTP error body and close the provider response deterministically."""
+    try:
+        try:
+            return error.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
+        except TypeError:  # Small fake responses in unit tests may not accept a size.
+            return error.read()
+    finally:
+        error.close()
+
+
 def http_json(
     method: str,
     url: str,
@@ -4516,10 +4527,7 @@ def http_json(
             )
             return result
     except HTTPError as exc:
-        try:
-            raw_error = exc.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
-        except TypeError:
-            raw_error = exc.read()
+        raw_error = _read_http_error_body(exc)
         if service == "openai":
             record_openai_rate_limits(getattr(exc, "headers", None))
             error_details = openai_error_details(exc.code, raw_error)
@@ -9060,10 +9068,7 @@ def openai_stream_request(
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
         raise
     except HTTPError as exc:
-        try:
-            raw_error = exc.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
-        except TypeError:
-            raw_error = exc.read()
+        raw_error = _read_http_error_body(exc)
         status = int(getattr(exc, "code", 502) or 502)
         details = openai_error_details(status, raw_error)
         record_openai_status(details)
