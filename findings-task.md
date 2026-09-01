@@ -1197,6 +1197,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 71/71/70/70 Tests, gezielter Transporttest, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-intervals-provider-read-transport` erfolgreich.
 - [ ] Weitere Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben fuer folgende kohaerente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Intervals-Write-Transport**
+
+- [x] Den authentifizierten POST-/PUT-/DELETE-Transport als `IntervalsWriteTransport` in `backend/providers/intervals.py` abgegrenzt.
+- [x] Die bestehenden `intervals_operation`-Mutationsschutz-Decoratoren, Payloads, Query-Parameter, Header und Service-Metadaten unveraendert erhalten.
+- [x] Regressionstest fuer alle drei Schreibmethoden und ihre Request-Vertraege ergaenzt.
+- [x] Review ohne Findings; PR #215 per Auto-Squash gemergt (`bdafae5`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards gruen.
+- [x] Validierung: vier schnelle Shards mit 71/71/71/70 Tests, gezielter Transporttest, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-intervals-provider-write-transport` erfolgreich.
+- [ ] Weitere Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben fuer folgende kohaerente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
