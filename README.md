@@ -15,10 +15,12 @@ It is not intended to be exposed directly to the public internet.
   chat history, and a growing local workout library stored in SQLite.
 - One Intervals.icu synchronization at startup, plus user-requested refreshes.
 - Optional Garmin Connect synchronization with deduplication against
-  Intervals.icu. Garmin-sourced VO2 max, running predictions, body weight, and
-  sport-specific maximum heart rates are explicitly marked as Garmin Connect
-  data in the performance view. If Garmin data is unavailable, sport-specific
-  maximum heart rates can fall back to Intervals.icu data.
+  Intervals.icu. Garmin-sourced FTP (separate from eFTP), running threshold
+  power, running and cycling threshold heart rate, running threshold pace,
+  sleep, resting heart rate, HRV, VO2 max, running predictions, body weight,
+  and sport-specific maximum heart rates are explicitly marked as Garmin
+  Connect data in the performance view. If a Garmin value is unavailable, the
+  existing Intervals.icu value remains available as a labelled fallback.
 - Activity synchronization for strength training, running, outdoor cycling,
   and indoor/virtual cycling.
 - Mobile-first profile and system sections can be collapsed; the planned
@@ -75,6 +77,13 @@ It is not intended to be exposed directly to the public internet.
 - The regular Intervals.icu activity pull is read-only and never uploads
   pending local library entries. Only the separate library synchronization
   action can create or update library templates remotely.
+- When the first regular Intervals.icu sync finds an empty local library, it
+  imports the existing remote templates into the local library. This initial
+  import is read-only; later local edits still require the separate explicit
+  library synchronization action for remote writes.
+- The explicit library synchronization also transfers dated local planning
+  entries to the Intervals.icu calendar with stable upsert identities, so a
+  library sync keeps the local template and its planned calendar unit aligned.
 - If a provider response no longer contains an imported template, it is kept
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by
@@ -99,10 +108,10 @@ It is not intended to be exposed directly to the public internet.
   confirmation are future local sessions replaced with illness-pause entries and
   the corresponding future check-in days filled.
   The Plan tab combines each dated check-in with recovery signals, weather,
-  planned sessions, and read-only calendar appointments; existing entries can
-  be selected and edited directly on their day. Check-in dates and daily
-  training boundaries use the saved IANA profile timezone, and future check-ins
-  are rejected. The Heute tab provides a compact daily view of the local
+  planned sessions, and read-only calendar appointments. Check-ins are entered
+  exclusively through the Coach Chat. Check-in dates and daily training
+  boundaries use the saved IANA profile timezone, and future check-ins are
+  rejected. The Heute tab provides a compact daily view of the local
   check-in, readiness/recovery signals, today's planned workout, relevant
   weather, open activity feedback, and pending plan adjustments. It uses
   already loaded state and does not trigger an additional coach or provider
@@ -118,9 +127,11 @@ It is not intended to be exposed directly to the public internet.
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local library entries on busy days can be proposed as short easy sessions.
   Invalid feeds are rejected without replacing the last good local calendar;
-  bounded DAILY/WEEKLY recurring events with COUNT or UNTIL are expanded only
-  inside the eight-week window. Other recurrence rules are reported as
-  unsupported, and expansion is capped at 1,000 occurrences.
+  common Google/RFC 5545 recurring events (`DAILY`, `WEEKLY`, `MONTHLY`, and
+  `YEARLY`, including `BYDAY`, `BYMONTHDAY`, `BYMONTH`, `BYSETPOS`, and `WKST`) are
+  expanded only inside the eight-week window. Google recurrence exceptions and
+  date-only `RDATE` additions are applied; unsupported rule parts are reported
+  clearly. Expansion is capped at 1,000 occurrences.
 - The planned calendar never displays a provider horizon wider than the
   Intervals.icu window actually loaded by the latest snapshot. The configured
   display preference may therefore be reduced temporarily after a short sync.
@@ -360,9 +371,9 @@ boundaries (`state`, `navigation`, `views`, `forms`, and `components`) depend
 on this client through explicit interfaces, with no new framework and no
 duplicate DTO definitions. The route constants and pure hash parsers are
 isolated in `public/navigation.js`, the shared mutable UI state is isolated in
-`public/state.js`, and state-free display/formatting helpers are isolated in
-`public/views.js`; availability/competition form helpers and dialog focus
-components are isolated in `public/forms.js` and `public/components.js`.
+`public/state.js`, state-free display/formatting helpers are isolated in
+`public/views.js`, and competition form helpers and dialog focus components are
+isolated in `public/forms.js` and `public/components.js`.
 DOM- and data-loading coordination remains in `app.js` and the script order is
 explicit.
 
@@ -400,15 +411,6 @@ A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
 settings or bypass explicit library synchronization or planning approvals.
-
-The athlete profile also offers an optional structured weekly availability with
-early/late local time windows, a maximum duration, indoor/outdoor preference,
-and a note for each weekday. It is saved only through the explicit profile
-action; existing availability free text is retained during migration. The
-coach receives only the compact confirmed projection. Weather time suggestions
-use these windows and the validated profile timezone; without configured
-windows, the app exposes only a general forecast range and does not assume work
-hours. External calendar conflicts remain visible as constraints.
 
 Other supported operational variables are:
 

@@ -37,7 +37,7 @@ function renderPlanSegments(segment = state.planSegment) {
 }
 
 function currentPlanLoadAreas() {
-  const areas = new Set(["chat", "activities", "performance", "feedback", "profile"]);
+  const areas = new Set(["chat", "activities", "performance", "feedback", "profile", "weather"]);
   const route = baseRoute();
   if (route === "today" || (route === "planned" && state.planSegment !== "library")) areas.add("plan");
   if (route === "planned" && state.planSegment === "library") areas.add("library");
@@ -944,26 +944,26 @@ function weatherForDate(date) {
   return (state.data?.weather?.days || []).find((item) => item.date === date) || null;
 }
 
-function renderWeatherNotice(weather) {
-  const notice = $("#weatherNotice");
-  if (!notice) return;
-  notice.hidden = false;
-  notice.className = "weather-notice";
-  if (!weather?.configured) {
-    notice.textContent = "Wetterhinweise: Hinterlege im Profil einen Wetterort (Stadt oder PLZ).";
-    return;
-  }
-  if (weather.loading) {
-    notice.textContent = weather.message || "Wetterdaten werden nachgeladen.";
-    return;
-  }
-  if (weather.error && !weather.days?.length) {
-    notice.classList.add("error");
-    notice.textContent = weather.error;
-    return;
-  }
-  const location = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
-  notice.textContent = `${location ? `Wetter für ${location}` : "Wettervorhersage"} · ${weather.model || "Open-Meteo"} · Tageswerte bis 14 Tage · Zeitvorschläge bis 5 Tage · Quelle: Open-Meteo.com${weather.stale ? " · letzte verfügbare Daten" : ""}`;
+function renderPlannedDayWeather(weather) {
+  if (!weather) return null;
+  const root = document.createElement("span");
+  root.className = "planned-day-weather";
+  const icon = document.createElement("span");
+  icon.className = "weather-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = weatherIconFor(weather);
+  const condition = document.createElement("strong");
+  condition.textContent = weather.condition || "Wetter";
+  const summary = document.createElement("span");
+  summary.className = "planned-day-weather-summary";
+  const temperatures = [weatherNumber(weather.temperature_min, " °C"), weatherNumber(weather.temperature_max, " °C")]
+    .filter(Boolean)
+    .join(" bis ");
+  summary.textContent = [temperatures, weatherNumber(weather.precipitation_probability_max, " % Regen")]
+    .filter(Boolean)
+    .join(" · ");
+  root.append(icon, condition, summary);
+  return root;
 }
 
 function todayCard(title, className = "") {
@@ -1039,7 +1039,6 @@ function renderToday(data) {
     ].filter(Boolean);
     todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
   } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
-  checkinCard.append(todayAction(checkin ? "Check-in bearbeiten" : "Check-in ausfüllen", () => openCheckinEditor(todayKey)));
   root.append(checkinCard);
 
   const readinessCard = todayCard("Readiness & Erholung", "today-readiness");
@@ -1103,20 +1102,22 @@ function planningContextNumber(value, suffix = "") {
 
 function renderDailyPlanningContext(date, todayKey) {
   const context = planningContextForDate(date);
-  const weather = context.weather || weatherForDate(date);
   const checkin = context.checkin;
   const recovery = context.recovery;
   const appointments = Array.isArray(context.appointments) ? context.appointments : [];
-  const hasSignals = weather || checkin || recovery || appointments.length;
+  const hasSignals = checkin || recovery || appointments.length;
   if (!hasSignals && dateKeyDifference(date, todayKey) > 0) return document.createDocumentFragment();
-  const root = document.createElement("div");
+  const root = document.createElement("details");
   root.className = "planned-day-context";
-  const heading = document.createElement("strong");
-  heading.textContent = "Tageskontext";
+  const heading = document.createElement("summary");
+  heading.className = "planned-day-context-heading";
+  const headingTitle = document.createElement("strong");
+  headingTitle.textContent = "Tageskontext";
+  heading.append(headingTitle);
   root.append(heading);
   const signals = document.createElement("div");
   signals.className = "planned-day-context-signals";
-  const addSignal = (label, value, className = "") => {
+  const addSignal = (label, value, className = "", target = signals) => {
     if (!value) return;
     const signal = document.createElement("div");
     signal.className = `planned-day-signal${className ? ` ${className}` : ""}`;
@@ -1126,17 +1127,9 @@ function renderDailyPlanningContext(date, todayKey) {
     const detail = document.createElement("span");
     detail.textContent = value;
     signal.append(title, detail);
-    signals.append(signal);
+    target.append(signal);
+    return signal;
   };
-  if (weather) {
-    const weatherValues = [
-      weather.condition || "Vorhersage",
-      [planningContextNumber(weather.temperature_min, " °C"), planningContextNumber(weather.temperature_max, " °C")].filter(Boolean).join(" bis "),
-      planningContextNumber(weather.precipitation_probability_max, " % Regen"),
-      planningContextNumber(weather.wind_speed_max, " km/h Wind"),
-    ].filter(Boolean);
-    addSignal(`${weatherIconFor(weather)} Wetter`, weatherValues.join(" · "));
-  }
   if (recovery) {
     const recoveryValues = [
       planningContextNumber(recovery.sleep_hours, " h Schlaf"),
@@ -1146,8 +1139,6 @@ function renderDailyPlanningContext(date, todayKey) {
       planningContextNumber(recovery.resting_hr, " bpm Ruhepuls"),
       planningContextNumber(recovery.body_battery, " Body Battery"),
     ].filter(Boolean);
-    const recoverySources = [...new Set(Object.values(recovery.sources || {}))].filter(Boolean);
-    if (recoverySources.length) recoveryValues.push(`Quelle: ${recoverySources.join(", ")}`);
     addSignal("Erholung", recoveryValues.join(" · "), "recovery");
   }
   if (checkin) {
@@ -1176,14 +1167,6 @@ function renderDailyPlanningContext(date, todayKey) {
     empty.className = "planned-day-context-empty";
     empty.textContent = "Noch keine Tagesinfos hinterlegt.";
     root.append(empty);
-  }
-  if (dateKeyDifference(date, todayKey) <= 0) {
-    const editButton = document.createElement("button");
-    editButton.type = "button";
-    editButton.className = "planned-day-checkin-button";
-    editButton.textContent = checkin ? "Tages-Check-in bearbeiten" : "Tages-Check-in hinzufügen";
-    editButton.addEventListener("click", () => openCheckinEditor(date));
-    root.append(editButton);
   }
   return root;
 }
@@ -1619,7 +1602,6 @@ function renderLocalPlanningActions(event, body) {
 function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContext = []) {
   setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
-  renderWeatherNotice(state.data?.weather);
   const root = $("#plannedCalendar");
   state.data.daily_planning_context = Array.isArray(dailyPlanningContext) ? dailyPlanningContext : [];
   root.querySelectorAll("details.planned-week").forEach((week) => state.plannedWeekOpen.set(week.dataset.week, week.open));
@@ -1700,35 +1682,25 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
       const calendarEvents = calendarEventsByDate.get(date) || [];
       const dayRoot = document.createElement("section");
       dayRoot.className = "planned-day";
+      dayRoot.classList.toggle("has-planned-events", events.length > 0);
 
       const heading = document.createElement("div");
       heading.className = "planned-day-heading";
+      const headingMain = document.createElement("div");
+      headingMain.className = "planned-day-heading-main";
       const title = document.createElement("h3");
       title.textContent = plannedDayLabel(day, dateKeyDifference(date, todayKey));
+      headingMain.append(title);
+      const weather = planningContextForDate(date).weather || weatherForDate(date);
+      const weatherRoot = renderPlannedDayWeather(weather);
+      if (weatherRoot) headingMain.append(weatherRoot);
       const count = document.createElement("span");
       count.className = "planned-day-count";
       count.textContent = events.length ? `${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
-      heading.append(title, count);
+      heading.append(headingMain, count);
       dayRoot.append(heading);
 
-      dayRoot.append(renderDailyPlanningContext(date, todayKey));
-      const weather = weatherForDate(date);
-      if (weather && !planningContextForDate(date).weather) {
-        const weatherRoot = document.createElement("div");
-        weatherRoot.className = "planned-weather";
-        const icon = document.createElement("span");
-        icon.className = "weather-icon";
-        icon.setAttribute("aria-hidden", "true");
-        icon.textContent = weatherIconFor(weather);
-        const condition = document.createElement("strong");
-        condition.textContent = weather.condition || "Wetter";
-        condition.title = weather.condition || "Wetter";
-        const summary = document.createElement("span");
-        const direction = weatherDirection(weather.wind_direction_dominant);
-        summary.textContent = `${weatherNumber(weather.temperature_min, " °C")} bis ${weatherNumber(weather.temperature_max, " °C")} · Regenrisiko ${weatherNumber(weather.precipitation_probability_max, " %")} · Wind bis ${weatherNumber(weather.wind_speed_max, " km/h")} / Böen ${weatherNumber(weather.wind_gusts_max, " km/h")}${direction ? ` aus ${direction}` : ""}`;
-        weatherRoot.append(icon, condition, summary);
-        dayRoot.append(weatherRoot);
-      }
+      const dailyContext = renderDailyPlanningContext(date, todayKey);
 
       if (!events.length && !calendarEvents.length) {
         const empty = document.createElement("p");
@@ -1856,6 +1828,7 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
         });
         dayRoot.append(entries);
       }
+      dayRoot.append(dailyContext);
       if (calendarEvents.length) {
         const calendarRoot = document.createElement("div");
         calendarRoot.className = "planned-calendar-markers";
@@ -2464,7 +2437,11 @@ async function runLibraryBulkRemoteSync() {
       method: "POST",
       body: JSON.stringify({ entries: selected.map((workout) => ({ library_workout_id: String(workout.id) })) }),
     });
-    const result = await executeLibraryActionPreview(preview, `Remote-Sync zu Intervals.icu für exakt ${selected.length} ausgewählte Einheit(en) freigeben?`);
+    const plannedCount = selected.filter((workout) => workout.date).length;
+    const plannedNotice = plannedCount
+      ? ` Davon werden ${plannedCount} datierte Planung(en) ebenfalls im Kalender angelegt oder aktualisiert.`
+      : "";
+    const result = await executeLibraryActionPreview(preview, `Remote-Sync zu Intervals.icu für exakt ${selected.length} ausgewählte Einheit(en) freigeben?${plannedNotice}`);
     if (!result) return;
     renderLibraryBulkResult(result);
     state.librarySelection = new Set(result.failed_object_ids || []);
@@ -2487,11 +2464,15 @@ async function loadLibrary() {
   try {
     const preview = await api("/api/library/sync/preview", { method: "POST", body: "{}" });
     const summary = preview.summary || {};
-    const changeCount = Object.values(summary).reduce((total, value) => total + Number(value || 0), 0);
+    const changeCount = Object.entries(summary)
+      .filter(([key]) => key !== "planned")
+      .reduce((total, [, value]) => total + Number(value || 0), 0);
+    const plannedCount = Number(summary.planned || 0);
     const confirmed = window.confirm(
       `Bibliothekssync zu Intervals.icu freigeben? ${changeCount} lokale Einträge: ` +
       `${summary.new || 0} neu, ${summary.changed || 0} geändert, ` +
-      `${summary.missing || 0} fehlend, ${summary.error_retry || 0} Fehlerwiederholung. ` +
+      `${summary.missing || 0} fehlend, ${summary.error_retry || 0} Fehlerwiederholung` +
+      `${plannedCount ? `; ${plannedCount} datierte Planung(en) werden ebenfalls in den Kalender übertragen` : ""}. ` +
       "Die Vorschau ist nur 10 Minuten gültig."
     );
     if (!confirmed) return;
@@ -2522,7 +2503,7 @@ async function loadLibrary() {
     root.append(message);
   } finally {
     button.disabled = false;
-    button.textContent = "Vorschau für Remote-Sync öffnen";
+    button.textContent = "Vorschau für Bibliotheks- und Planungssync";
   }
 }
 
@@ -2568,51 +2549,12 @@ function renderProfile(profile) {
     }
     field.value = value || "";
   }
-  renderWeeklyAvailability(profile.availability_schedule);
   if (form.elements.coaching_style?.value === "Supportive, direct, and evidence-aware") form.elements.coaching_style.value = "Unterstützend, direkt und evidenzbasiert";
   const summary = $("#profileSummary");
   if (summary) {
     const values = [profile.name, profile.sports, profile.typical_weekly_volume].filter(Boolean);
     summary.textContent = values.length ? values.join(" · ") : "Noch nicht ausgefüllt";
   }
-}
-
-function renderWeeklyAvailability(schedule = []) {
-  const root = $("#weeklyAvailabilityEditor");
-  if (!root) return;
-  const entries = Array.isArray(schedule) ? schedule : [];
-  root.className = "weekly-availability";
-  root.replaceChildren();
-  WEEKDAY_LABELS.forEach((dayLabel, weekday) => {
-    const entry = entries.find((item) => Number(item?.weekday) === weekday) || {};
-    const periods = entry.periods || {};
-    const day = document.createElement("div");
-    day.className = "availability-day";
-    day.dataset.availabilityDay = String(weekday);
-    const heading = document.createElement("strong");
-    heading.textContent = dayLabel;
-    const fields = document.createElement("div");
-    fields.className = "availability-day-fields";
-    for (const [period, label] of [["early", "Früh"], ["late", "Spät"]]) {
-      const window = periods[period] || {};
-      fields.append(
-        availabilityInput(`${label} von`, `availability-${weekday}-${period}-start`, "time", window.start),
-        availabilityInput(`${label} bis`, `availability-${weekday}-${period}-end`, "time", window.end)
-      );
-    }
-    fields.append(availabilityInput("Max. Minuten", `availability-${weekday}-max`, "number", entry.max_minutes, { min: "0", max: "1440", step: "1", placeholder: "Optional" }));
-    const environment = availabilityInput("Umgebung", `availability-${weekday}-environment`, "select", entry.environment || "either");
-    environment.querySelector("select").replaceChildren(
-      new Option("Drinnen oder draußen", "either"),
-      new Option("Nur drinnen", "indoor"),
-      new Option("Nur draußen", "outdoor")
-    );
-    environment.querySelector("select").value = entry.environment || "either";
-    fields.append(environment);
-    fields.append(availabilityInput("Notiz", `availability-${weekday}-note`, "text", entry.note, { maxlength: "500", placeholder: "Optional" }));
-    day.append(heading, fields);
-    root.append(day);
-  });
 }
 
 function populateCheckin(checkin, timeZone) {
@@ -3037,7 +2979,9 @@ function renderPerformance(performance) {
   if (!performance?.available) {
     const info = document.createElement("p");
     info.className = "fine-print";
-    info.textContent = "Nach dem ersten Trainingsdaten-Update werden hier Leistungswerte angezeigt.";
+    info.textContent = !state.loadedAreas.has("performance") && state.loadPromise
+      ? "Leistungsdaten werden geladen…"
+      : "Nach dem ersten Trainingsdaten-Update werden hier Leistungswerte angezeigt.";
     root.append(info);
     if (syncNotices.length) {
       const status = document.createElement("p");
@@ -3054,17 +2998,17 @@ function renderPerformance(performance) {
   const recovery = performance.recovery || {};
   const comparisons = performance.comparisons || {};
   const week = performance.rolling_training?.last_7_days || {};
-  const refreshedAt = state.data?.sync?.last_sync_at || performance.as_of;
+  const refreshedAt = performance.as_of || state.data?.performance_refresh?.last_refresh_at || state.data?.sync?.last_sync_at;
   const performanceDetail = syncNotices.length ? syncNotices.join(" · ") : refreshedAt ? `Letzte Aktualisierung: ${formatTime(refreshedAt)}` : "";
   const compared = (value, key) => value && typeof value === "object" ? { ...value, comparison: comparisons[key] } : { value, comparison: comparisons[key] };
   performanceSection(root, "Gesundheitsdaten", [
     ["Gewicht", compared(values.weight_kg, "weight_kg_30d"), null, { key: "weight_kg", step: "0.1" }],
     ["Körperfett", values.body_fat_pct, null, { key: "body_fat_pct", step: "0.1" }],
     ["Größe", values.height_cm, null, { key: "height_cm", step: "0.1" }],
-    ["Schlaf", compared({ value: recovery.sleep_hours, unit: "h", source: "Intervals.icu Wellness" }, "sleep_hours")],
+    ["Schlaf", compared({ value: recovery.sleep_hours, unit: "h", source: recovery.sleep_source || "Intervals.icu Wellness" }, "sleep_hours")],
     ["Readiness", compared({ value: recovery.readiness, unit: "", source: recovery.readiness_source || "Intervals.icu Wellness" }, "readiness_30d")],
-    ["Ruhepuls", compared({ value: recovery.restingHR, unit: "bpm", source: "Intervals.icu Wellness" }, "restingHR")],
-    ["HRV", compared({ value: recovery.hrv, unit: "ms", source: "Intervals.icu Wellness" }, "hrv")],
+    ["Ruhepuls", compared({ value: recovery.restingHR, unit: "bpm", source: recovery.restingHR_source || "Intervals.icu Wellness" }, "restingHR")],
+    ["HRV", compared({ value: recovery.hrv, unit: "ms", source: recovery.hrv_source || "Intervals.icu Wellness" }, "hrv")],
   ], performanceDetail);
   performanceSection(root, "Allgemeine Leistungsdaten", [
     ["Fitness / CTL", compared({ value: load.ctl, unit: "", source: "Intervals.icu" }, "fitness_ctl"), formatWhole],
@@ -3524,6 +3468,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     if (areas.has("chat")) requests.push(["chat", api("/api/chat/history?limit=100")]);
     if (areas.has("activities")) requests.push(["activities", api("/api/activities?limit=250")]);
     if (areas.has("plan")) requests.push(["plan", api(`/api/plan${query}`)]);
+    if (areas.has("weather") && !areas.has("plan")) requests.push(["weather", api(`/api/weather${query}`)]);
     if (areas.has("library")) requests.push(["library", api("/api/library?limit=100")]);
     if (areas.has("performance")) requests.push(["performance", api("/api/performance")]);
     if (areas.has("feedback")) requests.push(["feedback", api("/api/feedback")]);
@@ -3539,6 +3484,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       if (area === "chat") Object.assign(payload, { messages: result.messages || [], messages_next_cursor: result.next_cursor });
       if (area === "activities") Object.assign(payload, { activities: result.activities || [], activities_next_cursor: result.next_cursor });
       if (area === "plan") Object.assign(payload, result);
+      if (area === "weather") Object.assign(payload, { weather: result });
       if (area === "library") Object.assign(payload, { library: result.workouts || [], library_next_cursor: result.next_cursor });
       if (area === "performance") Object.assign(payload, result);
       if (area === "feedback") Object.assign(payload, result);
@@ -3615,9 +3561,13 @@ async function loadInitialState() {
   const route = routeFromHash();
   const segment = planSegmentFromRoute(route);
   const areas = ["chat", "activities", "performance", "feedback", "profile"];
+  areas.push("weather");
   if (route === "today" || (baseRoute(route) === "planned" && segment !== "library")) areas.push("plan");
   if (baseRoute(route) === "planned" && segment === "library") areas.push("library");
   await load("/api/bootstrap?local=1", areas);
+  if (state.data?.profile?.weather_location) {
+    await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
+  }
   scheduleChatStatusPoll(0);
 }
 
@@ -3988,7 +3938,6 @@ async function saveProfile(event) {
     ...(state.data?.profile || {}),
     ...Object.fromEntries(formData),
     sports: formData.getAll("sports").map((value) => String(value).trim()).filter(Boolean).join(", "),
-    availability_schedule: collectWeeklyAvailability(),
   };
   const payload = {
     profile,
@@ -4000,6 +3949,13 @@ async function saveProfile(event) {
     setDirtyIndicator("profileDirtyIndicator", false);
     invalidateContextPreview();
     toast("Athletenkontext gespeichert und für den Coach aktiviert");
+    // Do not keep the successful save action in its loading state while the
+    // follow-up refresh loads the rest of the application state.
+    if (button) {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.textContent = buttonLabel;
+    }
     await load();
   } catch (error) { toast(error.message, true); }
   finally {

@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=141" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=141">
+  <link rel="icon" href="/icon.svg?v=145" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=145">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -94,7 +94,6 @@
           <div><strong>Adaptive Anpassung nötig</strong><small id="adaptivePlanningCaption">Die aktualisierte Planung wartet auf deine Prüfung.</small></div>
           <button type="button" id="adaptivePlanningButton" class="adaptive-planning-button">Vorschau prüfen</button>
         </div>
-        <div id="weatherNotice" class="weather-notice" hidden></div>
         <div id="plannedCalendar" class="planned-calendar"></div>
         </section>
         <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle" aria-describedby="checkinDescription">
@@ -142,11 +141,11 @@
           <div class="plan-segment-heading"><div><span class="eyebrow">LOKALE VORLAGEN</span><h3 id="planLibraryTitle">Bibliothek <span id="libraryDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3></div><span class="segment-status">Lokal speichern · Remote-Sync nur mit Vorschau</span></div>
         <div class="local-remote-card">
           <div><strong>Remote-Aktion: Intervals.icu</strong><span class="tab-sync-detail">Vorschau erforderlich · Status wird nach dem Lauf aktualisiert</span></div>
-          <small>Lokale Vorlagen und lokale Planung bleiben ohne Remote-Schreibvorgang. Nur die Bibliotheksaktion darunter kann nach Vorschau und Bestätigung synchronisieren.</small>
+          <small>Lokale Vorlagen und lokale Planung bleiben ohne Remote-Schreibvorgang. Die Bibliotheksaktion kann nach Vorschau und Bestätigung Vorlagen und datierte Planungen synchronisieren.</small>
         </div>
         <div class="library-heading">
           <div><h4 class="subsection-title">Lokale Vorlagen</h4><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
-          <button id="libraryLoadButton" class="secondary-button" type="button">Vorschau für Remote-Sync öffnen</button>
+          <button id="libraryLoadButton" class="secondary-button" type="button">Vorschau für Bibliotheks- und Planungssync</button>
         </div>
         <div id="library" class="library"></div>
         <div class="library-toolbar">
@@ -201,11 +200,6 @@
             <label>Typischer Wochenumfang<input name="typical_weekly_volume" placeholder="Zum Beispiel: 8–10 Stunden, 5 Trainingstage"></label>
             <label>Langfristige Ziele<textarea name="goals" rows="4" placeholder="Saisonziele und Wettkampfziele…"></textarea></label>
             <label>Verfügbarkeit pro Woche<textarea name="availability" rows="3" placeholder="Tage, Zeiten, bevorzugter Ruhetag…"></textarea></label>
-            <fieldset class="availability-editor">
-              <legend>Strukturierte Wochenverfügbarkeit</legend>
-              <p>Optional: bestätigte Zeitfenster für die Planung. Der bisherige Freitext bleibt erhalten; nur diese gespeicherten Fenster steuern konkrete Zeit- und Wettervorschläge.</p>
-              <div id="weeklyAvailabilityEditor"></div>
-            </fieldset>
             <label>Rahmenbedingungen<textarea name="constraints" rows="3" placeholder="Verletzungen, Reisen, feste Grenzen…"></textarea></label>
             <label>Ausrüstung<textarea name="equipment" rows="2" placeholder="Rad, Smarttrainer, Gym, Powermeter…"></textarea></label>
             <label>Trainingspräferenzen<textarea name="training_preferences" rows="3" placeholder="Drinnen/draußen, bevorzugte Einheiten, Ruhetage…"></textarea></label>
@@ -385,12 +379,12 @@
       </div>
     </div>
   </dialog>
-  <script src="/api.js?v=141" defer></script>
-  <script src="/navigation.js?v=141" defer></script>
-  <script src="/state.js?v=141" defer></script>
-  <script src="/views.js?v=141" defer></script>
-  <script src="/forms.js?v=141" defer></script>
-  <script src="/components.js?v=141" defer></script>
-  <script src="/app.js?v=141" defer></script>
+  <script src="/api.js?v=145" defer></script>
+  <script src="/navigation.js?v=145" defer></script>
+  <script src="/state.js?v=145" defer></script>
+  <script src="/views.js?v=145" defer></script>
+  <script src="/forms.js?v=145" defer></script>
+  <script src="/components.js?v=145" defer></script>
+  <script src="/app.js?v=145" defer></script>
 </body>
 </html>
