@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 from typing import Any
 
 
@@ -105,3 +106,18 @@ class ActivityFeedbackRepository:
             "activity_date=excluded.activity_date, notes=excluded.notes, updated_at=excluded.updated_at",
             (feedback["activity_id"], feedback["activity_name"], feedback["activity_date"], feedback["notes"], now, now),
         )
+
+
+class SnapshotRepository:
+    """Persist bounded provider snapshots without owning a connection."""
+
+    def save(self, db: Any, snapshot: dict[str, Any], created_at: str, *, keep: int = 12) -> None:
+        db.execute(
+            "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
+            (json.dumps(snapshot, ensure_ascii=False), created_at),
+        )
+        db.execute("DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT ?)", (keep,))
+
+    def latest_payload(self, db: Any) -> str | None:
+        row = db.execute("SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1").fetchone()
+        return row["payload"] if row else None
