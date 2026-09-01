@@ -4254,11 +4254,16 @@ async function downloadDiagnostics() {
 
 async function downloadPrivacyExport() {
   try {
-    const payload = await api("/api/privacy/export");
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const response = await fetch("/api/privacy/export", { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) {
+      let message = "Privacy-Export konnte nicht erstellt werden.";
+      try { message = (await response.json()).error || message; } catch (_) { /* keep safe fallback */ }
+      throw new Error(message);
+    }
+    const blob = await response.blob();
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "intervals-coach-export.json";
+    link.download = `intervals-coach-export-${todayIso()}.zip`;
     link.click();
     URL.revokeObjectURL(link.href);
     toast("Datenexport erstellt");

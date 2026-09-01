@@ -6,6 +6,7 @@ import unittest
 import json
 import uuid
 import sqlite3
+import zipfile
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
@@ -478,6 +479,75 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("test-intervals-key", export_text)
         self.assertNotIn("test-password-123", export_text)
 
+    def test_privacy_export_zip_streams_collections_and_contains_complete_manifest(self):
+        server.save_snapshot({"export-test": True, "synced_at": "2026-09-01", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []})
+        temporary = server._privacy_export_file()
+        try:
+            with zipfile.ZipFile(temporary) as archive:
+                names = set(archive.namelist())
+                manifest = json.loads(archive.read("manifest.json"))
+                self.assertEqual(manifest["format"], "intervals-coach-privacy-export")
+                self.assertEqual(manifest["format_version"], 1)
+                self.assertEqual(manifest["schema_version"], server.CURRENT_DATABASE_SCHEMA_VERSION)
+                self.assertEqual(manifest["status"], "complete")
+                self.assertIn("snapshots.jsonl", names)
+                self.assertIn("profile.json", names)
+                self.assertNotIn("sessions.jsonl", names)
+                snapshots = [json.loads(line) for line in archive.read("snapshots.jsonl").splitlines()]
+                self.assertTrue(any(item.get("export-test") for item in snapshots))
+        finally:
+            temporary.unlink(missing_ok=True)
+
+        class ExportHandler:
+            def __init__(self):
+                self.payload = b""
+                self.path = None
+
+            def send_file_stream(self, path, _content_type, _filename, **kwargs):
+                self.path = path
+                self.payload = path.read_bytes()
+                if kwargs.get("cleanup"):
+                    path.unlink()
+
+        handler = ExportHandler()
+        server.stream_privacy_export(handler)
+        self.assertTrue(handler.payload.startswith(b"PK"))
+        self.assertFalse(handler.path.exists())
+
+    def test_file_stream_uses_bounded_chunks_and_cleans_up_after_disconnect(self):
+        class RecordingWriter:
+            def __init__(self):
+                self.writes = []
+
+            def write(self, data):
+                self.writes.append(data)
+                return len(data)
+
+        class FailingWriter:
+            def write(self, _data):
+                raise BrokenPipeError()
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            path = Path(temp_root) / "export.zip"
+            path.write_bytes(b"x" * (server.STREAM_CHUNK_BYTES * 2 + 1))
+            handler = object.__new__(server.RequestHandler)
+            handler.send_response = Mock()
+            handler.send_header = Mock()
+            handler.end_headers = Mock()
+            writer = RecordingWriter()
+            handler.wfile = writer
+            handler.client_disconnect_errors = (BrokenPipeError,)
+            handler.log_client_disconnect = Mock()
+            handler.send_file_stream(path, "application/octet-stream", "export.zip")
+            self.assertEqual(sum(len(data) for data in writer.writes), server.STREAM_CHUNK_BYTES * 2 + 1)
+            self.assertTrue(all(len(data) <= server.STREAM_CHUNK_BYTES for data in writer.writes))
+
+            path.write_bytes(b"x")
+            handler.wfile = FailingWriter()
+            handler.send_file_stream(path, "application/octet-stream", "export.zip", cleanup=True)
+            handler.log_client_disconnect.assert_called_once()
+            self.assertFalse(path.exists())
+
     def test_privacy_delete_reports_remote_attempt_and_failure(self):
         server.set_kv("openai_conversation_id", "conv-test")
         with patch.object(server, "delete_remote_conversation", side_effect=server.AppError(503, "upstream")):
@@ -863,8 +933,8 @@ class CoachTests(unittest.TestCase):
         service_worker = (Path(__file__).resolve().parents[1] / "public" / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
-        self.assertIn('/app.js?v=127', index)
-        self.assertIn('intervals-coach-v127', service_worker)
+        self.assertIn('/app.js?v=128', index)
+        self.assertIn('intervals-coach-v128', service_worker)
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
 
@@ -4213,8 +4283,8 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/app.js?v=127"', source)
-        self.assertIn('"/icon.svg?v=127"', source)
+        self.assertIn('"/app.js?v=128"', source)
+        self.assertIn('"/icon.svg?v=128"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
