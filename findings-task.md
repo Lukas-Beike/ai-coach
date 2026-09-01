@@ -1337,7 +1337,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Review und CI:** Diff-Review ohne offene Findings. PR #229: alle 15 Checks erfolgreich, 4 nicht anwendbare Checks übersprungen; Test-Shards, SQLCipher-Container, Syntax, SBOM/Scan, Analyse, CodeQL, Browser-Smoke und Accessibility grün.
 - **Offene Hinweise:** Die Historie ist lokal begrenzt (180 Tage, maximal 500 Einträge). Ein Undo synchronisiert absichtlich nicht automatisch zu einem Provider.
 
-### - [ ] FT-031 – Provider-Datenfrische und Retry-Verlauf sichtbar machen
+### - [x] FT-031 – Provider-Datenfrische und Retry-Verlauf sichtbar machen
 
 **Quelle:** Feature-Gap „Datenfrische-Timeline“, Garmin-/Intervals-/Wetter-/Kalenderreview, OBS-01
 **Ziel:** Für jede externe Quelle ist verständlich, wann zuletzt versucht und erfolgreich synchronisiert wurde, ob Daten teilweise veraltet sind und welche sichere nächste Aktion möglich ist.
@@ -1345,20 +1345,32 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Einheitliches Statusmodell pro Provider/Teilbereich definieren: letzter Versuch, letzter Erfolg, aktuelle Phase, Teilstatus, sicherer Fehlercode, nächster automatischer Versuch.
-- [ ] Last-Good-Daten klar von aktuell fehlgeschlagenem Refresh unterscheiden.
-- [ ] „Erneut anmelden erforderlich“, Rate Limit, Netzwerkfehler und ungültige Konfiguration getrennt darstellen.
-- [ ] Manuelle Retry-Aktion nur für den betroffenen read-only Providerpfad anbieten.
-- [ ] Remote-schreibende Retries niemals an generischen Provider-Retry koppeln.
-- [ ] Timeline in Anbindungen/Diagnose und kompakte Frischeanzeige in abhängigen Views integrieren.
-- [ ] Statusaufbewahrung begrenzen und keine Providerantworten oder URLs mit Tokens speichern.
-- [ ] Tests für Teilerfolg, Last-Good, Backoff, Neustart und mehrere Provider ergänzen.
+- [x] Einheitliches Statusmodell pro Provider/Teilbereich definieren: letzter Versuch, letzter Erfolg, aktuelle Phase, Teilstatus, sicherer Fehlercode, nächster automatischer Versuch.
+- [x] Last-Good-Daten klar von aktuell fehlgeschlagenem Refresh unterscheiden.
+- [x] „Erneut anmelden erforderlich“, Rate Limit, Netzwerkfehler und ungültige Konfiguration getrennt darstellen.
+- [x] Manuelle Retry-Aktion nur für den betroffenen read-only Providerpfad anbieten.
+- [x] Remote-schreibende Retries niemals an generischen Provider-Retry koppeln.
+- [x] Timeline in Anbindungen/Diagnose und kompakte Frischeanzeige in abhängigen Views integrieren.
+- [x] Statusaufbewahrung begrenzen und keine Providerantworten oder URLs mit Tokens speichern.
+- [x] Tests für Teilerfolg, Last-Good, Backoff, Neustart und mehrere Provider ergänzen.
 
 **Abnahmekriterien**
 
-- [ ] Nutzer kann „veraltet, aber nutzbar“ von „noch nie geladen“ unterscheiden.
-- [ ] Retry eines Lesefehlers kann keine Bibliothek, Wettkämpfe oder Kalender remote verändern.
-- [ ] Diagnose enthält genug technische Metadaten, aber keine Athleteninhalte oder Credentials.
+- [x] Nutzer kann „veraltet, aber nutzbar“ von „noch nie geladen“ unterscheiden.
+- [x] Retry eines Lesefehlers kann keine Bibliothek, Wettkämpfe oder Kalender remote verändern.
+- [x] Diagnose enthält genug technische Metadaten, aber keine Athleteninhalte oder Credentials.
+
+**Handover FT-031**
+
+- **Status:** abgeschlossen; Folgepaket FT-032 ist nach dem grünen Merge entblockt.
+- **Branch und Commit:** `feat/ft-031-provider-freshness`, `4de8951`; PR #231 per Auto-Squash nach `develop` gemergt (`ef36e00`).
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `README.md`, `public/app.js`, `public/index.html`, `public/styles.css`, `public/service-worker.js`, dieses Handover-Dokument.
+- **Verhaltensänderung:** Für Intervals.icu (Aktivitäten, Wettkämpfe, Leistung), Garmin, Open-Meteo und den gemeinsamen Kalender gibt es ein einheitliches Frischemodell mit Versuch, Erfolg, Phase, Teilstatus, sicherem Fehlercode und nächstem Retry. „Noch nie geladen“, „frisch“, „teilweise erfolgreich“, „veraltet, aber nutzbar“ und Fehler werden unterschieden. Retry-Schaltflächen verwenden ausschließlich die bestehenden read-only-Pfade; Bibliotheks-, Wettkampf- und andere Remote-Schreibvorgänge bleiben explizit getrennt.
+- **Datenschutz/Betrieb:** Der Verlauf ist auf 200 Einträge und 30 Tage begrenzt und enthält keine Providerantworten, Athleteninhalte, Credentials oder privaten Kalender-URLs. Diagnose und Privacy-Export geben nur die technischen Statusfelder aus; lokale Privacy-Löschung entfernt den Verlauf.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`; vier schnelle Shards mit 291 Tests; SQLCipher-Containersuite mit 291 Tests; `git diff --check`; Docker-Build `ai-coach:ft031-provider-freshness` erfolgreich.
+- **Review und CI:** Review ohne Findings. PR #231 vollständig grün einschließlich vier Test-Shards, zusammengefasstem Test-Check, Syntax, Validate, Container-Tests, SBOM/Vulnerability-Scan, Quality-Baseline, Browser-Smoke/Accessibility, CodeQL und Analyse.
+- **Offene Risiken:** Retry-Backoff bleibt auf transiente Fehler begrenzt; Authentifizierungs- und Konfigurationsfehler erhalten keinen automatischen Retry. Remote-Schreibpfade sind weiterhin keine generischen Provider-Retry-Ziele.
+- **Folgetasks:** FT-032 ist als nächstes Paket vorgesehen.
 
 ### - [ ] FT-032 – Sichere Bulk-Aktionen für Bibliothek und Plan bereitstellen
 
