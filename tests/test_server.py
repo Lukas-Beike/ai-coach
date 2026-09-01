@@ -1123,6 +1123,33 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in workouts], ["1"])
         self.assertLessEqual(len(json.dumps(bounded_coach_context_value({"text": "x" * 1000}, 100), ensure_ascii=False, separators=(",", ":"))), 100)
 
+    def test_backup_export_helpers_are_dependency_light_and_preserve_bounds(self):
+        from backend.backup import export as backup_export
+        from backend.backup.export import application_state, iter_workout_drafts, manifest, write_jsonl_rows
+
+        source = Path(backup_export.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("import server", source)
+
+        class Rows:
+            def execute(self, query):
+                if query.startswith("SELECT key, value FROM kv"):
+                    return [{"key": "visible", "value": "{\"enabled\":true}"}, {"key": "raw", "value": "not-json"}, {"key": "job_status", "value": "running"}]
+                if query.startswith("SELECT id, status"):
+                    return [{"id": "draft-1", "status": "local", "intervals_event_id": None, "error": None, "created_at": "2026-09-01", "updated_at": "2026-09-01", "payload": "{\"name\":\"Easy\"}"}]
+                raise AssertionError(query)
+
+        db = Rows()
+        self.assertEqual(application_state(db, excluded_keys={"profile"}), {"raw": "not-json", "visible": {"enabled": True}})
+        self.assertEqual(list(iter_workout_drafts(db))[0]["name"], "Easy")
+
+        archive_buffer = BytesIO()
+        with zipfile.ZipFile(archive_buffer, "w") as archive:
+            write_jsonl_rows(archive, "rows.jsonl", [{"id": "one"}], 10, now=lambda: 1, timeout_error=lambda: RuntimeError("timeout"))
+            self.assertEqual(manifest(["rows.jsonl", "profile.json"], schema_version=4, exported_at="now", format_version=1, jsonl_files={"rows.jsonl"})["categories"], ["profile", "rows"])
+        with self.assertRaises(RuntimeError):
+            with zipfile.ZipFile(BytesIO(), "w") as archive:
+                write_jsonl_rows(archive, "rows.jsonl", [{"id": "one"}], 0, now=lambda: 1, timeout_error=lambda: RuntimeError("timeout"))
+
     def test_maintenance_gate_blocks_new_operations_and_waits_for_running_one(self):
         gate = server.MaintenanceGate()
         started = threading.Event()
