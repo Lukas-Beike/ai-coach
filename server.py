@@ -39,6 +39,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
+from backend.db.repositories import KeyValueRepository
 from backend.db import schema_version as database_schema_version
 
 try:
@@ -1121,6 +1122,9 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+KEY_VALUE_REPOSITORY = KeyValueRepository(utc_now)
+
+
 def security_configuration_error() -> str | None:
     if not CONFIG.app_password:
         return "APP_PASSWORD ist nicht konfiguriert. Lege ein langes, zufälliges Passwort als Container-Umgebungsvariable fest."
@@ -1805,8 +1809,7 @@ def initialise_database() -> None:
 
 def get_kv(key: str, db: sqlite3.Connection | None = None) -> str | None:
     if db is not None:
-        row = db.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
-        return row["value"] if row else None
+        return KEY_VALUE_REPOSITORY.get(db, key)
     with DB_LOCK, database() as owned:
         return get_kv(key, owned)
 
@@ -1882,11 +1885,7 @@ def sync_date_windows(days: int, end_date: date | None = None) -> list[tuple[dat
 
 def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
     if db is not None:
-        db.execute(
-            "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-            (key, value, utc_now()),
-        )
+        KEY_VALUE_REPOSITORY.set(db, key, value)
         return
     with DB_LOCK, database() as owned:
         set_kv(key, value, owned)
