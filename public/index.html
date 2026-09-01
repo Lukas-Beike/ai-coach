@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=135" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=135">
+  <link rel="icon" href="/icon.svg?v=136" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=136">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -151,6 +151,20 @@
           <label>Anzeige<select id="libraryFilter"><option value="active">Aktive Einheiten</option><option value="templates">Vorlagen</option><option value="planned">Geplante lokale Einheiten</option><option value="archived">Archivierte Einheiten</option><option value="all">Alle Einheiten</option></select></label>
           <span id="librarySummary" class="tab-sync-detail"></span>
         </div>
+        <section class="library-bulk" aria-labelledby="libraryBulkTitle">
+          <div class="library-bulk-heading"><div><h4 id="libraryBulkTitle" class="subsection-title">Mehrfachauswahl</h4><span id="librarySelectionSummary" class="tab-sync-detail">Keine Einheiten ausgewählt</span></div><button id="libraryClearSelectionButton" class="secondary-button" type="button" hidden>Auswahl aufheben</button></div>
+          <p class="fine-print">Die Auswahl gilt nur für die aktuell geladene Seite und wird bei Filter- oder Reloadwechsel bewusst verworfen.</p>
+          <div class="library-bulk-actions">
+            <button id="librarySelectVisibleButton" class="secondary-button" type="button">Sichtbare auswählen</button>
+            <button id="libraryMarkButton" class="secondary-button" type="button" disabled>Lokal markieren</button>
+            <button id="libraryUnmarkButton" class="secondary-button" type="button" disabled>Markierung entfernen</button>
+            <label id="libraryBulkDateLabel" hidden>Verschiebung in Tagen<input id="libraryBulkDays" type="number" min="-365" max="365" step="1" value="1"></label>
+            <button id="libraryMoveButton" class="secondary-button" type="button" disabled>Verschieben</button>
+            <button id="libraryArchiveButton" class="secondary-button danger-button" type="button" disabled>Archivieren</button>
+            <button id="librarySyncSelectedButton" class="secondary-button" type="button" disabled>Auswahl synchronisieren</button>
+          </div>
+          <div id="libraryBulkResult" class="library-bulk-result" aria-live="polite"></div>
+        </section>
         <div id="libraryPagination" class="library-pagination"></div>
         </section>
       </section>
@@ -369,10 +383,10 @@
       </div>
     </div>
   </dialog>
-  <script src="/api.js?v=135" defer></script>
-  <script src="/navigation.js?v=135" defer></script>
-  <script src="/state.js?v=135" defer></script>
-  <script src="/views.js?v=135" defer></script>
-  <script src="/app.js?v=135" defer></script>
+  <script src="/api.js?v=136" defer></script>
+  <script src="/navigation.js?v=136" defer></script>
+  <script src="/state.js?v=136" defer></script>
+  <script src="/views.js?v=136" defer></script>
+  <script src="/app.js?v=136" defer></script>
 </body>
 </html>

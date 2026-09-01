@@ -906,3 +906,61 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   color: var(--muted, #667085);
   font-size: 0.9rem;
 }
+
+.library-bulk {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+}
+
+.library-bulk-heading {
+  display: flex;
+  gap: 0.7rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.library-bulk-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.55rem;
+}
+
+.library-bulk-actions label {
+  grid-column: span 2;
+}
+
+.library-select-label {
+  display: flex;
+  grid-template-columns: none;
+  gap: 0.45rem;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.library-select-checkbox {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.library-bulk-result {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+}
+
+.library-bulk-result ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+@media (max-width: 559px) {
+  .library-bulk-heading { align-items: flex-start; }
+  .library-bulk-actions { grid-template-columns: 1fr; }
+  .library-bulk-actions label { grid-column: auto; }
+  .library-bulk-actions .secondary-button { width: 100%; }
+}
