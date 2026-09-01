@@ -1052,28 +1052,32 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=129', index)
-        self.assertIn('/app.js?v=129', index)
-        self.assertIn('intervals-coach-v129', service_worker)
+        self.assertIn('/api.js?v=130', index)
+        self.assertIn('/navigation.js?v=130', index)
+        self.assertIn('/app.js?v=130', index)
+        self.assertIn('intervals-coach-v130', service_worker)
+        self.assertIn('"/navigation.js?v=130"', service_worker)
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
 
     def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
         for route in ("coach", "today", "activities", "planned", "performance", "more"):
             self.assertIn(f'href="#{route}"', index)
         self.assertIn('window.addEventListener("hashchange", syncNavigationRoute)', app)
         self.assertIn("window.history.pushState", app)
         self.assertIn("panel.focus({ preventScroll: true })", app)
-        self.assertIn('today: "todayPanel"', app)
+        self.assertIn('today: "todayPanel"', navigation)
         self.assertIn('function renderToday(data)', app)
 
     def test_plan_segments_are_deep_linked_and_library_is_lazy_paginated(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
-        self.assertIn('"planned/library": "workoutsPanel"', app)
-        self.assertIn('"planned/goals": "workoutsPanel"', app)
+        self.assertIn('"planned/library": "workoutsPanel"', navigation)
+        self.assertIn('"planned/goals": "workoutsPanel"', navigation)
         self.assertIn('function ensureRouteData(route = state.route)', app)
         self.assertIn('api("/api/library?limit=100")', app)
         self.assertIn('function loadMoreLibrary()', app)
@@ -1088,11 +1092,12 @@ class CoachTests(unittest.TestCase):
 
     def test_more_segments_group_settings_and_localize_sensitive_inputs(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
         for segment in ("profile", "connections", "coach", "privacy", "operations"):
-            self.assertIn(f'"more/{segment}"', app)
+            self.assertIn(f'"more/{segment}"', navigation)
             self.assertIn(f'href="#more/{segment}"', index)
-        self.assertIn('function moreSegmentFromRoute(route = state.route)', app)
+        self.assertIn('function moreSegmentFromRoute(route = state.route)', navigation)
         self.assertIn('function renderMoreSegments(segment = moreSegmentFromRoute())', app)
         self.assertIn('formData.getAll("sports")', app)
         self.assertIn('hours * 3600 + minutes * 60', app)
@@ -4413,15 +4418,15 @@ class CoachTests(unittest.TestCase):
             handler.wfile = Mock()
             return handler
 
-        first = make_handler("/api.js?v=129")
-        server.RequestHandler.send_static(first, "/api.js")
+        first = make_handler("/navigation.js?v=130")
+        server.RequestHandler.send_static(first, "/navigation.js")
         response_headers = {call.args[0]: call.args[1] for call in first.send_header.call_args_list}
         self.assertEqual(first.send_response.call_args.args, (200,))
         self.assertEqual(response_headers["Cache-Control"], "public, max-age=31536000, immutable")
         self.assertTrue(response_headers["ETag"].startswith('"'))
 
-        cached = make_handler("/api.js?v=129", {"If-None-Match": response_headers["ETag"]})
-        server.RequestHandler.send_static(cached, "/api.js")
+        cached = make_handler("/navigation.js?v=130", {"If-None-Match": response_headers["ETag"]})
+        server.RequestHandler.send_static(cached, "/navigation.js")
         self.assertEqual(cached.send_response.call_args.args, (304,))
         cached.wfile.write.assert_not_called()
 
@@ -4441,9 +4446,10 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=129"', source)
-        self.assertIn('"/app.js?v=129"', source)
-        self.assertIn('"/icon.svg?v=129"', source)
+        self.assertIn('"/api.js?v=130"', source)
+        self.assertIn('"/navigation.js?v=130"', source)
+        self.assertIn('"/app.js?v=130"', source)
+        self.assertIn('"/icon.svg?v=130"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
