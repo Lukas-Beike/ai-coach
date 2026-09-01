@@ -156,6 +156,7 @@ function showLogin() {
   state.chatStatusTimer = null;
   state.data = null;
   state.busy = false;
+  state.chatRequest = null;
   state.chatServerOperationId = null;
   state.chatResponseStarted = false;
   state.chatResponseScrollPending = false;
@@ -489,10 +490,11 @@ function updateChatControls() {
   const steerButton = $("#steerButton");
   const cancelButton = $("#cancelChatButton");
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
-  const chatIsResuming = Boolean(state.chatServerOperationId && !state.chatStream);
+  const chatIsResuming = Boolean(state.chatRequest?.phase === "recovering" || (state.chatServerOperationId && !state.chatStream));
+  const chatIsReconciling = state.chatRequest?.phase === "reconciling";
   if (sendButton) {
-    sendButton.disabled = !inputAvailable || chatIsResuming;
-    sendButton.textContent = chatIsResuming ? "Coach antwortet…" : state.busy ? "Einreihen" : "Senden";
+    sendButton.disabled = !inputAvailable || chatIsResuming || chatIsReconciling;
+    sendButton.textContent = chatIsReconciling ? "Antwort wird geladen…" : chatIsResuming ? "Coach antwortet…" : state.busy ? "Einreihen" : "Senden";
   }
   if (steerButton) {
     steerButton.hidden = !state.busy || chatIsResuming;
@@ -500,8 +502,9 @@ function updateChatControls() {
   }
   if (cancelButton) {
     cancelButton.hidden = !state.busy;
-    cancelButton.disabled = !state.chatStream || state.chatStream.cancelRequested;
-    cancelButton.textContent = state.chatStream?.cancelRequested ? "Wird abgebrochen…" : "Abbrechen";
+    const cancelRequested = Boolean(state.chatStream?.cancelRequested || state.chatRequest?.cancelRequested);
+    cancelButton.disabled = (!state.chatStream && !state.chatServerOperationId) || cancelRequested;
+    cancelButton.textContent = cancelRequested ? "Wird abgebrochen…" : "Abbrechen";
   }
   updateChatQueueStatus();
 }
@@ -1949,13 +1952,15 @@ function renderMessages(messages, forceScroll = false) {
     state.chatStreamText,
     state.chatServerOperationId,
     state.chatResponseStarted,
+    state.chatRequest?.phase || null,
+    state.chatRequest?.responseMessageId || null,
     state.chatQueue.map((entry) => [entry.id, entry.mode, entry.message]),
   ]);
   if (root.dataset.signature === signature) return;
   const shouldScroll = forceScroll || chatIsNearBottom();
   root.dataset.signature = signature;
   root.replaceChildren();
-  if (!visibleMessages.length) {
+  if (!visibleMessages.length && !state.chatRequest && !state.chatQueue.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
     const title = document.createElement("strong");
@@ -1971,13 +1976,18 @@ function renderMessages(messages, forceScroll = false) {
     root.append(node);
   }
   for (const entry of state.chatQueue) root.append(createPendingMessage(entry));
-  if (state.busy && state.chatStreamText) {
+  const persistedResponse = state.chatRequest?.responseMessageId
+    ? visibleMessages.some((message) => message.id === state.chatRequest.responseMessageId)
+    : state.chatRequest?.phase === "reconciling";
+  if (state.chatStreamText && !persistedResponse && state.chatRequest?.phase === "running") {
     const node = document.createElement("div");
     node.className = "message assistant streaming";
     node.innerHTML = markdownToHtml(state.chatStreamText);
     root.append(node);
   }
-  if (state.busy) root.append(createCoachWorkingIndicator());
+  if (state.chatRequest?.phase === "running" || (state.chatRequest?.phase === "recovering" && !persistedResponse)) {
+    root.append(createCoachWorkingIndicator());
+  }
   updateChatQueueStatus();
   updateChatComposerVisibility();
   if (shouldScroll && !state.chatResponseStarted) scrollChatToLatest();
@@ -3538,16 +3548,51 @@ function scheduleChatStatusPoll(delay = 1_500) {
   }, delay);
 }
 
+async function loadChatHistoryFresh() {
+  const pendingLoad = state.loadPromise;
+  if (pendingLoad) await pendingLoad.catch(() => {});
+  await load("/api/bootstrap", ["chat"]);
+}
+
+async function resumeQueuedChat() {
+  if (!state.chatQueue.length || state.chatRequest || state.chatServerOperationId) {
+    if (!state.chatQueue.length && !state.chatRequest && !state.chatServerOperationId) {
+      state.busy = false;
+      renderQuickMessageTemplates();
+      renderMessages(state.data?.messages || [], true);
+      updateChatControls();
+    }
+    return;
+  }
+  const next = state.chatQueue.shift();
+  renderMessages(state.data?.messages || [], true);
+  try {
+    await drainChatQueue(next.message);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    if (!state.chatRequest && !state.chatServerOperationId) state.busy = false;
+    renderQuickMessageTemplates();
+    renderMessages(state.data?.messages || [], true);
+    updateChatControls();
+  }
+}
+
 async function pollChatStatus() {
   if (!state.data || document.visibilityState !== "visible" || !navigator.onLine) {
     scheduleChatStatusPoll(5_000);
     return;
   }
+  if (state.chatStatusPollInFlight) return;
+  state.chatStatusPollInFlight = true;
+  let running = false;
   try {
     const status = await api("/api/chat/status");
-    const running = status.status === "running";
+    running = status.status === "running";
     if (running) {
       state.chatServerOperationId = status.operation_id || null;
+      if (!state.chatRequest) state.chatRequest = { phase: "recovering", operationId: state.chatServerOperationId, message: null };
+      else if (state.chatRequest.phase === "recovering") state.chatRequest.operationId = state.chatServerOperationId;
       if (!state.busy) {
         state.busy = true;
         renderQuickMessageTemplates();
@@ -3555,19 +3600,28 @@ async function pollChatStatus() {
         renderMessages(state.data.messages || [], true);
       }
     } else {
-      const resumedOperation = Boolean(state.chatServerOperationId);
+      if (state.chatStream) return;
+      const recoveringRequest = state.chatRequest?.phase === "recovering";
       state.chatServerOperationId = null;
-      if (resumedOperation && !state.chatStream) {
-        state.busy = false;
-        await load();
-        renderMessages(state.data?.messages || [], true);
-        scrollChatToResponseStart();
-        updateChatControls();
+      if (recoveringRequest) {
+        const request = state.chatRequest;
+        await loadChatHistoryFresh();
+        if (state.chatRequest === request) {
+          state.chatRequest = null;
+          state.busy = Boolean(state.chatQueue.length);
+          renderQuickMessageTemplates();
+          renderMessages(state.data?.messages || [], true);
+          updateChatControls();
+          void resumeQueuedChat();
+          scrollChatToResponseStart();
+        }
       }
     }
-    scheduleChatStatusPoll(running ? 1_500 : 5_000);
   } catch (error) {
     if (!/Authentication/.test(error.message)) scheduleChatStatusPoll(5_000);
+  } finally {
+    state.chatStatusPollInFlight = false;
+    scheduleChatStatusPoll(running ? 1_500 : 5_000);
   }
 }
 
@@ -3615,7 +3669,9 @@ async function requestCoachResponse(message) {
     renderMessages(state.data.messages, true);
   }
   state.chatStreamText = "";
-  const stream = { controller: new AbortController(), operationId: null, cancelRequested: false };
+  const request = { phase: "running", message, operationId: null, responseMessageId: null, cancelRequested: false };
+  state.chatRequest = request;
+  const stream = { controller: new AbortController(), operationId: null, cancelRequested: false, request, serverError: false };
   state.chatStream = stream;
   updateChatControls();
   renderMessages(state.data?.messages || [], true);
@@ -3629,6 +3685,7 @@ async function requestCoachResponse(message) {
       body: JSON.stringify({ message }),
     });
     if (!response.ok) {
+      if (response.status === 401) stream.serverError = true;
       let payload = {};
       try { payload = await response.json(); } catch (_) {}
       if (response.status === 401) showLogin();
@@ -3649,6 +3706,7 @@ async function requestCoachResponse(message) {
       const payload = JSON.parse(data.join("\n"));
       if (event === "started") {
         stream.operationId = payload.operation_id || null;
+        request.operationId = stream.operationId;
         state.chatServerOperationId = stream.operationId;
       }
       else if (event === "delta") {
@@ -3659,10 +3717,18 @@ async function requestCoachResponse(message) {
         renderMessages(state.data?.messages || [], false);
         if (responseJustStarted) scrollChatToResponseStart();
       } else if (event === "error") {
+        stream.serverError = true;
         const error = new Error(payload.message || "Die Coach-Anfrage ist fehlgeschlagen.");
         error.reason = payload.reason;
         throw error;
-      } else if (event === "completed") completed = true;
+      } else if (event === "completed") {
+        completed = true;
+        request.phase = "reconciling";
+        request.responseMessageId = payload.message?.id || null;
+        state.chatStreamText = "";
+        renderMessages(state.data?.messages || [], false);
+        updateChatControls();
+      }
     };
     while (true) {
       const chunk = await reader.read();
@@ -3675,14 +3741,24 @@ async function requestCoachResponse(message) {
     buffer += decoder.decode();
     if (buffer.trim()) consume(buffer);
     if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
-    await load();
+    await loadChatHistoryFresh();
     if (completed) scrollChatToResponseStart();
     invalidateContextPreview();
-    return completed;
+    return completed ? "completed" : "failed";
   } catch (error) {
     const cancelled = stream.cancelRequested || error?.name === "AbortError" || error?.reason === "chat_cancelled";
+    if (!completed && !stream.serverError) {
+      request.phase = "recovering";
+      state.chatStreamText = "";
+      state.chatServerOperationId = stream.operationId || state.chatServerOperationId;
+      if (state.chatStream === stream) state.chatStream = null;
+      renderMessages(state.data?.messages || [], false);
+      updateChatControls();
+      scheduleChatStatusPoll(0);
+      return "recovering";
+    }
     if (!cancelled) toast(error.message, true);
-    await load();
+    await loadChatHistoryFresh();
     invalidateContextPreview();
     return false;
   } finally {
@@ -3690,29 +3766,38 @@ async function requestCoachResponse(message) {
     state.chatStreamText = "";
     if (!completed) state.chatResponseScrollPending = false;
     state.chatResponseStarted = false;
-    state.chatServerOperationId = null;
+    if (state.chatRequest === request && request.phase !== "recovering") state.chatRequest = null;
+    if (request.phase !== "recovering") state.chatServerOperationId = null;
     updateChatControls();
   }
 }
 
 async function drainChatQueue(firstMessage) {
-  if (!await requestCoachResponse(firstMessage)) return;
+  const firstResult = await requestCoachResponse(firstMessage);
+  if (firstResult !== "completed") return firstResult;
   while (state.chatQueue.length) {
     const next = state.chatQueue.shift();
     renderMessages(state.data?.messages || [], true);
-    if (!await requestCoachResponse(next.message)) return;
+    if (await requestCoachResponse(next.message) !== "completed") return;
   }
+  return "completed";
 }
 
 async function cancelChat() {
   const stream = state.chatStream;
-  if (!stream) return;
-  stream.cancelRequested = true;
+  const operationId = stream?.operationId || state.chatServerOperationId;
+  if (!operationId) return;
+  if (stream) stream.cancelRequested = true;
+  if (state.chatRequest) {
+    state.chatRequest.cancelRequested = true;
+    state.chatRequest.phase = "recovering";
+  }
   await api("/api/chat/cancel", {
     method: "POST",
-    body: JSON.stringify({ operation_id: stream.operationId }),
+    body: JSON.stringify({ operation_id: operationId }),
   }).catch(() => {});
-  stream.controller.abort();
+  stream?.controller.abort();
+  scheduleChatStatusPoll(0);
 }
 
 async function sendMessage(event) {
@@ -3720,7 +3805,10 @@ async function sendMessage(event) {
   const input = $("#messageInput");
   const message = input.value.trim();
   if (!message || voiceIsRecording() || state.voiceTranscribing) return;
-  if (state.chatServerOperationId && !state.chatStream) return;
+  if (state.chatRequest || state.chatServerOperationId) {
+    if (state.busy) queueChatMessage(message, "queue");
+    return;
+  }
   if (state.busy) {
     queueChatMessage(message, "queue");
     return;
@@ -3736,7 +3824,7 @@ async function sendMessage(event) {
   try {
     await drainChatQueue(message);
   } finally {
-    state.busy = false;
+    if (!state.chatRequest && !state.chatServerOperationId) state.busy = false;
     updateChatControls();
     renderMessages(state.data?.messages || [], true);
     updateVoiceButton();
@@ -3928,6 +4016,7 @@ async function resetCoachChat() {
     if (state.data) {
       state.data.messages = [];
       state.chatQueue = [];
+      state.chatRequest = null;
       state.chatServerOperationId = null;
       state.chatResponseStarted = false;
       state.chatResponseScrollPending = false;
