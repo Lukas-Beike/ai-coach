@@ -1069,6 +1069,14 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [ ] Vollsuite und Browser-Smoke-Test sind nach jedem Schritt grün.
 - [ ] Neue Features benötigen nicht mehr standardmäßig Änderungen in beiden Monolithen.
 
+**Fortschritt FT-027 – DB-Schnitt**
+
+- [x] Modulgrenzen und der schrittweise Ablauf sind in `README.md` dokumentiert.
+- [x] Dependency-light DB-Primitiven aus `server.py` nach `backend/db.py` verschoben.
+- [x] Containerpaketierung und Regressionstest für den DB-Schnitt ergänzt.
+- [x] Review ohne Findings; PR #185 per Auto-Squash gemergt (`4e449f9`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility grün.
+- [ ] Repositorys, Provider, Sync, Coach, Backup, HTTP-API sowie Frontend-Bereiche bleiben für die folgenden kohärenten Refactor-PRs offen.
+
 ### - [ ] FT-028 – PWA-/Notification-Versprechen präzisieren und Produktentscheidung treffen
 
 **Quelle:** PWA-01, PWA-02
