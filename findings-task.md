@@ -1114,6 +1114,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 69/69, 69/69, 69/69 und 68/68 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-activity-feedback-repository` erfolgreich.
 - [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Snapshot-Repository**
+
+- [x] Lokale Provider-Snapshot-Reads/Writes als `SnapshotRepository` in `backend/db/repositories.py` abgegrenzt.
+- [x] Vollständige Snapshot-Payloads, Latest-Read, 12er-Retention, Connection Ownership, `DB_LOCK` und Sync-Metadaten unverändert erhalten.
+- [x] Regressionstest für Payload, Latest-Snapshot, Retention und die bestehende Projektion ergänzt.
+- [x] Review ohne Findings; PR #199 per Auto-Squash gemergt (`4df7ada`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 69/69, 69/69, 69/69 und 69/69 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-snapshot-repository` erfolgreich.
+- [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Fortschritt FT-027 - Chat-Repository**
 
 - [x] Lokale Chat-Reads/Writes als `ChatRepository` in `backend/db/repositories.py` abgegrenzt.
