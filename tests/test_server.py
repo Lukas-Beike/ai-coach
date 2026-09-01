@@ -290,6 +290,19 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(rows[0]["notes"], "updated")
         self.assertEqual(rows[0]["created_at"], "2026-09-01T00:00:00+00:00")
 
+    def test_activity_feedback_repository_preserves_upsert_delete_and_order_contract(self):
+        repository = server.ActivityFeedbackRepository(lambda: "2026-09-01T00:00:00+00:00")
+        older = {"activity_id": "activity-old", "activity_name": "Run", "activity_date": "2026-08-30", "notes": "older"}
+        newer = {"activity_id": "activity-new", "activity_name": "Ride", "activity_date": "2026-08-31", "notes": "newer"}
+        with server.database() as db:
+            repository.upsert(db, older)
+            repository.upsert(db, newer)
+            repository.upsert(db, dict(newer, notes="updated"))
+            rows = repository.list(db)
+            self.assertEqual(next(row for row in rows if row["activity_id"] == "activity-new")["notes"], "updated")
+            repository.delete(db, "activity-new")
+            self.assertEqual([row["activity_id"] for row in repository.list(db)], ["activity-old"])
+
     def test_profile_only_accepts_known_fields_and_trims(self):
         profile = server.normalize_profile({"name": "  Ada  ", "goals": "Finish strong", "admin": True})
         self.assertEqual(profile["name"], "Ada")
