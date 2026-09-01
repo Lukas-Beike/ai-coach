@@ -427,6 +427,21 @@ class CoachTests(unittest.TestCase):
         server.save_profile({"weather_location": "Koeln"})
         self.assertEqual(server.get_kv(server.WEATHER_FAILURE_KEY), "")
 
+    def test_athlete_context_location_change_clears_weather_caches(self):
+        server.save_profile({"weather_location": "Berlin"})
+        server.set_kv(server.WEATHER_CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}}))
+        server.set_kv(server.WEATHER_FAILURE_KEY, json.dumps({"count": 2, "retry_at": "2099-01-01T00:00:00+00:00"}))
+        server.save_athlete_context({"weather_location": "Koeln"}, [])
+        self.assertEqual(server.get_kv(server.WEATHER_CACHE_KEY), "")
+        self.assertEqual(server.get_kv(server.WEATHER_FAILURE_KEY), "")
+
+    def test_local_weather_state_does_not_fetch_without_complete_plan_state(self):
+        server.save_profile({"weather_location": "Berlin"})
+        with patch.object(server, "_fetch_weather_forecast", side_effect=AssertionError("weather must stay local")):
+            weather = server.public_weather_state(local_only=True)
+        self.assertTrue(weather["configured"])
+        self.assertTrue(weather["loading"])
+
     def test_weather_background_sync_refreshes_and_reuses_three_hour_cache(self):
         server.save_profile({"weather_location": "Berlin"})
         forecast = {
@@ -940,6 +955,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('async function loadState(path = "/api/bootstrap", requestedAreas = null)', app)
         self.assertIn('function load(path = "/api/bootstrap", requestedAreas = null)', app)
         self.assertIn('api("/api/chat/history?limit=100")', app)
+        self.assertIn('api(`/api/weather${query}`)', app)
+        self.assertIn('areas.push("weather")', app)
         self.assertIn('fetch("/api/chat/stream"', app)
         self.assertIn('api("/api/chat/status")', app)
         self.assertIn("function scrollChatToResponseStart()", app)

@@ -37,7 +37,7 @@ function renderPlanSegments(segment = state.planSegment) {
 }
 
 function currentPlanLoadAreas() {
-  const areas = new Set(["chat", "activities", "performance", "feedback", "profile"]);
+  const areas = new Set(["chat", "activities", "performance", "feedback", "profile", "weather"]);
   const route = baseRoute();
   if (route === "today" || (route === "planned" && state.planSegment !== "library")) areas.add("plan");
   if (route === "planned" && state.planSegment === "library") areas.add("library");
@@ -3485,6 +3485,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     if (areas.has("chat")) requests.push(["chat", api("/api/chat/history?limit=100")]);
     if (areas.has("activities")) requests.push(["activities", api("/api/activities?limit=250")]);
     if (areas.has("plan")) requests.push(["plan", api(`/api/plan${query}`)]);
+    if (areas.has("weather") && !areas.has("plan")) requests.push(["weather", api(`/api/weather${query}`)]);
     if (areas.has("library")) requests.push(["library", api("/api/library?limit=100")]);
     if (areas.has("performance")) requests.push(["performance", api("/api/performance")]);
     if (areas.has("feedback")) requests.push(["feedback", api("/api/feedback")]);
@@ -3500,6 +3501,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       if (area === "chat") Object.assign(payload, { messages: result.messages || [], messages_next_cursor: result.next_cursor });
       if (area === "activities") Object.assign(payload, { activities: result.activities || [], activities_next_cursor: result.next_cursor });
       if (area === "plan") Object.assign(payload, result);
+      if (area === "weather") Object.assign(payload, { weather: result });
       if (area === "library") Object.assign(payload, { library: result.workouts || [], library_next_cursor: result.next_cursor });
       if (area === "performance") Object.assign(payload, result);
       if (area === "feedback") Object.assign(payload, result);
@@ -3576,9 +3578,13 @@ async function loadInitialState() {
   const route = routeFromHash();
   const segment = planSegmentFromRoute(route);
   const areas = ["chat", "activities", "performance", "feedback", "profile"];
+  areas.push("weather");
   if (route === "today" || (baseRoute(route) === "planned" && segment !== "library")) areas.push("plan");
   if (baseRoute(route) === "planned" && segment === "library") areas.push("library");
   await load("/api/bootstrap?local=1", areas);
+  if (state.data?.profile?.weather_location) {
+    await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
+  }
   scheduleChatStatusPoll(0);
 }
 
