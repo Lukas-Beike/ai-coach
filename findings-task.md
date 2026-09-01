@@ -1302,7 +1302,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Validierung:** Vier schnelle Shards `71/71/71/71`, kanonischer PowerShell-/SQLCipher-Containerlauf `284` Tests, `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, Ruff-Lint/Format und MyPy-Baseline für `tests/run_tests.py`, Docker-Build, `git diff --check`. PR #227: Test-Shards, Container-Tests, Syntax, Image-SBOM/Scan, Browser Smoke/Accessibility, Quality-Baseline, Analyse, CodeQL und Validate grün.
 - **Offene Hinweise:** Der aktuelle Debian-Vendor-Stand meldet im PR-Report weiterhin nicht behebbare OS-Findings; sie werden sichtbar gehalten und blockieren Release-/Publish-Läufe, bis ein Fix verfügbar oder eine explizit reviewte Ausnahme akzeptiert ist. FT-030 bis FT-032 bleiben separate Folgepakete.
 
-### - [ ] FT-030 – Änderungshistorie und gezieltes Undo für lokale Daten einführen
+### - [x] FT-030 – Änderungshistorie und gezieltes Undo für lokale Daten einführen
 
 **Quelle:** Feature-Gap „Änderungshistorie/Undo“, COACH-01, DATA-01
 **Ziel:** Kritische lokale Änderungen an Profil, Bibliothek, Wettkämpfen und Plan sind nachvollziehbar und innerhalb klarer Grenzen reversibel, ohne entfernte Providerdaten still zurückzuschreiben.
@@ -1310,21 +1310,32 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Auditmodell definieren: Objektart/-ID, Aktion, technische Quelle, Zeitpunkt, Vorher-/Nachher-Hash und sichere strukturierte Diffdaten.
-- [ ] Keine freien Prompts, Providerpayloads, Credentials oder unnötigen Gesundheitsinhalte im Audit speichern.
-- [ ] Versionierung zunächst für Profil, Workout-Bibliothek, lokale Wettkämpfe und lokale Planänderungen ergänzen.
-- [ ] Undo als neue explizite Mutation mit Vorschau und Bestätigung behandeln.
-- [ ] Remote synchronisierte Zustände klar markieren; Undo ändert standardmäßig nur lokal und zeigt einen eventuell nötigen separaten Remote-Sync an.
-- [ ] Aufbewahrungsgrenze und sichere Bereinigung definieren.
-- [ ] Konflikte behandeln, wenn Objekt nach der Zielversion erneut geändert wurde.
-- [ ] Tests für Undo, Redo-/Replayversuch, Konflikt, Löschung und Privacy-Delete ergänzen.
+- [x] Auditmodell definieren: Objektart/-ID, Aktion, technische Quelle, Zeitpunkt, Vorher-/Nachher-Hash und sichere strukturierte Diffdaten.
+- [x] Keine freien Prompts, Providerpayloads, Credentials oder unnötigen Gesundheitsinhalte im Audit speichern.
+- [x] Versionierung zunächst für Profil, Workout-Bibliothek, lokale Wettkämpfe und lokale Planänderungen ergänzen.
+- [x] Undo als neue explizite Mutation mit Vorschau und Bestätigung behandeln.
+- [x] Remote synchronisierte Zustände klar markieren; Undo ändert standardmäßig nur lokal und zeigt einen eventuell nötigen separaten Remote-Sync an.
+- [x] Aufbewahrungsgrenze und sichere Bereinigung definieren.
+- [x] Konflikte behandeln, wenn Objekt nach der Zielversion erneut geändert wurde.
+- [x] Tests für Undo, Redo-/Replayversuch, Konflikt, Löschung und Privacy-Delete ergänzen.
 
 **Abnahmekriterien**
 
-- [ ] Nutzer kann sehen, was lokal wann geändert wurde, ohne sensible Rohinhalte im Audit offenzulegen.
-- [ ] Undo kann keine Remote-Mutation als Nebenwirkung auslösen.
-- [ ] Neuere Änderungen werden nicht still durch ein veraltetes Undo überschrieben.
-- [ ] „Lokale Daten löschen“ entfernt auch die zugehörige Änderungshistorie wie im Dialog angekündigt.
+- [x] Nutzer kann sehen, was lokal wann geändert wurde, ohne sensible Rohinhalte im Audit offenzulegen.
+- [x] Undo kann keine Remote-Mutation als Nebenwirkung auslösen.
+- [x] Neuere Änderungen werden nicht still durch ein veraltetes Undo überschrieben.
+- [x] „Lokale Daten löschen“ entfernt auch die zugehörige Änderungshistorie wie im Dialog angekündigt.
+
+**Handover FT-030 (2026-09-01)**
+
+- **Status:** abgeschlossen.
+- **Branch, Commit und PR:** `feat/ft-030-undo-history`, `1ce48cd`, PR [#229](https://github.com/Lukas-Beike/ai-coach/pull/229), Squash-Merge `d2a5421`.
+- **Geänderte Dateien:** `server.py`, `tests/test_server.py`, `README.md`, `public/app.js`, `public/index.html`, `public/styles.css`, `public/service-worker.js`.
+- **Verhalten:** Lokale Profil-, Bibliotheks-, Wettkampf- und Planänderungen werden mit begrenzter Aufbewahrung, Allowlist, Hashes und strukturierten Diffs versioniert. Die Historie zeigt nur sichere Metadaten und geänderte Feldnamen. Undo erfordert Vorschau, Bestätigung und einen einmaligen Aktionstoken, prüft den aktuellen Objekt-Hash und erzeugt bei Erfolg eine neue lokale Undo-Version. Remote-Provider werden dabei nicht beschrieben; synchronisierte Objekte bleiben als lokal geändert und benötigen einen separaten Sync-Schritt.
+- **Privacy:** Prompts, Providerpayloads, Credentials und unnötige Rohinhalte werden nicht in der öffentlichen Historie oder im Export ausgegeben. „Lokale Daten löschen“ entfernt die Historie mit den übrigen lokalen Daten.
+- **Validierung:** `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, vier schnelle Shards mit insgesamt 288 Tests, kanonischer SQLCipher-Containerlauf mit 288 Tests, `docker build -t ai-coach:ft030-undo-history .` und `git diff --check` erfolgreich.
+- **Review und CI:** Diff-Review ohne offene Findings. PR #229: alle 15 Checks erfolgreich, 4 nicht anwendbare Checks übersprungen; Test-Shards, SQLCipher-Container, Syntax, SBOM/Scan, Analyse, CodeQL, Browser-Smoke und Accessibility grün.
+- **Offene Hinweise:** Die Historie ist lokal begrenzt (180 Tage, maximal 500 Einträge). Ein Undo synchronisiert absichtlich nicht automatisch zu einem Provider.
 
 ### - [ ] FT-031 – Provider-Datenfrische und Retry-Verlauf sichtbar machen
 
