@@ -41,7 +41,7 @@ from urllib.request import Request, urlopen
 from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
-from backend.providers.intervals import IntervalsReadTransport, fetch_paged_collection
+from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 
 try:
     from garminconnect import Garmin
@@ -5346,6 +5346,11 @@ class IntervalsClient:
             self.headers,
             lambda *args, **kwargs: http_json(*args, **kwargs),
         )
+        self._write_transport = IntervalsWriteTransport(
+            self.base,
+            self.headers,
+            lambda *args, **kwargs: http_json(*args, **kwargs),
+        )
         self.pagination: dict[str, dict[str, Any]] = {}
         self._workout_folder_id: int | None = None
 
@@ -5377,18 +5382,15 @@ class IntervalsClient:
 
     @intervals_operation
     def post(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
-        query = "?" + urlencode(params, doseq=True) if params else ""
-        return http_json("POST", self.base + path + query, payload, self.headers, service="intervals")
+        return self._write_transport.post(path, payload, params)
 
     @intervals_operation
     def put(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
-        query = "?" + urlencode(params, doseq=True) if params else ""
-        return http_json("PUT", self.base + path + query, payload, self.headers, service="intervals")
+        return self._write_transport.put(path, payload, params)
 
     @intervals_operation
     def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        query = "?" + urlencode(params, doseq=True) if params else ""
-        return http_json("DELETE", self.base + path + query, headers=self.headers, service="intervals")
+        return self._write_transport.delete(path, params)
 
     def get_workout_library(self) -> list[dict[str, Any]]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
