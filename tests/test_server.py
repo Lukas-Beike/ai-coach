@@ -298,6 +298,22 @@ class CoachTests(unittest.TestCase):
             repository.set(db, payload)
             self.assertEqual(repository.get(db), payload)
 
+    def test_competition_repository_preserves_order_and_full_row_lookup_contract(self):
+        saved = server.save_coach_competition({
+            "name": "Repository race",
+            "event_date": "2026-09-20",
+            "sport": "Run",
+            "priority": "A",
+            "distance": "10 km",
+        })
+        repository = server.CompetitionRepository()
+        with server.database() as db:
+            rows = repository.list(db)
+            row = repository.get(db, saved["competition"]["id"])
+        self.assertEqual(rows[0]["name"], "Repository race")
+        self.assertEqual(row["event_date"], "2026-09-20")
+        self.assertEqual(row["sync_state"], "local")
+
     def test_activity_feedback_repository_preserves_upsert_delete_and_order_contract(self):
         repository = server.ActivityFeedbackRepository(lambda: "2026-09-01T00:00:00+00:00")
         older = {"activity_id": "activity-old", "activity_name": "Run", "activity_date": "2026-08-30", "notes": "older"}
