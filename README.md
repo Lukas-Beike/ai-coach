@@ -305,7 +305,7 @@ safe booleans and status values, never paths, secrets, or athlete data.
 Backend modularization starts with dependency-light database primitives in the
 `backend.db` package; its first repository is the explicit
 `KeyValueRepository`, `ProfileRepository`, `CompetitionRepository`,
-`TrainingPlanRepository`,
+`TrainingPlanRepository`, `PlanAdjustmentRepository`,
 `ChatRepository`,
 `CheckinRepository`,
 `ActivityFeedbackRepository`, `SnapshotRepository`, and
