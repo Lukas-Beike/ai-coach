@@ -753,8 +753,8 @@ class CoachTests(unittest.TestCase):
         service_worker = (Path(__file__).resolve().parents[1] / "public" / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
-        self.assertIn('/app.js?v=123', index)
-        self.assertIn('intervals-coach-v123', service_worker)
+        self.assertIn('/app.js?v=124', index)
+        self.assertIn('intervals-coach-v124', service_worker)
 
     def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -783,6 +783,25 @@ class CoachTests(unittest.TestCase):
         self.assertIn('href="#planned/goals"', index)
         self.assertEqual(index.count('id="libraryLoadButton"'), 1)
         self.assertEqual(index.count('id="libraryDirtyIndicator"'), 1)
+
+    def test_more_segments_group_settings_and_localize_sensitive_inputs(self):
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
+        for segment in ("profile", "connections", "coach", "privacy", "operations"):
+            self.assertIn(f'"more/{segment}"', app)
+            self.assertIn(f'href="#more/{segment}"', index)
+        self.assertIn('function moreSegmentFromRoute(route = state.route)', app)
+        self.assertIn('function renderMoreSegments(segment = moreSegmentFromRoute())', app)
+        self.assertIn('formData.getAll("sports")', app)
+        self.assertIn('hours * 3600 + minutes * 60', app)
+        self.assertIn('Math.round(kilometers * 1000)', app)
+        self.assertIn('name="sports" multiple', index)
+        self.assertIn('name="timezone" autocomplete="off"', index)
+        self.assertIn('id="profileContextNotice"', index)
+        self.assertIn('Dauer (hh:mm)', app)
+        self.assertIn('Distanz (km)', app)
+        self.assertIn('data-more-segment-panel="privacy"', index)
+        self.assertIn('data-more-segment-panel="operations"', index)
 
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -4040,8 +4059,8 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/app.js?v=123"', source)
-        self.assertIn('"/icon.svg?v=123"', source)
+        self.assertIn('"/app.js?v=124"', source)
+        self.assertIn('"/icon.svg?v=124"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)

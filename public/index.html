@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=123" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=123">
+  <link rel="icon" href="/icon.svg?v=124" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=124">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -161,15 +161,22 @@
 
       <section id="profilePanel" class="panel" aria-label="Athletenprofil">
         <div class="section-heading">
-          <div><span class="eyebrow">COACHING-PROFIL</span><h2>Athletenkontext <span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2></div>
+          <div><span class="eyebrow">MEHR · ATHLETENPROFIL</span><h2>Athletenprofil <span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2></div>
         </div>
-        <form id="profileForm" class="profile-form">
+        <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
+          <a href="#more/profile" data-more-segment="profile" aria-current="page">Athletenprofil</a>
+          <a href="#more/connections" data-more-segment="connections">Anbindungen</a>
+          <a href="#more/coach" data-more-segment="coach">Coach &amp; Modell</a>
+          <a href="#more/privacy" data-more-segment="privacy">Daten &amp; Datenschutz</a>
+          <a href="#more/operations" data-more-segment="operations">Betrieb &amp; Diagnose</a>
+        </nav>
+        <form id="profileForm" class="profile-form" aria-describedby="profileContextNotice">
           <details class="profile-section collapsible-section" open>
             <summary class="collapsible-summary"><span class="collapsible-summary-title">Dauerhaftes Profil</span><span id="profileSummary" class="collapsible-summary-meta">Noch nicht ausgefüllt</span></summary>
-            <p>Diese bestätigten Angaben werden lokal gespeichert und bei jeder Coach-Anfrage berücksichtigt.</p>
+            <p id="profileContextNotice" class="context-sharing-notice" role="note"><strong>Coach-Kontext:</strong> Die folgenden Profil-, Ziel- und Verfügbarkeitsangaben werden lokal gespeichert und können in Coach-Anfragen an OpenAI eingehen. Prüfe sie vor dem Speichern.</p>
             <div class="form-grid">
               <label>Name<input name="name" autocomplete="name"></label>
-              <label>Sportarten<input name="sports" placeholder="Radfahren, Laufen, Kraft…"></label>
+              <label>Sportarten<select name="sports" multiple size="4" aria-describedby="sportsHelp"><option value="Cycling">Radfahren</option><option value="Running">Laufen</option><option value="Swimming">Schwimmen</option><option value="Strength">Krafttraining</option><option value="Triathlon">Triathlon</option><option value="Other">Andere</option></select><small id="sportsHelp">Mit Strg/Ctrl oder Cmd mehrere Sportarten auswählen.</small></label>
             </div>
             <label>Trainingserfahrung<textarea name="training_background" rows="3" placeholder="Erfahrung, Trainingshistorie, Stärken und Schwächen…"></textarea></label>
             <label>Typischer Wochenumfang<input name="typical_weekly_volume" placeholder="Zum Beispiel: 8–10 Stunden, 5 Trainingstage"></label>
@@ -180,8 +187,8 @@
             <label>Trainingspräferenzen<textarea name="training_preferences" rows="3" placeholder="Drinnen/draußen, bevorzugte Einheiten, Ruhetage…"></textarea></label>
             <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Intervals.icu stehen…"></textarea></label>
             <div class="form-grid">
-              <label>Coaching-Stil<input name="coaching_style"></label>
-              <label>Zeitzone<input name="timezone" placeholder="Europe/Berlin" autocomplete="off"><small>IANA-Zeitzone, zum Beispiel Europe/Berlin oder America/New_York</small></label>
+              <label>Coaching-Stil<input name="coaching_style" placeholder="Unterstützend, direkt und evidenzbasiert"></label>
+              <label>Zeitzone<select name="timezone" autocomplete="off"><option value="Europe/Berlin">Europe/Berlin</option><option value="Europe/London">Europe/London</option><option value="Europe/Paris">Europe/Paris</option><option value="Europe/Zurich">Europe/Zurich</option><option value="America/New_York">America/New_York</option><option value="America/Chicago">America/Chicago</option><option value="America/Los_Angeles">America/Los_Angeles</option><option value="Asia/Tokyo">Asia/Tokyo</option><option value="Australia/Sydney">Australia/Sydney</option><option value="UTC">UTC</option></select><small>IANA-Zeitzone; die Auswahl steuert Tagesgrenzen und Zeitformatierung.</small></label>
             </div>
             <label>Wetter-/Urlaubsstandort<input name="weather_location" placeholder="Stadt oder PLZ, z. B. Münster"></label>
             <p class="fine-print profile-help">Diesen Standort kannst du jederzeit ändern, zum Beispiel für einen Urlaub. Eine Stadt oder PLZ reicht; konkrete Zeitvorschläge gibt es nur für die nächsten 5 Tage.</p>
@@ -202,9 +209,16 @@
 
       <section id="settingsPanel" class="panel" aria-label="Systemeinstellungen">
         <div class="section-heading">
-          <div><span class="eyebrow">EINSTELLUNGEN</span><h2>Anbindungen &amp; Server</h2></div>
+          <div><span class="eyebrow">MEHR</span><h2>Bereiche &amp; Einstellungen</h2></div>
         </div>
-        <details class="settings-section collapsible-section">
+        <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
+          <a href="#more/profile" data-more-segment="profile">Athletenprofil</a>
+          <a href="#more/connections" data-more-segment="connections" aria-current="page">Anbindungen</a>
+          <a href="#more/coach" data-more-segment="coach">Coach &amp; Modell</a>
+          <a href="#more/privacy" data-more-segment="privacy">Daten &amp; Datenschutz</a>
+          <a href="#more/operations" data-more-segment="operations">Betrieb &amp; Diagnose</a>
+        </nav>
+        <details class="settings-section collapsible-section" data-more-segment-panel="connections">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
@@ -218,7 +232,7 @@
           <p class="fine-print settings-message">Wetterdaten: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a> · Lizenz: CC BY 4.0.</p>
           <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend. Termine werden im Tab „Plan“ angezeigt.</p>
         </details>
-        <details class="settings-section collapsible-section">
+        <details class="settings-section collapsible-section" data-more-segment-panel="operations">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Kalenderansicht</span><span id="calendarDisplaySummary" class="collapsible-summary-meta">Einstellungen werden geladen...</span></summary>
           <form id="calendarDisplayForm" class="calendar-display-form">
             <div class="calendar-display-fields">
@@ -229,7 +243,7 @@
             <p class="fine-print settings-message">Steuert nur, wie viele Kalenderwochen in der Oberfläche angezeigt werden. Synchronisations- und Trainingsdaten bleiben unverändert.</p>
           </form>
         </details>
-        <details class="settings-section collapsible-section">
+        <details class="settings-section collapsible-section" data-more-segment-panel="coach">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Coach-Modell &amp; Thinking</span><span id="modelSettingsSummary" class="collapsible-summary-meta">Auswahl wird geladen…</span></summary>
           <div id="modelSettingsTarget">
             <div class="model-selector">
@@ -242,7 +256,7 @@
             </div>
           </div>
         </details>
-        <details class="settings-section release-section collapsible-section" aria-labelledby="releaseTitle">
+        <details class="settings-section release-section collapsible-section" data-more-segment-panel="operations" aria-labelledby="releaseTitle">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">GitHub-Versionen</span><span id="releaseSummary" class="collapsible-summary-meta">Release wird geprüft…</span></summary>
           <div class="settings-section-heading">
             <div><span class="eyebrow">RELEASE</span><h3 id="releaseTitle">GitHub-Versionen</h3><p id="releaseStatus">GitHub-Release wird geprüft…</p></div>
@@ -250,7 +264,7 @@
           </div>
           <pre id="releaseChangelog" class="release-changelog">Changelog wird geladen…</pre>
         </details>
-        <details class="settings-section context-preview collapsible-section" aria-label="Chat-Kontext und Prompt">
+        <details class="settings-section context-preview collapsible-section" data-more-segment-panel="coach" aria-label="Chat-Kontext und Prompt">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Chat-Kontext und Prompt</span><span class="collapsible-summary-meta">Transparenz</span></summary>
           <div class="context-preview-heading">
             <div><span class="eyebrow">TRANSPARENZ</span><h3 id="systemContextPreviewTitle">Chat-Kontext und Prompt</h3></div>
@@ -260,12 +274,12 @@
           <div id="systemContextPreviewStatus" class="context-preview-status">Noch nicht geladen.</div>
           <div id="systemContextPreviewContent" class="context-preview-content" hidden></div>
         </details>
-        <details class="settings-section logs-section collapsible-section">
+        <details class="settings-section logs-section collapsible-section" data-more-segment-panel="operations">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Server-Logs</span><span class="collapsible-summary-meta">Bereinigte Laufzeitdaten</span></summary>
           <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die letzten bereinigten Einträge aus dem Fehler- und Laufzeitprotokoll.</p></div><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button></div>
           <pre id="logsOutput" class="logs-output">Logs werden beim Öffnen geladen…</pre>
         </details>
-        <details class="settings-section collapsible-section">
+        <details class="settings-section collapsible-section" data-more-segment-panel="privacy">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Datenschutz &amp; Verbrauch</span><span id="privacySummary" class="collapsible-summary-meta">OpenAI-Verbrauch wird geladen…</span></summary>
           <p id="usageSummary" class="fine-print">OpenAI-Verbrauch wird geladen…</p>
           <div class="settings-inline-action notification-actions">
@@ -291,7 +305,7 @@
             <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
           </div>
         </details>
-        <details class="settings-section collapsible-section">
+        <details class="settings-section collapsible-section" data-more-segment-panel="operations">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span><span class="collapsible-summary-meta">Bereinigten Status herunterladen</span></summary>
           <div class="diagnostic-actions">
             <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
@@ -337,6 +351,6 @@
       </div>
     </div>
   </dialog>
-  <script src="/app.js?v=123" defer></script>
+  <script src="/app.js?v=124" defer></script>
 </body>
 </html>

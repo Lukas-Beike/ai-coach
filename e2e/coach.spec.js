@@ -81,6 +81,26 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#chatPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#coach$/);
 
+    const settingsNav = page.locator("#settingsPanel .more-segment-nav");
+    await page.getByRole("link", { name: "Mehr", exact: true }).click();
+    await expect(page).toHaveURL(/#more$/);
+    await expect(page.locator('[data-more-segment-panel="connections"]').first()).toBeVisible();
+    await settingsNav.getByRole("link", { name: "Coach & Modell", exact: true }).click();
+    await expect(page).toHaveURL(/#more\/coach$/);
+    await expect(page.locator('[data-more-segment-panel="coach"]')).toHaveCount(2);
+    await expect(page.locator('[data-more-segment-panel="coach"]').first()).toBeVisible();
+    await expect(page.locator('[data-more-segment-panel="connections"]').first()).toBeHidden();
+    await settingsNav.getByRole("link", { name: "Daten & Datenschutz", exact: true }).click();
+    await expect(page).toHaveURL(/#more\/privacy$/);
+    await expect(page.locator('[data-more-segment-panel="privacy"]')).toBeVisible();
+    await settingsNav.getByRole("link", { name: "Betrieb & Diagnose", exact: true }).click();
+    await expect(page).toHaveURL(/#more\/operations$/);
+    await expect(page.locator('[data-more-segment-panel="operations"]').first()).toBeVisible();
+    await settingsNav.getByRole("link", { name: "Athletenprofil", exact: true }).click();
+    await expect(page).toHaveURL(/#more\/profile$/);
+    await expect(page.locator("#profilePanel")).toHaveClass(/active/);
+    await expect(page.locator("#profileContextNotice")).toBeVisible();
+
     await page.getByRole("link", { name: "Plan", exact: true }).click();
     await expect(page.locator("#planCalendarSegment")).toBeVisible();
     await expect(page.getByRole("link", { name: "Kalender", exact: true })).toHaveAttribute("aria-current", "page");

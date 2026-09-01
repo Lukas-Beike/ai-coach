@@ -65,6 +65,11 @@ const NAV_ROUTES = Object.freeze({
   "planned/goals": "workoutsPanel",
   performance: "dataPanel",
   more: "settingsPanel",
+  "more/connections": "settingsPanel",
+  "more/coach": "settingsPanel",
+  "more/privacy": "settingsPanel",
+  "more/operations": "settingsPanel",
+  "more/profile": "profilePanel",
   profile: "profilePanel",
   settings: "settingsPanel",
 });
@@ -97,6 +102,25 @@ function planSegmentFromRoute(route = state.route) {
 
 function baseRoute(route = state.route) {
   return String(route || DEFAULT_NAV_ROUTE).split("/")[0];
+}
+
+function moreSegmentFromRoute(route = state.route) {
+  const segment = String(route || "").split("/")[1];
+  if (["profile", "connections", "coach", "privacy", "operations"].includes(segment)) return segment;
+  return route === "profile" ? "profile" : "connections";
+}
+
+function renderMoreSegments(segment = moreSegmentFromRoute()) {
+  const selected = ["profile", "connections", "coach", "privacy", "operations"].includes(segment) ? segment : "connections";
+  document.querySelectorAll("[data-more-segment-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.moreSegmentPanel !== selected;
+  });
+  document.querySelectorAll("[data-more-segment]").forEach((link) => {
+    const active = link.dataset.moreSegment === selected;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
 }
 
 function renderPlanSegments(segment = state.planSegment) {
@@ -148,6 +172,7 @@ function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}
   navigation.setAttribute("aria-current", "page");
   panel.classList.add("active");
   state.route = panelRoute;
+  if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
   if (mainRoute === "planned") {
     renderPlanSegments(planSegmentFromRoute(panelRoute));
     renderActivePlanSegment(state.data);
@@ -2535,8 +2560,21 @@ function renderProfile(profile) {
   if (state.profileDirty) return;
   const form = $("#profileForm");
   for (const [key, value] of Object.entries(profile)) {
-    if (form.elements[key]) form.elements[key].value = value || "";
+    const field = form.elements[key];
+    if (!field) continue;
+    if (key === "sports" && field.multiple) {
+      const selectedSports = String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+      [...field.options].forEach((option) => { option.selected = selectedSports.includes(option.value); });
+      continue;
+    }
+    if (key === "timezone" && field.tagName === "SELECT") {
+      if (value && ![...field.options].some((option) => option.value === value)) field.append(new Option(`${value} (gespeichert)`, value));
+      field.value = value || "";
+      continue;
+    }
+    field.value = value || "";
   }
+  if (form.elements.coaching_style?.value === "Supportive, direct, and evidence-aware") form.elements.coaching_style.value = "Unterstützend, direkt und evidenzbasiert";
   const summary = $("#profileSummary");
   if (summary) {
     const values = [profile.name, profile.sports, profile.typical_weekly_volume].filter(Boolean);
@@ -2683,8 +2721,8 @@ function contextField(labelText, field, value = "", options = {}) {
     input = document.createElement("select");
     for (const choice of options.choices) {
       const option = document.createElement("option");
-      option.value = choice;
-      option.textContent = choice;
+      option.value = typeof choice === "string" ? choice : choice.value;
+      option.textContent = typeof choice === "string" ? choice : choice.label;
       input.append(option);
     }
   } else if (options.multiline) {
@@ -2755,10 +2793,10 @@ function competitionEditor(competition = {}, index = 0) {
     contextField("Name", "name", competition.name, { placeholder: "Münsterland Giro" }),
     contextField("Datum", "event_date", competition.event_date, { type: "date" }),
     contextField("Startzeit (lokal)", "start_date_local", (competition.start_date_local || "").slice(0, 16), { type: "datetime-local" }),
-    contextField("Sportart", "sport", competition.sport || "Radfahren", { placeholder: "Radfahren, Rad indoor, Laufen oder Krafttraining" }),
-    contextField("Kategorie", "category", competition.category || `RACE_${competition.priority || "B"}`, { choices: ["RACE_A", "RACE_B", "RACE_C"] }),
-    contextField("Dauer (Sekunden)", "moving_time", competition.moving_time, { type: "number", placeholder: "14400" }),
-    contextField("Distanz (Meter)", "distance", competition.distance, { placeholder: "125000" }),
+    contextField("Sportart", "sport", competition.sport || "Cycling", { choices: [{ value: "Cycling", label: "Radfahren" }, { value: "Ride", label: "Radfahren (Provider)" }, { value: "VirtualRide", label: "Rad indoor" }, { value: "Running", label: "Laufen" }, { value: "Run", label: "Laufen (Provider)" }, { value: "Swim", label: "Schwimmen" }, { value: "Strength", label: "Krafttraining" }, { value: "Other", label: "Andere" }] }),
+    contextField("Kategorie", "category", competition.category || `RACE_${competition.priority || "B"}`, { choices: [{ value: "RACE_A", label: "A · Hauptwettkampf" }, { value: "RACE_B", label: "B · Aufbauwettkampf" }, { value: "RACE_C", label: "C · Trainingswettkampf" }] }),
+    contextField("Dauer (hh:mm)", "moving_time", competition.moving_time == null ? "" : `${String(Math.floor(Number(competition.moving_time) / 3600)).padStart(2, "0")}:${String(Math.floor(Number(competition.moving_time) % 3600 / 60)).padStart(2, "0")}`, { type: "time", step: 60 }),
+    contextField("Distanz (km)", "distance", competition.distance ? String((Number(competition.distance) / 1000).toLocaleString("en-US", { maximumFractionDigits: 3 })) : "", { type: "number", step: "0.001", min: "0", placeholder: "125" }),
     contextField("Externe ID", "external_id", competition.external_id, { placeholder: "Wird automatisch vergeben" })
   );
   card.append(
@@ -2838,7 +2876,17 @@ async function resolveCompetitionConflict(competitionId, strategy, button) {
 function collectCompetitions() {
   return [...document.querySelectorAll(".competition-editor")].map((card) => {
     const competition = { id: card.dataset.id || "" };
-    card.querySelectorAll("[data-field]").forEach((input) => { competition[input.dataset.field] = input.value.trim(); });
+    card.querySelectorAll("[data-field]").forEach((input) => {
+      const field = input.dataset.field;
+      const value = input.value.trim();
+      if (field === "moving_time") {
+        const [hours, minutes] = value.split(":").map(Number);
+        competition[field] = value && Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 3600 + minutes * 60 : "";
+      } else if (field === "distance") {
+        const kilometers = Number(value.replace(",", "."));
+        competition[field] = value && Number.isFinite(kilometers) ? String(Math.round(kilometers * 1000)) : "";
+      } else competition[field] = value;
+    });
     return competition;
   });
 }
@@ -3751,7 +3799,12 @@ async function saveProfile(event) {
     button.setAttribute("aria-busy", "true");
     button.textContent = "Athletenkontext wird gespeichert…";
   }
-  const profile = { ...(state.data?.profile || {}), ...Object.fromEntries(new FormData(event.currentTarget)) };
+  const formData = new FormData(event.currentTarget);
+  const profile = {
+    ...(state.data?.profile || {}),
+    ...Object.fromEntries(formData),
+    sports: formData.getAll("sports").map((value) => String(value).trim()).filter(Boolean).join(", "),
+  };
   const payload = {
     profile,
     competitions: collectCompetitions(),
@@ -4085,6 +4138,11 @@ document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEvent
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   applyNavigationRoute(`planned/${link.dataset.planSegment}`, { historyMode: "push" });
+}));
+document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  applyNavigationRoute(`more/${link.dataset.moreSegment}`, { historyMode: "push" });
 }));
 window.addEventListener("hashchange", syncNavigationRoute);
 

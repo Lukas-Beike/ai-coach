@@ -771,6 +771,8 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 ### - [ ] FT-019 – „Mehr“ in Profil, Anbindungen, Coach, Datenschutz und Betrieb gliedern
 
+**Status:** in Umsetzung
+
 **Quelle:** UX-01, UI-04, PRIV-01
 **Ziel:** Seltene Stammdaten- und technische Einstellungen sind auffindbar, ohne den täglichen Workflow zu überladen.
 **Abhängigkeiten:** FT-016
