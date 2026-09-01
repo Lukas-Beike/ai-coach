@@ -152,9 +152,8 @@ jobs:
     name: Image SBOM
     runs-on: ubuntu-latest
     permissions:
-      # The SBOM action attaches its generated SPDX document to published
-      # releases. Keep write access scoped to this single security job.
-      contents: write
+      # Keep the security job read-only; the SBOM is stored as a workflow artifact.
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -166,6 +165,7 @@ jobs:
           image: ai-coach:security
           format: spdx-json
           output-file: ai-coach-sbom.spdx.json
+          upload-release-assets: false
       - name: Upload image SBOM
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
