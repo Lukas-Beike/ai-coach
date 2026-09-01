@@ -1930,6 +1930,71 @@ function createCoachWorkingIndicator() {
   return node;
 }
 
+function renderCoachActionReview() {
+  const root = $("#coachActionReview");
+  const content = $("#coachActionReviewContent");
+  if (!root || !content) return;
+  content.replaceChildren();
+  const proposals = Array.isArray(state.coachActionProposals) ? state.coachActionProposals : [];
+  root.hidden = proposals.length === 0;
+  proposals.forEach((proposal) => {
+    const card = document.createElement("div");
+    card.className = "coach-action-card";
+    const description = document.createElement("p");
+    const target = proposal.target_system === "local+intervals"
+      ? "lokal und optional in Intervals.icu"
+      : proposal.target_system === "intervals" ? "in Intervals.icu" : "nur lokal";
+    description.textContent = `Der Coach schlägt ${target} ${proposal.diff?.length || 0} Einheiten vor. Noch nicht gespeichert.`;
+    const entries = document.createElement("ul");
+    (Array.isArray(proposal.diff) ? proposal.diff : []).forEach((entry) => {
+      const item = document.createElement("li");
+      item.textContent = [entry.name, entry.date, entry.sport, entry.duration_minutes ? `${entry.duration_minutes} min` : null].filter(Boolean).join(" · ");
+      entries.append(item);
+    });
+    const actions = document.createElement("div");
+    actions.className = "coach-action-card-actions";
+    const later = document.createElement("button");
+    later.type = "button";
+    later.className = "secondary-button";
+    later.textContent = "Später prüfen";
+    later.addEventListener("click", () => {
+      state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
+      renderCoachActionReview();
+    });
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "adaptive-planning-button";
+    confirm.textContent = proposal.target_system === "local+intervals" ? "Planung freigeben" : "Lokal speichern";
+    confirm.addEventListener("click", () => executeCoachActionProposal(proposal, confirm));
+    actions.append(later, confirm);
+    card.append(description, entries, actions);
+    content.append(card);
+  });
+}
+
+async function executeCoachActionProposal(proposal, button) {
+  if (!proposal?.id || button.disabled) return;
+  button.disabled = true;
+  try {
+    const confirmed = await api("/api/coach/actions/confirm", {
+      method: "POST",
+      body: JSON.stringify({ proposal_id: proposal.id }),
+    });
+    const result = await api("/api/coach/actions/execute", {
+      method: "POST",
+      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
+    });
+    state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
+    renderCoachActionReview();
+    toast(result.local_planned ? `${result.local_planned} Einheit(en) lokal geplant` : "Planung lokal gespeichert");
+    await load("/api/bootstrap?local=1", ["plan", "library"]);
+    applyNavigationRoute("planned", { historyMode: "push" });
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
+  }
+}
+
 function createPendingMessage(entry) {
   const node = document.createElement("div");
   node.className = "message user pending";
@@ -1954,6 +2019,7 @@ function renderMessages(messages, forceScroll = false) {
     state.chatResponseStarted,
     state.chatRequest?.phase || null,
     state.chatRequest?.responseMessageId || null,
+    (state.coachActionProposals || []).map((proposal) => [proposal.id, proposal.status]),
     state.chatQueue.map((entry) => [entry.id, entry.mode, entry.message]),
   ]);
   if (root.dataset.signature === signature) return;
@@ -1988,6 +2054,7 @@ function renderMessages(messages, forceScroll = false) {
   if (state.chatRequest?.phase === "running" || (state.chatRequest?.phase === "recovering" && !persistedResponse)) {
     root.append(createCoachWorkingIndicator());
   }
+  renderCoachActionReview();
   updateChatQueueStatus();
   updateChatComposerVisibility();
   if (shouldScroll && !state.chatResponseStarted) scrollChatToLatest();
@@ -3726,6 +3793,7 @@ async function requestCoachResponse(message) {
         request.phase = "reconciling";
         request.responseMessageId = payload.message?.id || null;
         state.chatStreamText = "";
+        state.coachActionProposals = Array.isArray(payload?.proposed_actions) ? payload.proposed_actions : [];
         renderMessages(state.data?.messages || [], false);
         updateChatControls();
       }

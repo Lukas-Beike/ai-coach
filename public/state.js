@@ -12,6 +12,7 @@ const state = {
   chatStatusPollInFlight: false,
   chatResponseStarted: false,
   chatResponseScrollPending: false,
+  coachActionProposals: [],
   chatQueue: [],
   chatQueueSequence: 0,
   profileDirty: false,
