@@ -1318,6 +1318,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 77/76/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-http-api` und SQLCipher-Containerlauf mit 305 Tests erfolgreich.
 - [ ] Weitere HTTP-API-, Coach-, Backup-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Frontend-Formulare**
+
+- [x] Availability- und Competition-Formularhelfer als `public/forms.js` abgegrenzt; kein neues Framework eingeführt.
+- [x] Bestehende Formularserialisierung, DOM-Semantik, Asset-Versionierung und Service-Worker-Cache unverändert bzw. konsistent erhalten; `forms.js` wird vor `app.js` geladen.
+- [x] Regressionen für neue Modulgrenze, Availability-/Competition-Umrechnung, Asset-Version 137 und versioniertes Caching ergänzt.
+- [x] Review ohne Findings; PR #259 per Auto-Squash gemergt (`b856152`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 77/76/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-frontend-forms` und SQLCipher-Containerlauf mit 305 Tests erfolgreich.
+- [ ] Weitere Frontend-, Coach-, Backup-, HTTP-API- und Sync-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
