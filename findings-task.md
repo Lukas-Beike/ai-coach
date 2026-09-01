@@ -1170,6 +1170,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 70/70, 70/70, 70/70 und 70/70 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-training-plan-repository` erfolgreich.
 - [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Plan-Adjustment-Repository**
+
+- [x] Persistenz, Latest-/Recent-Reads und Statusübergänge der Adaptive-Replan-Vorschauen als `PlanAdjustmentRepository` in `backend/db/repositories.py` abgegrenzt.
+- [x] Preview-, Applied-, Stale- und Partial-Semantik, JSON-Payloads, Transaktionsgrenzen, Connection Ownership, `DB_LOCK` und SQLCipher unverändert erhalten.
+- [x] Regressionstest für Preview-Erstellung, Lookup und Statusänderung ergänzt.
+- [x] Review ohne Findings; PR #209 per Auto-Squash gemergt (`5b4c01c`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 71/70/70/70 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-plan-adjustment-repository` erfolgreich.
+- [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
