@@ -1475,6 +1475,7 @@ function renderExternalCalendarMarker(event) {
   const markers = [
     Number(event.training_relevant) === 0 ? "Kein Training" : null,
     Number(event.no_intensity) === 1 ? "Keine Intensität" : null,
+    Number(event.short_only) === 1 ? "Nur kurz" : null,
   ].filter(Boolean);
   const label = document.createElement("span");
   label.textContent = markers.join(" · ") || "Kalenderhinweis";
@@ -1625,7 +1626,7 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
   });
   const calendarEventsByDate = new Map();
   (externalCalendarEvents || [])
-    .filter((event) => event && (Number(event.training_relevant) === 0 || Number(event.no_intensity) === 1))
+    .filter((event) => event && (Number(event.training_relevant) === 0 || Number(event.no_intensity) === 1 || Number(event.short_only) === 1))
     .forEach((event) => {
       const date = String(event.event_date || "").slice(0, 10);
       if (!date) return;

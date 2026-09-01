@@ -36,14 +36,16 @@ It is not intended to be exposed directly to the public internet.
 - If adaptive planning shortens a local workout or reduces its intensity due
   to a read-only iCalendar appointment, the linked planned workout records
   that reason and the original versus adjusted duration after approval.
-- Google Calendar has no editable iCalendar category field. Add
-  `[NO_TRAINING]` to the event description for informational appointments;
-  the event remains visible in the external-calendar list and as a red marker
+- Google Calendar has no editable iCalendar category field. The external
+  calendar sync imports only events whose description contains one of
+  `[NO_TRAINING]`, `[NO_INTENSITY]`, or `[SHORT_ONLY]`. Add `[NO_TRAINING]`
+  to informational appointments; the event remains visible as a red marker
   on its day in the planned calendar, but is excluded from coaching and
   adaptive planning.
 - Add `[NO_INTENSITY]` to the description when a calendar event should allow
   training but prevent hard sessions; it is shown as a red marker on its day;
-  other description tags have no effect.
+  `[SHORT_ONLY]` marks an appointment that should only allow a short session.
+  Other description tags have no effect.
 - Optional weather integration via Open-Meteo: a city or postal code in the
   profile enables a cached 14-day forecast in the planned calendar. For
   outdoor runs and rides, the app suggests a weather-aware time window for

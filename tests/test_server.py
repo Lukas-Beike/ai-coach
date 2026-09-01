@@ -1647,8 +1647,23 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(events[2]["training_relevant"])
         self.assertTrue(events[3]["no_intensity"])
         self.assertTrue(events[3]["training_relevant"])
+        self.assertFalse(events[3]["short_only"])
         self.assertFalse(events[4]["no_intensity"])
         self.assertTrue(events[4]["training_relevant"])
+        self.assertFalse(events[4]["training_impact"])
+
+    def test_ical_training_markers_are_contains_matched_in_description_only(self):
+        events = server.parse_ical_calendar(
+            b"BEGIN:VCALENDAR\r\n"
+            b"BEGIN:VEVENT\r\nUID:short-only\r\nDTSTART;VALUE=DATE:20260907\r\n"
+            b"SUMMARY:[SHORT_ONLY] Summary only\r\nDESCRIPTION:family appointment\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:short-only-description\r\nDTSTART;VALUE=DATE:20260908\r\n"
+            b"SUMMARY:Family appointment\r\nDESCRIPTION:Please keep it [short_only] today\r\nEND:VEVENT\r\n"
+            b"END:VCALENDAR\r\n"
+        )
+        self.assertFalse(events[0]["training_impact"])
+        self.assertTrue(events[1]["training_impact"])
+        self.assertTrue(events[1]["short_only"])
 
     def test_calendar_provider_primitives_unfold_and_validate_without_server_dependency(self):
         from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
@@ -1783,7 +1798,9 @@ class CoachTests(unittest.TestCase):
     def test_external_calendar_sync_keeps_url_server_side_and_replaces_events(self):
         payload = (
             b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:family-2\r\nDTSTART:20260902T100000Z\r\n"
-            b"DTEND:20260902T120000Z\r\nSUMMARY:School meeting\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            b"DTEND:20260902T120000Z\r\nSUMMARY:School meeting\r\nDESCRIPTION: [NO_INTENSITY]\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:unmarked\r\nDTSTART:20260903T100000Z\r\n"
+            b"DTEND:20260903T120000Z\r\nSUMMARY:Unmarked\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
         with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", return_value=payload), patch.object(
@@ -1798,6 +1815,7 @@ class CoachTests(unittest.TestCase):
             self.assertTrue(state["configured"])
             self.assertNotIn("url", state)
             self.assertEqual(state["events"][0]["duration_minutes"], 120)
+            self.assertEqual(state["events"][0]["short_only"], 0)
 
     def test_external_calendar_sync_limits_events_to_eight_weeks(self):
         today = server.local_now().date()
@@ -1805,7 +1823,7 @@ class CoachTests(unittest.TestCase):
         outside_window = in_window + timedelta(days=1)
         payload = (
             "BEGIN:VCALENDAR\r\n"
-            f"BEGIN:VEVENT\r\nUID:in-window\r\nDTSTART;VALUE=DATE:{in_window.strftime('%Y%m%d')}\r\nSUMMARY:Within window\r\nEND:VEVENT\r\n"
+            f"BEGIN:VEVENT\r\nUID:in-window\r\nDTSTART;VALUE=DATE:{in_window.strftime('%Y%m%d')}\r\nSUMMARY:Within window\r\nDESCRIPTION:[SHORT_ONLY]\r\nEND:VEVENT\r\n"
             f"BEGIN:VEVENT\r\nUID:outside-window\r\nDTSTART;VALUE=DATE:{outside_window.strftime('%Y%m%d')}\r\nSUMMARY:Outside window\r\nEND:VEVENT\r\n"
             "END:VCALENDAR\r\n"
         ).encode()
@@ -4914,6 +4932,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("planned-calendar-marker", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
         self.assertIn("Number(event.training_relevant) === 0", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
         self.assertIn("Number(event.no_intensity) === 1", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
+        self.assertIn("Number(event.short_only) === 1", (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8"))
 
     def test_intervals_connection_status_has_detail_and_refreshes_assets(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
