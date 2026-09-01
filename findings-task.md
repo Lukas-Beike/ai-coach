@@ -1272,6 +1272,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 75/75/75/75 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-sync-status` und SQLCipher-Containerlauf mit 300 Tests erfolgreich.
 - [ ] Weitere Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Sync-Orchestrierung**
+
+- [x] Die read-only Intervals-/Wettkampf-Pipeline als dependency-light `run_read_sync_pipeline` in `backend/sync/orchestration.py` abgegrenzt.
+- [x] Eine gemeinsame `operation_id`, unabhängige Fehlerpfade und die bestehende technische Fehlerklassifizierung unverändert erhalten; der Competition-Schritt bleibt mit `push_local=False` read-only.
+- [x] Regressionstest für Fortsetzung nach Intervals-Fehler, explizite Callback-Grenze und unveränderte Read-only-Semantik ergänzt.
+- [x] Review ohne Findings; PR #248 per Auto-Squash gemergt (`cf9c925`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 76/75/75/75 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-sync-orchestration` und SQLCipher-Containerlauf mit 301 Tests erfolgreich.
+- [ ] Weitere Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
