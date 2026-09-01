@@ -1245,6 +1245,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 75/74/74/74 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-garmin-provider` und SQLCipher-Containerlauf mit 297 Tests erfolgreich.
 - [ ] Weitere Repositorys, Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Kalender-Provider**
+
+- [x] iCalendar-Wert-/Datumsnormalisierung, bounded Unfolding und Duration-Parsing als zustandsfreie Funktionen in `backend/providers/calendar.py` abgegrenzt.
+- [x] HTTP-Fetch, SSRF-/Redirect-/Größenlimits, `AppError`-Mapping, Zeitzonenrichtlinie und Domain-Mapping unverändert im Anwendungskern belassen.
+- [x] Bestehende Kalender- und Recurrence-Regressionen sowie die neue Modulgrenzprüfung grün; keine Providerantworten oder URLs werden im Modul persistiert.
+- [x] Review ohne Findings; PR #242 per Auto-Squash gemergt (`5b7b24b`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 75/75/74/74 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-calendar-provider` und SQLCipher-Containerlauf mit 298 Tests erfolgreich.
+- [ ] Weitere Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
