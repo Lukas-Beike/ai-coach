@@ -806,7 +806,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - Manuelle Prüfung: Disposable-Docker-Fixture ohne Providerkonten, Secrets, Live-Datenbank oder Laufzeitdaten; Deep Links, Segment-Sichtbarkeit und Accessibility geprüft.
 - Offene Risiken: Keine für FT-019.
 
-### - [ ] FT-020 – Accessibility-Baseline WCAG 2.2 AA schließen
+### - [x] FT-020 – Accessibility-Baseline WCAG 2.2 AA schließen
 
 **Quelle:** A11Y-01, A11Y-02
 **Ziel:** Kernflows erfüllen eine dokumentierte WCAG-2.2-AA-Baseline.
@@ -814,19 +814,30 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Landmark-, Heading-, Label- und Dialogstruktur aller Kernviews auditieren.
-- [ ] Kontrast und kleine Hilfstexte über Design-Tokens korrigieren.
-- [ ] Touchziele mindestens 44 × 44 CSS-Pixel sicherstellen.
-- [ ] Fokusfalle, Escape, Fokus-Rückgabe und Fehlermeldungen in Dialogen prüfen.
-- [ ] 200-%-Textzoom, Reduced Motion und Tastatur-only testen.
-- [ ] Mindestens einen manuellen Screenreader-Smoke-Test dokumentieren.
-- [ ] axe-Regeln nur mit begründeten, engen Ausnahmen konfigurieren.
+- [x] Landmark-, Heading-, Label- und Dialogstruktur aller Kernviews auditieren.
+- [x] Kontrast und kleine Hilfstexte über Design-Tokens korrigieren.
+- [x] Touchziele mindestens 44 × 44 CSS-Pixel sicherstellen.
+- [x] Fokusfalle, Escape, Fokus-Rückgabe und Fehlermeldungen in Dialogen prüfen.
+- [x] 200-%-Textzoom, Reduced Motion und Tastatur-only testen.
+- [x] Mindestens einen manuellen Screenreader-Smoke-Test dokumentieren.
+- [x] axe-Regeln nur mit begründeten, engen Ausnahmen konfigurieren.
 
 **Abnahmekriterien**
 
-- [ ] Automatisierte Accessibility-Checks sind grün.
-- [ ] Alle Kernaktionen sind ohne Maus erreichbar.
-- [ ] Status und Validierungsfehler werden programmatisch angekündigt.
+- [x] Automatisierte Accessibility-Checks sind grün.
+- [x] Alle Kernaktionen sind ohne Maus erreichbar.
+- [x] Status und Validierungsfehler werden programmatisch angekündigt.
+
+**Handover FT-020**
+
+- Status: abgeschlossen; Folgepakete ab FT-021 sind entblockt.
+- Umsetzung: `feat/ft-020-a11y`, Commit `736bc90`, PR #170; Merge-Commit `258dc907`.
+- Änderungen: WCAG-Baseline für Kernviews dokumentiert und automatisiert geprüft; Interaktionsziele auf mindestens 44 CSS-Pixel abgesichert; Dialogbeschreibung, Fokus-Rückgabe, Status- und Validierungsfehler programmatisch ergänzt; Tastatur-, 200-%-Zoom- und Reduced-Motion-Regressionen erweitert.
+- Betroffene Dateien: `public/app.js`, `public/index.html`, `public/styles.css`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, `e2e/coach.spec.js`.
+- Validierung: Docker-Build erfolgreich; vier schnelle Test-Shards mit jeweils 62 Tests erfolgreich; `py_compile`, Node-Syntaxprüfung und `git diff --check` erfolgreich; lokale Desktop-/Mobile-Kernflows und Axe-Prüfungen erfolgreich; GitHub-CI inklusive Browser-Smoke/Accessibility, CodeQL, Analyse, Syntax und Validate erfolgreich.
+- Review: Diff-Review ohne offene Findings. Die lokale Prüfung fand zunächst zwei zu kleine bestehende Aktionsziele sowie veraltete Asset-Assertions; beide Korrekturen wurden umgesetzt und erneut grün geprüft. Zwischenläufe mit langsamer Fixture-Initialisierung und Login-Rate-Limit wurden mit frischen disposable Fixtures wiederholt.
+- Manuelle Prüfung: Semantische Landmark-/Label-/Dialogprüfung, Tastaturbedienung, sichtbarer Fokus, Modal-Fokus-Rückgabe, Status-/Fehlerankündigungen, 200-%-Zoom, Reduced Motion und axe-Core im isolierten Browser-Fixture geprüft; keine Providerkonten, Secrets, Live-Datenbanken oder Laufzeitdaten verwendet.
+- Offene Risiken: Keine für FT-020.
 
 ### - [ ] FT-021 – Strukturierte Wochenverfügbarkeit einführen
 
