@@ -1226,6 +1226,16 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Manuelle/Browser-Pruefung: verpflichtender GitHub-Browser-Smoke-/Accessibility-Lauf erfolgreich; lokale JavaScript-Syntaxpruefung war mangels Node.js nicht verfuegbar.
 - [ ] Weitere Frontend-Bereiche sowie Provider-, Sync-, Coach-, Backup- und HTTP-API-Schnittstellen bleiben fuer folgende kohaerente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Frontend-Views**
+
+- [x] Sichere Markdown-, Datums-, Kalender- und Wetterdarstellung als state-freie Hilfen in `public/views.js` abgegrenzt; DOM-, State- und Data-Loading-Koordination verbleibt in `public/app.js`.
+- [x] Static-Serving, versionierte PWA-Assets und Service-Worker-Cache fuer das neue Modul ergaenzt; bestehende Rendersemantik, Authentifizierung und API-Vertraege unveraendert erhalten.
+- [x] Regressionstests fuer sichere Darstellung, Date-only-Werte, Modulgrenze, Static-Revalidierung und Service-Worker-Assets aktualisiert; keine doppelten Hilfsdefinitionen oder zyklischen Abhaengigkeiten eingefuehrt.
+- [x] Review ohne Findings; PR #222 per Auto-Squash gemergt (`ab3c0d8`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL, Analyse und vier Test-Shards gruen.
+- [x] Validierung: vier schnelle Shards mit 71/71/71/70 Tests, drei gezielte View-/Asset-Tests, `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check` und Docker-Build `ai-coach:ft027-frontend-views` erfolgreich.
+- [x] Manuelle/Browser-Pruefung: verpflichtender GitHub-Browser-Smoke-/Accessibility-Lauf erfolgreich; lokale JavaScript-Syntaxpruefung war mangels Node.js nicht verfuegbar.
+- [ ] Weitere Frontend-Bereiche sowie Provider-, Sync-, Coach-, Backup- und HTTP-API-Schnittstellen bleiben fuer folgende kohaerente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
