@@ -1777,6 +1777,47 @@ class CoachTests(unittest.TestCase):
                 server.external_calendar_url("https://calendar.example/feed.ics")
         self.assertEqual(raised.exception.status, 400)
 
+    def test_calendar_url_validation_resolves_hostname_once(self):
+        with patch.object(
+            server.socket,
+            "getaddrinfo",
+            return_value=[(None, None, None, None, ("93.184.216.34", 443))],
+        ) as resolve:
+            self.assertEqual(server.external_calendar_url("https://calendar.example/feed.ics"), "https://calendar.example/feed.ics")
+
+        self.assertEqual(resolve.call_count, 1)
+
+    def test_calendar_feed_resolves_once_and_retries_another_global_address(self):
+        raw_socket = Mock()
+        tls_socket = Mock()
+        tls_context = Mock()
+        tls_context.wrap_socket.return_value = tls_socket
+        response = Mock(status=200)
+        response.read.return_value = b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
+        addresses = [server.ipaddress.ip_address("93.184.216.34"), server.ipaddress.ip_address("93.184.216.35")]
+
+        with patch.object(server, "_resolve_calendar_addresses", return_value=addresses) as resolve, patch.object(
+            server.ssl, "create_default_context", return_value=tls_context
+        ), patch.object(server.socket, "create_connection", side_effect=[OSError("first address unavailable"), raw_socket]) as connect, patch.object(
+            server, "HTTPResponse", return_value=response
+        ):
+            payload = server.fetch_calendar_feed("https://calendar.example/feed.ics")
+
+        self.assertEqual(payload, b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+        resolve.assert_called_once_with("calendar.example", status=502)
+        self.assertEqual(connect.call_count, 2)
+        tls_context.wrap_socket.assert_called_once_with(raw_socket, server_hostname="calendar.example")
+        tls_socket.close.assert_called_once_with()
+
+    def test_calendar_feed_timeout_is_reported_as_gateway_timeout(self):
+        with patch.object(
+            server, "_resolve_calendar_addresses", return_value=[server.ipaddress.ip_address("93.184.216.34")]
+        ), patch.object(server.socket, "create_connection", side_effect=TimeoutError("calendar timeout")):
+            with self.assertRaises(server.AppError) as raised:
+                server.fetch_calendar_feed("https://calendar.example/feed.ics")
+
+        self.assertEqual(raised.exception.status, 504)
+
     def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         with server.DB_LOCK, server.database() as db:
@@ -3059,6 +3100,9 @@ class CoachTests(unittest.TestCase):
             def get_lactate_threshold(self, *, latest=True):
                 return {"speed_and_heart_rate": {"speed": 3.6, "heartRate": 175, "heartRateCycling": 168}, "power": {"functionalThresholdPower": 320}}
 
+            def connectapi(self, *_args, **_kwargs):
+                raise AssertionError("the undocumented cycling threshold range endpoint must not be called")
+
             def get_weigh_ins(self, start, end):
                 return [{"date": end, "weight": 70}]
 
@@ -3087,6 +3131,7 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(result["provider_sync"]["pagination"]["hrv"]["complete"])
         self.assertEqual(statuses, ["Garmin: Zeitraum 1/1 wird synchronisiert…"])
         self.assertTrue(any(source == "weight" for _service, source, _details in calls))
+        self.assertNotIn("cycling_threshold_hr", [source for _service, source, _details in calls])
         self.assertEqual(result["cycling_ftp"]["functionalThresholdPower"], 301)
         self.assertEqual(result["running_threshold"]["power"]["functionalThresholdPower"], 320)
         self.assertEqual(result["resting_hr"][0]["restingHeartRate"], 51)
@@ -5150,6 +5195,28 @@ class CoachTests(unittest.TestCase):
 
         handler.log_client_disconnect.assert_called_once_with()
         handler.wfile.write.assert_not_called()
+
+    def test_json_response_disconnect_logs_response_metadata(self):
+        handler = object.__new__(server.RequestHandler)
+        handler.request_id = "request-2"
+        handler.command = "GET"
+        handler.path = "/api/activities"
+        handler.send_response = Mock()
+        handler.send_header = Mock()
+        handler.end_headers = Mock(side_effect=ConnectionResetError())
+        handler.wfile = Mock()
+
+        with patch.object(server.LOGGER, "info") as logger:
+            server.RequestHandler.send_json(handler, 200, {"activities": []})
+
+        context = logger.call_args.kwargs["extra"]["context"]
+        self.assertEqual(context["method"], "GET")
+        self.assertEqual(context["path"], "/api/activities")
+        self.assertEqual(context["request_id"], "request-2")
+        self.assertEqual(context["response_status"], 200)
+        self.assertEqual(context["response_bytes"], len(server.response_json_bytes({"activities": []})))
+        self.assertEqual(context["error_type"], "ConnectionResetError")
+        self.assertGreaterEqual(context["response_duration_ms"], 0)
 
     def test_static_files_reject_path_traversal(self):
         handler = object.__new__(server.RequestHandler)

@@ -130,6 +130,8 @@ MIN_EXPORT_FREE_BYTES = 10_000_000
 EXPORT_TIME_LIMIT_SECONDS = 120
 STREAM_CHUNK_BYTES = 64 * 1024
 MAX_EXTERNAL_CALENDAR_BYTES = 5_000_000
+CALENDAR_FETCH_TIMEOUT_SECONDS = 30
+CALENDAR_CONNECTION_TIMEOUT_SECONDS = 10
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 # The Responses API counts both visible output and reasoning tokens against
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
@@ -3641,6 +3643,7 @@ def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress
         except OSError as exc:
             message = "Die Kalenderadresse konnte nicht aufgelöst werden."
             raise AppError(status, message) from exc
+    addresses = list(dict.fromkeys(addresses))
     if not addresses or any(not address.is_global for address in addresses):
         raise AppError(status, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
     return addresses
@@ -3649,15 +3652,6 @@ def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress
 def fetch_calendar_feed(url: str) -> bytes:
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").rstrip(".").casefold()
-    try:
-        addresses = [ipaddress.ip_address(hostname)]
-    except ValueError:
-        try:
-            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
-        except OSError as exc:
-            raise AppError(502, "Der Kalender-Feed konnte nicht aufgelöst werden.") from exc
-    if not addresses or any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
-        raise AppError(400, "Private or local calendar addresses are not fetched.")
     port = parsed.port or 443
     request_target = parsed.path or "/"
     if parsed.query:
@@ -3678,29 +3672,95 @@ def fetch_calendar_feed(url: str) -> bytes:
     tls_context = ssl.create_default_context()
     tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
     # Resolve immediately before connecting and connect only to these checked
-    # addresses. This closes the validation/fetch DNS rebinding window.
-    addresses = _resolve_calendar_addresses(hostname, status=502)
-    for address in addresses:
-        raw_socket = None
-        tls_socket = None
-        try:
-            raw_socket = socket.create_connection((str(address), port), timeout=10)
-            tls_socket = tls_context.wrap_socket(raw_socket, server_hostname=hostname)
+    # addresses. This closes the validation/fetch DNS rebinding window. Keep
+    # one resolution per fetch; resolving twice made a slow resolver multiply
+    # the calendar synchronization time.
+    started = time.perf_counter()
+    request_context = {
+        "service": "calendar",
+        "method": "GET",
+        "path": "/redacted",
+        "timeout_seconds": CALENDAR_FETCH_TIMEOUT_SECONDS,
+    }
+    LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": request_context})
+    timed_out = False
+    try:
+        addresses = _resolve_calendar_addresses(hostname, status=502)
+        request_context["address_count"] = len(addresses)
+        deadline = started + CALENDAR_FETCH_TIMEOUT_SECONDS
+        last_network_error: OSError | None = None
+        for address in addresses:
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                timed_out = True
+                break
             raw_socket = None
-            tls_socket.sendall(request_bytes)
-            response = HTTPResponse(tls_socket, method="GET")
-            response.begin()
-            if 300 <= response.status < 400:
-                raise AppError(400, "Der Kalender-Feed darf nicht auf eine andere Adresse weiterleiten.")
-            if response.status >= 400:
-                raise AppError(502, f"Der Kalender-Feed antwortete mit HTTP {response.status}.")
-            return response.read(MAX_EXTERNAL_CALENDAR_BYTES + 1)
-        finally:
-            if tls_socket is not None:
-                tls_socket.close()
-            if raw_socket is not None:
-                raw_socket.close()
-    raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.")
+            tls_socket = None
+            try:
+                raw_socket = socket.create_connection(
+                    (str(address), port), timeout=min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, remaining)
+                )
+                tls_socket = tls_context.wrap_socket(raw_socket, server_hostname=hostname)
+                raw_socket = None
+                remaining = deadline - time.perf_counter()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                tls_socket.settimeout(min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, remaining))
+                tls_socket.sendall(request_bytes)
+                response = HTTPResponse(tls_socket, method="GET")
+                response.begin()
+                if 300 <= response.status < 400:
+                    raise AppError(400, "Der Kalender-Feed darf nicht auf eine andere Adresse weiterleiten.")
+                if response.status >= 400:
+                    raise AppError(502, f"Der Kalender-Feed antwortete mit HTTP {response.status}.")
+                payload = response.read(MAX_EXTERNAL_CALENDAR_BYTES + 1)
+                if len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
+                    raise AppError(413, "Der Kalender-Feed ist zu groß.")
+                LOGGER.info(
+                    "External HTTP request completed",
+                    extra={
+                        "event": "external_request_completed",
+                        "context": {
+                            **request_context,
+                            "status": response.status,
+                            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                            "response_bytes": len(payload),
+                        },
+                    },
+                )
+                return payload
+            except AppError:
+                raise
+            except TimeoutError as exc:
+                timed_out = True
+                last_network_error = exc
+                break
+            except OSError as exc:
+                last_network_error = exc
+                continue
+            finally:
+                if tls_socket is not None:
+                    tls_socket.close()
+                if raw_socket is not None:
+                    raw_socket.close()
+        if timed_out:
+            raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.")
+        raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.") from last_network_error
+    except AppError as exc:
+        LOGGER.error(
+            "External calendar request failed",
+            extra={
+                "event": "external_request_failed",
+                "context": {
+                    **request_context,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "status": exc.status,
+                    "error_code": "timeout" if timed_out or exc.status == 504 else "provider_error",
+                },
+            },
+        )
+        raise
 
 
 def _ical_temporal_value(raw: str, parameters: dict[str, str]) -> tuple[datetime, bool] | None:
@@ -4172,15 +4232,6 @@ def external_calendar_url(value: Any) -> str:
         raise AppError(400, "Die Kalenderadresse muss eine HTTPS-URL ohne Zugangsdaten sein.")
     if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
         raise AppError(400, "Lokale Kalenderadressen werden aus Sicherheitsgründen nicht abgerufen.")
-    try:
-        addresses = [ipaddress.ip_address(hostname)]
-    except ValueError:
-        try:
-            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
-        except OSError as exc:
-            raise AppError(400, "Die Kalenderadresse konnte nicht aufgelöst werden.") from exc
-    if any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
-        raise AppError(400, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
     _resolve_calendar_addresses(hostname, status=400)
     return raw
 
@@ -12470,7 +12521,7 @@ def session_cookie_headers(token: str = "", csrf: str = "", *, clear: bool = Fal
 
 class RequestHandler(BaseHTTPRequestHandler):
     server_version = f"IntervalsCoach/{APP_VERSION}"
-    client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+    client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
 
     def log_message(self, fmt: str, *args: Any) -> None:
         LOGGER.info(
@@ -12486,15 +12537,23 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.connection.settimeout(20)
 
     def log_client_disconnect(self) -> None:
+        context = {
+            "method": self.command,
+            "path": urlparse(self.path).path,
+            "request_id": getattr(self, "request_id", None),
+        }
+        for attribute, key in (("_response_status", "response_status"), ("_response_bytes", "response_bytes"), ("_response_error_type", "error_type")):
+            value = getattr(self, attribute, None)
+            if value is not None:
+                context[key] = value
+        started = getattr(self, "_response_started_at", None)
+        if started is not None:
+            context["response_duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
         LOGGER.info(
             "HTTP client disconnected before response completed",
             extra={
                 "event": "http_client_disconnected",
-                "context": {
-                    "method": self.command,
-                    "path": urlparse(self.path).path,
-                    "request_id": getattr(self, "request_id", None),
-                },
+                "context": context,
             },
         )
 
@@ -12938,11 +12997,18 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_header(key, value)
         for key, value in response_header_items(headers):
             self.send_header(key, value)
+        self._response_status = status
+        self._response_bytes = len(data)
+        self._response_started_at = time.perf_counter()
         try:
             self.end_headers()
             self.wfile.write(data)
-        except self.client_disconnect_errors:
+        except self.client_disconnect_errors as exc:
+            self._response_error_type = type(exc).__name__
             self.log_client_disconnect()
+        finally:
+            for attribute in ("_response_status", "_response_bytes", "_response_started_at", "_response_error_type"):
+                self.__dict__.pop(attribute, None)
 
     def send_file_stream(
         self,
