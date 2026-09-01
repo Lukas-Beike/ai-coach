@@ -275,4 +275,6 @@ jobs:
       - name: Sign published image digest
         env:
           COSIGN_YES: "true"
-        run: cosign sign "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.image.outputs.digest }}"
+        run: |
+          image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          cosign sign "${image,,}@${{ steps.image.outputs.digest }}"
