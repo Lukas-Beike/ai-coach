@@ -1096,6 +1096,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 272 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-repositories` erfolgreich.
 - [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Check-in-Repository**
+
+- [x] Die lokale `athlete_checkins`-Persistenz als `CheckinRepository` in `backend/db/repositories.py` abgegrenzt.
+- [x] Bestehende Normalisierung, Validierung, Upsert-Semantik, Datumsreihenfolge, Connection Ownership und `DB_LOCK` unverändert erhalten.
+- [x] Regressionstest für Upsert, Readback, Aktualisierung und chronologische Ausgabe ergänzt.
+- [x] Review ohne Findings; PR #195 per Auto-Squash gemergt (`73b8999`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 274 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-checkin-repository` erfolgreich.
+- [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Fortschritt FT-027 - Chat-Repository**
 
 - [x] Lokale Chat-Reads/Writes als `ChatRepository` in `backend/db/repositories.py` abgegrenzt.
