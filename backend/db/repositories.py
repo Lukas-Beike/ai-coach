@@ -91,6 +91,38 @@ class TrainingPlanRepository:
         return [dict(row) for row in rows]
 
 
+class PlanAdjustmentRepository:
+    """Persist adaptive-replanning previews and their application status."""
+
+    def create_preview(self, db: Any, adjustment_id: str, payload: str, created_at: str) -> None:
+        db.execute(
+            "INSERT INTO plan_adjustments(id, payload, status, created_at) VALUES (?, ?, 'preview', ?)",
+            (adjustment_id, payload, created_at),
+        )
+
+    def latest(self, db: Any) -> dict[str, Any] | None:
+        row = db.execute(
+            "SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_recent(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
+        rows = db.execute(
+            "SELECT payload, status FROM plan_adjustments ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get(self, db: Any, adjustment_id: str) -> dict[str, Any] | None:
+        row = db.execute("SELECT payload, status FROM plan_adjustments WHERE id = ?", (adjustment_id,)).fetchone()
+        return dict(row) if row else None
+
+    def mark_applied(self, db: Any, adjustment_id: str, payload: str, status: str, applied_at: str) -> None:
+        db.execute(
+            "UPDATE plan_adjustments SET payload=?, status=?, applied_at=? WHERE id=?",
+            (payload, status, applied_at, adjustment_id),
+        )
+
+
 class ChatRepository:
     """Persist and retrieve local chat messages without owning a connection."""
 

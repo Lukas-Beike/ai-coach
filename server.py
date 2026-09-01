@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
-from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository, WorkoutDraftRepository
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
 
 try:
@@ -1126,6 +1126,7 @@ KEY_VALUE_REPOSITORY = KeyValueRepository(utc_now)
 PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
 COMPETITION_REPOSITORY = CompetitionRepository()
 TRAINING_PLAN_REPOSITORY = TrainingPlanRepository()
+PLAN_ADJUSTMENT_REPOSITORY = PlanAdjustmentRepository()
 CHAT_REPOSITORY = ChatRepository(utc_now)
 CHECKIN_REPOSITORY = CheckinRepository(utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
@@ -5978,9 +5979,7 @@ def private_calendar_adjustment_context(
 
 def latest_replan_preview() -> dict[str, Any] | None:
     with DB_LOCK, database() as db:
-        row = db.execute(
-            "SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at DESC LIMIT 1"
-        ).fetchone()
+        row = PLAN_ADJUSTMENT_REPOSITORY.latest(db)
     if not row:
         return None
     try:
@@ -6009,7 +6008,7 @@ def current_adaptive_replan_status() -> dict[str, Any]:
 
 def latest_illness_pause_state() -> tuple[str, dict[str, Any]] | None:
     with DB_LOCK, database() as db:
-        rows = db.execute("SELECT payload, status FROM plan_adjustments ORDER BY created_at DESC LIMIT 100").fetchall()
+        rows = PLAN_ADJUSTMENT_REPOSITORY.list_recent(db)
     for row in rows:
         try:
             payload = json.loads(row.get("payload") or "{}")
@@ -6223,9 +6222,8 @@ def adaptive_replan_preview() -> dict[str, Any]:
     }
     adjustment_id = str(uuid.uuid4())
     with DB_LOCK, database() as db:
-        db.execute(
-            "INSERT INTO plan_adjustments(id, payload, status, created_at) VALUES (?, ?, 'preview', ?)",
-            (adjustment_id, json.dumps(preview, ensure_ascii=False), preview["generated_at"]),
+        PLAN_ADJUSTMENT_REPOSITORY.create_preview(
+            db, adjustment_id, json.dumps(preview, ensure_ascii=False), preview["generated_at"]
         )
     return {"id": adjustment_id, "status": "preview", **preview}
 
@@ -6266,7 +6264,7 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
     except (ValueError, AttributeError) as exc:
         raise AppError(400, "Ungültige Plananpassung.") from exc
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload, status FROM plan_adjustments WHERE id=?", (normalized_id,)).fetchone()
+        row = PLAN_ADJUSTMENT_REPOSITORY.get(db, normalized_id)
         if not row:
             raise AppError(404, "Plananpassung nicht gefunden.")
         if row["status"] == "applied":
@@ -6312,9 +6310,8 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
             updated_checkins = _fill_illness_checkins(db, active_illness_pause, now)
             payload["illness_pause"] = {**active_illness_pause, "approved": True}
         status = "stale" if stale and not updated else "partial" if stale else "applied"
-        db.execute(
-            "UPDATE plan_adjustments SET payload=?, status=?, applied_at=? WHERE id=?",
-            (json.dumps(payload, ensure_ascii=False), status, now, normalized_id),
+        PLAN_ADJUSTMENT_REPOSITORY.mark_applied(
+            db, normalized_id, json.dumps(payload, ensure_ascii=False), status, now
         )
     remote_sync: dict[str, Any] | None = None
     if sync_illness_to_intervals and active_illness_pause:

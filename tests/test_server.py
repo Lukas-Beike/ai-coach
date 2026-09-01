@@ -323,6 +323,16 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in rows], ["plan-new", "plan-old"])
         self.assertEqual(rows[0]["status"], "planned")
 
+    def test_plan_adjustment_repository_preserves_preview_lookup_and_status_contract(self):
+        repository = server.PlanAdjustmentRepository()
+        payload = json.dumps({"changes": [], "message": "No changes"}, ensure_ascii=False)
+        with server.database() as db:
+            repository.create_preview(db, "adjustment-test", payload, "2026-09-01T00:00:00+00:00")
+            self.assertEqual(repository.latest(db)["id"], "adjustment-test")
+            self.assertEqual(repository.get(db, "adjustment-test")["status"], "preview")
+            repository.mark_applied(db, "adjustment-test", payload, "applied", "2026-09-01T01:00:00+00:00")
+            self.assertEqual(repository.get(db, "adjustment-test")["status"], "applied")
+
     def test_activity_feedback_repository_preserves_upsert_delete_and_order_contract(self):
         repository = server.ActivityFeedbackRepository(lambda: "2026-09-01T00:00:00+00:00")
         older = {"activity_id": "activity-old", "activity_name": "Run", "activity_date": "2026-08-30", "notes": "older"}
