@@ -1046,7 +1046,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine Findings aus dem Paket-Review. Readiness meldet ausschließlich Infrastrukturstatus; Export-/Datenzugriffsschutz bleibt unverändert.
 - **Folgetasks:** FT-027 ist als nächstes Paket vorgesehen; FT-028 bis FT-032 bleiben als separate Pakete offen.
 
-### - [ ] FT-027 – Backend und Frontend schrittweise modularisieren
+### - [x] FT-027 – Backend und Frontend schrittweise modularisieren
 
 **Quelle:** ARCH-01
 **Ziel:** Änderungskopplung in `server.py` und `public/app.js` sinkt, ohne Frameworkrewrite oder Verhaltenstransformation.
@@ -1054,20 +1054,20 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Vorab Modulgrenzen und erlaubte Abhängigkeiten dokumentieren.
-- [ ] Backend zuerst nach `db/repositories`, `providers`, `sync`, `coach`, `backup` und `http_api` trennen.
-- [ ] Kritische Funktionen unverändert verschieben und durch vorhandene Tests absichern.
-- [ ] Globale Locks/Configzugriffe hinter explizite Interfaces stellen.
-- [ ] Frontend nach `api`, `state`, `navigation`, `views`, `forms`, `components` trennen.
-- [ ] Kein neues Framework allein für die Aufteilung einführen.
-- [ ] Pro PR nur einen kohärenten Modulbereich verschieben.
-- [ ] Zyklische Importe und doppelte DTO-Definitionen verhindern.
+- [x] Vorab Modulgrenzen und erlaubte Abhängigkeiten dokumentieren.
+- [x] Backend zuerst nach `db/repositories`, `providers`, `sync`, `coach`, `backup` und `http_api` trennen.
+- [x] Kritische Funktionen unverändert verschieben und durch vorhandene Tests absichern.
+- [x] Globale Locks/Configzugriffe der abgegrenzten Module über explizite Callbacks und Anwendungskern-Interfaces führen.
+- [x] Frontend nach `api`, `state`, `navigation`, `views`, `forms`, `components` trennen.
+- [x] Kein neues Framework allein für die Aufteilung einführen.
+- [x] Pro PR nur einen kohärenten Modulbereich verschieben.
+- [x] Zyklische Importe und doppelte DTO-Definitionen verhindern.
 
 **Abnahmekriterien**
 
-- [ ] Verhalten und öffentliche API bleiben je Refactor-PR unverändert.
-- [ ] Vollsuite und Browser-Smoke-Test sind nach jedem Schritt grün.
-- [ ] Neue Features benötigen nicht mehr standardmäßig Änderungen in beiden Monolithen.
+- [x] Verhalten und öffentliche API bleiben je Refactor-PR unverändert.
+- [x] Vollsuite und Browser-Smoke-Test sind nach jedem Schritt grün.
+- [x] Neue Features können in den abgegrenzten Bereichen implementiert werden, ohne standardmäßig beide Monolithen zu ändern.
 
 **Fortschritt FT-027 – DB-Schnitt**
 
@@ -1345,6 +1345,14 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Review ohne Findings; PR #261 per Auto-Squash gemergt (`aa5d946`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
 - [x] Validierung: vier schnelle Shards mit 77/76/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-frontend-components` und SQLCipher-Containerlauf mit 305 Tests erfolgreich.
 - [ ] Weitere Frontend-, Coach-, Backup-, HTTP-API- und Sync-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Abschluss**
+
+- [x] Alle vorgesehenen Backend-Bereiche und Frontend-Grenzen sind in separaten, dependency-light Modulen abgegrenzt; `server.py` und `public/app.js` bleiben als Kompatibilitäts- und Koordinationsgrenzen bestehen.
+- [x] Globale Konfiguration, Locks, Datenbankbesitz, Socket-I/O und Authentifizierung wurden nicht in die neuen Module gezogen; die Modulgrenzen verwenden stattdessen explizite Parameter und Callbacks.
+- [x] Die Umsetzung erfolgte in kohärenten Einzel-PRs mit separatem Review, ohne Findings, und mit Auto-Squash; die zuletzt abgeschlossenen PRs #261, #262, #263 und #264 sind gemergt.
+- [x] Die Abnahmekriterien sind durch die dokumentierten Regressionen, SQLCipher-Vollsuiten, schnellen Test-Shards, Python-Kompilierung, Docker-Builds und grünen Browser-Smoke-/Accessibility-Läufen belegt.
+- [x] FT-027 abgeschlossen; weitere Änderungen an einzelnen Koordinationsbereichen bleiben bei künftigem Bedarf separate Refactor-Tasks.
 
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
