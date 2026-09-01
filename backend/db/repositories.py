@@ -62,6 +62,35 @@ class CompetitionRepository:
         return dict(row) if row else None
 
 
+class TrainingPlanRepository:
+    """Persist and retrieve local training-plan metadata without owning a connection."""
+
+    def create(
+        self,
+        db: Any,
+        plan_id: str,
+        name: str,
+        goal: str,
+        start_date: str,
+        end_date: str,
+        status: str,
+        created_at: str,
+    ) -> None:
+        db.execute(
+            "INSERT INTO training_plans(id, name, goal, start_date, end_date, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (plan_id, name, goal, start_date, end_date, status, created_at, created_at),
+        )
+
+    def list(self, db: Any, limit: int = 30) -> list[dict[str, Any]]:
+        rows = db.execute(
+            "SELECT id, name, goal, start_date, end_date, status, created_at, updated_at "
+            "FROM training_plans ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 class ChatRepository:
     """Persist and retrieve local chat messages without owning a connection."""
 
