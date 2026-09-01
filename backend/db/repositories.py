@@ -77,3 +77,31 @@ class CheckinRepository:
                 checkin["availability_notes"], checkin["notes"], now, now,
             ),
         )
+
+
+class ActivityFeedbackRepository:
+    """Persist athlete notes about completed activities without owning a connection."""
+
+    def __init__(self, now: Callable[[], str]):
+        self._now = now
+
+    def list(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
+        rows = db.execute(
+            "SELECT activity_id, activity_name, activity_date, notes, created_at, updated_at "
+            "FROM activity_feedback ORDER BY updated_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete(self, db: Any, activity_id: str) -> None:
+        db.execute("DELETE FROM activity_feedback WHERE activity_id = ?", (activity_id,))
+
+    def upsert(self, db: Any, feedback: dict[str, str]) -> None:
+        now = self._now()
+        db.execute(
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(activity_id) DO UPDATE SET activity_name=excluded.activity_name, "
+            "activity_date=excluded.activity_date, notes=excluded.notes, updated_at=excluded.updated_at",
+            (feedback["activity_id"], feedback["activity_name"], feedback["activity_date"], feedback["notes"], now, now),
+        )

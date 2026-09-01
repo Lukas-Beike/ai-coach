@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
-from backend.db.repositories import ChatRepository, CheckinRepository, KeyValueRepository
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, KeyValueRepository
 from backend.db import schema_version as database_schema_version
 
 try:
@@ -1125,6 +1125,7 @@ def utc_now() -> str:
 KEY_VALUE_REPOSITORY = KeyValueRepository(utc_now)
 CHAT_REPOSITORY = ChatRepository(utc_now)
 CHECKIN_REPOSITORY = CheckinRepository(utc_now)
+ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
 
 
 def security_configuration_error() -> str | None:
@@ -2766,29 +2767,17 @@ def normalize_activity_feedback(activity_id: Any, value: Any) -> dict[str, str]:
 
 def list_activity_feedback(limit: int = 100) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT activity_id, activity_name, activity_date, notes, created_at, updated_at "
-            "FROM activity_feedback ORDER BY updated_at DESC LIMIT ?",
-            (max(1, min(int(limit), 500)),),
-        ).fetchall()
-    return [dict(row) for row in rows]
+        return ACTIVITY_FEEDBACK_REPOSITORY.list(db, max(1, min(int(limit), 500)))
 
 
 def save_activity_feedback(activity_id: Any, value: Any) -> dict[str, Any]:
     feedback = normalize_activity_feedback(activity_id, value)
     if not feedback["notes"]:
         with DB_LOCK, database() as db:
-            db.execute("DELETE FROM activity_feedback WHERE activity_id = ?", (feedback["activity_id"],))
+            ACTIVITY_FEEDBACK_REPOSITORY.delete(db, feedback["activity_id"])
         return {"status": "ok", "activity_feedback": None}
-    now = utc_now()
     with DB_LOCK, database() as db:
-        db.execute(
-            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(activity_id) DO UPDATE SET activity_name=excluded.activity_name, "
-            "activity_date=excluded.activity_date, notes=excluded.notes, updated_at=excluded.updated_at",
-            (feedback["activity_id"], feedback["activity_name"], feedback["activity_date"], feedback["notes"], now, now),
-        )
+        ACTIVITY_FEEDBACK_REPOSITORY.upsert(db, feedback)
     saved = next((item for item in list_activity_feedback(500) if item["activity_id"] == feedback["activity_id"]), feedback)
     return {"status": "ok", "activity_feedback": saved}
 
