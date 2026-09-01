@@ -2998,7 +2998,9 @@ function renderPerformance(performance) {
   if (!performance?.available) {
     const info = document.createElement("p");
     info.className = "fine-print";
-    info.textContent = "Nach dem ersten Trainingsdaten-Update werden hier Leistungswerte angezeigt.";
+    info.textContent = !state.loadedAreas.has("performance") && state.loadPromise
+      ? "Leistungsdaten werden geladen…"
+      : "Nach dem ersten Trainingsdaten-Update werden hier Leistungswerte angezeigt.";
     root.append(info);
     if (syncNotices.length) {
       const status = document.createElement("p");
@@ -3015,7 +3017,7 @@ function renderPerformance(performance) {
   const recovery = performance.recovery || {};
   const comparisons = performance.comparisons || {};
   const week = performance.rolling_training?.last_7_days || {};
-  const refreshedAt = state.data?.sync?.last_sync_at || performance.as_of;
+  const refreshedAt = performance.as_of || state.data?.performance_refresh?.last_refresh_at || state.data?.sync?.last_sync_at;
   const performanceDetail = syncNotices.length ? syncNotices.join(" · ") : refreshedAt ? `Letzte Aktualisierung: ${formatTime(refreshedAt)}` : "";
   const compared = (value, key) => value && typeof value === "object" ? { ...value, comparison: comparisons[key] } : { value, comparison: comparisons[key] };
   performanceSection(root, "Gesundheitsdaten", [
