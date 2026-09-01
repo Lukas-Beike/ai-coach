@@ -313,6 +313,18 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(json.loads(payload)["index"], 12)
         self.assertEqual(count, 12)
 
+    def test_workout_draft_repository_preserves_create_list_get_delete_contract(self):
+        repository = server.WorkoutDraftRepository()
+        draft_id = str(uuid.uuid4())
+        payload = json.dumps({"name": "Local draft", "date": "2026-09-02"})
+        with server.database() as db:
+            repository.create(db, draft_id, payload, "2026-09-01T00:00:00+00:00")
+            row = repository.get(db, draft_id)
+            self.assertEqual(row["payload"], payload)
+            self.assertEqual(repository.list(db)[0]["id"], draft_id)
+            repository.delete(db, draft_id)
+            self.assertIsNone(repository.get(db, draft_id))
+
     def test_profile_only_accepts_known_fields_and_trims(self):
         profile = server.normalize_profile({"name": "  Ada  ", "goals": "Finish strong", "admin": True})
         self.assertEqual(profile["name"], "Ada")
