@@ -1266,7 +1266,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Ein echter Offline-Datencache, eine lokale Schreibqueue oder garantierter Web Push bleiben bewusst außerhalb des Umfangs und erfordern eine separate Datenschutz-/Threat-Model-Entscheidung.
 - **Folgetasks:** FT-029 ist als nächstes Paket vorgesehen; FT-030 bis FT-032 bleiben separate Pakete.
 
-### - [ ] FT-029 – Testlauf, Supply Chain und Containerhärtung vervollständigen
+### - [x] FT-029 – Testlauf, Supply Chain und Containerhärtung vervollständigen
 
 **Quelle:** TEST-02, TEST-03, TEST-04, OPS-02, SEC-02
 **Ziel:** Lokale und CI-Validierung sind reproduzierbar, schneller und decken Python-Abhängigkeiten sowie Containerimage ab; private Deploymentgrenze bleibt sichtbar.
@@ -1274,23 +1274,33 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Kanonisches PowerShell-Testskript für Docker/SQLCipher bereitstellen.
-- [ ] Native Syntaxprüfung und Container-Unit-Test klar trennen.
-- [ ] Sichere Testbeschleunigung prüfen, etwa kopierte vorinitialisierte leere Test-DB pro Klasse.
-- [ ] `ResourceWarning`-verursachende HTTP-Mocks korrekt schließen.
-- [ ] Coverage, Formatter/Linter und leichte Typprüfung schrittweise ergänzen.
-- [ ] SBOM beim Imagebuild erzeugen.
-- [ ] Python- und OS/Base-Image-CVE-Scan im Publish-Workflow ausführen.
-- [ ] Image signieren und dokumentierte Ausnahmebehandlung für Findings einführen.
-- [ ] Runtimeempfehlungen um `--cap-drop=ALL`, PID-/Memory-/CPU-Limits und rootless Host ergänzen, nach Kompatibilitätstest.
-- [ ] LAN/VPN- und HTTPS-Reverse-Proxy-Grenze prominent halten; `http.server` nie direkt öffentlich exponieren.
+- [x] Kanonisches PowerShell-Testskript für Docker/SQLCipher bereitstellen.
+- [x] Native Syntaxprüfung und Container-Unit-Test klar trennen.
+- [x] Sichere Testbeschleunigung prüfen, etwa kopierte vorinitialisierte leere Test-DB pro Klasse.
+- [x] `ResourceWarning`-verursachende HTTP-Mocks korrekt schließen.
+- [x] Coverage, Formatter/Linter und leichte Typprüfung schrittweise ergänzen.
+- [x] SBOM beim Imagebuild erzeugen.
+- [x] Python- und OS/Base-Image-CVE-Scan im Publish-Workflow ausführen.
+- [x] Image signieren und dokumentierte Ausnahmebehandlung für Findings einführen.
+- [x] Runtimeempfehlungen um `--cap-drop=ALL`, PID-/Memory-/CPU-Limits und rootless Host ergänzen, nach Kompatibilitätstest.
+- [x] LAN/VPN- und HTTPS-Reverse-Proxy-Grenze prominent halten; `http.server` nie direkt öffentlich exponieren.
 
 **Abnahmekriterien**
 
-- [ ] Ein dokumentierter Befehl führt auf Windows die kanonische SQLCipher-Suite aus.
-- [ ] CI liefert Test-, Browser-, SBOM- und Image-Scan-Ergebnisse.
-- [ ] Keine Härtungsoption verhindert Schreibzugriff auf den expliziten `/data`-Mount.
-- [ ] Keine Abhängigkeit wird automatisch ungeprüft aktualisiert oder ein kritischer Scanbefund still ignoriert.
+- [x] Ein dokumentierter Befehl führt auf Windows die kanonische SQLCipher-Suite aus.
+- [x] CI liefert Test-, Browser-, SBOM- und Image-Scan-Ergebnisse.
+- [x] Keine Härtungsoption verhindert Schreibzugriff auf den expliziten `/data`-Mount.
+- [x] Keine Abhängigkeit wird automatisch ungeprüft aktualisiert oder ein kritischer Scanbefund still ignoriert.
+
+**Handover FT-029**
+
+- **Status:** abgeschlossen.
+- **Branch und Commits:** `feat/ft-029-test-hardening`, Implementierung `be1506d` (PR #226, per Auto-Squash gemergt als `ef2c7ed`); Gate-Korrektur `fix/ft-029-scan-correction`, `091b32c` (PR #227, per Auto-Squash gemergt als `24739b0`). Beide PRs zielten auf `develop` und wurden nach Rebase bearbeitet.
+- **Geänderte Bereiche:** `tests/run_sqlcipher_tests.ps1`, Test-Runner/Testdatenbank-Setup und HTTP-Fehler-Response-Lifecycle, `Dockerfile`, `requirements.txt`, `requirements-dev.txt`, Publish-Workflow, `README.md` und `SECURITY_EXCEPTIONS.md`.
+- **Verhalten:** Der Windows-Testlauf baut ein isoliertes Image und mountet nur `tests/` und `public/` read-only; native Syntax, schnelle Shards und Container-Unit-Tests sind getrennte CI-Jobs. Ein kopiertes, leeres Schema pro Testklasse hält den schnellen SQLite-Pfad isoliert; dedizierte Verschlüsselungstests bleiben SQLCipher. HTTPError-Bodies werden deterministisch geschlossen.
+- **Supply Chain und Betrieb:** Der Imagebuild erzeugt SBOM-/Provenance-Attestierungen; der CI-Scan erfasst OS/Base-Image und Python-Libraries inklusive unfixed Findings. Pull Requests zeigen den vollständigen HIGH/CRITICAL-Bericht report-only, während Release-/manuelle Publish-Läufe blockieren. Ausnahmen benötigen eine separate, überprüfte und zeitlich begrenzte Dokumentation; aktuell bestehen keine aktiven Ausnahmen. Veröffentlichten Digests wird per GitHub OIDC/Cosign eine Signatur erteilt. Browser-Kompatibilität mit read-only Rootfs, `no-new-privileges`, Cap-Drop sowie PID-/Memory-/CPU-Limits wurde geprüft; der `/data`-Mount bleibt explizit schreibbar.
+- **Validierung:** Vier schnelle Shards `71/71/71/71`, kanonischer PowerShell-/SQLCipher-Containerlauf `284` Tests, `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, Ruff-Lint/Format und MyPy-Baseline für `tests/run_tests.py`, Docker-Build, `git diff --check`. PR #227: Test-Shards, Container-Tests, Syntax, Image-SBOM/Scan, Browser Smoke/Accessibility, Quality-Baseline, Analyse, CodeQL und Validate grün.
+- **Offene Hinweise:** Der aktuelle Debian-Vendor-Stand meldet im PR-Report weiterhin nicht behebbare OS-Findings; sie werden sichtbar gehalten und blockieren Release-/Publish-Läufe, bis ein Fix verfügbar oder eine explizit reviewte Ausnahme akzeptiert ist. FT-030 bis FT-032 bleiben separate Folgepakete.
 
 ### - [ ] FT-030 – Änderungshistorie und gezieltes Undo für lokale Daten einführen
 
