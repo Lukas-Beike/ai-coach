@@ -999,6 +999,43 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(status["state_versions"], {"activities": "v1"})
         self.assertNotIn("activities", json.dumps(status["message"]))
 
+    def test_read_sync_orchestration_is_dependency_light_and_read_only(self):
+        from backend.sync.orchestration import run_read_sync_pipeline
+
+        calls = []
+        failures = []
+
+        class Scope:
+            def __enter__(self):
+                return {"operation_id": "operation-test", "trigger": "manual"}
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+        def observe(*args):
+            return Scope()
+
+        def intervals(*args, **kwargs):
+            calls.append(("intervals", args, kwargs))
+            raise RuntimeError("intervals failure")
+
+        def competitions(*args, **kwargs):
+            calls.append(("competitions", args, kwargs))
+
+        run_read_sync_pipeline(
+            "manual",
+            7,
+            "operation-input",
+            observe=observe,
+            sync_intervals=intervals,
+            sync_competitions=competitions,
+            record_failure=lambda scope, provider, phase, error: failures.append((scope, provider, phase, str(error))),
+        )
+
+        self.assertEqual([call[0] for call in calls], ["intervals", "competitions"])
+        self.assertEqual(calls[1][2], {"push_local": False, "operation_id": "operation-test"})
+        self.assertEqual(failures[0][1:], ("intervals", "sync", "intervals failure"))
+
     def test_start_sync_operation_claims_one_operation(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(server, "safe_sync") as worker, patch.object(server.threading, "Thread") as thread:
