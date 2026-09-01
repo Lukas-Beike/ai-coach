@@ -1641,20 +1641,50 @@ class CoachTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "400"):
             unfold_ical(b"BEGIN:VEVENT\r\nEND:VEVENT\r\n", max_bytes=1024, error=lambda status, message: ValueError(f"{status}: {message}"))
 
-    def test_ical_parser_rejects_incomplete_and_unsupported_recurring_feeds(self):
+    def test_ical_parser_supports_google_recurring_rules_and_rejects_unsupported_feeds(self):
         with self.assertRaises(server.AppError):
             server.parse_ical_calendar(b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:broken\r\nEND:VEVENT\r\n")
-        missing_bound = (
+        weekly = (
             b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:recurring\r\n"
-            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY\r\n"
+            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH\r\n"
             b"SUMMARY:Repeated\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
-        with self.assertRaises(server.AppError) as raised:
-            server.parse_ical_calendar(missing_bound)
-        self.assertEqual(raised.exception.status, 400)
-        unsupported = missing_bound.replace(b"FREQ=WEEKLY", b"FREQ=MONTHLY;COUNT=2")
+        weekly_events = server.parse_ical_calendar(weekly, window_start=date(2026, 9, 1), window_end=date(2026, 9, 14))
+        self.assertEqual([event["event_date"] for event in weekly_events], ["2026-09-01", "2026-09-03", "2026-09-08", "2026-09-10"])
+
+        monthly = weekly.replace(
+            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH",
+            b"DTSTART;VALUE=DATE:20260105\r\nRRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1",
+        ).replace(b"UID:recurring", b"UID:monthly")
+        monthly_events = server.parse_ical_calendar(monthly, window_start=date(2026, 2, 1), window_end=date(2026, 3, 28))
+        self.assertEqual([event["event_date"] for event in monthly_events], ["2026-02-02", "2026-03-02"])
+
+        yearly = weekly.replace(
+            b"DTSTART;VALUE=DATE:20260901\r\nRRULE:FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH",
+            b"DTSTART;VALUE=DATE:20250901\r\nRRULE:FREQ=YEARLY;BYMONTH=9;BYMONTHDAY=1",
+        ).replace(b"UID:recurring", b"UID:yearly")
+        yearly_events = server.parse_ical_calendar(yearly, window_start=date(2026, 8, 31), window_end=date(2026, 9, 30))
+        self.assertEqual([event["event_date"] for event in yearly_events], ["2026-09-01"])
+
+        unsupported = weekly.replace(b"FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH", b"FREQ=HOURLY;COUNT=2")
         with self.assertRaises(server.AppError):
             server.parse_ical_calendar(unsupported)
+
+    def test_ical_parser_applies_google_rdate_and_recurring_exceptions(self):
+        payload = (
+            b"BEGIN:VCALENDAR\r\n"
+            b"BEGIN:VEVENT\r\nUID:series\r\nDTSTART;VALUE=DATE:20260907\r\n"
+            b"RRULE:FREQ=WEEKLY;BYDAY=MO\r\nRDATE;VALUE=DATE:20260909\r\nSUMMARY:Series\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:series\r\nRECURRENCE-ID;VALUE=DATE:20260914\r\n"
+            b"DTSTART;VALUE=DATE:20260914\r\nSUMMARY:Changed\r\nEND:VEVENT\r\n"
+            b"END:VCALENDAR\r\n"
+        )
+        events = server.parse_ical_calendar(payload, window_start=date(2026, 9, 7), window_end=date(2026, 9, 20))
+        self.assertEqual([(event["event_date"], event["name"]) for event in events], [
+            ("2026-09-07", "Series"),
+            ("2026-09-09", "Series"),
+            ("2026-09-14", "Changed"),
+        ])
 
     def test_ical_parser_expands_bounded_daily_weekly_rules_with_exdates_and_dst(self):
         server.save_profile({"timezone": "Europe/Berlin"})
