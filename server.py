@@ -33,7 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
@@ -2576,6 +2576,8 @@ GARMIN_CONTEXT_FIELDS = {
     "racePredictionTime", "distance", "activityId", "activityName", "activityType", "startTimeLocal", "duration",
     "averageHR", "maxHR", "maxHeartRate", "calories", "trainingEffect", "vO2MaxValue", "trainingReadiness", "recoveryTime",
     "weight", "weightKg", "weight_kg", "summaryDate", "latestWeight", "calendarDate",
+    "restingHeartRate", "restingHR", "functionalThresholdPower", "ftp", "power", "speed",
+    "heartRate", "hearRate", "heartRateCycling", "heartRateRunning",
 }
 
 
@@ -2713,6 +2715,41 @@ def garmin_weight_average(snapshot: dict[str, Any], days: int, end_date: date) -
     return round(sum(values) / len(values), 2) if values else None
 
 
+def _garmin_last_numeric(value: Any, keys: set[str]) -> float | int | None:
+    """Find the last numeric value for exact Garmin field names."""
+    values: list[float | int] = []
+
+    def visit(item: Any) -> None:
+        if isinstance(item, dict):
+            for key, child in item.items():
+                if _garmin_key(key) in keys:
+                    number = _garmin_numeric(child)
+                    if number is not None:
+                        values.append(number)
+                visit(child)
+        elif isinstance(item, list):
+            for child in item[:500]:
+                visit(child)
+
+    visit(value)
+    return values[-1] if values else None
+
+
+def _garmin_bounded_metric(value: Any, minimum: float, maximum: float) -> float | int | None:
+    number = as_number(value)
+    return number if number is not None and minimum <= float(number) <= maximum else None
+
+
+def _garmin_pace_seconds(value: Any) -> float | int | None:
+    number = as_number(value)
+    if number is None or number <= 0:
+        return None
+    # Garmin's lactate-threshold speed is metres per second. Accept seconds
+    # per kilometre as a defensive fallback for fixture/API variants.
+    pace = 1000 / number if number < 20 else number
+    return round(pace) if 120 <= pace <= 900 else None
+
+
 def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Normalize Garmin's varying max-metric and race-prediction payloads."""
     max_metrics = snapshot.get("max_metrics") if isinstance(snapshot.get("max_metrics"), (dict, list)) else {}
@@ -2765,6 +2802,31 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                 visit_races(item, path)
 
     visit_races(race_predictions)
+    cycling_ftp = _garmin_bounded_metric(
+        _garmin_last_numeric(snapshot.get("cycling_ftp"), {"functionalthresholdpower", "ftp", "cyclingftp"}),
+        50,
+        700,
+    )
+    running_threshold = snapshot.get("running_threshold")
+    running_power = _garmin_bounded_metric(
+        _garmin_last_numeric(running_threshold, {"functionalthresholdpower", "ftp", "runningftp", "power"}),
+        50,
+        800,
+    )
+    running_pace = _garmin_pace_seconds(
+        _garmin_last_numeric(running_threshold, {"speed", "lactatethresholdspeed", "thresholdspeed", "pace"})
+    )
+    running_hr = _garmin_bounded_metric(
+        _garmin_last_numeric(running_threshold, {"heartrate", "hearrate", "heartraterunning", "lthr"}),
+        80,
+        230,
+    )
+    cycling_hr_source = snapshot.get("cycling_threshold_hr") or running_threshold
+    cycling_hr = _garmin_bounded_metric(
+        _garmin_last_numeric(cycling_hr_source, {"heartrate", "heartratecycling", "hearrate", "lthr", "value"}),
+        80,
+        230,
+    )
     max_hr_values: dict[str, list[float | int]] = {"cycling": [], "running": []}
     activities = snapshot.get("activities") if isinstance(snapshot.get("activities"), list) else []
     for activity in activities:
@@ -2785,6 +2847,11 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         "run_10k_seconds": (race_values["run_10k_seconds"], "s", "Garmin Connect Laufprognose"),
         "run_half_marathon_seconds": (race_values["run_half_marathon_seconds"], "s", "Garmin Connect Laufprognose"),
         "run_marathon_seconds": (race_values["run_marathon_seconds"], "s", "Garmin Connect Laufprognose"),
+        "cycling_ftp_watts": (cycling_ftp, "W", "Garmin Connect FTP"),
+        "run_threshold_watts": (running_power, "W", "Garmin Connect Lauf-Schwellenleistung"),
+        "run_threshold_pace_seconds_per_km": (running_pace, "s/km", "Garmin Connect Lauf-Schwellenpace"),
+        "bike_threshold_hr_bpm": (cycling_hr, "bpm", "Garmin Connect Rad-Schwellenpuls"),
+        "run_threshold_hr_bpm": (running_hr, "bpm", "Garmin Connect Lauf-Schwellenpuls"),
     }
     return {key: metric(value, unit, GARMIN_PERFORMANCE_SOURCE, note) for key, (value, unit, note) in units.items()}
 
@@ -2845,6 +2912,13 @@ def garmin_performance_context(snapshot: dict[str, Any]) -> dict[str, Any]:
             "10k_seconds": metrics["run_10k_seconds"],
             "half_marathon_seconds": metrics["run_half_marathon_seconds"],
             "marathon_seconds": metrics["run_marathon_seconds"],
+        },
+        "thresholds": {
+            "cycling_ftp_watts": metrics["cycling_ftp_watts"],
+            "run_threshold_watts": metrics["run_threshold_watts"],
+            "run_threshold_pace_seconds_per_km": metrics["run_threshold_pace_seconds_per_km"],
+            "bike_threshold_hr_bpm": metrics["bike_threshold_hr_bpm"],
+            "run_threshold_hr_bpm": metrics["run_threshold_hr_bpm"],
         },
     }
 
@@ -3062,6 +3136,17 @@ def garmin_public_state() -> dict[str, Any]:
         "duplicate_activities_skipped": skipped,
         "has_sleep": bool(snapshot.get("sleep")),
         "has_hrv": bool(snapshot.get("hrv")),
+        "has_resting_hr": bool(snapshot.get("resting_hr")),
+        "has_thresholds": any(
+            performance_metrics[key]["value"] is not None
+            for key in (
+                "cycling_ftp_watts",
+                "run_threshold_watts",
+                "run_threshold_pace_seconds_per_km",
+                "bike_threshold_hr_bpm",
+                "run_threshold_hr_bpm",
+            )
+        ),
         "has_readiness": bool(snapshot.get("readiness")),
         "has_race_predictions": bool(snapshot.get("race_predictions")),
         "has_weight": performance_metrics["weight_kg"]["value"] is not None,
@@ -3080,6 +3165,7 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
         "recovery": {
             "sleep": compact_garmin_recovery(snapshot.get("sleep")),
             "hrv": compact_garmin_recovery(snapshot.get("hrv")),
+            "resting_hr": compact_garmin_recovery(snapshot.get("resting_hr")),
             "readiness": compact_garmin_recovery(snapshot.get("readiness")),
             "body_battery": compact_garmin_recovery(snapshot.get("body_battery")),
         },
@@ -3871,8 +3957,54 @@ def _dated_garmin_recovery_records(value: Any) -> list[tuple[str, dict[str, Any]
     return records
 
 
-def _add_planning_recovery_value(recovery: dict[str, Any], metric_name: str, value: Any, source: str) -> None:
-    if value in (None, "") or metric_name in recovery:
+def garmin_recovery_metric(
+    snapshot: dict[str, Any],
+    section: str,
+    keys: tuple[str, ...],
+    transform: Callable[[Any], float | int | None] | None = None,
+) -> tuple[float | int | None, str | None]:
+    normalized_keys = {_garmin_key(key) for key in keys}
+    records = sorted(_dated_garmin_recovery_records(snapshot.get(section)), key=lambda item: item[0])
+    for record_date, record in reversed(records):
+        value = _garmin_last_numeric(record, normalized_keys)
+        if transform:
+            value = transform(value)
+        if value is not None:
+            return value, record_date
+    return None, None
+
+
+def garmin_recovery_average(
+    snapshot: dict[str, Any],
+    section: str,
+    keys: tuple[str, ...],
+    days: int,
+    end_date: date,
+    transform: Callable[[Any], float | int | None] | None = None,
+) -> float | None:
+    normalized_keys = {_garmin_key(key) for key in keys}
+    cutoff = end_date - timedelta(days=days - 1)
+    values: list[float] = []
+    for record_date, record in _dated_garmin_recovery_records(snapshot.get(section)):
+        try:
+            current = date.fromisoformat(record_date[:10])
+        except ValueError:
+            continue
+        if not cutoff <= current <= end_date:
+            continue
+        value = _garmin_last_numeric(record, normalized_keys)
+        if transform:
+            value = transform(value)
+        number = as_number(value)
+        if number is not None:
+            values.append(float(number))
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def _add_planning_recovery_value(
+    recovery: dict[str, Any], metric_name: str, value: Any, source: str, *, overwrite: bool = False
+) -> None:
+    if value in (None, "") or (metric_name in recovery and not overwrite):
         return
     recovery[metric_name] = value
     recovery.setdefault("sources", {})[metric_name] = source
@@ -3904,7 +4036,13 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         _add_planning_recovery_value(recovery, "resting_hr", first_present(row, ("restingHR", "resting_hr")), "Intervals.icu Wellness")
 
     garmin = garmin_snapshot()
-    for section, source_name in (("sleep", "Garmin Connect"), ("hrv", "Garmin Connect"), ("readiness", "Garmin Connect"), ("body_battery", "Garmin Connect")):
+    for section, source_name in (
+        ("sleep", "Garmin Connect"),
+        ("hrv", "Garmin Connect"),
+        ("resting_hr", "Garmin Connect"),
+        ("readiness", "Garmin Connect"),
+        ("body_battery", "Garmin Connect"),
+    ):
         for record_date, record in _dated_garmin_recovery_records(garmin.get(section)):
             recovery = recovery_by_date.setdefault(record_date, {})
             if section == "sleep":
@@ -3915,10 +4053,18 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                         sleep_hours = round(float(sleep_seconds) / 3600, 1)
                     except (TypeError, ValueError):
                         sleep_hours = None
-                _add_planning_recovery_value(recovery, "sleep_hours", sleep_hours, source_name)
-                _add_planning_recovery_value(recovery, "sleep_score", first_present(record, ("sleepScore", "overallSleepScore")), source_name)
+                _add_planning_recovery_value(recovery, "sleep_hours", sleep_hours, source_name, overwrite=True)
+                _add_planning_recovery_value(recovery, "sleep_score", first_present(record, ("sleepScore", "overallSleepScore")), source_name, overwrite=True)
             elif section == "hrv":
-                _add_planning_recovery_value(recovery, "hrv", first_present(record, ("hrvLastNight", "lastNightAvg", "hrvWeeklyAvg", "weeklyAvg")), source_name)
+                _add_planning_recovery_value(recovery, "hrv", first_present(record, ("hrvLastNight", "lastNightAvg", "hrvWeeklyAvg", "weeklyAvg")), source_name, overwrite=True)
+            elif section == "resting_hr":
+                _add_planning_recovery_value(
+                    recovery,
+                    "resting_hr",
+                    first_present(record, ("restingHeartRate", "restingHR", "resting_heart_rate")),
+                    source_name,
+                    overwrite=True,
+                )
             elif section == "readiness":
                 _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(record, ("trainingReadinessScore", "overallReadinessScore", "readinessScore", "score", "trainingReadiness"))), source_name)
             else:
@@ -8866,16 +9012,37 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         (first_present(athlete, ("height_cm", "height")), "Intervals.icu"),
         (profile.get("height_cm"), "Manuell"),
     ) if as_number(value) is not None), (None, None))
+    garmin_threshold_metrics = {
+        "cycling_ftp_watts": garmin_metrics["cycling_ftp_watts"] if garmin_metrics["cycling_ftp_watts"]["value"] is not None else metric(
+            first_present(ride, ("ftp", "indoor_ftp")) or first_present(wellness_ride, ("ftp", "indoor_ftp")) or first_present(athlete, ("icu_ftp",)),
+            "W", "Intervals.icu",
+        ),
+        "run_threshold_watts": garmin_metrics["run_threshold_watts"] if garmin_metrics["run_threshold_watts"]["value"] is not None else metric(
+            first_present(run, ("ftp", "indoor_ftp")) or first_present(wellness_run, ("ftp", "indoor_ftp")),
+            "W", "Intervals.icu",
+        ),
+        "run_threshold_pace_seconds_per_km": garmin_metrics["run_threshold_pace_seconds_per_km"] if garmin_metrics["run_threshold_pace_seconds_per_km"]["value"] is not None else metric(
+            threshold_pace_seconds(first_present(run, ("threshold_pace",)) or first_present(wellness_run, ("threshold_pace",))),
+            "s/km", "Intervals.icu",
+        ),
+        "bike_threshold_hr_bpm": garmin_metrics["bike_threshold_hr_bpm"] if garmin_metrics["bike_threshold_hr_bpm"]["value"] is not None else metric(
+            first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) or generic_lthr,
+            "bpm", "Intervals.icu" if first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) else "Intervals.icu (allgemein)",
+        ),
+        "run_threshold_hr_bpm": garmin_metrics["run_threshold_hr_bpm"] if garmin_metrics["run_threshold_hr_bpm"]["value"] is not None else metric(
+            first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) or generic_lthr,
+            "bpm", "Intervals.icu" if first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) else "Intervals.icu (allgemein)",
+        ),
+    }
     return {
         "weight_kg": metric(weight_value, "kg", weight_source),
         "body_fat_pct": metric(body_fat_value, "%", body_fat_source),
         "height_cm": metric(height_in_cm(height_value), "cm", height_source),
-        "cycling_ftp_watts": metric(first_present(ride, ("ftp", "indoor_ftp", "eftp", "eFTP")) or first_present(wellness_ride, ("eftp", "eFTP", "ftp")) or first_present(athlete, ("icu_ftp",)), "W", "Intervals.icu"),
+        # Garmin is authoritative when available. In particular, FTP must
+        # never be populated from Intervals.icu eFTP; the fallback only uses an
+        # explicitly labelled FTP field.
+        **garmin_threshold_metrics,
         "cycling_eftp_watts": metric(first_present(ride, ("eftp", "eFTP")) or first_present(wellness_ride, ("eftp", "eFTP")) or first_present(latest_ride_activity, ("icu_ftp", "eftp", "eFTP")), "W", "Intervals.icu"),
-        "run_threshold_watts": metric(first_present(run, ("ftp", "indoor_ftp", "eftp", "eFTP")) or first_present(wellness_run, ("eftp", "eFTP", "ftp")), "W", "Intervals.icu"),
-        "run_threshold_pace_seconds_per_km": metric(threshold_pace_seconds(first_present(run, ("threshold_pace",)) or first_present(wellness_run, ("threshold_pace",))), "s/km", "Intervals.icu"),
-        "bike_threshold_hr_bpm": metric(first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) or generic_lthr, "bpm", "Intervals.icu" if first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) else "Intervals.icu (allgemein)"),
-        "run_threshold_hr_bpm": metric(first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) or generic_lthr, "bpm", "Intervals.icu" if first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) else "Intervals.icu (allgemein)"),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
         "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
@@ -8895,11 +9062,67 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
     activities = snapshot.get("recent_activities") if isinstance(snapshot.get("recent_activities"), list) else []
     wellness_rows = [row for row in snapshot.get("recent_wellness", []) if isinstance(row, dict)] if isinstance(snapshot.get("recent_wellness"), list) else []
     latest_wellness = max(wellness_rows, key=lambda row: str(row.get("id") or ""), default={})
-    sleep_seconds = first_present(latest_wellness, ("sleepSecs",))
-    try:
-        sleep_hours = round(float(sleep_seconds) / 3600, 1) if sleep_seconds is not None else None
-    except (TypeError, ValueError):
-        sleep_hours = None
+    garmin = garmin_snapshot()
+    garmin_sleep_seconds, _garmin_sleep_date = garmin_recovery_metric(garmin, "sleep", ("sleepTimeSeconds", "sleepDuration"))
+    garmin_sleep_score, _garmin_sleep_score_date = garmin_recovery_metric(
+        garmin, "sleep", ("sleepScore", "overallSleepScore"), lambda value: _garmin_bounded_metric(value, 0, 100)
+    )
+    garmin_sleep_hours, garmin_sleep_date = garmin_recovery_metric(
+        garmin, "sleep", ("sleep_hours",), lambda value: as_number(value)
+    )
+    if garmin_sleep_hours is None and garmin_sleep_seconds is not None:
+        garmin_sleep_hours = round(float(garmin_sleep_seconds) / 3600, 1)
+    if garmin_sleep_hours is not None:
+        sleep_hours = garmin_sleep_hours
+        sleep_source = GARMIN_PERFORMANCE_SOURCE
+        sleep_average = garmin_recovery_average(
+            garmin, "sleep", ("sleepTimeSeconds", "sleepDuration"), 7, local_now().date(),
+            lambda value: round(float(value) / 3600, 1) if as_number(value) is not None else None,
+        )
+        if sleep_average is None:
+            sleep_average = garmin_recovery_average(garmin, "sleep", ("sleep_hours",), 7, local_now().date())
+    else:
+        sleep_seconds = first_present(latest_wellness, ("sleepSecs",))
+        try:
+            sleep_hours = round(float(sleep_seconds) / 3600, 1) if sleep_seconds is not None else None
+        except (TypeError, ValueError):
+            sleep_hours = None
+        sleep_source = "Intervals.icu Wellness" if sleep_hours is not None else None
+        sleep_average = wellness_average(wellness_rows, ("sleepSecs", "sleep_seconds"), 7, local_now().date(), 3600)
+        if sleep_average is None:
+            sleep_average = wellness_average(wellness_rows, ("sleep_hours",), 7, local_now().date())
+    sleep_score = garmin_sleep_score if garmin_sleep_score is not None else first_present(latest_wellness, ("sleepScore",))
+    sleep_score_source = GARMIN_PERFORMANCE_SOURCE if garmin_sleep_score is not None else ("Intervals.icu Wellness" if sleep_score is not None else None)
+    garmin_resting_hr, garmin_resting_hr_date = garmin_recovery_metric(
+        garmin, "resting_hr", ("restingHeartRate", "restingHR", "resting_heart_rate"),
+        lambda value: _garmin_bounded_metric(value, 30, 230),
+    )
+    if garmin_resting_hr is not None:
+        resting_hr = garmin_resting_hr
+        resting_hr_source = GARMIN_PERFORMANCE_SOURCE
+        resting_hr_average = garmin_recovery_average(
+            garmin, "resting_hr", ("restingHeartRate", "restingHR", "resting_heart_rate"), 7, local_now().date(),
+            lambda value: _garmin_bounded_metric(value, 30, 230),
+        )
+    else:
+        resting_hr = first_present(latest_wellness, ("restingHR", "resting_hr"))
+        resting_hr_source = "Intervals.icu Wellness" if resting_hr is not None else None
+        resting_hr_average = wellness_average(wellness_rows, ("restingHR", "resting_hr"), 7, local_now().date())
+    garmin_hrv, garmin_hrv_date = garmin_recovery_metric(
+        garmin, "hrv", ("hrvLastNight", "lastNightAvg", "hrvWeeklyAvg", "weeklyAvg", "hrv", "hrv_ms"),
+        lambda value: _garmin_bounded_metric(value, 1, 300),
+    )
+    if garmin_hrv is not None:
+        hrv = garmin_hrv
+        hrv_source = GARMIN_PERFORMANCE_SOURCE
+        hrv_average = garmin_recovery_average(
+            garmin, "hrv", ("hrvLastNight", "lastNightAvg", "hrvWeeklyAvg", "weeklyAvg", "hrv", "hrv_ms"), 7, local_now().date(),
+            lambda value: _garmin_bounded_metric(value, 1, 300),
+        )
+    else:
+        hrv = first_present(latest_wellness, ("hrv", "hrv_ms"))
+        hrv_source = "Intervals.icu Wellness" if hrv is not None else None
+        hrv_average = wellness_average(wellness_rows, ("hrv", "hrv_ms"), 7, local_now().date())
     metrics = api_performance_metrics(snapshot)
     load = {
         "id": latest_wellness.get("id"),
@@ -8918,9 +9141,8 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
     actual_atl_current = actual_atl.get(actual_atl_date) if actual_atl_date else None
     actual_atl_values = [value for row_date, value in actual_atl.items() if today - timedelta(days=6) <= row_date <= today]
     actual_atl_average = round(sum(actual_atl_values) / len(actual_atl_values), 2) if actual_atl_values else None
-    sleep_average = wellness_average(wellness_rows, ("sleepSecs", "sleep_seconds"), 7, today, 3600)
-    if sleep_average is None:
-        sleep_average = wellness_average(wellness_rows, ("sleep_hours",), 7, today)
+    # Garmin recovery metrics are the authoritative values when available;
+    # Intervals.icu remains a fallback for accounts without those Garmin data.
     readiness_current = readiness_score_value(first_present(latest_wellness, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness")))
     readiness_source = "Intervals.icu Wellness" if readiness_current is not None else None
     if readiness_current is None:
@@ -8951,8 +9173,8 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
     comparisons = {
         "sleep_hours": comparison_value(sleep_hours, sleep_average, "h", 7),
         "readiness": comparison_value(readiness_current, readiness_average, "", 7),
-        "restingHR": comparison_value(first_present(latest_wellness, ("restingHR", "resting_hr")), wellness_average(wellness_rows, ("restingHR", "resting_hr"), 7, today), "bpm", 7, higher_is_better=False),
-        "hrv": comparison_value(first_present(latest_wellness, ("hrv", "hrv_ms")), wellness_average(wellness_rows, ("hrv", "hrv_ms"), 7, today), "ms", 7),
+        "restingHR": comparison_value(resting_hr, resting_hr_average, "bpm", 7, higher_is_better=False),
+        "hrv": comparison_value(hrv, hrv_average, "ms", 7),
         "cycling_eftp_30d": comparison_value(metrics["cycling_eftp_watts"]["value"], eftp_30_day_average(wellness_rows, activities, today), "W", 30),
         "fitness_ctl": comparison_value(load["ctl"], wellness_average(wellness_rows, ("ctl", "ctLoad"), 7, today), "", 7),
         "form_tsb": comparison_value(load["tsb"], wellness_form_average(wellness_rows, 7, today), "", 7),
@@ -8989,11 +9211,13 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         "current_load": load,
         "actual_load": {"atl": actual_atl_current, "as_of": actual_atl_date.isoformat() if actual_atl_date else None, "source": "Abgeschlossene Aktivitäten (berechnet)"},
         "recovery": {
-            "id": latest_wellness.get("id"), "restingHR": first_present(latest_wellness, ("restingHR",)),
-            "hrv": first_present(latest_wellness, ("hrv",)), "sleepScore": first_present(latest_wellness, ("sleepScore",)),
+            "id": garmin_sleep_date or garmin_resting_hr_date or garmin_hrv_date or latest_wellness.get("id"),
+            "restingHR": resting_hr, "restingHR_source": resting_hr_source,
+            "hrv": hrv, "hrv_source": hrv_source, "sleepScore": sleep_score, "sleepScore_source": sleep_score_source,
             "fatigue": first_present(latest_wellness, ("fatigue",)), "soreness": first_present(latest_wellness, ("soreness",)),
             "stress": first_present(latest_wellness, ("stress",)), "mood": first_present(latest_wellness, ("mood",)),
             "readiness": readiness_current, "readiness_source": readiness_source, "sleep_hours": sleep_hours,
+            "sleep_source": sleep_source,
         },
         "rolling_training": {"last_7_days": last_7, "previous_7_days": previous_7, "last_30_days": last_30, "previous_30_days": previous_30, "last_28_days": activity_rollup(activities, 28, today)},
         "comparisons": comparisons,

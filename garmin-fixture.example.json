@@ -26,6 +26,12 @@
       "lastNightAvg": 57
     }
   ],
+  "resting_hr": [
+    {
+      "calendarDate": "2026-08-29",
+      "restingHeartRate": 51
+    }
+  ],
   "readiness": {
     "calendarDate": "2026-08-29",
     "score": 78,
@@ -38,6 +44,21 @@
       "drained": 31
     }
   ],
+  "cycling_ftp": {
+    "calendarDate": "2026-08-29",
+    "functionalThresholdPower": 302
+  },
+  "running_threshold": {
+    "speed_and_heart_rate": {
+      "calendarDate": "2026-08-29",
+      "speed": 3.8,
+      "heartRate": 176,
+      "heartRateCycling": 169
+    },
+    "power": {
+      "functionalThresholdPower": 328
+    }
+  },
   "max_metrics": {
     "running": {
       "vo2MaxPreciseValue": 49

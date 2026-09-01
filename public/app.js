@@ -3022,10 +3022,10 @@ function renderPerformance(performance) {
     ["Gewicht", compared(values.weight_kg, "weight_kg_30d"), null, { key: "weight_kg", step: "0.1" }],
     ["Körperfett", values.body_fat_pct, null, { key: "body_fat_pct", step: "0.1" }],
     ["Größe", values.height_cm, null, { key: "height_cm", step: "0.1" }],
-    ["Schlaf", compared({ value: recovery.sleep_hours, unit: "h", source: "Intervals.icu Wellness" }, "sleep_hours")],
+    ["Schlaf", compared({ value: recovery.sleep_hours, unit: "h", source: recovery.sleep_source || "Intervals.icu Wellness" }, "sleep_hours")],
     ["Readiness", compared({ value: recovery.readiness, unit: "", source: recovery.readiness_source || "Intervals.icu Wellness" }, "readiness_30d")],
-    ["Ruhepuls", compared({ value: recovery.restingHR, unit: "bpm", source: "Intervals.icu Wellness" }, "restingHR")],
-    ["HRV", compared({ value: recovery.hrv, unit: "ms", source: "Intervals.icu Wellness" }, "hrv")],
+    ["Ruhepuls", compared({ value: recovery.restingHR, unit: "bpm", source: recovery.restingHR_source || "Intervals.icu Wellness" }, "restingHR")],
+    ["HRV", compared({ value: recovery.hrv, unit: "ms", source: recovery.hrv_source || "Intervals.icu Wellness" }, "hrv")],
   ], performanceDetail);
   performanceSection(root, "Allgemeine Leistungsdaten", [
     ["Fitness / CTL", compared({ value: load.ctl, unit: "", source: "Intervals.icu" }, "fitness_ctl"), formatWhole],

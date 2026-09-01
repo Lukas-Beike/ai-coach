@@ -15,10 +15,12 @@ It is not intended to be exposed directly to the public internet.
   chat history, and a growing local workout library stored in SQLite.
 - One Intervals.icu synchronization at startup, plus user-requested refreshes.
 - Optional Garmin Connect synchronization with deduplication against
-  Intervals.icu. Garmin-sourced VO2 max, running predictions, body weight, and
-  sport-specific maximum heart rates are explicitly marked as Garmin Connect
-  data in the performance view. If Garmin data is unavailable, sport-specific
-  maximum heart rates can fall back to Intervals.icu data.
+  Intervals.icu. Garmin-sourced FTP (separate from eFTP), running threshold
+  power, running and cycling threshold heart rate, running threshold pace,
+  sleep, resting heart rate, HRV, VO2 max, running predictions, body weight,
+  and sport-specific maximum heart rates are explicitly marked as Garmin
+  Connect data in the performance view. If a Garmin value is unavailable, the
+  existing Intervals.icu value remains available as a labelled fallback.
 - Activity synchronization for strength training, running, outdoor cycling,
   and indoor/virtual cycling.
 - Mobile-first profile and system sections can be collapsed; the planned
