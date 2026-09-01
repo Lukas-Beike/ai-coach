@@ -769,9 +769,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-018.
 - **Folgetasks:** FT-019 und folgende Arbeitspakete sind entblockt.
 
-### - [ ] FT-019 – „Mehr“ in Profil, Anbindungen, Coach, Datenschutz und Betrieb gliedern
+### - [x] FT-019 – „Mehr“ in Profil, Anbindungen, Coach, Datenschutz und Betrieb gliedern
 
-**Status:** in Umsetzung
+**Status:** abgeschlossen
 
 **Quelle:** UX-01, UI-04, PRIV-01
 **Ziel:** Seltene Stammdaten- und technische Einstellungen sind auffindbar, ohne den täglichen Workflow zu überladen.
@@ -779,21 +779,32 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Menügruppen `Athletenprofil`, `Anbindungen`, `Coach & Modell`, `Daten & Datenschutz`, `Betrieb & Diagnose` anlegen.
-- [ ] Integrationsstatus und manuelle Provideraktionen unter Anbindungen bündeln.
-- [ ] Kontextvorschau nahe Coach & Modell zugänglich machen.
-- [ ] Bei sensiblen Profilfeldern kenntlich machen, dass sie in Coach-Anfragen an OpenAI gelangen können.
-- [ ] Englische Defaults in der deutschen UI lokalisieren.
-- [ ] Zeitzone/Sport als kontrollierte Auswahl darstellen.
-- [ ] Wettkampfdistanz/-zeit benutzerfreundlich formatieren und intern normalisiert halten.
-- [ ] Check-in-Skalen mit klaren Endpunkten und Richtung beschriften.
-- [ ] Hinweis auf parallele Radaufzeichnungen neutral formulieren und eine explizite „legitim/ignorieren“-Option vorsehen; niemals Löschung als zwingend darstellen.
+- [x] Menügruppen `Athletenprofil`, `Anbindungen`, `Coach & Modell`, `Daten & Datenschutz`, `Betrieb & Diagnose` anlegen.
+- [x] Integrationsstatus und manuelle Provideraktionen unter Anbindungen bündeln.
+- [x] Kontextvorschau nahe Coach & Modell zugänglich machen.
+- [x] Bei sensiblen Profilfeldern kenntlich machen, dass sie in Coach-Anfragen an OpenAI gelangen können.
+- [x] Englische Defaults in der deutschen UI lokalisieren.
+- [x] Zeitzone/Sport als kontrollierte Auswahl darstellen.
+- [x] Wettkampfdistanz/-zeit benutzerfreundlich formatieren und intern normalisiert halten.
+- [x] Check-in-Skalen mit klaren Endpunkten und Richtung beschriften.
+- [x] Hinweis auf parallele Radaufzeichnungen neutral formulieren und eine explizite „legitim/ignorieren“-Option vorsehen; niemals Löschung als zwingend darstellen.
 
 **Abnahmekriterien**
 
-- [ ] Datenschutz, Backup/Restore und Diagnose sind mit höchstens zwei Navigationsebenen erreichbar.
-- [ ] Keine technische Rohform ist ohne Erklärung primäre Eingabe.
-- [ ] Kontextweitergabe ist dort sichtbar, wo sensible Inhalte erfasst werden.
+- [x] Datenschutz, Backup/Restore und Diagnose sind mit höchstens zwei Navigationsebenen erreichbar.
+- [x] Keine technische Rohform ist ohne Erklärung primäre Eingabe.
+- [x] Kontextweitergabe ist dort sichtbar, wo sensible Inhalte erfasst werden.
+
+**Handover FT-019**
+
+- Status: abgeschlossen; Folgepakete ab FT-020 sind entblockt.
+- Umsetzung: `feat/ft-019-more-segments`, Commit `81de246`, PR #168; Merge-Commit `158a770d`.
+- Änderungen: „Mehr“ in fünf tiefenverlinkte Bereiche gegliedert; Integrationen, Coach/Modell, Kontextvorschau, Datenschutz sowie Betrieb/Diagnose räumlich gebündelt; sensible Profilfelder mit OpenAI-Hinweis versehen; Sport/Zeitzone kontrolliert ausgewählt; Wettkampfzeit und -distanz benutzerfreundlich eingegeben und intern normalisiert.
+- Betroffene Dateien: `public/index.html`, `public/app.js`, `public/styles.css`, `public/service-worker.js`, `README.md`, `tests/test_server.py`, `e2e/coach.spec.js`.
+- Validierung: Docker-Build erfolgreich; vier schnelle Test-Shards mit jeweils 62 Tests erfolgreich; `py_compile`, Node-Syntaxprüfung und `git diff --check` erfolgreich; GitHub-CI inklusive Browser-Smoke/Accessibility, CodeQL, Analyse, Syntax und Validate erfolgreich.
+- Review: Diff-Review ohne offene Findings. Ein E2E-Selektor wurde während der Prüfung auf die beabsichtigte geschlossene Details-Struktur korrigiert; danach lokaler Desktop-/Mobile-Flow und CI erfolgreich.
+- Manuelle Prüfung: Disposable-Docker-Fixture ohne Providerkonten, Secrets, Live-Datenbank oder Laufzeitdaten; Deep Links, Segment-Sichtbarkeit und Accessibility geprüft.
+- Offene Risiken: Keine für FT-019.
 
 ### - [ ] FT-020 – Accessibility-Baseline WCAG 2.2 AA schließen
 
