@@ -256,6 +256,15 @@ class CoachTests(unittest.TestCase):
                 db.execute("DELETE FROM schema_migrations WHERE version = 99")
         server.initialise_database()
 
+    def test_key_value_repository_preserves_get_and_upsert_contract(self):
+        repository = server.KeyValueRepository(lambda: "2026-09-01T00:00:00+00:00")
+        with server.database() as db:
+            self.assertIsNone(repository.get(db, "repository-test"))
+            repository.set(db, "repository-test", "first")
+            self.assertEqual(repository.get(db, "repository-test"), "first")
+            repository.set(db, "repository-test", "second")
+            self.assertEqual(repository.get(db, "repository-test"), "second")
+
     def test_profile_only_accepts_known_fields_and_trims(self):
         profile = server.normalize_profile({"name": "  Ada  ", "goals": "Finish strong", "admin": True})
         self.assertEqual(profile["name"], "Ada")
