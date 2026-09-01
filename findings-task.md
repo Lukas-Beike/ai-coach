@@ -1263,6 +1263,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 75/75/75/74 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-sync-windows` und SQLCipher-Containerlauf mit 299 Tests erfolgreich.
 - [ ] Weitere Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Sync-Status**
+
+- [x] Dependency-light Persistenzadapter und öffentliche Sync-Status-Projektion als `backend/sync/status.py` abgegrenzt.
+- [x] DB-Zugriff, Locks, Maintenance-Gate, Frische- und Versionsdaten sowie bestehende Server-Wrapper und `/api/sync/status`-API unverändert an der Anwendungskern-Grenze belassen.
+- [x] Regressionen für injizierte Modulgrenze, Fortschrittsbegrenzung und Redaction ergänzt.
+- [x] Review ohne Findings; ein Testduplikat wurde vor dem Abschluss entfernt; PR #246 per Auto-Squash gemergt (`82d5620`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 75/75/75/75 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-sync-status` und SQLCipher-Containerlauf mit 300 Tests erfolgreich.
+- [ ] Weitere Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
