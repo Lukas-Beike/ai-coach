@@ -113,7 +113,9 @@ It is not intended to be exposed directly to the public internet.
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local library entries on busy days can be proposed as short easy sessions.
   Invalid feeds are rejected without replacing the last good local calendar;
-  recurring events are reported as unsupported rather than partially expanded.
+  bounded DAILY/WEEKLY recurring events with COUNT or UNTIL are expanded only
+  inside the eight-week window. Other recurrence rules are reported as
+  unsupported, and expansion is capped at 1,000 occurrences.
 - The planned calendar never displays a provider horizon wider than the
   Intervals.icu window actually loaded by the latest snapshot. The configured
   display preference may therefore be reduced temporarily after a short sync.
