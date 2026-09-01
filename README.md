@@ -55,7 +55,10 @@ It is not intended to be exposed directly to the public internet.
   server-side and inserted into the editable message field; audio is not stored.
 - Coach chat with selectable GPT-5.6 models, configurable thinking level,
   context preview, structured logs, and prioritized steering/FIFO message
-  queueing while the coach is responding.
+  queueing while the coach is responding. Responses are streamed through a
+  credential-free server-side SSE bridge; the chat view renders safe partial
+  Markdown, and **Abbrechen** cancels the active request while **Steuern**
+  remains a separate queued follow-up action.
 - The normal Coach chat is read-only: durable local changes and every remote
   sync require a separate preview, an exact UI confirmation, and a short-lived
   single-use server-side action token bound to the session and payload.
@@ -143,7 +146,8 @@ It is not intended to be exposed directly to the public internet.
   failures, and persist tool-call results so retried follow-ups do not repeat
   local mutations. The application does not impose a local daily request or
   token budget; requests continue until OpenAI rejects them because the
-  account or project quota is exhausted.
+  account or project quota is exhausted. A cancelled or disconnected stream
+  records a separate usage operation and never executes a partial tool call.
 
 ## Loading and synchronization
 

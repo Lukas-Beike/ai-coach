@@ -909,6 +909,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 **Quelle:** COACH-04
 **Ziel:** Antworten werden progressiv sichtbar und können tatsächlich abgebrochen werden; „Abbrechen“ und „danach steuern“ sind getrennte Aktionen.
 **Abhängigkeiten:** FT-004 zwingend
+**Status:** in Arbeit; Server-SSE, Client-Teilrendering, Cancel-Signal und Abbruch-/Sicherheitsregressionstests umgesetzt, Browser-/Container-Gates stehen noch aus.
 
 **Umsetzung**
 
