@@ -209,6 +209,13 @@ search), while plans, performance, profile, feedback, and the workout library
 are loaded separately. The activity view can request the next page without
 reloading the complete application state.
 
+The Plan view is split into the deep-linked segments `#planned/calendar`,
+`#planned/library`, and `#planned/goals`. Calendar contains planned workouts,
+weather, and confirmation-required adaptive previews. The library loads only
+when opened, uses bounded pages for large collections, and keeps local template
+actions separate from the explicit Intervals.icu sync preview. Goals & Plans
+contains competitions and multi-week plans; competition push is shown as its+own remote action. Segment scroll positions are restored when navigating back.
+
 Manual Intervals.icu synchronization starts in the background and exposes only
 the bounded `/api/sync/status` response while it runs. The browser uses one
 status poll at a time, coordinates visible tabs through a short-lived local

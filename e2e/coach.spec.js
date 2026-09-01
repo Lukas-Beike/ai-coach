@@ -81,6 +81,22 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#chatPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#coach$/);
 
+    await page.getByRole("link", { name: "Plan", exact: true }).click();
+    await expect(page.locator("#planCalendarSegment")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Kalender", exact: true })).toHaveAttribute("aria-current", "page");
+    await page.getByRole("link", { name: "Bibliothek", exact: true }).click();
+    await expect(page).toHaveURL(/#planned\/library$/);
+    await expect(page.locator("#planLibrarySegment")).toBeVisible();
+    await expect(page.locator("#planCalendarSegment")).toBeHidden();
+    await expect(page.getByText("Remote-Aktion: Intervals.icu", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Vorschau für Remote-Sync öffnen", exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Ziele & Pläne", exact: true }).click();
+    await expect(page).toHaveURL(/#planned\/goals$/);
+    await expect(page.locator("#planGoalsSegment")).toBeVisible();
+    await expect(page.locator("#planLibrarySegment")).toBeHidden();
+    await page.goto("/#planned/goals");
+    await expect(page.locator("#planGoalsSegment")).toBeVisible();
+
     await page.getByRole("link", { name: "Heute", exact: true }).click();
     const checkinButton = page.getByRole("button", { name: /Check-in (ausfüllen|bearbeiten)/ }).first();
     await expect(checkinButton).toBeVisible();

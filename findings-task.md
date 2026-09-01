@@ -735,6 +735,8 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 ### - [ ] FT-018 – „Plan“ in Kalender, Bibliothek und Ziele & Pläne segmentieren
 
+**Status:** in Umsetzung
+
 **Quelle:** UX-01, aktuelle Menüzuteilung
 **Ziel:** Unterschiedliche Planobjekte und Sync-Wirkungen sind getrennt auffindbar und nicht mehr in einer einzigen langen Seite vermischt.
 **Abhängigkeiten:** FT-016, FT-010, FT-002, FT-003

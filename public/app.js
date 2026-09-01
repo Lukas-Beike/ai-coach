@@ -22,6 +22,9 @@ const state = {
   planningDrafts: new Map(),
   libraryDateDrafts: new Map(),
   plannedWeekOpen: new Map(),
+  planSegment: "calendar",
+  planSegmentScroll: { calendar: 0, library: 0, goals: 0 },
+  loadedAreas: new Set(),
   voiceRecorder: null,
   voiceStream: null,
   voiceTimer: null,
@@ -57,6 +60,9 @@ const NAV_ROUTES = Object.freeze({
   today: "todayPanel",
   activities: "activitiesPanel",
   planned: "workoutsPanel",
+  "planned/calendar": "workoutsPanel",
+  "planned/library": "workoutsPanel",
+  "planned/goals": "workoutsPanel",
   performance: "dataPanel",
   more: "settingsPanel",
   profile: "profilePanel",
@@ -84,12 +90,55 @@ function hashContainsKnownRoute(hash = window.location.hash) {
   return Object.prototype.hasOwnProperty.call(NAV_ROUTES, route);
 }
 
+function planSegmentFromRoute(route = state.route) {
+  const segment = String(route || "").split("/")[1];
+  return ["calendar", "library", "goals"].includes(segment) ? segment : "calendar";
+}
+
+function baseRoute(route = state.route) {
+  return String(route || DEFAULT_NAV_ROUTE).split("/")[0];
+}
+
+function renderPlanSegments(segment = state.planSegment) {
+  const selected = ["calendar", "library", "goals"].includes(segment) ? segment : "calendar";
+  state.planSegment = selected;
+  document.querySelectorAll("[data-plan-segment-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.planSegmentPanel !== selected;
+  });
+  document.querySelectorAll("[data-plan-segment]").forEach((link) => {
+    const active = link.dataset.planSegment === selected;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+}
+
+function currentPlanLoadAreas() {
+  const areas = new Set(["chat", "activities", "performance", "feedback", "profile"]);
+  const route = baseRoute();
+  if (route === "today" || (route === "planned" && state.planSegment !== "library")) areas.add("plan");
+  if (route === "planned" && state.planSegment === "library") areas.add("library");
+  return [...areas];
+}
+
+function ensureRouteData(route = state.route) {
+  if (!state.data || state.loadPromise) return;
+  const requested = [];
+  const panelRoute = baseRoute(route);
+  if ((panelRoute === "today" || (panelRoute === "planned" && state.planSegment !== "library")) && !state.loadedAreas.has("plan")) requested.push("plan");
+  if (panelRoute === "planned" && state.planSegment === "library" && !state.loadedAreas.has("library")) requested.push("library");
+  if (requested.length) load("/api/bootstrap", requested);
+}
+
 function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
   const panelRoute = NAV_ROUTES[route] ? route : DEFAULT_NAV_ROUTE;
-  const navigationRoute = NAV_LINK_ROUTES[panelRoute] || panelRoute;
+  const mainRoute = baseRoute(panelRoute);
+  const navigationRoute = NAV_LINK_ROUTES[mainRoute] || mainRoute;
   const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   if (currentPanel !== NAV_ROUTES[panelRoute] && !confirmDiscardChanges()) return false;
   if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges()) discardUnsavedChanges();
+  if (currentPanel === "workoutsPanel" && mainRoute !== "planned") state.planSegmentScroll[state.planSegment] = window.scrollY;
+  if (currentPanel === "workoutsPanel" && mainRoute === "planned" && state.planSegment !== planSegmentFromRoute(panelRoute)) state.planSegmentScroll[state.planSegment] = window.scrollY;
   document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
   const navigation = document.querySelector(`.nav-item[data-route="${navigationRoute}"]`);
   const panel = document.querySelector(`#${NAV_ROUTES[panelRoute]}`);
@@ -99,6 +148,10 @@ function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}
   navigation.setAttribute("aria-current", "page");
   panel.classList.add("active");
   state.route = panelRoute;
+  if (mainRoute === "planned") {
+    renderPlanSegments(planSegmentFromRoute(panelRoute));
+    renderActivePlanSegment(state.data);
+  }
   const targetHash = `#${panelRoute}`;
   if (window.location.hash !== targetHash) {
     if (historyMode === "push") window.history.pushState({ route: panelRoute }, "", targetHash);
@@ -108,8 +161,10 @@ function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}
   updateHeaderAction();
   if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadContextPreview();
   if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadLogs();
-  window.scrollTo({ top: 0, behavior: "auto" });
-  if (panelRoute === "coach") scrollChatToLatest(true);
+  const targetScroll = mainRoute === "planned" ? (state.planSegmentScroll[state.planSegment] || 0) : 0;
+  requestAnimationFrame(() => window.scrollTo({ top: targetScroll, behavior: "auto" }));
+  if (mainRoute === "coach") scrollChatToLatest(true);
+  ensureRouteData(panelRoute);
   if (focus && !$("#appShell")?.hidden) {
     panel.setAttribute("tabindex", "-1");
     panel.focus({ preventScroll: true });
@@ -170,6 +225,8 @@ function cookie(name) {
 
 function showLogin() {
   state.data = null;
+  state.loadedAreas.clear();
+  state.planSegment = "calendar";
   state.profileDirty = false;
   state.checkinDirty = false;
   state.chatDraftDirty = false;
@@ -708,7 +765,7 @@ function renderAdaptivePlanning(data) {
     const button = $("#adaptivePlanningButton");
     if (button) {
       button.disabled = Boolean(state.localSync.adaptivePlanning);
-      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : illnessNeedsForecast ? "Krankheitspause prüfen" : "Planung aktualisieren";
+      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : illnessNeedsForecast ? "Krankheitspause prüfen" : "Vorschau prüfen";
     }
   }
   if (coachNotice) coachNotice.hidden = !required;
@@ -2243,6 +2300,7 @@ function renderLibrary(workouts) {
   });
   const librarySummary = $("#librarySummary");
   if (librarySummary) librarySummary.textContent = `${visible.length} von ${allWorkouts.length} Einheiten`;
+  renderLibraryPagination();
   if (!visible.length) {
     const empty = document.createElement("p");
     empty.className = "context-empty";
@@ -2367,6 +2425,36 @@ function renderLibrary(workouts) {
     });
 }
 
+function renderLibraryPagination() {
+  const pagination = $("#libraryPagination");
+  if (!pagination) return;
+  pagination.replaceChildren();
+  if (!state.data?.library_next_cursor) return;
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "secondary-button";
+  more.textContent = "Weitere lokale Vorlagen laden";
+  more.addEventListener("click", loadMoreLibrary);
+  pagination.append(more);
+}
+
+async function loadMoreLibrary() {
+  const pagination = $("#libraryPagination");
+  const cursor = state.data?.library_next_cursor;
+  if (!pagination || !cursor) return;
+  const button = pagination.querySelector("button");
+  if (button) { button.disabled = true; button.textContent = "Weitere Vorlagen werden geladen…"; }
+  try {
+    const result = await api(`/api/library?limit=100&cursor=${encodeURIComponent(cursor)}`);
+    state.data.library = [...(state.data.library || []), ...(result.workouts || [])];
+    state.data.library_next_cursor = result.next_cursor;
+    renderLibrary(state.data.library);
+  } catch (error) {
+    toast(error.message, true);
+    if (button) button.disabled = false;
+  }
+}
+
 async function loadLibrary() {
   const button = $("#libraryLoadButton");
   const root = $("#library");
@@ -2415,7 +2503,7 @@ async function loadLibrary() {
     root.append(message);
   } finally {
     button.disabled = false;
-    button.textContent = "Bibliothek synchronisieren";
+    button.textContent = "Vorschau für Remote-Sync öffnen";
   }
 }
 
@@ -2712,7 +2800,7 @@ function renderCompetitionSync(data) {
   const detail = $("#competitionSyncDetail");
   if (button) {
     button.disabled = Boolean(sync.running || state.localSync.competitions || fullRunning);
-    button.textContent = sync.running || state.localSync.competitions ? "Synchronisierung läuft…" : "Mit Intervals.icu synchronisieren";
+    button.textContent = sync.running || state.localSync.competitions ? "Remote-Sync läuft…" : "Vorschau für Wettkampf-Push";
   }
   if (detail) {
     detail.textContent = sync.last_error
@@ -2721,7 +2809,7 @@ function renderCompetitionSync(data) {
         ? (sync.status || "Zielwettkämpfe werden synchronisiert…")
         : sync.last_sync_at
           ? `Letzte Aktualisierung: ${formatTime(sync.last_sync_at)}`
-          : "Noch nicht synchronisiert";
+          : "Status: noch nicht synchronisiert";
     detail.classList.toggle("error", Boolean(sync.last_error));
   }
 }
@@ -3277,8 +3365,7 @@ function render(data) {
   renderToday(data);
   renderActivities(data.activities || []);
   renderPlanned(data.planned || [], data.external_calendar?.events || [], data.daily_planning_context || []);
-  renderLibrary(data.library || []);
-  renderTrainingPlans(data.plans || [], data.library || []);
+  renderActivePlanSegment(data);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
     const libraryState = data.library_sync?.state || {};
@@ -3298,7 +3385,7 @@ function render(data) {
   renderProfile(data.profile);
   renderCheckins(data.checkins || data.local_feedback?.recent || [], data.profile?.timezone);
   renderGarmin(data.garmin);
-  renderCompetitions(data.competitions || []);
+  if (state.planSegment === "goals") renderCompetitions(data.competitions || []);
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
   renderCompetitionSync(data);
@@ -3337,6 +3424,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     }
     const results = await domainData;
     results.forEach(([area, result]) => {
+      state.loadedAreas.add(area);
       if (area === "chat") Object.assign(payload, { messages: result.messages || [], messages_next_cursor: result.next_cursor });
       if (area === "activities") Object.assign(payload, { activities: result.activities || [], activities_next_cursor: result.next_cursor });
       if (area === "plan") Object.assign(payload, result);
@@ -3362,7 +3450,8 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
 
 function load(path = "/api/bootstrap", requestedAreas = null) {
   if (state.loadPromise) return state.loadPromise;
-  const promise = loadState(path, requestedAreas);
+  const areas = requestedAreas || currentPlanLoadAreas();
+  const promise = loadState(path, areas);
   const tracked = promise.finally(() => {
     if (state.loadPromise === tracked) state.loadPromise = null;
   });
@@ -3371,7 +3460,22 @@ function load(path = "/api/bootstrap", requestedAreas = null) {
 }
 
 async function loadInitialState() {
-  await load("/api/bootstrap?local=1");
+  const route = routeFromHash();
+  const segment = planSegmentFromRoute(route);
+  const areas = ["chat", "activities", "performance", "feedback", "profile"];
+  if (route === "today" || (baseRoute(route) === "planned" && segment !== "library")) areas.push("plan");
+  if (baseRoute(route) === "planned" && segment === "library") areas.push("library");
+  await load("/api/bootstrap?local=1", areas);
+}
+
+function renderActivePlanSegment(data = state.data) {
+  if (!data) return;
+  renderPlanSegments(state.planSegment);
+  if (state.planSegment === "library") renderLibrary(data.library || []);
+  if (state.planSegment === "goals") {
+    renderCompetitions(data.competitions || []);
+    renderTrainingPlans(data.plans || [], data.library || []);
+  }
 }
 
 function queueChatMessage(message, mode) {
@@ -3976,6 +4080,11 @@ document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   applyNavigationRoute(link.dataset.route, { historyMode: "push" });
+}));
+document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  applyNavigationRoute(`planned/${link.dataset.planSegment}`, { historyMode: "push" });
 }));
 window.addEventListener("hashchange", syncNavigationRoute);
 
