@@ -1419,6 +1419,7 @@ class CoachTests(unittest.TestCase):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
+        styles = (Path(__file__).resolve().parents[1] / "public" / "styles.css").read_text(encoding="utf-8")
         self.assertIn('if (typeof value === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return value;', views)
         self.assertIn('function renderCheckins(checkins, timeZone)', app)
         self.assertIn('function renderDailyPlanningContext(date, todayKey)', app)
@@ -1437,6 +1438,8 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("recoverySources", app)
         self.assertNotIn('id="weatherNotice"', index)
         self.assertNotIn("function renderWeatherNotice", app)
+        self.assertIn('has-planned-events', app)
+        self.assertIn('.planned-day.has-planned-events', styles)
 
     def test_activity_feedback_is_persisted_and_attached_to_activity(self):
         server.save_snapshot({

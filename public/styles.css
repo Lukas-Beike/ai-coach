@@ -403,9 +403,12 @@ h2 {
 .planned-week-summary { flex: 0 1 auto; color: var(--subtle); font-size: .68rem; text-align: right; }
 .planned-week-days { display: grid; gap: 8px; padding: 8px; }
 .planned-day { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.planned-day.has-planned-events { border-color: rgba(105, 225, 183, .35); }
+.planned-day.has-planned-events .planned-day-heading { background: rgba(105, 225, 183, .035); }
 .planned-day-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 14px; }
 .planned-day-heading h3 { margin: 0; color: var(--ink); font-size: .9rem; }
 .planned-day-count { flex: 0 0 auto; color: var(--subtle); font-size: .68rem; }
+.planned-day.has-planned-events .planned-day-count { color: var(--accent-bright); font-weight: 700; }
 .planned-day-context { display: grid; gap: 9px; margin: 0 12px 12px; padding: 11px 12px; border: 1px solid rgba(105, 225, 183, .22); border-radius: 13px; color: var(--muted); background: rgba(105, 225, 183, .055); font-size: .7rem; line-height: 1.4; }
 .planned-day-context > strong { color: var(--ink); font-size: .75rem; }
 .planned-day-context-signals { display: grid; gap: 7px; }
@@ -472,18 +475,18 @@ h2 {
   text-wrap: pretty;
 }
 .planned-day-empty { margin: -4px 14px 14px; color: var(--subtle); font-size: .75rem; }
-.planned-day-entries { border-top: 1px solid var(--line); }
+.planned-day-entries { border-top: 2px solid rgba(105, 225, 183, .28); background: rgba(105, 225, 183, .025); }
 .planned-calendar-markers { display: grid; gap: 7px; margin-top: 8px; padding: 0 12px 12px; }
 .planned-calendar-marker { display: grid; gap: 3px; padding: 9px 11px; border: 1px solid rgba(255, 69, 58, .55); border-radius: 11px; color: #ffb0aa; background: rgba(255, 69, 58, .1); font-size: .7rem; line-height: 1.35; }
 .planned-calendar-marker strong { color: #fff; font-size: .75rem; }
 .planned-calendar-marker small { color: #ffcbc7; font-size: .65rem; }
 .planned-entry + .planned-entry { border-top: 1px solid var(--line); }
-.planned-entry > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 12px 14px; color: var(--ink); list-style-position: inside; }
+.planned-entry > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 14px; color: var(--ink); list-style-position: inside; }
 .planned-entry > summary::marker { color: var(--accent-bright); }
 .planned-entry > summary:hover { background: rgba(255, 255, 255, .035); }
 .planned-summary-main { display: grid; min-width: 0; gap: 4px; }
-.planned-summary-main strong { overflow: hidden; font-size: .86rem; text-overflow: ellipsis; white-space: nowrap; }
-.planned-meta { color: var(--subtle); font-size: .7rem; }
+.planned-summary-main strong { overflow-wrap: anywhere; color: var(--ink); font-size: .92rem; }
+.planned-meta { color: var(--muted); font-size: .72rem; }
 .planned-entry[open] > summary { border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .035); }
 .planned-entry-body { padding: 0 14px 14px; }
 .planned-compliance { display: grid; gap: 3px; margin-bottom: 12px; padding: 10px 11px; border-left: 3px solid var(--accent-bright); border-radius: 8px; color: var(--muted); background: rgba(52, 207, 161, .07); font-size: .73rem; line-height: 1.4; }

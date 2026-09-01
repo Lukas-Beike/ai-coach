@@ -1670,6 +1670,7 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
       const calendarEvents = calendarEventsByDate.get(date) || [];
       const dayRoot = document.createElement("section");
       dayRoot.className = "planned-day";
+      dayRoot.classList.toggle("has-planned-events", events.length > 0);
 
       const heading = document.createElement("div");
       heading.className = "planned-day-heading";
@@ -1681,10 +1682,11 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
       heading.append(title, count);
       dayRoot.append(heading);
 
-      dayRoot.append(renderDailyPlanningContext(date, todayKey));
+      const dailyContext = renderDailyPlanningContext(date, todayKey);
       const weather = weatherForDate(date);
+      let weatherRoot = null;
       if (weather && !planningContextForDate(date).weather) {
-        const weatherRoot = document.createElement("div");
+        weatherRoot = document.createElement("div");
         weatherRoot.className = "planned-weather";
         const icon = document.createElement("span");
         icon.className = "weather-icon";
@@ -1697,7 +1699,6 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
         const direction = weatherDirection(weather.wind_direction_dominant);
         summary.textContent = `${weatherNumber(weather.temperature_min, " °C")} bis ${weatherNumber(weather.temperature_max, " °C")} · Regenrisiko ${weatherNumber(weather.precipitation_probability_max, " %")} · Wind bis ${weatherNumber(weather.wind_speed_max, " km/h")} / Böen ${weatherNumber(weather.wind_gusts_max, " km/h")}${direction ? ` aus ${direction}` : ""}`;
         weatherRoot.append(icon, condition, summary);
-        dayRoot.append(weatherRoot);
       }
 
       if (!events.length && !calendarEvents.length) {
@@ -1826,6 +1827,8 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
         });
         dayRoot.append(entries);
       }
+      dayRoot.append(dailyContext);
+      if (weatherRoot) dayRoot.append(weatherRoot);
       if (calendarEvents.length) {
         const calendarRoot = document.createElement("div");
         calendarRoot.className = "planned-calendar-markers";
