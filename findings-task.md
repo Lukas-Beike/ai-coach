@@ -1327,6 +1327,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 77/76/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-frontend-forms` und SQLCipher-Containerlauf mit 305 Tests erfolgreich.
 - [ ] Weitere Frontend-, Coach-, Backup-, HTTP-API- und Sync-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Frontend-Komponenten**
+
+- [x] Zustandsfreie Dialog-Fokusverwaltung als `public/components.js` abgegrenzt; kein Framework eingeführt.
+- [x] Bestehende Dialogöffnung, Fokus-Rückgabe, Accessibility-Semantik, versionierte Asset-Auslieferung und Service-Worker-Cache unverändert erhalten.
+- [x] Regressionen für Modulgrenze, Script-Reihenfolge, Asset-Version 138 und versioniertes Caching ergänzt.
+- [x] Review ohne Findings; PR #261 per Auto-Squash gemergt (`aa5d946`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 77/76/76/76 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-frontend-components` und SQLCipher-Containerlauf mit 305 Tests erfolgreich.
+- [ ] Weitere Frontend-, Coach-, Backup-, HTTP-API- und Sync-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
