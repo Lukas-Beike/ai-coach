@@ -1087,8 +1087,6 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 271 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-frontend-api` erfolgreich.
 - [ ] Backend-Repositorys/-Provider/-Sync/-Coach/-Backup/-HTTP-API sowie weitere Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
-### - [ ] FT-028 – PWA-/Notification-Versprechen präzisieren und Produktentscheidung treffen
-
 **Fortschritt FT-027 - Key-Value-Repository**
 
 - [x] `backend.db` als Package strukturiert und `KeyValueRepository` als erstes explizites Repository-Interface ergänzt.
@@ -1097,6 +1095,17 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Review ohne Findings; PR #189 per Auto-Squash gemergt (`b852948`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
 - [x] Validierung: vier schnelle Shards mit 272 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-repositories` erfolgreich.
 - [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+**Fortschritt FT-027 - Chat-Repository**
+
+- [x] Lokale Chat-Reads/Writes als `ChatRepository` in `backend/db/repositories.py` abgegrenzt.
+- [x] Bestehende `add_message`-/`list_messages`-Wrapper, Trimming, ID-Reihenfolge, Connection Ownership und `DB_LOCK` unverändert erhalten.
+- [x] Regressionstest für Insert, Trimming, Readback und chronologische Ausgabe ergänzt.
+- [x] Review ohne Findings; PR #193 per Auto-Squash gemergt (`c12989d`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 273 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-chat-repository` erfolgreich.
+- [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
+### - [ ] FT-028 – PWA-/Notification-Versprechen präzisieren und Produktentscheidung treffen
 
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
