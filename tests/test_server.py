@@ -1348,6 +1348,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('"/forms.js?v=147"', service_worker)
         self.assertIn('"/components.js?v=147"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
+        self.assertIn('id="coachActionReview"', index)
+        self.assertIn('function executeCoachActionProposal(', app)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('window.addEventListener("offline"', app)
         self.assertIn('const state = {', state)
@@ -3094,7 +3096,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(snapshot["provider_sync"]["pagination"]["activities"]["records"], 1)
         self.assertTrue(snapshot["provider_sync"]["pagination"]["events"]["complete"])
 
-    def test_chat_creation_request_stores_directly_in_local_library(self):
+    def test_chat_creation_request_creates_local_action_preview(self):
         future_date = (date.today() + timedelta(days=1)).isoformat()
         calls = []
 
@@ -3127,11 +3129,17 @@ class CoachTests(unittest.TestCase):
             result = server.chat_with_coach("Erstelle mir für morgen eine Einheit.")
 
         response_calls = [payload for path, payload in calls if path == "/responses"]
-        self.assertEqual(response_calls[0]["tool_choice"], "auto")
+        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "save_workout_library_entries"})
         self.assertEqual(result["library_entries"], [])
+        self.assertEqual(result["proposed_actions"][0]["status"], "preview")
+        self.assertEqual(result["proposed_actions"][0]["diff"][0]["date"], future_date)
         self.assertEqual(server.list_workout_library(), [])
         self.assertEqual(server.list_workout_drafts(), [])
         create.assert_not_called()
+        confirmed = server.confirm_coach_action_preview(result["proposed_actions"][0]["id"], "")
+        executed = server.execute_coach_action(confirmed["action_token"], "")
+        self.assertTrue(executed["stored_locally"])
+        self.assertEqual(len(server.list_workout_library()), 1)
 
     def test_saved_library_plan_can_be_applied_locally_as_a_batch(self):
         server.upsert_workout_library([{
@@ -3233,8 +3241,9 @@ class CoachTests(unittest.TestCase):
             result = server.chat_with_coach("Wende die gespeicherte Bibliothekseinheit als Plan an.")
 
         response_calls = [payload for path, payload in calls if path == "/responses"]
-        self.assertEqual(response_calls[0]["tool_choice"], "auto")
+        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "apply_workout_library_plan"})
         self.assertEqual(result["planned_library_entries"], [])
+        self.assertEqual(result["proposed_actions"][0]["status"], "preview")
         self.assertEqual(len(server.list_workout_library()), 1)
 
     def test_library_backed_draft_is_planned_from_library_on_approval(self):
@@ -3467,6 +3476,7 @@ class CoachTests(unittest.TestCase):
     def test_morning_checkin_prompt_is_not_a_workout_creation_request(self):
         prompt = server.MORNING_CHECKIN_PROMPT
         self.assertFalse(server.prompt_requests_workout_creation(prompt))
+        self.assertTrue(server.prompt_requests_workout_creation("Plane die kommende Woche."))
         self.assertIn("Tagesform", prompt)
         self.assertIn("Muskelkater", prompt)
         self.assertIn("schwere Beine", prompt)

@@ -33,6 +33,13 @@
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Plan öffnen</button>
         </div>
         <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
+        <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
+          <div class="coach-action-review-heading">
+            <div><span class="eyebrow">VORSCHLAG PRÜFEN</span><h2 id="coachActionReviewTitle">Lokale Planung</h2></div>
+            <span class="coach-action-review-status">Noch nicht gespeichert</span>
+          </div>
+          <div id="coachActionReviewContent"></div>
+        </section>
         <form id="chatForm" class="composer">
           <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
             <span class="quick-message-label">Schnellstart</span>

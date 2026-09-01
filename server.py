@@ -1071,6 +1071,15 @@ COACH_TOOLS = [
     PREVIEW_ADAPTIVE_REPLAN_TOOL,
 ]
 
+# Planning requests may use the mutating schemas to produce a structured
+# proposal. The chat handler intercepts these calls and never executes them;
+# all writes still go through the explicit action-preview endpoints.
+COACH_PROPOSAL_TOOLS = [
+    *COACH_TOOLS,
+    WORKOUT_TOOL,
+    LIBRARY_PLAN_TOOL,
+]
+
 
 class AppError(Exception):
     def __init__(self, status: int, message: str, *, reason: str | None = None):
@@ -10489,12 +10498,19 @@ def prompt_requests_fresh_data(message: str) -> bool:
 def prompt_requests_workout_creation(message: str) -> bool:
     """Recognise explicit requests to create or schedule a workout."""
     text = message.casefold()
+    if re.search(r"\b(kein\w*|nicht|nie)\b", text):
+        return False
     asks_for_workout = bool(re.search(r"\b(einheit\w*|workout\w*|training\w*|trainingsplan\w*|session\w*)\b", text))
+    asks_for_schedule_window = bool(re.search(
+        r"\b(?:kommend\w*|nächste[nr]?|naechste[nr]?|folgend\w*|diese[rn]?)\s+woche\b"
+        r"|\b(?:heute|morgen|übermorgen|uebermorgen)\b",
+        text,
+    ))
     asks_to_create = bool(
         re.search(r"\b(erstell\w*|plan\w*|anleg\w*|generier\w*|entwerf\w*|mach\w*|schreib\w*)\b", text)
         or re.search(r"\bleg\w*\b.*\ban\b", text)
     )
-    return asks_for_workout and asks_to_create
+    return (asks_for_workout or asks_for_schedule_window) and asks_to_create
 
 
 def prompt_requests_long_plan(message: str) -> bool:
@@ -10531,6 +10547,8 @@ def prompt_contains_activity_feedback(message: str) -> bool:
 def prompt_requests_library_plan_application(message: str) -> bool:
     """Recognise an explicit request to apply an already saved library plan."""
     text = message.casefold()
+    if re.search(r"\b(kein\w*|nicht|nie)\b", text):
+        return False
     asks_for_library = bool(re.search(r"\b(bibliothek\w*|gespeichert\w*|vorhanden\w*)\b", text))
     asks_to_apply = bool(re.search(
         r"\b(anwend\w*|wend\w*|einplan\w*|übernehm\w*|uebernehm\w*|übertrag\w*|uebertrag\w*|schedule\w*|apply\w*)\b",
@@ -10689,6 +10707,84 @@ def _coach_action_view(row: dict[str, Any]) -> dict[str, Any]:
         "expires_at": row["expires_at"],
         "status": row["status"],
     }
+
+
+def _coach_workout_action_preview(action_type: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Build a visible local-action proposal from a coach tool call."""
+    if action_type == "save_workout_library_entries":
+        workouts = arguments.get("workouts")
+        if not isinstance(workouts, list) or not workouts:
+            raise AppError(400, "Die Coach-Vorschau enthält keine geplanten Einheiten.")
+        normalized = [normalize_workout_draft(item) for item in workouts]
+        diff = [{
+            "type": "create",
+            "date": item["date"],
+            "sport": item["sport"],
+            "name": item["name"],
+            "duration_minutes": item["duration_minutes"],
+            "target": item["target"],
+        } for item in normalized]
+        payload = {
+            "plan_name": str(arguments.get("plan_name") or "Coach-Plan"),
+            "goal": str(arguments.get("goal") or ""),
+            "workouts": normalized,
+        }
+        return {
+            "action_type": action_type,
+            "target_system": "local",
+            "object_ids": {"entries": len(normalized)},
+            "diff": diff,
+            "payload": payload,
+        }
+    if action_type == "apply_workout_library_plan":
+        entries = arguments.get("entries")
+        if not isinstance(entries, list) or not entries:
+            raise AppError(400, "Die Coach-Vorschau enthält keine Bibliothekseinheiten.")
+        if len(entries) > 14:
+            raise AppError(400, "Es können höchstens 14 Bibliothekseinheiten gleichzeitig eingeplant werden.")
+        diff = []
+        normalized_entries = []
+        with DB_LOCK, database() as db:
+            for item in entries:
+                if not isinstance(item, dict):
+                    raise AppError(400, "Jede Planung muss ein Objekt sein.")
+                try:
+                    workout_id = str(uuid.UUID(str(item.get("library_workout_id") or "")))
+                except (ValueError, AttributeError) as exc:
+                    raise AppError(400, "Ungültige lokale Bibliothekseinheiten-ID.") from exc
+                plan_date = str(item.get("date") or "").strip()
+                try:
+                    date.fromisoformat(plan_date)
+                except (TypeError, ValueError) as exc:
+                    raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.") from exc
+                row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (workout_id,)).fetchone()
+                if not row:
+                    raise AppError(404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.")
+                try:
+                    workout = json.loads(row["payload"])
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
+                if not isinstance(workout, dict):
+                    raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.")
+                normalized_entries.append({"library_workout_id": workout_id, "date": plan_date})
+                diff.append({
+                    "type": "plan",
+                    "library_workout_id": workout_id,
+                    "date": plan_date,
+                    "name": workout.get("name") or "Bibliotheks-Einheit",
+                    "sport": workout.get("type") or workout.get("sport") or "Ride",
+                })
+        return {
+            "action_type": action_type,
+            "target_system": "local+intervals" if arguments.get("sync_to_intervals") else "local",
+            "object_ids": {"library_workout_ids": [item["library_workout_id"] for item in normalized_entries]},
+            "diff": diff,
+            "payload": {
+                "entries": normalized_entries,
+                "sync_to_intervals": bool(arguments.get("sync_to_intervals")),
+            },
+        }
+    raise AppError(400, "Unbekannter Coach-Planungstyp.")
 
 
 def _require_current_coach_sync_preview(key: str, fingerprint: str, label: str) -> None:
@@ -10906,7 +11002,7 @@ def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
 
 @maintenance_operation
 @serialise_conversation
-def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None) -> dict[str, Any]:
+def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "") -> dict[str, Any]:
     _raise_chat_cancelled(cancel_event)
     message = message.strip()
     if not message:
@@ -10932,9 +11028,11 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             "\n\n[Systemhinweis: Die angeforderte Intervals.icu-Aktualisierung ist fehlgeschlagen. Nutze den letzten "
             "verfügbaren Snapshot, weise auf dessen möglichen veralteten Stand hin und stelle ihn nicht als aktuell dar.]"
         )
-    # Mutation intent is answered in normal chat, never routed to a mutating tool.
-    apply_library_plan = False
-    create_workout = False
+    # Planning requests may create a structured proposal, but the proposal
+    # itself is not a mutation. The action token and UI confirmation remain
+    # the only path that can change durable data.
+    apply_library_plan = allow_mutations and prompt_requests_library_plan_application(message)
+    create_workout = allow_mutations and not apply_library_plan and prompt_requests_workout_creation(message)
     tool_choice = (
         "none"
         if not allow_mutations
@@ -10946,7 +11044,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         if requested_tool
         else "auto"
     )
-    coach_tools = COACH_TOOLS if allow_mutations else []
+    coach_tools = COACH_PROPOSAL_TOOLS if allow_mutations and (apply_library_plan or create_workout) else COACH_TOOLS if allow_mutations else []
     request_payload = {
         "model": selected_model(),
         "conversation": conversation_id,
@@ -10961,6 +11059,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     response = responses_stream_request(request_payload, on_text_delta, cancel_event) if on_text_delta is not None else responses_request(request_payload)
     created_library_entries: list[dict[str, Any]] = []
     planned_library_entries: list[dict[str, Any]] = []
+    proposed_actions: list[dict[str, Any]] = []
     saved_activity_feedback: list[dict[str, Any]] = []
     tool_outputs = []
     blocked_mutation = False
@@ -10975,9 +11074,29 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             continue
         try:
             arguments = json.loads(item.get("arguments") or "{}")
+            if not isinstance(arguments, dict):
+                raise AppError(400, "Die Coach-Aktion benötigt ein Objekt als Argumente.")
             if item.get("name") in MUTATING_COACH_TOOL_NAMES:
-                blocked_mutation = True
-                raise AppError(403, "Dauerhafte Coach-Änderungen benötigen eine separate Vorschau und UI-Bestätigung.")
+                if item.get("name") not in {"save_workout_library_entries", "apply_workout_library_plan"}:
+                    blocked_mutation = True
+                    raise AppError(403, "Dauerhafte Coach-Änderungen benötigen eine separate Vorschau und UI-Bestätigung.")
+                if item.get("name") == "save_workout_library_entries" and not create_workout:
+                    blocked_mutation = True
+                    raise AppError(400, "Das Speichern einer Einheit muss in der aktuellen Nachricht ausdrücklich angefordert werden.")
+                if item.get("name") == "apply_workout_library_plan" and not apply_library_plan:
+                    blocked_mutation = True
+                    raise AppError(400, "Das Anwenden eines Bibliotheksplans muss in der aktuellen Nachricht ausdrücklich angefordert werden.")
+                if item.get("name") == "apply_workout_library_plan" and arguments.get("sync_to_intervals") and not prompt_requests_intervals_sync(message):
+                    raise AppError(400, "Eine Intervals.icu-Synchronisierung muss ausdrücklich in der Chat-Nachricht angefordert werden.")
+                proposal = create_coach_action_preview(
+                    _coach_workout_action_preview(item.get("name"), arguments),
+                    session_csrf_hash,
+                )
+                proposed_actions.append(proposal["proposed_action"])
+                result = {"ok": True, "status": "preview", "proposed_action": proposal["proposed_action"]}
+                remember_chat_tool_result(call_id, item.get("name"), result)
+                tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result)})
+                continue
             if item.get("name") in {
                 "refresh_intervals_data",
                 "refresh_current_performance",
@@ -11132,6 +11251,8 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             text = "Ich habe die geplanten Einheiten direkt in deiner lokalen Trainingsbibliothek gespeichert. Du kannst sie später mit Intervals.icu synchronisieren."
         elif planned_library_entries:
             text = "Ich habe die gespeicherten Bibliothekseinheiten lokal eingeplant."
+        elif proposed_actions:
+            text = "Ich habe die Planung als Vorschlag vorbereitet. Prüfe die Einheiten unten und gib sie dort ausdrücklich frei."
         elif response.get("status") == "incomplete":
             text = "Die Coach-Antwort wurde abgeschnitten, bevor Text erzeugt wurde. Bitte erneut versuchen; das Modell hat sein Antwortlimit erreicht."
         else:
@@ -11141,6 +11262,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         "message": assistant_message,
         "library_entries": created_library_entries,
         "planned_library_entries": planned_library_entries,
+        "proposed_actions": proposed_actions,
         "activity_feedback": saved_activity_feedback,
     }
 
@@ -12556,6 +12678,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 str(payload.get("message", "")),
                 on_text_delta=lambda delta: send_event("delta", {"text": delta}),
                 cancel_event=cancel_event,
+                session_csrf_hash=session["csrf_hash"],
             )
             send_event("completed", result)
         except AppError as exc:
@@ -12587,7 +12710,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.handle_chat_stream(session)
             elif path == "/api/chat":
                 payload = self.read_json()
-                self.send_json(200, chat_with_coach(str(payload.get("message", ""))))
+                self.send_json(200, chat_with_coach(str(payload.get("message", "")), session_csrf_hash=session["csrf_hash"]))
             elif path == "/api/sync":
                 payload = self.read_json()
                 days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))
