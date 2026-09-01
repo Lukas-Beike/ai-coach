@@ -733,9 +733,9 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine für FT-017.
 - **Folgetasks:** FT-018 und FT-019 sind entblockt.
 
-### - [ ] FT-018 – „Plan“ in Kalender, Bibliothek und Ziele & Pläne segmentieren
+### - [x] FT-018 – „Plan“ in Kalender, Bibliothek und Ziele & Pläne segmentieren
 
-**Status:** in Umsetzung
+**Status:** abgeschlossen
 
 **Quelle:** UX-01, aktuelle Menüzuteilung
 **Ziel:** Unterschiedliche Planobjekte und Sync-Wirkungen sind getrennt auffindbar und nicht mehr in einer einzigen langen Seite vermischt.
@@ -743,19 +743,31 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Unterrouten/Segmente `Kalender`, `Bibliothek`, `Ziele & Pläne` einführen.
-- [ ] Kalender enthält geplante Workouts, Wetter und adaptive Vorschauen.
-- [ ] Bibliothek enthält lokale Vorlagen und ausschließlich dort den expliziten Remote-Sync.
-- [ ] Ziele & Pläne enthält Wettkämpfe und Mehrwochenpläne; Wettkampf-Push klar separat.
-- [ ] Jede Remote-Aktion mit Zielsystem, Vorschau und Status kennzeichnen.
-- [ ] Scrollposition und Deep Link pro Segment behandeln.
-- [ ] Leere und sehr große Listen testen.
+- [x] Unterrouten/Segmente `Kalender`, `Bibliothek`, `Ziele & Pläne` einführen.
+- [x] Kalender enthält geplante Workouts, Wetter und adaptive Vorschauen.
+- [x] Bibliothek enthält lokale Vorlagen und ausschließlich dort den expliziten Remote-Sync.
+- [x] Ziele & Pläne enthält Wettkämpfe und Mehrwochenpläne; Wettkampf-Push klar separat.
+- [x] Jede Remote-Aktion mit Zielsystem, Vorschau und Status kennzeichnen.
+- [x] Scrollposition und Deep Link pro Segment behandeln.
+- [x] Leere und sehr große Listen testen.
 
 **Abnahmekriterien**
 
-- [ ] Lokales Speichern und Remote-Synchronisieren sind visuell eindeutig verschieden.
-- [ ] Kein Segment lädt ungeöffnet seine gesamte große Liste.
-- [ ] Adaptive Vorschau bleibt explizit bestätigungspflichtig.
+- [x] Lokales Speichern und Remote-Synchronisieren sind visuell eindeutig verschieden.
+- [x] Kein Segment lädt ungeöffnet seine gesamte große Liste.
+- [x] Adaptive Vorschau bleibt explizit bestätigungspflichtig.
+
+**Handover FT-018**
+
+- **Status:** abgeschlossen.
+- **Branch/Commit:** `feat/ft-018-plan-segments` / `6f9979c`; per PR #166 als Squash-Commit `e39e586` in `develop` übernommen.
+- **Änderungen:** Plan in die Deep Links `#planned/calendar`, `#planned/library` und `#planned/goals` geteilt; Kalender, Bibliothek sowie Ziele & Pläne sind nur im aktiven Segment sichtbar. Die Bibliothek lädt erst beim Öffnen und unterstützt begrenzte Folgeseiten für große lokale Sammlungen. Lokale Vorlagenaktionen und der explizite Intervals.icu-Remote-Sync sowie der Wettkampf-Push sind getrennt beschriftet; adaptive Vorschauen bleiben bestätigungspflichtig. Segment-Scrollpositionen und Reload/Deep Links werden behandelt.
+- **Betroffene Dateien:** `public/index.html`, `public/app.js`, `public/styles.css`, `public/service-worker.js`, `e2e/coach.spec.js`, `tests/test_server.py`, `README.md`.
+- **Validierung:** `docker build -t ai-coach:ft018 .`; vier parallele schnelle Shards mit 62/62/62/61 Tests, alle Exit-Code 0; `python -m py_compile server.py tests/test_server.py tests/run_tests.py`; GitHub CI mit vier Shards, Syntax, Validate, Analyse/CodeQL und Browser-Smoke/Accessibility erfolgreich.
+- **Review:** Diff-Review ohne offene Findings. Ein zunächst gefundener E2E-History-Testfehler wurde durch eine isolierte Testreihenfolgekorrektur behoben und lokal sowie in CI erneut geprüft.
+- **Manuelle Prüfung:** Disposable Docker-Fixture mit Desktop- und Mobile-Playwright-Lauf; Navigation, Deep Links, Segment-Sichtbarkeit, Remote-Aktionskennzeichnung und WCAG-Prüfung bestanden. Keine Providerkonten, Secrets, Live-Datenbanken oder Laufzeitdaten verwendet.
+- **Offene Risiken:** Keine für FT-018.
+- **Folgetasks:** FT-019 und folgende Arbeitspakete sind entblockt.
 
 ### - [ ] FT-019 – „Mehr“ in Profil, Anbindungen, Coach, Datenschutz und Betrieb gliedern
 
