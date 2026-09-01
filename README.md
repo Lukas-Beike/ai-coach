@@ -673,13 +673,14 @@ cannot enter the test container:
 ./tests/run_sqlcipher_tests.ps1
 ```
 
-Native Python syntax checks and container unit tests are separate CI jobs. The
-container job uses the same bounded test runner as the four fast native shards.
+Native Python syntax checks, container unit tests, and image security are
+separate CI jobs aggregated by the required `test` check. The container job
+uses the same bounded test runner as the four fast native shards.
 An advisory quality job records a coverage baseline and runs pinned Ruff
 formatter/linter and MyPy checks; it is intentionally non-blocking while the
 existing large module is brought under those tools incrementally.
 
-Pull requests run the unit tests and syntax checks. The conventional-commit
+Pull requests run the unit tests, syntax checks, and image security report. The conventional-commit
 workflow validates pull-request titles and commit subjects. Dependabot manages
 Python, Docker, and GitHub Actions dependencies and can automatically squash
 merge successful update pull requests.
@@ -687,11 +688,14 @@ merge successful update pull requests.
 ### Image supply chain and runtime boundary
 
 The test-and-publish workflow emits an SPDX image SBOM and scans both OS/base
-image packages and Python libraries. High and critical findings, including
-unfixed findings, fail the scan; no vulnerability is silently ignored. A
-finding exception must be proposed in a separate reviewed change with the
-identifier, affected image, rationale, owner, mitigation, and expiry date.
-Until that change is explicitly accepted, the scan remains blocking.
+image packages and Python libraries. The complete HIGH/CRITICAL report,
+including unfixed findings, remains visible on every run; no vulnerability is
+silently ignored. Release and manual publish runs fail on those findings, while
+pull requests remain report-only when the pinned vendor image has no available
+fix, so normal development can still receive the complete result. A finding
+exception must be proposed in a separate reviewed change with the identifier,
+affected image, rationale, owner, mitigation, and expiry date. Until that
+change is explicitly accepted, the release scan remains blocking.
 
 Published image digests receive a keyless Sigstore/Cosign signature through
 GitHub OIDC. The local runtime remains private: use a trusted LAN or private
