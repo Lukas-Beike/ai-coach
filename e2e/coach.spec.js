@@ -164,8 +164,6 @@ test.describe("critical browser states", () => {
 
     await page.goto("/#profile");
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
-    await expect(page.locator("#weeklyAvailabilityEditor")).toBeVisible();
-    await expect(page.locator("#weeklyAvailabilityEditor [data-availability-day]")).toHaveCount(7);
     const profileName = page.getByLabel("Name");
     await profileName.fill("Fixture Athlete");
     await expect(page.locator("#profileDirtyIndicator")).toBeVisible();

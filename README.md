@@ -360,9 +360,9 @@ boundaries (`state`, `navigation`, `views`, `forms`, and `components`) depend
 on this client through explicit interfaces, with no new framework and no
 duplicate DTO definitions. The route constants and pure hash parsers are
 isolated in `public/navigation.js`, the shared mutable UI state is isolated in
-`public/state.js`, and state-free display/formatting helpers are isolated in
-`public/views.js`; availability/competition form helpers and dialog focus
-components are isolated in `public/forms.js` and `public/components.js`.
+`public/state.js`, state-free display/formatting helpers are isolated in
+`public/views.js`, and competition form helpers and dialog focus components are
+isolated in `public/forms.js` and `public/components.js`.
 DOM- and data-loading coordination remains in `app.js` and the script order is
 explicit.
 
@@ -400,15 +400,6 @@ A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
 settings or bypass explicit library synchronization or planning approvals.
-
-The athlete profile also offers an optional structured weekly availability with
-early/late local time windows, a maximum duration, indoor/outdoor preference,
-and a note for each weekday. It is saved only through the explicit profile
-action; existing availability free text is retained during migration. The
-coach receives only the compact confirmed projection. Weather time suggestions
-use these windows and the validated profile timezone; without configured
-windows, the app exposes only a general forecast range and does not assume work
-hours. External calendar conflicts remain visible as constraints.
 
 Other supported operational variables are:
 

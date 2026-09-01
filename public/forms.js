@@ -1,34 +1,3 @@
-const WEEKDAY_LABELS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
-
-function availabilityInput(labelText, name, type, value, attributes = {}) {
-  const label = document.createElement("label");
-  label.textContent = labelText;
-  const input = document.createElement(type === "select" ? "select" : "input");
-  input.name = name;
-  input.type = type === "select" ? "text" : type;
-  input.value = value || "";
-  Object.entries(attributes).forEach(([key, attributeValue]) => input.setAttribute(key, attributeValue));
-  label.append(input);
-  return label;
-}
-
-function collectWeeklyAvailability() {
-  return [...document.querySelectorAll("[data-availability-day]")].map((day) => {
-    const weekday = Number(day.dataset.availabilityDay);
-    const value = (name) => day.querySelector(`[name="availability-${weekday}-${name}"]`)?.value.trim() || "";
-    const periods = {};
-    for (const period of ["early", "late"]) {
-      const start = value(`${period}-start`);
-      const end = value(`${period}-end`);
-      if (start || end) periods[period] = { start, end };
-    }
-    const max = value("max");
-    const note = value("note");
-    if (!Object.keys(periods).length && !max && !note) return null;
-    return { weekday, periods, max_minutes: max, environment: value("environment") || "either", note };
-  }).filter(Boolean);
-}
-
 function contextField(labelText, field, value = "", options = {}) {
   const label = document.createElement("label");
   label.textContent = labelText;
