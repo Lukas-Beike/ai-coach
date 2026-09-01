@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
-from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, ProfileRepository, SnapshotRepository, WorkoutDraftRepository
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
 
 try:
@@ -1125,6 +1125,7 @@ def utc_now() -> str:
 KEY_VALUE_REPOSITORY = KeyValueRepository(utc_now)
 PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
 COMPETITION_REPOSITORY = CompetitionRepository()
+TRAINING_PLAN_REPOSITORY = TrainingPlanRepository()
 CHAT_REPOSITORY = ChatRepository(utc_now)
 CHECKIN_REPOSITORY = CheckinRepository(utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
@@ -5850,9 +5851,8 @@ def save_workout_drafts(
         normalized_workouts = attach_cached_library_entries(normalized_workouts, db=db)
         if plan_id:
             dates = sorted(item["date"] for item in normalized_workouts)
-            db.execute(
-                "INSERT INTO training_plans(id, name, goal, start_date, end_date, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)",
-                (plan_id, plan_name.strip()[:200], goal.strip()[:2000], dates[0], dates[-1], now, now),
+            TRAINING_PLAN_REPOSITORY.create(
+                db, plan_id, plan_name.strip()[:200], goal.strip()[:2000], dates[0], dates[-1], "draft", now
             )
         for workout in normalized_workouts:
             if plan_id:
@@ -5884,9 +5884,8 @@ def save_workout_library_entries(
     with DB_LOCK, database() as db:
         if plan_id:
             dates = sorted(item["date"] for item in normalized_workouts)
-            db.execute(
-                "INSERT INTO training_plans(id, name, goal, start_date, end_date, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'planned', ?, ?)",
-                (plan_id, plan_name.strip()[:200], goal.strip()[:2000], dates[0], dates[-1], now, now),
+            TRAINING_PLAN_REPOSITORY.create(
+                db, plan_id, plan_name.strip()[:200], goal.strip()[:2000], dates[0], dates[-1], "planned", now
             )
         for workout in normalized_workouts:
             if plan_id:
@@ -5899,11 +5898,7 @@ def save_workout_library_entries(
 
 def list_training_plans(limit: int = 30) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT id, name, goal, start_date, end_date, status, created_at, updated_at FROM training_plans ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    return [dict(row) for row in rows]
+        return TRAINING_PLAN_REPOSITORY.list(db, limit)
 
 
 def list_workout_drafts(limit: int = 50) -> list[dict[str, Any]]:

@@ -314,6 +314,15 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(row["event_date"], "2026-09-20")
         self.assertEqual(row["sync_state"], "local")
 
+    def test_training_plan_repository_preserves_create_and_newest_first_contract(self):
+        repository = server.TrainingPlanRepository()
+        with server.database() as db:
+            repository.create(db, "plan-old", "Old", "Base", "2026-09-01", "2026-09-07", "draft", "2026-09-01T00:00:00+00:00")
+            repository.create(db, "plan-new", "New", "Build", "2026-09-08", "2026-09-14", "planned", "2026-09-02T00:00:00+00:00")
+            rows = repository.list(db)
+        self.assertEqual([row["id"] for row in rows], ["plan-new", "plan-old"])
+        self.assertEqual(rows[0]["status"], "planned")
+
     def test_activity_feedback_repository_preserves_upsert_delete_and_order_contract(self):
         repository = server.ActivityFeedbackRepository(lambda: "2026-09-01T00:00:00+00:00")
         older = {"activity_id": "activity-old", "activity_name": "Run", "activity_date": "2026-08-30", "notes": "older"}
