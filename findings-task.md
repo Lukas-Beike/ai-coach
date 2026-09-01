@@ -1216,6 +1216,16 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Manuelle/Browser-Pruefung: verpflichtender GitHub-Browser-Smoke-/Accessibility-Lauf erfolgreich; lokale JavaScript-Syntaxpruefung war mangels Node.js nicht verfuegbar.
 - [ ] Weitere Frontend-Bereiche sowie Provider-, Sync-, Coach-, Backup- und HTTP-API-Schnittstellen bleiben fuer folgende kohaerente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Frontend-State**
+
+- [x] Den gemeinsamen mutablen UI-State ohne Frameworkrewrite in `public/state.js` abgegrenzt; die bestehende Koordination in `public/app.js` verwendet weiterhin dieselbe State-Struktur.
+- [x] Static-Serving, versionierte PWA-Assets und Service-Worker-Cache fuer das neue Modul ergaenzt; Authentifizierung, API-Vertraege und Laufzeitsemantik unveraendert erhalten.
+- [x] Regressionstests fuer Modulgrenze, Static-Revalidierung und Service-Worker-Assets aktualisiert; keine doppelten State-Definitionen oder zyklischen Abhaengigkeiten eingefuehrt.
+- [x] Review ohne Findings; PR #220 per Auto-Squash gemergt (`9f056a5`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL, Analyse und vier Test-Shards gruen.
+- [x] Validierung: vier schnelle Shards mit 71/71/71/70 Tests, drei gezielte Asset-/Static-Tests, `python -m py_compile server.py tests/test_server.py tests/run_tests.py`, `git diff --check` und Docker-Build `ai-coach:ft027-frontend-state` erfolgreich.
+- [x] Manuelle/Browser-Pruefung: verpflichtender GitHub-Browser-Smoke-/Accessibility-Lauf erfolgreich; lokale JavaScript-Syntaxpruefung war mangels Node.js nicht verfuegbar.
+- [ ] Weitere Frontend-Bereiche sowie Provider-, Sync-, Coach-, Backup- und HTTP-API-Schnittstellen bleiben fuer folgende kohaerente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
