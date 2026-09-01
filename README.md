@@ -325,7 +325,9 @@ the existing compatibility wrappers and supplies the login callback. The API
 client has no dependency on application state or views. Future frontend
 boundaries (`state`, `navigation`, `views`, `forms`, and `components`) must
 depend on this client through explicit interfaces, with no new framework and
-no duplicate DTO definitions.
+no duplicate DTO definitions. The route constants and pure hash parsers are
+now isolated in `public/navigation.js`; DOM-, state-, and data-loading
+coordination remains in `app.js` and the script order is explicit.
 
 Optional Garmin Connect configuration:
 
