@@ -2464,7 +2464,11 @@ async function runLibraryBulkRemoteSync() {
       method: "POST",
       body: JSON.stringify({ entries: selected.map((workout) => ({ library_workout_id: String(workout.id) })) }),
     });
-    const result = await executeLibraryActionPreview(preview, `Remote-Sync zu Intervals.icu für exakt ${selected.length} ausgewählte Einheit(en) freigeben?`);
+    const plannedCount = selected.filter((workout) => workout.date).length;
+    const plannedNotice = plannedCount
+      ? ` Davon werden ${plannedCount} datierte Planung(en) ebenfalls im Kalender angelegt oder aktualisiert.`
+      : "";
+    const result = await executeLibraryActionPreview(preview, `Remote-Sync zu Intervals.icu für exakt ${selected.length} ausgewählte Einheit(en) freigeben?${plannedNotice}`);
     if (!result) return;
     renderLibraryBulkResult(result);
     state.librarySelection = new Set(result.failed_object_ids || []);
@@ -2487,11 +2491,15 @@ async function loadLibrary() {
   try {
     const preview = await api("/api/library/sync/preview", { method: "POST", body: "{}" });
     const summary = preview.summary || {};
-    const changeCount = Object.values(summary).reduce((total, value) => total + Number(value || 0), 0);
+    const changeCount = Object.entries(summary)
+      .filter(([key]) => key !== "planned")
+      .reduce((total, [, value]) => total + Number(value || 0), 0);
+    const plannedCount = Number(summary.planned || 0);
     const confirmed = window.confirm(
       `Bibliothekssync zu Intervals.icu freigeben? ${changeCount} lokale Einträge: ` +
       `${summary.new || 0} neu, ${summary.changed || 0} geändert, ` +
-      `${summary.missing || 0} fehlend, ${summary.error_retry || 0} Fehlerwiederholung. ` +
+      `${summary.missing || 0} fehlend, ${summary.error_retry || 0} Fehlerwiederholung` +
+      `${plannedCount ? `; ${plannedCount} datierte Planung(en) werden ebenfalls in den Kalender übertragen` : ""}. ` +
       "Die Vorschau ist nur 10 Minuten gültig."
     );
     if (!confirmed) return;
@@ -2522,7 +2530,7 @@ async function loadLibrary() {
     root.append(message);
   } finally {
     button.disabled = false;
-    button.textContent = "Vorschau für Remote-Sync öffnen";
+    button.textContent = "Vorschau für Bibliotheks- und Planungssync";
   }
 }
 
