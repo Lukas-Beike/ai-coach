@@ -326,9 +326,10 @@ client has no dependency on application state or views. Future frontend
 boundaries (`state`, `navigation`, `views`, `forms`, and `components`) must
 depend on this client through explicit interfaces, with no new framework and
 no duplicate DTO definitions. The route constants and pure hash parsers are
-isolated in `public/navigation.js`, and the shared mutable UI state is
-isolated in `public/state.js`; DOM- and data-loading coordination remains in
-`app.js` and the script order is explicit.
+isolated in `public/navigation.js`, the shared mutable UI state is isolated in
+`public/state.js`, and state-free display/formatting helpers are isolated in
+`public/views.js`; DOM- and data-loading coordination remains in `app.js` and
+the script order is explicit.
 
 Optional Garmin Connect configuration:
 
