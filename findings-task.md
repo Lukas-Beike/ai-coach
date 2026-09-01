@@ -1300,6 +1300,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 76/76/76/75 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-coach-projection` und SQLCipher-Containerlauf mit 303 Tests erfolgreich.
 - [ ] Weitere Coach-, Backup-, HTTP-API-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Backup-/Privacy-Export**
+
+- [x] Zustandsfreie Export-Serialisierung, begrenzte Workout-Iteratoren, KV-Projektion, JSONL-Schreiben und Manifestbildung als `backend/backup/export.py` abgegrenzt.
+- [x] Datenbankbesitz, Größen-/Zeitlimits, Maintenance-Gate, Restore, Snapshot-/Persistenzsemantik und Server-seitige Fehlergrenzen unverändert erhalten.
+- [x] Regressionen für dependency-light Modulgrenze, ungültige Payloads, Begrenzungen, Manifest und Zeitlimit-Callback ergänzt.
+- [x] Review ohne Findings; PR #255 per Auto-Squash gemergt (`c40a50a`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 76 Tests je Shard, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-backup` und SQLCipher-Containerlauf mit 304 Tests erfolgreich.
+- [ ] Weitere Backup-, Coach-, HTTP-API-, Sync- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
