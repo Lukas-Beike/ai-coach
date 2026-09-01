@@ -2405,6 +2405,21 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["running_max_hr_bpm"]["value"], 193)
         self.assertEqual(metrics["cycling_max_hr_bpm"]["source"], "Garmin Connect")
 
+    def test_garmin_profile_max_heart_rate_overrides_activity_values(self):
+        zones = [{"sport": "DEFAULT", "maxHeartRateUsed": 186}]
+        metrics = server.garmin_performance_metrics({
+            "heart_rate_zones": zones,
+            "sport_max_hr": {"cycling": 178, "running": 181},
+            "activities": [
+                {"activityType": "cycling", "maxHR": 178},
+                {"activityType": "running", "maxHR": 181},
+            ],
+        })
+        self.assertEqual(server.garmin_profile_max_hr({"heart_rate_zones": zones}), {"generic": 186})
+        self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 186)
+        self.assertEqual(metrics["running_max_hr_bpm"]["value"], 186)
+        self.assertEqual(metrics["cycling_max_hr_bpm"]["note"], "Garmin Connect Herzfrequenzzonen")
+
     def test_garmin_threshold_metrics_are_used_without_confusing_ftp_and_eftp(self):
         today = server.local_now().date().isoformat()
         server.set_kv("garmin_snapshot", json.dumps({
@@ -2432,7 +2447,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 176)
 
     def test_garmin_threshold_pace_accepts_speed_alias_and_clock_format(self):
-        for key, value, expected in (("speedInMetersPerSecond", 3.8, 263), ("thresholdPace", "4:27", 267)):
+        for key, value, expected in (("speedInMetersPerSecond", 3.8, 263), ("thresholdPace", "4:27", 267), ("speed", 0.35833233, 280)):
             metrics = server.garmin_performance_metrics({"running_threshold": {key: value}})
             self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], expected)
             self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["source"], "Garmin Connect")
@@ -2476,7 +2491,9 @@ class CoachTests(unittest.TestCase):
             "value": 1300, "unit": "Schritte/Tag", "source": "Garmin Connect",
             "note": "Durchschnitt der letzten 7 Tage",
         })
+        self.assertIsInstance(performance["metrics"]["steps_7d"]["value"], int)
         self.assertEqual(performance["metrics"]["floors_7d"]["value"], 8)
+        self.assertIsInstance(performance["metrics"]["floors_7d"]["value"], int)
         self.assertEqual(performance["metrics"]["calories_7d"]["value"], 2030)
 
     def test_performance_exposes_thirty_day_trends_for_api_and_garmin_values(self):
@@ -3024,6 +3041,9 @@ class CoachTests(unittest.TestCase):
             def get_heart_rates(self, current):
                 return {"restingHeartRate": 51}
 
+            def get_heart_rate_zones(self):
+                return [{"sport": "DEFAULT", "maxHeartRateUsed": 186}]
+
             def get_training_readiness(self, current):
                 return {"date": current, "score": 75}
 
@@ -3070,6 +3090,8 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["cycling_ftp"]["functionalThresholdPower"], 301)
         self.assertEqual(result["running_threshold"]["power"]["functionalThresholdPower"], 320)
         self.assertEqual(result["resting_hr"][0]["restingHeartRate"], 51)
+        self.assertEqual(result["heart_rate_zones"][0]["maxHeartRateUsed"], 186)
+        self.assertTrue(any(source == "heart_rate_zones" for _service, source, _details in calls))
         self.assertEqual(len(result["daily_stats"]), 2)
         self.assertEqual(result["daily_stats"][0]["calendarDate"], "2026-08-30")
         self.assertEqual(result["daily_stats"][1]["totalSteps"], 1234)
@@ -4900,6 +4922,21 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["cycling_vo2max_ml_kg_min"]["value"], 62)
         self.assertEqual(performance["current_load"]["ctl"], 68)
         self.assertEqual(performance["current_load"]["tsb"], -6)
+
+    def test_current_eftp_prefers_latest_intervals_ride_estimate(self):
+        today = date.today().isoformat()
+        snapshot = server.compact_snapshot(
+            {
+                "sportSettings": [{"types": ["Ride"], "eFTP": 274}],
+            },
+            [{"start_date_local": f"{today}T08:00:00", "type": "Ride", "icu_ftp": 310}],
+            [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 274}]}],
+            [],
+        )
+
+        metric = server.current_performance_context(snapshot)["metrics"]["cycling_eftp_watts"]
+        self.assertEqual(metric["value"], 310)
+        self.assertEqual(metric["source"], "Intervals.icu")
 
     def test_manual_body_profile_values_are_used_when_api_values_are_absent(self):
         server.save_profile({"weight_kg": "71,4", "body_fat_pct": "10.5", "height_cm": "181"})
