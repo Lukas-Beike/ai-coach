@@ -1150,6 +1150,29 @@ class CoachTests(unittest.TestCase):
             with zipfile.ZipFile(BytesIO(), "w") as archive:
                 write_jsonl_rows(archive, "rows.jsonl", [{"id": "one"}], 0, now=lambda: 1, timeout_error=lambda: RuntimeError("timeout"))
 
+    def test_http_response_helpers_are_dependency_light_and_preserve_headers(self):
+        from backend.http_api import responses
+
+        source = Path(responses.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("import server", source)
+        self.assertEqual(responses.json_bytes({"text": "ä"}), b'{"text": "\xc3\xa4"}')
+        self.assertEqual(
+            list(responses.header_items({"Set-Cookie": ["one", "two"], "X-Test": "value"})),
+            [("Set-Cookie", "one"), ("Set-Cookie", "two"), ("X-Test", "value")],
+        )
+        self.assertEqual(
+            responses.response_headers("application/json", 12),
+            (("Content-Type", "application/json"), ("Content-Length", "12"), ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "DENY")),
+        )
+        self.assertEqual(
+            responses.session_cookies("session", "csrf", "token", "csrf-token", ttl_seconds=60, secure=True),
+            ["session=token; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=60", "csrf=csrf-token; Path=/; SameSite=Strict; Secure; Max-Age=60"],
+        )
+        self.assertEqual(
+            responses.session_cookies("session", "csrf", "token", "csrf-token", ttl_seconds=60, clear=True),
+            ["session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", "csrf=; Path=/; SameSite=Strict; Max-Age=0"],
+        )
+
     def test_maintenance_gate_blocks_new_operations_and_waits_for_running_one(self):
         gate = server.MaintenanceGate()
         started = threading.Event()

@@ -59,6 +59,12 @@ from backend.coach.context import (
     compact_coach_local_planned_workouts as compact_coach_local_planned_workouts_value,
     compact_coach_planned_event as compact_coach_planned_event_value,
 )
+from backend.http_api.responses import (
+    header_items as response_header_items,
+    json_bytes as response_json_bytes,
+    response_headers,
+    session_cookies,
+)
 from backend.backup.export import (
     application_state as export_application_state,
     decode_payload as export_decode_payload,
@@ -11669,16 +11675,15 @@ def require_csrf(handler: BaseHTTPRequestHandler, session: dict[str, Any]) -> No
 
 def session_cookie_headers(token: str = "", csrf: str = "", *, clear: bool = False) -> list[str]:
     """Create hardened session cookies without duplicating flag logic."""
-    secure = "; Secure" if getattr(CONFIG, "secure_cookies", False) else ""
-    if clear:
-        max_age = "; Max-Age=0"
-        token = csrf = ""
-    else:
-        max_age = f"; Max-Age={SESSION_TTL_SECONDS}"
-    return [
-        f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict{secure}{max_age}",
-        f"{CSRF_COOKIE}={csrf}; Path=/; SameSite=Strict{secure}{max_age}",
-    ]
+    return session_cookies(
+        SESSION_COOKIE,
+        CSRF_COOKIE,
+        token,
+        csrf,
+        ttl_seconds=SESSION_TTL_SECONDS,
+        secure=bool(getattr(CONFIG, "secure_cookies", False)),
+        clear=clear,
+    )
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -12135,19 +12140,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         return payload
 
     def send_json(self, status: int, payload: Any, headers: dict[str, str | list[str]] | None = None) -> None:
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        data = response_json_bytes(payload)
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        for key, value in (headers or {}).items():
-            if isinstance(value, (list, tuple)):
-                for item in value:
-                    self.send_header(key, str(item))
-            else:
-                self.send_header(key, value)
+        for key, value in response_headers("application/json; charset=utf-8", len(data)):
+            self.send_header(key, value)
+        for key, value in response_header_items(headers):
+            self.send_header(key, value)
         try:
             self.end_headers()
             self.wfile.write(data)
@@ -12195,17 +12193,10 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def send_bytes(self, status: int, data: bytes, content_type: str, headers: dict[str, str | list[str]] | None = None) -> None:
         self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        for key, value in (headers or {}).items():
-            if isinstance(value, (list, tuple)):
-                for item in value:
-                    self.send_header(key, str(item))
-            else:
-                self.send_header(key, value)
+        for key, value in response_headers(content_type, len(data)):
+            self.send_header(key, value)
+        for key, value in response_header_items(headers):
+            self.send_header(key, value)
         try:
             self.end_headers()
             self.wfile.write(data)
