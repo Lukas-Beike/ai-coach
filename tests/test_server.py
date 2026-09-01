@@ -971,6 +971,31 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(status["operation_id"], "operation-test")
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["progress"], 35)
+
+    def test_sync_status_projection_is_dependency_light(self):
+        from backend.sync.status import persist_sync_operation_state, project_sync_status
+
+        values = {}
+        persist_sync_operation_state(
+            "operation-test",
+            "running",
+            "fetching",
+            140,
+            "Daten werden gelesen",
+            "secret provider detail",
+            set_value=values.__setitem__,
+            redact=lambda value: f"redacted:{value}",
+        )
+        self.assertEqual(values["sync_operation_progress"], "100")
+        self.assertEqual(values["last_sync_error"], "redacted:secret provider detail")
+        status = project_sync_status(
+            running=True,
+            get_value=values.get,
+            state_versions={"activities": "v1"},
+            provider_freshness=[],
+            maintenance={"active": False, "running_operations": 0},
+        )
+        self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["state_versions"], {"activities": "v1"})
         self.assertNotIn("activities", json.dumps(status["message"]))
 
