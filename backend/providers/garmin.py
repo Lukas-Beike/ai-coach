@@ -78,6 +78,30 @@ def collect_garmin_data(
         fetch_range("body_battery", client.get_body_battery, window_start, window_end)
         fetch_range("activities", client.get_activities_by_date, window_start, window_end)
 
+    heart_rate_fetch = getattr(client, "get_heart_rates", None)
+    if callable(heart_rate_fetch):
+        stats = pagination.setdefault("resting_hr", {"windows": len(windows), "records": 0, "complete": True})
+        for window_start, window_end in windows:
+            current = window_start
+            while current <= window_end:
+                try:
+                    value = external_call(
+                        "garmin",
+                        "resting_hr",
+                        lambda current=current: heart_rate_fetch(current.isoformat()),
+                        {"date": current.isoformat()},
+                    )
+                    if value is not None:
+                        if isinstance(value, dict) and not any(key in value for key in ("calendarDate", "date", "summaryDate")):
+                            value = {"calendarDate": current.isoformat(), **value}
+                        payload.setdefault("resting_hr", []).append(value)
+                        stats["records"] = int(stats["records"]) + 1
+                except Exception as exc:
+                    stats["complete"] = False
+                    stats["error"] = redact(str(exc))[:500]
+                    add_error("resting_hr", exc)
+                current += timedelta(days=1)
+
     max_metrics_start = today - timedelta(days=89)
     max_metrics_range = getattr(client, "get_max_metrics_range", None)
     max_metrics_fetch = (
@@ -102,6 +126,63 @@ def collect_garmin_data(
             payload[key] = external_call("garmin", key, fetch, details)
         except Exception as exc:
             add_error(key, exc)
+
+    cycling_ftp_fetch = getattr(client, "get_cycling_ftp", None)
+    if not callable(cycling_ftp_fetch):
+        connectapi = getattr(client, "connectapi", None)
+        if callable(connectapi):
+            cycling_ftp_fetch = lambda: connectapi(
+                "/biometric-service/biometric/latestFunctionalThresholdPower/CYCLING"
+            )
+    if callable(cycling_ftp_fetch):
+        try:
+            payload["cycling_ftp"] = external_call("garmin", "cycling_ftp", cycling_ftp_fetch, None)
+        except Exception as exc:
+            add_error("cycling_ftp", exc)
+
+    running_threshold_fetch = getattr(client, "get_lactate_threshold", None)
+    if callable(running_threshold_fetch):
+        try:
+            payload["running_threshold"] = external_call(
+                "garmin", "running_threshold", lambda: running_threshold_fetch(latest=True), {"latest": True}
+            )
+        except TypeError:
+            try:
+                payload["running_threshold"] = external_call("garmin", "running_threshold", running_threshold_fetch, None)
+            except Exception as exc:
+                add_error("running_threshold", exc)
+        except Exception as exc:
+            add_error("running_threshold", exc)
+    elif callable(getattr(client, "connectapi", None)):
+        connectapi = client.connectapi
+        try:
+            payload["running_threshold"] = {
+                "speed_and_heart_rate": external_call(
+                    "garmin", "running_threshold_speed_hr", lambda: connectapi("/biometric-service/biometric/latestLactateThreshold"), None
+                ),
+                "power": external_call(
+                    "garmin", "running_threshold_power", lambda: connectapi(
+                        f"/biometric-service/biometric/powerToWeight/latest/{today.isoformat()}?sport=Running"
+                    ), {"date": today.isoformat(), "sport": "Running"}
+                ),
+            }
+        except Exception as exc:
+            add_error("running_threshold", exc)
+
+    connectapi = getattr(client, "connectapi", None)
+    if callable(connectapi):
+        try:
+            payload["cycling_threshold_hr"] = external_call(
+                "garmin",
+                "cycling_threshold_hr",
+                lambda: connectapi(
+                    f"/biometric-service/stats/lactateThresholdHeartRate/range/{today.isoformat()}/{today.isoformat()}"
+                    "?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST"
+                ),
+                {"date": today.isoformat(), "sport": "CYCLING", "aggregation": "daily", "aggregation_strategy": "LATEST"},
+            )
+        except Exception as exc:
+            add_error("cycling_threshold_hr", exc)
 
     weight_fetch = getattr(client, "get_weigh_ins", None) or getattr(client, "get_body_composition", None)
     if callable(weight_fetch):
