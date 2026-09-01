@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
-from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, KeyValueRepository, SnapshotRepository, WorkoutDraftRepository
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, KeyValueRepository, ProfileRepository, SnapshotRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
 
 try:
@@ -1123,6 +1123,7 @@ def utc_now() -> str:
 
 
 KEY_VALUE_REPOSITORY = KeyValueRepository(utc_now)
+PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
 CHAT_REPOSITORY = ChatRepository(utc_now)
 CHECKIN_REPOSITORY = CheckinRepository(utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
@@ -2652,7 +2653,9 @@ def normalize_profile(value: dict[str, Any], *, validate_timezone: bool = False)
 
 def get_profile() -> dict[str, Any]:
     try:
-        return normalize_profile(json.loads(get_kv("profile") or "{}"))
+        with DB_LOCK, database() as db:
+            payload = PROFILE_REPOSITORY.get(db)
+        return normalize_profile(json.loads(payload or "{}"))
     except (TypeError, json.JSONDecodeError):
         return dict(DEFAULT_PROFILE)
 
@@ -2660,7 +2663,8 @@ def get_profile() -> dict[str, Any]:
 def save_profile(profile: dict[str, Any]) -> dict[str, str]:
     previous = get_profile()
     normalized = normalize_profile(profile, validate_timezone=True)
-    set_kv("profile", json.dumps(normalized, ensure_ascii=False))
+    with DB_LOCK, database() as db:
+        PROFILE_REPOSITORY.set(db, json.dumps(normalized, ensure_ascii=False))
     if previous.get("weather_location", "") != normalized.get("weather_location", ""):
         # A changed holiday/training location must never keep showing the
         # forecast for the previous place until the normal cache expires.
