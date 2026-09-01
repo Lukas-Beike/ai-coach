@@ -942,7 +942,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 ## 8. P3 – Datenmodell, Betrieb und Wartbarkeit
 
-### - [ ] FT-024 – Versionierte DB-Migrationen und Foreign-Key-Enforcement einführen
+### - [x] FT-024 – Versionierte DB-Migrationen und Foreign-Key-Enforcement einführen
 
 **Quelle:** ARCH-02, ARCH-03
 **Ziel:** Schemaänderungen sind versioniert, transaktional und nachvollziehbar; deklarierte Fremdschlüssel werden auf jeder Verbindung geprüft.
@@ -977,7 +977,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Keine Findings aus dem Paket-Review. Die bestehenden Restore-/SQLCipher-Pfade bleiben abhängig von der Laufzeitverfügbarkeit des gepinnten SQLCipher-Pakets.
 - **Folgetasks:** FT-025 ist nach dem grünen Merge von PR #179 entblockt.
 
-### - [ ] FT-025 – Backup und Privacy-Export speicherschonend streamen
+### - [x] FT-025 – Backup und Privacy-Export speicherschonend streamen
 
 **Quelle:** REC-02
 **Ziel:** Große Datenbanken und Exporte werden nicht vollständig im Prozessspeicher dupliziert.
