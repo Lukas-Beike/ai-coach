@@ -77,6 +77,13 @@ It is not intended to be exposed directly to the public internet.
 - The regular Intervals.icu activity pull is read-only and never uploads
   pending local library entries. Only the separate library synchronization
   action can create or update library templates remotely.
+- When the first regular Intervals.icu sync finds an empty local library, it
+  imports the existing remote templates into the local library. This initial
+  import is read-only; later local edits still require the separate explicit
+  library synchronization action for remote writes.
+- The explicit library synchronization also transfers dated local planning
+  entries to the Intervals.icu calendar with stable upsert identities, so a
+  library sync keeps the local template and its planned calendar unit aligned.
 - If a provider response no longer contains an imported template, it is kept
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by
