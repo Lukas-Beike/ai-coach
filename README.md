@@ -130,10 +130,10 @@ It is not intended to be exposed directly to the public internet.
   explicit local approval; remote Intervals.icu calendar events are never
   changed by this process.
 - Annual event overview with base, build, peak, taper, and completed phases.
-- Optional PWA notifications for upcoming events and
-  synchronization errors. Notifications are opt-in and are delivered by the
-  browser/service worker while the PWA can run; device workout delivery remains
-  delegated to Intervals.icu.
+- Optional PWA notifications for upcoming events and synchronization errors.
+  Notifications are opt-in and are delivered by the browser/service worker
+  while the PWA can run; there is no guaranteed background push service, and
+  device workout delivery remains delegated to Intervals.icu.
 - Configurable Intervals.icu activity synchronization period, data export,
   local cleanup, and retention policy.
 - Encrypted database backup download and validated restore with an automatic
@@ -182,6 +182,14 @@ planned workout, relevant weather, open activity feedback, and pending plan
 adjustments. It uses already loaded state only; opening the view does not
 trigger an additional coach or provider request. Missing data, offline state,
 sync progress, and the last sync error are shown explicitly.
+
+The PWA provides an installable offline shell only. It does not provide a full
+offline data view or a local mutation queue: authenticated API responses are
+never cached by the service worker, and offline mode clearly limits the user
+to already loaded data until connectivity returns. This is the deliberate
+product decision for the current private single-athlete app; adding an offline
+data cache, queue, or Web Push would require a separate privacy and threat-
+model decision.
 
 Versioned JavaScript, CSS, and image assets with a `?v=...` query are served
 with a one-year immutable cache policy and an ETag. HTML, the manifest, and the

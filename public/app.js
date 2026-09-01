@@ -437,6 +437,19 @@ function toast(message, error = false) {
   toast.timer = setTimeout(() => { node.className = "toast"; }, 3000);
 }
 
+function renderConnectivityStatus(online = navigator.onLine) {
+  const notice = $("#connectivityNotice");
+  if (!notice) return;
+  notice.hidden = online;
+  notice.textContent = online ? "" : "Offline: Nur bereits geladene Daten sind verfügbar. Synchronisierung und Speichern warten auf die Verbindung.";
+}
+
+function setupConnectivityStatus() {
+  renderConnectivityStatus();
+  window.addEventListener("online", () => renderConnectivityStatus(true));
+  window.addEventListener("offline", () => renderConnectivityStatus(false));
+}
+
 function setVoiceStatus(message = "", error = false) {
   const node = $("#voiceStatus");
   if (!node) return;
@@ -4133,6 +4146,7 @@ window.addEventListener("beforeunload", (event) => {
   event.returnValue = "";
 });
 setupPwaUpdates();
+setupConnectivityStatus();
 renderNotificationStatus();
 setupSyncStatusMonitoring();
 syncNavigationRoute();
