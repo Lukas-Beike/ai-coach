@@ -839,7 +839,7 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - Manuelle Prüfung: Semantische Landmark-/Label-/Dialogprüfung, Tastaturbedienung, sichtbarer Fokus, Modal-Fokus-Rückgabe, Status-/Fehlerankündigungen, 200-%-Zoom, Reduced Motion und axe-Core im isolierten Browser-Fixture geprüft; keine Providerkonten, Secrets, Live-Datenbanken oder Laufzeitdaten verwendet.
 - Offene Risiken: Keine für FT-020.
 
-### - [ ] FT-021 – Strukturierte Wochenverfügbarkeit einführen
+### - [x] FT-021 – Strukturierte Wochenverfügbarkeit einführen
 
 **Quelle:** EXT-02
 **Ziel:** Coach und Wetterplanung nutzen bestätigte, lokale Zeitfenster statt impliziter/hartcodierter Arbeitszeitannahmen.
@@ -847,19 +847,30 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 
 **Umsetzung**
 
-- [ ] Datenmodell für Wochentag, früh/spät, maximale Dauer, Indoor/Outdoor und optionale Notiz definieren.
-- [ ] Explizite UI-Aktion zum Speichern; Chat darf nicht still mutieren.
-- [ ] Zeitzone und DST berücksichtigen.
-- [ ] Kompakte Coach-Context-Projektion ergänzen.
-- [ ] Wetterfenster aus strukturierten Daten ableiten; sinnvollen Fallback definieren.
-- [ ] Konflikte mit externen Kalenderterminen sichtbar machen.
-- [ ] Migration ohne Verlust bestehender Freitextprofile durchführen.
+- [x] Datenmodell für Wochentag, früh/spät, maximale Dauer, Indoor/Outdoor und optionale Notiz definieren.
+- [x] Explizite UI-Aktion zum Speichern; Chat darf nicht still mutieren.
+- [x] Zeitzone und DST berücksichtigen.
+- [x] Kompakte Coach-Context-Projektion ergänzen.
+- [x] Wetterfenster aus strukturierten Daten ableiten; sinnvollen Fallback definieren.
+- [x] Konflikte mit externen Kalenderterminen sichtbar machen.
+- [x] Migration ohne Verlust bestehender Freitextprofile durchführen.
 
 **Abnahmekriterien**
 
-- [ ] Keine hardcodierte Arbeitszeit entscheidet primär über Vorschläge.
-- [ ] Verfügbarkeit bleibt lokale autoritative Profildata.
-- [ ] Coach-Kontext enthält nur die kompakte relevante Projektion.
+- [x] Keine hardcodierte Arbeitszeit entscheidet primär über Vorschläge.
+- [x] Verfügbarkeit bleibt lokale autoritative Profildata.
+- [x] Coach-Kontext enthält nur die kompakte relevante Projektion.
+
+**Handover FT-021**
+
+- **Status:** abgeschlossen; Folgepakete ab FT-022 sind entblockt.
+- **Branch und Commit:** `feat/ft-021-availability`, `875fd22`; PR #172 per Auto-Squash nach `develop` gemergt.
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/styles.css`, `public/service-worker.js`, `e2e/coach.spec.js`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument.
+- **Verhaltensänderung:** Das Profil unterstützt bestätigte Wochenfenster mit lokaler Zeit, Dauergrenze, Umgebung und Notiz. Das explizite Profil-Speichern persistiert sie lokal; bestehender Verfügbarkeitstext bleibt erhalten. Wettervorschläge verwenden nur bestätigte Outdoor-/Either-Fenster und fallen ohne strukturierte Fenster auf eine allgemeine, nicht arbeitszeitgebundene Tageszeit zurück. Der Coach erhält nur die kompakte Projektion; externe Kalendertermine bleiben sichtbare Constraints.
+- **Validierung:** `python tests/run_tests.py --shard 1 --total 4`, `--shard 2 --total 4`, `--shard 3 --total 4`, `--shard 4 --total 4` jeweils erfolgreich (63/62/62/62 Tests); `python -m py_compile server.py tests/test_server.py tests/run_tests.py` erfolgreich; `docker build -t ai-coach:ft021 .` erfolgreich; GitHub-Pflichtchecks für PR #172 einschließlich Browser Smoke/Accessibility, Syntax, Validate, CodeQL und aller vier Shards erfolgreich.
+- **Manuelle Prüfung:** Disposable SQLCipher-Docker-Container mit Playwright auf Desktop und Mobile geprüft; Login, Profilnavigation und die sieben Zeilen des Wochenverfügbarkeitseditors erfolgreich. Keine Secrets, Providerkonten, Live-Datenbanken oder Runtime-Dateien verwendet.
+- **Offene Risiken:** Die lokale WCAG-Ausführung im Disposable-Container konnte wegen eines bestehenden 30-Sekunden-Login-/Bootstrap-Wartefensters nicht vollständig abschließen; der verpflichtende GitHub-Browser-/Accessibility-Check ist grün.
+- **Folgetasks:** FT-022 bis FT-032 bleiben als separate Pakete offen; FT-022 ist als nächstes Paket vorgesehen.
 
 ### - [ ] FT-022 – Begrenzte Wiederholungsregeln für iCalendar unterstützen
 
