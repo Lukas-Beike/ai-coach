@@ -952,6 +952,11 @@ class CoachTests(unittest.TestCase):
         self.assertIn("garmin", bootstrap["state_versions"])
         self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 20_000)
 
+    def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
+        with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
+            server.public_bootstrap(local_only=True)
+        self.assertEqual(connect.call_count, 1)
+
     def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
