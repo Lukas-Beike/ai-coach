@@ -1236,6 +1236,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Manuelle/Browser-Pruefung: verpflichtender GitHub-Browser-Smoke-/Accessibility-Lauf erfolgreich; lokale JavaScript-Syntaxpruefung war mangels Node.js nicht verfuegbar.
 - [ ] Weitere Frontend-Bereiche sowie Provider-, Sync-, Coach-, Backup- und HTTP-API-Schnittstellen bleiben fuer folgende kohaerente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Garmin-Provider**
+
+- [x] Die Garmin-Range- und Metrikabfragen als dependency-light `collect_garmin_data`-Adapter in `backend/providers/garmin.py` abgegrenzt.
+- [x] Authentifizierung, Tokenstore, Locks, Redaction, Persistenz, Synchronisationsorchestrierung und Statusspeicherung unverändert im Anwendungskern belassen.
+- [x] Begrenzte Zeitfenster, Pagination-Metadaten, Teilfehler und Fixture-Verhalten durch Regressionstest abgesichert; Providerfehler bleiben redigiert.
+- [x] Review ohne Findings; PR #240 per Auto-Squash gemergt (`e99f5f3`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 75/74/74/74 Tests, Python-Kompilierung, `git diff --check`, Docker-Build `ai-coach:ft027-garmin-provider` und SQLCipher-Containerlauf mit 297 Tests erfolgreich.
+- [ ] Weitere Repositorys, Provider-, Sync-, Coach-, Backup-, HTTP-API- und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
