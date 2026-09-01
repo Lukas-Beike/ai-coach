@@ -1161,6 +1161,15 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Validierung: vier schnelle Shards mit 70/70, 70/70, 70/70 und 69/69 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-competition-repository` erfolgreich.
 - [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
 
+**Fortschritt FT-027 - Training-Plan-Repository**
+
+- [x] Lokale Training-Plan-Metadaten für Erstellung und Reads als `TrainingPlanRepository` in `backend/db/repositories.py` abgegrenzt.
+- [x] Draft-/Planned-Status, Datumsbereiche, Sortierung, Connection Ownership, `DB_LOCK`, SQLCipher und lokale Planung ohne impliziten Remote-Write unverändert erhalten.
+- [x] Regressionstest für Erstellung, Status und newest-first-Ausgabe ergänzt.
+- [x] Review ohne Findings; PR #207 per Auto-Squash gemergt (`bc8fdc0`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 70/70, 70/70, 70/70 und 70/70 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-training-plan-repository` erfolgreich.
+- [ ] Weitere Repositorys sowie Provider, Sync, Coach, Backup, HTTP-API und Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 **Quelle:** PWA-01, PWA-02
 **Ziel:** UI und README versprechen nur tatsächlich verfügbares Offline-/Notification-Verhalten; Erweiterungen erfolgen erst nach expliziter Datenschutzentscheidung.
 **Abhängigkeiten:** FT-015
