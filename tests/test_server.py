@@ -932,12 +932,17 @@ class CoachTests(unittest.TestCase):
 
     def test_maintenance_ui_status_and_restore_asset_versions_are_present(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        api_client = (Path(__file__).resolve().parents[1] / "public" / "api.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
         service_worker = (Path(__file__).resolve().parents[1] / "public" / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
-        self.assertIn('/app.js?v=128', index)
-        self.assertIn('intervals-coach-v128', service_worker)
+        self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
+        self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
+        self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
+        self.assertIn('/api.js?v=129', index)
+        self.assertIn('/app.js?v=129', index)
+        self.assertIn('intervals-coach-v129', service_worker)
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
 
@@ -4258,15 +4263,15 @@ class CoachTests(unittest.TestCase):
             handler.wfile = Mock()
             return handler
 
-        first = make_handler("/app.js?v=122")
-        server.RequestHandler.send_static(first, "/app.js")
+        first = make_handler("/api.js?v=129")
+        server.RequestHandler.send_static(first, "/api.js")
         response_headers = {call.args[0]: call.args[1] for call in first.send_header.call_args_list}
         self.assertEqual(first.send_response.call_args.args, (200,))
         self.assertEqual(response_headers["Cache-Control"], "public, max-age=31536000, immutable")
         self.assertTrue(response_headers["ETag"].startswith('"'))
 
-        cached = make_handler("/app.js?v=122", {"If-None-Match": response_headers["ETag"]})
-        server.RequestHandler.send_static(cached, "/app.js")
+        cached = make_handler("/api.js?v=129", {"If-None-Match": response_headers["ETag"]})
+        server.RequestHandler.send_static(cached, "/api.js")
         self.assertEqual(cached.send_response.call_args.args, (304,))
         cached.wfile.write.assert_not_called()
 
@@ -4286,8 +4291,9 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/app.js?v=128"', source)
-        self.assertIn('"/icon.svg?v=128"', source)
+        self.assertIn('"/api.js?v=129"', source)
+        self.assertIn('"/app.js?v=129"', source)
+        self.assertIn('"/icon.svg?v=129"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)

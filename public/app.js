@@ -319,18 +319,7 @@ function finishAppShellLoading() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.method && options.method !== "GET" ? { "X-CSRF-Token": cookie("ic_csrf") } : {}), ...(options.headers || {}) },
-  });
-  let payload = {};
-  try { payload = await response.json(); } catch (_) {}
-  if (!response.ok) {
-    if (response.status === 401) showLogin();
-    throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
-  }
-  return payload;
+  return window.AppApi.request(path, options, showLogin);
 }
 
 function syncPollLeaseAvailable() {
@@ -492,19 +481,7 @@ function handleSyncVisibility() {
 }
 
 async function apiAudio(path, blob) {
-  const response = await fetch(path, {
-    method: "POST",
-    credentials: "same-origin",
-    body: blob,
-    headers: { "Content-Type": blob.type || "application/octet-stream", "X-CSRF-Token": cookie("ic_csrf") },
-  });
-  let payload = {};
-  try { payload = await response.json(); } catch (_) {}
-  if (!response.ok) {
-    if (response.status === 401) showLogin();
-    throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
-  }
-  return payload;
+  return window.AppApi.audio(path, blob, showLogin);
 }
 
 async function bootstrapAuth() {
