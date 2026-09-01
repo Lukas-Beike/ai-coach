@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.db import schema_version as database_schema_version
 
 try:
@@ -1123,6 +1123,7 @@ def utc_now() -> str:
 
 
 KEY_VALUE_REPOSITORY = KeyValueRepository(utc_now)
+CHAT_REPOSITORY = ChatRepository(utc_now)
 
 
 def security_configuration_error() -> str | None:
@@ -2609,21 +2610,13 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
 
 
 def add_message(role: str, content: str) -> dict[str, Any]:
-    created_at = utc_now()
     with DB_LOCK, database() as db:
-        cursor = db.execute(
-            "INSERT INTO messages(role, content, created_at) VALUES (?, ?, ?)",
-            (role, content.strip(), created_at),
-        )
-        return {"id": cursor.lastrowid, "role": role, "content": content.strip(), "created_at": created_at}
+        return CHAT_REPOSITORY.add(db, role, content)
 
 
 def list_messages(limit: int = 100) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT id, role, content, created_at FROM messages ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-    return [dict(row) for row in reversed(rows)]
+        return CHAT_REPOSITORY.list(db, limit)
 
 
 DEFAULT_TIMEZONE = "Europe/Berlin"
