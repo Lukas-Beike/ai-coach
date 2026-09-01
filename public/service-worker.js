@@ -1,6 +1,6 @@
-const CACHE = "intervals-coach-v137";
-const ASSETS = ["/", "/styles.css?v=137", "/api.js?v=137", "/navigation.js?v=137", "/state.js?v=137", "/views.js?v=137", "/forms.js?v=137", "/app.js?v=137", "/icon.svg?v=137", "/manifest.webmanifest"];
-const VERSIONED_ASSETS = new Set(["/api.js", "/navigation.js", "/state.js", "/views.js", "/forms.js", "/app.js", "/styles.css", "/logo.png", "/icon.svg"]);
+const CACHE = "intervals-coach-v138";
+const ASSETS = ["/", "/styles.css?v=138", "/api.js?v=138", "/navigation.js?v=138", "/state.js?v=138", "/views.js?v=138", "/forms.js?v=138", "/components.js?v=138", "/app.js?v=138", "/icon.svg?v=138", "/manifest.webmanifest"];
+const VERSIONED_ASSETS = new Set(["/api.js", "/navigation.js", "/state.js", "/views.js", "/forms.js", "/components.js", "/app.js", "/styles.css", "/logo.png", "/icon.svg"]);
 self.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS))));
 self.addEventListener("activate", (event) => event.waitUntil((async () => {
   const keys = await caches.keys();
