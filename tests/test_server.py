@@ -1361,6 +1361,19 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(events[4]["no_intensity"])
         self.assertTrue(events[4]["training_relevant"])
 
+    def test_calendar_provider_primitives_unfold_and_validate_without_server_dependency(self):
+        from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
+
+        payload = b"BEGIN:VCALENDAR\r\nDESCRIPTION:First\r\n continuation\r\nEND:VCALENDAR\r\n"
+        lines = unfold_ical(payload, max_bytes=1024, error=lambda status, message: ValueError(f"{status}: {message}"))
+
+        self.assertIn("DESCRIPTION:Firstcontinuation", lines)
+        self.assertEqual(parse_ics_value(r"Name\, with\; escaped\\text"), "Name, with; escaped\\text")
+        self.assertEqual(parse_ics_date("VALUE=DATE:20260901"), "2026-09-01")
+        self.assertEqual(ical_duration("PT1H30M"), timedelta(hours=1, minutes=30))
+        with self.assertRaisesRegex(ValueError, "400"):
+            unfold_ical(b"BEGIN:VEVENT\r\nEND:VEVENT\r\n", max_bytes=1024, error=lambda status, message: ValueError(f"{status}: {message}"))
+
     def test_ical_parser_rejects_incomplete_and_unsupported_recurring_feeds(self):
         with self.assertRaises(server.AppError):
             server.parse_ical_calendar(b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:broken\r\nEND:VEVENT\r\n")
