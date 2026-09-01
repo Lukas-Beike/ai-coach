@@ -47,6 +47,7 @@ from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_
 from backend.sync.windows import split_date_windows
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.orchestration import run_read_sync_pipeline
+from backend.sync.daily import daily_marker_key, daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
 
 try:
     from garminconnect import Garmin
@@ -10615,28 +10616,28 @@ def local_date_from_timestamp(value: Any, timezone_value: Any = None) -> str | N
 
 
 def daily_sync_marker_key(source: str) -> str:
-    if source not in DAILY_SYNC_LEGACY_KEYS:
-        raise ValueError(f"unknown daily sync source: {source}")
-    return f"daily_sync_{source}_local_date"
+    return daily_marker_key(source, DAILY_SYNC_LEGACY_KEYS)
 
 
 def daily_sync_due(source: str, now: datetime | None = None) -> bool:
-    current_date = local_date_from_timestamp((now or local_now()).isoformat())
-    marker = get_kv(daily_sync_marker_key(source))
-    if marker:
-        return marker != current_date
-    # Migrate lazily from the old UTC instant. This is safe at startup and
-    # avoids treating a UTC date prefix as an athlete-local calendar date.
-    legacy_date = local_date_from_timestamp(get_kv(DAILY_SYNC_LEGACY_KEYS[source]))
-    if legacy_date:
-        set_kv(daily_sync_marker_key(source), legacy_date)
-        return legacy_date != current_date
-    return True
+    return daily_sync_is_due(
+        source,
+        now or local_now(),
+        legacy_keys=DAILY_SYNC_LEGACY_KEYS,
+        get_value=get_kv,
+        set_value=set_kv,
+        local_date=local_date_from_timestamp,
+    )
 
 
 def mark_daily_sync(source: str, now: datetime | None = None) -> None:
-    local_date = local_date_from_timestamp((now or local_now()).isoformat())
-    set_kv(daily_sync_marker_key(source), local_date)
+    mark_daily_sync_value(
+        source,
+        now or local_now(),
+        legacy_keys=DAILY_SYNC_LEGACY_KEYS,
+        set_value=set_kv,
+        local_date=local_date_from_timestamp,
+    )
 
 
 def morning_checkin_date() -> str | None:

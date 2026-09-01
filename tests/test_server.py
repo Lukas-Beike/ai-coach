@@ -1078,6 +1078,24 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.daily_sync_due("garmin", local_day))
         self.assertTrue(server.daily_sync_due("calendar", local_day))
 
+    def test_daily_sync_marker_module_is_dependency_light(self):
+        from backend.sync.daily import daily_sync_is_due, mark_daily_sync
+
+        values = {"last_sync_at": "2026-03-30T00:30:00+00:00"}
+        writes = []
+        local_date = lambda value: value[:10] if value else None
+        current = datetime(2026, 3, 30, 0, 30, tzinfo=timezone.utc)
+        legacy = {"intervals": "last_sync_at"}
+
+        self.assertFalse(daily_sync_is_due(
+            "intervals", current, legacy_keys=legacy, get_value=values.get,
+            set_value=lambda key, value: (values.__setitem__(key, value), writes.append((key, value))),
+            local_date=local_date,
+        ))
+        self.assertEqual(writes, [("daily_sync_intervals_local_date", "2026-03-30")])
+        mark_daily_sync("intervals", current, legacy_keys=legacy, set_value=values.__setitem__, local_date=local_date)
+        self.assertEqual(values["daily_sync_intervals_local_date"], "2026-03-30")
+
     def test_daily_sync_loop_uses_local_provider_markers(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
         loop = source[source.index("def daily_sync_loop"):source.index("def safe_garmin_sync")]
