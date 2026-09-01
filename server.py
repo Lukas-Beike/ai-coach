@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
-from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, KeyValueRepository, ProfileRepository, SnapshotRepository, WorkoutDraftRepository
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, ProfileRepository, SnapshotRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
 
 try:
@@ -1124,6 +1124,7 @@ def utc_now() -> str:
 
 KEY_VALUE_REPOSITORY = KeyValueRepository(utc_now)
 PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
+COMPETITION_REPOSITORY = CompetitionRepository()
 CHAT_REPOSITORY = ChatRepository(utc_now)
 CHECKIN_REPOSITORY = CheckinRepository(utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
@@ -2937,19 +2938,8 @@ def normalize_competition(value: Any) -> dict[str, str]:
 
 
 def list_competitions(include_sync: bool = False, limit: int | None = None) -> list[dict[str, Any]]:
-    fields = (
-        "id, name, event_date, start_date_local, sport, priority, category, distance, target, "
-        "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
-        "sync_state, sync_conflict, last_synced_at"
-    )
     with DB_LOCK, database() as db:
-        query = f"SELECT {fields} FROM competitions ORDER BY event_date, priority, name"
-        params: tuple[Any, ...] = ()
-        if limit is not None:
-            query += " LIMIT ?"
-            params = (max(1, min(int(limit), 500)),)
-        rows = db.execute(query, params).fetchall()
-    return [dict(row) for row in rows]
+        return COMPETITION_REPOSITORY.list(db, max(1, min(int(limit), 500)) if limit is not None else None)
 
 
 def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
@@ -3720,7 +3710,7 @@ def save_coach_competition(arguments: Any) -> dict[str, Any]:
     existing_row = None
     if competition_id:
         with DB_LOCK, database() as db:
-            existing_row = db.execute("SELECT * FROM competitions WHERE id=?", (competition_id,)).fetchone()
+            existing_row = COMPETITION_REPOSITORY.get(db, competition_id)
         if not existing_row:
             raise AppError(404, "Wettkampf nicht gefunden.")
         # The tool schema is deliberately explicit, but preserve existing
@@ -3736,7 +3726,7 @@ def save_coach_competition(arguments: Any) -> dict[str, Any]:
         normalized["id"] = competition_id
     now = utc_now()
     with DB_LOCK, database() as db:
-        existing = db.execute("SELECT id, created_at FROM competitions WHERE id=?", (normalized["id"],)).fetchone()
+        existing = COMPETITION_REPOSITORY.get(db, normalized["id"])
         if not existing:
             count = db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()["count"]
             if count >= 20:
@@ -3992,7 +3982,7 @@ def resolve_competition_conflict(competition_id: Any, strategy: Any) -> dict[str
         raise AppError(400, "Ungültige Konfliktstrategie.")
     now = utc_now()
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT * FROM competitions WHERE id=?", (normalized_id,)).fetchone()
+        row = COMPETITION_REPOSITORY.get(db, normalized_id)
         if not row:
             raise AppError(404, "Wettkampf nicht gefunden.")
         if row.get("sync_state") != "conflict" or not row.get("sync_conflict"):

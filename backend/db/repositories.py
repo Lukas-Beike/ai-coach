@@ -40,6 +40,28 @@ class ProfileRepository:
         self._key_value.set(db, self._KEY, payload)
 
 
+class CompetitionRepository:
+    """Read local competitions without owning a database connection."""
+
+    _LIST_FIELDS = (
+        "id, name, event_date, start_date_local, sport, priority, category, distance, target, "
+        "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
+        "sync_state, sync_conflict, last_synced_at"
+    )
+
+    def list(self, db: Any, limit: int | None = None) -> list[dict[str, Any]]:
+        query = f"SELECT {self._LIST_FIELDS} FROM competitions ORDER BY event_date, priority, name"
+        params: tuple[Any, ...] = ()
+        if limit is not None:
+            query += " LIMIT ?"
+            params = (limit,)
+        return [dict(row) for row in db.execute(query, params).fetchall()]
+
+    def get(self, db: Any, competition_id: str) -> dict[str, Any] | None:
+        row = db.execute("SELECT * FROM competitions WHERE id = ?", (competition_id,)).fetchone()
+        return dict(row) if row else None
+
+
 class ChatRepository:
     """Persist and retrieve local chat messages without owning a connection."""
 
