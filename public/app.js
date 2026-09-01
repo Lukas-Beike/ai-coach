@@ -724,6 +724,81 @@ function renderExternalCalendar(data) {
   }
 }
 
+const PROVIDER_FRESHNESS_STATUS = {
+  fresh: "Frisch",
+  partial: "Teilweise erfolgreich",
+  stale: "Veraltet, aber nutzbar",
+  syncing: "Wird aktualisiert",
+  error: "Fehler",
+  never_loaded: "Noch nie geladen",
+  not_configured: "Nicht konfiguriert",
+};
+
+const PROVIDER_FRESHNESS_ERRORS = {
+  auth_required: "Erneute Anmeldung erforderlich",
+  rate_limited: "Rate Limit erreicht",
+  network_error: "Netzwerkfehler",
+  invalid_configuration: "Ungültige Konfiguration",
+  provider_error: "Providerfehler",
+};
+
+function renderProviderFreshness(data) {
+  const root = $("#providerFreshnessTimeline");
+  if (!root) return;
+  root.replaceChildren();
+  const entries = Array.isArray(data.provider_freshness) ? data.provider_freshness : [];
+  if (!entries.length) {
+    root.textContent = "Noch kein Provider-Status verfügbar.";
+    return;
+  }
+  entries.forEach((entry) => {
+    const item = document.createElement("article");
+    item.className = "provider-freshness-item";
+    const header = document.createElement("div");
+    header.className = "provider-freshness-header";
+    const title = document.createElement("strong");
+    title.textContent = entry.label || entry.provider || "Provider";
+    const status = document.createElement("span");
+    status.className = entry.state === "fresh" || entry.state === "partial" ? "configured" : "not-configured";
+    status.textContent = PROVIDER_FRESHNESS_STATUS[entry.state] || "Unbekannter Status";
+    header.append(title, status);
+    const meta = document.createElement("span");
+    meta.className = "provider-freshness-meta";
+    const attempt = entry.last_attempt_at ? `Letzter Versuch: ${formatTime(entry.last_attempt_at)}` : "Noch kein Versuch";
+    const success = entry.last_success_at ? `Letzter Erfolg: ${formatTime(entry.last_success_at)}` : "Noch kein erfolgreicher Abruf";
+    const retry = entry.next_retry_at ? `Nächster Versuch ab: ${formatTime(entry.next_retry_at)}` : "Kein automatischer Retry terminiert";
+    meta.textContent = `${attempt} · ${success} · ${retry}`;
+    item.append(header, meta);
+    if (entry.error_code) {
+      const error = document.createElement("span");
+      error.className = "error";
+      error.textContent = PROVIDER_FRESHNESS_ERRORS[entry.error_code] || "Providerfehler";
+      item.append(error);
+    }
+    if (entry.read_only && entry.configured && ["error", "stale"].includes(entry.state)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = "Erneut versuchen";
+      button.addEventListener("click", () => retryProvider(entry.provider, button));
+      item.append(button);
+    }
+    root.append(item);
+  });
+}
+
+async function retryProvider(provider, button) {
+  if (button) button.disabled = true;
+  try {
+    if (provider === "intervals") await syncNow({ currentTarget: $("#systemIntervalsSyncButton") });
+    else if (provider === "garmin") await syncGarmin();
+    else if (provider === "weather") await syncWeather();
+    else if (provider === "calendar") await syncExternalCalendar();
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function renderRemoteDeleteNotice() {
   const root = $("#remoteDeleteNotice");
   if (!root) return;
@@ -3198,6 +3273,7 @@ function renderSettings(data) {
   if (privacySummary) privacySummary.textContent = `${usage.requests || 0} OpenAI-Anfragen heute`;
   renderGithubRelease(data.app);
   renderNotificationStatus();
+  renderProviderFreshness(data);
 }
 
 const CHANGE_HISTORY_LABELS = {
