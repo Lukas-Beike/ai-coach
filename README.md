@@ -520,7 +520,13 @@ failures.
 The **System** tab allows the athlete to export local data as JSON or delete
 local chats, snapshots, legacy drafts, active and archived library entries,
 competitions, plans, check-ins, feedback, provider snapshots, calendar imports,
-and profile state. Session cookies and server credentials are never part of the
+and profile state. It also shows a bounded local change history for profile,
+library, competition, and plan changes. History entries expose only changed
+field names; the values needed for an explicitly confirmed local Undo remain in
+the encrypted database record and are never sent to a provider. Undo uses a
+preview and one-time confirmation token, checks the current object hash, and
+marks a previously synchronized object as locally changed so any remote sync
+remains a separate action. Session cookies and server credentials are never part of the
 export. The database file itself remains in place. Chat reset and local cleanup
 also attempt to delete the stored OpenAI conversation; if that remote deletion
 cannot be confirmed, the UI shows an explicit warning. Data held by external

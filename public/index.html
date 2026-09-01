@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=133" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=133">
+  <link rel="icon" href="/icon.svg?v=134" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=134">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -298,6 +298,12 @@
             <button id="privacyExportButton" type="button" class="secondary-button">Daten exportieren</button>
             <button id="privacyDeleteButton" type="button" class="secondary-button danger-button">Lokale Daten löschen</button>
           </div>
+          <div class="settings-inline-action">
+            <div><strong>Lokale Änderungshistorie</strong><span>Nur sichere strukturierte Änderungen; Undo bleibt lokal und löst keinen Remote-Sync aus.</span></div>
+            <button id="changeHistoryRefreshButton" type="button" class="secondary-button">Historie laden</button>
+          </div>
+          <div id="changeHistoryStatus" class="fine-print" role="status">Noch nicht geladen.</div>
+          <div id="changeHistoryList" class="change-history-list" aria-live="polite"></div>
           <div id="privacyDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
           <div id="privacyDeleteResult" class="fine-print" hidden role="status"></div>
           <div class="settings-inline-action backup-actions">
@@ -359,10 +365,10 @@
       </div>
     </div>
   </dialog>
-  <script src="/api.js?v=133" defer></script>
-  <script src="/navigation.js?v=133" defer></script>
-  <script src="/state.js?v=133" defer></script>
-  <script src="/views.js?v=133" defer></script>
-  <script src="/app.js?v=133" defer></script>
+  <script src="/api.js?v=134" defer></script>
+  <script src="/navigation.js?v=134" defer></script>
+  <script src="/state.js?v=134" defer></script>
+  <script src="/views.js?v=134" defer></script>
+  <script src="/app.js?v=134" defer></script>
 </body>
 </html>

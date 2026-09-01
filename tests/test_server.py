@@ -178,6 +178,7 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM activity_feedback")
             db.execute("DELETE FROM plan_adjustments")
             db.execute("DELETE FROM coach_action_proposals")
+            db.execute("DELETE FROM change_history")
             db.execute("DELETE FROM public_event_candidates")
             db.execute("DELETE FROM public_event_sources")
             db.execute("DELETE FROM external_calendar_events")
@@ -203,13 +204,14 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
             migrations = db.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
             self.assertEqual(backend_db.schema_version(db), server.CURRENT_DATABASE_SCHEMA_VERSION)
-        self.assertEqual([row["version"] for row in migrations], [1, 2])
+        self.assertEqual([row["version"] for row in migrations], [1, 2, 3])
         self.assertEqual(migrations[0]["name"], "legacy-schema-baseline")
         self.assertEqual(migrations[1]["name"], "public-calendar-foreign-key-cascade")
+        self.assertEqual(migrations[2]["name"], "local-change-history")
 
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 2)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 3)
 
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = server.utc_now()
@@ -711,7 +713,7 @@ class CoachTests(unittest.TestCase):
         with server.DB_LOCK, server.database() as db:
             for table in expected_tables - {"kv"}:
                 self.assertEqual(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"], 0)
-            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 2)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 3)
 
     def test_weather_refresh_rechecks_adaptive_planning(self):
         server.save_profile({"weather_location": "Berlin"})
@@ -1075,15 +1077,15 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=133', index)
-        self.assertIn('/navigation.js?v=133', index)
-        self.assertIn('/state.js?v=133', index)
-        self.assertIn('/views.js?v=133', index)
-        self.assertIn('/app.js?v=133', index)
-        self.assertIn('intervals-coach-v133', service_worker)
-        self.assertIn('"/navigation.js?v=133"', service_worker)
-        self.assertIn('"/state.js?v=133"', service_worker)
-        self.assertIn('"/views.js?v=133"', service_worker)
+        self.assertIn('/api.js?v=134', index)
+        self.assertIn('/navigation.js?v=134', index)
+        self.assertIn('/state.js?v=134', index)
+        self.assertIn('/views.js?v=134', index)
+        self.assertIn('/app.js?v=134', index)
+        self.assertIn('intervals-coach-v134', service_worker)
+        self.assertIn('"/navigation.js?v=134"', service_worker)
+        self.assertIn('"/state.js?v=134"', service_worker)
+        self.assertIn('"/views.js?v=134"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('window.addEventListener("offline"', app)
@@ -4481,13 +4483,13 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=133"', source)
-        self.assertIn('"/navigation.js?v=133"', source)
-        self.assertIn('"/state.js?v=133"', source)
-        self.assertIn('"/views.js?v=133"', source)
-        self.assertIn('"/app.js?v=133"', source)
-        self.assertIn('"/icon.svg?v=133"', source)
-        self.assertIn('"/styles.css?v=133"', source)
+        self.assertIn('"/api.js?v=134"', source)
+        self.assertIn('"/navigation.js?v=134"', source)
+        self.assertIn('"/state.js?v=134"', source)
+        self.assertIn('"/views.js?v=134"', source)
+        self.assertIn('"/app.js?v=134"', source)
+        self.assertIn('"/icon.svg?v=134"', source)
+        self.assertIn('"/styles.css?v=134"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -5113,6 +5115,55 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(completed["context"]["service"], "garmin")
         self.assertEqual(completed["context"]["operation"], "get_sleep_daily")
         self.assertEqual(completed["context"]["result_items"], 1)
+
+    def test_change_history_records_safe_diff_and_explicit_undo(self):
+        server.save_profile({"name": "Ada", "weight_kg": "71"})
+        server.save_profile({"name": "Bea", "weight_kg": "72"})
+        history = server.list_change_history()
+        latest = next(item for item in history if item["entity_type"] == "profile")
+        self.assertEqual(latest["action"], "update")
+        self.assertEqual(latest["diff"]["fields"]["name"], {"changed": True})
+        self.assertEqual(latest["diff"]["fields"]["weight_kg"], {"changed": True})
+        self.assertNotIn("Ada", json.dumps(latest))
+        self.assertNotIn('"before"', json.dumps(latest))
+        self.assertNotIn('"after"', json.dumps(latest))
+        self.assertNotIn("prompt", json.dumps(latest).casefold())
+        preview = server._history_preview(latest["id"], "session-csrf-hash")
+        confirmed = server.confirm_coach_action_preview(preview["proposed_action"]["id"], "session-csrf-hash")
+        result = server.execute_coach_action(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
+        self.assertTrue(result["remote_untouched"])
+        self.assertEqual(server.get_profile()["name"], "Ada")
+        with self.assertRaises(server.AppError) as replay:
+            server._history_preview(latest["id"], "session-csrf-hash")
+        self.assertEqual(replay.exception.status, 409)
+
+    def test_deleted_local_library_entry_can_be_undone_without_provider_write(self):
+        entry = server.create_local_workout_library_entry({"name": "Easy", "sport": "Ride", "duration_minutes": 30})
+        created = next(item for item in server.list_change_history() if item["entity_id"] == entry["id"] and item["action"] == "create")
+        preview = server._history_preview(created["id"], "session-csrf-hash")
+        confirmed = server.confirm_coach_action_preview(preview["proposed_action"]["id"], "session-csrf-hash")
+        result = server.execute_coach_action(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
+        self.assertEqual(result["status"], "undone")
+        self.assertFalse(server.list_workout_library(include_archived=True))
+
+    def test_privacy_delete_removes_change_history(self):
+        server.save_profile({"name": "Ada"})
+        self.assertTrue(server.list_change_history())
+        with patch.object(server, "delete_remote_conversation", return_value=True):
+            server.delete_local_data()
+        self.assertEqual(server.list_change_history(), [])
+
+    def test_undo_preview_rejects_newer_local_change(self):
+        entry = server.create_local_workout_library_entry({"name": "Easy", "sport": "Ride", "duration_minutes": 30})
+        server.update_workout_library_entry(entry["id"], {"action": "update", "name": "Tempo"})
+        changed = next(item for item in server.list_change_history() if item["entity_id"] == entry["id"] and item["action"] == "update")
+        preview = server._history_preview(changed["id"], "session-csrf-hash")
+        confirmed = server.confirm_coach_action_preview(preview["proposed_action"]["id"], "session-csrf-hash")
+        server.update_workout_library_entry(entry["id"], {"action": "update", "name": "Recovery"})
+        with self.assertRaises(server.AppError) as conflict:
+            server.execute_coach_action(confirmed["action_token"], "session-csrf-hash", confirmed["proposed_action"]["payload_hash"])
+        self.assertEqual(conflict.exception.status, 409)
+        self.assertEqual(server.get_workout_library()[0]["name"], "Recovery")
 
 if __name__ == "__main__":
     unittest.main()
