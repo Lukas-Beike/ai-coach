@@ -863,6 +863,7 @@ class CoachTests(unittest.TestCase):
             "sleep": [{"calendarDate": today, "sleepTimeSeconds": 28800, "sleepScore": 82}],
             "hrv": [{"calendarDate": today, "lastNightAvg": 48}],
             "readiness": [{"calendarDate": today, "trainingReadinessScore": 55}],
+            "daily_stats": [{"calendarDate": today, "totalSteps": 9876, "floorsAscended": 12, "totalKilocalories": 2345}],
         }))
         with server.DB_LOCK, server.database() as db:
             db.execute(
@@ -881,6 +882,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(day["recovery"]["sleep_hours"], 8.0)
         self.assertEqual(day["recovery"]["hrv"], 48)
         self.assertEqual(day["recovery"]["sources"]["hrv"], "Garmin Connect")
+        self.assertEqual(day["health"], {"steps": 9876, "floors": 12, "calories": 2345, "source": "Garmin Connect"})
         self.assertEqual(day["weather"]["condition"], "Regen")
         self.assertEqual(day["appointments"][0]["name"], "Familientermin")
 
@@ -2424,6 +2426,29 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(recovery["hrv"], 63)
         self.assertEqual(recovery["hrv_source"], "Garmin Connect")
 
+    def test_garmin_daily_health_is_averaged_over_the_last_seven_days(self):
+        today = server.local_now().date()
+        server.set_kv("garmin_snapshot", json.dumps({
+            "daily_stats": [
+                {
+                    "calendarDate": (today - timedelta(days=offset)).isoformat(),
+                    "totalSteps": 1000 + offset * 100,
+                    "floorsAscended": 5 + offset,
+                    "totalKilocalories": 2000 + offset * 10,
+                }
+                for offset in range(7)
+            ]
+        }))
+        performance = server.current_performance_context({
+            "synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": []
+        })
+        self.assertEqual(performance["metrics"]["steps_7d"], {
+            "value": 1300, "unit": "Schritte/Tag", "source": "Garmin Connect",
+            "note": "Durchschnitt der letzten 7 Tage",
+        })
+        self.assertEqual(performance["metrics"]["floors_7d"]["value"], 8)
+        self.assertEqual(performance["metrics"]["calories_7d"]["value"], 2030)
+
     def test_performance_exposes_thirty_day_trends_for_api_and_garmin_values(self):
         today = server.local_now().date()
         snapshot = {
@@ -2963,6 +2988,9 @@ class CoachTests(unittest.TestCase):
             def get_activities_by_date(self, start, end):
                 return [{"start": start, "end": end}]
 
+            def get_user_summary(self, current):
+                return {"totalSteps": 1234, "floorsAscended": 7, "totalKilocalories": 2100}
+
             def get_heart_rates(self, current):
                 return {"restingHeartRate": 51}
 
@@ -3012,6 +3040,10 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["cycling_ftp"]["functionalThresholdPower"], 301)
         self.assertEqual(result["running_threshold"]["power"]["functionalThresholdPower"], 320)
         self.assertEqual(result["resting_hr"][0]["restingHeartRate"], 51)
+        self.assertEqual(len(result["daily_stats"]), 2)
+        self.assertEqual(result["daily_stats"][0]["calendarDate"], "2026-08-30")
+        self.assertEqual(result["daily_stats"][1]["totalSteps"], 1234)
+        self.assertEqual(result["provider_sync"]["pagination"]["daily_stats"]["records"], 2)
 
     def test_intervals_collection_rejects_repeated_full_page(self):
         client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))

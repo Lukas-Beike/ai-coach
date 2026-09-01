@@ -18,9 +18,12 @@ It is not intended to be exposed directly to the public internet.
   Intervals.icu. Garmin-sourced FTP (separate from eFTP), running threshold
   power, running and cycling threshold heart rate, running threshold pace,
   sleep, resting heart rate, HRV, VO2 max, running predictions, body weight,
-  and sport-specific maximum heart rates are explicitly marked as Garmin
-  Connect data in the performance view. If a Garmin value is unavailable, the
-  existing Intervals.icu value remains available as a labelled fallback.
+  sport-specific maximum heart rates, and daily steps, floors, and calories are
+  explicitly marked as Garmin Connect data in the performance view. Daily
+  health totals are shown in the planned calendar's date-specific context; the
+  performance view shows their seven-day averages. If a Garmin value is
+  unavailable, the existing Intervals.icu value remains available as a
+  labelled fallback.
 - Activity synchronization for strength training, running, outdoor cycling,
   and indoor/virtual cycling.
 - Mobile-first profile and system sections can be collapsed; the planned

@@ -1105,8 +1105,9 @@ function renderDailyPlanningContext(date, todayKey) {
   const context = planningContextForDate(date);
   const checkin = context.checkin;
   const recovery = context.recovery;
+  const health = context.health;
   const appointments = Array.isArray(context.appointments) ? context.appointments : [];
-  const hasSignals = checkin || recovery || appointments.length;
+  const hasSignals = checkin || recovery || health || appointments.length;
   if (!hasSignals && dateKeyDifference(date, todayKey) > 0) return document.createDocumentFragment();
   const root = document.createElement("details");
   root.className = "planned-day-context";
@@ -1141,6 +1142,14 @@ function renderDailyPlanningContext(date, todayKey) {
       planningContextNumber(recovery.body_battery, " Body Battery"),
     ].filter(Boolean);
     addSignal("Erholung", recoveryValues.join(" · "), "recovery");
+  }
+  if (health) {
+    const healthValues = [
+      planningContextNumber(health.steps, " Schritte"),
+      planningContextNumber(health.floors, " Stockwerke"),
+      planningContextNumber(health.calories, " kcal"),
+    ].filter(Boolean);
+    addSignal("Gesundheit", healthValues.join(" · "), "health");
   }
   if (checkin) {
     const checkinValues = [
@@ -3010,6 +3019,9 @@ function renderPerformance(performance) {
     ["Readiness", compared({ value: recovery.readiness, unit: "", source: recovery.readiness_source || "Intervals.icu Wellness" }, "readiness_30d")],
     ["Ruhepuls", compared({ value: recovery.restingHR, unit: "bpm", source: recovery.restingHR_source || "Intervals.icu Wellness" }, "restingHR")],
     ["HRV", compared({ value: recovery.hrv, unit: "ms", source: recovery.hrv_source || "Intervals.icu Wellness" }, "hrv")],
+    ["Schritte (Ø letzte 7 Tage)", values.steps_7d],
+    ["Stockwerke (Ø letzte 7 Tage)", values.floors_7d],
+    ["Kalorien (Ø letzte 7 Tage)", values.calories_7d],
   ], performanceDetail);
   performanceSection(root, "Allgemeine Leistungsdaten", [
     ["Fitness / CTL", compared({ value: load.ctl, unit: "", source: "Intervals.icu" }, "fitness_ctl"), formatWhole],
