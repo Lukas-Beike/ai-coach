@@ -1639,6 +1639,7 @@ def initialise_database() -> None:
                 all_day INTEGER NOT NULL DEFAULT 0,
                 training_relevant INTEGER NOT NULL DEFAULT 1,
                 no_intensity INTEGER NOT NULL DEFAULT 0,
+                short_only INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL,
                 UNIQUE(uid, start_local)
             );
@@ -1830,6 +1831,8 @@ def initialise_database() -> None:
             db.execute("ALTER TABLE external_calendar_events ADD COLUMN training_relevant INTEGER NOT NULL DEFAULT 1")
         if "no_intensity" not in external_columns:
             db.execute("ALTER TABLE external_calendar_events ADD COLUMN no_intensity INTEGER NOT NULL DEFAULT 0")
+        if "short_only" not in external_columns:
+            db.execute("ALTER TABLE external_calendar_events ADD COLUMN short_only INTEGER NOT NULL DEFAULT 0")
         checkin_columns = {row["name"] for row in db.execute("PRAGMA table_info(athlete_checkins)").fetchall()}
         if "day_form" not in checkin_columns:
             db.execute("ALTER TABLE athlete_checkins ADD COLUMN day_form TEXT NOT NULL DEFAULT ''")
@@ -3689,18 +3692,34 @@ def _ical_temporal_value(raw: str, parameters: dict[str, str]) -> tuple[datetime
         return None
 
 
-ICAL_NO_TRAINING_MARKER = re.compile(r"(?<![A-Z0-9_])\[NO_TRAINING\](?![A-Z0-9_])", re.IGNORECASE)
-ICAL_NO_INTENSITY_MARKER = re.compile(r"(?<![A-Z0-9_])\[NO_INTENSITY\](?![A-Z0-9_])", re.IGNORECASE)
+ICAL_NO_TRAINING_MARKER = "[NO_TRAINING]"
+ICAL_NO_INTENSITY_MARKER = "[NO_INTENSITY]"
+ICAL_SHORT_ONLY_MARKER = "[SHORT_ONLY]"
+ICAL_TRAINING_MARKERS = (ICAL_NO_TRAINING_MARKER, ICAL_NO_INTENSITY_MARKER, ICAL_SHORT_ONLY_MARKER)
+
+
+def _ical_description_contains(description: Any, marker: str) -> bool:
+    return marker.casefold() in str(description or "").casefold()
+
+
+def ical_training_impact(description: Any) -> bool:
+    """Keep only events whose description explicitly contains a training marker."""
+    return any(_ical_description_contains(description, marker) for marker in ICAL_TRAINING_MARKERS)
 
 
 def ical_training_relevant(name: Any, description: Any) -> bool:
     """Ignore only events explicitly marked as informational in their description."""
-    return not bool(ICAL_NO_TRAINING_MARKER.search(f"{name or ''}\n{description or ''}"))
+    return not _ical_description_contains(description, ICAL_NO_TRAINING_MARKER)
 
 
 def ical_no_intensity(name: Any, description: Any) -> bool:
     """Treat only the explicit marker as a no-intensity training constraint."""
-    return bool(ICAL_NO_INTENSITY_MARKER.search(f"{name or ''}\n{description or ''}"))
+    return _ical_description_contains(description, ICAL_NO_INTENSITY_MARKER)
+
+
+def ical_short_only(name: Any, description: Any) -> bool:
+    """Treat only the explicit marker as a short-session training constraint."""
+    return _ical_description_contains(description, ICAL_SHORT_ONLY_MARKER)
 
 
 def _ical_rrule(raw: str) -> dict[str, Any]:
@@ -3870,8 +3889,10 @@ def _ical_event_record(current: dict[str, Any], start: datetime, duration: timed
         "end_local": end.isoformat(),
         "duration_minutes": duration_minutes,
         "all_day": bool(current.get("all_day")),
+        "training_impact": ical_training_impact(current.get("description")),
         "training_relevant": ical_training_relevant(current.get("name"), current.get("description")),
         "no_intensity": ical_no_intensity(current.get("name"), current.get("description")),
+        "short_only": ical_short_only(current.get("name"), current.get("description")),
     }
 
 
@@ -4127,7 +4148,7 @@ def list_external_calendar_events(limit: int = 300, training_relevant_only: bool
     with DB_LOCK, database() as db:
         relevance_filter = " AND training_relevant = 1" if training_relevant_only else ""
         rows = db.execute(
-            "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at "
+            "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, short_only, updated_at "
             f"FROM external_calendar_events WHERE event_date >= ?{relevance_filter} ORDER BY start_local LIMIT ?",
             (local_now().date().isoformat(), max(1, min(int(limit), 1000))),
         ).fetchall()
@@ -4162,15 +4183,19 @@ def sync_external_calendar(reason: str = "manual", operation_id: str | None = No
             raise AppError(413, "Der Kalender-Feed ist zu groß.")
         today = local_now().date()
         latest = today + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS)
-        events = parse_ical_calendar(payload, window_start=today, window_end=latest)
+        events = [
+            event
+            for event in parse_ical_calendar(payload, window_start=today, window_end=latest)
+            if event.get("training_impact")
+        ]
         now = utc_now()
         with DB_LOCK, database() as db:
             db.execute("DELETE FROM external_calendar_events")
             for event in events:
                 db.execute(
-                    "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (event["id"], event["uid"], event["name"], event["event_date"], event["start_local"], event["end_local"], event["duration_minutes"], int(event["all_day"]), int(event.get("training_relevant", True)), int(event.get("no_intensity", False)), now),
+                    "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, short_only, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (event["id"], event["uid"], event["name"], event["event_date"], event["start_local"], event["end_local"], event["duration_minutes"], int(event["all_day"]), int(event.get("training_relevant", True)), int(event.get("no_intensity", False)), int(event.get("short_only", False)), now),
                 )
         set_kv("last_external_calendar_sync_at", now)
         mark_daily_sync("calendar")
@@ -4207,7 +4232,7 @@ PLANNING_CONTEXT_WEATHER_FIELDS = (
 )
 PLANNING_CONTEXT_APPOINTMENT_FIELDS = (
     "id", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day",
-    "training_relevant", "no_intensity",
+    "training_relevant", "no_intensity", "short_only",
 )
 
 
@@ -6886,6 +6911,7 @@ def private_calendar_adjustment_context(
                 "event_date": str(event.get("event_date") or "")[:10],
                 "duration_minutes": int(event.get("duration_minutes") or 0),
                 "no_intensity": bool(event.get("no_intensity")),
+                "short_only": bool(event.get("short_only")),
             }
             for event in calendar_events[:10]
             if isinstance(event, dict)
@@ -6894,6 +6920,7 @@ def private_calendar_adjustment_context(
         "adjusted_duration_minutes": adjusted.get("duration_minutes"),
         "intensity_adjusted": True,
         "no_intensity_requested": any(bool(event.get("no_intensity")) for event in calendar_events),
+        "short_only_requested": any(bool(event.get("short_only")) for event in calendar_events),
     }
 
 
@@ -11869,7 +11896,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "provider_refresh_history": {"id", "provider", "area", "operation_id", "trigger", "started_at", "finished_at", "phase", "status", "error_code", "next_retry_at"},
     "public_event_sources": {"id", "name", "url", "last_sync_at", "last_error", "created_at", "updated_at"},
     "public_event_candidates": {"id", "source_id", "uid", "name", "event_date", "sport", "distance", "location", "url", "description", "imported_competition_id", "created_at", "updated_at"},
-    "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "updated_at"},
+    "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "short_only", "updated_at"},
     "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
 }
 
