@@ -38,6 +38,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
+from backend.db import row_factory as database_row_factory
+from backend.db import schema_version as database_schema_version
+
 try:
     from garminconnect import Garmin
 except ImportError:  # Optional dependency for installations without Garmin enabled.
@@ -1191,11 +1194,6 @@ def migrate_plaintext_database() -> None:
         raise
 
 
-def database_row_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
-    """Return mapping-like rows for both sqlite3 and sqlcipher3 backends."""
-    return {description[0]: row[index] for index, description in enumerate(cursor.description)}
-
-
 # A request-scoped connection lets composite reads reuse one SQLCipher setup.
 # The outer caller still owns DB_LOCK; nested database() calls only reuse it.
 DATABASE_CONTEXT: ContextVar[Any | None] = ContextVar("database_context", default=None)
@@ -1305,23 +1303,6 @@ def observed_sync(provider: str):
                 return result
         return wrapped
     return decorator
-
-
-def database_schema_version(db: Any) -> int:
-    try:
-        row = db.execute("SELECT MAX(version) AS version FROM schema_migrations").fetchone()
-    except Exception:
-        return 0
-    try:
-        if not row:
-            return 0
-        try:
-            value = row["version"]
-        except (KeyError, TypeError, IndexError):
-            value = row[0]
-        return int(value or 0)
-    except (KeyError, TypeError, IndexError, ValueError):
-        return 0
 
 
 def _record_database_migration(db: Any, version: int, name: str) -> None:
