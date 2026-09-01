@@ -2526,6 +2526,24 @@ class CoachTests(unittest.TestCase):
             {"name": "Easy", "description": "- 30m Z2", "type": "Ride", "folder_id": 77},
         )
 
+    def test_library_update_always_sends_required_folder(self):
+        client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
+        with patch.object(client, "get_or_create_workout_folder", return_value=12345) as folder, patch.object(
+            client, "put", return_value={"id": "remote-1"}
+        ) as put:
+            client.update_library_workout("remote-1", {
+                "name": "Easy",
+                "description": "- 30m Z2",
+                "type": "Ride",
+            })
+        folder.assert_called_once_with()
+        self.assertEqual(put.call_args.args[1], {
+            "name": "Easy",
+            "description": "- 30m Z2",
+            "type": "Ride",
+            "folder_id": 12345,
+        })
+
     def test_unknown_workout_sport_falls_back_to_provider_other_type(self):
         client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key", intervals_athlete_id="athlete-1"))
         with patch.object(client, "get", return_value=[]), patch.object(

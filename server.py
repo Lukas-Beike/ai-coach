@@ -6002,8 +6002,10 @@ class IntervalsClient:
             "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
         }
         folder_id = self._folder_id(workout.get("folder_id"))
-        if folder_id is not None:
-            payload["folder_id"] = folder_id
+        # Intervals.icu requires folder_id for workout updates as well as
+        # creates. Older locally cached entries may not have retained the
+        # remote folder, so use the private Coach folder as a safe fallback.
+        payload["folder_id"] = folder_id if folder_id is not None else self.get_or_create_workout_folder()
         result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", payload)
         if not isinstance(result, dict):
             raise AppError(502, "Intervals.icu returned no updated library workout.")
