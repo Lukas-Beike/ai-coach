@@ -960,6 +960,14 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn('setInterval(() => {\n  if (state.localSync.intervals', app)
         self.assertNotIn('async function load(path = "/api/state")', app)
 
+    def test_profile_save_resets_button_before_follow_up_refresh(self):
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        save_profile = app[app.index("async function saveProfile"):app.index("let pwaReloadPending")]
+        self.assertIn(
+            'button.removeAttribute("aria-busy");\n      button.textContent = buttonLabel;\n    }\n    await load();',
+            save_profile,
+        )
+
     def test_sync_status_is_bounded_and_contains_versions(self):
         server.set_kv("sync_operation_id", "operation-test")
         server.set_kv("sync_operation_status", "running")
