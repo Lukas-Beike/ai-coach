@@ -405,16 +405,16 @@ h2 {
 .planned-day { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .planned-day.has-planned-events { border-color: rgba(105, 225, 183, .35); }
 .planned-day.has-planned-events .planned-day-heading { background: rgba(105, 225, 183, .035); }
-.planned-day-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 14px; }
+.planned-day-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px; }
+.planned-day-heading-main { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px; min-width: 0; }
 .planned-day-heading h3 { margin: 0; color: var(--ink); font-size: .9rem; }
 .planned-day-count { flex: 0 0 auto; color: var(--subtle); font-size: .68rem; }
 .planned-day.has-planned-events .planned-day-count { color: var(--accent-bright); font-weight: 700; }
 .planned-day-context { display: grid; gap: 9px; margin: 0 12px 12px; padding: 11px 12px; border: 1px solid rgba(105, 225, 183, .22); border-radius: 13px; color: var(--muted); background: rgba(105, 225, 183, .055); font-size: .7rem; line-height: 1.4; }
-.planned-day-context > strong { color: var(--ink); font-size: .75rem; }
+.planned-day-context > summary { cursor: pointer; color: var(--ink); font-size: .75rem; font-weight: 700; list-style-position: inside; }
+.planned-day-context > summary::marker { color: var(--accent-bright); }
+.planned-day-context[open] > summary { margin-bottom: 1px; }
 .planned-day-context-signals { display: grid; gap: 7px; }
-.planned-day-context-inline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
-.planned-day-context-inline .planned-day-signal { display: inline; }
-.planned-day-context-inline .planned-day-signal + .planned-day-signal::before { content: "·"; margin-right: 8px; color: var(--subtle); }
 .planned-day-signal { display: grid; gap: 2px; min-width: 0; }
 .planned-day-signal-label { color: var(--accent-bright); font-size: .66rem; font-weight: 700; }
 .planned-day-signal > span:last-child { overflow-wrap: anywhere; }
@@ -459,8 +459,9 @@ h2 {
 .adaptive-planning-button:hover { border-color: #ff827a; background: #ff5b51; }
 .adaptive-planning-button:active { transform: scale(.98); }
 .adaptive-planning-button:disabled { cursor: wait; opacity: .65; }
-.planned-weather { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; padding: 0 14px 12px; color: var(--muted); font-size: .7rem; }
-.planned-weather strong { color: var(--ink); font-size: .75rem; }
+.planned-day-weather { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted); font-size: .68rem; }
+.planned-day-weather strong { flex: 0 1 auto; color: var(--ink); font-size: .7rem; }
+.planned-day-weather-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .weather-icon { flex: 0 0 auto; font-size: 1rem; line-height: 1; }
 .planned-weather-slot { overflow: hidden; color: var(--accent-bright); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
 .planned-weather-recommendation { display: grid; grid-template-columns: auto 1fr; gap: 3px 7px; margin-top: 12px; padding: 10px 11px; border-left: 3px solid var(--accent-bright); border-radius: 8px; color: var(--muted); background: rgba(52, 207, 161, .07); font-size: .73rem; line-height: 1.4; }
