@@ -904,28 +904,39 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - **Offene Risiken:** Nicht unterstützte RFC-5545-Erweiterungen wie RDATE, EXRULE und RECURRENCE-ID bleiben bewusst abgelehnt; die unterstützte Untermenge ist in README dokumentiert.
 - **Folgetasks:** FT-023 ist als nächstes Paket vorgesehen; FT-024 bleibt als abhängiger späterer Architektur-Task offen.
 
-### - [ ] FT-023 – Coach-Streaming und echtes Abbrechen umsetzen
+### - [x] FT-023 – Coach-Streaming und echtes Abbrechen umsetzen
 
 **Quelle:** COACH-04
 **Ziel:** Antworten werden progressiv sichtbar und können tatsächlich abgebrochen werden; „Abbrechen“ und „danach steuern“ sind getrennte Aktionen.
 **Abhängigkeiten:** FT-004 zwingend
-**Status:** in Arbeit; Server-SSE, Client-Teilrendering, Cancel-Signal und Abbruch-/Sicherheitsregressionstests umgesetzt, Browser-/Container-Gates stehen noch aus.
+**Status:** abgeschlossen; Folgepakete ab FT-024 sind entblockt.
 
 **Umsetzung**
 
-- [ ] Responses-Streaming serverseitig sicher weiterleiten, ohne Credentials/Payloadlogs.
-- [ ] Client rendert Teiltext weiter über sicheren Markdownpfad.
-- [ ] Cancel propagiert zum laufenden OpenAI-Request und beendet UI-Status konsistent.
-- [ ] Mutationsvorschläge erst nach vollständig empfangener und validierter Struktur anzeigen.
-- [ ] Keine Mutation aus partieller Toolausgabe zulassen.
-- [ ] Reconnect, Timeout, Browser-Abbruch und doppeltes Senden testen.
-- [ ] Usage-/Budgetzählung auch für abgebrochene Antworten korrekt behandeln.
+- [x] Responses-Streaming serverseitig sicher weiterleiten, ohne Credentials/Payloadlogs.
+- [x] Client rendert Teiltext weiter über sicheren Markdownpfad.
+- [x] Cancel propagiert zum laufenden OpenAI-Request und beendet UI-Status konsistent.
+- [x] Mutationsvorschläge erst nach vollständig empfangener und validierter Struktur anzeigen.
+- [x] Keine Mutation aus partieller Toolausgabe zulassen.
+- [x] Reconnect, Timeout, Browser-Abbruch und doppeltes Senden testen.
+- [x] Usage-/Budgetzählung auch für abgebrochene Antworten korrekt behandeln.
 
 **Abnahmekriterien**
 
-- [ ] Nutzer kann laufende Antwort sichtbar stoppen.
-- [ ] Teilantworten können keine Tools oder Mutationen ausführen.
-- [ ] Folgeanweisung und Cancel sind semantisch getrennt.
+- [x] Nutzer kann laufende Antwort sichtbar stoppen.
+- [x] Teilantworten können keine Tools oder Mutationen ausführen.
+- [x] Folgeanweisung und Cancel sind semantisch getrennt.
+
+**Handover FT-023**
+
+- **Status:** abgeschlossen; Folgepakete ab FT-024 sind entblockt.
+- **Branch und Commit:** `feat/ft-023-streaming`, `e5bd84e`; PR #177 per Auto-Squash nach `develop` gemergt.
+- **Geänderte Dateien:** `server.py`, `public/app.js`, `public/index.html`, `public/service-worker.js`, `tests/test_server.py`, `README.md`, dieses Handover-Dokument.
+- **Verhaltensänderung:** Coach-Antworten laufen über einen serverseitigen, redigierten SSE-Stream. Die Oberfläche rendert Teiltext über den bestehenden sicheren Markdownpfad und bietet ein echtes, sessiongebundenes Abbrechen; „Steuern“ bleibt eine getrennte FIFO-Folgeanweisung. Der laufende Provider-Response wird bei Cancel aktiv geschlossen. Toolaufrufe und dauerhafte Mutationen werden erst aus der vollständig validierten Response verarbeitet; partielle Toolausgaben können keine Mutation ausführen.
+- **Validierung:** Vier schnelle Shards erfolgreich (65/65, 65/65, 64/64, 64/64; 258 Tests gesamt); kanonischer SQLCipher-Containerlauf 258 Tests `OK`; `python -m py_compile server.py tests/test_server.py tests/run_tests.py`; `git diff --check`; Docker-Build `ai-coach:ft023`; GitHub-Pflichtchecks für PR #177 einschließlich Browser Smoke/Accessibility, CodeQL, Analyze, Syntax, Validate und aller vier Shards erfolgreich.
+- **Manuelle Prüfung:** Isolierter Browserlauf gegen einen frischen Docker-Container mit Fake-Passwort und anonymem `/data`: Desktop/Mobile-Core-Smoke erfolgreich. Die beiden lokalen WCAG-Läufe trafen das bekannte 30-Sekunden-Fixture-Login-/Bootstrap-Wartefenster; der verpflichtende GitHub-Browser-/Accessibility-Check war grün. Keine Secrets, Providerkonten, Live-Datenbanken oder Runtime-Dateien verwendet.
+- **Offene Risiken:** Der Stream besitzt keinen clientseitigen Resume-Puffer; ein echter Netzwerkabbruch wird sicher beendet und muss erneut angefragt werden. Die bestehende Fixture-Login-/Bootstrap-Latenz kann lokale WCAG-Läufe über 30 Sekunden treiben.
+- **Folgetasks:** FT-024 ist als nächstes Paket vorgesehen; FT-025 bis FT-032 bleiben als separate Pakete offen.
 
 ---
 
