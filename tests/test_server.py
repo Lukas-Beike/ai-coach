@@ -2445,6 +2445,26 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(client.pagination["activities"], {"pages": 2, "records": 501, "complete": True})
         self.assertEqual(get.call_args_list[1].args[1]["offset"], 500)
 
+    def test_intervals_read_transport_injects_request_and_builds_query(self):
+        from backend.providers.intervals import IntervalsReadTransport
+
+        request = Mock(return_value={"id": "athlete-1"})
+        transport = IntervalsReadTransport(
+            "https://intervals.icu/api/v1",
+            {"Authorization": "Basic test"},
+            request,
+        )
+
+        result = transport.get("/athlete/athlete-1", {"include": ["a", "b"]})
+
+        self.assertEqual(result, {"id": "athlete-1"})
+        request.assert_called_once_with(
+            "GET",
+            "https://intervals.icu/api/v1/athlete/athlete-1?include=a&include=b",
+            headers={"Authorization": "Basic test"},
+            service="intervals",
+        )
+
     def test_intervals_collection_rejects_repeated_full_page(self):
         client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         page = [{"id": f"activity-{index}"} for index in range(500)]
