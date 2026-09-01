@@ -1077,6 +1077,16 @@ FT-001 ist die Testspezifikation für FT-002 bis FT-004. FT-007 sollte vor grö�
 - [x] Review ohne Findings; PR #185 per Auto-Squash gemergt (`4e449f9`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility grün.
 - [ ] Repositorys, Provider, Sync, Coach, Backup, HTTP-API sowie Frontend-Bereiche bleiben für die folgenden kohärenten Refactor-PRs offen.
 
+**Fortschritt FT-027 – Frontend-API-Schnitt**
+
+- [x] Den Frontend-API-Bereich ohne neues Framework als separates `public/api.js`-Modul abgegrenzt.
+- [x] JSON-/Audio-Requests, CSRF-Header und gemeinsame HTTP-Fehlerbehandlung unverändert aus `public/app.js` verschoben.
+- [x] Bestehende `app.js`-Wrapper und das 401-Loginverhalten als Kompatibilitätsgrenze erhalten; keine doppelten DTOs oder zyklischen Importe eingeführt.
+- [x] Static-Serving, PWA-Asset-Versionen und Service-Worker-Cache für den neuen Client ergänzt.
+- [x] Review ohne Findings; PR #187 per Auto-Squash gemergt (`5fd114f`), alle Pflichtchecks inklusive Browser-Smoke/Accessibility, CodeQL und vier Test-Shards grün.
+- [x] Validierung: vier schnelle Shards mit 271 Tests, Python-Kompilierung, `git diff --check` und Docker-Build `ai-coach:ft027-frontend-api` erfolgreich.
+- [ ] Backend-Repositorys/-Provider/-Sync/-Coach/-Backup/-HTTP-API sowie weitere Frontend-Bereiche bleiben für folgende kohärente Refactor-PRs offen.
+
 ### - [ ] FT-028 – PWA-/Notification-Versprechen präzisieren und Produktentscheidung treffen
 
 **Quelle:** PWA-01, PWA-02
