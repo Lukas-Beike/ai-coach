@@ -108,10 +108,10 @@ It is not intended to be exposed directly to the public internet.
   confirmation are future local sessions replaced with illness-pause entries and
   the corresponding future check-in days filled.
   The Plan tab combines each dated check-in with recovery signals, weather,
-  planned sessions, and read-only calendar appointments; existing entries can
-  be selected and edited directly on their day. Check-in dates and daily
-  training boundaries use the saved IANA profile timezone, and future check-ins
-  are rejected. The Heute tab provides a compact daily view of the local
+  planned sessions, and read-only calendar appointments. Check-ins are entered
+  exclusively through the Coach Chat. Check-in dates and daily training
+  boundaries use the saved IANA profile timezone, and future check-ins are
+  rejected. The Heute tab provides a compact daily view of the local
   check-in, readiness/recovery signals, today's planned workout, relevant
   weather, open activity feedback, and pending plan adjustments. It uses
   already loaded state and does not trigger an additional coach or provider

@@ -124,17 +124,9 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#planGoalsSegment")).toBeVisible();
 
     await page.getByRole("link", { name: "Heute", exact: true }).click();
-    const checkinButton = page.getByRole("button", { name: /Check-in (ausfüllen|bearbeiten)/ }).first();
-    await expect(checkinButton).toBeVisible();
-    await checkinButton.click();
-    const checkinDialog = page.locator("#checkinDialog");
-    await expect(checkinDialog).toBeVisible();
-    await expect(checkinDialog.getByRole("heading", { name: "Tages-Check-in" })).toBeVisible();
-    await expect(checkinDialog.getByLabel("Tagesform")).toBeVisible();
-    await expect(checkinDialog.locator('[name="soreness"]')).toBeFocused();
-    await checkinDialog.getByRole("button", { name: "Schließen" }).click();
-    await expect(checkinDialog).toBeHidden();
-    await expect(checkinButton).toBeFocused();
+    await expect(page.getByRole("button", { name: /Check-in (ausfüllen|bearbeiten)/ })).toHaveCount(0);
+    await expect(page.locator("#checkinDialog")).toBeHidden();
+    await expect(page.locator("#chatPanel")).toContainText("Morgen-Check-in");
 
     const undersizedTargets = await page.locator(".panel.active button:visible, .panel.active a:visible, .panel.active input:visible, .panel.active textarea:visible, .panel.active select:visible, .panel.active summary:visible, .bottom-nav a:visible").evaluateAll((nodes) => nodes
       .filter((node) => !node.closest("[hidden]"))

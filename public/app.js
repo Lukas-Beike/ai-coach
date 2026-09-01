@@ -944,26 +944,26 @@ function weatherForDate(date) {
   return (state.data?.weather?.days || []).find((item) => item.date === date) || null;
 }
 
-function renderWeatherNotice(weather) {
-  const notice = $("#weatherNotice");
-  if (!notice) return;
-  notice.hidden = false;
-  notice.className = "weather-notice";
-  if (!weather?.configured) {
-    notice.textContent = "Wetterhinweise: Hinterlege im Profil einen Wetterort (Stadt oder PLZ).";
-    return;
-  }
-  if (weather.loading) {
-    notice.textContent = weather.message || "Wetterdaten werden nachgeladen.";
-    return;
-  }
-  if (weather.error && !weather.days?.length) {
-    notice.classList.add("error");
-    notice.textContent = weather.error;
-    return;
-  }
-  const location = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
-  notice.textContent = `${location ? `Wetter für ${location}` : "Wettervorhersage"} · ${weather.model || "Open-Meteo"} · Tageswerte bis 14 Tage · Zeitvorschläge bis 5 Tage · Quelle: Open-Meteo.com${weather.stale ? " · letzte verfügbare Daten" : ""}`;
+function renderPlannedDayWeather(weather) {
+  if (!weather) return null;
+  const root = document.createElement("span");
+  root.className = "planned-day-weather";
+  const icon = document.createElement("span");
+  icon.className = "weather-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = weatherIconFor(weather);
+  const condition = document.createElement("strong");
+  condition.textContent = weather.condition || "Wetter";
+  const summary = document.createElement("span");
+  summary.className = "planned-day-weather-summary";
+  const temperatures = [weatherNumber(weather.temperature_min, " °C"), weatherNumber(weather.temperature_max, " °C")]
+    .filter(Boolean)
+    .join(" bis ");
+  summary.textContent = [temperatures, weatherNumber(weather.precipitation_probability_max, " % Regen")]
+    .filter(Boolean)
+    .join(" · ");
+  root.append(icon, condition, summary);
+  return root;
 }
 
 function todayCard(title, className = "") {
@@ -1039,7 +1039,6 @@ function renderToday(data) {
     ].filter(Boolean);
     todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
   } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
-  checkinCard.append(todayAction(checkin ? "Check-in bearbeiten" : "Check-in ausfüllen", () => openCheckinEditor(todayKey)));
   root.append(checkinCard);
 
   const readinessCard = todayCard("Readiness & Erholung", "today-readiness");
@@ -1103,20 +1102,22 @@ function planningContextNumber(value, suffix = "") {
 
 function renderDailyPlanningContext(date, todayKey) {
   const context = planningContextForDate(date);
-  const weather = context.weather || weatherForDate(date);
   const checkin = context.checkin;
   const recovery = context.recovery;
   const appointments = Array.isArray(context.appointments) ? context.appointments : [];
-  const hasSignals = weather || checkin || recovery || appointments.length;
+  const hasSignals = checkin || recovery || appointments.length;
   if (!hasSignals && dateKeyDifference(date, todayKey) > 0) return document.createDocumentFragment();
-  const root = document.createElement("div");
+  const root = document.createElement("details");
   root.className = "planned-day-context";
-  const heading = document.createElement("strong");
-  heading.textContent = "Tageskontext";
+  const heading = document.createElement("summary");
+  heading.className = "planned-day-context-heading";
+  const headingTitle = document.createElement("strong");
+  headingTitle.textContent = "Tageskontext";
+  heading.append(headingTitle);
   root.append(heading);
   const signals = document.createElement("div");
   signals.className = "planned-day-context-signals";
-  const addSignal = (label, value, className = "") => {
+  const addSignal = (label, value, className = "", target = signals) => {
     if (!value) return;
     const signal = document.createElement("div");
     signal.className = `planned-day-signal${className ? ` ${className}` : ""}`;
@@ -1126,17 +1127,9 @@ function renderDailyPlanningContext(date, todayKey) {
     const detail = document.createElement("span");
     detail.textContent = value;
     signal.append(title, detail);
-    signals.append(signal);
+    target.append(signal);
+    return signal;
   };
-  if (weather) {
-    const weatherValues = [
-      weather.condition || "Vorhersage",
-      [planningContextNumber(weather.temperature_min, " °C"), planningContextNumber(weather.temperature_max, " °C")].filter(Boolean).join(" bis "),
-      planningContextNumber(weather.precipitation_probability_max, " % Regen"),
-      planningContextNumber(weather.wind_speed_max, " km/h Wind"),
-    ].filter(Boolean);
-    addSignal(`${weatherIconFor(weather)} Wetter`, weatherValues.join(" · "));
-  }
   if (recovery) {
     const recoveryValues = [
       planningContextNumber(recovery.sleep_hours, " h Schlaf"),
@@ -1146,8 +1139,6 @@ function renderDailyPlanningContext(date, todayKey) {
       planningContextNumber(recovery.resting_hr, " bpm Ruhepuls"),
       planningContextNumber(recovery.body_battery, " Body Battery"),
     ].filter(Boolean);
-    const recoverySources = [...new Set(Object.values(recovery.sources || {}))].filter(Boolean);
-    if (recoverySources.length) recoveryValues.push(`Quelle: ${recoverySources.join(", ")}`);
     addSignal("Erholung", recoveryValues.join(" · "), "recovery");
   }
   if (checkin) {
@@ -1176,14 +1167,6 @@ function renderDailyPlanningContext(date, todayKey) {
     empty.className = "planned-day-context-empty";
     empty.textContent = "Noch keine Tagesinfos hinterlegt.";
     root.append(empty);
-  }
-  if (dateKeyDifference(date, todayKey) <= 0) {
-    const editButton = document.createElement("button");
-    editButton.type = "button";
-    editButton.className = "planned-day-checkin-button";
-    editButton.textContent = checkin ? "Tages-Check-in bearbeiten" : "Tages-Check-in hinzufügen";
-    editButton.addEventListener("click", () => openCheckinEditor(date));
-    root.append(editButton);
   }
   return root;
 }
@@ -1619,7 +1602,6 @@ function renderLocalPlanningActions(event, body) {
 function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContext = []) {
   setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
-  renderWeatherNotice(state.data?.weather);
   const root = $("#plannedCalendar");
   state.data.daily_planning_context = Array.isArray(dailyPlanningContext) ? dailyPlanningContext : [];
   root.querySelectorAll("details.planned-week").forEach((week) => state.plannedWeekOpen.set(week.dataset.week, week.open));
@@ -1700,35 +1682,25 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
       const calendarEvents = calendarEventsByDate.get(date) || [];
       const dayRoot = document.createElement("section");
       dayRoot.className = "planned-day";
+      dayRoot.classList.toggle("has-planned-events", events.length > 0);
 
       const heading = document.createElement("div");
       heading.className = "planned-day-heading";
+      const headingMain = document.createElement("div");
+      headingMain.className = "planned-day-heading-main";
       const title = document.createElement("h3");
       title.textContent = plannedDayLabel(day, dateKeyDifference(date, todayKey));
+      headingMain.append(title);
+      const weather = planningContextForDate(date).weather || weatherForDate(date);
+      const weatherRoot = renderPlannedDayWeather(weather);
+      if (weatherRoot) headingMain.append(weatherRoot);
       const count = document.createElement("span");
       count.className = "planned-day-count";
       count.textContent = events.length ? `${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
-      heading.append(title, count);
+      heading.append(headingMain, count);
       dayRoot.append(heading);
 
-      dayRoot.append(renderDailyPlanningContext(date, todayKey));
-      const weather = weatherForDate(date);
-      if (weather && !planningContextForDate(date).weather) {
-        const weatherRoot = document.createElement("div");
-        weatherRoot.className = "planned-weather";
-        const icon = document.createElement("span");
-        icon.className = "weather-icon";
-        icon.setAttribute("aria-hidden", "true");
-        icon.textContent = weatherIconFor(weather);
-        const condition = document.createElement("strong");
-        condition.textContent = weather.condition || "Wetter";
-        condition.title = weather.condition || "Wetter";
-        const summary = document.createElement("span");
-        const direction = weatherDirection(weather.wind_direction_dominant);
-        summary.textContent = `${weatherNumber(weather.temperature_min, " °C")} bis ${weatherNumber(weather.temperature_max, " °C")} · Regenrisiko ${weatherNumber(weather.precipitation_probability_max, " %")} · Wind bis ${weatherNumber(weather.wind_speed_max, " km/h")} / Böen ${weatherNumber(weather.wind_gusts_max, " km/h")}${direction ? ` aus ${direction}` : ""}`;
-        weatherRoot.append(icon, condition, summary);
-        dayRoot.append(weatherRoot);
-      }
+      const dailyContext = renderDailyPlanningContext(date, todayKey);
 
       if (!events.length && !calendarEvents.length) {
         const empty = document.createElement("p");
@@ -1856,6 +1828,7 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
         });
         dayRoot.append(entries);
       }
+      dayRoot.append(dailyContext);
       if (calendarEvents.length) {
         const calendarRoot = document.createElement("div");
         calendarRoot.className = "planned-calendar-markers";
