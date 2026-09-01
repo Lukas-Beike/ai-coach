@@ -1039,7 +1039,6 @@ function renderToday(data) {
     ].filter(Boolean);
     todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
   } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
-  checkinCard.append(todayAction(checkin ? "Check-in bearbeiten" : "Check-in ausfüllen", () => openCheckinEditor(todayKey)));
   root.append(checkinCard);
 
   const readinessCard = todayCard("Readiness & Erholung", "today-readiness");
@@ -1116,7 +1115,9 @@ function renderDailyPlanningContext(date, todayKey) {
   root.append(heading);
   const signals = document.createElement("div");
   signals.className = "planned-day-context-signals";
-  const addSignal = (label, value, className = "") => {
+  const weatherRecovery = document.createElement("div");
+  weatherRecovery.className = "planned-day-context-inline";
+  const addSignal = (label, value, className = "", target = signals) => {
     if (!value) return;
     const signal = document.createElement("div");
     signal.className = `planned-day-signal${className ? ` ${className}` : ""}`;
@@ -1126,7 +1127,8 @@ function renderDailyPlanningContext(date, todayKey) {
     const detail = document.createElement("span");
     detail.textContent = value;
     signal.append(title, detail);
-    signals.append(signal);
+    target.append(signal);
+    return signal;
   };
   if (weather) {
     const weatherValues = [
@@ -1135,7 +1137,7 @@ function renderDailyPlanningContext(date, todayKey) {
       planningContextNumber(weather.precipitation_probability_max, " % Regen"),
       planningContextNumber(weather.wind_speed_max, " km/h Wind"),
     ].filter(Boolean);
-    addSignal(`${weatherIconFor(weather)} Wetter`, weatherValues.join(" · "));
+    addSignal(`${weatherIconFor(weather)} Wetter`, weatherValues.join(" · "), "", weatherRecovery);
   }
   if (recovery) {
     const recoveryValues = [
@@ -1146,10 +1148,9 @@ function renderDailyPlanningContext(date, todayKey) {
       planningContextNumber(recovery.resting_hr, " bpm Ruhepuls"),
       planningContextNumber(recovery.body_battery, " Body Battery"),
     ].filter(Boolean);
-    const recoverySources = [...new Set(Object.values(recovery.sources || {}))].filter(Boolean);
-    if (recoverySources.length) recoveryValues.push(`Quelle: ${recoverySources.join(", ")}`);
-    addSignal("Erholung", recoveryValues.join(" · "), "recovery");
+    addSignal("Erholung", recoveryValues.join(" · "), "recovery", weatherRecovery);
   }
+  if (weatherRecovery.childElementCount) signals.append(weatherRecovery);
   if (checkin) {
     const checkinValues = [
       checkin.day_form ? `Tagesform: ${checkin.day_form}` : null,
@@ -1176,14 +1177,6 @@ function renderDailyPlanningContext(date, todayKey) {
     empty.className = "planned-day-context-empty";
     empty.textContent = "Noch keine Tagesinfos hinterlegt.";
     root.append(empty);
-  }
-  if (dateKeyDifference(date, todayKey) <= 0) {
-    const editButton = document.createElement("button");
-    editButton.type = "button";
-    editButton.className = "planned-day-checkin-button";
-    editButton.textContent = checkin ? "Tages-Check-in bearbeiten" : "Tages-Check-in hinzufügen";
-    editButton.addEventListener("click", () => openCheckinEditor(date));
-    root.append(editButton);
   }
   return root;
 }

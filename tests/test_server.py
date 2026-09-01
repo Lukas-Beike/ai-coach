@@ -1431,6 +1431,10 @@ class CoachTests(unittest.TestCase):
         self.assertIn('id="syncIllnessToIntervals"', app)
         self.assertEqual(server.ILLNESS_CALENDAR_CATEGORY, "SICK")
         self.assertNotIn('class="checkin-section"', index)
+        self.assertIn("planned-day-context-inline", app)
+        self.assertNotIn("planned-day-checkin-button", app)
+        self.assertNotIn("todayAction(checkin ?", app)
+        self.assertNotIn("recoverySources", app)
 
     def test_activity_feedback_is_persisted_and_attached_to_activity(self):
         server.save_snapshot({

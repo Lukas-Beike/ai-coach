@@ -409,6 +409,9 @@ h2 {
 .planned-day-context { display: grid; gap: 9px; margin: 0 12px 12px; padding: 11px 12px; border: 1px solid rgba(105, 225, 183, .22); border-radius: 13px; color: var(--muted); background: rgba(105, 225, 183, .055); font-size: .7rem; line-height: 1.4; }
 .planned-day-context > strong { color: var(--ink); font-size: .75rem; }
 .planned-day-context-signals { display: grid; gap: 7px; }
+.planned-day-context-inline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.planned-day-context-inline .planned-day-signal { display: inline; }
+.planned-day-context-inline .planned-day-signal + .planned-day-signal::before { content: "·"; margin-right: 8px; color: var(--subtle); }
 .planned-day-signal { display: grid; gap: 2px; min-width: 0; }
 .planned-day-signal-label { color: var(--accent-bright); font-size: .66rem; font-weight: 700; }
 .planned-day-signal > span:last-child { overflow-wrap: anywhere; }
@@ -417,8 +420,6 @@ h2 {
 .planned-day-signal.illness .planned-day-signal-label { color: #ff8078; }
 .planned-day-signal.appointments .planned-day-signal-label { color: #ffaaa3; }
 .planned-day-context-empty { color: var(--subtle); }
-.planned-day-checkin-button { justify-self: start; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); background: rgba(255, 255, 255, .06); font-size: .68rem; font-weight: 650; }
-.planned-day-checkin-button:hover { border-color: rgba(52, 207, 161, .65); background: var(--accent-soft); }
 .illness-pause-preview { display: grid; gap: 6px; margin: 10px 0; padding: 11px 12px; border: 1px solid rgba(255, 128, 120, .45); border-radius: 12px; color: var(--muted); background: rgba(255, 128, 120, .08); }
 .illness-pause-preview strong { color: #ffb1aa; }
 .illness-pause-preview label { display: flex; align-items: flex-start; gap: 8px; color: var(--ink); }
