@@ -40,7 +40,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-button, input, textarea, select { font: inherit; }
+button, input, textarea, select { min-height: 44px; font: inherit; }
 button { cursor: pointer; }
 button, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 
@@ -356,7 +356,7 @@ h2 {
 .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
 .metric-grid > div { padding: 10px; border: 1px solid rgba(255, 255, 255, .06); border-radius: 12px; background: rgba(255, 255, 255, .035); }
 .metric-grid .metric-editable { position: relative; }
-.metric-edit-button { position: absolute; top: 7px; right: 7px; display: grid; width: 23px; height: 23px; place-items: center; border: 1px solid transparent; border-radius: 7px; color: var(--subtle); background: transparent; font-size: .8rem; line-height: 1; }
+.metric-edit-button { position: absolute; top: 4px; right: 4px; display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid transparent; border-radius: 10px; color: var(--subtle); background: transparent; font-size: .8rem; line-height: 1; }
 .metric-edit-button:hover { border-color: var(--line); color: var(--ink); background: rgba(255, 255, 255, .08); }
 .metric-editable.editing { border-color: rgba(52, 207, 161, .65); background: rgba(16, 163, 127, .08); }
 .metric-edit-input { width: calc(100% - 28px); margin: 0 0 2px; padding: 2px 4px; border: 0; border-bottom: 1px solid var(--accent-bright); border-radius: 0; outline: 0; color: var(--ink); background: transparent; font-size: 1rem; font-weight: 700; }
@@ -518,7 +518,7 @@ h2 {
 .activity-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .activity-card h3 { margin: 0; color: var(--ink); font-size: .92rem; }
 .activity-meta { margin-top: 4px; color: var(--subtle); font-size: .7rem; }
-.activity-type-button { width: fit-content; border: 0; padding: 0; color: var(--subtle); background: transparent; font-size: .7rem; text-align: left; }
+.activity-type-button { width: fit-content; border: 0; padding: 10px 0; color: var(--subtle); background: transparent; font-size: .7rem; text-align: left; }
 .activity-type-button:hover, .activity-type-button[aria-pressed="true"] { color: var(--accent-bright); text-decoration: underline; text-underline-offset: 3px; }
 .activity-stats { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; color: var(--muted); font-size: .73rem; }
 .activity-stats strong { color: var(--ink); }
@@ -537,7 +537,7 @@ h2 {
 .danger-button { border-color: rgba(255, 69, 58, .35); color: #ff9a93; }
 .danger-button:hover { border-color: rgba(255, 69, 58, .65); background: rgba(255, 69, 58, .1); }
 .plan-segment-nav { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .025); }
-.plan-segment-nav a { flex: 1 1 120px; padding: 9px 10px; border-radius: 10px; color: var(--muted); font-size: .72rem; font-weight: 700; text-align: center; text-decoration: none; }
+.plan-segment-nav a { display: grid; min-height: 44px; flex: 1 1 120px; place-items: center; padding: 9px 10px; border-radius: 10px; color: var(--muted); font-size: .72rem; font-weight: 700; text-align: center; text-decoration: none; }
 .plan-segment-nav a:hover, .plan-segment-nav a.active { color: var(--ink); background: var(--accent-soft); }
 .plan-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .plan-segment { min-width: 0; }
@@ -551,7 +551,7 @@ h2 {
 .local-remote-card small { color: var(--muted); font-size: .68rem; line-height: 1.4; }
 .library-pagination { display: flex; justify-content: center; margin: 14px 0 4px; }
 .more-segment-nav { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .025); }
-.more-segment-nav a { flex: 1 1 145px; padding: 9px 10px; border-radius: 10px; color: var(--muted); font-size: .72rem; font-weight: 700; text-align: center; text-decoration: none; }
+.more-segment-nav a { display: grid; min-height: 44px; flex: 1 1 145px; place-items: center; padding: 9px 10px; border-radius: 10px; color: var(--muted); font-size: .72rem; font-weight: 700; text-align: center; text-decoration: none; }
 .more-segment-nav a:hover, .more-segment-nav a.active { color: var(--ink); background: var(--accent-soft); }
 .more-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .context-sharing-notice { margin: 0 0 14px; padding: 10px 12px; border: 1px solid rgba(255, 193, 7, .3); border-radius: 12px; color: var(--muted); background: rgba(255, 193, 7, .06); font-size: .74rem; line-height: 1.45; }
@@ -692,6 +692,9 @@ h2 {
 .replan-change strong { color: var(--ink); }
 .logs-output { max-height: 420px; min-height: 160px; margin: 0; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: #171719; white-space: pre-wrap; overflow-wrap: anywhere; font: .67rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .secondary-button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
   border: 1px solid var(--line-strong);
   border-radius: 13px;
   padding: 10px 14px;
@@ -746,6 +749,7 @@ input:focus, textarea:focus, select:focus { border-color: rgba(52, 207, 161, .72
 .nav-item:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .nav-item b { display: inline-grid; min-width: 16px; height: 16px; margin-left: 2px; place-items: center; border-radius: 50%; color: #fff; background: var(--accent); font-size: .62rem; }
 .nav-item b:empty { display: none; }
+.collapsible-section > summary, .planned-week > summary, .library-sport > summary { min-height: 44px; }
 
 dialog { width: min(90vw, 420px); border: 1px solid var(--line); border-radius: 22px; padding: 24px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow); }
 dialog::backdrop { background: rgba(0, 0, 0, .62); backdrop-filter: blur(8px); }
@@ -757,6 +761,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
 .toast { overflow-wrap: anywhere; text-align: center; }
 .toast.show { transform: translate(-50%, 0); opacity: 1; }
 .toast.error { background: var(--danger); box-shadow: 0 8px 24px rgba(255, 69, 58, .25); }
+.today-card .secondary-button, .adaptive-planning-notice .secondary-button { min-height: 44px; }
 
 @media (max-width: 559px) {
   .shell { padding-right: 12px; padding-left: 12px; }

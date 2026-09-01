@@ -753,8 +753,10 @@ class CoachTests(unittest.TestCase):
         service_worker = (Path(__file__).resolve().parents[1] / "public" / "service-worker.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
-        self.assertIn('/app.js?v=124', index)
-        self.assertIn('intervals-coach-v124', service_worker)
+        self.assertIn('/app.js?v=125', index)
+        self.assertIn('intervals-coach-v125', service_worker)
+        self.assertIn('aria-describedby="checkinDescription"', index)
+        self.assertIn('id="checkinError" class="error" role="alert"', index)
 
     def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -4059,8 +4061,8 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/app.js?v=124"', source)
-        self.assertIn('"/icon.svg?v=124"', source)
+        self.assertIn('"/app.js?v=125"', source)
+        self.assertIn('"/icon.svg?v=125"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)

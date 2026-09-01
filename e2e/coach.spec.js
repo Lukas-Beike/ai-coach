@@ -85,6 +85,12 @@ test.describe("critical browser states", () => {
     await page.getByRole("link", { name: "Mehr", exact: true }).click();
     await expect(page).toHaveURL(/#more$/);
     await expect(page.locator('[data-more-segment-panel="connections"]').first()).toBeVisible();
+    await page.getByRole("link", { name: "Coach & Modell", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/#more\/coach$/);
+    await page.getByRole("link", { name: "Mehr", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/#more$/);
     await settingsNav.getByRole("link", { name: "Coach & Modell", exact: true }).click();
     await expect(page).toHaveURL(/#more\/coach$/);
     await expect(page.locator('[data-more-segment-panel="coach"]')).toHaveCount(2);
@@ -125,8 +131,16 @@ test.describe("critical browser states", () => {
     await expect(checkinDialog).toBeVisible();
     await expect(checkinDialog.getByRole("heading", { name: "Tages-Check-in" })).toBeVisible();
     await expect(checkinDialog.getByLabel("Tagesform")).toBeVisible();
+    await expect(checkinDialog.locator('[name="soreness"]')).toBeFocused();
     await checkinDialog.getByRole("button", { name: "Schließen" }).click();
     await expect(checkinDialog).toBeHidden();
+    await expect(checkinButton).toBeFocused();
+
+    const undersizedTargets = await page.locator(".panel.active button:visible, .panel.active a:visible, .panel.active input:visible, .panel.active textarea:visible, .panel.active select:visible, .panel.active summary:visible, .bottom-nav a:visible").evaluateAll((nodes) => nodes
+      .filter((node) => !node.closest("[hidden]"))
+      .filter((node) => node.getBoundingClientRect().width < 44 || node.getBoundingClientRect().height < 44)
+      .map((node) => ({ tag: node.tagName, id: node.id, text: node.textContent.trim().slice(0, 40) })));
+    expect(undersizedTargets, "visible touch targets below 44 CSS pixels").toEqual([]);
 
     await page.getByRole("link", { name: "Coach", exact: true }).click();
     const safetyHint = page.getByText("Trainingsempfehlungen dienen zur Orientierung", { exact: false });
@@ -143,6 +157,10 @@ test.describe("critical browser states", () => {
     });
     expect(safetyLayout.hintBottom).toBeLessThanOrEqual(Math.min(safetyLayout.composerTop, safetyLayout.navigationTop));
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.getByRole("link", { name: "Heute", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#todayPanel")).toHaveClass(/active/);
 
     await page.goto("/#profile");
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);

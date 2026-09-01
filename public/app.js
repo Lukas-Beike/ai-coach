@@ -84,6 +84,24 @@ const NAV_LINK_ROUTES = Object.freeze({
   settings: "more",
 });
 const DEFAULT_NAV_ROUTE = "coach";
+const dialogFocusReturn = new WeakMap();
+
+function showAccessibleDialog(dialog, initialFocus = null) {
+  if (!dialog) return;
+  const active = document.activeElement;
+  dialogFocusReturn.set(dialog, active instanceof HTMLElement && active !== document.body ? active : null);
+  if (!dialog.open) dialog.showModal();
+  const target = initialFocus || dialog.querySelector("button, input, textarea, select, [tabindex]:not([tabindex='-1'])");
+  if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+}
+
+function restoreDialogFocus(dialog) {
+  const target = dialogFocusReturn.get(dialog);
+  dialogFocusReturn.delete(dialog);
+  if (target instanceof HTMLElement && target.isConnected && !target.disabled && !target.closest("[hidden]")) {
+    target.focus({ preventScroll: true });
+  }
+}
 
 function routeFromHash(hash = window.location.hash) {
   const route = String(hash || "").replace(/^#/, "").toLowerCase();
@@ -270,8 +288,7 @@ function showLogin() {
   $("#appShell").hidden = true;
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
-  if (!dialog.open) dialog.showModal();
-  $("#loginPassword").focus();
+  showAccessibleDialog(dialog, $("#loginPassword"));
 }
 
 function showAppShellLoading() {
@@ -756,7 +773,7 @@ function openAdaptivePlanningDialog(preview) {
     apply.hidden = !(preview.changes || []).length && !(preview.illness_pause && !preview.illness_pause.approved);
     apply.dataset.adjustmentId = preview.id || "";
   }
-  if (!dialog.open) dialog.showModal();
+  showAccessibleDialog(dialog, $("#cancelAdaptivePlanningButton"));
 }
 
 function renderAdaptivePlanning(data) {
@@ -2607,8 +2624,7 @@ function openCheckinEditor(date) {
   // The dialog may still be nested in a hidden panel in older cached markup.
   // Move it to the document root before opening so that panel cannot suppress the modal.
   if (dialog.parentElement?.classList.contains("panel")) document.body.append(dialog);
-  if (!dialog.open) dialog.showModal();
-  form.elements.soreness?.focus();
+  showAccessibleDialog(dialog, form.elements.soreness);
 }
 
 function renderCheckins(checkins, timeZone) {
@@ -3876,6 +3892,8 @@ async function saveCheckin(event) {
     values[field] = values[field] === "" ? null : Number(values[field]);
   }
   const button = form.querySelector("button[type=submit]");
+  const errorNode = $("#checkinError");
+  if (errorNode) errorNode.textContent = "";
   if (button) { button.disabled = true; button.textContent = "Check-in wird gespeichert…"; }
   try {
     const result = await api("/api/feedback", { method: "POST", body: JSON.stringify(values) });
@@ -3885,7 +3903,10 @@ async function saveCheckin(event) {
     toast("Tages-Check-in gespeichert");
     $("#checkinDialog")?.close();
     await load();
-  } catch (error) { toast(error.message, true); }
+  } catch (error) {
+    if (errorNode) errorNode.textContent = error.message;
+    toast(error.message, true);
+  }
   finally {
     if (button) { button.disabled = false; button.textContent = "Tages-Check-in speichern"; }
   }
@@ -4144,6 +4165,7 @@ document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEvent
   event.preventDefault();
   applyNavigationRoute(`more/${link.dataset.moreSegment}`, { historyMode: "push" });
 }));
+document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("close", () => restoreDialogFocus(dialog)));
 window.addEventListener("hashchange", syncNavigationRoute);
 
 $("#loginForm").addEventListener("submit", login);
