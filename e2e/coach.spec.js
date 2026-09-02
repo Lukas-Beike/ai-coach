@@ -114,7 +114,7 @@ test.describe("critical browser states", () => {
     await expect(page).toHaveURL(/#planned\/library$/);
     await expect(page.locator("#planLibrarySegment")).toBeVisible();
     await expect(page.locator("#planCalendarSegment")).toBeHidden();
-    await expect(page.getByText("Remote-Aktion: Intervals.icu", { exact: true })).toBeVisible();
+    await expect(page.getByText("Lokal speichern · Remote-Sync nur mit Vorschau", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Vorschau für Bibliotheks- und Planungssync", exact: true })).toBeVisible();
     await page.getByRole("link", { name: "Ziele & Pläne", exact: true }).click();
     await expect(page).toHaveURL(/#planned\/goals$/);
