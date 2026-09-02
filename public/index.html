@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=147" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=147">
+  <link rel="icon" href="/icon.svg?v=149" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=149">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -146,17 +146,13 @@
         </section>
         <section id="planLibrarySegment" class="plan-segment" data-plan-segment-panel="library" aria-labelledby="planLibraryTitle" hidden>
           <div class="plan-segment-heading"><div><span class="eyebrow">LOKALE VORLAGEN</span><h3 id="planLibraryTitle">Bibliothek <span id="libraryDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3></div><span class="segment-status">Lokal speichern · Remote-Sync nur mit Vorschau</span></div>
-        <div class="local-remote-card">
-          <div><strong>Remote-Aktion: Intervals.icu</strong><span class="tab-sync-detail">Vorschau erforderlich · Status wird nach dem Lauf aktualisiert</span></div>
-          <small>Lokale Vorlagen und lokale Planung bleiben ohne Remote-Schreibvorgang. Die Bibliotheksaktion kann nach Vorschau und Bestätigung Vorlagen und datierte Planungen synchronisieren.</small>
-        </div>
         <div class="library-heading">
           <div><h4 class="subsection-title">Lokale Vorlagen</h4><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
           <button id="libraryLoadButton" class="secondary-button" type="button">Vorschau für Bibliotheks- und Planungssync</button>
         </div>
         <div id="library" class="library"></div>
         <div class="library-toolbar">
-          <label>Anzeige<select id="libraryFilter"><option value="active">Aktive Einheiten</option><option value="templates">Vorlagen</option><option value="planned">Geplante lokale Einheiten</option><option value="archived">Archivierte Einheiten</option><option value="all">Alle Einheiten</option></select></label>
+          <label>Anzeige<select id="libraryFilter"><option value="active">Aktive Vorlagen</option><option value="templates">Vorlagen</option><option value="archived">Archivierte Vorlagen</option><option value="all">Alle Vorlagen</option></select></label>
           <span id="librarySummary" class="tab-sync-detail"></span>
         </div>
         <section class="library-bulk" aria-labelledby="libraryBulkTitle">
@@ -166,8 +162,6 @@
             <button id="librarySelectVisibleButton" class="secondary-button" type="button">Sichtbare auswählen</button>
             <button id="libraryMarkButton" class="secondary-button" type="button" disabled>Lokal markieren</button>
             <button id="libraryUnmarkButton" class="secondary-button" type="button" disabled>Markierung entfernen</button>
-            <label id="libraryBulkDateLabel" hidden>Verschiebung in Tagen<input id="libraryBulkDays" type="number" min="-365" max="365" step="1" value="1"></label>
-            <button id="libraryMoveButton" class="secondary-button" type="button" disabled>Verschieben</button>
             <button id="libraryArchiveButton" class="secondary-button danger-button" type="button" disabled>Archivieren</button>
             <button id="librarySyncSelectedButton" class="secondary-button" type="button" disabled>Auswahl synchronisieren</button>
           </div>
@@ -386,12 +380,12 @@
       </div>
     </div>
   </dialog>
-  <script src="/api.js?v=147" defer></script>
-  <script src="/navigation.js?v=147" defer></script>
-  <script src="/state.js?v=147" defer></script>
-  <script src="/views.js?v=147" defer></script>
-  <script src="/forms.js?v=147" defer></script>
-  <script src="/components.js?v=147" defer></script>
-  <script src="/app.js?v=147" defer></script>
+  <script src="/api.js?v=149" defer></script>
+  <script src="/navigation.js?v=149" defer></script>
+  <script src="/state.js?v=149" defer></script>
+  <script src="/views.js?v=149" defer></script>
+  <script src="/forms.js?v=149" defer></script>
+  <script src="/components.js?v=149" defer></script>
+  <script src="/app.js?v=149" defer></script>
 </body>
 </html>

@@ -68,17 +68,15 @@ It is not intended to be exposed directly to the public internet.
   remains a separate queued follow-up action. Reloading the page or losing the
   streaming connection does not cancel the server-side coach request; its
   persisted answer appears in the chat after the next load.
-- The normal Coach chat is read-only: durable local changes and every remote
-  sync require a separate preview, an exact UI confirmation, and a short-lived
-  single-use server-side action token bound to the session and payload.
-- For an explicit workout or plan request, the coach creates a structured
-  preview first. The athlete must approve it in the Coach view before every
-  dated workout is stored in the local training library. Similar workouts are
-  not deduplicated, so the library can grow into a complete local training
-  history. Every library entry has its own local
-  UUID. Imported Intervals.icu templates additionally retain their provider ID
-  as `external_id`; local entries remain local until the library is explicitly
-   synchronized.
+- The Coach is the local source of truth for future planned units, target
+  competitions, and reusable workout templates. An unambiguous plan request
+  stores local planned units immediately; deletions, bulk changes, conflicts,
+  and adaptive replans still require confirmation. Every planning entity has a
+  stable local UUID and sync metadata.
+- Dated workouts are stored in the dedicated local `planned_units` table and
+  never in the reusable template library. Imported Intervals.icu calendar
+  workouts, competitions, and templates retain their provider identities;
+  local changes remain local until the separate sync preview is confirmed.
    Beim ersten expliziten Bibliothekssync wird dafür bei Intervals.icu bei
    Bedarf ein privater Ordner „Intervals Coach“ angelegt.
 - The regular Intervals.icu activity pull is read-only and never uploads
@@ -88,9 +86,10 @@ It is not intended to be exposed directly to the public internet.
   imports the existing remote templates into the local library. This initial
   import is read-only; later local edits still require the separate explicit
   library synchronization action for remote writes.
-- The explicit library synchronization also transfers dated local planning
-  entries to the Intervals.icu calendar with stable upsert identities, so a
-  library sync keeps the local template and its planned calendar unit aligned.
+- The explicit planning synchronization transfers dirty local planned units to
+  the Intervals.icu calendar with stable upsert identities. It reads remote
+  changes first, updates remote-only rows locally, and records two-sided
+  changes as conflicts. Remote deletions are never silently applied locally.
 - If a provider response no longer contains an imported template, it is kept
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by
@@ -245,11 +244,12 @@ are loaded separately. The activity view can request the next page without
 reloading the complete application state.
 
 The Plan view is split into the deep-linked segments `#planned/calendar`,
-`#planned/library`, and `#planned/goals`. Calendar contains planned workouts,
-weather, and confirmation-required adaptive previews. The library loads only
-when opened, uses bounded pages for large collections, and keeps local template
-actions separate from the explicit Intervals.icu sync preview. Goals & Plans
-contains competitions and multi-week plans; competition push is shown as its own remote action. Segment scroll positions are restored when navigating back.
+`#planned/library`, and `#planned/goals`. Calendar is the local primary view and
+contains planned workouts, competitions, relevant read-only calendar events,
+weather, recovery, check-ins, and confirmation-required adaptive previews. The
+library contains reusable templates only. Goals & Plans contains competitions
+and multi-week plans; remote synchronization is a separate preview/confirmation
+action. Segment scroll positions are restored when navigating back.
 
 The More view is organized into the deep-linked segments `#more/profile`,
 `#more/connections`, `#more/coach`, `#more/privacy`, and `#more/operations`.
