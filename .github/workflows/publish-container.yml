@@ -95,6 +95,7 @@ jobs:
           --pids-limit=256 --memory=512m --cpus=1 --tmpfs /tmp
           --volume "${GITHUB_WORKSPACE}/tests:/review/tests:ro"
           --volume "${GITHUB_WORKSPACE}/public:/review/public:ro"
+          --volume "${GITHUB_WORKSPACE}/.github:/review/.github:ro"
           --env PYTHONPATH=/app:/review/tests --workdir /app ai-coach:test
           python /review/tests/run_tests.py
 

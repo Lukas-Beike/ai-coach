@@ -565,6 +565,7 @@ h2 {
 .plan-segment-heading h3 { margin: 0; color: var(--ink); font-size: 1.02rem; }
 .segment-status { color: var(--subtle); font-size: .68rem; line-height: 1.4; text-align: right; }
 .local-remote-card { display: grid; gap: 5px; margin-bottom: 14px; padding: 11px 13px; border: 1px solid rgba(52, 207, 161, .24); border-radius: 13px; background: rgba(52, 207, 161, .06); }
+.plan-segment[data-plan-segment-panel="library"] .local-remote-card { display: none; }
 .local-remote-card > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .local-remote-card strong { color: var(--ink); font-size: .76rem; }
 .local-remote-card small { color: var(--muted); font-size: .68rem; line-height: 1.4; }

@@ -281,6 +281,12 @@ function renderMaintenanceStatus(maintenance) {
     return;
   }
   statusCard.hidden = false;
+  if (!missing.length && !error && (pendingLocal || syncConflicts)) {
+    $("#statusTitle").textContent = syncConflicts ? "Coach benötigt Aufmerksamkeit" : "Lokale Planung wartet auf Sync";
+    $("#statusDetail").textContent = syncConflicts
+      ? `${syncConflicts} Konflikt${syncConflicts === 1 ? "" : "e"} in der lokalen Planung zu klären`
+      : `${pendingLocal} lokale Änderung${pendingLocal === 1 ? "" : "en"} wartet auf Remote-Sync`;
+  }
   statusCard.classList.remove("working");
   statusCard.classList.add("warning");
   $("#statusTitle").textContent = "Wartungsmodus aktiv";
@@ -867,19 +873,30 @@ function renderStatus(data) {
   if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
   const performanceRefresh = data.performance_refresh || {};
   const openaiStatus = data.usage?.status || {};
+  const libraryState = data.library_sync?.state || {};
+  const pendingLocal = Number(libraryState.local || 0) + Number(libraryState.sync_error || 0)
+    + Number(libraryState.planned_local || 0) + Number(libraryState.planned_sync_error || 0);
+  const remoteMissing = Number(libraryState.remote_missing || 0) + Number(libraryState.planned_remote_missing || 0);
+  const syncConflicts = Number(libraryState.planned_conflicts || 0);
   const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error || performanceRefresh.last_error
     || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const statusCard = $("#statusCard");
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
-  const hasProblem = Boolean(missing.length || error);
+  const hasProblem = Boolean(missing.length || error || pendingLocal || remoteMissing || syncConflicts);
   statusCard.hidden = !hasProblem || activePanel === "settingsPanel";
   statusCard.classList.toggle("warning", hasProblem);
   $("#statusTitle").textContent = missing.length
     ? `Einrichtung nötig: ${missing.join(" + ")}`
-    : error ? "Coach benötigt Aufmerksamkeit" : "Coach ist bereit";
+    : error ? "Coach benötigt Aufmerksamkeit"
+      : syncConflicts ? "Sync-Konflikte benötigen eine Entscheidung"
+        : pendingLocal ? "Lokale Änderungen warten auf Sync"
+          : remoteMissing ? "Remote-Löschungen benötigen eine Entscheidung" : "Coach ist bereit";
   $("#statusDetail").textContent = missing.length
     ? "Ergänze die fehlende Serverkonfiguration"
-    : error || (morning.status === "ready" ? `Morgen-Check-in abgeschlossen: ${dateLabel(morning.date)}` : "Bereit für deine nächste Frage");
+    : error || (syncConflicts ? `${syncConflicts} Planungskonflikt(e) im Plan-Bereich auflösen`
+      : pendingLocal ? `${pendingLocal} lokale Änderung(en) über die Sync-Vorschau übertragen`
+        : remoteMissing ? `${remoteMissing} Remote-Löschung(en) im Plan-Bereich prüfen`
+          : (morning.status === "ready" ? `Morgen-Check-in abgeschlossen: ${dateLabel(morning.date)}` : "Bereit für deine nächste Frage"));
   statusCard.classList.remove("working");
 }
 
@@ -1109,8 +1126,10 @@ function renderDailyPlanningContext(date, todayKey) {
   const checkin = context.checkin;
   const recovery = context.recovery;
   const health = context.health;
+  const weather = context.weather;
+  const activityFeedback = Array.isArray(context.activity_feedback) ? context.activity_feedback : [];
   const appointments = Array.isArray(context.appointments) ? context.appointments : [];
-  const hasSignals = checkin || recovery || health || appointments.length;
+  const hasSignals = checkin || recovery || health || weather || appointments.length || activityFeedback.length;
   if (!hasSignals && dateKeyDifference(date, todayKey) > 0) return document.createDocumentFragment();
   const root = document.createElement("details");
   root.className = "planned-day-context";
@@ -1145,6 +1164,8 @@ function renderDailyPlanningContext(date, todayKey) {
       planningContextNumber(recovery.body_battery, " Body Battery"),
     ].filter(Boolean);
     addSignal("Erholung", recoveryValues.join(" · "), "recovery");
+    const recoverySources = [...new Set(Object.values(recovery.sources || {}).filter(Boolean))];
+    if (recoverySources.length) addSignal("Quelle Erholung", recoverySources.join(" · "), "signal-source");
   }
   if (health) {
     const healthValues = [
@@ -1153,6 +1174,18 @@ function renderDailyPlanningContext(date, todayKey) {
       planningContextNumber(health.calories, " kcal"),
     ].filter(Boolean);
     addSignal("Gesundheit", healthValues.join(" · "), "health");
+    if (health.source) addSignal("Quelle Gesundheit", health.source, "signal-source");
+  }
+  if (weather) {
+    const weatherValues = [
+      weather.condition,
+      planningContextNumber(weather.temperature_min, " °C"),
+      planningContextNumber(weather.temperature_max, " °C"),
+      planningContextNumber(weather.precipitation_probability_max, " % Regen"),
+      planningContextNumber(weather.wind_gusts_max, " km/h Böen"),
+    ].filter(Boolean);
+    addSignal("Wetter", weatherValues.join(" · "), "weather");
+    addSignal("Quelle Wetter", "Open-Meteo", "signal-source");
   }
   if (checkin) {
     const checkinValues = [
@@ -1174,6 +1207,9 @@ function renderDailyPlanningContext(date, todayKey) {
     });
     addSignal("Termine", appointmentValues.join(" · "), "appointments");
   }
+  if (activityFeedback.length) {
+    addSignal("Aktivitätsfeedback", `${activityFeedback.length} Rückmeldung${activityFeedback.length === 1 ? "" : "en"} vorhanden`, "feedback");
+  }
   if (hasSignals) root.append(signals);
   else {
     const empty = document.createElement("span");
@@ -1182,6 +1218,26 @@ function renderDailyPlanningContext(date, todayKey) {
     root.append(empty);
   }
   return root;
+}
+
+async function resolvePlannedConflict(localId, strategy, button) {
+  if (!localId || !button) return;
+  if (!window.confirm(strategy === "adopt_remote"
+    ? "Die Remote-Version dieser Planung übernehmen? Die lokale Änderung wird verworfen."
+    : "Die lokale Version behalten und beim nächsten Remote-Sync übertragen?")) return;
+  button.disabled = true;
+  try {
+    await api(`/api/planned/local/${encodeURIComponent(localId)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ strategy }),
+    });
+    toast(strategy === "adopt_remote" ? "Remote-Planung übernommen" : "Lokale Planung priorisiert");
+    invalidateContextPreview();
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    button.disabled = false;
+  }
 }
 
 function distanceLabel(value) {
@@ -1462,7 +1518,7 @@ function renderParallelCyclingWarning(groups) {
     deleteButton.addEventListener("click", () => {
       const selectedId = options.querySelector("input:checked")?.value;
       const selected = group.find((event) => String(event.id) === selectedId);
-      if (selected) deletePlanned(selected.id, deleteButton, selected.name);
+            if (selected) deletePlanned(selected.local_id || selected.id, deleteButton, selected.name);
     });
     groupRoot.append(options, deleteButton);
     root.append(groupRoot);
@@ -1613,7 +1669,7 @@ function renderLocalPlanningActions(event, body) {
   body.append(actions);
 }
 
-function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContext = []) {
+function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContext = [], competitions = []) {
   setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
   renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   const root = $("#plannedCalendar");
@@ -1627,9 +1683,25 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
     if (!eventsByDate.has(date)) eventsByDate.set(date, []);
     eventsByDate.get(date).push(event);
   });
+  (competitions || []).forEach((competition) => {
+    if (!competition || !competition.event_date) return;
+    const date = String(competition.event_date).slice(0, 10);
+    if (!eventsByDate.has(date)) eventsByDate.set(date, []);
+    eventsByDate.get(date).push({
+      ...competition,
+      date,
+      start_date_local: competition.start_date_local || `${date}T00:00:00`,
+      type: competition.sport || "Wettkampf",
+      category: competition.category || `RACE_${competition.priority || "B"}`,
+      is_competition: true,
+      is_local: true,
+      sync_source: competition.external_id ? "local+intervals" : "local",
+      sync_status: competition.sync_state || "local",
+    });
+  });
   const calendarEventsByDate = new Map();
   (externalCalendarEvents || [])
-    .filter((event) => event && (Number(event.training_relevant) === 0 || Number(event.no_intensity) === 1 || Number(event.short_only) === 1))
+    .filter((event) => event && Number(event.training_relevant) === 1)
     .forEach((event) => {
       const date = String(event.event_date || "").slice(0, 10);
       if (!date) return;
@@ -1736,7 +1808,9 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
           meta.className = "planned-meta";
           const compliance = event.compliance;
           const complianceSummary = compliance?.percentage != null ? `Umsetzung ${compliance.percentage}%` : compliance?.status === "missed" ? "Nicht umgesetzt" : compliance?.status === "completed" ? "Absolviert" : null;
-          const syncLabel = event.sync_source === "local+intervals"
+          const syncLabel = event.is_competition
+            ? "Wettkampf"
+            : event.sync_source === "local+intervals"
             ? "Lokal + Intervals.icu"
             : event.sync_source === "local"
               ? "Nur lokal"
@@ -1768,6 +1842,27 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
               complianceRoot.append(completed);
             }
             body.append(complianceRoot);
+          }
+          if (event.sync_status === "conflict" && event.local_id) {
+            const conflictRoot = document.createElement("div");
+            conflictRoot.className = "competition-conflict planned-conflict";
+            const remote = event.sync_conflict?.remote || {};
+            const conflictText = document.createElement("span");
+            conflictText.textContent = remote.name
+              ? `Konflikt: Remote enthält „${remote.name}“ am ${String(remote.date || remote.start_date_local || "").slice(0, 10)}.`
+              : "Konflikt: Die lokale und die Remote-Planung wurden gleichzeitig geändert.";
+            const conflictActions = document.createElement("div");
+            conflictActions.className = "competition-conflict-actions";
+            for (const [strategy, label] of [["keep_local", "Lokal behalten"], ["adopt_remote", "Remote übernehmen"]]) {
+              const conflictButton = document.createElement("button");
+              conflictButton.type = "button";
+              conflictButton.className = "secondary-button";
+              conflictButton.textContent = label;
+              conflictButton.addEventListener("click", () => resolvePlannedConflict(event.local_id, strategy, conflictButton));
+              conflictActions.append(conflictButton);
+            }
+            conflictRoot.append(conflictText, conflictActions);
+            body.append(conflictRoot);
           }
           const privateAdjustment = event.private_calendar_adjustment;
           if (privateAdjustment) {
@@ -1825,7 +1920,7 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
             identity.textContent = `Remote-ID: ${event.remote_id}`;
             body.append(identity);
           }
-          renderLocalPlanningActions(event, body);
+          if (!event.is_competition) renderLocalPlanningActions(event, body);
           if (event.id != null && event.is_remote && isCoachOwnedWorkout(event)) {
             const actions = document.createElement("div");
             actions.className = "card-actions";
@@ -1833,7 +1928,7 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
             button.type = "button";
             button.className = "secondary-button danger-button";
             button.textContent = "Einheit löschen";
-            button.addEventListener("click", () => deletePlanned(event.id, button, event.name));
+            button.addEventListener("click", () => deletePlanned(event.local_id || event.id, button, event.name));
             actions.append(button);
             body.append(actions);
           }
@@ -1857,13 +1952,13 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
 }
 
 async function deletePlanned(eventId, button, name) {
-  if (!window.confirm(`„${name || "Geplante Einheit"}“ wirklich aus Intervals.icu löschen?`)) return;
+  if (!window.confirm(`„${name || "Geplante Einheit"}“ wirklich lokal archivieren und für den nächsten Sync vormerken?`)) return;
   button.disabled = true;
   button.textContent = "Wird gelöscht…";
   try {
     await api(`/api/planned/${encodeURIComponent(eventId)}`, { method: "DELETE" });
     state.remoteDeleteFailure = null;
-    toast("Geplante Einheit gelöscht");
+    toast("Geplante Einheit lokal entfernt; Sync vorgemerkt");
     await load();
   } catch (error) {
     state.remoteDeleteFailure = { name: name || "Geplante Einheit", message: error.message };
@@ -2224,12 +2319,10 @@ function updateLibraryBulkControls() {
   if (summary) summary.textContent = count ? `${count} Einheit${count === 1 ? "" : "en"} ausgewählt · lokale und Remote-Wirkung vorab prüfen` : "Keine Einheiten ausgewählt";
   const clear = $("#libraryClearSelectionButton");
   if (clear) clear.hidden = count === 0;
-  ["libraryMarkButton", "libraryUnmarkButton", "libraryMoveButton", "libraryArchiveButton", "librarySyncSelectedButton"].forEach((id) => {
+  ["libraryMarkButton", "libraryUnmarkButton", "libraryArchiveButton", "librarySyncSelectedButton"].forEach((id) => {
     const button = $("#" + id);
     if (button) button.disabled = count === 0 || state.libraryBulkBusy;
   });
-  const dateLabel = $("#libraryBulkDateLabel");
-  if (dateLabel) dateLabel.hidden = count === 0;
 }
 
 function clearLibrarySelection() {
@@ -2248,6 +2341,7 @@ function renderLibrary(workouts) {
   state.librarySelection = new Set([...state.librarySelection].filter((id) => knownIds.has(id)));
   const filter = state.libraryFilter || "active";
   const filterSelect = $("#libraryFilter");
+  filterSelect?.querySelector('option[value="planned"]')?.remove();
   if (filterSelect && filterSelect.value !== filter) filterSelect.value = filter;
   const visible = allWorkouts.filter((workout) => {
     if (filter === "archived") return Boolean(workout.archived);
@@ -2490,21 +2584,13 @@ async function runLibraryBulkLocalAction(action) {
   const selected = selectedLibraryWorkouts();
   if (!selected.length) return;
   const entries = selected.map((workout) => ({ library_workout_id: String(workout.id) }));
-  if (action === "move") {
-    const daysInput = $("#libraryBulkDays");
-    const offset = Number(daysInput?.value);
-    if (!Number.isInteger(offset) || offset < -365 || offset > 365 || offset === 0) { toast("Bitte eine Verschiebung zwischen -365 und 365 Tagen (außer 0) auswählen.", true); return; }
-    selected.forEach((workout, index) => { entries[index].date = addDateKey(String(workout.date || ""), offset); });
-  }
   state.libraryBulkBusy = true;
   updateLibraryBulkControls();
   try {
     const preview = await api("/api/library/bulk/preview", { method: "POST", body: JSON.stringify({ action, entries }) });
     const message = action === "archive"
       ? `Nur lokal archivieren? ${selected.length} Einheit(en) werden nicht gelöscht und kein Remote-System wird beschrieben.`
-      : action === "move"
-        ? `Nur lokal verschieben? ${selected.length} Einheit(en) werden um ${entries[0].date ? $("#libraryBulkDays").value : "?"} Tag(e) verschoben.`
-        : `Nur lokal ${action === "mark" ? "markieren" : "die Markierung entfernen"}? ${selected.length} Einheit(en) werden geändert.`;
+      : `Nur lokal ${action === "mark" ? "markieren" : "die Markierung entfernen"}? ${selected.length} Einheit(en) werden geändert.`;
     const result = await executeLibraryActionPreview(preview, message);
     if (!result) return;
     renderLibraryBulkResult(result);
@@ -2550,7 +2636,7 @@ async function loadLibrary() {
   button.disabled = true;
   button.textContent = "Bibliothek wird geladen…";
   try {
-    const preview = await api("/api/library/sync/preview", { method: "POST", body: "{}" });
+    const preview = await api("/api/planning/sync/preview", { method: "POST", body: "{}" });
     const summary = preview.summary || {};
     const changeCount = Object.entries(summary)
       .filter(([key]) => key !== "planned")
@@ -3510,16 +3596,19 @@ function render(data) {
   renderMessages(data.messages, firstRender);
   renderToday(data);
   renderActivities(data.activities || []);
-  renderPlanned(data.planned || [], data.external_calendar?.events || [], data.daily_planning_context || []);
+  renderPlanned(data.planned || [], data.external_calendar?.events || [], data.daily_planning_context || [], data.competitions || []);
   renderActivePlanSegment(data);
   const librarySyncDetail = $("#librarySyncDetail");
   if (librarySyncDetail) {
     const libraryState = data.library_sync?.state || {};
-    const pending = Number(libraryState.local || 0) + Number(libraryState.sync_error || 0);
-    const missing = Number(libraryState.remote_missing || 0);
+    const pending = Number(libraryState.local || 0) + Number(libraryState.sync_error || 0)
+      + Number(libraryState.planned_local || 0) + Number(libraryState.planned_sync_error || 0);
+    const missing = Number(libraryState.remote_missing || 0) + Number(libraryState.planned_remote_missing || 0);
+    const conflicts = Number(libraryState.planned_conflicts || 0);
     const stateHint = [
       pending ? `${pending} lokale Einheit${pending === 1 ? "" : "en"} noch nicht synchronisiert` : null,
       missing ? `${missing} Remote-Einheit${missing === 1 ? "" : "en"} nicht gefunden` : null,
+      conflicts ? `${conflicts} Konflikt${conflicts === 1 ? "" : "e"} zu klären` : null,
     ].filter(Boolean).join(" · ");
     librarySyncDetail.textContent = data.library_sync?.last_error
       ? data.library_sync.last_error
@@ -4529,7 +4618,6 @@ $("#librarySelectVisibleButton").addEventListener("click", () => {
 $("#libraryClearSelectionButton").addEventListener("click", clearLibrarySelection);
 $("#libraryMarkButton").addEventListener("click", () => runLibraryBulkLocalAction("mark"));
 $("#libraryUnmarkButton").addEventListener("click", () => runLibraryBulkLocalAction("unmark"));
-$("#libraryMoveButton").addEventListener("click", () => runLibraryBulkLocalAction("move"));
 $("#libraryArchiveButton").addEventListener("click", () => runLibraryBulkLocalAction("archive"));
 $("#librarySyncSelectedButton").addEventListener("click", runLibraryBulkRemoteSync);
 $("#systemContextPreviewButton").addEventListener("click", () => {
