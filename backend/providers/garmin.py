@@ -128,6 +128,15 @@ def collect_garmin_data(
                     add_error("resting_hr", exc)
                 current += timedelta(days=1)
 
+    heart_rate_zones_fetch = getattr(client, "get_heart_rate_zones", None)
+    if callable(heart_rate_zones_fetch):
+        try:
+            payload["heart_rate_zones"] = external_call(
+                "garmin", "heart_rate_zones", heart_rate_zones_fetch, None
+            )
+        except Exception as exc:
+            add_error("heart_rate_zones", exc)
+
     max_metrics_start = today - timedelta(days=89)
     max_metrics_range = getattr(client, "get_max_metrics_range", None)
     max_metrics_fetch = (
@@ -195,20 +204,12 @@ def collect_garmin_data(
         except Exception as exc:
             add_error("running_threshold", exc)
 
-    connectapi = getattr(client, "connectapi", None)
-    if callable(connectapi):
-        try:
-            payload["cycling_threshold_hr"] = external_call(
-                "garmin",
-                "cycling_threshold_hr",
-                lambda: connectapi(
-                    f"/biometric-service/stats/lactateThresholdHeartRate/range/{today.isoformat()}/{today.isoformat()}"
-                    "?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST"
-                ),
-                {"date": today.isoformat(), "sport": "CYCLING", "aggregation": "daily", "aggregation_strategy": "LATEST"},
-            )
-        except Exception as exc:
-            add_error("cycling_threshold_hr", exc)
+    # get_lactate_threshold() already contains the cycling heart-rate field
+    # when Garmin provides it (heartRateCycling). The separate range endpoint
+    # is undocumented and has started returning an unprocessable response for
+    # otherwise healthy accounts. Keep the collector on the supported client
+    # method; garmin_performance_metrics() can read heartRateCycling from the
+    # running_threshold payload and falls back to the other source sections.
 
     weight_fetch = getattr(client, "get_weigh_ins", None) or getattr(client, "get_body_composition", None)
     if callable(weight_fetch):

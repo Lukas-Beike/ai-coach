@@ -116,7 +116,7 @@ STATIC_TARGETS = {
 VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.4.4"
+APP_VERSION = "1.4.5"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -130,6 +130,8 @@ MIN_EXPORT_FREE_BYTES = 10_000_000
 EXPORT_TIME_LIMIT_SECONDS = 120
 STREAM_CHUNK_BYTES = 64 * 1024
 MAX_EXTERNAL_CALENDAR_BYTES = 5_000_000
+CALENDAR_FETCH_TIMEOUT_SECONDS = 30
+CALENDAR_CONNECTION_TIMEOUT_SECONDS = 10
 MAX_EXTERNAL_RESPONSE_BYTES = 10_000_000
 # The Responses API counts both visible output and reasoning tokens against
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
@@ -2816,10 +2818,38 @@ def _garmin_pace_seconds(value: Any) -> float | int | None:
     number = _garmin_numeric(value)
     if number is None or number <= 0:
         return None
-    # Garmin's lactate-threshold speed is metres per second. Accept seconds
-    # per kilometre as a defensive fallback for fixture/API variants.
-    pace = 1000 / number if number < 20 else number
+    scaled_garmin_speed = number < 1
+    # Garmin's profile/latestLactateThreshold payload currently exposes the
+    # running threshold speed in a decimetre-per-second-like scale (for
+    # example 0.35833233 represents roughly 3.58 m/s, or 4:40/km). The
+    # fixture and some API variants expose the regular m/s value instead.
+    pace = 100 / number if scaled_garmin_speed else 1000 / number if number < 20 else number
+    if scaled_garmin_speed:
+        # Garmin displays this profile pace in five-second steps.
+        pace = round(pace / 5) * 5
     return round(pace) if 120 <= pace <= 900 else None
+
+
+def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:
+    """Read max-HR values from Garmin's heart-rate-zone profile payload."""
+    values: dict[str, list[float | int]] = {"cycling": [], "running": [], "generic": []}
+    zones = snapshot.get("heart_rate_zones")
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            max_hr = as_number(first_present(value, ("maxHeartRateUsed", "maxHeartRate", "maxHR")))
+            if max_hr is not None and 80 <= float(max_hr) <= 260:
+                sport = _garmin_key(first_present(value, ("sport", "sportType", "activityType")))
+                kind = "cycling" if any(term in sport for term in ("cycling", "cycl", "bike", "ride")) else "running" if any(term in sport for term in ("running", "run")) else "generic"
+                values[kind].append(max_hr)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value[:100]:
+                visit(child)
+
+    visit(zones)
+    return {kind: max(items) for kind, items in values.items() if items}
 
 
 def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -2903,25 +2933,29 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         80,
         230,
     )
+    profile_max_hr = garmin_profile_max_hr(snapshot)
     max_hr_values: dict[str, list[float | int]] = {"cycling": [], "running": []}
     stored_max_hr = snapshot.get("sport_max_hr") if isinstance(snapshot.get("sport_max_hr"), dict) else {}
+    activities = snapshot.get("activities") if isinstance(snapshot.get("activities"), list) else []
     for kind in max_hr_values:
+        profile_value = profile_max_hr.get(kind) or profile_max_hr.get("generic")
+        if profile_value is not None:
+            max_hr_values[kind].append(profile_value)
+            continue
         stored_value = as_number(stored_max_hr.get(kind))
         if stored_value is not None and 80 <= float(stored_value) <= 260:
             max_hr_values[kind].append(stored_value)
-    activities = snapshot.get("activities") if isinstance(snapshot.get("activities"), list) else []
-    for activity in activities:
-        if not isinstance(activity, dict):
-            continue
-        value = as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate")))
-        kind = activity_kind(activity)
-        if value is not None and 80 <= float(value) <= 260 and kind in max_hr_values:
-            max_hr_values[kind].append(value)
+        for activity in activities:
+            if not isinstance(activity, dict):
+                continue
+            value = as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate")))
+            if value is not None and 80 <= float(value) <= 260 and activity_kind(activity) == kind:
+                max_hr_values[kind].append(value)
     weight = garmin_weight_metric(snapshot)
     units = {
         "weight_kg": (weight["value"], "kg", "Garmin Connect KÃ¶rpergewicht"),
-        "cycling_max_hr_bpm": (max(max_hr_values["cycling"], default=None), "bpm", "Garmin Connect RadaktivitÃ¤ten"),
-        "running_max_hr_bpm": (max(max_hr_values["running"], default=None), "bpm", "Garmin Connect LaufaktivitÃ¤ten"),
+        "cycling_max_hr_bpm": (max(max_hr_values["cycling"], default=None), "bpm", "Garmin Connect Herzfrequenzzonen" if profile_max_hr else "Garmin Connect RadaktivitÃ¤ten"),
+        "running_max_hr_bpm": (max(max_hr_values["running"], default=None), "bpm", "Garmin Connect Herzfrequenzzonen" if profile_max_hr else "Garmin Connect LaufaktivitÃ¤ten"),
         "cycling_vo2max_ml_kg_min": (cycling_vo2, "ml/kg/min", "Garmin Connect max metrics"),
         "running_vo2max_ml_kg_min": (running_vo2, "ml/kg/min", "Garmin Connect max metrics"),
         "run_5k_seconds": (race_values["run_5k_seconds"], "s", "Garmin Connect Laufprognose"),
@@ -3609,6 +3643,7 @@ def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress
         except OSError as exc:
             message = "Die Kalenderadresse konnte nicht aufgelöst werden."
             raise AppError(status, message) from exc
+    addresses = list(dict.fromkeys(addresses))
     if not addresses or any(not address.is_global for address in addresses):
         raise AppError(status, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
     return addresses
@@ -3617,15 +3652,6 @@ def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress
 def fetch_calendar_feed(url: str) -> bytes:
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").rstrip(".").casefold()
-    try:
-        addresses = [ipaddress.ip_address(hostname)]
-    except ValueError:
-        try:
-            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
-        except OSError as exc:
-            raise AppError(502, "Der Kalender-Feed konnte nicht aufgelöst werden.") from exc
-    if not addresses or any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
-        raise AppError(400, "Private or local calendar addresses are not fetched.")
     port = parsed.port or 443
     request_target = parsed.path or "/"
     if parsed.query:
@@ -3646,29 +3672,95 @@ def fetch_calendar_feed(url: str) -> bytes:
     tls_context = ssl.create_default_context()
     tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
     # Resolve immediately before connecting and connect only to these checked
-    # addresses. This closes the validation/fetch DNS rebinding window.
-    addresses = _resolve_calendar_addresses(hostname, status=502)
-    for address in addresses:
-        raw_socket = None
-        tls_socket = None
-        try:
-            raw_socket = socket.create_connection((str(address), port), timeout=10)
-            tls_socket = tls_context.wrap_socket(raw_socket, server_hostname=hostname)
+    # addresses. This closes the validation/fetch DNS rebinding window. Keep
+    # one resolution per fetch; resolving twice made a slow resolver multiply
+    # the calendar synchronization time.
+    started = time.perf_counter()
+    request_context = {
+        "service": "calendar",
+        "method": "GET",
+        "path": "/redacted",
+        "timeout_seconds": CALENDAR_FETCH_TIMEOUT_SECONDS,
+    }
+    LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": request_context})
+    timed_out = False
+    try:
+        addresses = _resolve_calendar_addresses(hostname, status=502)
+        request_context["address_count"] = len(addresses)
+        deadline = started + CALENDAR_FETCH_TIMEOUT_SECONDS
+        last_network_error: OSError | None = None
+        for address in addresses:
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                timed_out = True
+                break
             raw_socket = None
-            tls_socket.sendall(request_bytes)
-            response = HTTPResponse(tls_socket, method="GET")
-            response.begin()
-            if 300 <= response.status < 400:
-                raise AppError(400, "Der Kalender-Feed darf nicht auf eine andere Adresse weiterleiten.")
-            if response.status >= 400:
-                raise AppError(502, f"Der Kalender-Feed antwortete mit HTTP {response.status}.")
-            return response.read(MAX_EXTERNAL_CALENDAR_BYTES + 1)
-        finally:
-            if tls_socket is not None:
-                tls_socket.close()
-            if raw_socket is not None:
-                raw_socket.close()
-    raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.")
+            tls_socket = None
+            try:
+                raw_socket = socket.create_connection(
+                    (str(address), port), timeout=min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, remaining)
+                )
+                tls_socket = tls_context.wrap_socket(raw_socket, server_hostname=hostname)
+                raw_socket = None
+                remaining = deadline - time.perf_counter()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                tls_socket.settimeout(min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, remaining))
+                tls_socket.sendall(request_bytes)
+                response = HTTPResponse(tls_socket, method="GET")
+                response.begin()
+                if 300 <= response.status < 400:
+                    raise AppError(400, "Der Kalender-Feed darf nicht auf eine andere Adresse weiterleiten.")
+                if response.status >= 400:
+                    raise AppError(502, f"Der Kalender-Feed antwortete mit HTTP {response.status}.")
+                payload = response.read(MAX_EXTERNAL_CALENDAR_BYTES + 1)
+                if len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
+                    raise AppError(413, "Der Kalender-Feed ist zu groß.")
+                LOGGER.info(
+                    "External HTTP request completed",
+                    extra={
+                        "event": "external_request_completed",
+                        "context": {
+                            **request_context,
+                            "status": response.status,
+                            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                            "response_bytes": len(payload),
+                        },
+                    },
+                )
+                return payload
+            except AppError:
+                raise
+            except TimeoutError as exc:
+                timed_out = True
+                last_network_error = exc
+                break
+            except OSError as exc:
+                last_network_error = exc
+                continue
+            finally:
+                if tls_socket is not None:
+                    tls_socket.close()
+                if raw_socket is not None:
+                    raw_socket.close()
+        if timed_out:
+            raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.")
+        raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.") from last_network_error
+    except AppError as exc:
+        LOGGER.error(
+            "External calendar request failed",
+            extra={
+                "event": "external_request_failed",
+                "context": {
+                    **request_context,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "status": exc.status,
+                    "error_code": "timeout" if timed_out or exc.status == 504 else "provider_error",
+                },
+            },
+        )
+        raise
 
 
 def _ical_temporal_value(raw: str, parameters: dict[str, str]) -> tuple[datetime, bool] | None:
@@ -4140,15 +4232,6 @@ def external_calendar_url(value: Any) -> str:
         raise AppError(400, "Die Kalenderadresse muss eine HTTPS-URL ohne Zugangsdaten sein.")
     if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
         raise AppError(400, "Lokale Kalenderadressen werden aus Sicherheitsgründen nicht abgerufen.")
-    try:
-        addresses = [ipaddress.ip_address(hostname)]
-    except ValueError:
-        try:
-            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)]
-        except OSError as exc:
-            raise AppError(400, "Die Kalenderadresse konnte nicht aufgelöst werden.") from exc
-    if any(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved for address in addresses):
-        raise AppError(400, "Private oder lokale Kalenderadressen werden nicht abgerufen.")
     _resolve_calendar_addresses(hostname, status=400)
     return raw
 
@@ -4330,7 +4413,7 @@ def _garmin_daily_health_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str
         for metric_name, keys in GARMIN_DAILY_HEALTH_FIELDS.items():
             value = as_number(first_present(record, keys))
             if value is not None:
-                health[metric_name] = value
+                health[metric_name] = int(round(float(value))) if metric_name in {"steps", "floors"} else value
         if health:
             health["source"] = GARMIN_PERFORMANCE_SOURCE
     return health_by_date
@@ -4354,7 +4437,7 @@ def garmin_daily_health_metrics(snapshot: dict[str, Any], days: int, end_date: d
     units = {"steps": "Schritte/Tag", "floors": "Stockwerke/Tag", "calories": "kcal/Tag"}
     return {
         f"{metric_name}_7d": metric(
-            round(sum(numbers) / len(numbers), 2) if numbers else None,
+            int(round(sum(numbers) / len(numbers))) if numbers and metric_name in {"steps", "floors"} else round(sum(numbers) / len(numbers), 2) if numbers else None,
             units[metric_name],
             GARMIN_PERFORMANCE_SOURCE,
             "Durchschnitt der letzten 7 Tage",
@@ -9466,6 +9549,7 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
     wellness_run = sport_info_setting(latest_wellness, "run")
     latest_ride_activity = next((activity for activity in sorted(activities, key=lambda item: str(item.get("start_date_local") or ""), reverse=True)
                                  if isinstance(activity, dict) and any(term in str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold() for term in ("ride", "rad", "bike", "cycling"))), {})
+    latest_ride_eftp = first_present(latest_ride_activity, ("icu_ftp",))
     generic_lthr = first_present(athlete, ("lthr",))
     profile = get_profile()
     garmin_metrics = garmin_performance_metrics(garmin_snapshot())
@@ -9521,7 +9605,7 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         # never be populated from Intervals.icu eFTP; the fallback only uses an
         # explicitly labelled FTP field.
         **garmin_threshold_metrics,
-        "cycling_eftp_watts": metric(first_present(ride, ("eftp", "eFTP")) or first_present(wellness_ride, ("eftp", "eFTP")) or first_present(latest_ride_activity, ("icu_ftp", "eftp", "eFTP")), "W", "Intervals.icu"),
+        "cycling_eftp_watts": metric(latest_ride_eftp or first_present(wellness_ride, ("eftp", "eFTP")) or first_present(ride, ("eftp", "eFTP")), "W", "Intervals.icu"),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
         "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
@@ -12437,7 +12521,7 @@ def session_cookie_headers(token: str = "", csrf: str = "", *, clear: bool = Fal
 
 class RequestHandler(BaseHTTPRequestHandler):
     server_version = f"IntervalsCoach/{APP_VERSION}"
-    client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+    client_disconnect_errors = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
 
     def log_message(self, fmt: str, *args: Any) -> None:
         LOGGER.info(
@@ -12453,15 +12537,23 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.connection.settimeout(20)
 
     def log_client_disconnect(self) -> None:
+        context = {
+            "method": self.command,
+            "path": urlparse(self.path).path,
+            "request_id": getattr(self, "request_id", None),
+        }
+        for attribute, key in (("_response_status", "response_status"), ("_response_bytes", "response_bytes"), ("_response_error_type", "error_type")):
+            value = getattr(self, attribute, None)
+            if value is not None:
+                context[key] = value
+        started = getattr(self, "_response_started_at", None)
+        if started is not None:
+            context["response_duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
         LOGGER.info(
             "HTTP client disconnected before response completed",
             extra={
                 "event": "http_client_disconnected",
-                "context": {
-                    "method": self.command,
-                    "path": urlparse(self.path).path,
-                    "request_id": getattr(self, "request_id", None),
-                },
+                "context": context,
             },
         )
 
@@ -12905,11 +12997,18 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_header(key, value)
         for key, value in response_header_items(headers):
             self.send_header(key, value)
+        self._response_status = status
+        self._response_bytes = len(data)
+        self._response_started_at = time.perf_counter()
         try:
             self.end_headers()
             self.wfile.write(data)
-        except self.client_disconnect_errors:
+        except self.client_disconnect_errors as exc:
+            self._response_error_type = type(exc).__name__
             self.log_client_disconnect()
+        finally:
+            for attribute in ("_response_status", "_response_bytes", "_response_started_at", "_response_error_type"):
+                self.__dict__.pop(attribute, None)
 
     def send_file_stream(
         self,
