@@ -99,6 +99,9 @@ It is not intended to be exposed directly to the public internet.
   archived/restored, and local-only templates can be deleted. Synced templates
   are intentionally archived instead of deleted; edits become pending local
   changes until the explicit library synchronization.
+- Existing training plans can be renamed, have their goal, status, or date range
+  changed, and can be deleted through the Coach. Plan deletion is reviewed and
+  removes plan metadata only; scheduled local workout units remain untouched.
 - The coach can explicitly apply saved library entries as local planned units.
   Existing calendar dates are checked first. Intervals.icu calendar writes stay
   disabled unless the athlete explicitly requests that synchronization.
@@ -110,12 +113,12 @@ It is not intended to be exposed directly to the public internet.
   subjective soreness, stress, motivation, session RPE, illness, pain, available
   training time, and day-specific constraints. Reported illness is a high-priority
   planning constraint and is shown separately in the dated daily context. The
-  coach can propose a conservative sport-pause forecast; only after explicit
-  confirmation are future local sessions replaced with illness-pause entries and
+  coach can propose a conservative sport-pause forecast; after explicit approval
+  in Coach Chat, future local sessions are replaced with illness-pause entries and
   the corresponding future check-in days filled.
   The Plan tab combines each dated check-in with recovery signals, weather,
-  planned sessions, and read-only calendar appointments. Check-ins are entered
-  exclusively through the Coach Chat. Check-in dates and daily training
+  planned sessions, and read-only calendar appointments. Check-ins can be entered
+  or edited through Coach Chat and the daily editor. Check-in dates and daily training
   boundaries use the saved IANA profile timezone, and future check-ins are
   rejected. The Heute tab provides a compact daily view of the local
   check-in, readiness/recovery signals, today's planned workout, relevant
