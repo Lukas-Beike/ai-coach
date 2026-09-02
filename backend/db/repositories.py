@@ -90,6 +90,33 @@ class TrainingPlanRepository:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def get(self, db: Any, plan_id: str) -> dict[str, Any] | None:
+        row = db.execute(
+            "SELECT id, name, goal, start_date, end_date, status, created_at, updated_at "
+            "FROM training_plans WHERE id = ?",
+            (plan_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update(
+        self,
+        db: Any,
+        plan_id: str,
+        name: str,
+        goal: str,
+        start_date: str,
+        end_date: str,
+        status: str,
+        updated_at: str,
+    ) -> None:
+        db.execute(
+            "UPDATE training_plans SET name=?, goal=?, start_date=?, end_date=?, status=?, updated_at=? WHERE id=?",
+            (name, goal, start_date, end_date, status, updated_at, plan_id),
+        )
+
+    def delete(self, db: Any, plan_id: str) -> None:
+        db.execute("DELETE FROM training_plans WHERE id = ?", (plan_id,))
+
 
 class PlanAdjustmentRepository:
     """Persist adaptive-replanning previews and their application status."""

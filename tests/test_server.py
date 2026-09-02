@@ -374,9 +374,15 @@ class CoachTests(unittest.TestCase):
         with server.database() as db:
             repository.create(db, "plan-old", "Old", "Base", "2026-09-01", "2026-09-07", "draft", "2026-09-01T00:00:00+00:00")
             repository.create(db, "plan-new", "New", "Build", "2026-09-08", "2026-09-14", "planned", "2026-09-02T00:00:00+00:00")
+            repository.update(db, "plan-old", "Renamed", "Updated", "2026-09-02", "2026-09-09", "active", "2026-09-02T01:00:00+00:00")
             rows = repository.list(db)
+            updated = repository.get(db, "plan-old")
         self.assertEqual([row["id"] for row in rows], ["plan-new", "plan-old"])
         self.assertEqual(rows[0]["status"], "planned")
+        self.assertEqual(updated["name"], "Renamed")
+        with server.database() as db:
+            repository.delete(db, "plan-old")
+            self.assertIsNone(repository.get(db, "plan-old"))
 
     def test_plan_adjustment_repository_preserves_preview_lookup_and_status_contract(self):
         repository = server.PlanAdjustmentRepository()
@@ -1600,6 +1606,7 @@ class CoachTests(unittest.TestCase):
             "list_workout_library",
             "list_recent_activities",
             "list_planned_workouts",
+            "list_training_plans",
             "refresh_intervals_data",
             "refresh_current_performance",
             "refresh_workout_library",
@@ -1614,6 +1621,7 @@ class CoachTests(unittest.TestCase):
             "save_workout_library_entries", "apply_workout_library_plan", "save_competition",
             "delete_competition", "save_library_template", "update_local_planned_unit",
             "update_library_template",
+            "save_checkin", "update_training_plan",
         } <= available_tools)
         routing_cases = {
             "Welche Wettkämpfe sind gespeichert?": "list_competitions",
@@ -1635,7 +1643,7 @@ class CoachTests(unittest.TestCase):
             "Aktualisiere das Wetter": "refresh_weather",
             "Synchronisiere den Kalender": "refresh_external_calendar",
             "Starte die adaptive Planung als Vorschau": "preview_adaptive_replan",
-            "Wende die adaptive Planung an": None,
+            "Wende die adaptive Planung an": "apply_adaptive_replan",
         }
         for message, expected in routing_cases.items():
             with self.subTest(message=message):
@@ -1645,6 +1653,117 @@ class CoachTests(unittest.TestCase):
         with self.assertRaises(server.AppError) as raised:
             server.apply_coach_adaptive_replan(str(uuid.uuid4()), "Wende die adaptive Planung an.")
         self.assertEqual(raised.exception.status, 409)
+
+    def test_chat_can_save_and_edit_a_daily_checkin(self):
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_checkin"}
+            if len([call for call in calls if call[0] == "/responses"]) == 1:
+                return {"output": [{
+                    "type": "function_call",
+                    "name": "save_checkin",
+                    "call_id": "call_checkin",
+                    "arguments": json.dumps({
+                        "checkin_date": "", "soreness": 6, "stress": 3, "motivation": 7,
+                        "session_rpe": -1, "available_minutes": 45, "day_form": "Schwere Beine",
+                        "illness": "", "pain": "", "availability_notes": "Nur locker",
+                        "notes": "Erster Eintrag",
+                    }),
+                }]}
+            return {"output_text": "Der Check-in ist gespeichert.", "output": []}
+
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ):
+            result = server.chat_with_coach("Speichere meinen Tages-Check-in: heute schwere Beine, 45 Minuten verfügbar.")
+
+        self.assertEqual(result["checkins"][0]["soreness"], 6)
+        self.assertEqual(server.list_checkins()[0]["available_minutes"], 45)
+        edited = server.save_coach_checkin({
+            "checkin_date": "", "soreness": 8, "stress": -1, "motivation": -1,
+            "session_rpe": -1, "available_minutes": -1, "day_form": "", "illness": "",
+            "pain": "", "availability_notes": "", "notes": "Nur Schmerzen bewertet",
+        })
+        self.assertEqual(edited["checkin"]["soreness"], 8)
+        self.assertEqual(edited["checkin"]["day_form"], "Schwere Beine")
+        response_calls = [payload for path, payload in calls if path == "/responses"]
+        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "save_checkin"})
+
+    def test_chat_can_apply_adaptive_replan_after_explicit_approval(self):
+        adjustment_id = str(uuid.uuid4())
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_adaptive_apply"}
+            if len([call for call in calls if call[0] == "/responses"]) == 1:
+                return {"output": [{
+                    "type": "function_call",
+                    "name": "apply_adaptive_replan",
+                    "call_id": "call_adaptive_apply",
+                    "arguments": json.dumps({"adjustment_id": adjustment_id}),
+                }]}
+            return {"output_text": "Die adaptive Anpassung ist angewendet.", "output": []}
+
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ), patch.object(
+            server, "apply_coach_adaptive_replan", return_value={"status": "applied", "adjustment_id": adjustment_id}
+        ) as apply:
+            result = server.chat_with_coach("Wende die adaptive Planung an.")
+
+        self.assertIn("angewendet", result["message"]["content"])
+        apply.assert_called_once_with(adjustment_id, "Wende die adaptive Planung an.")
+        response_calls = [payload for path, payload in calls if path == "/responses"]
+        self.assertEqual(response_calls[0]["tool_choice"], {"type": "function", "name": "apply_adaptive_replan"})
+
+    def test_training_plan_lifecycle_is_available_as_local_coach_action(self):
+        plan_id = str(uuid.uuid4())
+        with server.database() as db:
+            server.TrainingPlanRepository().create(
+                db, plan_id, "Base", "Grundlage", "2026-09-01", "2026-09-14", "planned", server.utc_now()
+            )
+        updated = server.update_training_plan(plan_id, {
+            "action": "update", "name": "Build", "goal": "Wettkampfvorbereitung",
+            "start_date": "2026-09-02", "end_date": "2026-09-21", "status": "active",
+        })
+        self.assertEqual(updated["plan"]["name"], "Build")
+        self.assertEqual(updated["plan"]["status"], "active")
+        preview = server._coach_workout_action_preview("update_training_plan", {
+            "plan_id": plan_id, "action": "delete", "name": "", "goal": "",
+            "start_date": "", "end_date": "", "status": "planned",
+        })
+        proposal = server.create_coach_action_preview(preview, "session-plan")
+        confirmed = server.confirm_coach_action_preview(proposal["proposed_action"]["id"], "session-plan")
+        executed = server.execute_coach_action(confirmed["action_token"], "session-plan")
+        self.assertEqual(executed["status"], "deleted")
+        self.assertEqual(server.list_training_plans(), [])
+
+    def test_library_template_save_requires_explicit_template_intent(self):
+        calls = []
+
+        def fake_openai(path, payload):
+            calls.append((path, payload))
+            if path == "/conversations":
+                return {"id": "conv_template_gate"}
+            if len([call for call in calls if call[0] == "/responses"]) == 1:
+                return {"output": [{
+                    "type": "function_call", "name": "save_library_template",
+                    "call_id": "call_template_gate",
+                    "arguments": json.dumps({"sport": "Ride", "name": "Ungewollt", "description": "- 30m Z2", "duration_minutes": 30, "target": "AUTO"}),
+                }]}
+            return {"output_text": "Keine Vorlage gespeichert.", "output": []}
+
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="openai-test")), patch.object(
+            server, "openai_request", side_effect=fake_openai
+        ):
+            server.chat_with_coach("Erkläre mir nur, wie Vorlagen funktionieren.")
+
+        self.assertEqual(server.list_workout_library(), [])
 
     def test_empty_activity_feedback_removes_entry_and_input_is_bounded(self):
         result = server.save_activity_feedback("activity-2", {"notes": "x" * 5000})
