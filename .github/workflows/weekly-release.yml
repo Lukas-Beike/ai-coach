@@ -170,29 +170,39 @@ jobs:
             version_merge=true
           fi
 
+          count_releaseable_commits() {
+            local commit_range="$1"
+            git log --format='%s' "$commit_range" | awk '
+              !/^chore\(release\): set application version to [0-9]+\.[0-9]+\.[0-9]+( \(#[0-9]+\))?$/ { count++ }
+              END { print count + 0 }
+            '
+          }
+
           latest_tag="$(gh release list --repo "$REPOSITORY" --limit 100 --json tagName,publishedAt,isDraft,isPrerelease \
             --jq '[.[] | select(.isDraft == false and .isPrerelease == false) | select(.tagName | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(.publishedAt) | last | .tagName // empty')"
           if [[ -n "$latest_tag" ]]; then
             if ! git rev-parse --verify --quiet "refs/tags/$latest_tag" >/dev/null; then
               git fetch --no-tags origin "refs/tags/$latest_tag:refs/tags/$latest_tag"
             fi
-            release_base="$(git merge-base "$latest_tag" HEAD 2>/dev/null || true)"
-            if [[ -z "$release_base" ]]; then
-              release_tree="$(git show -s --format='%T' "$latest_tag")"
-              while read -r candidate_commit candidate_tree; do
-                if [[ "$candidate_tree" == "$release_tree" ]]; then
-                  release_base="$candidate_commit"
-                  break
-                fi
-              done < <(git log HEAD --format='%H %T')
-            fi
+            # Releases are promoted from develop to main, so the release
+            # commit is represented by the same tree in develop. The normal
+            # merge-base is only the old branch point here and would count
+            # the complete history since the branches diverged.
+            release_tree="$(git show -s --format='%T' "$latest_tag")"
+            release_base=""
+            while read -r candidate_commit candidate_tree; do
+              if [[ "$candidate_tree" == "$release_tree" ]]; then
+                release_base="$candidate_commit"
+                break
+              fi
+            done < <(git log HEAD --format='%H %T')
             if [[ -z "$release_base" ]]; then
               echo "Could not find the latest release tree in develop; refusing to guess the commit count."
               exit 1
             fi
-            commit_count="$(git rev-list --count "${release_base}..HEAD")"
+            commit_count="$(count_releaseable_commits "${release_base}..HEAD")"
           else
-            commit_count="$(git rev-list --count HEAD)"
+            commit_count="$(count_releaseable_commits HEAD)"
           fi
           echo "Commits since latest release: $commit_count"
 
