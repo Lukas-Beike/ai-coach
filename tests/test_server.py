@@ -1807,6 +1807,8 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(events[0]["all_day"])
         self.assertEqual(events[1]["duration_minutes"], 1440)
         self.assertTrue(events[1]["all_day"])
+        self.assertFalse(events[0]["training_relevant"])
+        self.assertFalse(events[1]["training_relevant"])
         self.assertFalse(events[2]["training_relevant"])
         self.assertTrue(events[3]["no_intensity"])
         self.assertTrue(events[3]["training_relevant"])
@@ -2020,6 +2022,7 @@ class CoachTests(unittest.TestCase):
             self.assertNotIn("url", state)
             self.assertEqual(state["events"][0]["duration_minutes"], 120)
             self.assertEqual(state["events"][0]["short_only"], 0)
+            self.assertEqual([event["uid"] for event in server.list_external_calendar_events(1000, training_relevant_only=True)], ["family-2"])
             self.assertFalse(state["events"][1]["training_relevant"])
 
     def test_external_calendar_sync_limits_events_to_eight_weeks(self):

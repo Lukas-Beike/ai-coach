@@ -116,7 +116,7 @@ STATIC_TARGETS = {
 VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.4.8"
+APP_VERSION = "1.4.9"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -4046,8 +4046,9 @@ def ical_training_impact(description: Any) -> bool:
 
 
 def ical_training_relevant(name: Any, description: Any) -> bool:
-    """Ignore only events explicitly marked as informational in their description."""
-    return not _ical_description_contains(description, ICAL_NO_TRAINING_MARKER)
+    """Treat only described events as training-relevant calendar constraints."""
+    description_text = str(description or "").strip()
+    return bool(description_text) and not _ical_description_contains(description_text, ICAL_NO_TRAINING_MARKER)
 
 
 def ical_no_intensity(name: Any, description: Any) -> bool:
