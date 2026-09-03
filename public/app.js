@@ -3119,7 +3119,7 @@ function competitionCard(competition = {}, index = 0) {
   additionalGrid.className = "competition-card-facts competition-additional-grid";
   additionalGrid.append(
     competitionFact("Startzeit", competition.start_date_local ? formatTime(competition.start_date_local) : ""),
-    competitionFact("Erwartete Dauer", formatDuration(competition.moving_time)),
+    competitionFact("Erwartete Dauer (hh:mm)", formatDuration(competition.moving_time)),
     competitionFact("Streckenprofil", competition.course_profile),
     competitionFact("Beschreibung", competition.description),
     competitionFact("Notizen", competition.notes)
