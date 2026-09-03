@@ -10374,16 +10374,40 @@ def set_sync_operation_state(
     )
 
 
-def sync_status_state() -> dict[str, Any]:
+def sync_public_state(
+    *,
+    freshness: list[dict[str, Any]] | None = None,
+    jobs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return the safe, live sync progress projection used by browser state."""
     running = SYNC_LOCK.locked() or get_kv("sync_running") == "1"
     result = project_sync_status(
         running=running,
         get_value=get_kv,
         state_versions=state_versions(),
-        provider_freshness=provider_freshness_state(),
+        provider_freshness=freshness if freshness is not None else provider_freshness_state(),
         maintenance=MAINTENANCE_GATE.state(),
     )
-    result["jobs"] = sync_jobs_state()
+    result["jobs"] = jobs if jobs is not None else sync_jobs_state()
+    return result
+
+
+def sync_status_state() -> dict[str, Any]:
+    return sync_public_state()
+
+
+def sync_browser_state(
+    *,
+    freshness: list[dict[str, Any]] | None = None,
+    jobs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Keep the browser's legacy display status while adding live progress."""
+    result = sync_public_state(freshness=freshness, jobs=jobs)
+    # Bootstrap already carries these projections at the top level. Keeping
+    # them out of the nested sync card preserves its bounded payload size.
+    for key in ("state_versions", "provider_freshness", "maintenance"):
+        result.pop(key, None)
+    result["status"] = get_kv("sync_status") or result.get("message")
     return result
 
 
@@ -14867,12 +14891,7 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
             "provider_states": bootstrap_provider_states(freshness),
             "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
             "provider_resync": {"intervals": provider_resync_state("intervals"), "garmin": provider_resync_state("garmin")},
-            "sync": {
-                "last_sync_at": get_kv("last_sync_at"), "last_error": get_kv("last_sync_error") or None,
-                "running": get_kv("sync_running") == "1", "status": get_kv("sync_status") or None,
-                "last_window_start": get_kv("last_sync_window_start"), "last_window_end": get_kv("last_sync_window_end"),
-                "jobs": jobs,
-            },
+            "sync": sync_browser_state(freshness=freshness, jobs=jobs),
             "running_jobs": [job for job in jobs if job.get("status") in {"queued", "running"}],
             "library_sync": {"last_sync_at": get_kv("last_library_sync_at"), "last_error": get_kv("last_library_sync_error") or None, "state": workout_library_sync_summary()},
             "sync_settings": {"intervals_days": sync_period("intervals"), "garmin_days": sync_period("garmin")},
@@ -15002,6 +15021,8 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         checkins = list_checkins(30)
         external_calendar = external_calendar_state()
         daily_context = daily_planning_context(snapshot, planned, weather, checkins, list_external_calendar_events(50, training_relevant_only=True))
+        freshness = provider_freshness_state()
+        sync = sync_browser_state(freshness=freshness)
         return {
             "app": {
                 "name": "Intervals Coach",
@@ -15035,21 +15056,13 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "performance": current_performance_context(snapshot),
             "garmin": garmin_public_state(),
             "intervals": intervals_public_state(snapshot),
-            "provider_freshness": provider_freshness_state(),
+            "provider_freshness": freshness,
             "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
             "provider_resync": {
                 "intervals": provider_resync_state("intervals"),
                 "garmin": provider_resync_state("garmin"),
             },
-            "sync": {
-                "last_sync_at": get_kv("last_sync_at"),
-                "last_error": get_kv("last_sync_error") or None,
-                "running": get_kv("sync_running") == "1",
-                "status": get_kv("sync_status") or None,
-                "last_window_start": get_kv("last_sync_window_start"),
-                "last_window_end": get_kv("last_sync_window_end"),
-                "jobs": sync_jobs_state(),
-            },
+            "sync": sync,
             "library_sync": {
                 "last_sync_at": get_kv("last_library_sync_at"),
                 "last_error": get_kv("last_library_sync_error") or None,

@@ -1317,6 +1317,9 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(status["operation_id"], "operation-test")
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["progress"], 35)
+        bootstrap = server.public_bootstrap(local_only=True)
+        self.assertEqual(bootstrap["sync"]["progress"], 35)
+        self.assertEqual(bootstrap["sync"]["message"], "Daten werden gelesen…")
 
     def test_sync_status_projection_is_dependency_light(self):
         from backend.sync.status import persist_sync_operation_state, project_sync_status
@@ -7006,6 +7009,10 @@ class CoachTests(unittest.TestCase):
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
         self.assertIn('v=163', index)
+        self.assertIn('id="connectionsSyncProgress"', index)
+        self.assertIn('id="providerAttentionBanner"', index)
+        self.assertIn("function renderConnectionsSyncProgress(data)", app)
+        self.assertIn("function providerRequiresManualAttention(entry)", app)
 
     def test_library_bulk_local_actions_preview_diff_and_hash_conflict(self):
         first = server.create_local_workout_library_entry({

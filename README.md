@@ -289,6 +289,13 @@ remain separate explicit actions. The same safe freshness metadata is included
 in the diagnostics report. The timeline retains at most 200 attempts for 30
 days and never stores provider responses or calendar URLs during normal use.
 
+While a provider synchronization is running, the connections view shows its
+current phase and, where the provider reports one, a progress indicator. A
+site-wide notice headed **“Anbindung benötigt Aufmerksamkeit”** is displayed
+only for errors that require manual intervention (for example, renewed login
+or invalid configuration). Partial data with a scheduled automatic retry,
+including the two-hour Garmin Body Battery retry, does not raise that notice.
+
 The workout library also supports a mobile-friendly, keyboard-accessible
 multi-selection for local marking, date shifting, archiving, and explicitly
 selected Intervals.icu synchronization. Every bulk operation shows a bounded

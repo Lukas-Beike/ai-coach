@@ -176,6 +176,12 @@ h2 {
 .status-card.working .pulse { animation: pulse 1.2s ease-in-out infinite; }
 .connectivity-notice { margin: -4px 0 16px; padding: 10px 13px; border: 1px solid rgba(255, 159, 10, .45); border-radius: 12px; background: rgba(255, 159, 10, .1); color: var(--orange); font-size: .76rem; line-height: 1.4; }
 .connectivity-notice[hidden] { display: none; }
+.provider-attention-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: -4px 0 16px; padding: 12px 13px; border: 1px solid rgba(255, 69, 58, .55); border-radius: 12px; background: rgba(255, 69, 58, .1); color: #ffb4ae; font-size: .76rem; line-height: 1.4; }
+.provider-attention-banner[hidden] { display: none; }
+.provider-attention-banner > div { display: grid; gap: 2px; min-width: 0; }
+.provider-attention-banner strong { color: #ffd1cd; }
+.provider-attention-banner span { color: var(--muted); }
+.provider-attention-banner a { flex: 0 0 auto; color: #ffd1cd; font-weight: 700; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 #appShell.is-loading main, #appShell.is-loading .bottom-nav { pointer-events: none; opacity: .72; }
 @keyframes pulse { 50% { transform: scale(1.55); box-shadow: 0 0 0 8px transparent; } }
 
@@ -780,6 +786,18 @@ h2 {
 .connection-card .sync-period { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--subtle); font-size: .67rem; font-weight: 500; }
 .connection-card .sync-period input { width: 76px; padding: 7px 8px; text-align: center; font-size: .76rem; }
 .connection-resync-status { display: block; line-height: 1.4; }
+.connections-sync-progress { display: grid; gap: 8px; padding: 11px; border: 1px solid rgba(52, 207, 161, .38); border-radius: 13px; background: rgba(52, 207, 161, .07); }
+.connections-sync-progress[hidden] { display: none; }
+.connection-sync-progress-item { display: grid; gap: 6px; }
+.connection-sync-progress-header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: var(--muted); font-size: .7rem; }
+.connection-sync-progress-header strong { color: var(--ink); font-size: .76rem; }
+.connection-sync-progress-header span { text-align: right; }
+.connection-sync-progress-bar { width: 100%; height: 6px; overflow: hidden; border: 0; border-radius: 999px; background: rgba(255, 255, 255, .12); accent-color: var(--accent-bright); }
+.connection-sync-progress-bar::-webkit-progress-bar { background: rgba(255, 255, 255, .12); }
+.connection-sync-progress-bar::-webkit-progress-value { background: var(--accent-bright); }
+.connection-sync-progress-bar::-moz-progress-bar { background: var(--accent-bright); }
+.connection-sync-progress-bar.is-indeterminate { appearance: none; background: linear-gradient(90deg, transparent 0 20%, var(--accent-bright) 35% 55%, transparent 70% 100%); background-size: 200% 100%; animation: connection-progress 1.2s linear infinite; }
+@keyframes connection-progress { to { background-position: -200% 0; } }
 .settings-message { margin: 0; text-align: left; }
 .release-section .settings-section-heading .secondary-button { flex: 0 0 auto; padding: 8px 11px; font-size: .7rem; }
 .release-changelog { max-height: 420px; min-height: 90px; margin: 0; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: #171719; white-space: pre-wrap; overflow-wrap: anywhere; font: .72rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
@@ -946,6 +964,8 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .connection-card .sync-period { grid-column: 1 / -1; grid-row: 2; width: 100%; }
   .connection-card .sync-period input { width: 82px; }
   .connection-card .connection-resync-status { grid-column: 1 / -1; grid-row: 4; }
+  .provider-attention-banner { align-items: flex-start; flex-direction: column; }
+  .provider-attention-banner a { min-height: 44px; display: inline-flex; align-items: center; }
   .settings-message { overflow-wrap: anywhere; }
   .settings-message code { overflow-wrap: anywhere; }
   .settings-inline-action { display: grid; gap: 9px; align-items: stretch; }

@@ -42,6 +42,10 @@
         <span id="statusDetail">Trainingsbereich wird geprüft</span>
       </section>
       <section id="connectivityNotice" class="connectivity-notice" role="status" aria-live="polite" hidden></section>
+      <section id="providerAttentionBanner" class="provider-attention-banner" role="alert" aria-live="assertive" hidden>
+        <div><strong>Anbindung benötigt Aufmerksamkeit</strong><span id="providerAttentionDetail"></span></div>
+        <a href="#more/connections">Anbindungen öffnen</a>
+      </section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
         <section id="coachOverview" class="coach-overview card" aria-labelledby="coachOverviewTitle">
@@ -264,6 +268,7 @@
         </nav>
         <details class="settings-section collapsible-section" data-more-segment-panel="connections">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
+          <section id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></section>
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="chatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
