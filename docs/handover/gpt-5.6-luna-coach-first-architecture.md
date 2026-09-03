@@ -314,17 +314,17 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 11. Docker-, Sicherheits- und Abschlussprüfung
 
-- [ ] `python -m unittest discover -s tests -v` und beide Syntaxchecks erneut ausführen.
-- [ ] `docker build -t ai-coach:local .` ausführen.
-- [ ] Security-/Secret-/Redaction-Prüfung und Healthcheck ausführen.
-- [ ] Assetquerys und Service-Worker-Cache gemeinsam aktualisieren; `APP_VERSION` nur über den Releaseprozess ändern.
-- [ ] Diff, Branch, Migration, Datenpfade und Dokumentation abschließend prüfen.
+- [x] `python -m unittest discover -s tests -v` und beide Syntaxchecks erneut ausführen.
+- [x] `docker build -t ai-coach:local .` ausführen.
+- [x] Security-/Secret-/Redaction-Prüfung und Healthcheck ausführen.
+- [x] Assetquerys und Service-Worker-Cache gemeinsam aktualisieren; `APP_VERSION` nur über den Releaseprozess ändern.
+- [x] Diff, Branch, Migration, Datenpfade und Dokumentation abschließend prüfen.
 
 **Subsysteme:** CI, Docker, Release, Security, README.  
 **Definition of Done:** Alle Tests grün, keine Secrets, keine Datenbankmutation außerhalb getesteter Pfade, Arbeitsbaum sauber.  
 **Tests:** Unit, Syntax, Docker, Health, Secret-Scan, Browser-Smoke.  
 **Seiteneffekte:** Keine Veröffentlichung, kein PR und kein Push von Runtime-/Testdaten.  
-**Evidence:** `- Finale Befehle/Ergebnisse/Commit: …`
+**Evidence:** Ergebnis: Vollsuite `python -m unittest discover -s tests -v` — 370 Tests grün, 3 erwartete SQLCipher-Skips; `python -m py_compile server.py tests/test_server.py` grün; Docker-Build grün mit Image-Digest `sha256:6dd5232cc7508bd320d1b62cf51ae68a02930b1ff1680e65674b3d6be0df3634`; isolierte Playwright-Viewportmatrix 10/10 grün; Healthcheck `{"status": "ok", "maintenance": {"active": false, "running_operations": 0}}`; Native-Dialog-, veraltete-Asset-, verbreitete-Credential-/Private-Key- und geschützte-Pfad-Scans ohne Treffer. `APP_VERSION` blieb `1.4.9`, Assetquerys und Service-Worker-Cache sind auf v158 synchronisiert. Feature-Worktree sauber; keine Runtime-/Geheimnisdateien oder Remote-Veröffentlichung. Commit: folgt nach diesem Evidence-Patch.
 
 ## 6. Arbeitsweise und Commitfolge
 
@@ -345,10 +345,10 @@ Jeder Commit bleibt klein, verwendet Conventional Commits und wird vor dem näch
 
 ## 8. Abschlusskriterien für das Handover
 
-- [ ] Alle Implementierungstasks sind mit Evidence belegt.
-- [ ] Der gemeldete Plan-/Kalenderdialog speichert im richtigen Turn und liefert keinen falschen „nichts gespeichert“-Text.
-- [ ] Coach kann lokale Planung, Vorlagenänderungen, Undo, Providerrefresh, Intervals-Sync, Jobs und Konfliktlösung über Werkzeuge ausführen.
-- [ ] Initiale Shell, Chatverlauf/Skeleton, Wetterzustand und Syncfortschritt sind nachvollziehbar.
-- [ ] Navigation, Tabs, Buttons, Layouts und Breakpoints erfüllen die visuelle Abnahme.
-- [ ] Daten-, Sicherheits-, SQLCipher- und Remote-Sync-Grenzen sind unverändert eingehalten.
-- [ ] Alle Tests und der Docker-Build sind grün; der Arbeitsbaum enthält keine Runtime- oder Geheimnisdateien.
+- [x] Alle Implementierungstasks sind mit Evidence belegt.
+- [x] Der gemeldete Plan-/Kalenderdialog speichert im richtigen Turn und liefert keinen falschen „nichts gespeichert“-Text.
+- [x] Coach kann lokale Planung, Vorlagenänderungen, Undo, Providerrefresh, Intervals-Sync, Jobs und Konfliktlösung über Werkzeuge ausführen.
+- [x] Initiale Shell, Chatverlauf/Skeleton, Wetterzustand und Syncfortschritt sind nachvollziehbar.
+- [x] Navigation, Tabs, Buttons, Layouts und Breakpoints erfüllen die visuelle Abnahme.
+- [x] Daten-, Sicherheits-, SQLCipher- und Remote-Sync-Grenzen sind unverändert eingehalten.
+- [x] Alle Tests und der Docker-Build sind grün; der Arbeitsbaum enthält keine Runtime- oder Geheimnisdateien.
