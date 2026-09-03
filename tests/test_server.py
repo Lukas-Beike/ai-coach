@@ -155,6 +155,9 @@ class RecordedIntervalsClient:
     def delete_event(self, event_id):
         self.recorder.record("DELETE", f"/athlete/0/events/{event_id}")
 
+    def delete_activity(self, activity_id):
+        self.recorder.record("DELETE", f"/activity/{activity_id}")
+
 
 class CoachTests(unittest.TestCase):
     @classmethod
@@ -354,6 +357,41 @@ class CoachTests(unittest.TestCase):
             result = server.chat_with_coach("Lade bitte meine letzten Einheiten und erstelle einen Entwurf.", client_turn_id="turn-fresh")
         self.assertEqual(result["command_receipts"][0]["tool"], "stage_training_plan")
         self.assertEqual(order[0], "refresh")
+
+    def test_latest_activity_quick_action_refreshes_once_then_offers_garmin_duplicate_delete(self):
+        intent = {
+            "intent": "remote_sync", "operation": "start_provider_refresh", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["intervals_refresh"],
+            "follow_up_operations": [],
+        }
+        activities = [
+            {"id": "wahoo", "type": "Ride", "source": "Wahoo", "start_date_local": "2026-08-30T08:00:00", "moving_time": 5400, "distance": 45000},
+            {"id": "garmin", "type": "Ride", "source": "Garmin Connect", "start_date_local": "2026-08-30T08:03:00", "moving_time": 5360, "distance": 44800},
+        ]
+        captured = []
+
+        def refresh(*args, **kwargs):
+            server.save_snapshot({
+                "synced_at": "2026-08-30T10:00:00+00:00", "athlete": {}, "recent_activities": activities,
+                "recent_wellness": [], "upcoming_calendar": [], "raw_provider_data": {"activities": activities},
+            })
+            return {"status": "ok"}
+
+        def response(payload):
+            captured.append(payload)
+            return {"output_text": "Ich analysiere die Wahoo-Aufzeichnung. Garmin löschen?"}
+
+        message = "Aktualisiere zuerst meine Intervals.icu-Daten und analysiere danach meine letzte Einheit."
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-latest"
+        ), patch.object(server, "sync_intervals", side_effect=refresh) as sync, patch.object(
+            server, "responses_request", side_effect=response
+        ):
+            result = server.chat_with_coach(message, client_turn_id="turn-latest", session_csrf_hash="csrf-hash")
+        sync.assert_called_once()
+        self.assertEqual(result["intent"]["intent"], "advice")
+        self.assertEqual(result["proposed_actions"][0]["action_type"], "delete_duplicate_intervals_activity")
+        self.assertIn("Wahoo-Aufzeichnung als kanonische", captured[0]["instructions"])
 
     def test_structured_commit_rejects_model_artifact_outside_classified_scope(self):
         artifact = server._stage_coach_artifact(
@@ -1602,19 +1640,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=160', index)
-        self.assertIn('/navigation.js?v=160', index)
-        self.assertIn('/state.js?v=160', index)
-        self.assertIn('/views.js?v=160', index)
-        self.assertIn('/forms.js?v=160', index)
-        self.assertIn('/components.js?v=160', index)
-        self.assertIn('/app.js?v=160', index)
-        self.assertIn('intervals-coach-v160', service_worker)
-        self.assertIn('"/navigation.js?v=160"', service_worker)
-        self.assertIn('"/state.js?v=160"', service_worker)
-        self.assertIn('"/views.js?v=160"', service_worker)
-        self.assertIn('"/forms.js?v=160"', service_worker)
-        self.assertIn('"/components.js?v=160"', service_worker)
+        self.assertIn('/api.js?v=161', index)
+        self.assertIn('/navigation.js?v=161', index)
+        self.assertIn('/state.js?v=161', index)
+        self.assertIn('/views.js?v=161', index)
+        self.assertIn('/forms.js?v=161', index)
+        self.assertIn('/components.js?v=161', index)
+        self.assertIn('/app.js?v=161', index)
+        self.assertIn('intervals-coach-v161', service_worker)
+        self.assertIn('"/navigation.js?v=161"', service_worker)
+        self.assertIn('"/state.js?v=161"', service_worker)
+        self.assertIn('"/views.js?v=161"', service_worker)
+        self.assertIn('"/forms.js?v=161"', service_worker)
+        self.assertIn('"/components.js?v=161"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('function executeCoachActionProposal(', app)
@@ -1633,8 +1671,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=160'), index.index('/components.js?v=160'))
-        self.assertLess(index.index('/components.js?v=160'), index.index('/app.js?v=160'))
+        self.assertLess(index.index('/forms.js?v=161'), index.index('/components.js?v=161'))
+        self.assertLess(index.index('/components.js?v=161'), index.index('/app.js?v=161'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -1666,7 +1704,10 @@ class CoachTests(unittest.TestCase):
         styles = (Path(__file__).resolve().parents[1] / "public" / "styles.css").read_text(encoding="utf-8")
         self.assertIn('id="coachOverview"', index)
         self.assertIn('id="coachQuickActions"', index)
-        self.assertIn('id="coachProviderStatus"', index)
+        self.assertNotIn('id="coachProviderStatus"', index)
+        self.assertNotIn('id="coachReadyStatus"', index)
+        self.assertIn('id="coachAdjustPlanButton"', index)
+        self.assertIn('>Plan anpassen</button>', index)
         self.assertIn('id="coachReceipts"', index)
         self.assertIn('function renderCoachOverview(data)', app)
         self.assertIn('function renderCoachReceipts()', app)
@@ -6014,16 +6055,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=160"', source)
-        self.assertIn('"/navigation.js?v=160"', source)
-        self.assertIn('"/state.js?v=160"', source)
-        self.assertIn('"/views.js?v=160"', source)
-        self.assertIn('"/forms.js?v=160"', source)
-        self.assertIn('"/components.js?v=160"', source)
+        self.assertIn('"/api.js?v=161"', source)
+        self.assertIn('"/navigation.js?v=161"', source)
+        self.assertIn('"/state.js?v=161"', source)
+        self.assertIn('"/views.js?v=161"', source)
+        self.assertIn('"/forms.js?v=161"', source)
+        self.assertIn('"/components.js?v=161"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=160"', source)
-        self.assertIn('"/icon.svg?v=160"', source)
-        self.assertIn('"/styles.css?v=160"', source)
+        self.assertIn('"/app.js?v=161"', source)
+        self.assertIn('"/icon.svg?v=161"', source)
+        self.assertIn('"/styles.css?v=161"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6074,6 +6115,75 @@ class CoachTests(unittest.TestCase):
         kept, skipped = server.filter_garmin_activities([garmin], intervals)
         self.assertEqual(len(kept), 1)
         self.assertEqual(skipped, 0)
+
+    def test_latest_intervals_duplicate_keeps_wahoo_and_selects_garmin_for_deletion(self):
+        activities = [
+            {
+                "id": "i-wahoo", "type": "Ride", "source": "Wahoo", "device_name": "ELEMNT BOLT",
+                "start_date_local": "2026-08-29T07:00:00", "moving_time": 7200, "distance": 60200,
+            },
+            {
+                "id": "i-garmin", "type": "Ride", "source": "Garmin Connect", "device_name": "Edge 1040",
+                "start_date_local": "2026-08-29T07:04:00", "moving_time": 7160, "distance": 59800,
+            },
+        ]
+        pair = server.latest_wahoo_garmin_duplicate({
+            "synced_at": "2026-08-29T10:00:00+00:00",
+            "raw_provider_data": {"activities": activities},
+        })
+        self.assertEqual(pair["canonical_id"], "i-wahoo")
+        self.assertEqual(pair["duplicate_id"], "i-garmin")
+
+    def test_intervals_duplicate_requires_matching_start_duration_and_distance(self):
+        wahoo = {
+            "id": "wahoo", "type": "Ride", "source": "Wahoo", "start_date_local": "2026-08-29T07:00:00",
+            "moving_time": 7200, "distance": 60000,
+        }
+        garmin = {
+            "id": "garmin", "type": "Ride", "source": "Garmin", "start_date_local": "2026-08-29T07:05:00",
+            "moving_time": 7200, "distance": 80000,
+        }
+        self.assertFalse(server.intervals_cycling_activities_match(wahoo, garmin))
+        self.assertIsNone(server.latest_wahoo_garmin_duplicate({"raw_provider_data": {"activities": [wahoo, garmin]}}))
+
+    def test_confirmed_duplicate_delete_removes_only_garmin_copy(self):
+        snapshot = {
+            "synced_at": "2026-08-29T10:00:00+00:00", "athlete": {}, "recent_wellness": [], "upcoming_calendar": [],
+            "recent_activities": [
+                {"id": "i-wahoo", "type": "Ride", "source": "Wahoo", "start_date_local": "2026-08-29T07:00:00", "moving_time": 7200, "distance": 60000},
+                {"id": "i-garmin", "type": "Ride", "source": "Garmin", "start_date_local": "2026-08-29T07:03:00", "moving_time": 7180, "distance": 59800},
+            ],
+        }
+        snapshot["raw_provider_data"] = {"activities": list(snapshot["recent_activities"])}
+        server.save_snapshot(snapshot)
+        pair = server.latest_wahoo_garmin_duplicate()
+        with patch.object(server.IntervalsClient, "delete_activity", return_value=None) as delete:
+            result = server.delete_duplicate_intervals_activity({
+                "canonical_id": pair["canonical_id"], "duplicate_id": pair["duplicate_id"],
+                "snapshot_synced_at": pair["snapshot_synced_at"],
+            })
+        delete.assert_called_once_with("i-garmin")
+        self.assertEqual(result["kept_activity_id"], "i-wahoo")
+        self.assertEqual([item["id"] for item in server.latest_snapshot()["recent_activities"]], ["i-wahoo"])
+
+    def test_coach_quick_actions_hide_completed_morning_and_limit_plan_blockers_to_three_days(self):
+        today = server.local_now().date()
+        server.set_kv("morning_checkin_status", "ready")
+        server.set_kv("morning_checkin_date", today.isoformat())
+        preview = {
+            "changes": [
+                {"date": (today + timedelta(days=2)).isoformat(), "name": "Lange Ausfahrt", "blocking_triggers": ["weather"]},
+                {"date": (today + timedelta(days=3)).isoformat(), "name": "Spätere Ausfahrt", "blocking_triggers": ["calendar"]},
+                {"date": today.isoformat(), "name": "Intervalle", "blocking_triggers": []},
+            ]
+        }
+        with server.DB_LOCK, server.database() as db:
+            server.PLAN_ADJUSTMENT_REPOSITORY.create_preview(db, str(uuid.uuid4()), json.dumps(preview), server.utc_now())
+        actions = server.coach_quick_actions_state()
+        self.assertFalse(actions["morning_checkin"])
+        self.assertTrue(actions["adjust_plan"])
+        self.assertEqual([item["name"] for item in actions["plan_blockers"]], ["Lange Ausfahrt"])
+        self.assertEqual(actions["horizon_days"], 3)
 
     def test_diagnostics_redact_credentials_from_logs(self):
         server.initialise_logging()
@@ -6784,7 +6894,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=160', index)
+        self.assertIn('v=161', index)
 
     def test_library_bulk_local_actions_preview_diff_and_hash_conflict(self):
         first = server.create_local_workout_library_entry({
@@ -6887,8 +6997,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("function runLibraryBulkRemoteSync()", app)
         self.assertIn("expected_payload_hash", (server.PUBLIC_DIR.parent / "server.py").read_text(encoding="utf-8"))
         self.assertIn("librarySelection", state)
-        self.assertIn("intervals-coach-v160", worker)
-        self.assertIn("/app.js?v=160", index)
+        self.assertIn("intervals-coach-v161", worker)
+        self.assertIn("/app.js?v=161", index)
 
 if __name__ == "__main__":
     unittest.main()

@@ -68,6 +68,14 @@ It is not intended to be exposed directly to the public internet.
   remains a separate queued follow-up action. Reloading the page or losing the
   streaming connection does not cancel the server-side coach request; its
   persisted answer appears in the chat after the next load.
+- The Coach start card contains only contextual quick actions, not provider
+  connection badges. The morning check-in disappears after it completed for
+  the athlete's local day. "Plan anpassen" appears only for an unapplied
+  calendar, illness, injury, or blocking-weather change affecting a planned
+  unit within the next three days. "Letzte Einheit analysieren" refreshes
+  Intervals.icu before coaching. When near-identical Wahoo and Garmin cycling
+  recordings are present, Wahoo is canonical; deleting the Garmin cloud copy
+  always requires a separate confirmation in Coach Chat.
 - The Coach is the local source of truth for future planned units, target
   competitions, and reusable workout templates. An unambiguous plan request
   stores local planned units immediately; deletions, bulk changes, conflicts,

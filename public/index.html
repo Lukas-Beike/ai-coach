@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg?v=160" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=160">
+    <link rel="icon" href="/icon.svg?v=161" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=161">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -47,14 +47,12 @@
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
         <section id="coachOverview" class="coach-overview card" aria-labelledby="coachOverviewTitle">
           <div class="coach-overview-heading">
-            <div><span class="eyebrow">DEIN TRAININGSCOACH</span><h2 id="coachOverviewTitle">Was möchtest du heute klären?</h2><p id="coachOverviewStatus">Verlauf, Planung und Erholung sind im Coach-Kontext gebündelt.</p></div>
-            <span id="coachReadyStatus" class="status-chip" data-status="loading">Wird geprüft</span>
+            <div><span class="eyebrow">DEIN TRAININGSCOACH</span><h2 id="coachOverviewTitle">Was möchtest du heute klären?</h2><p>Verlauf, Planung und Erholung sind im Coach-Kontext gebündelt.</p></div>
           </div>
-          <div id="coachProviderStatus" class="coach-provider-status" aria-label="Datenquellenstatus"></div>
           <div id="coachQuickActions" class="coach-quick-actions" aria-label="Schnellaktionen">
-            <button type="button" class="btn secondary" data-coach-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
-            <button type="button" class="btn secondary" data-coach-message="Analysiere meine letzte absolvierte Einheit anhand der aktuellen Intervals.icu-Daten. Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit?">Letzte Einheit analysieren</button>
-            <button type="button" class="btn ghost" data-coach-message="Zeige mir kurz den Stand meiner nächsten geplanten Einheiten und ob eine Anpassung sinnvoll ist.">Plan prüfen</button>
+            <button id="coachMorningCheckinButton" type="button" class="btn secondary" data-coach-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
+            <button id="coachLatestActivityButton" type="button" class="btn secondary" data-coach-message="Aktualisiere zuerst meine Intervals.icu-Daten. Analysiere danach meine letzte absolvierte Einheit: Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit? Nutze bei einer nahezu gleichen Wahoo- und Garmin-Radaufzeichnung immer Wahoo.">Letzte Einheit analysieren</button>
+            <button id="coachAdjustPlanButton" type="button" class="btn ghost" data-coach-message="Zeige mir die konkrete Anpassung für die erkannte Blockade in den kommenden drei Tagen als Vorschlag. Berücksichtige den neuen Kalendertermin, Krankheit, Verletzung oder unmögliches Wetter und ändere noch nichts ohne meine Freigabe." hidden>Plan anpassen</button>
           </div>
         </section>
         <div id="coachAdaptivePlanningNotice" class="adaptive-planning-notice coach-adaptive-planning-notice" hidden role="status">
@@ -74,8 +72,8 @@
         <form id="chatForm" class="composer">
           <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
             <span class="quick-message-label">Schnellstart</span>
-            <button type="button" data-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
-            <button type="button" data-message="Analysiere meine letzte absolvierte Einheit anhand der aktuellen Intervals.icu-Daten. Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit?">Letzte Einheit analysieren</button>
+            <button id="quickMorningCheckinButton" type="button" data-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
+            <button type="button" data-message="Aktualisiere zuerst meine Intervals.icu-Daten. Analysiere danach meine letzte absolvierte Einheit: Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit? Nutze bei einer nahezu gleichen Wahoo- und Garmin-Radaufzeichnung immer Wahoo.">Letzte Einheit analysieren</button>
           </div>
           <div id="chatQueueStatus" class="chat-queue-status" hidden aria-live="polite"></div>
           <textarea id="messageInput" rows="1" maxlength="12000" placeholder="Frage deinen Coach…" aria-label="Nachricht an deinen Coach"></textarea>
@@ -427,12 +425,12 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=160" defer></script>
-  <script src="/navigation.js?v=160" defer></script>
-  <script src="/state.js?v=160" defer></script>
-  <script src="/views.js?v=160" defer></script>
-  <script src="/forms.js?v=160" defer></script>
-  <script src="/components.js?v=160" defer></script>
-  <script src="/app.js?v=160" defer></script>
+  <script src="/api.js?v=161" defer></script>
+  <script src="/navigation.js?v=161" defer></script>
+  <script src="/state.js?v=161" defer></script>
+  <script src="/views.js?v=161" defer></script>
+  <script src="/forms.js?v=161" defer></script>
+  <script src="/components.js?v=161" defer></script>
+  <script src="/app.js?v=161" defer></script>
 </body>
 </html>
