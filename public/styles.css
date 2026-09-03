@@ -418,7 +418,7 @@ h2 {
 }
 .composer button:hover, .profile-form > button:hover, .push-button:hover { filter: brightness(1.08); }
 .composer button:active, .profile-form > button:active, .push-button:active { transform: scale(.97); }
-.composer button:disabled, .push-button:disabled { cursor: wait; opacity: .55; }
+.composer button:disabled, .push-button:disabled { cursor: wait; opacity: 1; color: #c9d6d2; background: #3b4a46; box-shadow: none; }
 .login-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
 .auth-loading { position: fixed; z-index: 20; inset: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px; color: var(--subtle); background: var(--bg); font-size: .9rem; }
 .auth-loading[hidden] { display: none !important; }
