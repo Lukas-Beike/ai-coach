@@ -1784,7 +1784,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('name="sports" multiple', index)
         self.assertIn('name="timezone" autocomplete="off"', index)
         self.assertIn('id="profileContextNotice"', index)
-        self.assertIn('Dauer (hh:mm)', app)
+        self.assertIn('Erwartete Dauer (hh:mm)', app)
         self.assertIn('Distanz (km)', app)
         self.assertIn('data-more-segment-panel="privacy"', index)
         self.assertIn('data-more-segment-panel="operations"', index)
