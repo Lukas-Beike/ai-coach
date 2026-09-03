@@ -1317,6 +1317,9 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(status["operation_id"], "operation-test")
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["progress"], 35)
+        bootstrap = server.public_bootstrap(local_only=True)
+        self.assertEqual(bootstrap["sync"]["progress"], 35)
+        self.assertEqual(bootstrap["sync"]["message"], "Daten werden gelesen…")
 
     def test_sync_status_projection_is_dependency_light(self):
         from backend.sync.status import persist_sync_operation_state, project_sync_status
@@ -1641,21 +1644,24 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=163', index)
-        self.assertIn('/navigation.js?v=163', index)
-        self.assertIn('/state.js?v=163', index)
-        self.assertIn('/views.js?v=163', index)
-        self.assertIn('/forms.js?v=163', index)
-        self.assertIn('/components.js?v=163', index)
-        self.assertIn('/app.js?v=163', index)
-        self.assertIn('intervals-coach-v163', service_worker)
-        self.assertIn('"/navigation.js?v=163"', service_worker)
-        self.assertIn('"/state.js?v=163"', service_worker)
-        self.assertIn('"/views.js?v=163"', service_worker)
-        self.assertIn('"/forms.js?v=163"', service_worker)
-        self.assertIn('"/components.js?v=163"', service_worker)
+        self.assertIn('/api.js?v=164', index)
+        self.assertIn('/navigation.js?v=164', index)
+        self.assertIn('/state.js?v=164', index)
+        self.assertIn('/views.js?v=164', index)
+        self.assertIn('/forms.js?v=164', index)
+        self.assertIn('/components.js?v=164', index)
+        self.assertIn('/app.js?v=164', index)
+        self.assertIn('intervals-coach-v164', service_worker)
+        self.assertIn('"/navigation.js?v=164"', service_worker)
+        self.assertIn('"/state.js?v=164"', service_worker)
+        self.assertIn('"/views.js?v=164"', service_worker)
+        self.assertIn('"/forms.js?v=164"', service_worker)
+        self.assertIn('"/components.js?v=164"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
+        self.assertIn('id="diagnosticCaptureToggle"', index)
+        self.assertIn('function setDiagnosticCapture(', app)
+        self.assertIn('/api/diagnostics/capture', app)
         self.assertIn('function executeCoachActionProposal(', app)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('window.addEventListener("offline"', app)
@@ -1676,8 +1682,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=163'), index.index('/components.js?v=163'))
-        self.assertLess(index.index('/components.js?v=163'), index.index('/app.js?v=163'))
+        self.assertLess(index.index('/forms.js?v=164'), index.index('/components.js?v=164'))
+        self.assertLess(index.index('/components.js?v=164'), index.index('/app.js?v=164'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -6069,16 +6075,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=163"', source)
-        self.assertIn('"/navigation.js?v=163"', source)
-        self.assertIn('"/state.js?v=163"', source)
-        self.assertIn('"/views.js?v=163"', source)
-        self.assertIn('"/forms.js?v=163"', source)
-        self.assertIn('"/components.js?v=163"', source)
+        self.assertIn('"/api.js?v=164"', source)
+        self.assertIn('"/navigation.js?v=164"', source)
+        self.assertIn('"/state.js?v=164"', source)
+        self.assertIn('"/views.js?v=164"', source)
+        self.assertIn('"/forms.js?v=164"', source)
+        self.assertIn('"/components.js?v=164"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=163"', source)
-        self.assertIn('"/icon.svg?v=163"', source)
-        self.assertIn('"/styles.css?v=163"', source)
+        self.assertIn('"/app.js?v=164"', source)
+        self.assertIn('"/icon.svg?v=164"', source)
+        self.assertIn('"/styles.css?v=164"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6359,6 +6365,51 @@ class CoachTests(unittest.TestCase):
                 server.http_json("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
         self.assertTrue(response_body.closed)
 
+    def test_user_enabled_diagnostic_capture_keeps_response_shape_without_content(self):
+        self.assertFalse(server.diagnostic_capture_status()["active"])
+        enabled = server.set_diagnostic_capture(True)
+        self.assertTrue(enabled["active"])
+        response = {
+            "bodyBattery": 82,
+            "access_token": "must-never-appear",
+            "nested": {"sessionId": "must-also-never-appear", "athlete_note": "must-not-appear"},
+        }
+        server.external_call("garmin", "body_battery", lambda: response)
+        report = server.diagnostic_report()
+        report_text = json.dumps(report, ensure_ascii=False)
+        self.assertIn("bodyBattery", report_text)
+        self.assertNotIn("must-not-appear", report_text)
+        self.assertNotIn("must-never-appear", report_text)
+        self.assertNotIn("must-also-never-appear", report_text)
+        entries = server.diagnostic_capture_entries()
+        self.assertTrue(entries)
+        response_capture = entries[-1]["details"]["response"]
+        self.assertIn("shape", response_capture)
+        self.assertNotIn("content", response_capture)
+
+        server.set_diagnostic_capture(False)
+        self.assertFalse(server.diagnostic_capture_status()["active"])
+        server.external_call("garmin", "body_battery", lambda: {"new_marker": "not captured"})
+        self.assertNotIn("not captured", json.dumps(server.diagnostic_report(), ensure_ascii=False))
+
+    def test_body_battery_retry_is_delayed_and_runs_only_the_targeted_operation(self):
+        scheduled = server._schedule_body_battery_retry(30)
+        self.assertIsNotNone(scheduled)
+        self.assertEqual(scheduled["provider"], "garmin")
+        self.assertEqual(scheduled["type"], "body_battery_retry")
+        retry_at = datetime.fromisoformat(scheduled["available_at"].replace("Z", "+00:00"))
+        remaining = (retry_at - datetime.now(timezone.utc)).total_seconds()
+        self.assertGreater(remaining, server.GARMIN_BODY_BATTERY_RETRY_SECONDS - 5)
+        self.assertLessEqual(remaining, server.GARMIN_BODY_BATTERY_RETRY_SECONDS + 5)
+        self.assertIsNone(server._schedule_body_battery_retry(30))
+        with patch.object(server, "sync_garmin_body_battery_retry", return_value={"status": "ok", "records": 2}) as retry:
+            result = server._execute_sync_job({
+                "id": scheduled["id"], "provider": "garmin", "type": "body_battery_retry",
+                "payload": json.dumps({"days": 30, "reason": "test"}),
+            })
+        self.assertEqual(result["status"], "ok")
+        retry.assert_called_once_with(days=30, operation_id=scheduled["id"], reason="test")
+
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.initialise_logging()
         with patch.object(server, "urlopen", side_effect=server.URLError("offline")):
@@ -6511,7 +6562,7 @@ class CoachTests(unittest.TestCase):
         completed = [entry for entry in entries if entry.get("event") == "external_request_completed"][-1]
         self.assertEqual(result["activities"], [1, 2])
         self.assertEqual(started["context"]["service"], "intervals")
-        self.assertEqual(started["context"]["path"], "/api/v1/athlete/0/activities")
+        self.assertEqual(started["context"]["path"], "/api/v1/athlete/[REDACTED_PATH]/activities")
         self.assertEqual(started["context"]["query_keys"], ["newest", "oldest"])
         self.assertEqual(completed["context"]["status"], 200)
         self.assertEqual(completed["context"]["result_fields"], 1)
@@ -6929,7 +6980,13 @@ class CoachTests(unittest.TestCase):
             failed = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
             self.assertEqual(failed[("intervals", "activities")]["state"], "error")
             self.assertEqual(failed[("intervals", "activities")]["error_code"], "network_error")
-            self.assertTrue(failed[("intervals", "activities")]["next_retry_at"])
+            self.assertIsNone(failed[("intervals", "activities")]["next_retry_at"])
+            server.enqueue_sync_job(
+                "intervals", "refresh", {"days": 1},
+                requested_by="test", available_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            )
+            scheduled = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            self.assertTrue(scheduled[("intervals", "activities")]["next_retry_at"])
             refresh_id = server._provider_refresh_start("intervals", "activities", "operation-test-2", "manual")
             server._provider_refresh_finish(refresh_id, "success", "complete")
             with server.DB_LOCK, server.database() as db:
@@ -6961,7 +7018,11 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=163', index)
+        self.assertIn('v=164', index)
+        self.assertIn('id="connectionsSyncProgress"', index)
+        self.assertIn('id="providerAttentionBanner"', index)
+        self.assertIn("function renderConnectionsSyncProgress(data)", app)
+        self.assertIn("function providerRequiresManualAttention(entry)", app)
 
     def test_library_bulk_local_actions_preview_diff_and_hash_conflict(self):
         first = server.create_local_workout_library_entry({
@@ -7064,8 +7125,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("function runLibraryBulkRemoteSync()", app)
         self.assertIn("expected_payload_hash", (server.PUBLIC_DIR.parent / "server.py").read_text(encoding="utf-8"))
         self.assertIn("librarySelection", state)
-        self.assertIn("intervals-coach-v163", worker)
-        self.assertIn("/app.js?v=163", index)
+        self.assertIn("intervals-coach-v164", worker)
+        self.assertIn("/app.js?v=164", index)
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg?v=163" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=163">
+    <link rel="icon" href="/icon.svg?v=164" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=164">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -42,6 +42,10 @@
         <span id="statusDetail">Trainingsbereich wird geprüft</span>
       </section>
       <section id="connectivityNotice" class="connectivity-notice" role="status" aria-live="polite" hidden></section>
+      <section id="providerAttentionBanner" class="provider-attention-banner" role="alert" aria-live="assertive" hidden>
+        <div><strong>Anbindung benötigt Aufmerksamkeit</strong><span id="providerAttentionDetail"></span></div>
+        <a href="#more/connections">Anbindungen öffnen</a>
+      </section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
         <section id="coachOverview" class="coach-overview card" aria-labelledby="coachOverviewTitle">
@@ -264,6 +268,7 @@
         </nav>
         <details class="settings-section collapsible-section" data-more-segment-panel="connections">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
+          <section id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></section>
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="chatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
@@ -363,7 +368,12 @@
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span><span class="collapsible-summary-meta">Bereinigten Status herunterladen</span></summary>
           <div class="diagnostic-actions">
             <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
-            <p class="fine-print">Enthält aktuelle bereinigte Fehler und Laufzeitstatus, niemals API-Schlüssel oder Trainingsdaten.</p>
+            <label class="diagnostic-capture-toggle" for="diagnosticCaptureToggle">
+              <input type="checkbox" id="diagnosticCaptureToggle">
+              <span>Erweiterte technische Diagnose für eine Stunde aufzeichnen</span>
+            </label>
+            <p id="diagnosticCaptureStatus" class="fine-print">Aus. Antwortinhalte und Athletendaten werden nicht aufgezeichnet.</p>
+            <p class="fine-print">Der normale Diagnoseexport enthält keine API-Schlüssel, Tokens oder Trainingsdaten. Während der aktiven Aufzeichnung werden zusätzlich Antwortformen und technische Metadaten gespeichert – niemals Antwortinhalte oder Athletendaten.</p>
           </div>
         </details>
       </section>
@@ -417,12 +427,12 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=163" defer></script>
-  <script src="/navigation.js?v=163" defer></script>
-  <script src="/state.js?v=163" defer></script>
-  <script src="/views.js?v=163" defer></script>
-  <script src="/forms.js?v=163" defer></script>
-  <script src="/components.js?v=163" defer></script>
-  <script src="/app.js?v=163" defer></script>
+  <script src="/api.js?v=164" defer></script>
+  <script src="/navigation.js?v=164" defer></script>
+  <script src="/state.js?v=164" defer></script>
+  <script src="/views.js?v=164" defer></script>
+  <script src="/forms.js?v=164" defer></script>
+  <script src="/components.js?v=164" defer></script>
+  <script src="/app.js?v=164" defer></script>
 </body>
 </html>

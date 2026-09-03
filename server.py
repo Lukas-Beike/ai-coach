@@ -552,6 +552,29 @@ def _safe_url_netloc(parsed: Any) -> str:
     return f"{host}:{port}" if port else host
 
 
+def _safe_provider_path(path: str) -> str:
+    """Keep route structure while removing provider resource identifiers."""
+    safe_segments = []
+    redact_next = False
+    for segment in str(path or "").split("/"):
+        if not segment:
+            continue
+        decoded = unquote(segment)
+        was_redacted = redact_next
+        if was_redacted:
+            safe_segments.append("[REDACTED_PATH]")
+            redact_next = False
+        elif re.fullmatch(r"(?:api|v[0-9]+|[a-z][a-z_-]{0,31})", decoded):
+            safe_segments.append(decoded)
+        else:
+            safe_segments.append("[REDACTED_PATH]")
+        if not was_redacted and decoded.casefold() in {
+            "athlete", "activities", "activity", "event", "events", "profile", "user", "workout", "workouts",
+        }:
+            redact_next = True
+    return "/" + "/".join(safe_segments)
+
+
 def _unguessable_url_path_segment(segment: str) -> bool:
     decoded = unquote(segment)
     if len(decoded) >= 32:
@@ -717,9 +740,20 @@ def external_call(
         context.update({"operation_id": operation_context["operation_id"], "trigger": operation_context["trigger"], "phase": operation})
     started = time.perf_counter()
     LOGGER.info("External call started", extra={"event": "external_call_started", "context": context})
+    capture_diagnostic_event("external_call_started", {
+        "service": service,
+        "operation": operation,
+        "details": _safe_diagnostic_context(details),
+    })
     try:
         result = call()
-    except AppError:
+    except AppError as exc:
+        capture_diagnostic_event("external_call_failed", {
+            "service": service,
+            "operation": operation,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "error": _safe_diagnostic_error(exc),
+        })
         raise
     except Exception as exc:
         failure_context = {
@@ -728,6 +762,12 @@ def external_call(
             "error_code": operation_error_code(exc),
         }
         LOGGER.error("External call failed", extra={"event": "external_call_failed", "context": failure_context}, exc_info=True)
+        capture_diagnostic_event("external_call_failed", {
+            "service": service,
+            "operation": operation,
+            "duration_ms": failure_context["duration_ms"],
+            "error": _safe_diagnostic_error(exc),
+        })
         raise provider_error(service, "client") from exc
     LOGGER.info(
         "External call completed",
@@ -740,6 +780,12 @@ def external_call(
             },
         },
     )
+    capture_diagnostic_event("external_call_completed", {
+        "service": service,
+        "operation": operation,
+        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+        "response": diagnostic_capture_response(result),
+    })
     return result
 
 
@@ -1435,6 +1481,11 @@ SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
 SYNC_JOB_POLL_SECONDS = 1.0
 SYNC_JOB_LIST_LIMIT = 50
+GARMIN_BODY_BATTERY_RETRY_SECONDS = 2 * 60 * 60
+DIAGNOSTIC_CAPTURE_DURATION_SECONDS = 60 * 60
+DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 1500
+DIAGNOSTIC_CAPTURE_STATE_KEY = "diagnostic_capture_state"
+DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
 
 CHANGE_HISTORY_RETENTION_DAYS = 180
 CHANGE_HISTORY_MAX_ROWS = 500
@@ -2408,6 +2459,8 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
     values = envelope["payload"]
     if envelope["type"] == "historical_backfill" and envelope["provider"] not in {"intervals", "garmin"}:
         raise AppError(400, "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig.", reason="invalid_job_request")
+    if envelope["type"] == "body_battery_retry" and envelope["provider"] != "garmin":
+        raise AppError(400, "Der Body-Battery-Retry ist nur bei Garmin erlaubt.", reason="invalid_job_request")
     if envelope["type"] == "plan_push":
         if envelope["provider"] != "intervals":
             raise AppError(400, "Plan-Push-Jobs sind nur für Intervals.icu zulässig.", reason="invalid_job_request")
@@ -2538,11 +2591,18 @@ def enqueue_sync_job(
     *,
     requested_by: str = "system",
     item_operations: list[dict[str, Any]] | None = None,
+    available_at: str | None = None,
 ) -> dict[str, Any]:
     """Persist a resumable job and wake the background worker."""
     envelope = _sync_job_payload(provider, job_type, payload)
     requested = str(requested_by or "system").strip().casefold()[:40] or "system"
     now = utc_now()
+    scheduled_at = now
+    if available_at is not None:
+        try:
+            scheduled_at = datetime.fromisoformat(str(available_at).replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Der Startzeitpunkt des Synchronisationsjobs ist ungültig.", reason="invalid_job_request") from exc
     job_id = uuid.uuid4().hex
     operations = item_operations or [{"item_key": f"{envelope['provider']}:{envelope['type']}", "operation": envelope["type"]}]
     if not 1 <= len(operations) <= 1000:
@@ -2551,7 +2611,7 @@ def enqueue_sync_job(
         db.execute(
             "INSERT INTO sync_jobs(id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, available_at, created_at, updated_at) "
             "VALUES (?, ?, ?, 'queued', ?, ?, 0, ?, 0, ?, ?, ?)",
-            (job_id, envelope["provider"], envelope["type"], json.dumps(envelope["payload"], ensure_ascii=False, separators=(",", ":")), requested, len(operations), now, now, now),
+            (job_id, envelope["provider"], envelope["type"], json.dumps(envelope["payload"], ensure_ascii=False, separators=(",", ":")), requested, len(operations), scheduled_at, now, now),
         )
         for index, operation in enumerate(operations):
             if not isinstance(operation, dict):
@@ -2757,6 +2817,12 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
             result["competitions"] = competition_result
         return result
     if provider == "garmin":
+        if job_type == "body_battery_retry":
+            return sync_garmin_body_battery_retry(
+                days=int(payload.get("days") or sync_period("garmin")),
+                operation_id=job["id"],
+                reason=reason,
+            )
         historical_end = None
         if job_type == "historical_backfill":
             days = max(1, min(int(payload.get("days") or SYNC_CHUNK_DAYS), SYNC_CHUNK_DAYS))
@@ -2863,6 +2929,25 @@ def resolve_sync_job(job_id: str, payload: Any) -> dict[str, Any]:
     return sync_job_state(job_id)
 
 
+def _scheduled_provider_retry_at(db: Any, provider: str) -> str | None:
+    """Return only a future queued retry, never an advisory history timestamp."""
+    now = datetime.now(timezone.utc)
+    rows = db.execute(
+        "SELECT available_at FROM sync_jobs "
+        "WHERE provider=? AND type IN ('refresh', 'body_battery_retry') "
+        "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
+        (provider,),
+    ).fetchall()
+    for row in rows:
+        try:
+            available_at = datetime.fromisoformat(str(row["available_at"]).replace("Z", "+00:00")).astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if available_at > now:
+            return available_at.isoformat()
+    return None
+
+
 def provider_freshness_state() -> list[dict[str, Any]]:
     fallbacks = {
         ("intervals", "activities"): get_kv("last_sync_at"),
@@ -2913,6 +2998,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
             fallback_error = bool(fallback_errors[key])
             last_attempt = row.get("started_at") if row else fallback
             last_good = (last_success["finished_at"] if last_success else None) or fallback
+            scheduled_retry = _scheduled_provider_retry_at(db, provider)
             state = "not_configured" if not configured[key] else "never_loaded"
             if configured[key] and row and row["status"] == "running":
                 state = "syncing"
@@ -2939,7 +3025,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
                 "last_attempt_at": last_attempt,
                 "last_success_at": last_good,
                 "error_code": row.get("error_code") if row and row["status"] == "error" else "provider_error" if fallback_error else None,
-                "next_retry_at": row.get("next_retry_at") if row else None,
+                "next_retry_at": scheduled_retry,
                 "stale": state == "stale",
                 "has_last_good": bool(last_good),
             })
@@ -3351,6 +3437,143 @@ def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
         return
     with DB_LOCK, database() as owned:
         set_kv(key, value, owned)
+
+
+def _safe_diagnostic_context(value: Any) -> dict[str, Any]:
+    """Keep request metadata useful without retaining request contents."""
+    if not isinstance(value, dict):
+        return {}
+    safe: dict[str, Any] = {}
+    for key, item in value.items():
+        key_text = str(key)[:80]
+        if key_text in {"window_start", "window_end", "date", "latest", "range_supported", "email_configured", "tokenstore_exists"}:
+            safe[key_text] = item if item is None or isinstance(item, (bool, int, float)) else str(item)[:40]
+    return safe
+
+
+def diagnostic_response_shape(value: Any, depth: int = 0) -> dict[str, Any]:
+    """Describe a response without retaining athlete or provider payload values."""
+    if value is None:
+        return {"type": "null"}
+    if isinstance(value, dict):
+        keys = []
+        for key in list(value)[:50]:
+            text = str(key)
+            keys.append(text[:80] if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,79}", text) else "[nonstandard]")
+        result: dict[str, Any] = {"type": "object", "field_count": len(value), "fields": keys}
+        if depth < 1 and value:
+            result["sample"] = diagnostic_response_shape(next(iter(value.values())), depth + 1)
+        return result
+    if isinstance(value, (list, tuple)):
+        result = {"type": "array", "items": len(value)}
+        if depth < 1 and value:
+            result["item_shape"] = diagnostic_response_shape(value[0], depth + 1)
+        return result
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, (int, float)):
+        return {"type": "number"}
+    if isinstance(value, str):
+        return {"type": "string", "length": len(value)}
+    return {"type": type(value).__name__}
+
+
+def diagnostic_capture_response(value: Any) -> dict[str, Any]:
+    """Return response shape metadata without retaining response contents."""
+    return {"shape": diagnostic_response_shape(value)}
+
+
+def _safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
+    """Expose only classified technical exception metadata during user debugging."""
+    status = getattr(exc, "status", None) or getattr(exc, "code", None)
+    result: dict[str, Any] = {"type": type(exc).__name__}
+    if isinstance(status, int):
+        result["status"] = status
+    reason = str(getattr(exc, "reason", "") or "").strip()
+    if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
+        result["reason"] = reason
+    return result
+
+
+def _safe_response_headers(headers: Any) -> dict[str, str]:
+    """Retain only transport headers that cannot carry credentials or content."""
+    if headers is None:
+        return {}
+    allowed = {"content-type", "content-length", "date", "retry-after", "server"}
+    result: dict[str, str] = {}
+    try:
+        items = headers.items()
+    except (AttributeError, TypeError):
+        return result
+    for key, value in items:
+        name = str(key).strip().casefold()
+        if name in allowed or name.startswith("x-ratelimit-"):
+            result[name] = redact_text(str(value))[:160]
+    return result
+
+
+def _diagnostic_capture_state() -> dict[str, Any]:
+    try:
+        value = json.loads(get_kv(DIAGNOSTIC_CAPTURE_STATE_KEY) or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        value = {}
+    return value if isinstance(value, dict) else {}
+
+
+def diagnostic_capture_status() -> dict[str, Any]:
+    state = _diagnostic_capture_state()
+    expires_at = str(state.get("expires_at") or "")
+    try:
+        active = datetime.fromisoformat(expires_at.replace("Z", "+00:00")) > datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        active = False
+    if not active and state:
+        set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, "")
+    try:
+        entries = json.loads(get_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY) or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        entries = []
+    return {
+        "active": active,
+        "started_at": state.get("started_at") if active else None,
+        "expires_at": expires_at if active else None,
+        "entries": len(entries) if isinstance(entries, list) else 0,
+        "maximum_entries": DIAGNOSTIC_CAPTURE_MAX_ENTRIES,
+    }
+
+
+def diagnostic_capture_entries() -> list[dict[str, Any]]:
+    try:
+        entries = json.loads(get_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY) or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(entries, list):
+        return []
+    return [sanitize_log_value(entry) for entry in entries if isinstance(entry, dict)][-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:]
+
+
+def set_diagnostic_capture(enabled: Any) -> dict[str, Any]:
+    """Enable a one-hour, user-initiated technical capture or stop it early."""
+    if enabled is not True and enabled is not False:
+        raise AppError(400, "Die Diagnoseaufzeichnung erwartet enabled=true oder enabled=false.")
+    if enabled:
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(seconds=DIAGNOSTIC_CAPTURE_DURATION_SECONDS)).isoformat()
+        set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, json.dumps({"started_at": now.isoformat(), "expires_at": expires_at}, separators=(",", ":")))
+        set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, "[]")
+    else:
+        set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, "")
+    return diagnostic_capture_status()
+
+
+def capture_diagnostic_event(event: str, details: dict[str, Any]) -> None:
+    """Persist bounded response metadata only while the athlete enabled capture."""
+    if not diagnostic_capture_status()["active"]:
+        return
+    entry = {"timestamp": utc_now(), "event": str(event)[:80], "details": sanitize_log_value(details)}
+    entries = diagnostic_capture_entries()
+    entries.append(entry)
+    set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, json.dumps(entries[-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:], ensure_ascii=False, separators=(",", ":")))
 
 
 def garmin_snapshot() -> dict[str, Any]:
@@ -4181,6 +4404,97 @@ def _merge_garmin_records(incoming: Any, previous: Any) -> list[Any]:
     return merged
 
 
+def _garmin_error_entries() -> list[dict[str, Any]]:
+    try:
+        errors = json.loads(get_kv("last_garmin_error") or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        errors = []
+    return [entry for entry in errors if isinstance(entry, dict)] if isinstance(errors, list) else []
+
+
+def _set_garmin_error_entries(errors: list[dict[str, Any]]) -> None:
+    set_kv("last_garmin_error", json.dumps(errors, ensure_ascii=False, separators=(",", ":")) if errors else "")
+
+
+def _schedule_body_battery_retry(days: int) -> dict[str, Any] | None:
+    """Queue exactly one targeted retry two hours after a partial Garmin sync."""
+    if _sync_job_active("garmin", "body_battery_retry"):
+        return None
+    available_at = (datetime.now(timezone.utc) + timedelta(seconds=GARMIN_BODY_BATTERY_RETRY_SECONDS)).isoformat()
+    return enqueue_sync_job(
+        "garmin",
+        "body_battery_retry",
+        {"days": days, "reason": "Automatischer Body-Battery-Retry"},
+        requested_by="system",
+        available_at=available_at,
+    )
+
+
+@observed_sync("garmin", "data")
+@maintenance_operation
+@garmin_operation
+def sync_garmin_body_battery_retry(days: int = 30, operation_id: str | None = None, reason: str = "body-battery-retry") -> dict[str, Any]:
+    """Refresh only Body Battery while preserving the last complete Garmin snapshot."""
+    fixture = garmin_fixture_path()
+    if fixture is not None:
+        payload = load_garmin_fixture(days)
+        records = payload.get("body_battery")
+        if not isinstance(records, list):
+            return {"status": "partial", "errors": 1, "source": "fixture"}
+        previous = garmin_snapshot()
+        previous["body_battery"] = _merge_garmin_records(records, previous.get("body_battery"))
+        previous["synced_at"] = payload["synced_at"]
+        set_kv("garmin_snapshot", json.dumps(previous, ensure_ascii=False, separators=(",", ":")))
+        _set_garmin_error_entries([entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"])
+        return {"status": "ok", "errors": 0, "source": "fixture", "records": len(records)}
+    if Garmin is None:
+        raise AppError(503, "Die optionale Garmin-Bibliothek ist nicht installiert.")
+    if not CONFIG.garmin_email and not Path(CONFIG.garmin_tokenstore).exists():
+        raise AppError(503, "Garmin ist nicht konfiguriert.")
+    if not GARMIN_LOCK.acquire(blocking=False):
+        return {"status": "already_running"}
+    try:
+        today = local_now().date()
+        windows = sync_date_windows(days, today)
+        previous = garmin_snapshot()
+        client = Garmin(CONFIG.garmin_email or None, CONFIG.garmin_password or None)
+        mfa_status, _ = external_call(
+            "garmin", "login", lambda: client.login(CONFIG.garmin_tokenstore),
+            {"email_configured": bool(CONFIG.garmin_email), "tokenstore_exists": Path(CONFIG.garmin_tokenstore).exists()},
+        )
+        if mfa_status:
+            raise AppError(401, "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb des Servers eingerichtet werden.")
+        records: list[Any] = []
+        try:
+            for window_start, window_end in windows:
+                value = external_call(
+                    "garmin", "body_battery",
+                    lambda window_start=window_start, window_end=window_end: client.get_body_battery(window_start.isoformat(), window_end.isoformat()),
+                    {"window_start": window_start.isoformat(), "window_end": window_end.isoformat()},
+                )
+                if isinstance(value, list):
+                    records.extend(value)
+                elif value is not None:
+                    records.append(value)
+        except Exception as exc:
+            _garmin_capability_failure("body_battery", exc)
+            errors = [entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"]
+            errors.append({"source": "body_battery", "message": redact_text(str(exc))[:500]})
+            _set_garmin_error_entries(errors)
+            return {"status": "partial", "errors": 1, "records": 0}
+        previous["body_battery"] = _merge_garmin_records(records, previous.get("body_battery"))
+        previous["synced_at"] = utc_now()
+        previous.setdefault("provider_sync", {}).setdefault("pagination", {})["body_battery"] = {
+            "windows": len(windows), "records": len(records), "complete": True,
+        }
+        set_kv("garmin_snapshot", json.dumps(previous, ensure_ascii=False, separators=(",", ":")))
+        _garmin_capability_success("body_battery")
+        _set_garmin_error_entries([entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"])
+        return {"status": "ok", "errors": 0, "records": len(records)}
+    finally:
+        GARMIN_LOCK.release()
+
+
 @observed_sync("garmin", "data")
 @maintenance_operation
 @garmin_operation
@@ -4294,7 +4608,20 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
         update_provider_sync_cursor("garmin", "data", windows[-1][1].isoformat(), payload["synced_at"])
         if end_date is not None:
             update_provider_sync_cursor("garmin", "historical", windows[0][0].isoformat(), payload["synced_at"])
-        return {"status": "partial" if payload["errors"] else "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
+        current_errors = [error for error in payload.get("errors", []) if error]
+        body_battery_failed = bool(current_errors) and all(
+            isinstance(error, dict) and error.get("source") == "body_battery"
+            for error in current_errors
+        )
+        retry_job = _schedule_body_battery_retry(days) if body_battery_failed and end_date is None else None
+        return {
+            "status": "partial" if payload["errors"] else "ok",
+            "synced_at": payload["synced_at"],
+            "errors": len(payload["errors"]),
+            "activities": len(payload.get("activities") or []),
+            "pagination": payload["provider_sync"]["pagination"],
+            "body_battery_retry_at": retry_job.get("available_at") if retry_job else None,
+        }
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
         set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
@@ -6616,17 +6943,26 @@ def http_json(
         "service": service or parsed_url.netloc,
         "method": method.upper(),
         "host": parsed_url.netloc,
-        "path": parsed_url.path,
+        "path": _safe_provider_path(parsed_url.path),
         "timeout_seconds": timeout,
         "request_bytes": len(body or b""),
     }
     operation_context = OPERATION_CONTEXT.get()
     if operation_context:
-        request_context.update({"operation_id": operation_context["operation_id"], "trigger": operation_context["trigger"], "phase": parsed_url.path.rsplit("/", 1)[-1] or "request"})
+        request_context.update({"operation_id": operation_context["operation_id"], "trigger": operation_context["trigger"], "phase": request_context["path"].rsplit("/", 1)[-1] or "request"})
     if parsed_url.query:
         request_context["query_keys"] = sorted(parse_qs(parsed_url.query, keep_blank_values=True))
     started = time.perf_counter()
     LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": request_context})
+    capture_diagnostic_event("external_http_started", {
+        "service": request_context["service"],
+        "method": request_context["method"],
+        "host": _safe_url_netloc(parsed_url),
+        "path": request_context["path"],
+        "query_keys": request_context.get("query_keys", []),
+        "request_bytes": request_context["request_bytes"],
+        "content_type": request_headers.get("Content-Type"),
+    })
     try:
         with urlopen(request, timeout=timeout) as response:
             try:
@@ -6652,6 +6988,17 @@ def http_json(
                     },
                 },
             )
+            capture_diagnostic_event("external_http_completed", {
+                "service": request_context["service"],
+                "method": request_context["method"],
+                "host": _safe_url_netloc(parsed_url),
+                "path": request_context["path"],
+                "status": getattr(response, "status", None) or getattr(response, "code", None) or 200,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                "response_bytes": len(raw),
+                "headers": _safe_response_headers(getattr(response, "headers", None)),
+                "response": diagnostic_capture_response(result),
+            })
             return result
     except HTTPError as exc:
         raw_error = _read_http_error_body(exc)
@@ -6675,6 +7022,16 @@ def http_json(
             },
             exc_info=True,
         )
+        capture_diagnostic_event("external_http_failed", {
+            "service": request_context["service"],
+            "method": request_context["method"],
+            "host": _safe_url_netloc(parsed_url),
+            "path": request_context["path"],
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "error": _safe_diagnostic_error(exc),
+            "headers": _safe_response_headers(getattr(exc, "headers", None)),
+            "error_bytes": len(raw_error),
+        })
         if error_details:
             raise AppError(exc.code if exc.code == 429 else 502, error_details["message"], reason=error_details["reason"]) from exc
         raise AppError(502, upstream_http_error_message(exc.code, raw_error, service), reason="provider_http_error") from exc
@@ -6700,8 +7057,24 @@ def http_json(
             },
             exc_info=True,
         )
+        capture_diagnostic_event("external_http_failed", {
+            "service": request_context["service"],
+            "method": request_context["method"],
+            "host": _safe_url_netloc(parsed_url),
+            "path": request_context["path"],
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "error": _safe_diagnostic_error(exc),
+        })
         raise provider_error(service, "network") from exc
-    except AppError:
+    except AppError as exc:
+        capture_diagnostic_event("external_http_failed", {
+            "service": request_context["service"],
+            "method": request_context["method"],
+            "host": _safe_url_netloc(parsed_url),
+            "path": request_context["path"],
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "error": _safe_diagnostic_error(exc),
+        })
         raise
     except Exception as exc:
         if service == "openai":
@@ -6725,6 +7098,14 @@ def http_json(
             },
             exc_info=True,
         )
+        capture_diagnostic_event("external_http_failed", {
+            "service": request_context["service"],
+            "method": request_context["method"],
+            "host": _safe_url_netloc(parsed_url),
+            "path": request_context["path"],
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "error": _safe_diagnostic_error(exc),
+        })
         raise provider_error(service, "client") from exc
 
 
@@ -9991,16 +10372,40 @@ def set_sync_operation_state(
     )
 
 
-def sync_status_state() -> dict[str, Any]:
+def sync_public_state(
+    *,
+    freshness: list[dict[str, Any]] | None = None,
+    jobs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return the safe, live sync progress projection used by browser state."""
     running = SYNC_LOCK.locked() or get_kv("sync_running") == "1"
     result = project_sync_status(
         running=running,
         get_value=get_kv,
         state_versions=state_versions(),
-        provider_freshness=provider_freshness_state(),
+        provider_freshness=freshness if freshness is not None else provider_freshness_state(),
         maintenance=MAINTENANCE_GATE.state(),
     )
-    result["jobs"] = sync_jobs_state()
+    result["jobs"] = jobs if jobs is not None else sync_jobs_state()
+    return result
+
+
+def sync_status_state() -> dict[str, Any]:
+    return sync_public_state()
+
+
+def sync_browser_state(
+    *,
+    freshness: list[dict[str, Any]] | None = None,
+    jobs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Keep the browser's legacy display status while adding live progress."""
+    result = sync_public_state(freshness=freshness, jobs=jobs)
+    # Bootstrap already carries these projections at the top level. Keeping
+    # them out of the nested sync card preserves its bounded payload size.
+    for key in ("state_versions", "provider_freshness", "maintenance"):
+        result.pop(key, None)
+    result["status"] = get_kv("sync_status") or result.get("message")
     return result
 
 
@@ -14478,17 +14883,13 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
             "daily_planning_context": [],
             "performance": {},
             "garmin": garmin_public_state(),
+            "diagnostic_capture": diagnostic_capture_status(),
             "intervals": intervals_public_state(snapshot),
             "provider_freshness": freshness,
             "provider_states": bootstrap_provider_states(freshness),
             "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
             "provider_resync": {"intervals": provider_resync_state("intervals"), "garmin": provider_resync_state("garmin")},
-            "sync": {
-                "last_sync_at": get_kv("last_sync_at"), "last_error": get_kv("last_sync_error") or None,
-                "running": get_kv("sync_running") == "1", "status": get_kv("sync_status") or None,
-                "last_window_start": get_kv("last_sync_window_start"), "last_window_end": get_kv("last_sync_window_end"),
-                "jobs": jobs,
-            },
+            "sync": sync_browser_state(freshness=freshness, jobs=jobs),
             "running_jobs": [job for job in jobs if job.get("status") in {"queued", "running"}],
             "library_sync": {"last_sync_at": get_kv("last_library_sync_at"), "last_error": get_kv("last_library_sync_error") or None, "state": workout_library_sync_summary()},
             "sync_settings": {"intervals_days": sync_period("intervals"), "garmin_days": sync_period("garmin")},
@@ -14618,6 +15019,8 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         checkins = list_checkins(30)
         external_calendar = external_calendar_state()
         daily_context = daily_planning_context(snapshot, planned, weather, checkins, list_external_calendar_events(50, training_relevant_only=True))
+        freshness = provider_freshness_state()
+        sync = sync_browser_state(freshness=freshness)
         return {
             "app": {
                 "name": "Intervals Coach",
@@ -14651,21 +15054,13 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "performance": current_performance_context(snapshot),
             "garmin": garmin_public_state(),
             "intervals": intervals_public_state(snapshot),
-            "provider_freshness": provider_freshness_state(),
+            "provider_freshness": freshness,
             "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
             "provider_resync": {
                 "intervals": provider_resync_state("intervals"),
                 "garmin": provider_resync_state("garmin"),
             },
-            "sync": {
-                "last_sync_at": get_kv("last_sync_at"),
-                "last_error": get_kv("last_sync_error") or None,
-                "running": get_kv("sync_running") == "1",
-                "status": get_kv("sync_status") or None,
-                "last_window_start": get_kv("last_sync_window_start"),
-                "last_window_end": get_kv("last_sync_window_end"),
-                "jobs": sync_jobs_state(),
-            },
+            "sync": sync,
             "library_sync": {
                 "last_sync_at": get_kv("last_library_sync_at"),
                 "last_error": get_kv("last_library_sync_error") or None,
@@ -14831,7 +15226,8 @@ def diagnostic_report() -> dict[str, Any]:
         },
         "database": {"messages": message_count, "workout_drafts_legacy": draft_count, "workout_library": library_count, "workout_library_state": workout_library_sync_summary(), "competitions": competition_count, "athlete_checkins": checkin_count, "activity_feedback": activity_feedback_count, "external_calendar_events": len(list_external_calendar_events())},
         "logs": recent_log_entries(),
-        "note": "Zugangsdaten und Athleteninhalte sind bewusst ausgeschlossen. Diese JSON-Datei kann zur Fehlersuche bereitgestellt werden.",
+        "debug_capture": {**diagnostic_capture_status(), "entries": diagnostic_capture_entries()},
+        "note": "Zugangsdaten, Tokens, Rohantworten und Athleteninhalte sind ausgeschlossen; die optionale Diagnoseaufzeichnung speichert nur technische Antwortformen und Metadaten.",
     }
 
 
@@ -15656,6 +16052,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/diagnostics":
                 require_auth(self)
                 self.send_json(200, diagnostic_report())
+            elif path == "/api/diagnostics/capture":
+                require_auth(self)
+                self.send_json(200, diagnostic_capture_status())
             elif path == "/api/privacy/export":
                 require_auth(self)
                 stream_privacy_export(self)
@@ -15900,6 +16299,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(202, start_sync_operation(days, reason="manuell"))
             elif path == "/api/sync/status":
                 raise AppError(405, "GET verwenden.")
+            elif path == "/api/diagnostics/capture":
+                self.send_json(200, set_diagnostic_capture(self.read_json().get("enabled")))
             elif path == "/api/intervals/full-resync":
                 payload = self.read_json()
                 if payload.get("confirm") != "FULL_RESYNC":

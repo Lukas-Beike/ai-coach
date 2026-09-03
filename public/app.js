@@ -379,6 +379,9 @@ function renderSyncStatus(status) {
     ...(state.data.sync || {}),
     running: Boolean(status.running),
     status: status.message || null,
+    message: status.message || null,
+    phase: status.phase || null,
+    progress: progressPercentage(status.progress),
     last_error: status.last_error || null,
   };
   renderActivities(state.data.activities || []);
@@ -874,6 +877,128 @@ const PROVIDER_FRESHNESS_ERRORS = {
   invalid_configuration: "Ungültige Konfiguration",
   provider_error: "Providerfehler",
 };
+
+function providerRequiresManualAttention(entry) {
+  if (!entry?.configured) return false;
+  if (["auth_required", "invalid_configuration"].includes(entry.error_code)) return true;
+  const hasFutureRetry = entry.next_retry_at && Date.parse(entry.next_retry_at) > Date.now();
+  return ["error", "stale", "partial"].includes(entry.state) && !hasFutureRetry;
+}
+
+function renderProviderAttention(data) {
+  const banner = $("#providerAttentionBanner");
+  const detail = $("#providerAttentionDetail");
+  if (!banner || !detail) return;
+  const providers = (Array.isArray(data.provider_freshness) ? data.provider_freshness : [])
+    .filter(providerRequiresManualAttention);
+  banner.hidden = !providers.length;
+  if (!providers.length) {
+    detail.textContent = "";
+    return;
+  }
+  const labels = [...new Set(providers.map((entry) => entry.label || entry.provider || "Eine Anbindung"))];
+  detail.textContent = labels.length === 1
+    ? `${labels[0]} benötigt manuelles Eingreifen.`
+    : `${labels.length} Anbindungen benötigen manuelles Eingreifen.`;
+}
+
+function progressPercentage(value) {
+  const progress = Number(value);
+  return Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : null;
+}
+
+function garminWindowProgress(message) {
+  const match = String(message || "").match(/Zeitraum\s+(\d+)\/(\d+)/i);
+  if (!match) return null;
+  const current = Number(match[1]);
+  const total = Number(match[2]);
+  if (!Number.isFinite(current) || !Number.isFinite(total) || total < 1) return null;
+  return Math.max(1, Math.min(99, Math.round(((current - 1) / total) * 100)));
+}
+
+function connectionProgressEntry(label, message, progress = null) {
+  return { label, message: String(message || "Synchronisierung läuft…"), progress };
+}
+
+function renderConnectionsSyncProgress(data) {
+  const root = $("#connectionsSyncProgress");
+  if (!root) return;
+  root.replaceChildren();
+  const entries = [];
+  const activeProviders = new Set();
+  const sync = data.sync || {};
+  const intervalRunning = Boolean(sync.running || state.localSync.intervals);
+  if (intervalRunning) {
+    entries.push(connectionProgressEntry(
+      "Intervals.icu",
+      sync.message || sync.status || "Intervals.icu-Synchronisierung wird gestartet…",
+      progressPercentage(sync.progress),
+    ));
+    activeProviders.add("intervals");
+  }
+  const garminSync = data.garmin_sync || {};
+  const garminRunning = Boolean(garminSync.running || state.localSync.garmin);
+  if (garminRunning) {
+    const message = garminSync.status || "Garmin-Synchronisierung wird gestartet…";
+    entries.push(connectionProgressEntry("Garmin", message, garminWindowProgress(message)));
+    activeProviders.add("garmin");
+  }
+  const resyncs = data.provider_resync || {};
+  [
+    ["intervals", "Intervals.icu", state.localSync.intervalsFull],
+    ["garmin", "Garmin", state.localSync.garminFull],
+  ].forEach(([provider, label, localRunning]) => {
+    const resync = resyncs[provider] || {};
+    if (!resync.running && !localRunning) return;
+    entries.push(connectionProgressEntry(label, resync.status || "Lokale Daten werden vollständig neu geladen…"));
+    activeProviders.add(provider);
+  });
+  if (data.external_calendar?.running || state.localSync.externalCalendar) {
+    entries.push(connectionProgressEntry("Gemeinsamer Kalender", data.external_calendar?.status || "Kalender wird synchronisiert…"));
+    activeProviders.add("calendar");
+  }
+  if (data.weather?.loading || state.localSync.weather) {
+    entries.push(connectionProgressEntry("Open-Meteo", "Wetter wird aktualisiert…"));
+    activeProviders.add("weather");
+  }
+  (Array.isArray(sync.jobs) ? sync.jobs : [])
+    .filter((job) => ["queued", "running"].includes(job?.status) && job.provider && !activeProviders.has(job.provider))
+    .forEach((job) => {
+      const completed = Number(job.progress?.completed || 0);
+      const total = Number(job.progress?.total || 0);
+      const progress = total > 0 ? Math.round((completed / total) * 100) : null;
+      const label = coachProviderLabel(job.provider);
+      const message = job.status === "queued"
+        ? "Wartet auf den Start der Synchronisierung…"
+        : total > 0 ? `${completed}/${total} Arbeitsschritt${total === 1 ? "" : "e"} abgeschlossen` : "Synchronisierung läuft…";
+      entries.push(connectionProgressEntry(label, message, progress));
+    });
+  root.hidden = !entries.length;
+  entries.forEach((entry) => {
+    const item = document.createElement("article");
+    item.className = "connection-sync-progress-item";
+    const header = document.createElement("div");
+    header.className = "connection-sync-progress-header";
+    const label = document.createElement("strong");
+    label.textContent = entry.label;
+    const message = document.createElement("span");
+    message.textContent = entry.message;
+    header.append(label, message);
+    const bar = document.createElement("progress");
+    bar.className = "connection-sync-progress-bar";
+    bar.max = 100;
+    if (entry.progress == null) {
+      bar.classList.add("is-indeterminate");
+      bar.removeAttribute("value");
+      bar.setAttribute("aria-label", `${entry.label}: Fortschritt wird ermittelt`);
+    } else {
+      bar.value = entry.progress;
+      bar.setAttribute("aria-label", `${entry.label}: ${entry.progress}%`);
+    }
+    item.append(header, bar);
+    root.append(item);
+  });
+}
 
 function renderProviderFreshness(data) {
   const root = $("#providerFreshnessTimeline");
@@ -3567,7 +3692,12 @@ function renderSettings(data) {
             ? `Letzte Aktualisierung: ${formatTime(intervals.last_sync_at || librarySync.last_sync_at)}${libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : ""}${paginationDetail ? ` · ${paginationDetail}` : ""}`
             : "Noch keine Synchronisierung durchgeführt";
   }
-  setStatus("#garminConnectionStatus", garmin.configured, garmin.configured ? (garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert") : "Nicht konfiguriert");
+  const garminSyncRunning = Boolean(data.garmin_sync?.running || state.localSync.garmin);
+  setStatus("#garminConnectionStatus", garmin.configured, !garmin.configured
+    ? "Nicht konfiguriert"
+    : garminSyncRunning
+      ? "Synchronisierung läuft…"
+      : garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert");
   const weatherLocation = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
   setStatus("#weatherConnectionStatus", weather.configured, weather.configured ? (weather.loading ? "Wird geladen" : "Konfiguriert") : "Nicht konfiguriert");
   const weatherDetail = $("#weatherConnectionDetail");
@@ -3649,6 +3779,8 @@ function renderSettings(data) {
   if (privacySummary) privacySummary.textContent = `${usage.requests || 0} OpenAI-Anfragen heute`;
   renderGithubRelease(data.app);
   renderNotificationStatus();
+  renderProviderAttention(data);
+  renderConnectionsSyncProgress(data);
   renderProviderFreshness(data);
 }
 
@@ -3790,6 +3922,7 @@ function render(data) {
   renderPerformance(data.performance);
   renderModel(data.model);
   renderThinkingLevel(data.thinking_level);
+  renderDiagnosticCapture(data.diagnostic_capture);
   renderSettings(data);
   updateHeaderAction();
 }
@@ -4604,6 +4737,40 @@ async function downloadDiagnostics() {
   finally { button.disabled = false; button.textContent = "Diagnose herunterladen"; }
 }
 
+function renderDiagnosticCapture(capture = {}) {
+  const toggle = $("#diagnosticCaptureToggle");
+  const status = $("#diagnosticCaptureStatus");
+  if (!toggle || !status) return;
+  const active = Boolean(capture.active);
+  toggle.checked = active;
+  if (active) {
+    const entries = Number(capture.entries || 0);
+    status.textContent = `Aktiv bis ${formatTime(capture.expires_at)} · ${entries} technische Einträge gespeichert. Es werden nur Antwortformen und technische Metadaten gespeichert; keine Antwortinhalte, Athletendaten, Zugangsdaten oder Tokens.`;
+  } else {
+    status.textContent = "Aus. Antwortinhalte und Athletendaten werden nicht aufgezeichnet.";
+  }
+}
+
+async function setDiagnosticCapture(event) {
+  const toggle = event.currentTarget;
+  const previous = !toggle.checked;
+  toggle.disabled = true;
+  try {
+    const capture = await api("/api/diagnostics/capture", {
+      method: "POST",
+      body: JSON.stringify({ enabled: toggle.checked }),
+    });
+    if (state.data) state.data.diagnostic_capture = capture;
+    renderDiagnosticCapture(capture);
+    toast(capture.active ? "Erweiterte technische Diagnose ist für eine Stunde aktiv" : "Erweiterte technische Diagnose beendet");
+  } catch (error) {
+    toggle.checked = previous;
+    toast(error.message, true);
+  } finally {
+    toggle.disabled = false;
+  }
+}
+
 async function downloadPrivacyExport() {
   try {
     const response = await fetch("/api/privacy/export", { credentials: "same-origin", cache: "no-store" });
@@ -4756,6 +4923,7 @@ $("#modelSelect").addEventListener("change", saveModel);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
+$("#diagnosticCaptureToggle").addEventListener("change", setDiagnosticCapture);
 $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#chatResetButton").addEventListener("click", resetCoachChat);
 $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);
