@@ -277,16 +277,16 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 8. Coach-, Heute-, Plan-, Analyse- und Mehr-Redesign
 
-- [ ] Coach mit sofortigem Verlauf/Skeleton, Schnellaktionen, Providerstatus und Inline-Receipts umsetzen.
-- [ ] Heute nach Priorität ordnen; Plan als Agenda/Week-Grid mit kompakten Leerzuständen umsetzen.
-- [ ] Verlauf/Leistung unter Analyse zusammenführen; Filter als gemeinsame Komponente umsetzen.
-- [ ] Mehr als mobile Liste und Desktop-Einstellungsrail implementieren; technische Details und Danger Zone trennen.
+- [x] Coach mit sofortigem Verlauf/Skeleton, Schnellaktionen, Providerstatus und Inline-Receipts umsetzen.
+- [x] Heute nach Priorität ordnen; Plan als Agenda/Week-Grid mit kompakten Leerzuständen umsetzen.
+- [x] Verlauf/Leistung unter Analyse zusammenführen; Filter als gemeinsame Komponente umsetzen.
+- [x] Mehr als mobile Liste und Desktop-Einstellungsrail implementieren; technische Details und Danger Zone trennen.
 
 **Subsysteme:** `views.js`, `forms.js`, `components.js`, `state.js`, Styles.  
 **Definition of Done:** Keine Seite zeigt widersprüchlich „bereit“ und „Einrichtung nötig“; jede Aktion hat einen sichtbaren Status.  
 **Tests:** Leeren, befüllten, Loading-, Offline-, Fehler-, Sync- und Konfliktzustand je Route prüfen.  
 **Seiteneffekte:** Fachansichten bleiben Transparenz/Reparatur; Coach bleibt primäre Aktionsfläche.  
-**Evidence:** `- Screenshot/Viewport/Commit: …`
+**Evidence:** Ergebnis: Vollsuite `python -m unittest discover -s tests -v` — 367 Tests grün, 3 erwartete SQLCipher-Skips; `python -m py_compile server.py tests/test_server.py` grün; fokussierte DOM-/Routing-/Service-Worker-/Asset- und Task-8-Vertragstests grün; Docker-Build grün mit Image-Digest `sha256:270697846f3b1fbb14856a91d342214e981dfa1af59b13a3a621b5d97bb466fd`; statische Schutzprüfung für Native-Dialoge, Protected Paths, veraltete Asset-Versionen und `git diff --check` grün. Die vollständige manuelle Viewport-Abnahme bleibt Task 10. Commit: 8cf37e4.
 
 ### 9. Backend-, Integrations- und Dialogregressionstests
 
