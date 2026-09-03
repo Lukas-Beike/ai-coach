@@ -252,15 +252,15 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 6. Bootstrap v3 und SSE
 
-- [ ] Lokalen Bootstrap ohne Providerwartezeit implementieren.
-- [ ] Chatverlauf/Skeleton, lokale Planung, Providerzustände und laufende Jobs initial liefern.
-- [ ] SSE-Ereignisse, Reconnect und Gap-Recovery implementieren.
+- [x] Lokalen Bootstrap ohne Providerwartezeit implementieren.
+- [x] Chatverlauf/Skeleton, lokale Planung, Providerzustände und laufende Jobs initial liefern.
+- [x] SSE-Ereignisse, Reconnect und Gap-Recovery implementieren.
 
 **Subsysteme:** HTTP API, State Store, SSE, Bootstrap.  
 **Definition of Done:** Shell ist sofort bedienbar; Providerstatus ist `not_configured|loading|ready|stale|degraded|error` statt leerer Objekte.  
 **Tests:** Bootstrap ohne Netzwerk, SSE-Reconnect, verpasste Ereignisse, Auth/CSRF, Jobfortschritt.  
 **Seiteneffekte:** Keine Netzwerkanfrage im Bootstrap-Request.  
-**Evidence:** `- Test/Commit: …`
+**Evidence:** Ergebnis: python -m unittest discover -s tests -v — 366 Tests grün, 3 erwartete SQLCipher-Skips; python -m py_compile server.py tests/test_server.py grün; Bootstrap-Spezialtests inklusive Offline-/Ein-Verbindungsprüfung, Schema 3, Providerstatus und lokalem State grün; SSE-Cursor-, Jobfortschritt-, Retention-Gap- und Frontend-Reconnect-Tests grün. Netzwerkprüfung bestätigte github_release_status(refresh=False) im Bootstrap; native-Dialog- und Protected-Path-Scan grün. Commit: 305d534.
 
 ### 7. Responsive App-Shell und Designsystem
 
