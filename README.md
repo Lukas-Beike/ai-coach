@@ -120,11 +120,12 @@ It is not intended to be exposed directly to the public internet.
   planned sessions, and read-only calendar appointments. Check-ins can be entered
   or edited through Coach Chat and the daily editor. Check-in dates and daily training
   boundaries use the saved IANA profile timezone, and future check-ins are
-  rejected. The Heute tab provides a compact daily view of the local
-  check-in, readiness/recovery signals, today's planned workout, relevant
-  weather, open activity feedback, and pending plan adjustments. It uses
-  already loaded state and does not trigger an additional coach or provider
-  request when opened. Missing, loading, offline, sync, and error states are
+  rejected. The Heute tab provides a compact, read-only coach-oriented daily
+  synthesis of the local morning check-in, readiness/recovery signals, today's
+  planned workout, relevant weather, open activity feedback, and pending plan
+  adjustments. It uses already loaded state and does not trigger an additional
+  coach or provider request when opened; navigation and action buttons are not
+  shown in this view. Missing, loading, offline, sync, and error states are
   shown clearly.
 - After a completed activity, the coach can ask for a short subjective follow-up
   and store the athlete's answer as activity feedback.

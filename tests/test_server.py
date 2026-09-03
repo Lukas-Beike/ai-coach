@@ -1687,6 +1687,13 @@ class CoachTests(unittest.TestCase):
         self.assertIn('coachReceipts: []', state)
         self.assertNotIn('id="activitiesPanel"', index)
 
+    def test_today_view_is_a_read_only_coach_oriented_summary(self):
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        today_view = app[app.index("function renderToday(data)"):app.index("function planningContextForDate(")]
+        self.assertIn('todayCard("Coach-Einordnung", "today-priority")', today_view)
+        self.assertIn('todayCard("Morgen-Check-in", "today-checkin")', today_view)
+        self.assertNotIn("todayAction(", today_view)
+
     def test_plan_segments_are_deep_linked_and_library_is_lazy_paginated(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
