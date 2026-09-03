@@ -3424,6 +3424,50 @@ class CoachTests(unittest.TestCase):
         server._garmin_capability_success("body_battery")
         self.assertTrue(server._garmin_capability_allowed("body_battery"))
 
+    def test_garmin_range_collector_never_exceeds_two_parallel_calls(self):
+        from backend.providers.garmin import collect_garmin_data
+
+        class FakeGarmin:
+            def __init__(self):
+                self.active = 0
+                self.maximum = 0
+                self.lock = threading.Lock()
+
+            def range_call(self, start, end):
+                with self.lock:
+                    self.active += 1
+                    self.maximum = max(self.maximum, self.active)
+                server.time.sleep(0.01)
+                with self.lock:
+                    self.active -= 1
+                return [{"date": start, "end": end}]
+
+            get_sleep_daily = range_call
+            get_hrv_data_range = range_call
+            get_body_battery = range_call
+            get_activities_by_date = range_call
+
+            def get_training_readiness(self, current):
+                return {"date": current}
+
+            def get_race_predictions(self):
+                return []
+
+            def get_max_metrics(self, current):
+                return {"date": current}
+
+        fake = FakeGarmin()
+        collect_garmin_data(
+            fake,
+            [(date(2026, 8, 30), date(2026, 8, 31))],
+            start=date(2026, 8, 30),
+            today=date(2026, 8, 31),
+            synced_at="2026-09-01T00:00:00+00:00",
+            external_call=lambda _service, _source, operation, _details: operation(),
+            redact=lambda value: value,
+        )
+        self.assertEqual(fake.maximum, 2)
+
     def test_intervals_collection_rejects_repeated_full_page(self):
         client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         page = [{"id": f"activity-{index}"} for index in range(500)]
