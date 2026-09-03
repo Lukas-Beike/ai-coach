@@ -3442,48 +3442,9 @@ def diagnostic_response_shape(value: Any, depth: int = 0) -> dict[str, Any]:
     return {"type": type(value).__name__}
 
 
-DIAGNOSTIC_CAPTURE_SECRET_KEY = re.compile(r"(?:api.?key|authorization|cookie|credential|csrf|password|secret|session|ticket|token)", re.IGNORECASE)
-
-
-def _redact_diagnostic_string(value: str) -> str:
-    """Remove credentials that may occur as response values without a clear key."""
-    redacted = redact_text(value)
-    redacted = re.sub(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b", "[REDACTED_JWT]", redacted)
-    redacted = re.sub(r"\b[A-Za-z0-9_-]{40,}\b", "[REDACTED_POSSIBLE_TOKEN]", redacted)
-    return redacted
-
-
-def _sanitize_diagnostic_response(value: Any, depth: int = 0) -> Any:
-    """Bound a user-enabled response capture while removing credential material."""
-    if depth > 12:
-        return "[TRUNCATED_DEPTH]"
-    if isinstance(value, dict):
-        result: dict[str, Any] = {}
-        for index, (key, item) in enumerate(value.items()):
-            if index >= 500:
-                result["[TRUNCATED_FIELDS]"] = len(value) - index
-                break
-            key_text = str(key)[:160]
-            if DIAGNOSTIC_CAPTURE_SECRET_KEY.search(key_text):
-                result[key_text] = "[REDACTED]"
-            else:
-                result[key_text] = _sanitize_diagnostic_response(item, depth + 1)
-        return result
-    if isinstance(value, (list, tuple)):
-        items = [_sanitize_diagnostic_response(item, depth + 1) for item in value[:2000]]
-        if len(value) > 2000:
-            items.append({"[TRUNCATED_ITEMS]": len(value) - 2000})
-        return items
-    if isinstance(value, str):
-        return _redact_diagnostic_string(value)[:8192]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    return _redact_diagnostic_string(str(value))[:8192]
-
-
 def diagnostic_capture_response(value: Any) -> dict[str, Any]:
-    """Return a schema plus a bounded, secret-free response for active diagnostics."""
-    return {"shape": diagnostic_response_shape(value), "content": _sanitize_diagnostic_response(value)}
+    """Return response shape metadata without retaining response contents."""
+    return {"shape": diagnostic_response_shape(value)}
 
 
 def _safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
@@ -4611,9 +4572,10 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
         update_provider_sync_cursor("garmin", "data", windows[-1][1].isoformat(), payload["synced_at"])
         if end_date is not None:
             update_provider_sync_cursor("garmin", "historical", windows[0][0].isoformat(), payload["synced_at"])
-        body_battery_failed = any(
+        current_errors = [error for error in payload.get("errors", []) if error]
+        body_battery_failed = bool(current_errors) and all(
             isinstance(error, dict) and error.get("source") == "body_battery"
-            for error in payload["errors"]
+            for error in current_errors
         )
         retry_job = _schedule_body_battery_retry(days) if body_battery_failed and end_date is None else None
         return {
@@ -15229,7 +15191,7 @@ def diagnostic_report() -> dict[str, Any]:
         "database": {"messages": message_count, "workout_drafts_legacy": draft_count, "workout_library": library_count, "workout_library_state": workout_library_sync_summary(), "competitions": competition_count, "athlete_checkins": checkin_count, "activity_feedback": activity_feedback_count, "external_calendar_events": len(list_external_calendar_events())},
         "logs": recent_log_entries(),
         "debug_capture": {**diagnostic_capture_status(), "entries": diagnostic_capture_entries()},
-        "note": "Zugangsdaten, Tokens und Rohantworten sind ausgeschlossen. Nur während einer vom Nutzer aktivierten Diagnoseaufzeichnung können bereinigte Antwortinhalte mit Athletendaten enthalten sein.",
+        "note": "Zugangsdaten, Tokens, Rohantworten und Athleteninhalte sind ausgeschlossen; die optionale Diagnoseaufzeichnung speichert nur technische Antwortformen und Metadaten.",
     }
 
 

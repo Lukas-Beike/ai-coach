@@ -624,10 +624,12 @@ technical operation ID across trigger, provider, phase, duration, counts, and
 safe error codes; they do not log provider payloads or athlete content.
 In **Betrieb & Diagnose**, the athlete can explicitly enable a one-hour
 technical capture. It records bounded provider response content only for that
-period so an export can diagnose provider schema failures. It does not capture
-request bodies, API keys, passwords, tokens, cookies, authorization/session/
-CSRF fields, or private calendar URLs; the normal logs and diagnostics remain
-content-free. The capture is never enabled by the Coach.
+period so an export can diagnose provider schema failures. It records only
+response shapes and technical metadata, never response content. It does not
+capture request bodies, API keys, passwords, tokens, cookies,
+authorization/session/CSRF fields, athlete content, or private calendar URLs;
+the normal logs and diagnostics remain content-free. The capture is never
+enabled by the Coach.
 For HTTPS reverse-proxy deployments, set
 `COOKIE_SECURE=true`; this adds the `Secure` attribute to the session and CSRF
 cookies. Keep it `false` for the documented local HTTP development flow.

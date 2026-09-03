@@ -6365,23 +6365,27 @@ class CoachTests(unittest.TestCase):
                 server.http_json("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
         self.assertTrue(response_body.closed)
 
-    def test_user_enabled_diagnostic_capture_keeps_response_content_but_redacts_secrets(self):
+    def test_user_enabled_diagnostic_capture_keeps_response_shape_without_content(self):
         self.assertFalse(server.diagnostic_capture_status()["active"])
         enabled = server.set_diagnostic_capture(True)
         self.assertTrue(enabled["active"])
         response = {
             "bodyBattery": 82,
             "access_token": "must-never-appear",
-            "nested": {"sessionId": "must-also-never-appear", "athlete_note": "allowed during capture"},
+            "nested": {"sessionId": "must-also-never-appear", "athlete_note": "must-not-appear"},
         }
         server.external_call("garmin", "body_battery", lambda: response)
         report = server.diagnostic_report()
         report_text = json.dumps(report, ensure_ascii=False)
-        self.assertIn("allowed during capture", report_text)
         self.assertIn("bodyBattery", report_text)
+        self.assertNotIn("must-not-appear", report_text)
         self.assertNotIn("must-never-appear", report_text)
         self.assertNotIn("must-also-never-appear", report_text)
-        self.assertIn("[REDACTED]", report_text)
+        entries = server.diagnostic_capture_entries()
+        self.assertTrue(entries)
+        response_capture = entries[-1]["details"]["response"]
+        self.assertIn("shape", response_capture)
+        self.assertNotIn("content", response_capture)
 
         server.set_diagnostic_capture(False)
         self.assertFalse(server.diagnostic_capture_status()["active"])
