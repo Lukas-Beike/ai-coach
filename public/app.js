@@ -1256,6 +1256,12 @@ function renderToday(data) {
     ].filter(Boolean);
     todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
   } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
+  const checkinButton = document.createElement("button");
+  checkinButton.type = "button";
+  checkinButton.className = "secondary-button today-checkin-action";
+  checkinButton.textContent = checkin ? "Check-in prüfen" : "Check-in ausfüllen";
+  checkinButton.addEventListener("click", () => openCheckinEditor(todayKey));
+  checkinCard.append(checkinButton);
   root.append(checkinCard);
 
   const readinessCard = todayCard("Readiness & Erholung", "today-readiness");
