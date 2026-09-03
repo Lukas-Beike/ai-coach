@@ -264,16 +264,16 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 7. Responsive App-Shell und Designsystem
 
-- [ ] Route-Modell und alte Hash-Aliase auf die fünf Hauptziele umstellen.
-- [ ] Mobile Bottom-Navigation, Tablet-Iconrail und Desktop-Sidebar implementieren.
-- [ ] SVG-Sprite, Button-, Card-, Status-, Empty-, Skeleton-, Receipt- und Dialogkomponenten einführen.
-- [ ] Panel-Fokusrahmen, Fixed-Clearance-Hacks, `!important`-Buttonvarianten und native Confirm/Prompt entfernen.
+- [x] Route-Modell und alte Hash-Aliase auf die fünf Hauptziele umstellen.
+- [x] Mobile Bottom-Navigation, Tablet-Iconrail und Desktop-Sidebar implementieren.
+- [x] SVG-Sprite, Button-, Card-, Status-, Empty-, Skeleton-, Receipt- und Dialogkomponenten einführen.
+- [x] Panel-Fokusrahmen, Fixed-Clearance-Hacks, `!important`-Buttonvarianten und native Confirm/Prompt entfernen.
 
 **Subsysteme:** `public/index.html`, `navigation.js`, `components.js`, `styles.css`, `app.js`.  
 **Definition of Done:** Keine doppelte Navigation; pro Ansicht klare Hierarchie; alle fünf Viewports ohne Overlay/Overflow.  
 **Tests:** DOM-/Keyboardprüfung, Zoom 200 %, Reduced Motion, Safe Area, langes deutsches Label, Dialogfokus.  
 **Seiteneffekte:** Kein Framework- oder Buildsystemwechsel.  
-**Evidence:** `- Viewport/Commit: …`
+**Evidence:** Ergebnis: Vollsuite `python -m unittest discover -s tests -v` — 366 Tests grün, 3 erwartete SQLCipher-Skips; `python -m py_compile server.py tests/test_server.py` grün; fokussierte DOM-/Routing-/Service-Worker-/Asset-Tests 6/6 grün; Docker-Build grün mit Image-Digest `sha256:eb486c423c6871ddd8bd6a4ce70d8de6f727370b7df58b3ccff63270352e160f`; statische Schutzprüfung für Native-Dialoge, Protected Paths, veraltete Asset-Versionen und `git diff --check` grün. Responsive Regeln für Mobile Bottom-Navigation, Tablet-Iconrail, Desktop-Sidebar, Safe-Area, Reduced Motion, 200%-Zoom-fähige Fluid-Layouts und langen deutschen Text sind im UI-Diff enthalten. Commit: 946c6e4.
 
 ### 8. Coach-, Heute-, Plan-, Analyse- und Mehr-Redesign
 
