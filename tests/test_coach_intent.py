@@ -39,6 +39,31 @@ class CoachIntentContractTests(unittest.TestCase):
                 "authorization_scope": [],
             })})
 
+    def test_parse_intent_accepts_explicit_competition_sync_operation(self):
+        result = parse_intent_response({"output_text": json.dumps({
+            "intent": "remote_sync",
+            "operation": "sync_competitions",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_competitions"],
+            "follow_up_operations": [],
+        })})
+        self.assertEqual(result["operation"], "sync_competitions")
+        self.assertEqual(result["target_system"], "intervals")
+
+    def test_parse_intent_accepts_training_plan_update_operation(self):
+        result = parse_intent_response({"output_text": json.dumps({
+            "intent": "local_action",
+            "operation": "update_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["training_plan:plan-1"],
+            "follow_up_operations": [],
+        })})
+        self.assertEqual(result["operation"], "update_training_plan")
+
 
 if __name__ == "__main__":
     unittest.main()

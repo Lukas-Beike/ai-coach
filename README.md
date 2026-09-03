@@ -68,40 +68,48 @@ It is not intended to be exposed directly to the public internet.
   remains a separate queued follow-up action. Reloading the page or losing the
   streaming connection does not cancel the server-side coach request; its
   persisted answer appears in the chat after the next load.
+- The Coach start card contains only contextual quick actions, not provider
+  connection badges. The morning check-in disappears after it completed for
+  the athlete's local day. "Plan anpassen" appears only for an unapplied
+  calendar, illness, injury, or blocking-weather change affecting a planned
+  unit within the next three days. "Letzte Einheit analysieren" refreshes
+  Intervals.icu before coaching. When near-identical Wahoo and Garmin cycling
+  recordings are present, Wahoo is canonical; deleting the Garmin cloud copy
+  always requires a separate confirmation in Coach Chat.
 - The Coach is the local source of truth for future planned units, target
   competitions, and reusable workout templates. An unambiguous plan request
-  stores local planned units immediately; deletions, bulk changes, conflicts,
-  and adaptive replans still require confirmation. Every planning entity has a
-  stable local UUID and sync metadata.
+  stores local planned units immediately. Explicit requests to move, archive,
+  restore, or delete units and templates are executed by Coach tools without a
+  second UI confirmation; questions and hypotheticals remain read-only. Every
+  planning entity has a stable local UUID and sync metadata.
 - Dated workouts are stored in the dedicated local `planned_units` table and
-  never in the reusable template library. Imported Intervals.icu calendar
-  workouts, competitions, and templates retain their provider identities;
-  local changes remain local until the separate sync preview is confirmed.
+  never in the reusable template library. Intervals.icu calendar workouts and
+  templates are imported once during initial setup. After that import, the
+  local app is authoritative for future planning; completed Intervals.icu
+  activities remain authoritative for what was actually performed.
    Beim ersten expliziten Bibliothekssync wird dafür bei Intervals.icu bei
    Bedarf ein privater Ordner „Intervals Coach“ angelegt.
 - The regular Intervals.icu activity pull is read-only and never uploads
-  pending local library entries. Only the separate library synchronization
-  action can create or update library templates remotely.
+  pending local library entries or re-imports future remote planning. Only an
+  explicitly named Coach synchronization can create, update, or delete planned
+  units remotely. The current chat request is the authorization for that sync.
 - When the first regular Intervals.icu sync finds an empty local library, it
   imports the existing remote templates into the local library. This initial
   import is read-only; later local edits still require the separate explicit
   library synchronization action for remote writes.
 - The explicit planning synchronization transfers dirty local planned units to
-  the Intervals.icu calendar with stable upsert identities. It reads remote
-  changes first, updates remote-only rows locally, and records two-sided
-  changes as conflicts. Remote deletions are never silently applied locally.
+  the Intervals.icu calendar with stable upsert identities. It does not replace
+  the local plan with later remote edits or deletions.
 - If a provider response no longer contains an imported template, it is kept
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by
   a full Intervals.icu resync.
-- Multi-week plans are grouped in the local library and shown with their date
-  range, goal, status, and active units. Library templates can be edited,
-  archived/restored, and local-only templates can be deleted. Synced templates
-  are intentionally archived instead of deleted; edits become pending local
-  changes until the explicit library synchronization.
+- Multi-week plans and library templates are managed through the Coach. The
+  Bibliothek view is intentionally read-only and shows the individual active
+  workout templates grouped by sport.
 - Existing training plans can be renamed, have their goal, status, or date range
-  changed, and can be deleted through the Coach. Plan deletion is reviewed and
-  removes plan metadata only; scheduled local workout units remain untouched.
+  changed, and can be deleted directly through the Coach. Plan deletion removes
+  plan metadata only; scheduled local workout units remain untouched.
 - The coach can explicitly apply saved library entries as local planned units.
   Existing calendar dates are checked first. Intervals.icu calendar writes stay
   disabled unless the athlete explicitly requests that synchronization.
@@ -120,11 +128,12 @@ It is not intended to be exposed directly to the public internet.
   planned sessions, and read-only calendar appointments. Check-ins can be entered
   or edited through Coach Chat and the daily editor. Check-in dates and daily training
   boundaries use the saved IANA profile timezone, and future check-ins are
-  rejected. The Heute tab provides a compact daily view of the local
-  check-in, readiness/recovery signals, today's planned workout, relevant
-  weather, open activity feedback, and pending plan adjustments. It uses
-  already loaded state and does not trigger an additional coach or provider
-  request when opened. Missing, loading, offline, sync, and error states are
+  rejected. The Heute tab provides a compact, read-only coach-oriented daily
+  synthesis of the local morning check-in, readiness/recovery signals, today's
+  planned workout, relevant weather, open activity feedback, and pending plan
+  adjustments. It uses already loaded state and does not trigger an additional
+  coach or provider request when opened; navigation and action buttons are not
+  shown in this view. Missing, loading, offline, sync, and error states are
   shown clearly.
 - After a completed activity, the coach can ask for a short subjective follow-up
   and store the athlete's answer as activity feedback.
@@ -187,6 +196,9 @@ visible and polls more frequently while a manual synchronization is running.
 Large Intervals.icu responses are fetched in bounded pages and the latest
 sync reports the fetched page/window counts; incomplete Garmin ranges remain
 visible as partial provider status instead of being presented as complete.
+If only Garmin Body Battery is unavailable, the last known value remains
+available and the app queues one targeted retry after two hours; it does not
+repeat the complete Garmin synchronization for that capability alone.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
@@ -195,8 +207,8 @@ GitHub release information is checked at most every 15 minutes. The morning
 check-in is generated at most once per local calendar day when its required
 integrations are configured.
 
-The six main views use stable hash links: `#coach`, `#today`, `#activities`,
-`#planned`, `#performance`, and `#more`. Navigation is implemented with real
+The five main views use stable hash links: `#coach`, `#today`, `#plan`,
+`#analysis`, and `#more`. Navigation is implemented with real
 links, so direct links, reload, browser back/forward, keyboard access, and
 screen-reader announcements remain available. An unknown hash falls back to
 `#coach`; a deep link is retained through the login flow. The `#today` view
@@ -246,13 +258,11 @@ search), while plans, performance, profile, feedback, and the workout library
 are loaded separately. The activity view can request the next page without
 reloading the complete application state.
 
-The Plan view is split into the deep-linked segments `#planned/calendar`,
-`#planned/library`, and `#planned/goals`. Calendar is the local primary view and
-contains planned workouts, competitions, relevant read-only calendar events,
-weather, recovery, check-ins, and confirmation-required adaptive previews. The
-library contains reusable templates only. Goals & Plans contains competitions
-and multi-week plans; remote synchronization is a separate preview/confirmation
-action. Segment scroll positions are restored when navigating back.
+The `#plan` route is a read-only Bibliothek view containing the individual
+active workout templates grouped by sport. It has no conflict resolution,
+multi-selection, local marking, manual scheduling, editing, or synchronization
+controls. Planning, template management, competitions, multi-week plans, and
+explicit remote synchronization are handled through the Coach.
 
 The More view is organized into the deep-linked segments `#more/profile`,
 `#more/connections`, `#more/coach`, `#more/privacy`, and `#more/operations`.
@@ -275,44 +285,45 @@ bounded retry time after transient failures. Retry buttons are limited to the
 corresponding read-only provider path; competition and workout-library writes
 remain separate explicit actions. The same safe freshness metadata is included
 in the diagnostics report. The timeline retains at most 200 attempts for 30
-days and never stores provider responses or calendar URLs.
+days and never stores provider responses or calendar URLs during normal use.
 
-The workout library also supports a mobile-friendly, keyboard-accessible
-multi-selection for local marking, date shifting, archiving, and explicitly
-selected Intervals.icu synchronization. Every bulk operation shows a bounded
-server-side diff first. Local actions remain local; selected remote sync uses
-the existing one-time confirmation token, exact object IDs, and payload hashes.
-Each remote object reports its own result, and only failed or conflicting
-objects remain selected for a deliberate retry. Filter and reload changes
-discard the selection visibly.
+While a provider synchronization is running, the connections view shows its
+current phase and, where the provider reports one, a progress indicator. A
+site-wide notice headed **“Anbindung benötigt Aufmerksamkeit”** is displayed
+only for errors that require manual intervention (for example, renewed login
+or invalid configuration). Partial data with a scheduled automatic retry,
+including the two-hour Garmin Body Battery retry, does not raise that notice.
+
+The library has no multi-selection, local marking, manual planning, conflict
+resolution, or synchronization controls. The Coach receives bounded local IDs
+and payload hashes, performs explicitly requested single or bulk changes, and
+queues an explicitly named Intervals.icu synchronization in batches. Provider
+failures are reported in Coach Chat and can be retried there.
 
 ## Target competitions and Intervals.icu
 
-Target competitions are entered manually in the profile with the Intervals.icu
-event fields: name, local start date/time, sport/type, category, description,
-duration, distance, target, and external ID. They are synchronized in both
-directions with Intervals.icu. Local changes are exported as `RACE_A`,
+Target competitions are managed through the Coach with the Intervals.icu event
+fields: name, local start date/time, sport/type, category, description, duration,
+distance, target, and external ID. They are synchronized in both directions
+with Intervals.icu. Local changes are exported as `RACE_A`,
 `RACE_B`, or `RACE_C` events with a stable `external_id`; matching race events
 from Intervals.icu are imported into the local database.
 
 Startup, daily, and ordinary pull synchronization only reads competition events
-and never exports local changes or deletion tombstones. The dedicated competition
-sync first shows a create/change/delete diff and requires immediate confirmation;
-its ten-minute fingerprint prevents a stale preview from writing.
+and never exports local changes or deletion tombstones. An explicit named Coach
+request performs the dedicated competition synchronization.
 
 Competition synchronization accepts strength training, running, outdoor
 cycling (`Ride`), and indoor/virtual cycling (`VirtualRide`). Other sports are
 skipped. Remote events that were previously linked but no longer exist are
-kept locally as a visible `remote_missing` conflict until an explicit local
-decision and a later reconciliation; local deletions are propagated to
-Intervals.icu during the next synchronization.
+kept locally; a later explicit Coach synchronization reconciles them. Local
+deletions are propagated to Intervals.icu during that synchronization.
 The Intervals.icu event ID is stored locally after import or a successful push.
 Before creating a new event, synchronization also checks for an existing race
 with the same name, date, and sport to avoid creating duplicates. A dirty local
-row that matches a remote race by identity only is never silently adopted:
-the UI exposes actions to keep the local version or adopt the remote version.
-Planned-workout conflicts use overlapping local start/duration windows when
-both sides provide times, and fall back to same-day conflicts otherwise.
+row that matches a remote race by identity only is never silently adopted. The
+Coach reports provider failures and can retry the requested operation; planned
+workouts always use the preserved local version.
 
 ## Configuration
 
@@ -335,16 +346,9 @@ is used as the SQLCipher database key. It is never stored by the application
 and cannot be recovered if lost. The password must be at least 12 characters
 long.
 
-When an existing unencrypted database is first started with `APP_PASSWORD`,
-the application migrates it to SQLCipher and keeps a file named
-`*.plaintext-backup-*` in the data directory. Protect this backup like any
-other unencrypted copy of the database.
-
-The database schema has a monotone version recorded in `schema_migrations`.
-Startup applies supported migrations idempotently and validates declared
-foreign keys on every connection. Existing orphaned relations or an unknown
-schema version stop startup and require the documented restore workflow; the
-database file is not replaced automatically. The public-calendar candidate
+The database is created with the current SQLCipher schema on first startup.
+Restore accepts only a complete database with that current schema and checks
+its integrity before replacing the active file. The public-calendar candidate
 relation explicitly cascades when its source is deleted.
 
 `/api/health` is a liveness probe: it only confirms that the HTTP process can
@@ -354,15 +358,14 @@ answer. `/api/readiness` is a separate infrastructure probe and returns HTTP
 safe booleans and status values, never paths, secrets, or athlete data.
 
 Backend modularization starts with dependency-light database primitives in the
-`backend.db` package; its first repository is the explicit
+`backend.db` package. Its repositories provide explicit
 `KeyValueRepository`, `ProfileRepository`, `CompetitionRepository`,
 `TrainingPlanRepository`, `PlanAdjustmentRepository`,
 `ChatRepository`,
 `CheckinRepository`,
-`ActivityFeedbackRepository`, `SnapshotRepository`, and
-`WorkoutDraftRepository` interfaces in
-`backend/db/repositories.py`. The HTTP application remains the compatibility
-boundary. The Intervals.icu provider's bounded, duplicate-page-safe collection
+`ActivityFeedbackRepository`, and `SnapshotRepository` interfaces in
+`backend/db/repositories.py`. The Intervals.icu provider's bounded,
+duplicate-page-safe collection
 pagination is isolated in `backend/providers/intervals.py`; it receives the
 transport and error factory explicitly and has no dependency on application
 state. Further provider operations, synchronization, coaching,
@@ -374,16 +377,16 @@ as application code and do not change the
 SQLCipher, authentication, or persistence contracts.
 
 The first frontend boundary is `public/api.js`. It owns same-origin JSON and
-audio requests, CSRF headers, and common HTTP error handling; `app.js` keeps
-the existing compatibility wrappers and supplies the login callback. The API
+audio requests, CSRF headers, and common HTTP error handling; `app.js` supplies
+the login callback. The API
 client has no dependency on application state or views. Future frontend
 boundaries (`state`, `navigation`, `views`, `forms`, and `components`) depend
 on this client through explicit interfaces, with no new framework and no
 duplicate DTO definitions. The route constants and pure hash parsers are
 isolated in `public/navigation.js`, the shared mutable UI state is isolated in
 `public/state.js`, state-free display/formatting helpers are isolated in
-`public/views.js`, and competition form helpers and dialog focus components are
-isolated in `public/forms.js` and `public/components.js`.
+`public/views.js`, and dialog focus components are isolated in
+`public/components.js`.
 DOM- and data-loading coordination remains in `app.js` and the script order is
 explicit.
 
@@ -416,7 +419,7 @@ in the More tab. Daily synchronization uses the athlete's validated
 IANA timezone and stores a separate local execution date for each provider.
 Existing UTC timestamps are converted lazily when the local marker is missing;
 a successful manual sync counts for that provider's current local day. Events
-themselves are shown only in the **Plan** tab.
+are supplied to the Coach as read-only scheduling context.
 A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
 shows the error. Calendar text is untrusted data; it cannot change application
@@ -473,11 +476,10 @@ particularly well. These activity-specific notes are stored separately from
 imported Garmin and Intervals.icu values and included in the AI context as
 local athlete data.
 
-The adaptive planning action is surfaced as a red update notice in the planned
-calendar (and as a compact hint on the Coach tab) when a weather or shared
-calendar refresh finds future local library entries that need adjustment. It
-produces a change preview; only after explicit approval are eligible local
-library entries updated.
+The adaptive planning action is surfaced as a compact hint on the Coach tab when
+a weather or shared calendar refresh finds future local planned units that need
+adjustment. It produces a change preview; asking the Coach to apply the preview
+is the explicit approval and updates eligible local library entries.
 It does not overwrite, delete, or reschedule remote Intervals.icu calendar
 events.
 
@@ -485,11 +487,11 @@ External calendar events are only planning signals. The heuristic uses the event
 date, start/end time, duration, and all-day status to identify library entries
 that are hard or long. It does not infer or diagnose an infection from a family event;
 illness must still be entered in the athlete check-in. Every suggested change
-remains a local preview and requires **Anpassung anwenden**.
+remains a local preview and requires an explicit Coach request to apply it.
 
 Confirmed illness pauses can optionally be synchronized as explicit `SICK`
-calendar entries to Intervals.icu. This remote calendar write is always a
-separate athlete-selected option and is never performed by the preview itself.
+calendar entries to Intervals.icu. This remote calendar write happens only when
+the athlete explicitly names that synchronization in Coach Chat.
 
 
 ## Docker and Unraid
@@ -557,7 +559,7 @@ connection are handled as normal aborted requests rather than internal server
 failures.
 
 The **System** tab allows the athlete to export local data as JSON or delete
-local chats, snapshots, legacy drafts, active and archived library entries,
+local chats, snapshots, active and archived library entries,
 competitions, plans, check-ins, feedback, provider snapshots, calendar imports,
 and profile state. It also shows a bounded local change history for profile,
 library, competition, and plan changes. History entries expose only changed
@@ -587,7 +589,7 @@ the backup database. Before replacement, the current database is retained as a
 
 Database backups are checkpointed and downloaded in bounded file chunks. The
 privacy export is an incrementally written ZIP archive: large collections are
-JSONL entries and `manifest.json` records the export format, schema version,
+JSONL entries and `manifest.json` records the export format, format version,
 categories, and complete status. Temporary export files are removed after the
 download, including after a client disconnect. Export generation enforces a
 100 MB size limit, a 120-second time limit, and a free-space check before it
@@ -601,6 +603,14 @@ five minutes, while expired sessions and stale in-memory rate-limit buckets are
 cleaned up periodically in bounded batches. Synchronization logs correlate a
 technical operation ID across trigger, provider, phase, duration, counts, and
 safe error codes; they do not log provider payloads or athlete content.
+In **Betrieb & Diagnose**, the athlete can explicitly enable a one-hour
+technical capture. It records response shapes and technical metadata only for
+that period so an export can diagnose provider schema failures. It never records
+response content or athlete data. It does not
+capture request bodies, API keys, passwords, tokens, cookies,
+authorization/session/CSRF fields, athlete content, or private calendar URLs;
+the normal logs and diagnostics remain content-free. The capture is never
+enabled by the Coach.
 For HTTPS reverse-proxy deployments, set
 `COOKIE_SECURE=true`; this adds the `Secure` attribute to the session and CSRF
 cookies. Keep it `false` for the documented local HTTP development flow.

@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg?v=159" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=159">
+    <link rel="icon" href="/icon.svg?v=165" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css?v=165">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -25,16 +25,15 @@
     <aside class="desktop-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
       <a class="nav-item" href="#today" aria-controls="todayPanel" aria-label="Heute" data-panel="todayPanel" data-route="today"><svg class="nav-icon" aria-hidden="true"><use href="#icon-today"></use></svg><span>Heute</span></a>
-      <a class="nav-item" href="#plan/calendar" aria-controls="workoutsPanel" aria-label="Plan" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Plan</span></a>
-      <a class="nav-item" href="#analysis/history" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
-      <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span><small id="desktopNavVersion" class="nav-version"></small></a>
+      <a class="nav-item" href="#plan" aria-controls="workoutsPanel" aria-label="Bibliothek" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Bibliothek</span></a>
+      <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
+      <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </aside>
     <header class="topbar">
-      <div>
-        <span class="eyebrow">PRIVATER TRAININGSBEREICH</span>
-        <h1>Intervals Coach <small id="appVersion" class="app-version" aria-label="Version"></small><a id="appUpdateIndicator" class="app-update-indicator" href="#" target="_blank" rel="noopener noreferrer" hidden aria-label="Neuere Version verfügbar" title="Neuere Version verfügbar"><svg class="app-update-warning" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.5 21 20H3L12 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 9v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="17" r="1" fill="currentColor"></circle></svg></a><button id="pwaUpdateButton" class="app-update-indicator pwa-update-button" type="button" hidden aria-label="Neue App-Version laden" title="Neue App-Version laden"><svg class="nav-icon" aria-hidden="true"><use href="#icon-refresh"></use></svg></button></h1>
+      <div class="topbar-actions">
+        <button id="headerActionButton" class="secondary-button top-action" type="button" hidden></button>
+        <button id="pwaUpdateButton" class="app-update-indicator pwa-update-button" type="button" hidden aria-label="Neue App-Version laden" title="Neue App-Version laden"><svg class="nav-icon" aria-hidden="true"><use href="#icon-refresh"></use></svg></button>
       </div>
-      <button id="headerActionButton" class="secondary-button top-action" type="button" hidden></button>
     </header>
 
     <main>
@@ -43,23 +42,25 @@
         <span id="statusDetail">Trainingsbereich wird geprüft</span>
       </section>
       <section id="connectivityNotice" class="connectivity-notice" role="status" aria-live="polite" hidden></section>
+      <section id="providerAttentionBanner" class="provider-attention-banner" role="alert" aria-live="assertive" hidden>
+        <div><strong>Anbindung benötigt Aufmerksamkeit</strong><span id="providerAttentionDetail"></span></div>
+        <a href="#more/connections">Anbindungen öffnen</a>
+      </section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
         <section id="coachOverview" class="coach-overview card" aria-labelledby="coachOverviewTitle">
           <div class="coach-overview-heading">
-            <div><span class="eyebrow">DEIN TRAININGSCOACH</span><h2 id="coachOverviewTitle">Was möchtest du heute klären?</h2><p id="coachOverviewStatus">Verlauf, Planung und Erholung sind im Coach-Kontext gebündelt.</p></div>
-            <span id="coachReadyStatus" class="status-chip" data-status="loading">Wird geprüft</span>
+            <div><span class="eyebrow">DEIN TRAININGSCOACH</span><h2 id="coachOverviewTitle">Was möchtest du heute klären?</h2><p>Verlauf, Planung und Erholung sind im Coach-Kontext gebündelt.</p></div>
           </div>
-          <div id="coachProviderStatus" class="coach-provider-status" aria-label="Datenquellenstatus"></div>
           <div id="coachQuickActions" class="coach-quick-actions" aria-label="Schnellaktionen">
-            <button type="button" class="btn secondary" data-coach-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
-            <button type="button" class="btn secondary" data-coach-message="Analysiere meine letzte absolvierte Einheit anhand der aktuellen Intervals.icu-Daten. Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit?">Letzte Einheit analysieren</button>
-            <button type="button" class="btn ghost" data-coach-message="Zeige mir kurz den Stand meiner nächsten geplanten Einheiten und ob eine Anpassung sinnvoll ist.">Plan prüfen</button>
+            <button id="coachMorningCheckinButton" type="button" class="btn secondary" data-coach-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
+            <button id="coachLatestActivityButton" type="button" class="btn secondary" data-coach-message="Aktualisiere zuerst meine Intervals.icu-Daten. Analysiere danach meine letzte absolvierte Einheit: Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit? Nutze bei einer nahezu gleichen Wahoo- und Garmin-Radaufzeichnung immer Wahoo.">Letzte Einheit analysieren</button>
+            <button id="coachAdjustPlanButton" type="button" class="btn ghost" data-coach-message="Zeige mir die konkrete Anpassung für die erkannte Blockade in den kommenden drei Tagen als Vorschlag. Berücksichtige den neuen Kalendertermin, Krankheit, Verletzung oder unmögliches Wetter und ändere noch nichts ohne meine Freigabe." hidden>Plan anpassen</button>
           </div>
         </section>
         <div id="coachAdaptivePlanningNotice" class="adaptive-planning-notice coach-adaptive-planning-notice" hidden role="status">
-          <div><strong>Deine Planung braucht eine Anpassung</strong><small>Öffne „Plan“, um die Vorschläge zu prüfen.</small></div>
-          <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Plan öffnen</button>
+          <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
+          <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
         </div>
         <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
         <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
@@ -74,8 +75,8 @@
         <form id="chatForm" class="composer">
           <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
             <span class="quick-message-label">Schnellstart</span>
-            <button type="button" data-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
-            <button type="button" data-message="Analysiere meine letzte absolvierte Einheit anhand der aktuellen Intervals.icu-Daten. Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit?">Letzte Einheit analysieren</button>
+            <button id="quickMorningCheckinButton" type="button" data-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
+            <button type="button" data-message="Aktualisiere zuerst meine Intervals.icu-Daten. Analysiere danach meine letzte absolvierte Einheit: Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit? Nutze bei einer nahezu gleichen Wahoo- und Garmin-Radaufzeichnung immer Wahoo.">Letzte Einheit analysieren</button>
           </div>
           <div id="chatQueueStatus" class="chat-queue-status" hidden aria-live="polite"></div>
           <textarea id="messageInput" rows="1" maxlength="12000" placeholder="Frage deinen Coach…" aria-label="Nachricht an deinen Coach"></textarea>
@@ -100,25 +101,12 @@
         <div id="todaySummary" class="today-grid"></div>
       </section>
 
-      <section id="workoutsPanel" class="panel" aria-label="Geplante Einheiten">
+      <section id="workoutsPanel" class="panel" aria-label="Trainingsbibliothek">
         <div class="section-heading">
-          <div><span class="eyebrow">KALENDER</span><h2>Plan <span id="planningDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2><span id="planningSummary" class="tab-sync-detail"></span></div>
+          <div><span class="eyebrow">TRAININGSBIBLIOTHEK</span><h2>Bibliothek</h2><span id="librarySummary" class="tab-sync-detail"></span></div>
         </div>
-        <nav class="plan-segment-nav" aria-label="Planbereiche">
-          <a href="#plan/calendar" data-plan-segment="calendar" aria-current="page">Kalender</a>
-          <a href="#plan/templates" data-plan-segment="templates">Vorlagen</a>
-          <a href="#plan/goals" data-plan-segment="goals">Ziele &amp; Pläne</a>
-        </nav>
-        <section id="planCalendarSegment" class="plan-segment" data-plan-segment-panel="calendar" aria-labelledby="planCalendarTitle">
-          <div class="plan-segment-heading"><div><span class="eyebrow">LOKALE PLANUNG</span><h3 id="planCalendarTitle">Kalender</h3></div><span class="segment-status">Lokal gespeichert · Remote-Daten nur als Quelle</span></div>
-        <div id="remoteDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
-        <div id="parallelCyclingWarning" class="parallel-warning" hidden></div>
-        <div id="adaptivePlanningNotice" class="adaptive-planning-notice" hidden role="status">
-          <div><strong>Adaptive Anpassung nötig</strong><small id="adaptivePlanningCaption">Die aktualisierte Planung wartet auf deine Prüfung.</small></div>
-          <button type="button" id="adaptivePlanningButton" class="adaptive-planning-button">Vorschau prüfen</button>
-        </div>
-        <div id="plannedCalendar" class="planned-calendar"></div>
-        </section>
+        <div id="library" class="library" aria-live="polite"></div>
+        <div id="libraryPagination" class="library-pagination"></div>
         <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle" aria-describedby="checkinDescription">
           <div class="checkin-dialog-content">
             <div class="settings-section-heading">
@@ -145,46 +133,6 @@
             <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
           </div>
         </dialog>
-        <section id="planGoalsSegment" class="plan-segment" data-plan-segment-panel="goals" aria-labelledby="planGoalsTitle" hidden>
-          <div class="plan-segment-heading"><div><span class="eyebrow">ZIELE UND MEHRWOCHENPLÄNE</span><h3 id="planGoalsTitle">Ziele &amp; Pläne</h3></div><span class="segment-status">Lokal gespeichert · Wettkampf-Push separat</span></div>
-        <details id="plannedCompetitionsSection" class="settings-section collapsible-section">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Zielwettkämpfe</span><span id="plannedCompetitionsSummary" class="collapsible-summary-meta">Noch keine Wettkämpfe</span></summary>
-          <p>Trage Wettkämpfe lokal ein. Der separate Remote-Push zu Intervals.icu erfordert eine Vorschau und Bestätigung.</p>
-          <div id="competitionList" class="competition-list"></div>
-          <div class="settings-inline-action competition-sync-actions">
-            <div><strong>Remote-Ziel: Intervals.icu</strong><span id="competitionSyncDetail">Status: noch nicht synchronisiert</span></div>
-            <button type="button" id="competitionSyncButton" class="secondary-button">Vorschau für Wettkampf-Push</button>
-          </div>
-          <button type="button" id="addCompetitionButton" class="secondary-button">Wettkampf hinzufügen</button>
-          <button type="submit" form="profileForm">Wettkämpfe speichern</button>
-        </details>
-          <div id="trainingPlans" class="training-plans"></div>
-        </section>
-        <section id="planLibrarySegment" class="plan-segment" data-plan-segment-panel="templates" aria-labelledby="planLibraryTitle" hidden>
-          <div class="plan-segment-heading"><div><span class="eyebrow">LOKALE VORLAGEN</span><h3 id="planLibraryTitle">Vorlagen <span id="libraryDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3></div><span class="segment-status">Lokal speichern · Remote-Sync nur mit Vorschau</span></div>
-        <div class="library-heading">
-          <div><h4 class="subsection-title">Lokale Vorlagen</h4><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
-          <button id="libraryLoadButton" class="secondary-button" type="button">Vorschau für Bibliotheks- und Planungssync</button>
-        </div>
-        <div id="library" class="library"></div>
-        <div class="library-toolbar">
-          <label>Anzeige<select id="libraryFilter"><option value="active">Aktive Vorlagen</option><option value="templates">Vorlagen</option><option value="archived">Archivierte Vorlagen</option><option value="all">Alle Vorlagen</option></select></label>
-          <span id="librarySummary" class="tab-sync-detail"></span>
-        </div>
-        <section class="library-bulk" aria-labelledby="libraryBulkTitle">
-          <div class="library-bulk-heading"><div><h4 id="libraryBulkTitle" class="subsection-title">Mehrfachauswahl</h4><span id="librarySelectionSummary" class="tab-sync-detail">Keine Einheiten ausgewählt</span></div><button id="libraryClearSelectionButton" class="secondary-button" type="button" hidden>Auswahl aufheben</button></div>
-          <p class="fine-print">Die Auswahl gilt nur für die aktuell geladene Seite und wird bei Filter- oder Reloadwechsel bewusst verworfen.</p>
-          <div class="library-bulk-actions">
-            <button id="librarySelectVisibleButton" class="secondary-button" type="button">Sichtbare auswählen</button>
-            <button id="libraryMarkButton" class="secondary-button" type="button" disabled>Lokal markieren</button>
-            <button id="libraryUnmarkButton" class="secondary-button" type="button" disabled>Markierung entfernen</button>
-            <button id="libraryArchiveButton" class="secondary-button danger-button" type="button" disabled>Archivieren</button>
-            <button id="librarySyncSelectedButton" class="secondary-button" type="button" disabled>Auswahl synchronisieren</button>
-          </div>
-          <div id="libraryBulkResult" class="library-bulk-result" aria-live="polite"></div>
-        </section>
-        <div id="libraryPagination" class="library-pagination"></div>
-        </section>
       </section>
 
       <section id="dataPanel" class="panel" aria-label="Analyse">
@@ -192,10 +140,14 @@
           <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Verlauf und Leistungsdaten in einem Bereich</span></div>
         </div>
         <nav class="analysis-segment-nav" aria-label="Analysebereiche">
-          <a href="#analysis/history" data-analysis-segment="history" aria-current="page">Verlauf</a>
-          <a href="#analysis/performance" data-analysis-segment="performance">Leistung</a>
+          <a href="#analysis/performance" data-analysis-segment="performance" aria-current="page">Leistung</a>
+          <a href="#analysis/history" data-analysis-segment="history">Verlauf</a>
         </nav>
-        <section id="analysisHistorySegment" class="analysis-segment" data-analysis-segment-panel="history" aria-labelledby="analysisHistoryTitle">
+        <section id="analysisPerformanceSegment" class="analysis-segment" data-analysis-segment-panel="performance" aria-labelledby="analysisPerformanceTitle">
+          <div class="analysis-segment-heading"><div><span class="eyebrow">LEISTUNG</span><h3 id="analysisPerformanceTitle">Leistungsdaten</h3></div></div>
+          <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
+        </section>
+        <section id="analysisHistorySegment" class="analysis-segment" data-analysis-segment-panel="history" aria-labelledby="analysisHistoryTitle" hidden>
           <div class="analysis-segment-heading"><div><span class="eyebrow">TRAININGSVERLAUF</span><h3 id="analysisHistoryTitle">Aktivitäten <span id="activityDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3></div><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
           <div class="activity-date-filter" aria-label="Aktivitäten nach Zeitraum filtern">
             <label for="activityFromDate">Von<input id="activityFromDate" type="date"></label>
@@ -205,10 +157,6 @@
           <div id="activityStats" class="activity-stats-summary" aria-label="Aktivitätsstatistik"></div>
           <div id="activityFilters" class="activity-filters" aria-label="Aktivitätstypen filtern"></div>
           <div id="activities" class="activities"></div>
-        </section>
-        <section id="analysisPerformanceSegment" class="analysis-segment" data-analysis-segment-panel="performance" aria-labelledby="analysisPerformanceTitle" hidden>
-          <div class="analysis-segment-heading"><div><span class="eyebrow">LEISTUNG</span><h3 id="analysisPerformanceTitle">Leistungsdaten</h3></div></div>
-          <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
         </section>
       </section>
 
@@ -262,7 +210,7 @@
 
       <section id="settingsPanel" class="panel" aria-label="Systemeinstellungen">
         <div class="section-heading">
-          <div><span class="eyebrow">MEHR</span><h2>Bereiche &amp; Einstellungen</h2></div>
+          <div><span class="eyebrow">MEHR</span><h2>Bereiche &amp; Einstellungen</h2><p class="settings-app-version">Version <span id="settingsAppVersion">wird geladen…</span></p></div>
         </div>
         <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
           <a href="#more/profile" data-more-segment="profile">Athletenprofil</a>
@@ -273,6 +221,7 @@
         </nav>
         <details class="settings-section collapsible-section" data-more-segment-panel="connections">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
+          <section id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></section>
           <div class="connection-cards">
             <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small></div><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small></div><button id="chatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></article>
@@ -372,7 +321,12 @@
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span><span class="collapsible-summary-meta">Bereinigten Status herunterladen</span></summary>
           <div class="diagnostic-actions">
             <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
-            <p class="fine-print">Enthält aktuelle bereinigte Fehler und Laufzeitstatus, niemals API-Schlüssel oder Trainingsdaten.</p>
+            <label class="diagnostic-capture-toggle" for="diagnosticCaptureToggle">
+              <input type="checkbox" id="diagnosticCaptureToggle">
+              <span>Erweiterte technische Diagnose für eine Stunde aufzeichnen</span>
+            </label>
+            <p id="diagnosticCaptureStatus" class="fine-print">Aus. Antwortinhalte und Athletendaten werden nicht aufgezeichnet.</p>
+            <p class="fine-print">Der normale Diagnoseexport enthält keine API-Schlüssel, Tokens oder Trainingsdaten. Während der aktiven Aufzeichnung werden zusätzlich Antwortformen und technische Metadaten gespeichert – niemals Antwortinhalte oder Athletendaten.</p>
           </div>
         </details>
       </section>
@@ -381,8 +335,8 @@
     <nav class="bottom-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
       <a class="nav-item" href="#today" aria-controls="todayPanel" aria-label="Heute" data-panel="todayPanel" data-route="today"><svg class="nav-icon" aria-hidden="true"><use href="#icon-today"></use></svg><span>Heute</span></a>
-      <a class="nav-item" href="#plan/calendar" aria-controls="workoutsPanel" aria-label="Plan" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Plan</span></a>
-      <a class="nav-item" href="#analysis/history" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
+      <a class="nav-item" href="#plan" aria-controls="workoutsPanel" aria-label="Bibliothek" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Bibliothek</span></a>
+      <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </nav>
   </div>
@@ -391,7 +345,6 @@
   <div id="authLoading" class="auth-loading" role="status" aria-live="polite">Trainingsbereich wird gepr&uuml;ft&hellip;</div>
   <dialog id="loginDialog" aria-labelledby="loginTitle">
     <form id="loginForm" method="dialog">
-      <span class="eyebrow">PRIVATER TRAININGSBEREICH</span>
       <h2 id="loginTitle">Anmelden</h2>
       <p>Gib das im Container gesetzte APP_PASSWORD ein.</p>
       <label for="loginPassword">Passwort<input id="loginPassword" type="password" autocomplete="current-password" required></label>
@@ -401,17 +354,6 @@
         <span id="loginButtonLabel">Anmelden</span>
       </button>
     </form>
-  </dialog>
-  <dialog id="adaptivePlanningDialog" aria-labelledby="adaptivePlanningDialogTitle">
-    <div class="adaptive-planning-dialog">
-      <span class="eyebrow">PLANUNGSVORSCHLAG</span>
-      <h2 id="adaptivePlanningDialogTitle">Adaptive Anpassung prüfen</h2>
-      <div id="adaptivePlanningPreview" class="replan-preview"></div>
-      <div class="dialog-actions">
-        <button type="button" id="cancelAdaptivePlanningButton" class="secondary-button">Später</button>
-        <button type="button" id="applyAdaptivePlanningButton" class="adaptive-planning-button">Anpassung anwenden</button>
-      </div>
-    </div>
   </dialog>
   <dialog id="confirmationDialog" aria-labelledby="confirmationDialogTitle" aria-describedby="confirmationDialogMessage">
     <form id="confirmationDialogForm" method="dialog" class="confirmation-dialog">
@@ -427,12 +369,12 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=159" defer></script>
-  <script src="/navigation.js?v=159" defer></script>
-  <script src="/state.js?v=159" defer></script>
-  <script src="/views.js?v=159" defer></script>
-  <script src="/forms.js?v=159" defer></script>
-  <script src="/components.js?v=159" defer></script>
-  <script src="/app.js?v=159" defer></script>
+  <script src="/api.js?v=165" defer></script>
+  <script src="/navigation.js?v=165" defer></script>
+  <script src="/state.js?v=165" defer></script>
+  <script src="/views.js?v=165" defer></script>
+  <script src="/forms.js?v=165" defer></script>
+  <script src="/components.js?v=165" defer></script>
+  <script src="/app.js?v=165" defer></script>
 </body>
 </html>

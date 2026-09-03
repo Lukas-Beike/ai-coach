@@ -15,9 +15,9 @@
 - Do not print secrets or full athlete payloads in failures, fixtures, or test
   diagnostics. Use clearly fake values and sanitized/minimal fixtures.
 - Preserve coverage for the security and approval boundaries: APP_PASSWORD,
-  session/CSRF authentication, SQLCipher/plaintext migration, path traversal,
+  session/CSRF authentication, SQLCipher startup, path traversal,
   public-calendar SSRF validation, redacted logs/diagnostics, bounded request
-  bodies, backup validation/restore, local-only drafts, and explicit remote
+  bodies, backup validation/restore, local-only planned units, and explicit remote
   workout approval.
 - When changing sync or context behavior, test source precedence and provenance
   for Intervals.icu, Garmin, local feedback, derived metrics, and AI estimates.

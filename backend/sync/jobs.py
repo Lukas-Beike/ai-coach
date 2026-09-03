@@ -13,7 +13,7 @@ from typing import Any
 
 
 PROVIDERS = frozenset({"intervals", "garmin", "calendar", "weather"})
-JOB_TYPES = frozenset({"refresh", "plan_push", "historical_backfill"})
+JOB_TYPES = frozenset({"refresh", "plan_push", "historical_backfill", "body_battery_retry"})
 JOB_STATUSES = frozenset({"queued", "running", "completed", "partial", "failed"})
 ITEM_STATUSES = frozenset({"queued", "running", "completed", "partial", "failed", "skipped"})
 TERMINAL_JOB_STATUSES = frozenset({"completed", "partial", "failed"})

@@ -25,26 +25,6 @@ def decode_payload(value: Any) -> Any:
         return {}
 
 
-def iter_workout_drafts(db: Any, *, decode: PayloadDecoder = decode_payload) -> Iterable[dict[str, Any]]:
-    """Yield the bounded, flattened legacy workout-draft export records."""
-    for row in db.execute(
-        "SELECT id, status, intervals_event_id, error, created_at, updated_at, payload "
-        "FROM workout_drafts ORDER BY created_at DESC LIMIT 50"
-    ):
-        payload = decode(row["payload"])
-        if not isinstance(payload, dict):
-            payload = {}
-        yield {
-            "id": row["id"],
-            "status": row["status"],
-            "intervals_event_id": row["intervals_event_id"],
-            "error": row["error"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-            **payload,
-        }
-
-
 def iter_workout_library(db: Any, *, decode: PayloadDecoder = decode_payload) -> Iterable[dict[str, Any]]:
     """Yield bounded workout-library payloads in the established order."""
     for row in db.execute(
@@ -94,7 +74,6 @@ def write_jsonl_rows(
 def manifest(
     archive_names: Iterable[str],
     *,
-    schema_version: int,
     exported_at: str,
     format_version: int,
     jsonl_files: Iterable[str],
@@ -103,7 +82,6 @@ def manifest(
     return {
         "format": "intervals-coach-privacy-export",
         "format_version": format_version,
-        "schema_version": schema_version,
         "exported_at": exported_at,
         "status": "complete",
         "categories": sorted(name.rsplit(".", 1)[0] for name in archive_names if name != "manifest.json"),
