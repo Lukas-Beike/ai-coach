@@ -7,7 +7,7 @@
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icon.svg?v=164" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=164">
+    <link rel="stylesheet" href="/styles.css?v=164">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -25,7 +25,7 @@
     <aside class="desktop-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
       <a class="nav-item" href="#today" aria-controls="todayPanel" aria-label="Heute" data-panel="todayPanel" data-route="today"><svg class="nav-icon" aria-hidden="true"><use href="#icon-today"></use></svg><span>Heute</span></a>
-      <a class="nav-item" href="#plan/calendar" aria-controls="workoutsPanel" aria-label="Plan" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Plan</span></a>
+      <a class="nav-item" href="#plan" aria-controls="workoutsPanel" aria-label="Bibliothek" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Bibliothek</span></a>
       <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </aside>
@@ -59,8 +59,8 @@
           </div>
         </section>
         <div id="coachAdaptivePlanningNotice" class="adaptive-planning-notice coach-adaptive-planning-notice" hidden role="status">
-          <div><strong>Deine Planung braucht eine Anpassung</strong><small>Öffne „Plan“, um die Vorschläge zu prüfen.</small></div>
-          <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Plan öffnen</button>
+          <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
+          <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
         </div>
         <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
         <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
@@ -101,25 +101,12 @@
         <div id="todaySummary" class="today-grid"></div>
       </section>
 
-      <section id="workoutsPanel" class="panel" aria-label="Geplante Einheiten">
+      <section id="workoutsPanel" class="panel" aria-label="Trainingsbibliothek">
         <div class="section-heading">
-          <div><span class="eyebrow">KALENDER</span><h2>Plan <span id="planningDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2><span id="planningSummary" class="tab-sync-detail"></span></div>
+          <div><span class="eyebrow">TRAININGSBIBLIOTHEK</span><h2>Bibliothek</h2><span id="librarySummary" class="tab-sync-detail"></span></div>
         </div>
-        <nav class="plan-segment-nav" aria-label="Planbereiche">
-          <a href="#plan/calendar" data-plan-segment="calendar" aria-current="page">Kalender</a>
-          <a href="#plan/templates" data-plan-segment="templates">Vorlagen</a>
-          <a href="#plan/goals" data-plan-segment="goals">Ziele &amp; Pläne</a>
-        </nav>
-        <section id="planCalendarSegment" class="plan-segment" data-plan-segment-panel="calendar" aria-labelledby="planCalendarTitle">
-          <div class="plan-segment-heading"><div><span class="eyebrow">LOKALE PLANUNG</span><h3 id="planCalendarTitle">Kalender</h3></div><span class="segment-status">Lokal gespeichert · Remote-Daten nur als Quelle</span></div>
-        <div id="remoteDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
-        <div id="parallelCyclingWarning" class="parallel-warning" hidden></div>
-        <div id="adaptivePlanningNotice" class="adaptive-planning-notice" hidden role="status">
-          <div><strong>Adaptive Anpassung nötig</strong><small id="adaptivePlanningCaption">Die aktualisierte Planung wartet auf deine Prüfung.</small></div>
-          <button type="button" id="adaptivePlanningButton" class="adaptive-planning-button">Vorschau prüfen</button>
-        </div>
-        <div id="plannedCalendar" class="planned-calendar"></div>
-        </section>
+        <div id="library" class="library" aria-live="polite"></div>
+        <div id="libraryPagination" class="library-pagination"></div>
         <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle" aria-describedby="checkinDescription">
           <div class="checkin-dialog-content">
             <div class="settings-section-heading">
@@ -146,40 +133,6 @@
             <div id="checkinHistory" class="checkin-history" aria-live="polite"></div>
           </div>
         </dialog>
-        <section id="planGoalsSegment" class="plan-segment" data-plan-segment-panel="goals" aria-labelledby="planGoalsTitle" hidden>
-          <div class="plan-segment-heading"><div><span class="eyebrow">ZIELE UND MEHRWOCHENPLÄNE</span><h3 id="planGoalsTitle">Ziele &amp; Pläne</h3></div><span class="segment-status">Lokal gespeichert · Wettkampf-Push separat</span></div>
-        <section id="plannedCompetitionsSection" class="settings-section">
-          <div class="settings-section-heading"><div><h4>Zielwettkämpfe</h4><p>Diese Übersicht ist schreibgeschützt. Hinzufügen, Überarbeiten, Löschen und Synchronisieren erledigt ausschließlich dein Coach.</p></div><span id="plannedCompetitionsSummary" class="tab-sync-detail">Noch keine Wettkämpfe</span></div>
-          <div id="competitionList" class="competition-list"></div>
-          <button type="button" id="competitionCoachButton" class="secondary-button">Mit Coach bearbeiten</button>
-        </section>
-          <div id="trainingPlans" class="training-plans"></div>
-        </section>
-        <section id="planLibrarySegment" class="plan-segment" data-plan-segment-panel="templates" aria-labelledby="planLibraryTitle" hidden>
-          <div class="plan-segment-heading"><div><span class="eyebrow">LOKALE VORLAGEN</span><h3 id="planLibraryTitle">Vorlagen <span id="libraryDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3></div><span class="segment-status">Lokal speichern · Remote-Sync nur mit Vorschau</span></div>
-        <div class="library-heading">
-          <div><h4 class="subsection-title">Lokale Vorlagen</h4><span id="librarySyncDetail" class="tab-sync-detail"></span></div>
-          <button id="libraryLoadButton" class="secondary-button" type="button">Vorschau für Bibliotheks- und Planungssync</button>
-        </div>
-        <div id="library" class="library"></div>
-        <div class="library-toolbar">
-          <label>Anzeige<select id="libraryFilter"><option value="active">Aktive Vorlagen</option><option value="templates">Vorlagen</option><option value="archived">Archivierte Vorlagen</option><option value="all">Alle Vorlagen</option></select></label>
-          <span id="librarySummary" class="tab-sync-detail"></span>
-        </div>
-        <section class="library-bulk" aria-labelledby="libraryBulkTitle">
-          <div class="library-bulk-heading"><div><h4 id="libraryBulkTitle" class="subsection-title">Mehrfachauswahl</h4><span id="librarySelectionSummary" class="tab-sync-detail">Keine Einheiten ausgewählt</span></div><button id="libraryClearSelectionButton" class="secondary-button" type="button" hidden>Auswahl aufheben</button></div>
-          <p class="fine-print">Die Auswahl gilt nur für die aktuell geladene Seite und wird bei Filter- oder Reloadwechsel bewusst verworfen.</p>
-          <div class="library-bulk-actions">
-            <button id="librarySelectVisibleButton" class="secondary-button" type="button">Sichtbare auswählen</button>
-            <button id="libraryMarkButton" class="secondary-button" type="button" disabled>Lokal markieren</button>
-            <button id="libraryUnmarkButton" class="secondary-button" type="button" disabled>Markierung entfernen</button>
-            <button id="libraryArchiveButton" class="secondary-button danger-button" type="button" disabled>Archivieren</button>
-            <button id="librarySyncSelectedButton" class="secondary-button" type="button" disabled>Auswahl synchronisieren</button>
-          </div>
-          <div id="libraryBulkResult" class="library-bulk-result" aria-live="polite"></div>
-        </section>
-        <div id="libraryPagination" class="library-pagination"></div>
-        </section>
       </section>
 
       <section id="dataPanel" class="panel" aria-label="Analyse">
@@ -382,7 +335,7 @@
     <nav class="bottom-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
       <a class="nav-item" href="#today" aria-controls="todayPanel" aria-label="Heute" data-panel="todayPanel" data-route="today"><svg class="nav-icon" aria-hidden="true"><use href="#icon-today"></use></svg><span>Heute</span></a>
-      <a class="nav-item" href="#plan/calendar" aria-controls="workoutsPanel" aria-label="Plan" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Plan</span></a>
+      <a class="nav-item" href="#plan" aria-controls="workoutsPanel" aria-label="Bibliothek" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Bibliothek</span></a>
       <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </nav>
@@ -401,17 +354,6 @@
         <span id="loginButtonLabel">Anmelden</span>
       </button>
     </form>
-  </dialog>
-  <dialog id="adaptivePlanningDialog" aria-labelledby="adaptivePlanningDialogTitle">
-    <div class="adaptive-planning-dialog">
-      <span class="eyebrow">PLANUNGSVORSCHLAG</span>
-      <h2 id="adaptivePlanningDialogTitle">Adaptive Anpassung prüfen</h2>
-      <div id="adaptivePlanningPreview" class="replan-preview"></div>
-      <div class="dialog-actions">
-        <button type="button" id="cancelAdaptivePlanningButton" class="secondary-button">Später</button>
-        <button type="button" id="applyAdaptivePlanningButton" class="adaptive-planning-button">Anpassung anwenden</button>
-      </div>
-    </div>
   </dialog>
   <dialog id="confirmationDialog" aria-labelledby="confirmationDialogTitle" aria-describedby="confirmationDialogMessage">
     <form id="confirmationDialogForm" method="dialog" class="confirmation-dialog">
