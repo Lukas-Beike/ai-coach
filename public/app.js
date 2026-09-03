@@ -154,6 +154,15 @@ function cookie(name) {
 function showLogin() {
   if (state.chatStatusTimer) clearTimeout(state.chatStatusTimer);
   state.chatStatusTimer = null;
+  state.stateEventSource?.close();
+  state.stateEventSource = null;
+  if (state.stateEventReconnectTimer) clearTimeout(state.stateEventReconnectTimer);
+  if (state.stateEventRefreshTimer) clearTimeout(state.stateEventRefreshTimer);
+  state.stateEventReconnectTimer = null;
+  state.stateEventRefreshTimer = null;
+  state.stateEventRefreshAreas.clear();
+  state.stateEventLastId = 0;
+  state.stateEventBackoff = 1000;
   state.data = null;
   state.busy = false;
   state.chatRequest = null;
@@ -241,6 +250,60 @@ function finishAppShellLoading() {
 
 async function api(path, options = {}) {
   return window.AppApi.request(path, options, showLogin);
+}
+
+function scheduleStateEventRefresh(areas) {
+  (areas || []).forEach((area) => state.stateEventRefreshAreas.add(area));
+  if (state.stateEventRefreshTimer) clearTimeout(state.stateEventRefreshTimer);
+  state.stateEventRefreshTimer = setTimeout(() => {
+    state.stateEventRefreshTimer = null;
+    const requested = [...state.stateEventRefreshAreas];
+    state.stateEventRefreshAreas.clear();
+    load("/api/bootstrap?local=1", requested).catch(() => {});
+  }, 150);
+}
+
+function handleStateEvent(event) {
+  if (event.lastEventId) state.stateEventLastId = Number(event.lastEventId) || state.stateEventLastId;
+  let payload = {};
+  try { payload = JSON.parse(event.data || "{}"); } catch (_) { return; }
+  if (payload.latest_event_id !== undefined) state.stateEventLastId = Number(payload.latest_event_id) || state.stateEventLastId;
+  if (event.type === "reset") {
+    scheduleStateEventRefresh(["chat", "plan", "library", "performance", "feedback", "profile"]);
+    return;
+  }
+  const areas = {
+    coach: ["chat"],
+    planning: ["plan", "library"],
+    provider: [],
+    job: [],
+    sync: [],
+  }[event.type];
+  if (areas) scheduleStateEventRefresh(areas);
+}
+
+function scheduleStateEventReconnect() {
+  if (state.stateEventReconnectTimer || !state.data || !navigator.onLine) return;
+  const delay = state.stateEventBackoff;
+  state.stateEventBackoff = Math.min(state.stateEventBackoff * 2, 30_000);
+  state.stateEventReconnectTimer = setTimeout(() => {
+    state.stateEventReconnectTimer = null;
+    connectStateEvents();
+  }, delay);
+}
+
+function connectStateEvents() {
+  if (!state.data || !("EventSource" in window) || state.stateEventSource) return;
+  const source = new EventSource(`/api/state/events?since=${encodeURIComponent(state.stateEventLastId)}`, { withCredentials: true });
+  state.stateEventSource = source;
+  source.onopen = () => { state.stateEventBackoff = 1000; };
+  ["provider", "job", "planning", "coach", "sync", "reset"].forEach((name) => source.addEventListener(name, handleStateEvent));
+  source.onerror = () => {
+    if (state.stateEventSource !== source) return;
+    source.close();
+    state.stateEventSource = null;
+    scheduleStateEventReconnect();
+  };
 }
 
 function syncPollLeaseAvailable() {
@@ -478,6 +541,7 @@ function setupConnectivityStatus() {
   renderConnectivityStatus();
   window.addEventListener("online", () => renderConnectivityStatus(true));
   window.addEventListener("offline", () => renderConnectivityStatus(false));
+  window.addEventListener("online", () => connectStateEvents());
 }
 
 function setVoiceStatus(message = "", error = false) {
@@ -3799,6 +3863,7 @@ async function loadInitialState() {
   if (state.data?.profile?.weather_location) {
     await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
   }
+  connectStateEvents();
   scheduleChatStatusPoll(0);
 }
 

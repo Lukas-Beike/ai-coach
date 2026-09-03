@@ -1016,12 +1016,43 @@ class CoachTests(unittest.TestCase):
         for index in range(500):
             server.add_message("user", f"message {index}")
         bootstrap = server.public_bootstrap(local_only=True)
-        self.assertEqual(bootstrap["schema_version"], 2)
-        self.assertEqual(bootstrap["messages"], [])
+        self.assertEqual(bootstrap["schema_version"], 3)
+        self.assertEqual(len(bootstrap["messages"]), 100)
         self.assertEqual(bootstrap["activities"], [])
+        self.assertTrue(all(bootstrap["skeleton"].values()))
+        self.assertIn("plan_revision", bootstrap)
+        self.assertIn("provider_states", bootstrap)
+        self.assertIn("running_jobs", bootstrap)
         self.assertIn("activities", bootstrap["state_versions"])
         self.assertIn("garmin", bootstrap["state_versions"])
         self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 20_000)
+
+    def test_bootstrap_never_refreshes_github_or_provider_network(self):
+        with patch.object(server, "fetch_github_latest_release", side_effect=AssertionError("network")):
+            bootstrap = server.public_bootstrap(local_only=False)
+        self.assertEqual(bootstrap["schema_version"], 3)
+        self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
+
+    def test_state_events_report_missed_retention_and_redact_content(self):
+        with server.STATE_EVENT_CONDITION:
+            server.STATE_EVENTS.clear()
+            server.STATE_EVENT_NEXT_ID = 0
+        for index in range(501):
+            server.publish_state_event("job", {"job_id": f"job-{index}", "status": "running", "progress": {"completed": index, "total": 501}})
+        gap = server.state_events_since(0)
+        self.assertTrue(gap["gap"])
+        self.assertEqual(gap["events"], [])
+        current = server.state_events_since(gap["latest_event_id"] - 1)
+        self.assertFalse(current["gap"])
+        self.assertEqual(len(current["events"]), 1)
+        self.assertNotIn("athlete content", json.dumps(current))
+
+    def test_state_events_validate_cursor_and_publish_job_progress(self):
+        with self.assertRaises(server.AppError) as raised:
+            server.state_events_since("not-a-number")
+        self.assertEqual(raised.exception.reason, "invalid_event_cursor")
+        event = server.publish_state_event("job", {"job_id": "job-1", "status": "completed", "progress": {"completed": 1, "total": 1}})
+        self.assertEqual(server.state_events_since(event["event_id"] - 1)["events"][0]["data"]["progress"]["completed"], 1)
 
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
@@ -1038,6 +1069,9 @@ class CoachTests(unittest.TestCase):
         self.assertIn('areas.push("weather")', app)
         self.assertIn('fetch("/api/chat/stream"', app)
         self.assertIn('api("/api/chat/status")', app)
+        self.assertIn('new EventSource(`/api/state/events?since=', app)
+        self.assertIn('function connectStateEvents()', app)
+        self.assertIn('event.type === "reset"', app)
         self.assertIn('garmin: ["performance"]', app)
         self.assertIn("function scrollChatToResponseStart()", app)
         self.assertIn("async function loadChatHistoryFresh()", app)
@@ -1440,6 +1474,7 @@ class CoachTests(unittest.TestCase):
         self.assertLess(index.index('/components.js?v=151'), index.index('/app.js?v=151'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
+        self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
 
     def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")

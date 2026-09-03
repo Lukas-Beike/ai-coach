@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import calendar as calendar_module
+from collections import deque
 import difflib
 import hashlib
 import hmac
@@ -175,6 +176,9 @@ SYNC_JOB_STOP = threading.Event()
 SYNC_JOB_WORKER: threading.Thread | None = None
 SESSION_LOCK = threading.RLock()
 SESSIONS: dict[str, dict[str, Any]] = {}
+STATE_EVENT_CONDITION = threading.Condition()
+STATE_EVENTS: deque[dict[str, Any]] = deque(maxlen=500)
+STATE_EVENT_NEXT_ID = 0
 RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMITS: dict[str, list[float]] = {}
 PUSH_RE = re.compile(r"^/api/workouts/([0-9a-f-]+)/push$")
@@ -191,6 +195,46 @@ SYNC_JOB_RESOLVE_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)/resolve$")
 COMPETITION_CONFLICT_RE = re.compile(r"^/api/competitions/([0-9a-f-]+)/resolve$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
+
+
+def publish_state_event(event: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Publish a bounded, non-athlete-facing state notification.
+
+    The event stream is only a wake-up and reconciliation signal. It must not
+    carry chat text, provider payloads, credentials, or other durable content.
+    """
+    allowed_events = {"provider", "job", "planning", "coach", "sync"}
+    if event not in allowed_events:
+        raise ValueError("invalid state event")
+    safe_payload = payload if isinstance(payload, dict) else {}
+    with STATE_EVENT_CONDITION:
+        global STATE_EVENT_NEXT_ID
+        STATE_EVENT_NEXT_ID += 1
+        item = {
+            "event_id": STATE_EVENT_NEXT_ID,
+            "event": event,
+            "data": dict(safe_payload),
+        }
+        STATE_EVENTS.append(item)
+        STATE_EVENT_CONDITION.notify_all()
+        return dict(item)
+
+
+def state_events_since(since: int = 0) -> dict[str, Any]:
+    """Return retained state events and explicitly report a retention gap."""
+    try:
+        cursor = max(0, int(since))
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor") from exc
+    with STATE_EVENT_CONDITION:
+        latest = STATE_EVENT_NEXT_ID
+        retained = list(STATE_EVENTS)
+    if not retained:
+        return {"events": [], "latest_event_id": latest, "gap": False}
+    oldest = int(retained[0]["event_id"])
+    gap = cursor < oldest - 1
+    events = [] if gap else [item for item in retained if int(item["event_id"]) > cursor]
+    return {"events": events, "latest_event_id": latest, "gap": gap}
 
 
 class MaintenanceGate:
@@ -2264,6 +2308,7 @@ def _provider_refresh_start(provider: str, area: str, operation_id: str, trigger
             "VALUES (?, ?, ?, ?, ?, ?, 'queued', 'running')",
             (refresh_id, provider, area, operation_id, trigger, utc_now()),
         )
+    publish_state_event("provider", {"provider": provider, "area": area, "status": "loading", "refresh_id": refresh_id})
     return refresh_id
 
 
@@ -2303,6 +2348,8 @@ def _provider_refresh_finish(
     error_code: str | None = None,
 ) -> None:
     finished_at = utc_now()
+    provider = None
+    area = None
     with DB_LOCK, database() as db:
         row = db.execute(
             "SELECT provider, area FROM provider_refresh_history WHERE id=?",
@@ -2316,6 +2363,9 @@ def _provider_refresh_finish(
             (finished_at, phase, status, error_code, next_retry_at, refresh_id),
         )
         _provider_refresh_cleanup(db)
+    if provider and area:
+        public_status = "ready" if status == "success" else "degraded" if status == "partial" else "error"
+        publish_state_event("provider", {"provider": provider, "area": area, "status": public_status})
 
 
 def _provider_refresh_error_code(error: BaseException) -> str:
@@ -2512,7 +2562,18 @@ def enqueue_sync_job(
                 (f"{job_id}-{index}", job_id, item_key, item_operation, payload_hash, now, now),
             )
     SYNC_JOB_WAKE.set()
-    return sync_job_state(job_id)
+    result = sync_job_state(job_id)
+    publish_state_event(
+        "job",
+        {
+            "job_id": job_id,
+            "provider": result["provider"],
+            "type": result["type"],
+            "status": result["status"],
+            "progress": result["progress"],
+        },
+    )
+    return result
 
 
 def resume_interrupted_sync_jobs() -> int:
@@ -2558,7 +2619,13 @@ def _sync_job_update(job_id: str, item_status: str, *, error_class: str | None =
     if item_status not in ITEM_STATUSES:
         raise ValueError("invalid sync item status")
     now = utc_now()
+    provider = None
+    job_type = None
     with DB_LOCK, database() as db:
+        job = db.execute("SELECT provider, type FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
+        if job:
+            provider = job["provider"]
+            job_type = job["type"]
         db.execute(
             "UPDATE sync_job_items SET status=?, error_class=?, error_detail=?, updated_at=? WHERE job_id=?",
             (item_status, error_class, error_detail, now, job_id),
@@ -2571,6 +2638,18 @@ def _sync_job_update(job_id: str, item_status: str, *, error_class: str | None =
         db.execute(
             "UPDATE sync_jobs SET status=?, progress_total=?, progress_completed=?, finished_at=?, error_class=?, updated_at=? WHERE id=?",
             (status, total, completed, finished, error_class, now, job_id),
+        )
+    if provider and job_type:
+        publish_state_event(
+            "job",
+            {
+                "job_id": job_id,
+                "provider": provider,
+                "type": job_type,
+                "status": status,
+                "progress": {"completed": completed, "total": total},
+                "error_class": error_class,
+            },
         )
 
 
@@ -4100,7 +4179,9 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
 
 def add_message(role: str, content: str) -> dict[str, Any]:
     with DB_LOCK, database() as db:
-        return CHAT_REPOSITORY.add(db, role, content)
+        result = CHAT_REPOSITORY.add(db, role, content)
+    publish_state_event("coach", {"message_id": result.get("id"), "role": str(role)[:20]})
+    return result
 
 
 def list_messages(limit: int = 100) -> list[dict[str, Any]]:
@@ -9648,6 +9729,15 @@ def set_sync_operation_state(
         set_value=set_kv,
         redact=redact_text,
     )
+    publish_state_event(
+        "sync",
+        {
+            "operation_id": str(operation_id)[:80],
+            "status": str(status)[:20],
+            "phase": str(phase)[:40],
+            "progress": max(0, min(int(progress), 100)),
+        },
+    )
 
 
 def sync_status_state() -> dict[str, Any]:
@@ -13588,8 +13678,42 @@ def add_private_calendar_context_to_planned(
     return enriched
 
 
+def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Project provider freshness into the small, stable bootstrap contract."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in freshness:
+        if isinstance(item, dict) and item.get("provider"):
+            grouped.setdefault(str(item["provider"]), []).append(item)
+    state_map = {
+        "not_configured": "not_configured",
+        "syncing": "loading",
+        "never_loaded": "loading",
+        "fresh": "ready",
+        "connected": "ready",
+        "partial": "degraded",
+        "stale": "stale",
+        "error": "error",
+    }
+    result: dict[str, dict[str, Any]] = {}
+    priority = {"error": 5, "stale": 4, "degraded": 3, "loading": 2, "ready": 1, "not_configured": 0}
+    for provider, areas in grouped.items():
+        projected = [state_map.get(str(item.get("state")), "error") for item in areas]
+        status = max(projected, key=lambda value: priority[value]) if projected else "not_configured"
+        result[provider] = {
+            "status": status,
+            "areas": {
+                str(item.get("area")): {
+                    "status": state_map.get(str(item.get("state")), "error"),
+                    "last_success_at": item.get("last_success_at"),
+                }
+                for item in areas
+            },
+        }
+    return result
+
+
 def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
-    """Return only bounded metadata needed before domain areas are loaded."""
+    """Return bounded local state without waiting for any provider network call."""
     # The startup screen waits for this response. Keep all of its local reads
     # on one connection so SQLCipher is keyed once instead of once per helper.
     # The nested helpers reuse the active DATABASE_CONTEXT connection.
@@ -13598,12 +13722,19 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
         local_planned = list_dated_local_planned_workouts(limit=250)
         competitions = list_competitions(limit=100)
         relevant_external = list_external_calendar_events(250, training_relevant_only=True)
+        profile = get_profile()
+        freshness = provider_freshness_state()
+        jobs = sync_jobs_state()
+        state_version_values = state_versions()
         return {
-            "schema_version": 2,
-            "state_versions": state_versions(),
-            "app": {"name": "Intervals Coach", "version": APP_VERSION, "github_release": github_release_status(refresh=not local_only)},
-            "messages": [],
-            "plans": [],
+            "schema_version": 3,
+            "state_versions": state_version_values,
+            "plan_revision": state_version_values.get("plan"),
+            "app": {"name": "Intervals Coach", "version": APP_VERSION, "github_release": github_release_status(refresh=False)},
+            "skeleton": {key: True for key in ("chat", "activities", "plan", "library", "performance", "feedback", "profile")},
+            "messages": list_messages(limit=100),
+            "messages_next_cursor": None,
+            "plans": list_training_plans(limit=30),
             "library": [],
             "activities": [],
             "planned": local_planned,
@@ -13612,26 +13743,28 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
             "planning_compliance": [],
             "weather": {},
             "parallel_cycling": [],
-            "profile": get_profile(),
+            "profile": profile,
             "competitions": competitions,
             "checkins": [],
             "local_feedback": {"today": None, "recent": [], "scope": "Only athlete-entered subjective feedback and constraints; wearable/provider values remain in their source sections."},
             "activity_feedback": {"recent": [], "scope": "Only athlete-entered notes about completed activities; this feedback is separate from daily check-ins and provider values."},
-            "planning": {},
+            "planning": planning_state(),
             "external_calendar": external_calendar_state(),
             "daily_planning_context": [],
             "performance": {},
             "garmin": garmin_public_state(),
             "intervals": intervals_public_state(snapshot),
-            "provider_freshness": provider_freshness_state(),
+            "provider_freshness": freshness,
+            "provider_states": bootstrap_provider_states(freshness),
             "garmin_sync": {"running": GARMIN_LOCK.locked(), "status": get_kv("garmin_sync_status") or None},
             "provider_resync": {"intervals": provider_resync_state("intervals"), "garmin": provider_resync_state("garmin")},
             "sync": {
                 "last_sync_at": get_kv("last_sync_at"), "last_error": get_kv("last_sync_error") or None,
                 "running": get_kv("sync_running") == "1", "status": get_kv("sync_status") or None,
                 "last_window_start": get_kv("last_sync_window_start"), "last_window_end": get_kv("last_sync_window_end"),
-                "jobs": sync_jobs_state(),
+                "jobs": jobs,
             },
+            "running_jobs": [job for job in jobs if job.get("status") in {"queued", "running"}],
             "library_sync": {"last_sync_at": get_kv("last_library_sync_at"), "last_error": get_kv("last_library_sync_error") or None, "state": workout_library_sync_summary()},
             "sync_settings": {"intervals_days": sync_period("intervals"), "garmin_days": sync_period("garmin")},
             "calendar_display": calendar_display_settings(),
@@ -14739,6 +14872,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 schedule_morning_checkin()
                 query = parse_qs(urlparse(self.path).query)
                 self.send_json(200, public_bootstrap(local_only=query.get("local", ["0"])[0] == "1"))
+            elif path == "/api/state/events":
+                require_auth(self)
+                self.handle_state_events()
             elif match := SYNC_JOB_RE.match(path):
                 require_auth(self)
                 self.send_json(200, sync_job_state(match.group(1)))
@@ -14898,14 +15034,50 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.log_client_disconnect()
             raise ClientDisconnected() from exc
 
-    def send_sse_event(self, event: str, payload: Any) -> None:
+    def send_sse_event(self, event: str, payload: Any, event_id: int | None = None) -> None:
         data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         try:
-            self.wfile.write(f"event: {event}\ndata: {data}\n\n".encode("utf-8"))
+            prefix = f"id: {event_id}\n" if event_id is not None else ""
+            self.wfile.write(f"{prefix}event: {event}\ndata: {data}\n\n".encode("utf-8"))
             self.wfile.flush()
         except self.client_disconnect_errors as exc:
             self.log_client_disconnect()
             raise ClientDisconnected() from exc
+
+    def handle_state_events(self) -> None:
+        query = parse_qs(urlparse(self.path).query)
+        raw_since = query.get("since", ["0"])[0]
+        if not str(raw_since).isdigit():
+            raise AppError(400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor")
+        since = int(raw_since)
+        self.connection.settimeout(None)
+        try:
+            self.send_sse_headers()
+            initial = state_events_since(since)
+            if initial["gap"]:
+                since = int(initial["latest_event_id"])
+                self.send_sse_event("reset", {"reason": "gap", "latest_event_id": since}, since or None)
+            else:
+                for item in initial["events"]:
+                    since = int(item["event_id"])
+                    self.send_sse_event(item["event"], item["data"], since)
+            self.send_sse_event("ready", {"latest_event_id": since}, since or None)
+            while True:
+                with STATE_EVENT_CONDITION:
+                    STATE_EVENT_CONDITION.wait(timeout=15)
+                pending = state_events_since(since)
+                if pending["gap"]:
+                    since = int(pending["latest_event_id"])
+                    self.send_sse_event("reset", {"reason": "gap", "latest_event_id": since}, since or None)
+                    continue
+                if not pending["events"]:
+                    self.send_sse_event("heartbeat", {"latest_event_id": pending["latest_event_id"]})
+                    continue
+                for item in pending["events"]:
+                    since = int(item["event_id"])
+                    self.send_sse_event(item["event"], item["data"], since)
+        except ClientDisconnected:
+            return
 
     def handle_chat_stream(self, session: dict[str, Any]) -> None:
         payload = self.read_json()
