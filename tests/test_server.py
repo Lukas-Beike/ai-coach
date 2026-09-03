@@ -234,16 +234,20 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
             migrations = db.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
             self.assertEqual(backend_db.schema_version(db), server.CURRENT_DATABASE_SCHEMA_VERSION)
-        self.assertEqual([row["version"] for row in migrations], [1, 2, 3, 4, 5])
+            tables = {row["name"] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            self.assertTrue({"planning_state", "coach_plan_artifacts", "coach_commands", "sync_jobs", "sync_job_items", "provider_sync_cursors"} <= tables)
+            planned_columns = {row["name"] for row in db.execute("PRAGMA table_info(planned_units)").fetchall()}
+            self.assertTrue({"plan_id", "revision", "tombstone", "command_id"} <= planned_columns)
+        self.assertEqual([row["version"] for row in migrations], [1, 2, 3, 4, 5, 6])
         self.assertEqual(migrations[0]["name"], "legacy-schema-baseline")
         self.assertEqual(migrations[1]["name"], "public-calendar-foreign-key-cascade")
         self.assertEqual(migrations[2]["name"], "local-change-history")
         self.assertEqual(migrations[3]["name"], "provider-refresh-history")
         self.assertEqual(migrations[4]["name"], "dedicated-local-planned-units")
-
+        self.assertEqual(migrations[5]["name"], "coach-first-command-and-sync-state")
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 5)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 6)
 
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = server.utc_now()
@@ -766,7 +770,7 @@ class CoachTests(unittest.TestCase):
         with server.DB_LOCK, server.database() as db:
             for table in expected_tables - {"kv"}:
                 self.assertEqual(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"], 0)
-            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 5)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 6)
 
     def test_weather_refresh_rechecks_adaptive_planning(self):
         server.save_profile({"weather_location": "Berlin"})

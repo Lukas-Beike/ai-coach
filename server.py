@@ -42,6 +42,7 @@ from urllib.request import Request, urlopen
 from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository, WorkoutDraftRepository
 from backend.db import schema_version as database_schema_version
+from backend.db.manager import DatabaseManager
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 from backend.providers.garmin import collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
@@ -1343,7 +1344,9 @@ def migrate_plaintext_database() -> None:
 # The outer caller still owns DB_LOCK; nested database() calls only reuse it.
 DATABASE_CONTEXT: ContextVar[Any | None] = ContextVar("database_context", default=None)
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_context", default=None)
-CURRENT_DATABASE_SCHEMA_VERSION = 5
+CURRENT_DATABASE_SCHEMA_VERSION = 6
+DATABASE_MANAGER: DatabaseManager | None = None
+DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
 
 PROVIDER_REFRESH_RETENTION_DAYS = 30
 PROVIDER_REFRESH_MAX_ROWS = 200
@@ -1559,30 +1562,47 @@ def _migrate_public_calendar_foreign_key(db: Any) -> None:
     db.execute("ALTER TABLE public_event_candidates_migration RENAME TO public_event_candidates")
 
 
+def database_manager() -> DatabaseManager:
+    """Return the manager for the active path and secure configuration."""
+    global DATABASE_MANAGER, DATABASE_MANAGER_SIGNATURE
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    signature = (str(DB_PATH.resolve()), CONFIG.app_password, SQLCIPHER_AVAILABLE)
+    if DATABASE_MANAGER is not None and DATABASE_MANAGER_SIGNATURE != signature:
+        DATABASE_MANAGER.close()
+        DATABASE_MANAGER = None
+        DATABASE_MANAGER_SIGNATURE = None
+    if DATABASE_MANAGER is None:
+        if CONFIG.app_password:
+            if not SQLCIPHER_AVAILABLE:
+                raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
+            migrate_plaintext_database()
+        DATABASE_MANAGER = DatabaseManager(
+            DB_PATH,
+            sqlite_backend if CONFIG.app_password else sqlite3,
+            password=CONFIG.app_password,
+            configure=_configure_cipher,
+            row_factory=database_row_factory,
+            reader_count=4,
+            timeout=20,
+            persist_connections=bool(CONFIG.app_password),
+        )
+        DATABASE_MANAGER_SIGNATURE = signature
+    return DATABASE_MANAGER
+
+
 @contextmanager
 def database():
     existing = DATABASE_CONTEXT.get()
     if existing is not None:
         yield existing
         return
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if CONFIG.app_password:
-        if not SQLCIPHER_AVAILABLE:
-            raise RuntimeError("SQLCipher ist für eine verschlüsselte Datenbank erforderlich.")
-        migrate_plaintext_database()
-        db = sqlite_backend.connect(DB_PATH, timeout=20)
-        _configure_cipher(db, CONFIG.app_password)
-    else:
-        db = sqlite3.connect(DB_PATH, timeout=20)
-    db.execute("PRAGMA foreign_keys = ON")
-    db.row_factory = database_row_factory
-    context_token = DATABASE_CONTEXT.set(db)
-    try:
-        yield db
-        db.commit()
-    finally:
-        DATABASE_CONTEXT.reset(context_token)
-        db.close()
+    with database_manager().unit_of_work() as db:
+        context_token = DATABASE_CONTEXT.set(db)
+        try:
+            yield db
+        finally:
+            DATABASE_CONTEXT.reset(context_token)
+    return
 
 
 def initialise_database() -> None:
@@ -1654,9 +1674,88 @@ def initialise_database() -> None:
                  sync_conflict TEXT NOT NULL DEFAULT '',
                  baseline_hash TEXT,
                  last_synced_at TEXT,
+                 plan_id TEXT,
+                 revision INTEGER NOT NULL DEFAULT 0,
+                 tombstone INTEGER NOT NULL DEFAULT 0,
+                 command_id TEXT,
                  created_at TEXT NOT NULL,
                  updated_at TEXT NOT NULL
              );
+            CREATE TABLE IF NOT EXISTS planning_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                revision INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS coach_plan_artifacts (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT,
+                client_turn_id TEXT,
+                base_revision INTEGER NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('draft', 'committed', 'superseded')),
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_coach_plan_artifacts_conversation
+                ON coach_plan_artifacts(conversation_id, created_at DESC);
+            CREATE TABLE IF NOT EXISTS coach_commands (
+                id TEXT PRIMARY KEY,
+                client_turn_id TEXT NOT NULL UNIQUE,
+                conversation_id TEXT,
+                intent TEXT NOT NULL,
+                target_system TEXT NOT NULL,
+                artifact_id TEXT,
+                status TEXT NOT NULL,
+                receipt TEXT,
+                error_class TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (artifact_id) REFERENCES coach_plan_artifacts(id)
+            );
+            CREATE TABLE IF NOT EXISTS sync_jobs (
+                id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                type TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'partial', 'failed')),
+                payload TEXT NOT NULL,
+                requested_by TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                progress_total INTEGER NOT NULL DEFAULT 0,
+                progress_completed INTEGER NOT NULL DEFAULT 0,
+                error_class TEXT,
+                available_at TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_available
+                ON sync_jobs(status, available_at, created_at);
+            CREATE TABLE IF NOT EXISTS sync_job_items (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                item_key TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                payload_hash TEXT NOT NULL,
+                remote_id TEXT,
+                status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                error_class TEXT,
+                error_detail TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(job_id, item_key),
+                FOREIGN KEY (job_id) REFERENCES sync_jobs(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_sync_job_items_status ON sync_job_items(job_id, status);
+            CREATE TABLE IF NOT EXISTS provider_sync_cursors (
+                provider TEXT NOT NULL,
+                stream TEXT NOT NULL,
+                cursor TEXT,
+                high_water_mark TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (provider, stream)
+            );
             CREATE TABLE IF NOT EXISTS competitions (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -2092,6 +2191,29 @@ def initialise_database() -> None:
                     )
                     db.execute("DELETE FROM workout_library WHERE id=?", (row["id"],))
                 _record_database_migration(db, 5, "dedicated-local-planned-units")
+                db.execute(f"RELEASE SAVEPOINT {savepoint}")
+            except Exception:
+                db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                db.execute(f"RELEASE SAVEPOINT {savepoint}")
+                raise
+        if migration_version < 6:
+            savepoint = "schema_migration_6"
+            db.execute(f"SAVEPOINT {savepoint}")
+            try:
+                planned_columns = {row["name"] for row in db.execute("PRAGMA table_info(planned_units)").fetchall()}
+                for column, definition in (
+                    ("plan_id", "TEXT"),
+                    ("revision", "INTEGER NOT NULL DEFAULT 0"),
+                    ("tombstone", "INTEGER NOT NULL DEFAULT 0"),
+                    ("command_id", "TEXT"),
+                ):
+                    if column not in planned_columns:
+                        db.execute(f"ALTER TABLE planned_units ADD COLUMN {column} {definition}")
+                db.execute(
+                    "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
+                    (utc_now(),),
+                )
+                _record_database_migration(db, 6, "coach-first-command-and-sync-state")
                 db.execute(f"RELEASE SAVEPOINT {savepoint}")
             except Exception:
                 db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
@@ -12921,6 +13043,8 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "competition_sync_tombstones.jsonl",
     "messages.jsonl",
     "chat_tool_calls.jsonl",
+    "coach_plan_artifacts.jsonl",
+    "coach_commands.jsonl",
     "snapshots.jsonl",
     "legacy_workout_drafts.jsonl",
     "workout_library.jsonl",
@@ -12929,6 +13053,9 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "plan_adjustments.jsonl",
     "change_history.jsonl",
     "provider_refresh_history.jsonl",
+    "sync_jobs.jsonl",
+    "sync_job_items.jsonl",
+    "provider_sync_cursors.jsonl",
 }
 
 
@@ -12959,7 +13086,7 @@ def _export_planned_units(db: Any) -> Any:
     yield from (
         {**dict(row), "payload": _export_payload(row["payload"])}
         for row in db.execute(
-            "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, created_at, updated_at "
+            "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, plan_id, revision, tombstone, command_id, created_at, updated_at "
             "FROM planned_units ORDER BY updated_at"
         )
     )
@@ -13022,6 +13149,18 @@ def _privacy_export_file() -> Path:
             )
             _export_jsonl_rows(
                 archive,
+                "coach_plan_artifacts.jsonl",
+                (dict(row) for row in db.execute("SELECT id, conversation_id, client_turn_id, base_revision, status, payload, created_at, updated_at FROM coach_plan_artifacts ORDER BY created_at")),
+                deadline,
+            )
+            _export_jsonl_rows(
+                archive,
+                "coach_commands.jsonl",
+                (dict(row) for row in db.execute("SELECT id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, receipt, error_class, created_at, updated_at FROM coach_commands ORDER BY created_at")),
+                deadline,
+            )
+            _export_jsonl_rows(
+                archive,
                 "snapshots.jsonl",
                 (_export_payload(row["payload"]) for row in db.execute("SELECT payload FROM snapshots ORDER BY id")),
                 deadline,
@@ -13054,6 +13193,24 @@ def _privacy_export_file() -> Path:
                 archive,
                 "provider_refresh_history.jsonl",
                 (dict(row) for row in db.execute("SELECT id, provider, area, operation_id, trigger, started_at, finished_at, phase, status, error_code, next_retry_at FROM provider_refresh_history ORDER BY started_at")),
+                deadline,
+            )
+            _export_jsonl_rows(
+                archive,
+                "sync_jobs.jsonl",
+                (dict(row) for row in db.execute("SELECT id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, error_class, available_at, started_at, finished_at, created_at, updated_at FROM sync_jobs ORDER BY created_at")),
+                deadline,
+            )
+            _export_jsonl_rows(
+                archive,
+                "sync_job_items.jsonl",
+                (dict(row) for row in db.execute("SELECT id, job_id, item_key, operation, payload_hash, remote_id, status, attempts, error_class, error_detail, created_at, updated_at FROM sync_job_items ORDER BY created_at")),
+                deadline,
+            )
+            _export_jsonl_rows(
+                archive,
+                "provider_sync_cursors.jsonl",
+                (dict(row) for row in db.execute("SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors ORDER BY provider, stream")),
                 deadline,
             )
             archive.writestr("local_feedback.json", json.dumps(local_feedback_context(), ensure_ascii=False, separators=(",", ":")))
@@ -13098,7 +13255,13 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "snapshots": {"id", "payload", "created_at"},
     "workout_drafts": {"id", "payload", "status", "intervals_event_id", "error", "created_at", "updated_at"},
     "workout_library": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "last_synced_at", "updated_at"},
-    "planned_units": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "sync_conflict", "baseline_hash", "last_synced_at", "created_at", "updated_at"},
+    "planned_units": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "sync_conflict", "baseline_hash", "last_synced_at", "plan_id", "revision", "tombstone", "command_id", "created_at", "updated_at"},
+    "planning_state": {"id", "revision", "updated_at"},
+    "coach_plan_artifacts": {"id", "conversation_id", "client_turn_id", "base_revision", "status", "payload", "created_at", "updated_at"},
+    "coach_commands": {"id", "client_turn_id", "conversation_id", "intent", "target_system", "artifact_id", "status", "receipt", "error_class", "created_at", "updated_at"},
+    "sync_jobs": {"id", "provider", "type", "status", "payload", "requested_by", "attempts", "progress_total", "progress_completed", "error_class", "available_at", "started_at", "finished_at", "created_at", "updated_at"},
+    "sync_job_items": {"id", "job_id", "item_key", "operation", "payload_hash", "remote_id", "status", "attempts", "error_class", "error_detail", "created_at", "updated_at"},
+    "provider_sync_cursors": {"provider", "stream", "cursor", "high_water_mark", "updated_at"},
     "competitions": {"id", "name", "event_date", "sport", "priority", "distance", "target", "course_profile", "notes", "category", "start_date_local", "description", "moving_time", "intervals_event_id", "external_id", "sync_dirty", "sync_state", "sync_conflict", "last_synced_at", "created_at", "updated_at"},
     "competition_sync_tombstones": {"id", "intervals_event_id", "external_id", "created_at"},
     "training_plans": {"id", "name", "goal", "start_date", "end_date", "status", "created_at", "updated_at"},
@@ -13216,16 +13379,17 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
             connection.close()
         with DB_LOCK:
             _checkpoint_database_locked()
-            backup_path = DATA_DIR / f"{DB_PATH.name}.pre-restore-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-            if DB_PATH.exists():
-                shutil.copy2(DB_PATH, backup_path)
-                previous_backup_name = backup_path.name
-            for sidecar in (Path(f"{DB_PATH}-wal"), Path(f"{DB_PATH}-shm")):
-                try:
-                    sidecar.unlink()
-                except FileNotFoundError:
-                    pass
-            os.replace(temporary_path, DB_PATH)
+            with database_manager().restore_drain():
+                backup_path = DATA_DIR / f"{DB_PATH.name}.pre-restore-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+                if DB_PATH.exists():
+                    shutil.copy2(DB_PATH, backup_path)
+                    previous_backup_name = backup_path.name
+                for sidecar in (Path(f"{DB_PATH}-wal"), Path(f"{DB_PATH}-shm")):
+                    try:
+                        sidecar.unlink()
+                    except FileNotFoundError:
+                        pass
+                os.replace(temporary_path, DB_PATH)
         return {"status": "ok", "restored": True, "previous_database_backup": previous_backup_name}
     except AppError:
         raise
@@ -13252,11 +13416,11 @@ def delete_remote_conversation(conversation_id: str) -> bool:
 
 
 PRIVACY_DELETE_SCOPE = (
-    ("chats", "Chats, Coach-Werkzeug- und Aktionsprotokolle", ("messages", "chat_tool_calls", "coach_action_proposals")),
+    ("chats", "Chats, Coach-Werkzeug- und Aktionsprotokolle", ("messages", "chat_tool_calls", "coach_commands", "coach_plan_artifacts", "coach_action_proposals")),
     ("snapshots", "Trainings-Snapshots", ("snapshots",)),
     ("library", "Workout-Bibliothek, geplante Einheiten und Entwürfe", ("workout_drafts", "workout_library", "planned_units")),
     ("competitions", "Wettkämpfe und Sync-Vormerkungen", ("competitions", "competition_sync_tombstones")),
-    ("plans", "Trainingspläne", ("training_plans",)),
+    ("plans", "Trainingspläne", ("training_plans", "planning_state")),
     ("checkins", "Tages-Check-ins", ("athlete_checkins",)),
     ("feedback", "Aktivitätsfeedback", ("activity_feedback",)),
     ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),
@@ -13264,7 +13428,7 @@ PRIVACY_DELETE_SCOPE = (
     ("sessions", "Anmeldesitzungen", ("sessions",)),
     ("settings", "Profil, Einstellungen, Syncstatus und lokale Caches", ("kv",)),
     ("history", "Lokale Änderungshistorie", ("change_history",)),
-    ("provider_status", "Bereinigter Provider-Refresh-Verlauf", ("provider_refresh_history",)),
+    ("provider_status", "Bereinigter Provider-Refresh-Verlauf", ("provider_refresh_history", "sync_job_items", "sync_jobs", "provider_sync_cursors")),
 )
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
@@ -13306,7 +13470,7 @@ def delete_local_data() -> dict[str, Any]:
             LOGGER.warning("Remote OpenAI conversation could not be deleted", extra={"event": "privacy_remote_delete_failed"}, exc_info=True)
     with DB_LOCK, database() as db:
         deleted_counts = _privacy_delete_counts(db)
-        deleted_tables = {table for _category, _label, tables in PRIVACY_DELETE_SCOPE for table in tables}
+        deleted_tables = list(dict.fromkeys(table for _category, _label, tables in PRIVACY_DELETE_SCOPE for table in tables))
         for table in deleted_tables:
             db.execute(f"DELETE FROM {table}")
         db.execute("DELETE FROM kv")
