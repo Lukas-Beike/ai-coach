@@ -1800,7 +1800,9 @@ class CoachTests(unittest.TestCase):
             b"BEGIN:VEVENT\r\nUID:no-intensity\r\nDTSTART;VALUE=DATE:20260905\r\n"
             b"SUMMARY:Evening event\r\nDESCRIPTION: [NO_INTENSITY] Training remains possible, but easy\r\nEND:VEVENT\r\n"
             b"BEGIN:VEVENT\r\nUID:other-marker\r\nDTSTART;VALUE=DATE:20260906\r\n"
-            b"SUMMARY:Other marker\r\nDESCRIPTION: [OTHER_TAG] Keine besondere Wirkung\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            b"SUMMARY:Other marker\r\nDESCRIPTION: [OTHER_TAG] Keine besondere Wirkung\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            window_start=date(2026, 9, 2),
+            window_end=date(2026, 9, 8),
         )
         self.assertEqual(events[0]["duration_minutes"], 180)
         self.assertEqual(events[0]["event_date"], "2026-09-02")
@@ -2010,6 +2012,8 @@ class CoachTests(unittest.TestCase):
         )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
         with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", return_value=payload), patch.object(
+            server, "local_now", return_value=datetime(2026, 9, 2, tzinfo=timezone.utc)
+        ), patch.object(
             server, "check_adaptive_replan", return_value={"needs_replan": True, "replan_changes": 2}
         ) as check:
             result = server.sync_external_calendar("test")
@@ -5292,7 +5296,7 @@ class CoachTests(unittest.TestCase):
         for day_offset, day in enumerate(daily_dates):
             for hour in range(24):
                 hourly_times.append(f"{day}T{hour:02d}:00")
-                hourly_precipitation.append(5 if day_offset == 1 and hour in (8, 9) else 70)
+                hourly_precipitation.append(5 if day_offset == 1 and hour in (16, 17) else 70)
         forecast = {
             "daily": {
                 "time": daily_dates,
