@@ -272,13 +272,16 @@ class CoachTests(unittest.TestCase):
     def test_persistent_sync_job_retries_only_safe_transient_errors(self):
         job = server.enqueue_sync_job("weather", "refresh", {"force": True})
         claimed = server._claim_sync_job()
-        with patch.object(server, "_execute_sync_job", side_effect=server.AppError(503, "temporär", reason="network_error")):
+        provider_detail = "https://athlete:secret-pass@example.invalid/private-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        with patch.object(server, "_execute_sync_job", side_effect=server.AppError(503, provider_detail, reason="network_error")):
             server._run_claimed_sync_job(claimed)
         state = server.sync_job_state(job["id"])
         self.assertEqual(state["status"], "queued")
         self.assertEqual(state["error_class"], "network_error")
         self.assertEqual(state["items"][0]["status"], "queued")
         self.assertIsNotNone(state["available_at"])
+        self.assertNotIn("secret-pass", state["items"][0]["error_detail"])
+        self.assertNotIn("private-token-aaaaaaaa", state["items"][0]["error_detail"])
 
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = server.utc_now()
@@ -4029,6 +4032,57 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(command["status"], "completed")
         self.assertIn("Der Entwurf ist gespeichert.", command["receipt"])
 
+    def test_task9_duplicate_coach_turn_replays_receipt_without_reexecution(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-replay", "arguments": json.dumps({"payload": {"plan_name": "Replay", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}})}]},
+            {"output_text": "Der Entwurf ist gespeichert."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent) as classify, patch.object(
+            server, "ensure_conversation", return_value="conversation-replay"
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            first = server.chat_with_coach("Erstelle einen Entwurf", client_turn_id="turn-task9-replay")
+            replay = server.chat_with_coach("Erstelle einen Entwurf", client_turn_id="turn-task9-replay")
+        self.assertEqual(replay, first)
+        self.assertEqual(classify.call_count, 1)
+        self.assertEqual(request.call_count, 2)
+        with server.DB_LOCK, server.database() as db:
+            command_count = db.execute("SELECT COUNT(*) AS count FROM coach_commands WHERE client_turn_id=?", ("turn-task9-replay",)).fetchone()["count"]
+        self.assertEqual(command_count, 1)
+
+    def test_task9_failed_coach_tool_is_completed_with_safe_error_receipt(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-invalid-plan", "arguments": json.dumps({"payload": {"plan_name": "Ungültig", "workouts": []}})}]},
+            {"output_text": "Der Plan konnte nicht gespeichert werden. Bitte ergänze mindestens eine Einheit."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-error"
+        ), patch.object(server, "responses_request", side_effect=responses):
+            result = server.chat_with_coach("Speichere den leeren Plan", client_turn_id="turn-task9-error")
+        receipt = result["command_receipts"][0]["result"]
+        self.assertFalse(receipt["ok"])
+        self.assertIn("mindestens eine Einheit", receipt["error"])
+        self.assertNotIn("nichts gespeichert", result["message"]["content"].casefold())
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-task9-error",)).fetchone()
+        self.assertEqual(command["status"], "completed")
+        self.assertIn("mindestens eine Einheit", command["receipt"])
+
     def test_structured_provider_refresh_is_queued_and_not_run_in_chat_request(self):
         intent = {
             "intent": "remote_sync",
@@ -5555,6 +5609,17 @@ class CoachTests(unittest.TestCase):
         self.assertIn("confirmationForm?.addEventListener(\"submit\"", app_source)
         self.assertNotIn("window.confirm", app_source)
         self.assertNotIn("window.prompt", app_source)
+
+    def test_task9_browser_regression_contract_covers_routes_and_responsive_guards(self):
+        e2e_source = (server.PUBLIC_DIR.parent / "e2e" / "coach.spec.js").read_text(encoding="utf-8")
+        playwright_config = (server.PUBLIC_DIR.parent / "playwright.config.cjs").read_text(encoding="utf-8")
+        for route in ("#coach", "#today", "plan/calendar", "analysis/history", "#more"):
+            self.assertIn(route, e2e_source)
+        for guard in ("expectNoBrowserErrorsOrOverflow", "reducedMotion", 'fontSize = "200%"', "touch targets below 44"):
+            self.assertIn(guard, e2e_source)
+        self.assertIn('name: "desktop"', playwright_config)
+        self.assertIn('name: "mobile"', playwright_config)
+        self.assertIn("width: 390, height: 844", playwright_config)
 
     def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
         today = server.local_now().date()
