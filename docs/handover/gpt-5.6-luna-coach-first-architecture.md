@@ -290,15 +290,15 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 9. Backend-, Integrations- und Dialogregressionstests
 
-- [ ] Alle gemeldeten deutschen Dialoge als End-to-End-ähnliche Mocktests abdecken.
-- [ ] Tool- und API-Idempotenz, Revision, Jobfortsetzung und Redaction testen.
-- [ ] Keine Routineaktion darf einen nativen Confirm-/Prompt-Aufruf auslösen.
+- [x] Alle gemeldeten deutschen Dialoge als End-to-End-ähnliche Mocktests abdecken.
+- [x] Tool- und API-Idempotenz, Revision, Jobfortsetzung und Redaction testen.
+- [x] Keine Routineaktion darf einen nativen Confirm-/Prompt-Aufruf auslösen.
 
 **Subsysteme:** `tests/`, Coach, Planning, Sync, UI-Vertragsprüfungen.  
 **Definition of Done:** Jeder Fehlerfall liefert ein korrektes Receipt statt einer erfundenen „nichts gespeichert“-Meldung.  
 **Tests:** Vollständige Unit-/Integrationstest-Suite, `rg`-Prüfung auf verbotene Aufrufe, temporäre DB/Mockprovider.  
 **Seiteneffekte:** Keine Tests gegen echte Konten, `.env` oder `/data`.  
-**Evidence:** `- Test/Commit: …`
+**Evidence:** Ergebnis: fokussierte Task-9-Regressionsfälle 5/5 grün; Vollsuite `python -m unittest discover -s tests -v` — 370 Tests grün, 3 erwartete SQLCipher-Skips; `python -m py_compile server.py tests/test_server.py` und `git diff --check` grün. Abgedeckt sind strukturierte Coach-Command-Replays ohne erneute Ausführung, sichere Fehler-Receipts, resumierbare/retrybare Sync-Jobs mit redigierten Fehlerdetails, Revisions-/Idempotenzverträge, zugängliche Bestätigungsdialoge sowie Browser-Routen-/Responsive-Guards. Commit: ebf3930.
 
 ### 10. Vollständige visuelle Viewport-Abnahme
 
