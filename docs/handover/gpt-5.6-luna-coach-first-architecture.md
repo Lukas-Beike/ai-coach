@@ -173,13 +173,15 @@ Additive, transaktionale Migration von Schema 5:
 
 - [ ] `AGENTS.md`, `public/AGENTS.md` und `tests/AGENTS.md` vollständig lesen.
 - [ ] Worktree/Branch und Arbeitsregeln prüfen; Primärcheckout, `.env`, `/data` und `Task.md` nicht verändern.
-- [ ] Baseline mit `python -m unittest discover -s tests -v`, `python -m py_compile server.py tests/test_server.py` und Docker-Build dokumentieren.
+- [x] Baseline mit `python -m unittest discover -s tests -v`, `python -m py_compile server.py tests/test_server.py` und Docker-Build dokumentieren.
 
 **Subsysteme:** Git, Tests, Docker.  
 **Definition of Done:** Branch basiert auf aktuellem `origin/develop`; Baseline und bekannte Skips dokumentiert.  
 **Tests:** Baseline-Befehle, `git status`, kein Secret-Scan-Treffer.  
 **Seiteneffekte:** Nur temporäre Test-/Buildartefakte; keine Live-Daten.  
-**Evidence:** `- Ergebnis: …`  
+**Evidence:**
+
+- Ergebnis: 344 Tests grün, 3 erwartete SQLCipher-Skips; beide Syntaxchecks grün (Bytecode temporär ausgelagert); `docker build -t ai-coach:local .` grün; Branch basiert auf `origin/develop` `c9a25e9`. Zeitabhängige Test-Fixtures stabilisiert in Commit `0dd1ca0`.
 
 ### 1. Schema-6-Migration und DB-Manager
 
