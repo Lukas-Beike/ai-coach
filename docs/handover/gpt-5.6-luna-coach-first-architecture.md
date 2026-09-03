@@ -213,16 +213,18 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 3. Inkrementelle Provider-Synchronisation
 
-- [ ] Intervals-Sync in priorisiertes 90-Tage-Fenster plus historische Backfilljobs teilen.
-- [ ] Garmin-Tagesabfragen begrenzen, deduplizieren und Capability-Circuit-Breaker einführen.
-- [ ] iCal-Fensterberechnung und Occurrence-Limit korrigieren; Wetterzustände typisieren.
-- [ ] Vollständige Rohdaten/Snapshots erhalten; nur Coach-Projektion begrenzen.
+- [x] Intervals-Sync in priorisiertes 90-Tage-Fenster plus historische Backfilljobs teilen.
+- [x] Garmin-Tagesabfragen begrenzen, deduplizieren und Capability-Circuit-Breaker einführen.
+- [x] iCal-Fensterberechnung und Occurrence-Limit korrigieren; Wetterzustände typisieren.
+- [x] Vollständige Rohdaten/Snapshots erhalten; nur Coach-Projektion begrenzen.
 
 **Subsysteme:** Intervals, Garmin, Kalender, Wetter, Context-Projektion.  
 **Definition of Done:** Initiale UI-Bedienbarkeit ist unabhängig von Backfill; regulärer Sync lädt Cursorfenster.  
 **Tests:** Mockprovider mit 2000er-Historie, Cursorüberlappung, Garmin-Fehlerwiederholung, iCal-Recurser, Rohdaten-/Projection-Assertions.  
 **Seiteneffekte:** Keine echten Providerkonten oder Tokens; keine Snapshot-Trunkierung.  
-**Evidence:** `- Test/Commit: …`
+**Evidence:**
+
+- Ergebnis: `python -m unittest discover -s tests -v` mit 353 Tests grün und 3 erwarteten SQLCipher-Skips; Intervals-Rohdaten-/Fenster-, Garmin-Deduplizierungs-/Parallelitäts-/Circuit-Breaker-, iCal- und Wetterstatus-Tests grün; Syntaxcheck und `docker build -t ai-coach:local .` grün. Commits: `293ada5`, `5676ebe`.
 
 ### 4. Structured Intent und Coach-Orchestrator
 
