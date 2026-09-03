@@ -707,6 +707,9 @@ h2 {
 .adaptive-planning-dialog { display: grid; gap: 12px; }
 .adaptive-planning-dialog h2 { margin: 0; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.confirmation-dialog { max-width: 560px; }
+.confirmation-dialog p { white-space: pre-wrap; max-height: 45vh; overflow: auto; }
+.confirmation-dialog input { width: 100%; }
 .dialog-actions .adaptive-planning-button { padding: 9px 11px; font-size: .75rem; }
 .replan-change { padding-top: 8px; border-top: 1px solid var(--line); }
 .replan-change strong { color: var(--ink); }

@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg?v=149" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=149">
+  <link rel="icon" href="/icon.svg?v=151" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=151">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -380,12 +380,26 @@
       </div>
     </div>
   </dialog>
-  <script src="/api.js?v=149" defer></script>
-  <script src="/navigation.js?v=149" defer></script>
-  <script src="/state.js?v=149" defer></script>
-  <script src="/views.js?v=149" defer></script>
-  <script src="/forms.js?v=149" defer></script>
-  <script src="/components.js?v=149" defer></script>
-  <script src="/app.js?v=150" defer></script>
+  <dialog id="confirmationDialog" aria-labelledby="confirmationDialogTitle" aria-describedby="confirmationDialogMessage">
+    <form id="confirmationDialogForm" method="dialog" class="confirmation-dialog">
+      <span class="eyebrow">BESTÄTIGUNG</span>
+      <h2 id="confirmationDialogTitle">Aktion bestätigen</h2>
+      <p id="confirmationDialogMessage"></p>
+      <label id="confirmationDialogInputLabel" for="confirmationDialogInput" hidden>Bestätigungstext
+        <input id="confirmationDialogInput" type="text" autocomplete="off">
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="confirmationDialogCancel" class="secondary-button">Abbrechen</button>
+        <button type="submit" id="confirmationDialogAccept" class="adaptive-planning-button">Bestätigen</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/api.js?v=151" defer></script>
+  <script src="/navigation.js?v=151" defer></script>
+  <script src="/state.js?v=151" defer></script>
+  <script src="/views.js?v=151" defer></script>
+  <script src="/forms.js?v=151" defer></script>
+  <script src="/components.js?v=151" defer></script>
+  <script src="/app.js?v=151" defer></script>
 </body>
 </html>

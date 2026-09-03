@@ -9323,6 +9323,35 @@ def _validate_workout_library_sync_confirmation(payload: dict[str, Any]) -> None
         raise AppError(409, "Die Bibliothek wurde seit der Vorschau geändert. Bitte erneut prüfen.")
 
 
+def enqueue_workout_library_sync_jobs(payload: Any) -> dict[str, Any]:
+    """Queue an explicitly approved library snapshot in bounded plan-push jobs."""
+    if not isinstance(payload, dict):
+        raise AppError(400, "Die Bibliothekssynchronisierung muss als Objekt gesendet werden.")
+    _validate_workout_library_sync_confirmation(payload)
+    summary, entries, fingerprint = _workout_library_sync_snapshot()
+    if fingerprint != str(payload.get("fingerprint") or "").strip().lower():
+        raise AppError(409, "Die Bibliothek wurde seit der Vorschau geaendert. Bitte erneut pruefen.")
+    selected = [
+        {"library_workout_id": entry["local_id"], "expected_payload_hash": entry["payload_hash"]}
+        for entry in entries
+    ]
+    jobs = []
+    for offset in range(0, len(selected), 28):
+        jobs.append(enqueue_sync_job(
+            "intervals",
+            "plan_push",
+            {"entries": selected[offset:offset + 28], "reason": "manueller Bibliothekssync"},
+            requested_by="user",
+        ))
+    return {
+        "status": "queued" if jobs else "completed",
+        "fingerprint": fingerprint,
+        "summary": summary,
+        "job_ids": [job["id"] for job in jobs],
+        "jobs": jobs,
+    }
+
+
 @maintenance_operation
 @intervals_operation
 def refresh_workout_library(reason: str = "manual") -> dict[str, Any]:
@@ -10017,11 +10046,25 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
                 "SELECT payload, sync_state FROM workout_library WHERE local_id=?",
                 (item["library_workout_id"],),
             ).fetchone()
+            is_planned = False
+            if not row:
+                row = db.execute(
+                    "SELECT payload, sync_state FROM planned_units WHERE local_id=?",
+                    (item["library_workout_id"],),
+                ).fetchone()
+                is_planned = bool(row)
         if not row:
             results.append({"library_workout_id": item["library_workout_id"], "status": "conflict", "error": "Einheit nicht gefunden"})
             continue
         if _library_payload_hash(row["payload"]) != item["expected_payload_hash"]:
             results.append({"library_workout_id": item["library_workout_id"], "status": "conflict", "error": "Seit der Vorschau geändert"})
+            continue
+        if is_planned:
+            try:
+                event = _sync_local_planned_unit_calendar_entry(item["library_workout_id"])
+                results.append({"library_workout_id": item["library_workout_id"], "status": "synced", "calendar_synced": event is not None})
+            except Exception as exc:
+                results.append({"library_workout_id": item["library_workout_id"], "status": "error", "error": redact_text(str(exc))[:500]})
             continue
         if row.get("sync_state") == "synced":
             try:
@@ -14967,6 +15010,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/competitions/sync/preview":
                 self.read_json()
                 self.send_json(200, competition_sync_preview())
+            elif path == "/api/competitions/sync/approved":
+                payload = self.read_json()
+                if payload.get("confirm") != "COMPETITION_SYNC":
+                    raise AppError(400, "Zum Wettkampf-Sync muss COMPETITION_SYNC bestaetigt werden.")
+                self.send_json(200, sync_competitions("approved UI sync", push_local=True, expected_fingerprint=payload.get("fingerprint")))
             elif path == "/api/performance/refresh":
                 self.send_json(200, refresh_current_performance())
             elif path == "/api/garmin/sync":
@@ -15001,13 +15049,19 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/planning/sync/preview":
                 self.read_json()
                 self.send_json(200, planning_sync_preview())
+            elif path == "/api/planning/sync/approved":
+                self.send_json(202, enqueue_workout_library_sync_jobs(self.read_json()))
             elif path == "/api/library/sync/preview":
                 self.read_json()
                 self.send_json(200, workout_library_sync_preview())
             elif path == "/api/library/bulk/preview":
                 self.send_json(200, library_bulk_preview(self.read_json()))
+            elif path == "/api/library/bulk":
+                self.send_json(200, _apply_bulk_local_library_action(self.read_json()))
             elif path == "/api/library/bulk-sync/preview":
                 self.send_json(200, selected_library_sync_preview(self.read_json()))
+            elif path == "/api/change-history/undo":
+                self.send_json(200, _apply_change_undo(self.read_json()))
             elif path in {"/api/library/sync", "/api/planning/sync"}:
                 raise AppError(410, "Bibliotheks-Remote-Sync benötigt die separate Coach-Aktionsbestätigung.")
             elif match := LIBRARY_ENTRY_RE.match(path):

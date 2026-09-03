@@ -53,12 +53,12 @@ function ensureRouteData(route = state.route) {
   if (requested.length) load("/api/bootstrap?local=1", requested);
 }
 
-function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
+async function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
   const panelRoute = NAV_ROUTES[route] ? route : DEFAULT_NAV_ROUTE;
   const mainRoute = baseRoute(panelRoute);
   const navigationRoute = NAV_LINK_ROUTES[mainRoute] || mainRoute;
   const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
-  if (currentPanel !== NAV_ROUTES[panelRoute] && !confirmDiscardChanges()) return false;
+  if (currentPanel !== NAV_ROUTES[panelRoute] && !(await confirmDiscardChanges())) return false;
   if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges()) discardUnsavedChanges();
   if (currentPanel === "workoutsPanel" && mainRoute !== "planned") state.planSegmentScroll[state.planSegment] = window.scrollY;
   if (currentPanel === "workoutsPanel" && mainRoute === "planned" && state.planSegment !== planSegmentFromRoute(panelRoute)) state.planSegmentScroll[state.planSegment] = window.scrollY;
@@ -100,9 +100,9 @@ function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}
   return true;
 }
 
-function syncNavigationRoute() {
+async function syncNavigationRoute() {
   const route = routeFromHash();
-  const applied = applyNavigationRoute(route, { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
+  const applied = await applyNavigationRoute(route, { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
   if (!applied && state.route) window.history.replaceState({ route: state.route }, "", `#${state.route}`);
 }
 
@@ -181,6 +181,37 @@ function showLogin() {
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
   showAccessibleDialog(dialog, $("#loginPassword"));
+}
+
+let confirmationResolver = null;
+
+function requestConfirmation(message, { title = "Aktion bestätigen", inputLabel = "", expectedText = "" } = {}) {
+  const dialog = $("#confirmationDialog");
+  const form = $("#confirmationDialogForm");
+  const messageNode = $("#confirmationDialogMessage");
+  const titleNode = $("#confirmationDialogTitle");
+  const inputLabelNode = $("#confirmationDialogInputLabel");
+  const input = $("#confirmationDialogInput");
+  if (!dialog || !form || !messageNode || !titleNode || !inputLabelNode || !input) return Promise.resolve(false);
+  if (confirmationResolver) confirmationResolver(false);
+  dialog.dataset.expectedText = expectedText;
+  titleNode.textContent = title;
+  messageNode.textContent = message;
+  inputLabelNode.hidden = !expectedText;
+  inputLabelNode.firstChild.textContent = inputLabel || "Bestätigungstext";
+  input.value = "";
+  input.required = Boolean(expectedText);
+  input.setCustomValidity("");
+  return new Promise((resolve) => {
+    confirmationResolver = resolve;
+    showAccessibleDialog(dialog, expectedText ? input : $("#confirmationDialogCancel"));
+  });
+}
+
+function settleConfirmation(value) {
+  const resolve = confirmationResolver;
+  confirmationResolver = null;
+  if (resolve) resolve(value);
 }
 
 function showAppShellLoading() {
@@ -845,8 +876,8 @@ function setDirtyIndicator(id, dirty) {
   if (indicator) indicator.hidden = !dirty;
 }
 
-function confirmDiscardChanges() {
-  return !hasUnsavedChanges() || window.confirm("Ungespeicherte Änderungen verwerfen?");
+async function confirmDiscardChanges() {
+  return !hasUnsavedChanges() || Boolean(await requestConfirmation("Ungespeicherte Änderungen verwerfen?", { title: "Änderungen verwerfen?" }));
 }
 
 function discardUnsavedChanges() {
@@ -1222,9 +1253,9 @@ function renderDailyPlanningContext(date, todayKey) {
 
 async function resolvePlannedConflict(localId, strategy, button) {
   if (!localId || !button) return;
-  if (!window.confirm(strategy === "adopt_remote"
+  if (!await requestConfirmation(strategy === "adopt_remote"
     ? "Die Remote-Version dieser Planung übernehmen? Die lokale Änderung wird verworfen."
-    : "Die lokale Version behalten und beim nächsten Remote-Sync übertragen?")) return;
+    : "Die lokale Version behalten und beim nächsten Remote-Sync übertragen?", { title: "Synchronisationskonflikt lösen?" })) return;
   button.disabled = true;
   try {
     await api(`/api/planned/local/${encodeURIComponent(localId)}/resolve`, {
@@ -1651,7 +1682,7 @@ function renderLocalPlanningActions(event, body) {
   deleteButton.className = "secondary-button danger-button";
   deleteButton.textContent = "Nur lokal entfernen";
   deleteButton.addEventListener("click", async () => {
-    if (!window.confirm(`„${event.name || "Geplante Einheit"}“ wirklich nur aus der lokalen Planung entfernen?`)) return;
+    if (!await requestConfirmation(`„${event.name || "Geplante Einheit"}“ wirklich nur aus der lokalen Planung entfernen?`, { title: "Lokale Planung entfernen?" })) return;
     deleteButton.disabled = true;
     try {
       await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, {
@@ -1952,7 +1983,7 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
 }
 
 async function deletePlanned(eventId, button, name) {
-  if (!window.confirm(`„${name || "Geplante Einheit"}“ wirklich lokal archivieren und für den nächsten Sync vormerken?`)) return;
+  if (!await requestConfirmation(`„${name || "Geplante Einheit"}“ wirklich lokal archivieren und für den nächsten Sync vormerken?`, { title: "Planung archivieren?" })) return;
   button.disabled = true;
   button.textContent = "Wird gelöscht…";
   try {
@@ -2480,7 +2511,7 @@ function renderLibrary(workouts) {
             remove.className = "secondary-button danger-button";
             remove.textContent = "Löschen";
             remove.addEventListener("click", () => {
-              if (window.confirm(`„${workout.name || "Bibliothekseinheit"}“ wirklich lokal löschen?`)) updateLibraryEntry(workout.id, { action: "delete" });
+              requestConfirmation(`„${workout.name || "Bibliothekseinheit"}“ wirklich lokal löschen?`, { title: "Vorlage löschen?" }).then((confirmed) => { if (confirmed) updateLibraryEntry(workout.id, { action: "delete" }); });
             });
             controls.append(remove);
           }
@@ -2535,25 +2566,15 @@ function describeLibraryBulkPreview(preview, remote = false) {
 }
 
 async function executeLibraryActionPreview(preview, message) {
-  if (!window.confirm(message + "\n\n" + describeLibraryBulkPreview(preview, preview.target_system === "intervals"))) return null;
-  const actionPreview = await api("/api/coach/actions/preview", {
+  if (!await requestConfirmation(message + "\n\n" + describeLibraryBulkPreview(preview, preview.target_system === "intervals"), { title: "Bulk-Aktion bestätigen?" })) return null;
+  if (preview.target_system === "local") {
+    return api("/api/library/bulk", { method: "POST", body: JSON.stringify(preview.payload) });
+  }
+  const job = await api("/api/sync/jobs", {
     method: "POST",
-    body: JSON.stringify({
-      action_type: preview.action === "sync_selected_workout_library" ? preview.action : "bulk_update_workout_library",
-      target_system: preview.target_system,
-      object_ids: preview.object_ids,
-      diff: preview.entries,
-      payload: preview.payload,
-    }),
+    body: JSON.stringify({ provider: "intervals", type: "plan_push", payload: { ...preview.payload, reason: "manueller Bibliothekssync" } }),
   });
-  const confirmed = await api("/api/coach/actions/confirm", {
-    method: "POST",
-    body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
-  });
-  return api("/api/coach/actions/execute", {
-    method: "POST",
-    body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
-  });
+  return { status: "queued", sync_job_id: job.id, job, results: [], failed_object_ids: [] };
 }
 
 function renderLibraryBulkResult(result) {
@@ -2642,7 +2663,7 @@ async function loadLibrary() {
       .filter(([key]) => key !== "planned")
       .reduce((total, [, value]) => total + Number(value || 0), 0);
     const plannedCount = Number(summary.planned || 0);
-    const confirmed = window.confirm(
+    const confirmed = await requestConfirmation(
       `Bibliothekssync zu Intervals.icu freigeben? ${changeCount} lokale Einträge: ` +
       `${summary.new || 0} neu, ${summary.changed || 0} geändert, ` +
       `${summary.missing || 0} fehlend, ${summary.error_retry || 0} Fehlerwiederholung` +
@@ -2650,24 +2671,11 @@ async function loadLibrary() {
       "Die Vorschau ist nur 10 Minuten gültig."
     );
     if (!confirmed) return;
-    const actionPreview = await api("/api/coach/actions/preview", {
+    const result = await api("/api/planning/sync/approved", {
       method: "POST",
-      body: JSON.stringify({
-        action_type: "sync_workout_library",
-        target_system: "intervals",
-        object_ids: {},
-        diff: preview.entries || [],
-        payload: { fingerprint: preview.fingerprint },
-      }),
+      body: JSON.stringify({ confirm: "LIBRARY_SYNC", fingerprint: preview.fingerprint }),
     });
-    const confirmedAction = await api("/api/coach/actions/confirm", {
-      method: "POST",
-      body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
-    });
-    await api("/api/coach/actions/execute", {
-      method: "POST",
-      body: JSON.stringify({ action_token: confirmedAction.action_token, payload_hash: confirmedAction.proposed_action.payload_hash }),
-    });
+    toast(result.status === "queued" ? `${result.job_ids?.length || 0} Bibliotheks-Syncjob(s) eingereiht` : "Bibliothek ist bereits aktuell");
     await load();
   } catch (error) {
     root.replaceChildren();
@@ -3549,13 +3557,12 @@ async function loadChangeHistory() {
 }
 
 async function undoChange(changeId, button) {
-  if (!window.confirm("Diese Änderung lokal zurücknehmen? Es wird kein Remote-Provider beschrieben. Neuere Änderungen führen zu einem Konflikt.")) return;
+  if (!await requestConfirmation("Diese Änderung lokal zurücknehmen? Es wird kein Remote-Provider beschrieben. Neuere Änderungen führen zu einem Konflikt.", { title: "Lokale Änderung zurücknehmen?" })) return;
   button.disabled = true;
   try {
     const preview = await api("/api/change-history/undo/preview", { method: "POST", body: JSON.stringify({ change_id: changeId }) });
-    if (!window.confirm("Undo-Vorschau bestätigen? Die Mutation bleibt lokal; ein späterer Remote-Sync muss separat geprüft werden.")) return;
-    const confirmed = await api("/api/coach/actions/confirm", { method: "POST", body: JSON.stringify({ proposal_id: preview.proposed_action.id }) });
-    await api("/api/coach/actions/execute", { method: "POST", body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }) });
+    if (!await requestConfirmation("Undo-Vorschau bestätigen? Die Mutation bleibt lokal; ein späterer Remote-Sync muss separat geprüft werden.", { title: "Undo-Vorschau bestätigen?" })) return;
+    await api("/api/change-history/undo", { method: "POST", body: JSON.stringify(preview.proposed_action.payload) });
     toast("Lokale Änderung zurückgenommen");
     await load();
     await loadChangeHistory();
@@ -4040,25 +4047,11 @@ async function syncCompetitions() {
     });
     const details = actions.length ? `\n\n${actions.join("\n")}` : "\n\nKeine Remote-Änderungen erforderlich.";
     const message = `Intervals.icu-Wettkampf-Sync bestätigen?\n\nErstellen: ${summary.create || 0} · Ändern: ${summary.change || 0} · Löschen: ${summary.delete || 0} · Konflikte: ${summary.conflict || 0}${details}`;
-    if (!window.confirm(message)) return;
+    if (!await requestConfirmation(message, { title: "Wettkampf-Sync bestätigen?" })) return;
     button.textContent = "Synchronisierung läuft…";
-    const actionPreview = await api("/api/coach/actions/preview", {
+    const result = await api("/api/competitions/sync/approved", {
       method: "POST",
-      body: JSON.stringify({
-        action_type: "sync_competitions",
-        target_system: "intervals",
-        object_ids: {},
-        diff: preview.actions || [],
-        payload: { fingerprint: preview.fingerprint },
-      }),
-    });
-    const confirmedAction = await api("/api/coach/actions/confirm", {
-      method: "POST",
-      body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
-    });
-    const result = await api("/api/coach/actions/execute", {
-      method: "POST",
-      body: JSON.stringify({ action_token: confirmedAction.action_token, payload_hash: confirmedAction.proposed_action.payload_hash }),
+      body: JSON.stringify({ confirm: "COMPETITION_SYNC", fingerprint: preview.fingerprint }),
     });
     if (result.status === "already_running") toast("Zielwettkämpfe werden bereits synchronisiert");
     else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.conflicts ? ` · ${result.conflicts} Konflikt(e) bitte prüfen` : ""}${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
@@ -4143,7 +4136,7 @@ async function fullResync(source) {
   const button = $(isGarmin ? "#garminFullResyncButton" : "#systemIntervalsFullResyncButton");
   if (!button) return;
   const providerLabel = isGarmin ? "Garmin" : "Intervals.icu";
-  if (!window.confirm(`Alle lokal gespeicherten ${providerLabel}-Daten löschen und vollständig neu laden? Die Daten in ${providerLabel} bleiben unverändert.`)) return;
+  if (!await requestConfirmation(`Alle lokal gespeicherten ${providerLabel}-Daten löschen und vollständig neu laden? Die Daten in ${providerLabel} bleiben unverändert.`, { title: `${providerLabel}-Daten vollständig neu laden?` })) return;
   const stateKey = isGarmin ? "garminFull" : "intervalsFull";
   state.localSync[stateKey] = true;
   button.disabled = true;
@@ -4166,7 +4159,7 @@ async function fullResync(source) {
 
 async function resetCoachChat() {
   const button = $("#chatResetButton");
-  if (!button || !window.confirm("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?")) return;
+  if (!button || !await requestConfirmation("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?", { title: "Coach-Chat zurücksetzen?" })) return;
   button.disabled = true;
   button.textContent = "Wird zurückgesetzt…";
   try {
@@ -4256,7 +4249,7 @@ function setupPwaUpdates() {
 }
 
 async function applyPwaUpdate() {
-  if (!confirmDiscardChanges()) return;
+  if (!await confirmDiscardChanges()) return;
   try {
     const registration = await navigator.serviceWorker.getRegistration();
     if (!registration?.waiting) {
@@ -4350,7 +4343,7 @@ async function applyReplan() {
   const confirmation = syncIllness
     ? "Krankheitspause bestätigen, die nächsten Tage im lokalen Check-in füllen, die Planung umbauen und Krankheitstage als SICK-Einträge nach Intervals.icu synchronisieren?"
     : "Krankheitspause bestätigen, die nächsten Tage im lokalen Check-in füllen und die lokale Planung umbauen? Intervals.icu wird dabei nicht verändert.";
-  if (!button || !adjustmentId || !window.confirm(confirmation)) return;
+  if (!button || !adjustmentId || !await requestConfirmation(confirmation, { title: "Adaptive Planung anwenden?" })) return;
   button.disabled = true;
   try {
     const changes = state.data?.planning?.latest_replan?.changes || [];
@@ -4400,7 +4393,7 @@ async function downloadDatabaseBackup() {
 async function restoreDatabaseBackup() {
   const input = $("#backupFileInput");
   const file = input?.files?.[0];
-  if (!file || !window.confirm("Das aktuelle Datenbank-Backup wird vorher gesichert und durch die ausgewählte Datei ersetzt. Fortfahren?")) return;
+  if (!file || !await requestConfirmation("Das aktuelle Datenbank-Backup wird vorher gesichert und durch die ausgewählte Datei ersetzt. Fortfahren?", { title: "Datenbank-Backup wiederherstellen?" })) return;
   const button = $("#backupRestoreButton");
   button.disabled = true;
   try {
@@ -4510,12 +4503,12 @@ async function deletePrivacyData() {
       `${(preview.remote_untouched || []).join("\n")}\n\n` +
       `${preview.openai_conversation || "Eine vorhandene OpenAI-Konversation wird separat behandelt."}\n\n` +
       "Erstelle bei Bedarf vorher ein verschlüsseltes Backup oder einen Export. Dieser Schritt kann nicht rückgängig gemacht werden.";
-    if (!window.confirm(scope)) return;
-    const confirmation = window.prompt(`Zur Bestätigung exakt eingeben: ${preview.confirmation_text}`, "");
-    if (confirmation !== preview.confirmation_text) {
-      toast("Löschen abgebrochen: Bestätigungstext stimmt nicht überein.", true);
-      return;
-    }
+    const confirmation = await requestConfirmation(scope, {
+      title: "Lokale Daten endgültig löschen?",
+      inputLabel: "Bestätigungstext",
+      expectedText: preview.confirmation_text,
+    });
+    if (!confirmation) return;
     const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: confirmation }) });
     const notice = $("#privacyDeleteNotice");
     if (notice) {
@@ -4536,10 +4529,32 @@ async function deletePrivacyData() {
 }
 
 async function logout() {
-  if (!confirmDiscardChanges()) return;
+  if (!await confirmDiscardChanges()) return;
   try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
   showLogin();
 }
+
+const confirmationDialog = $("#confirmationDialog");
+const confirmationForm = $("#confirmationDialogForm");
+const confirmationInput = $("#confirmationDialogInput");
+confirmationForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const expectedText = confirmationDialog?.dataset.expectedText || "";
+  if (expectedText && confirmationInput?.value !== expectedText) {
+    confirmationInput?.setCustomValidity("Bestätigungstext stimmt nicht überein.");
+    confirmationInput?.reportValidity();
+    confirmationInput?.focus();
+    return;
+  }
+  confirmationInput?.setCustomValidity("");
+  settleConfirmation(expectedText ? confirmationInput.value : true);
+  confirmationDialog?.close();
+});
+$("#confirmationDialogCancel")?.addEventListener("click", () => {
+  settleConfirmation(false);
+  confirmationDialog?.close();
+});
+confirmationDialog?.addEventListener("close", () => settleConfirmation(false));
 
 document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
