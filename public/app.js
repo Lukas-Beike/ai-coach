@@ -879,10 +879,10 @@ const PROVIDER_FRESHNESS_ERRORS = {
 };
 
 function providerRequiresManualAttention(entry) {
-  if (!entry?.configured || !entry.error_code) return false;
+  if (!entry?.configured) return false;
   if (["auth_required", "invalid_configuration"].includes(entry.error_code)) return true;
   const hasFutureRetry = entry.next_retry_at && Date.parse(entry.next_retry_at) > Date.now();
-  return ["error", "stale"].includes(entry.state) && !hasFutureRetry;
+  return ["error", "stale", "partial"].includes(entry.state) && !hasFutureRetry;
 }
 
 function renderProviderAttention(data) {
