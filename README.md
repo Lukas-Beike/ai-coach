@@ -196,6 +196,9 @@ visible and polls more frequently while a manual synchronization is running.
 Large Intervals.icu responses are fetched in bounded pages and the latest
 sync reports the fetched page/window counts; incomplete Garmin ranges remain
 visible as partial provider status instead of being presented as complete.
+If only Garmin Body Battery is unavailable, the last known value remains
+available and the app queues one targeted retry after two hours; it does not
+repeat the complete Garmin synchronization for that capability alone.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
@@ -284,7 +287,7 @@ bounded retry time after transient failures. Retry buttons are limited to the
 corresponding read-only provider path; competition and workout-library writes
 remain separate explicit actions. The same safe freshness metadata is included
 in the diagnostics report. The timeline retains at most 200 attempts for 30
-days and never stores provider responses or calendar URLs.
+days and never stores provider responses or calendar URLs during normal use.
 
 The workout library also supports a mobile-friendly, keyboard-accessible
 multi-selection for local marking, date shifting, archiving, and explicitly
@@ -612,6 +615,12 @@ five minutes, while expired sessions and stale in-memory rate-limit buckets are
 cleaned up periodically in bounded batches. Synchronization logs correlate a
 technical operation ID across trigger, provider, phase, duration, counts, and
 safe error codes; they do not log provider payloads or athlete content.
+In **Betrieb & Diagnose**, the athlete can explicitly enable a one-hour
+technical capture. It records bounded provider response content only for that
+period so an export can diagnose provider schema failures. It does not capture
+request bodies, API keys, passwords, tokens, cookies, authorization/session/
+CSRF fields, or private calendar URLs; the normal logs and diagnostics remain
+content-free. The capture is never enabled by the Coach.
 For HTTPS reverse-proxy deployments, set
 `COOKIE_SECURE=true`; this adds the `Secure` attribute to the session and CSRF
 cookies. Keep it `false` for the documented local HTTP development flow.

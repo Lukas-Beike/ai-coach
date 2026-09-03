@@ -363,7 +363,12 @@
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span><span class="collapsible-summary-meta">Bereinigten Status herunterladen</span></summary>
           <div class="diagnostic-actions">
             <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
-            <p class="fine-print">Enthält aktuelle bereinigte Fehler und Laufzeitstatus, niemals API-Schlüssel oder Trainingsdaten.</p>
+            <label class="diagnostic-capture-toggle" for="diagnosticCaptureToggle">
+              <input type="checkbox" id="diagnosticCaptureToggle">
+              <span>Erweiterte technische Diagnose für eine Stunde aufzeichnen</span>
+            </label>
+            <p id="diagnosticCaptureStatus" class="fine-print">Aus. Antwortinhalte und Athletendaten werden nicht aufgezeichnet.</p>
+            <p class="fine-print">Der normale Diagnoseexport enthält keine API-Schlüssel, Tokens oder Trainingsdaten. Während der aktiven Aufzeichnung enthält er zusätzlich bereinigte Antwortinhalte.</p>
           </div>
         </details>
       </section>

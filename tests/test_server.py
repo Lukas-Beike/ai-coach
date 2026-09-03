@@ -1656,6 +1656,9 @@ class CoachTests(unittest.TestCase):
         self.assertIn('"/components.js?v=163"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
+        self.assertIn('id="diagnosticCaptureToggle"', index)
+        self.assertIn('function setDiagnosticCapture(', app)
+        self.assertIn('/api/diagnostics/capture', app)
         self.assertIn('function executeCoachActionProposal(', app)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('window.addEventListener("offline"', app)
@@ -6358,6 +6361,47 @@ class CoachTests(unittest.TestCase):
             with self.assertRaises(server.AppError):
                 server.http_json("GET", "https://intervals.icu/api/v1/athlete/0", service="intervals")
         self.assertTrue(response_body.closed)
+
+    def test_user_enabled_diagnostic_capture_keeps_response_content_but_redacts_secrets(self):
+        self.assertFalse(server.diagnostic_capture_status()["active"])
+        enabled = server.set_diagnostic_capture(True)
+        self.assertTrue(enabled["active"])
+        response = {
+            "bodyBattery": 82,
+            "access_token": "must-never-appear",
+            "nested": {"sessionId": "must-also-never-appear", "athlete_note": "allowed during capture"},
+        }
+        server.external_call("garmin", "body_battery", lambda: response)
+        report = server.diagnostic_report()
+        report_text = json.dumps(report, ensure_ascii=False)
+        self.assertIn("allowed during capture", report_text)
+        self.assertIn("bodyBattery", report_text)
+        self.assertNotIn("must-never-appear", report_text)
+        self.assertNotIn("must-also-never-appear", report_text)
+        self.assertIn("[REDACTED]", report_text)
+
+        server.set_diagnostic_capture(False)
+        self.assertFalse(server.diagnostic_capture_status()["active"])
+        server.external_call("garmin", "body_battery", lambda: {"new_marker": "not captured"})
+        self.assertNotIn("not captured", json.dumps(server.diagnostic_report(), ensure_ascii=False))
+
+    def test_body_battery_retry_is_delayed_and_runs_only_the_targeted_operation(self):
+        scheduled = server._schedule_body_battery_retry(30)
+        self.assertIsNotNone(scheduled)
+        self.assertEqual(scheduled["provider"], "garmin")
+        self.assertEqual(scheduled["type"], "body_battery_retry")
+        retry_at = datetime.fromisoformat(scheduled["available_at"].replace("Z", "+00:00"))
+        remaining = (retry_at - datetime.now(timezone.utc)).total_seconds()
+        self.assertGreater(remaining, server.GARMIN_BODY_BATTERY_RETRY_SECONDS - 5)
+        self.assertLessEqual(remaining, server.GARMIN_BODY_BATTERY_RETRY_SECONDS + 5)
+        self.assertIsNone(server._schedule_body_battery_retry(30))
+        with patch.object(server, "sync_garmin_body_battery_retry", return_value={"status": "ok", "records": 2}) as retry:
+            result = server._execute_sync_job({
+                "id": scheduled["id"], "provider": "garmin", "type": "body_battery_retry",
+                "payload": json.dumps({"days": 30, "reason": "test"}),
+            })
+        self.assertEqual(result["status"], "ok")
+        retry.assert_called_once_with(days=30, operation_id=scheduled["id"], reason="test")
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.initialise_logging()

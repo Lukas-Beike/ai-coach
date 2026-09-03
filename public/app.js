@@ -3790,6 +3790,7 @@ function render(data) {
   renderPerformance(data.performance);
   renderModel(data.model);
   renderThinkingLevel(data.thinking_level);
+  renderDiagnosticCapture(data.diagnostic_capture);
   renderSettings(data);
   updateHeaderAction();
 }
@@ -4604,6 +4605,40 @@ async function downloadDiagnostics() {
   finally { button.disabled = false; button.textContent = "Diagnose herunterladen"; }
 }
 
+function renderDiagnosticCapture(capture = {}) {
+  const toggle = $("#diagnosticCaptureToggle");
+  const status = $("#diagnosticCaptureStatus");
+  if (!toggle || !status) return;
+  const active = Boolean(capture.active);
+  toggle.checked = active;
+  if (active) {
+    const entries = Number(capture.entries || 0);
+    status.textContent = `Aktiv bis ${formatTime(capture.expires_at)} · ${entries} technische Einträge gespeichert. Bereinigte Antwortinhalte dürfen Athletendaten enthalten; Zugangsdaten und Tokens bleiben ausgeschlossen.`;
+  } else {
+    status.textContent = "Aus. Antwortinhalte und Athletendaten werden nicht aufgezeichnet.";
+  }
+}
+
+async function setDiagnosticCapture(event) {
+  const toggle = event.currentTarget;
+  const previous = !toggle.checked;
+  toggle.disabled = true;
+  try {
+    const capture = await api("/api/diagnostics/capture", {
+      method: "POST",
+      body: JSON.stringify({ enabled: toggle.checked }),
+    });
+    if (state.data) state.data.diagnostic_capture = capture;
+    renderDiagnosticCapture(capture);
+    toast(capture.active ? "Erweiterte technische Diagnose ist für eine Stunde aktiv" : "Erweiterte technische Diagnose beendet");
+  } catch (error) {
+    toggle.checked = previous;
+    toast(error.message, true);
+  } finally {
+    toggle.disabled = false;
+  }
+}
+
 async function downloadPrivacyExport() {
   try {
     const response = await fetch("/api/privacy/export", { credentials: "same-origin", cache: "no-store" });
@@ -4756,6 +4791,7 @@ $("#modelSelect").addEventListener("change", saveModel);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
+$("#diagnosticCaptureToggle").addEventListener("change", setDiagnosticCapture);
 $("#logsRefreshButton").addEventListener("click", loadLogs);
 $("#chatResetButton").addEventListener("click", resetCoachChat);
 $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);
