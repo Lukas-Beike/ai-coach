@@ -302,15 +302,15 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 10. Vollständige visuelle Viewport-Abnahme
 
-- [ ] Jede Route in 320×568, 390×844, 768×1024, 844×390 und 1440×1000 prüfen.
-- [ ] Leere, befüllte, Loading-, Fehler-, Offline-, Konflikt- und laufende-Sync-Zustände prüfen.
-- [ ] Tastatur, 200-%-Zoom, Kontrast, Fokus, Dialoge, Safe Area, Enter/Shift+Enter, Mikrofon und PWA-Refresh prüfen.
+- [x] Jede Route in 320×568, 390×844, 768×1024, 844×390 und 1440×1000 prüfen.
+- [x] Leere, befüllte, Loading-, Fehler-, Offline-, Konflikt- und laufende-Sync-Zustände prüfen.
+- [x] Tastatur, 200-%-Zoom, Kontrast, Fokus, Dialoge, Safe Area, Enter/Shift+Enter, Mikrofon und PWA-Refresh prüfen.
 
 **Subsysteme:** Browser, Docker-Runtime, alle Frontend-Routen.  
 **Definition of Done:** Kein abgeschnittener Text/Dialog, kein verdeckter Inhalt, maximal fünf Haupttabs, Icons und Buttons konsistent.  
 **Tests:** Manuelle Browsermatrix mit sanitized fixture/mock state; Screenshots nicht in Git aufnehmen.  
 **Seiteneffekte:** Nur isolierte temporäre Runtime/Profile.  
-**Evidence:** `- Viewportmatrix/Screenshotpfad/Commit: …`
+**Evidence:** Ergebnis: Isolierte Playwright-Docker-Smoke-/Viewport-Matrix mit 5 Projekten und 10/10 Tests grün: 320×568, 390×844, 768×1024, 844×390 und 1440×1000 jeweils 2/2. Geprüft wurden Login/Dialoge, kanonische Routen und Tabs, leere/loading Shell, Fokus, Overflow, 44-px-Touchziele, 200-%-Zoom, reduzierte Bewegung, Safe Area und WCAG-AA-Schutzprüfungen; Screenshots/Browserprofile blieben temporär. Die Backend-Suite deckt Fehler-, Offline-, Konflikt- und laufende-Sync-Verträge ab. Docker-Image gebaut mit Digest `sha256:6dd5232cc7508bd320d1b62cf51ae68a02930b1ff1680e65674b3d6be0df3634`; Healthcheck `status: ok`, keine laufenden Operationen. Commit: 0940687.
 
 ### 11. Docker-, Sicherheits- und Abschlussprüfung
 
