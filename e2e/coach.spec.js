@@ -181,7 +181,7 @@ test.describe("critical browser states", () => {
     expect(loginResults.violations, "Login accessibility violations").toEqual([]);
     await login(page);
 
-    for (const [label, panelId] of navigation.filter(([name]) => ["Coach", "Heute", "Mehr"].includes(name))) {
+    for (const [label, panelId] of navigation) {
       await page.getByRole("link", { name: label, exact: true }).click();
       await expect(page.locator(`#${panelId}`)).toHaveClass(/active/);
       const results = await new AxeBuilder({ page })
@@ -193,6 +193,23 @@ test.describe("critical browser states", () => {
 
     await expectNoBrowserErrorsOrOverflow(page, browserErrors);
     await page.screenshot({ path: testInfo.outputPath("settings-core.png"), fullPage: true });
+  });
+
+  test("inactive panels stay hidden and compact labels remain readable", async ({ page }) => {
+    const browserErrors = installBrowserGuards(page);
+    await login(page);
+    await page.getByRole("link", { name: "Coach", exact: true }).click();
+    const panelState = await page.locator("main .panel").evaluateAll((panels) => panels.map((panel) => ({
+      id: panel.id,
+      active: panel.classList.contains("active"),
+      display: getComputedStyle(panel).display,
+    })));
+    expect(panelState.filter((panel) => !panel.active && panel.display !== "none"), "inactive panels must not leak into the active view").toEqual([]);
+    const clippedLabels = await page.locator(".coach-provider-item strong:visible").evaluateAll((nodes) => nodes
+      .filter((node) => node.scrollWidth > node.clientWidth || node.getBoundingClientRect().right > window.innerWidth + 1)
+      .map((node) => node.textContent));
+    expect(clippedLabels, "visible provider labels must fit their cards").toEqual([]);
+    await expectNoBrowserErrorsOrOverflow(page, browserErrors);
   });
 
 });

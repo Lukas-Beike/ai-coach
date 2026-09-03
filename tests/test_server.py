@@ -414,6 +414,33 @@ class CoachTests(unittest.TestCase):
         self.assertGreaterEqual(active.call_count, 1)
         enqueue.assert_not_called()
 
+    def test_startup_historical_backfill_resumes_before_saved_cursor(self):
+        config = replace(server.CONFIG, intervals_api_key="configured", calendar_ical_url="", garmin_email="", garmin_tokenstore="")
+        with patch.object(server, "CONFIG", config), patch.object(server, "_sync_job_active", return_value=False), patch.object(
+            server, "provider_sync_cursor", return_value={"cursor": "2026-08-01"}
+        ), patch.object(server, "enqueue_sync_job") as enqueue:
+            server.enqueue_startup_sync_jobs()
+        historical = next(call for call in enqueue.call_args_list if call.args[1] == "historical_backfill")
+        self.assertEqual(historical.args[2]["end_date"], "2026-07-31")
+
+    def test_historical_snapshot_merge_preserves_current_read_model(self):
+        current = {
+            "synced_at": "current",
+            "recent_activities": [{"id": "new"}],
+            "raw_provider_data": {"athlete": {"id": "athlete"}, "activities": [{"id": "new"}], "wellness": [], "upcoming_calendar": []},
+        }
+        historical = {
+            "synced_at": "historical",
+            "recent_activities": [{"id": "old"}],
+            "raw_provider_data": {"athlete": {}, "activities": [{"id": "old"}], "wellness": [{"id": "wellness-old"}], "upcoming_calendar": []},
+            "provider_sync": {"calendar_window": {"start": "2020-01-01", "end": "2020-03-30"}},
+        }
+        merged = server.merge_historical_snapshot(current, historical)
+        self.assertEqual(merged["recent_activities"], current["recent_activities"])
+        self.assertEqual({item["id"] for item in merged["raw_provider_data"]["activities"]}, {"new", "old"})
+        self.assertEqual(merged["raw_provider_data"]["wellness"], [{"id": "wellness-old"}])
+        self.assertEqual(merged["synced_at"], "current")
+
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = server.utc_now()
         with server.DB_LOCK, server.database() as db:
@@ -1575,19 +1602,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=158', index)
-        self.assertIn('/navigation.js?v=158', index)
-        self.assertIn('/state.js?v=158', index)
-        self.assertIn('/views.js?v=158', index)
-        self.assertIn('/forms.js?v=158', index)
-        self.assertIn('/components.js?v=158', index)
-        self.assertIn('/app.js?v=158', index)
-        self.assertIn('intervals-coach-v158', service_worker)
-        self.assertIn('"/navigation.js?v=158"', service_worker)
-        self.assertIn('"/state.js?v=158"', service_worker)
-        self.assertIn('"/views.js?v=158"', service_worker)
-        self.assertIn('"/forms.js?v=158"', service_worker)
-        self.assertIn('"/components.js?v=158"', service_worker)
+        self.assertIn('/api.js?v=159', index)
+        self.assertIn('/navigation.js?v=159', index)
+        self.assertIn('/state.js?v=159', index)
+        self.assertIn('/views.js?v=159', index)
+        self.assertIn('/forms.js?v=159', index)
+        self.assertIn('/components.js?v=159', index)
+        self.assertIn('/app.js?v=159', index)
+        self.assertIn('intervals-coach-v159', service_worker)
+        self.assertIn('"/navigation.js?v=159"', service_worker)
+        self.assertIn('"/state.js?v=159"', service_worker)
+        self.assertIn('"/views.js?v=159"', service_worker)
+        self.assertIn('"/forms.js?v=159"', service_worker)
+        self.assertIn('"/components.js?v=159"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('function executeCoachActionProposal(', app)
@@ -1606,8 +1633,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=158'), index.index('/components.js?v=158'))
-        self.assertLess(index.index('/components.js?v=158'), index.index('/app.js?v=158'))
+        self.assertLess(index.index('/forms.js?v=159'), index.index('/components.js?v=159'))
+        self.assertLess(index.index('/components.js?v=159'), index.index('/app.js?v=159'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -5977,16 +6004,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=158"', source)
-        self.assertIn('"/navigation.js?v=158"', source)
-        self.assertIn('"/state.js?v=158"', source)
-        self.assertIn('"/views.js?v=158"', source)
-        self.assertIn('"/forms.js?v=158"', source)
-        self.assertIn('"/components.js?v=158"', source)
+        self.assertIn('"/api.js?v=159"', source)
+        self.assertIn('"/navigation.js?v=159"', source)
+        self.assertIn('"/state.js?v=159"', source)
+        self.assertIn('"/views.js?v=159"', source)
+        self.assertIn('"/forms.js?v=159"', source)
+        self.assertIn('"/components.js?v=159"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=158"', source)
-        self.assertIn('"/icon.svg?v=158"', source)
-        self.assertIn('"/styles.css?v=158"', source)
+        self.assertIn('"/app.js?v=159"', source)
+        self.assertIn('"/icon.svg?v=159"', source)
+        self.assertIn('"/styles.css?v=159"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6747,7 +6774,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=158', index)
+        self.assertIn('v=159', index)
 
     def test_library_bulk_local_actions_preview_diff_and_hash_conflict(self):
         first = server.create_local_workout_library_entry({
@@ -6850,8 +6877,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("function runLibraryBulkRemoteSync()", app)
         self.assertIn("expected_payload_hash", (server.PUBLIC_DIR.parent / "server.py").read_text(encoding="utf-8"))
         self.assertIn("librarySelection", state)
-        self.assertIn("intervals-coach-v158", worker)
-        self.assertIn("/app.js?v=158", index)
+        self.assertIn("intervals-coach-v159", worker)
+        self.assertIn("/app.js?v=159", index)
 
 if __name__ == "__main__":
     unittest.main()

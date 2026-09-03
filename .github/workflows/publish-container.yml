@@ -124,10 +124,9 @@ jobs:
           echo "All native shards, syntax checks, and container tests passed."
 
   quality:
-    name: Quality baseline (advisory)
+    name: Quality baseline
     needs: test
     if: needs.test.result == 'success'
-    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -242,7 +241,7 @@ jobs:
 
   build-and-push:
     if: (github.event_name == 'release' && github.event.action == 'published') || (github.event_name == 'workflow_dispatch' && inputs.publish_container == true)
-    needs: test
+    needs: [test, e2e, quality]
     runs-on: ubuntu-latest
     permissions:
       contents: read
