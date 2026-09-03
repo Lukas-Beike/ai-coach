@@ -185,15 +185,17 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 1. Schema-6-Migration und DB-Manager
 
-- [ ] Migrationen und Repositories für alle neuen Tabellen sowie additive `planned_units`-Felder implementieren.
-- [ ] SQLCipher-Connection-Manager mit Writer/Reader-Pool, Unit of Work, Sessioncache und Restore-Drain einführen.
-- [ ] Bestehende Daten, Tombstones, Backups und Recovery-Pfade erhalten.
+- [x] Migrationen und Repositories für alle neuen Tabellen sowie additive `planned_units`-Felder implementieren.
+- [x] SQLCipher-Connection-Manager mit Writer/Reader-Pool, Unit of Work, Sessioncache und Restore-Drain einführen.
+- [x] Bestehende Daten, Tombstones, Backups und Recovery-Pfade erhalten.
 
 **Subsysteme:** `server.py`, `backend/db`, Migrationen, Backup.  
 **Definition of Done:** Schema 5 migriert deterministisch nach 6; Wiederholung ist sicher; alte Daten bleiben lesbar.  
 **Tests:** Migration von temporärer DB, Rollback, Parallel-Reads, Writer-Serialisierung, Sessioninvalidierung, Restore.  
 **Seiteneffekte:** Keine Migration gegen `/data`; keine Datenlöschung außerhalb eines getesteten Restore-Flows.  
-**Evidence:** `- Test/Commit: …`
+**Evidence:**
+
+- Ergebnis: `python -m unittest discover -s tests -v` mit 347 Tests grün und 3 erwarteten SQLCipher-Skips; fokussierte DB-Manager-, Migrations-, Export- und Delete-Tests grün; beide Syntaxchecks grün; `docker build -t ai-coach:local .` grün. Commit: `4a25ad4`.
 
 ### 2. Persistente Providerjobs
 
