@@ -920,58 +920,20 @@ function renderProviderFreshness(data) {
   });
 }
 
-function coachProviderLabel(provider) {
-  return { intervals: "Intervals.icu", garmin: "Garmin", weather: "Wetter", calendar: "Kalender" }[provider] || provider;
-}
-
-function coachStatusLabel(status) {
-  return {
-    ready: "Bereit",
-    loading: "Wird geladen",
-    stale: "Letzte Daten",
-    degraded: "Teilweise",
-    error: "Fehler",
-    not_configured: "Nicht eingerichtet",
-  }[status] || "Unbekannt";
-}
-
 function renderCoachOverview(data) {
-  const root = $("#coachProviderStatus");
-  const ready = $("#coachReadyStatus");
-  const intro = $("#coachOverviewStatus");
-  if (!root || !ready) return;
-  root.replaceChildren();
-  const configured = data.configured || {};
-  const providers = data.provider_states || {};
-  const entries = ["intervals", "garmin", "weather"].map((provider) => {
-    const providerState = providers[provider] || {};
-    const status = providerState.status || (configured[provider] === false ? "not_configured" : "loading");
-    return { provider, status };
-  });
-  entries.forEach(({ provider, status }) => {
-    const item = document.createElement("div");
-    item.className = "coach-provider-item";
-    item.append(document.createElement("span"));
-    const copy = document.createElement("div");
-    const name = document.createElement("strong");
-    name.textContent = coachProviderLabel(provider);
-    const detail = document.createElement("small");
-    detail.textContent = coachStatusLabel(status);
-    copy.append(name, detail);
-    item.append(copy);
-    item.dataset.status = status;
-    root.append(item);
-  });
-  const hasError = entries.some(({ status }) => status === "error");
-  const hasLoading = entries.some(({ status }) => status === "loading");
-  const missing = !configured.openai || !configured.intervals;
-  const overall = missing ? "not_configured" : hasError ? "error" : hasLoading ? "loading" : "ready";
-  ready.dataset.status = overall;
-  ready.textContent = missing ? "Einrichtung nötig" : coachStatusLabel(overall);
-  if (intro) intro.textContent = missing
-    ? "OpenAI und Intervals.icu werden für Coach-Antworten benötigt."
-    : hasError ? "Eine Datenquelle braucht Aufmerksamkeit; bereits geladene Daten bleiben sichtbar."
-      : "Verlauf, Planung und Erholung sind im Coach-Kontext gebündelt.";
+  const actions = data.coach_quick_actions || {};
+  const morning = $("#coachMorningCheckinButton");
+  const quickMorning = $("#quickMorningCheckinButton");
+  const adjust = $("#coachAdjustPlanButton");
+  if (morning) morning.hidden = actions.morning_checkin === false;
+  if (quickMorning) quickMorning.hidden = actions.morning_checkin === false;
+  if (adjust) {
+    adjust.hidden = actions.adjust_plan !== true;
+    const blockers = Array.isArray(actions.plan_blockers) ? actions.plan_blockers : [];
+    adjust.title = blockers.length
+      ? `Plananpassung nötig: ${blockers.map((item) => `${dateLabel(item.date)} · ${item.name}`).join(", ")}`
+      : "";
+  }
 }
 
 function renderCoachReceipts() {
@@ -2270,18 +2232,27 @@ function renderCoachActionReview() {
   content.replaceChildren();
   const proposals = Array.isArray(state.coachActionProposals) ? state.coachActionProposals : [];
   root.hidden = proposals.length === 0;
+  const reviewTitle = $("#coachActionReviewTitle");
+  if (reviewTitle) reviewTitle.textContent = proposals.length === 1 && proposals[0].action_type === "delete_duplicate_intervals_activity"
+    ? "Doppelte Radaufzeichnung"
+    : "Lokale Planung";
   proposals.forEach((proposal) => {
+    const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
     const card = document.createElement("div");
     card.className = "coach-action-card";
     const description = document.createElement("p");
     const target = proposal.target_system === "local+intervals"
       ? "lokal und optional in Intervals.icu"
       : proposal.target_system === "intervals" ? "in Intervals.icu" : "nur lokal";
-    description.textContent = `Der Coach schlägt ${target} ${proposal.diff?.length || 0} Einheiten vor. Noch nicht gespeichert.`;
+    description.textContent = duplicateDelete
+      ? "Diese Garmin-Radaufzeichnung ist nahezu identisch mit der Wahoo-Einheit. Soll nur das Garmin-Duplikat aus Intervals.icu gelöscht werden?"
+      : `Der Coach schlägt ${target} ${proposal.diff?.length || 0} Einheiten vor. Noch nicht gespeichert.`;
     const entries = document.createElement("ul");
     (Array.isArray(proposal.diff) ? proposal.diff : []).forEach((entry) => {
       const item = document.createElement("li");
-      item.textContent = [entry.name, entry.date, entry.sport, entry.duration_minutes ? `${entry.duration_minutes} min` : null].filter(Boolean).join(" · ");
+      item.textContent = duplicateDelete
+        ? [entry.name, entry.date, "Garmin löschen · Wahoo behalten"].filter(Boolean).join(" · ")
+        : [entry.name, entry.date, entry.sport, entry.duration_minutes ? `${entry.duration_minutes} min` : null].filter(Boolean).join(" · ");
       entries.append(item);
     });
     const actions = document.createElement("div");
@@ -2289,7 +2260,7 @@ function renderCoachActionReview() {
     const later = document.createElement("button");
     later.type = "button";
     later.className = "secondary-button";
-    later.textContent = "Später prüfen";
+    later.textContent = duplicateDelete ? "Garmin behalten" : "Später prüfen";
     later.addEventListener("click", () => {
       state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
       renderCoachActionReview();
@@ -2297,7 +2268,9 @@ function renderCoachActionReview() {
     const confirm = document.createElement("button");
     confirm.type = "button";
     confirm.className = "adaptive-planning-button";
-    confirm.textContent = proposal.target_system === "local+intervals" ? "Planung freigeben" : "Lokal speichern";
+    confirm.textContent = duplicateDelete
+      ? "Garmin-Duplikat löschen"
+      : proposal.target_system === "local+intervals" ? "Planung freigeben" : "Lokal speichern";
     confirm.addEventListener("click", () => executeCoachActionProposal(proposal, confirm));
     actions.append(later, confirm);
     card.append(description, entries, actions);
@@ -2319,13 +2292,20 @@ async function executeCoachActionProposal(proposal, button) {
     });
     state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
     renderCoachActionReview();
-    const receiptMessage = result.local_planned
+    const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
+    const receiptMessage = duplicateDelete
+      ? "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten."
+      : result.local_planned
       ? `${result.local_planned} Einheit(en) lokal geplant. Remote-Sync bleibt eine separate Freigabe.`
       : "Planung lokal gespeichert. Sie bleibt bis zur separaten Sync-Freigabe lokal.";
-    addCoachReceipt({ title: "Planung gespeichert", message: receiptMessage, details: [result.sync_job_id ? `Syncjob ${result.sync_job_id} eingereiht` : "Keine implizite Remote-Änderung"] });
-    toast(result.local_planned ? `${result.local_planned} Einheit(en) lokal geplant` : "Planung lokal gespeichert");
-    await load("/api/bootstrap?local=1", ["plan", "library"]);
-    applyNavigationRoute("plan/calendar", { historyMode: "push" });
+    addCoachReceipt({
+      title: duplicateDelete ? "Duplikat gelöscht" : "Planung gespeichert",
+      message: receiptMessage,
+      details: duplicateDelete ? ["Wahoo bleibt die kanonische Radaufzeichnung"] : [result.sync_job_id ? `Syncjob ${result.sync_job_id} eingereiht` : "Keine implizite Remote-Änderung"],
+    });
+    toast(duplicateDelete ? "Garmin-Duplikat gelöscht" : result.local_planned ? `${result.local_planned} Einheit(en) lokal geplant` : "Planung lokal gespeichert");
+    await load("/api/bootstrap?local=1", duplicateDelete ? ["activities"] : ["plan", "library"]);
+    if (!duplicateDelete) applyNavigationRoute("plan/calendar", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Planung nicht gespeichert", message: error.message, status: "error" });
     toast(error.message, true);
@@ -4106,6 +4086,10 @@ async function requestCoachResponse(message) {
         request.responseMessageId = payload.message?.id || null;
         state.chatStreamText = "";
         state.coachActionProposals = Array.isArray(payload?.proposed_actions) ? payload.proposed_actions : [];
+        if (payload?.coach_quick_actions && state.data) {
+          state.data.coach_quick_actions = payload.coach_quick_actions;
+          renderCoachOverview(state.data);
+        }
         addStructuredCoachReceipts(payload);
         renderMessages(state.data?.messages || [], false);
         updateChatControls();

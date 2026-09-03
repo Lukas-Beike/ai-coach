@@ -764,7 +764,7 @@ DEFAULT_PROFILE = {
 WEATHER_FORECAST_DAYS = 14
 WEATHER_RECOMMENDATION_DAYS = 5
 WEATHER_ICON_D2_DAYS = 2
-WEATHER_ADAPTIVE_DAYS = 2
+WEATHER_ADAPTIVE_DAYS = 3
 WEATHER_ADAPTIVE_LONG_RIDE_MINUTES = 180
 WEATHER_ADAPTIVE_MAX_MINUTES = 90
 WEATHER_CACHE_SECONDS = 3 * 60 * 60
@@ -1244,6 +1244,7 @@ MUTATING_COACH_TOOL_NAMES = {
     "update_library_template",
     "save_checkin",
     "update_training_plan",
+    "delete_duplicate_intervals_activity",
 }
 
 COACH_TOOLS = [
@@ -3495,6 +3496,79 @@ def filter_garmin_activities(activities: Any, intervals_activities: Any) -> tupl
     intervals_list = [item for item in intervals_activities if isinstance(item, dict)] if isinstance(intervals_activities, list) else []
     filtered = [item for item in garmin_list if not garmin_activity_duplicates_intervals(item, intervals_list)]
     return filtered, len(garmin_list) - len(filtered)
+
+
+def intervals_activity_device_source(activity: Any) -> str | None:
+    """Identify only explicit Wahoo/Garmin provenance on an Intervals activity."""
+    if not isinstance(activity, dict):
+        return None
+    provenance = " ".join(
+        str(activity.get(key) or "")
+        for key in ("source", "device_name", "external_id")
+    ).casefold()
+    if "wahoo" in provenance or "elemnt" in provenance:
+        return "wahoo"
+    if "garmin" in provenance:
+        return "garmin"
+    return None
+
+
+def intervals_cycling_activities_match(left: Any, right: Any) -> bool:
+    """Conservatively match duplicate ride recordings by start, time and distance."""
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    if activity_kind(left) != "cycling" or activity_kind(right) != "cycling":
+        return False
+    left_start = activity_datetime(left.get("start_date_local") or left.get("start_date"))
+    right_start = activity_datetime(right.get("start_date_local") or right.get("start_date"))
+    left_duration = as_number(first_present(left, ("moving_time", "elapsed_time")))
+    right_duration = as_number(first_present(right, ("moving_time", "elapsed_time")))
+    left_distance = as_number(left.get("distance"))
+    right_distance = as_number(right.get("distance"))
+    if None in (left_start, right_start, left_duration, right_duration, left_distance, right_distance):
+        return False
+    if float(left_duration) <= 0 or float(right_duration) <= 0 or float(left_distance) <= 0 or float(right_distance) <= 0:
+        return False
+    return (
+        abs((left_start - right_start).total_seconds()) <= 30 * 60
+        and abs(float(left_duration) - float(right_duration)) <= max(120, max(float(left_duration), float(right_duration)) * 0.10)
+        and abs(float(left_distance) - float(right_distance)) <= max(500, max(float(left_distance), float(right_distance)) * 0.10)
+    )
+
+
+def latest_wahoo_garmin_duplicate(snapshot: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Return the newest exact-source ride pair, always keeping Wahoo canonical."""
+    snapshot = snapshot if isinstance(snapshot, dict) else latest_snapshot() or {}
+    raw = snapshot.get("raw_provider_data") if isinstance(snapshot.get("raw_provider_data"), dict) else {}
+    activities = raw.get("activities") if isinstance(raw.get("activities"), list) else snapshot.get("recent_activities", [])
+    candidates = [item for item in activities if isinstance(item, dict) and activity_kind(item) == "cycling"]
+    candidates.sort(key=lambda item: str(item.get("start_date_local") or item.get("start_date") or ""), reverse=True)
+    wahoo = [item for item in candidates if intervals_activity_device_source(item) == "wahoo"]
+    garmin = [item for item in candidates if intervals_activity_device_source(item) == "garmin"]
+    pairs: list[tuple[datetime, dict[str, Any], dict[str, Any]]] = []
+    for canonical in wahoo:
+        for duplicate in garmin:
+            if intervals_cycling_activities_match(canonical, duplicate):
+                started = activity_datetime(canonical.get("start_date_local") or canonical.get("start_date"))
+                if started is not None:
+                    pairs.append((started, canonical, duplicate))
+    if not pairs:
+        return None
+    _started, canonical, duplicate = max(pairs, key=lambda item: item[0])
+    canonical_id = str(first_present(canonical, ("id", "activityId")) or "").strip()
+    duplicate_id = str(first_present(duplicate, ("id", "activityId")) or "").strip()
+    if not canonical_id or not duplicate_id or canonical_id == duplicate_id:
+        return None
+    return {
+        "canonical_id": canonical_id,
+        "canonical_name": str(canonical.get("name") or "Wahoo-Radeinheit")[:200],
+        "duplicate_id": duplicate_id,
+        "duplicate_name": str(duplicate.get("name") or "Garmin-Radeinheit")[:200],
+        "start_date_local": str(canonical.get("start_date_local") or canonical.get("start_date") or "")[:40],
+        "moving_time": canonical.get("moving_time") or canonical.get("elapsed_time"),
+        "distance": canonical.get("distance"),
+        "snapshot_synced_at": snapshot.get("synced_at"),
+    }
 
 
 def garmin_activity_max_hr(activities: Any) -> dict[str, float | int]:
@@ -7658,6 +7732,9 @@ class IntervalsClient:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         return self.delete(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")
 
+    def delete_activity(self, activity_id: str) -> Any:
+        return self.delete(f"/activity/{quote(activity_id, safe='')}")
+
 
 def deduplicate_api_records(records: list[Any]) -> list[Any]:
     """Merge adjacent date-window responses without duplicating boundary rows."""
@@ -7715,6 +7792,7 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
         "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "average_heartrate",
         "max_heartrate", "average_watts", "weighted_average_watts", "average_speed", "max_speed",
         "icu_weighted_avg_speed", "icu_pace", "feel", "icu_rpe", "paired_event_id",
+        "source", "device_name", "external_id", "file_type",
     )
     wellness_fields = (
         "id", "ctl", "ctLoad", "atl", "atlLoad", "tsb", "form", "rampRate", "weight", "bodyFat",
@@ -8155,6 +8233,53 @@ def current_adaptive_replan_status() -> dict[str, Any]:
     }
 
 
+def coach_quick_actions_state() -> dict[str, Any]:
+    """Expose only actions that are useful now; never expose provider status here."""
+    today = local_now().date()
+    morning_done = (
+        get_kv("morning_checkin_status") == "ready"
+        and get_kv("morning_checkin_date") == today.isoformat()
+    )
+    preview = latest_replan_preview()
+    blockers: list[dict[str, Any]] = []
+    if isinstance(preview, dict) and preview.get("status") == "preview":
+        horizon = today + timedelta(days=2)
+        for change in preview.get("changes", []) if isinstance(preview.get("changes"), list) else []:
+            if not isinstance(change, dict):
+                continue
+            try:
+                change_date = date.fromisoformat(str(change.get("date") or "")[:10])
+            except (TypeError, ValueError):
+                continue
+            trigger_values = change.get("blocking_triggers")
+            triggers = {str(value) for value in trigger_values} if isinstance(trigger_values, list) else set()
+            # Existing previews from older versions did not persist typed triggers.
+            if not triggers:
+                reason = str((change.get("after") or {}).get("rationale") or "").casefold()
+                if "illness" in reason or "krank" in reason:
+                    triggers.add("illness")
+                if "pain" in reason or "injur" in reason or "schmerz" in reason or "verletz" in reason:
+                    triggers.add("injury")
+                if "calendar" in reason or "kalender" in reason:
+                    triggers.add("calendar")
+                if "weather" in reason or "wetter" in reason:
+                    triggers.add("weather")
+            relevant = sorted(triggers.intersection({"calendar", "illness", "injury", "weather"}))
+            if today <= change_date <= horizon and relevant:
+                blockers.append({
+                    "date": change_date.isoformat(),
+                    "name": str(change.get("name") or "Geplante Einheit")[:200],
+                    "triggers": relevant,
+                })
+    return {
+        "morning_checkin": not morning_done,
+        "analyze_latest_activity": True,
+        "adjust_plan": bool(blockers),
+        "plan_blockers": blockers,
+        "horizon_days": 3,
+    }
+
+
 def latest_illness_pause_state() -> tuple[str, dict[str, Any]] | None:
     with DB_LOCK, database() as db:
         rows = PLAN_ADJUSTMENT_REPOSITORY.list_recent(db)
@@ -8319,20 +8444,28 @@ def adaptive_replan_preview() -> dict[str, Any]:
         )
         if illness_active or severe or (high_load and draft_is_hard(draft)) or limited or calendar_limited or no_intensity_limited or weather_reason:
             reasons: list[str] = []
+            blocking_triggers: list[str] = []
             if illness_active:
                 reasons.append(f"illness reported; sport pause through {illness_pause['end_date']}")
+                blocking_triggers.append("illness")
             if severe:
                 reasons.append("pain or high soreness reported")
+                if feedback.get("pain"):
+                    blocking_triggers.append("injury")
             if high_load and draft_is_hard(draft):
                 reasons.append("recovery signal suggests reducing intensity")
             if limited and not severe:
                 reasons.append(f"only {available_minutes} minutes are available")
             if calendar_limited:
                 reasons.append(calendar_reason)
+                blocking_triggers.append("calendar")
             if no_intensity_limited:
                 reasons.append("calendar marker [NO_INTENSITY] requests an easy session")
+                if "calendar" not in blocking_triggers:
+                    blocking_triggers.append("calendar")
             if weather_reason:
                 reasons.append(weather_reason)
+                blocking_triggers.append("weather")
             reason = "; ".join(reasons)
             adaptive_limits = [
                 limit for limit in (
@@ -8352,6 +8485,7 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 )
             changes.append({
                 "library_workout_id": draft["id"], "date": draft.get("date"), "name": draft.get("name"),
+                "blocking_triggers": blocking_triggers,
                 "external_events": calendar_events,
                 "before": {"duration_minutes": draft.get("duration_minutes"), "description": draft.get("description")},
                 "after": {"name": replacement.get("name"), "duration_minutes": replacement["duration_minutes"], "description": replacement["description"], "rationale": replacement["rationale"]},
@@ -12263,6 +12397,19 @@ def prompt_requests_fresh_data(message: str) -> bool:
     return asks_for_training and ((asks_for_timeframe and (asks_to_load or asks_to_analyse)) or asks_to_load)
 
 
+def prompt_requests_latest_activity_analysis(message: str) -> bool:
+    text = message.casefold()
+    return bool(
+        re.search(r"\b(letzte[nr]?|neueste[nr]?|latest)\b", text)
+        and re.search(r"\b(einheit|workout|training|fahrt|ride|activity|aktivit)", text)
+        and re.search(r"\b(analys|auswert|bewert|review)", text)
+    )
+
+
+def prompt_requests_morning_checkin(message: str) -> bool:
+    return bool(re.search(r"\bmorgen[- ]?check[- ]?in\b", message.casefold()))
+
+
 def prompt_requests_workout_creation(message: str) -> bool:
     """Recognise explicit requests to create or schedule a workout."""
     text = message.casefold()
@@ -12521,6 +12668,7 @@ COACH_ACTION_TYPES = {
     "update_local_planned_unit",
     "update_library_template",
     "update_training_plan",
+    "delete_duplicate_intervals_activity",
 }
 
 
@@ -12538,6 +12686,75 @@ def _coach_action_view(row: dict[str, Any]) -> dict[str, Any]:
         "payload_hash": row["payload_hash"],
         "expires_at": row["expires_at"],
         "status": row["status"],
+    }
+
+
+def duplicate_activity_delete_preview(pair: dict[str, Any], session_csrf_hash: str) -> dict[str, Any]:
+    """Create the required explicit confirmation for deleting only the Garmin copy."""
+    return create_coach_action_preview({
+        "action_type": "delete_duplicate_intervals_activity",
+        "target_system": "intervals",
+        "object_ids": {
+            "keep_activity_id": pair["canonical_id"],
+            "delete_activity_id": pair["duplicate_id"],
+        },
+        "diff": [{
+            "type": "delete",
+            "id": pair["duplicate_id"],
+            "name": pair["duplicate_name"],
+            "date": str(pair.get("start_date_local") or "")[:10],
+            "source": "Garmin",
+            "kept_source": "Wahoo",
+        }],
+        "payload": {
+            "canonical_id": pair["canonical_id"],
+            "duplicate_id": pair["duplicate_id"],
+            "snapshot_synced_at": pair.get("snapshot_synced_at"),
+        },
+    }, session_csrf_hash)
+
+
+def _remove_intervals_activity_from_local_snapshot(activity_id: str) -> None:
+    """Reflect a confirmed remote deletion without touching any unrelated source rows."""
+    snapshot = latest_snapshot()
+    if not isinstance(snapshot, dict):
+        return
+
+    def retained(values: Any) -> list[Any]:
+        return [
+            item for item in values if not (
+                isinstance(item, dict)
+                and str(first_present(item, ("id", "activityId")) or "") == activity_id
+            )
+        ] if isinstance(values, list) else []
+
+    updated = dict(snapshot)
+    updated["recent_activities"] = retained(snapshot.get("recent_activities"))
+    raw = snapshot.get("raw_provider_data") if isinstance(snapshot.get("raw_provider_data"), dict) else None
+    if raw is not None:
+        updated["raw_provider_data"] = {**raw, "activities": retained(raw.get("activities"))}
+    updated["synced_at"] = utc_now()
+    with DB_LOCK, database() as db:
+        SNAPSHOT_REPOSITORY.save(db, updated, updated["synced_at"])
+
+
+def delete_duplicate_intervals_activity(payload: dict[str, Any]) -> dict[str, Any]:
+    """Delete the confirmed Garmin cloud duplicate while retaining the Wahoo activity."""
+    current = latest_wahoo_garmin_duplicate()
+    if not current or any(
+        str(payload.get(key) or "") != str(current.get(key) or "")
+        for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
+    ):
+        raise AppError(409, "Das Wahoo-/Garmin-Duplikat ist nicht mehr aktuell. Bitte die letzte Einheit erneut analysieren.")
+    duplicate_id = str(current["duplicate_id"])
+    IntervalsClient().delete_activity(duplicate_id)
+    _remove_intervals_activity_from_local_snapshot(duplicate_id)
+    add_message("event", "Bestätigte Garmin-Duplikataktivität wurde aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten.")
+    return {
+        "status": "deleted",
+        "deleted_activity_id": duplicate_id,
+        "kept_activity_id": current["canonical_id"],
+        "kept_source": "Wahoo",
     }
 
 
@@ -12732,6 +12949,7 @@ def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str
         "apply_adaptive_replan": {"local"},
         "bulk_update_workout_library": {"local"},
         "sync_selected_workout_library": {"intervals"},
+        "delete_duplicate_intervals_activity": {"intervals"},
     }
     if action_type in {"apply_workout_library_plan", "save_competition", "delete_competition"}:
         expected_targets[action_type] = {"local"}
@@ -12762,6 +12980,13 @@ def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str
         latest = latest_replan_preview()
         if not latest or latest.get("status") != "preview" or str(latest.get("id")) != adjustment_id:
             raise AppError(409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen.")
+    if action_type == "delete_duplicate_intervals_activity":
+        current = latest_wahoo_garmin_duplicate()
+        if not current or any(
+            str(payload.get(key) or "") != str(current.get(key) or "")
+            for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
+        ):
+            raise AppError(409, "Das Wahoo-/Garmin-Duplikat ist nicht mehr aktuell. Bitte die letzte Einheit erneut analysieren.")
     proposal_id = str(uuid.uuid4())
     expires_at = time.time() + COACH_ACTION_TTL_SECONDS
     now = utc_now()
@@ -12840,6 +13065,8 @@ def _execute_coach_action(action_type: str, payload: dict[str, Any]) -> dict[str
         return {"ok": True, **update_workout_library_entry(payload.get("local_id"), payload)}
     if action_type == "update_training_plan":
         return {"ok": True, **update_training_plan(payload.get("plan_id"), payload)}
+    if action_type == "delete_duplicate_intervals_activity":
+        return {"ok": True, **delete_duplicate_intervals_activity(payload)}
     if action_type == "undo_change":
         return _apply_change_undo(payload)
     raise AppError(400, "Unbekannte Coach-Aktion.")
@@ -13315,6 +13542,7 @@ def _chat_with_structured_coach_impl(
     cancel_event: threading.Event | None = None,
     session_csrf_hash: str = "",
     refresh_error: str | None = None,
+    duplicate_activity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with DB_LOCK, database() as db:
         existing_command = db.execute("SELECT receipt, status, updated_at FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
@@ -13345,6 +13573,14 @@ def _chat_with_structured_coach_impl(
             "\n\n[Systemhinweis: Die angeforderte Intervals.icu-Aktualisierung ist fehlgeschlagen. "
             "Nutze den letzten verfügbaren Snapshot, weise auf dessen möglichen veralteten Stand hin "
             "und stelle ihn nicht als aktuell dar.]"
+        )
+    if duplicate_activity:
+        model_instructions += (
+            "\n\n[Systemhinweis: Für die zuletzt analysierte Radeinheit liegen in Intervals.icu eine nahezu gleiche "
+            "Wahoo- und Garmin-Aufzeichnung vor. Verwende ausschließlich die Wahoo-Aufzeichnung als kanonische "
+            "Einheit. Erwähne das Duplikat knapp und frage am Ende kurz, ob die Garmin-Aufzeichnung aus "
+            "Intervals.icu gelöscht werden soll. Behaupte nicht, dass sie bereits gelöscht wurde; die Löschung "
+            "erfolgt nur über die separate Bestätigung unter der Antwort.]"
         )
     requested_operation = intent.get("operation")
     forced_tool = requested_operation if requested_operation in COACH_CANONICAL_TOOL_NAMES else "none"
@@ -13429,12 +13665,17 @@ def _chat_with_structured_coach_impl(
     text = output_text(response)
     if not text:
         text = "Die Coach-Antwort enthält keine Textantwort. Bitte erneut versuchen."
+    proposed_actions: list[dict[str, Any]] = []
+    if duplicate_activity:
+        proposal = duplicate_activity_delete_preview(duplicate_activity, session_csrf_hash)
+        proposed_actions.append(proposal["proposed_action"])
     receipt = {
         "message": add_message("assistant", text),
         "command_receipts": command_receipts,
         "sync_job_ids": sync_job_ids,
         "intent": intent,
         "tool_rounds": rounds,
+        "proposed_actions": proposed_actions,
     }
     with DB_LOCK, database() as db:
         db.execute(
@@ -13583,17 +13824,31 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         conversation_id = ensure_conversation()
         structured_intent = request_coach_intent(message, conversation_id)
         refresh_error = None
-        if prompt_requests_fresh_data(message) and not (
+        latest_activity_analysis = prompt_requests_latest_activity_analysis(message)
+        if latest_activity_analysis or (prompt_requests_fresh_data(message) and not (
             structured_intent.get("operation") == "start_provider_refresh"
             and structured_intent.get("target_system") == "intervals"
-        ):
+        )):
             add_message("event", "Aktuelle Intervals.icu-Trainingsdaten werden geladen…")
             try:
                 sync_intervals("Chat-Anfrage", activity_days=sync_period("intervals"))
             except Exception as exc:
                 refresh_error = redact_text(str(exc))[:1000]
                 add_message("event", f"Aktuelle Daten konnten nicht geladen werden: {refresh_error}")
-        return _chat_with_structured_coach(
+        if latest_activity_analysis and structured_intent.get("operation") == "start_provider_refresh":
+            # The quick action deliberately performs the required synchronous
+            # refresh above so the same Coach turn can analyse the new snapshot.
+            structured_intent = {
+                "intent": "advice", "operation": None, "target_system": "none",
+                "artifact_id": None, "ambiguities": [], "authorization_scope": [],
+                "follow_up_operations": [],
+            }
+        duplicate_activity = (
+            latest_wahoo_garmin_duplicate()
+            if not refresh_error and latest_activity_analysis
+            else None
+        )
+        receipt = _chat_with_structured_coach(
             message,
             intent=structured_intent,
             conversation_id=conversation_id,
@@ -13602,7 +13857,14 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             cancel_event=cancel_event,
             session_csrf_hash=session_csrf_hash,
             refresh_error=refresh_error,
+            duplicate_activity=duplicate_activity,
         )
+        if prompt_requests_morning_checkin(message) and receipt.get("message"):
+            set_kv("morning_checkin_date", local_now().date().isoformat())
+            set_kv("morning_checkin_status", "ready")
+            set_kv("morning_checkin_error", "")
+            receipt["coach_quick_actions"] = coach_quick_actions_state()
+        return receipt
     refresh_error = None
     if structured_intent is not None:
         intent_operation = structured_intent.get("operation")
@@ -14181,6 +14443,7 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
                 "status": get_kv("morning_checkin_status") or "waiting", "running": get_kv("morning_checkin_running") == "1",
                 "date": get_kv("morning_checkin_date"), "last_error": get_kv("morning_checkin_error") or None,
             },
+            "coach_quick_actions": coach_quick_actions_state(),
             "model": {"selected": selected_model(), "options": available_model_options()},
             "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
             "configured": {
@@ -14220,6 +14483,7 @@ def public_plan_state(local_only: bool = False) -> dict[str, Any]:
         "external_calendar": external_calendar_state(),
         "daily_planning_context": daily_planning_context(snapshot, planned, weather, list_checkins(30), list_external_calendar_events(50, training_relevant_only=True)),
         "planning": planning_state(),
+        "coach_quick_actions": coach_quick_actions_state(),
     }
 
 
@@ -14367,6 +14631,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "date": get_kv("morning_checkin_date"),
                 "last_error": get_kv("morning_checkin_error") or None,
             },
+            "coach_quick_actions": coach_quick_actions_state(),
             "model": {"selected": selected_model(), "options": available_model_options()},
             "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
             "configured": {
