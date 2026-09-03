@@ -3057,24 +3057,32 @@ function renderGarmin(garmin) {
   }
 }
 
-function competitionEditor(competition = {}, index = 0) {
+function competitionSportLabel(sport) {
+  return ({ Cycling: "Radfahren", Ride: "Radfahren", VirtualRide: "Rad indoor", Running: "Laufen", Run: "Laufen", Swim: "Schwimmen", Strength: "Krafttraining" })[sport] || sport || "–";
+}
+
+function competitionFact(labelText, value) {
+  const item = document.createElement("div");
+  const label = document.createElement("span");
+  label.textContent = labelText;
+  const content = document.createElement("strong");
+  content.textContent = value || "–";
+  item.append(label, content);
+  return item;
+}
+
+function competitionCard(competition = {}, index = 0) {
   const card = document.createElement("article");
-  card.className = "competition-editor";
-  card.dataset.id = competition.id || "";
+  card.className = "competition-card";
 
   const top = document.createElement("div");
-  top.className = "competition-editor-top";
+  top.className = "competition-card-top";
   const title = document.createElement("strong");
   title.textContent = competition.name || `Wettkampf ${index + 1}`;
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "remove-context-button";
-  remove.textContent = "Entfernen";
-  remove.addEventListener("click", () => {
-    card.remove();
-    state.profileDirty = true;
-  });
-  top.append(title, remove);
+  const priority = document.createElement("span");
+  priority.className = "competition-priority";
+  priority.textContent = `${competition.priority || "B"}-Wettkampf`;
+  top.append(title, priority);
 
   if (competition.sync_state === "conflict") {
     const conflict = document.createElement("div");
@@ -3084,52 +3092,44 @@ function competitionEditor(competition = {}, index = 0) {
     })();
     const message = document.createElement("span");
     message.textContent = remote.name
-      ? `Konflikt: Remote enthält „${remote.name}“ am ${dateLabel(remote.event_date || "")}.`
-      : "Konflikt: Das Remote-Event konnte nicht eindeutig zugeordnet werden.";
-    const actions = document.createElement("div");
-    actions.className = "competition-conflict-actions";
-    for (const [strategy, labelText] of [["keep_local", "Lokal behalten"], ["adopt_remote", "Remote übernehmen"]]) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "secondary-button";
-      button.textContent = labelText;
-      button.addEventListener("click", () => resolveCompetitionConflict(competition.id, strategy, button));
-      actions.append(button);
-    }
-    conflict.append(message, actions);
+      ? `Konflikt mit „${remote.name}“ am ${dateLabel(remote.event_date || "")}. Bitte mit dem Coach klären.`
+      : "Das Remote-Event konnte nicht eindeutig zugeordnet werden. Bitte mit dem Coach klären.";
+    conflict.append(message);
     card.append(conflict);
   } else if (competition.sync_state === "local_override") {
     const status = document.createElement("small");
     status.className = "competition-sync-state";
-    status.textContent = "Lokal priorisiert · beim nächsten Sync wird das Remote-Event aktualisiert";
+    status.textContent = "Lokal priorisiert · der Coach kann den nächsten Sync ausführen";
     card.append(status);
   }
 
-  const mainGrid = document.createElement("div");
-  mainGrid.className = "form-grid";
-  mainGrid.append(
-    contextField("Name", "name", competition.name, { placeholder: "Münsterland Giro" }),
-    contextField("Datum", "event_date", competition.event_date, { type: "date" }),
-    contextField("Startzeit (lokal)", "start_date_local", (competition.start_date_local || "").slice(0, 16), { type: "datetime-local" }),
-    contextField("Sportart", "sport", competition.sport || "Cycling", { choices: [{ value: "Cycling", label: "Radfahren" }, { value: "Ride", label: "Radfahren (Provider)" }, { value: "VirtualRide", label: "Rad indoor" }, { value: "Running", label: "Laufen" }, { value: "Run", label: "Laufen (Provider)" }, { value: "Swim", label: "Schwimmen" }, { value: "Strength", label: "Krafttraining" }, { value: "Other", label: "Andere" }] }),
-    contextField("Kategorie", "category", competition.category || `RACE_${competition.priority || "B"}`, { choices: [{ value: "RACE_A", label: "A · Hauptwettkampf" }, { value: "RACE_B", label: "B · Aufbauwettkampf" }, { value: "RACE_C", label: "C · Trainingswettkampf" }] }),
-    contextField("Dauer (hh:mm)", "moving_time", competition.moving_time == null ? "" : `${String(Math.floor(Number(competition.moving_time) / 3600)).padStart(2, "0")}:${String(Math.floor(Number(competition.moving_time) % 3600 / 60)).padStart(2, "0")}`, { type: "time", step: 60 }),
-    contextField("Distanz (km)", "distance", competition.distance ? String((Number(competition.distance) / 1000).toLocaleString("en-US", { maximumFractionDigits: 3 })) : "", { type: "number", step: "0.001", min: "0", placeholder: "125" }),
-    contextField("Externe ID", "external_id", competition.external_id, { placeholder: "Wird automatisch vergeben" })
+  const facts = document.createElement("div");
+  facts.className = "competition-card-facts";
+  facts.append(
+    competitionFact("Datum", competition.event_date ? dateLabel(competition.event_date) : ""),
+    competitionFact("Sportart", competitionSportLabel(competition.sport)),
+    competitionFact("Distanz", distanceLabel(competition.distance)),
+    competitionFact("Zielpace / Zielzeit", competition.target)
   );
-  card.append(
-    top,
-    mainGrid,
-    contextField("Ergebnisziel", "target", competition.target, { multiline: true, placeholder: "Zielzeit, Platzierung, Finish-Ziel…" }),
-    contextField("Streckenprofil", "course_profile", competition.course_profile, { multiline: true, placeholder: "Höhenmeter, Technik, erwartete Dauer…" }),
-    contextField("Beschreibung", "description", competition.description, { multiline: true, placeholder: "Beschreibung des Intervals.icu-Events…" }),
-    contextField("Notizen", "notes", competition.notes, { multiline: true })
+  const additional = document.createElement("details");
+  additional.className = "competition-additional-fields";
+  const additionalSummary = document.createElement("summary");
+  additionalSummary.textContent = "Weitere Intervals.icu-Felder";
+  const additionalGrid = document.createElement("div");
+  additionalGrid.className = "competition-card-facts competition-additional-grid";
+  additionalGrid.append(
+    competitionFact("Startzeit", competition.start_date_local ? formatTime(competition.start_date_local) : ""),
+    competitionFact("Erwartete Dauer", formatDuration(competition.moving_time)),
+    competitionFact("Streckenprofil", competition.course_profile),
+    competitionFact("Beschreibung", competition.description),
+    competitionFact("Notizen", competition.notes)
   );
+  additional.append(additionalSummary, additionalGrid);
+  card.append(top, facts, additional);
   return card;
 }
 
 function renderCompetitions(competitions) {
-  if (state.profileDirty) return;
   const root = $("#competitionList");
   const summary = $("#plannedCompetitionsSummary");
   if (summary) {
@@ -3146,56 +3146,18 @@ function renderCompetitions(competitions) {
     root.append(empty);
     return;
   }
-  competitions.forEach((competition, index) => root.append(competitionEditor(competition, index)));
+  [...competitions]
+    .sort((a, b) => String(a.event_date || "9999-12-31").localeCompare(String(b.event_date || "9999-12-31")))
+    .forEach((competition, index) => root.append(competitionCard(competition, index)));
 }
 
-function renderCompetitionSync(data) {
-  const sync = data.competition_sync || {};
-  const fullRunning = Boolean(data.provider_resync?.intervals?.running || state.localSync.intervalsFull);
-  const button = $("#competitionSyncButton");
-  const detail = $("#competitionSyncDetail");
-  if (button) {
-    button.disabled = Boolean(sync.running || state.localSync.competitions || fullRunning);
-    button.textContent = sync.running || state.localSync.competitions ? "Remote-Sync läuft…" : "Vorschau für Wettkampf-Push";
-  }
-  if (detail) {
-    detail.textContent = sync.last_error
-      ? sync.last_error
-      : sync.running
-        ? (sync.status || "Zielwettkämpfe werden synchronisiert…")
-        : sync.last_sync_at
-          ? `Letzte Aktualisierung: ${formatTime(sync.last_sync_at)}`
-          : "Status: noch nicht synchronisiert";
-    detail.classList.toggle("error", Boolean(sync.last_error));
-  }
-}
-
-async function resolveCompetitionConflict(competitionId, strategy, button) {
-  if (!competitionId) return;
-  if (state.profileDirty) {
-    toast("Bitte zuerst die lokalen Profiländerungen speichern oder verwerfen.", true);
-    return;
-  }
-  button.disabled = true;
-  try {
-    await api(`/api/competitions/${encodeURIComponent(competitionId)}/resolve`, {
-      method: "POST",
-      body: JSON.stringify({ strategy }),
-    });
-    toast(strategy === "adopt_remote" ? "Remote-Wettkampf übernommen" : "Lokaler Wettkampf wird priorisiert");
-    invalidateContextPreview();
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    button.disabled = false;
-  }
-}
-
-function addCompetition() {
-  const root = $("#competitionList");
-  root.querySelector(".context-empty")?.remove();
-  root.append(competitionEditor({}, root.querySelectorAll(".competition-editor").length));
-  state.profileDirty = true;
+function askCoachAboutCompetitions() {
+  const input = $("#messageInput");
+  if (!input) return;
+  input.value = "Ich möchte meine Zielwettkämpfe hinzufügen oder überarbeiten.";
+  input.dispatchEvent(new Event("input"));
+  applyNavigationRoute("coach", { historyMode: "push" });
+  requestAnimationFrame(() => input.focus());
 }
 
 function formatDuration(seconds) {
@@ -3808,7 +3770,6 @@ function render(data) {
   if (state.planSegment === "goals") renderCompetitions(data.competitions || []);
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
-  renderCompetitionSync(data);
   renderPerformance(data.performance);
   renderModel(data.model);
   renderThinkingLevel(data.thinking_level);
@@ -4209,43 +4170,6 @@ async function syncNow(event) {
   finally { state.localSync.intervals = false; button.disabled = false; button.classList.remove("busy"); button.textContent = defaultCaption; updateHeaderAction(); }
 }
 
-async function syncCompetitions() {
-  if (state.profileDirty) {
-    toast("Bitte zuerst die lokalen Änderungen speichern.", true);
-    return;
-  }
-  const button = $("#competitionSyncButton");
-  if (!button) return;
-  state.localSync.competitions = true;
-  button.disabled = true;
-  button.textContent = "Vorschau wird erstellt…";
-  try {
-    const preview = await api("/api/competitions/sync/preview", { method: "POST", body: "{}" });
-    if (preview.status === "already_running") {
-      toast("Zielwettkämpfe werden bereits synchronisiert");
-      return;
-    }
-    const summary = preview.summary || {};
-    const actions = (preview.actions || []).map((action) => {
-      const label = action.type === "create" ? "Erstellen" : action.type === "change" ? "Ändern" : action.type === "delete" ? "Löschen" : "Konflikt";
-      return `${label}: ${action.name || action.local_id || action.remote_id || "Wettkampf"}${action.event_date ? ` (${action.event_date})` : ""}`;
-    });
-    const details = actions.length ? `\n\n${actions.join("\n")}` : "\n\nKeine Remote-Änderungen erforderlich.";
-    const message = `Intervals.icu-Wettkampf-Sync bestätigen?\n\nErstellen: ${summary.create || 0} · Ändern: ${summary.change || 0} · Löschen: ${summary.delete || 0} · Konflikte: ${summary.conflict || 0}${details}`;
-    if (!await requestConfirmation(message, { title: "Wettkampf-Sync bestätigen?" })) return;
-    button.textContent = "Synchronisierung läuft…";
-    const result = await api("/api/competitions/sync/approved", {
-      method: "POST",
-      body: JSON.stringify({ confirm: "COMPETITION_SYNC", fingerprint: preview.fingerprint }),
-    });
-    if (result.status === "already_running") toast("Zielwettkämpfe werden bereits synchronisiert");
-    else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.conflicts ? ` · ${result.conflicts} Konflikt(e) bitte prüfen` : ""}${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
-    invalidateContextPreview();
-    await load();
-  } catch (error) { toast(error.message, true); await load(); }
-  finally { state.localSync.competitions = false; renderCompetitionSync(state.data || {}); }
-}
-
 async function refreshPerformance() {
   const button = $("#headerActionButton");
   if (!button) return;
@@ -4383,16 +4307,12 @@ async function saveProfile(event) {
     ...Object.fromEntries(formData),
     sports: formData.getAll("sports").map((value) => String(value).trim()).filter(Boolean).join(", "),
   };
-  const payload = {
-    profile,
-    competitions: collectCompetitions(),
-  };
   try {
-    await api("/api/athlete-context", { method: "PUT", body: JSON.stringify(payload) });
+    await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
     state.profileDirty = false;
     setDirtyIndicator("profileDirtyIndicator", false);
     invalidateContextPreview();
-    toast("Athletenkontext gespeichert und für den Coach aktiviert");
+    toast("Athletenprofil gespeichert und für den Coach aktiviert");
     // Do not keep the successful save action in its loading state while the
     // follow-up refresh loads the rest of the application state.
     if (button) {
@@ -4801,7 +4721,6 @@ $("#headerActionButton").addEventListener("click", (event) => {
 });
 $("#systemIntervalsSyncButton").addEventListener("click", syncNow);
 $("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync("intervals"));
-$("#competitionSyncButton").addEventListener("click", syncCompetitions);
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 $("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar);
 $("#weatherSyncButton").addEventListener("click", syncWeather);
@@ -4815,8 +4734,7 @@ $("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptiveP
 $("#coachAdaptivePlanningButton").addEventListener("click", () => applyNavigationRoute("plan/calendar", { historyMode: "push" }));
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
-$("#competitionList").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
-$("#addCompetitionButton").addEventListener("click", addCompetition);
+$("#competitionCoachButton").addEventListener("click", askCoachAboutCompetitions);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);

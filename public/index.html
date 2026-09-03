@@ -144,17 +144,11 @@
         </dialog>
         <section id="planGoalsSegment" class="plan-segment" data-plan-segment-panel="goals" aria-labelledby="planGoalsTitle" hidden>
           <div class="plan-segment-heading"><div><span class="eyebrow">ZIELE UND MEHRWOCHENPLÄNE</span><h3 id="planGoalsTitle">Ziele &amp; Pläne</h3></div><span class="segment-status">Lokal gespeichert · Wettkampf-Push separat</span></div>
-        <details id="plannedCompetitionsSection" class="settings-section collapsible-section">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Zielwettkämpfe</span><span id="plannedCompetitionsSummary" class="collapsible-summary-meta">Noch keine Wettkämpfe</span></summary>
-          <p>Trage Wettkämpfe lokal ein. Der separate Remote-Push zu Intervals.icu erfordert eine Vorschau und Bestätigung.</p>
+        <section id="plannedCompetitionsSection" class="settings-section">
+          <div class="settings-section-heading"><div><h4>Zielwettkämpfe</h4><p>Diese Übersicht ist schreibgeschützt. Hinzufügen, Überarbeiten, Löschen und Synchronisieren erledigt ausschließlich dein Coach.</p></div><span id="plannedCompetitionsSummary" class="tab-sync-detail">Noch keine Wettkämpfe</span></div>
           <div id="competitionList" class="competition-list"></div>
-          <div class="settings-inline-action competition-sync-actions">
-            <div><strong>Remote-Ziel: Intervals.icu</strong><span id="competitionSyncDetail">Status: noch nicht synchronisiert</span></div>
-            <button type="button" id="competitionSyncButton" class="secondary-button">Vorschau für Wettkampf-Push</button>
-          </div>
-          <button type="button" id="addCompetitionButton" class="secondary-button">Wettkampf hinzufügen</button>
-          <button type="submit" form="profileForm">Wettkämpfe speichern</button>
-        </details>
+          <button type="button" id="competitionCoachButton" class="secondary-button">Mit Coach bearbeiten</button>
+        </section>
           <div id="trainingPlans" class="training-plans"></div>
         </section>
         <section id="planLibrarySegment" class="plan-segment" data-plan-segment-panel="templates" aria-labelledby="planLibraryTitle" hidden>

@@ -297,9 +297,11 @@ discard the selection visibly.
 
 ## Target competitions and Intervals.icu
 
-Target competitions are entered manually in the profile with the Intervals.icu
-event fields: name, local start date/time, sport/type, category, description,
-duration, distance, target, and external ID. They are synchronized in both
+Target competitions are shown in the read-only, date-sorted Goals & Plans list.
+The Coach creates, revises, deletes, and synchronizes them. The overview shows
+date, sport/type, competition name, distance, priority (A-C), and target pace
+or time; further Intervals.icu event fields are available in each entry. They
+are synchronized in both
 directions with Intervals.icu. Local changes are exported as `RACE_A`,
 `RACE_B`, or `RACE_C` events with a stable `external_id`; matching race events
 from Intervals.icu are imported into the local database.
@@ -391,8 +393,8 @@ on this client through explicit interfaces, with no new framework and no
 duplicate DTO definitions. The route constants and pure hash parsers are
 isolated in `public/navigation.js`, the shared mutable UI state is isolated in
 `public/state.js`, state-free display/formatting helpers are isolated in
-`public/views.js`, and competition form helpers and dialog focus components are
-isolated in `public/forms.js` and `public/components.js`.
+`public/views.js`, and dialog focus components are isolated in
+`public/components.js`.
 DOM- and data-loading coordination remains in `app.js` and the script order is
 explicit.
 

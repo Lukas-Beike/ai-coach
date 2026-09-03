@@ -23,21 +23,3 @@ function contextField(labelText, field, value = "", options = {}) {
   label.append(input);
   return label;
 }
-
-function collectCompetitions() {
-  return [...document.querySelectorAll(".competition-editor")].map((card) => {
-    const competition = { id: card.dataset.id || "" };
-    card.querySelectorAll("[data-field]").forEach((input) => {
-      const field = input.dataset.field;
-      const value = input.value.trim();
-      if (field === "moving_time") {
-        const [hours, minutes] = value.split(":").map(Number);
-        competition[field] = value && Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 3600 + minutes * 60 : "";
-      } else if (field === "distance") {
-        const kilometers = Number(value.replace(",", "."));
-        competition[field] = value && Number.isFinite(kilometers) ? String(Math.round(kilometers * 1000)) : "";
-      } else competition[field] = value;
-    });
-    return competition;
-  });
-}
