@@ -3993,6 +3993,21 @@ class CoachTests(unittest.TestCase):
             server.enqueue_sync_job("intervals", "plan_push", {"entries": [entry] * 29}, requested_by="coach")
         self.assertEqual(too_many.exception.reason, "invalid_job_request")
 
+    def test_structured_training_change_batch_rolls_back_on_late_failure(self):
+        planned = server.create_local_planned_unit({
+            "date": "2099-01-02", "sport": "Ride", "name": "Original",
+            "description": "- 30m 60%", "duration_minutes": 30, "target": "AUTO",
+        })
+        with self.assertRaises(server.AppError):
+            server._apply_structured_training_changes({
+                "changes": [
+                    {"local_id": planned["id"], "action": "update", "date": "2099-01-02", "name": "Changed"},
+                    {"local_id": str(uuid.uuid4()), "action": "update", "date": "2099-01-02", "name": "Missing"},
+                ],
+            })
+        saved = next(item for item in server.list_planned_units(100, include_archived=True) if item["id"] == planned["id"])
+        self.assertEqual(saved["name"], "Original")
+
     def test_context_preview_exposes_context_and_last_chat_input(self):
         server.add_message("user", "Wie soll ich morgen trainieren?")
         preview = server.context_preview()

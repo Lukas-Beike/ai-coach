@@ -12743,6 +12743,30 @@ def _stage_coach_artifact(conversation_id: str, client_turn_id: str, payload: di
     return {"ok": True, "status": "draft", "artifact_id": artifact_id, "base_revision": base_revision}
 
 
+def _apply_structured_training_changes(arguments: dict[str, Any]) -> dict[str, Any]:
+    changes = arguments.get("changes") or []
+    if not isinstance(changes, list) or not changes or len(changes) > 28:
+        raise AppError(400, "Ein Coach-Kommando darf höchstens 28 Änderungen enthalten.", reason="change_limit")
+    with DB_LOCK, database() as db:
+        revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        current_revision = int((revision_row or {}).get("revision") or 0)
+        expected_revision = arguments.get("expected_revision")
+        if expected_revision is not None and int(expected_revision) != current_revision:
+            raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
+        for change in changes:
+            if not isinstance(change, dict) or not change.get("local_id"):
+                raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
+            expected_hash = str(change.get("expected_payload_hash") or "").strip().lower()
+            if expected_hash:
+                row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (str(change["local_id"]),)).fetchone()
+                if not row or _planned_unit_payload_hash(row["payload"]) != expected_hash:
+                    raise AppError(409, "Eine Planänderung ist seit der Vorschau veraltet.", reason="payload_hash_conflict")
+        applied = [update_local_planned_workout(change["local_id"], change) for change in changes]
+        db.execute("UPDATE planning_state SET revision=revision+1, updated_at=? WHERE id=1", (utc_now(),))
+        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+    return {"ok": True, "status": "applied", "planning_revision": int((revision or {}).get("revision") or current_revision), "changes": applied}
+
+
 def _structured_coach_tool_result(
     name: str,
     arguments: dict[str, Any],
@@ -12787,6 +12811,10 @@ def _structured_coach_tool_result(
             db.execute("UPDATE coach_plan_artifacts SET status='committed', updated_at=? WHERE id=? AND status='draft'", (utc_now(), artifact_id))
         return {"ok": True, "status": "committed", "artifact_id": artifact_id, "library_entry_ids": [entry["id"] for entry in entries]}
     if name == "apply_training_changes":
+        if operation != "apply_training_changes":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        return _apply_structured_training_changes(arguments)
+    if name == "apply_training_changes_legacy":
         if operation != "apply_training_changes":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         changes = arguments.get("changes") or []
