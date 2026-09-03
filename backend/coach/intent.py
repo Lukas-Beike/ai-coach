@@ -18,6 +18,7 @@ OPERATION_VALUES = frozenset({
     "read_training_state",
     "list_competitions",
     "list_training_plans",
+    "update_training_plan",
     "stage_training_plan",
     "commit_training_plan",
     "apply_training_changes",
@@ -67,6 +68,7 @@ def intent_request_payload(
             "and exactly one concrete question in ambiguities. "
             "An explicit request to create, edit, move, archive, restore, or delete local planning is a local_action. "
             "An explicit request to list competitions or training plans is a local_action using the matching read operation. "
+            "An explicit request to rename, edit, or delete training-plan metadata is a local_action using update_training_plan. "
             "An explicit request to add, edit, or delete a competition is a local_action using the matching competition operation. "
             "An explicit request to synchronize the local plan or library to Intervals.icu is a remote_sync using "
             "start_intervals_plan_sync; use local_plan scope when the athlete requests all pending entries. "

@@ -13997,16 +13997,29 @@ def _mark_local_competitions_authoritative() -> int:
     """Make local competition rows win when the athlete explicitly pushes them."""
     with DB_LOCK, database() as db:
         rows = db.execute(
-            "SELECT id, intervals_event_id FROM competitions WHERE sync_dirty=1 OR sync_state='conflict'"
+            "SELECT id, intervals_event_id, sync_state, sync_conflict FROM competitions WHERE sync_dirty=1 OR sync_state='conflict'"
         ).fetchall()
         now = utc_now()
         for row in rows:
-            # A missing remote event must be recreated from the local payload;
-            # its old provider id cannot be used as an update target anymore.
-            db.execute(
-                "UPDATE competitions SET intervals_event_id=NULL, sync_dirty=1, sync_state='local_override', sync_conflict='', updated_at=? WHERE id=?",
-                (now, row["id"]),
-            )
+            conflict_type = ""
+            try:
+                conflict = json.loads(row.get("sync_conflict") or "{}")
+                conflict_type = str(conflict.get("type") or "") if isinstance(conflict, dict) else ""
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+            # Preserve a known provider id for ordinary local edits so the
+            # explicit Coach sync updates the existing remote event. Only a
+            # verified missing event needs to be recreated without its id.
+            if row.get("sync_state") == "remote_missing" or conflict_type == "remote_missing":
+                db.execute(
+                    "UPDATE competitions SET intervals_event_id=NULL, sync_dirty=1, sync_state='local_override', sync_conflict='', updated_at=? WHERE id=?",
+                    (now, row["id"]),
+                )
+            else:
+                db.execute(
+                    "UPDATE competitions SET sync_dirty=1, sync_state='local_override', sync_conflict='', updated_at=? WHERE id=?",
+                    (now, row["id"]),
+                )
     return len(rows)
 
 

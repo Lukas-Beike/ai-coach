@@ -475,6 +475,30 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(synced["pushed"], 1)
         sync.assert_called_once_with("Bestätigter Coach-Auftrag", push_local=True)
 
+    def test_explicit_competition_push_preserves_provider_id_for_ordinary_edits(self):
+        competition = server.save_coach_competition({
+            "name": "Linked Race", "event_date": "2099-01-02", "sport": "Cycling",
+        })["competition"]
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE competitions SET intervals_event_id='123', sync_dirty=1, sync_state='local', sync_conflict='' WHERE id=?",
+                (competition["id"],),
+            )
+
+        self.assertEqual(server._mark_local_competitions_authoritative(), 1)
+        local_override = server.list_competitions(include_sync=True)[0]
+        self.assertEqual(local_override["intervals_event_id"], "123")
+        self.assertEqual(local_override["sync_state"], "local_override")
+
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE competitions SET sync_state='conflict', sync_conflict=? WHERE id=?",
+                (json.dumps({"type": "remote_missing"}), competition["id"]),
+            )
+        server._mark_local_competitions_authoritative()
+        recreated = server.list_competitions(include_sync=True)[0]
+        self.assertIsNone(recreated["intervals_event_id"])
+
     def test_structured_coach_can_keep_a_planning_conflict_local_before_push(self):
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Local",
