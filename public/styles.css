@@ -431,6 +431,7 @@ h2 {
 .voice-status[hidden] { display: none; }
 .fine-print { margin: 10px 4px 0; color: var(--subtle); text-align: center; font-size: .69rem; }
 #chatPanel > .fine-print { margin-top: 4px; }
+#chatPanel .fine-print { scroll-margin-bottom: 96px; }
 
 .section-heading { display: flex; justify-content: space-between; margin: 18px 2px 20px; }
 .section-heading > div { display: grid; gap: 5px; min-width: 0; }

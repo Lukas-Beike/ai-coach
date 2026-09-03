@@ -552,6 +552,29 @@ def _safe_url_netloc(parsed: Any) -> str:
     return f"{host}:{port}" if port else host
 
 
+def _safe_provider_path(path: str) -> str:
+    """Keep route structure while removing provider resource identifiers."""
+    safe_segments = []
+    redact_next = False
+    for segment in str(path or "").split("/"):
+        if not segment:
+            continue
+        decoded = unquote(segment)
+        was_redacted = redact_next
+        if was_redacted:
+            safe_segments.append("[REDACTED_PATH]")
+            redact_next = False
+        elif re.fullmatch(r"(?:api|v[0-9]+|[a-z][a-z_-]{0,31})", decoded):
+            safe_segments.append(decoded)
+        else:
+            safe_segments.append("[REDACTED_PATH]")
+        if not was_redacted and decoded.casefold() in {
+            "athlete", "activities", "activity", "event", "events", "profile", "user", "workout", "workouts",
+        }:
+            redact_next = True
+    return "/" + "/".join(safe_segments)
+
+
 def _unguessable_url_path_segment(segment: str) -> bool:
     decoded = unquote(segment)
     if len(decoded) >= 32:
@@ -2906,6 +2929,25 @@ def resolve_sync_job(job_id: str, payload: Any) -> dict[str, Any]:
     return sync_job_state(job_id)
 
 
+def _scheduled_provider_retry_at(db: Any, provider: str) -> str | None:
+    """Return only a future queued retry, never an advisory history timestamp."""
+    now = datetime.now(timezone.utc)
+    rows = db.execute(
+        "SELECT available_at FROM sync_jobs "
+        "WHERE provider=? AND type IN ('refresh', 'body_battery_retry') "
+        "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
+        (provider,),
+    ).fetchall()
+    for row in rows:
+        try:
+            available_at = datetime.fromisoformat(str(row["available_at"]).replace("Z", "+00:00")).astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if available_at > now:
+            return available_at.isoformat()
+    return None
+
+
 def provider_freshness_state() -> list[dict[str, Any]]:
     fallbacks = {
         ("intervals", "activities"): get_kv("last_sync_at"),
@@ -2956,13 +2998,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
             fallback_error = bool(fallback_errors[key])
             last_attempt = row.get("started_at") if row else fallback
             last_good = (last_success["finished_at"] if last_success else None) or fallback
-            scheduled_retry = None
-            if key == ("garmin", "data"):
-                retry = db.execute(
-                    "SELECT available_at FROM sync_jobs WHERE provider='garmin' AND type='body_battery_retry' "
-                    "AND status IN ('queued', 'running') ORDER BY available_at DESC LIMIT 1"
-                ).fetchone()
-                scheduled_retry = retry["available_at"] if retry else None
+            scheduled_retry = _scheduled_provider_retry_at(db, provider)
             state = "not_configured" if not configured[key] else "never_loaded"
             if configured[key] and row and row["status"] == "running":
                 state = "syncing"
@@ -2989,7 +3025,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
                 "last_attempt_at": last_attempt,
                 "last_success_at": last_good,
                 "error_code": row.get("error_code") if row and row["status"] == "error" else "provider_error" if fallback_error else None,
-                "next_retry_at": (row.get("next_retry_at") if row else None) or scheduled_retry,
+                "next_retry_at": scheduled_retry,
                 "stale": state == "stale",
                 "has_last_good": bool(last_good),
             })
@@ -6907,13 +6943,13 @@ def http_json(
         "service": service or parsed_url.netloc,
         "method": method.upper(),
         "host": parsed_url.netloc,
-        "path": parsed_url.path,
+        "path": _safe_provider_path(parsed_url.path),
         "timeout_seconds": timeout,
         "request_bytes": len(body or b""),
     }
     operation_context = OPERATION_CONTEXT.get()
     if operation_context:
-        request_context.update({"operation_id": operation_context["operation_id"], "trigger": operation_context["trigger"], "phase": parsed_url.path.rsplit("/", 1)[-1] or "request"})
+        request_context.update({"operation_id": operation_context["operation_id"], "trigger": operation_context["trigger"], "phase": request_context["path"].rsplit("/", 1)[-1] or "request"})
     if parsed_url.query:
         request_context["query_keys"] = sorted(parse_qs(parsed_url.query, keep_blank_values=True))
     started = time.perf_counter()
@@ -6922,7 +6958,7 @@ def http_json(
         "service": request_context["service"],
         "method": request_context["method"],
         "host": _safe_url_netloc(parsed_url),
-        "path": parsed_url.path,
+        "path": request_context["path"],
         "query_keys": request_context.get("query_keys", []),
         "request_bytes": request_context["request_bytes"],
         "content_type": request_headers.get("Content-Type"),
@@ -6956,7 +6992,7 @@ def http_json(
                 "service": request_context["service"],
                 "method": request_context["method"],
                 "host": _safe_url_netloc(parsed_url),
-                "path": parsed_url.path,
+                "path": request_context["path"],
                 "status": getattr(response, "status", None) or getattr(response, "code", None) or 200,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                 "response_bytes": len(raw),
@@ -6990,7 +7026,7 @@ def http_json(
             "service": request_context["service"],
             "method": request_context["method"],
             "host": _safe_url_netloc(parsed_url),
-            "path": parsed_url.path,
+            "path": request_context["path"],
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "error": _safe_diagnostic_error(exc),
             "headers": _safe_response_headers(getattr(exc, "headers", None)),
@@ -7025,7 +7061,7 @@ def http_json(
             "service": request_context["service"],
             "method": request_context["method"],
             "host": _safe_url_netloc(parsed_url),
-            "path": parsed_url.path,
+            "path": request_context["path"],
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "error": _safe_diagnostic_error(exc),
         })
@@ -7035,7 +7071,7 @@ def http_json(
             "service": request_context["service"],
             "method": request_context["method"],
             "host": _safe_url_netloc(parsed_url),
-            "path": parsed_url.path,
+            "path": request_context["path"],
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "error": _safe_diagnostic_error(exc),
         })
@@ -7066,7 +7102,7 @@ def http_json(
             "service": request_context["service"],
             "method": request_context["method"],
             "host": _safe_url_netloc(parsed_url),
-            "path": parsed_url.path,
+            "path": request_context["path"],
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "error": _safe_diagnostic_error(exc),
         })

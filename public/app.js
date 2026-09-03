@@ -881,7 +881,8 @@ const PROVIDER_FRESHNESS_ERRORS = {
 function providerRequiresManualAttention(entry) {
   if (!entry?.configured || !entry.error_code) return false;
   if (["auth_required", "invalid_configuration"].includes(entry.error_code)) return true;
-  return ["error", "stale"].includes(entry.state) && !entry.next_retry_at;
+  const hasFutureRetry = entry.next_retry_at && Date.parse(entry.next_retry_at) > Date.now();
+  return ["error", "stale"].includes(entry.state) && !hasFutureRetry;
 }
 
 function renderProviderAttention(data) {
@@ -4744,7 +4745,7 @@ function renderDiagnosticCapture(capture = {}) {
   toggle.checked = active;
   if (active) {
     const entries = Number(capture.entries || 0);
-    status.textContent = `Aktiv bis ${formatTime(capture.expires_at)} · ${entries} technische Einträge gespeichert. Bereinigte Antwortinhalte dürfen Athletendaten enthalten; Zugangsdaten und Tokens bleiben ausgeschlossen.`;
+    status.textContent = `Aktiv bis ${formatTime(capture.expires_at)} · ${entries} technische Einträge gespeichert. Es werden nur Antwortformen und technische Metadaten gespeichert; keine Antwortinhalte, Athletendaten, Zugangsdaten oder Tokens.`;
   } else {
     status.textContent = "Aus. Antwortinhalte und Athletendaten werden nicht aufgezeichnet.";
   }

@@ -6562,7 +6562,7 @@ class CoachTests(unittest.TestCase):
         completed = [entry for entry in entries if entry.get("event") == "external_request_completed"][-1]
         self.assertEqual(result["activities"], [1, 2])
         self.assertEqual(started["context"]["service"], "intervals")
-        self.assertEqual(started["context"]["path"], "/api/v1/athlete/0/activities")
+        self.assertEqual(started["context"]["path"], "/api/v1/athlete/[REDACTED_PATH]/activities")
         self.assertEqual(started["context"]["query_keys"], ["newest", "oldest"])
         self.assertEqual(completed["context"]["status"], 200)
         self.assertEqual(completed["context"]["result_fields"], 1)
@@ -6980,7 +6980,13 @@ class CoachTests(unittest.TestCase):
             failed = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
             self.assertEqual(failed[("intervals", "activities")]["state"], "error")
             self.assertEqual(failed[("intervals", "activities")]["error_code"], "network_error")
-            self.assertTrue(failed[("intervals", "activities")]["next_retry_at"])
+            self.assertIsNone(failed[("intervals", "activities")]["next_retry_at"])
+            server.enqueue_sync_job(
+                "intervals", "refresh", {"days": 1},
+                requested_by="test", available_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            )
+            scheduled = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            self.assertTrue(scheduled[("intervals", "activities")]["next_retry_at"])
             refresh_id = server._provider_refresh_start("intervals", "activities", "operation-test-2", "manual")
             server._provider_refresh_finish(refresh_id, "success", "complete")
             with server.DB_LOCK, server.database() as db:
