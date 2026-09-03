@@ -152,6 +152,7 @@ COACH_DEFAULT_MAX_OUTPUT_TOKENS = 6_000
 COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
 COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
+INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
 SYNC_START_LOCK = threading.Lock()
@@ -3541,8 +3542,20 @@ def latest_wahoo_garmin_duplicate(snapshot: dict[str, Any] | None = None) -> dic
     snapshot = snapshot if isinstance(snapshot, dict) else latest_snapshot() or {}
     raw = snapshot.get("raw_provider_data") if isinstance(snapshot.get("raw_provider_data"), dict) else {}
     activities = raw.get("activities") if isinstance(raw.get("activities"), list) else snapshot.get("recent_activities", [])
-    candidates = [item for item in activities if isinstance(item, dict) and activity_kind(item) == "cycling"]
-    candidates.sort(key=lambda item: str(item.get("start_date_local") or item.get("start_date") or ""), reverse=True)
+    all_activities = [item for item in activities if isinstance(item, dict)]
+    dated_candidates = [
+        (started, item)
+        for item in all_activities
+        if (started := activity_datetime(item.get("start_date_local") or item.get("start_date"))) is not None
+    ]
+    if not dated_candidates:
+        return None
+    latest_activity = max(dated_candidates, key=lambda item: item[0])[1]
+    latest_id = str(first_present(latest_activity, ("id", "activityId")) or "").strip()
+    if not latest_id:
+        return None
+    candidates = [item for item in all_activities if activity_kind(item) == "cycling"]
+    candidates.sort(key=lambda item: activity_datetime(item.get("start_date_local") or item.get("start_date")) or datetime.min, reverse=True)
     wahoo = [item for item in candidates if intervals_activity_device_source(item) == "wahoo"]
     garmin = [item for item in candidates if intervals_activity_device_source(item) == "garmin"]
     pairs: list[tuple[datetime, dict[str, Any], dict[str, Any]]] = []
@@ -3550,7 +3563,9 @@ def latest_wahoo_garmin_duplicate(snapshot: dict[str, Any] | None = None) -> dic
         for duplicate in garmin:
             if intervals_cycling_activities_match(canonical, duplicate):
                 started = activity_datetime(canonical.get("start_date_local") or canonical.get("start_date"))
-                if started is not None:
+                canonical_id = str(first_present(canonical, ("id", "activityId")) or "").strip()
+                duplicate_id = str(first_present(duplicate, ("id", "activityId")) or "").strip()
+                if started is not None and latest_id in {canonical_id, duplicate_id}:
                     pairs.append((started, canonical, duplicate))
     if not pairs:
         return None
@@ -10929,13 +10944,39 @@ def sync_intervals(
     activity_days: int | None = None,
     operation_id: str | None = None,
     end_date: date | None = None,
+    wait_for_existing: bool = False,
 ) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
     if activity_days is None:
         activity_days = sync_period("intervals")
-    if not SYNC_LOCK.acquire(blocking=False):
-        return {"status": "already_running"}
+    acquired = SYNC_LOCK.acquire(blocking=False)
+    if not acquired:
+        if not wait_for_existing:
+            return {"status": "already_running"}
+        previous_sync_at = get_kv("last_sync_at")
+        deadline = time.monotonic() + INTERVALS_SYNC_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            remaining = max(0.05, min(1.0, deadline - time.monotonic()))
+            if SYNC_LOCK.acquire(timeout=remaining):
+                try:
+                    current_sync_at = get_kv("last_sync_at")
+                    if current_sync_at and current_sync_at != previous_sync_at:
+                        return {"status": "ok", "waited_for_existing": True, "synced_at": current_sync_at}
+                    last_error = redact_text(get_kv("last_sync_error") or "")
+                    detail = f" {last_error[:300]}" if last_error else ""
+                    raise AppError(
+                        503,
+                        f"Die laufende Intervals.icu-Synchronisierung konnte nicht abgeschlossen werden.{detail}",
+                        reason="provider_refresh_failed",
+                    )
+                finally:
+                    SYNC_LOCK.release()
+        raise AppError(
+            503,
+            "Die laufende Intervals.icu-Synchronisierung ist noch nicht abgeschlossen. Bitte später erneut versuchen.",
+            reason="provider_busy",
+        )
     operation_id = operation_id or (get_kv("sync_operation_id") if get_kv("sync_running") == "1" else None) or uuid.uuid4().hex
     try:
         set_kv("sync_operation_started_at", get_kv("sync_operation_started_at") if get_kv("sync_running") == "1" else utc_now())
@@ -12407,7 +12448,7 @@ def prompt_requests_latest_activity_analysis(message: str) -> bool:
 
 
 def prompt_requests_morning_checkin(message: str) -> bool:
-    return bool(re.search(r"\bmorgen[- ]?check[- ]?in\b", message.casefold()))
+    return bool(re.search(r"\bmorgen[- ]?check[- ]?in\b", message.casefold())) and prompt_contains_checkin(message)
 
 
 def prompt_requests_workout_creation(message: str) -> bool:
@@ -13831,10 +13872,26 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         )):
             add_message("event", "Aktuelle Intervals.icu-Trainingsdaten werden geladen…")
             try:
-                sync_intervals("Chat-Anfrage", activity_days=sync_period("intervals"))
+                sync_result = sync_intervals(
+                    "Chat-Anfrage",
+                    activity_days=sync_period("intervals"),
+                    wait_for_existing=latest_activity_analysis,
+                )
+                if latest_activity_analysis and sync_result.get("status") == "already_running":
+                    raise AppError(
+                        503,
+                        "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.",
+                        reason="provider_busy",
+                    )
             except Exception as exc:
                 refresh_error = redact_text(str(exc))[:1000]
                 add_message("event", f"Aktuelle Daten konnten nicht geladen werden: {refresh_error}")
+                if latest_activity_analysis:
+                    raise AppError(
+                        503,
+                        "Die aktuelle Intervals.icu-Synchronisierung ist nicht verfügbar. Die letzte Einheit wurde nicht analysiert.",
+                        reason="latest_activity_refresh_failed",
+                    ) from exc
         if latest_activity_analysis and structured_intent.get("operation") == "start_provider_refresh":
             # The quick action deliberately performs the required synchronous
             # refresh above so the same Coach turn can analyse the new snapshot.
@@ -13859,7 +13916,12 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             refresh_error=refresh_error,
             duplicate_activity=duplicate_activity,
         )
-        if prompt_requests_morning_checkin(message) and receipt.get("message"):
+        if (
+            prompt_requests_morning_checkin(message)
+            and not refresh_error
+            and structured_intent.get("intent") != "needs_clarification"
+            and receipt.get("message")
+        ):
             set_kv("morning_checkin_date", local_now().date().isoformat())
             set_kv("morning_checkin_status", "ready")
             set_kv("morning_checkin_error", "")
