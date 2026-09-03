@@ -50,6 +50,15 @@ from backend.sync.windows import split_date_windows
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.orchestration import run_read_sync_pipeline
 from backend.sync.daily import daily_marker_key, daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
+from backend.sync.jobs import (
+    JOB_STATUSES,
+    ITEM_STATUSES,
+    aggregate_job_status,
+    bounded_progress,
+    is_retryable_error,
+    retry_delay,
+    validate_job_request,
+)
 from backend.coach.context import (
     COACH_ACTIVITY_FIELDS,
     bounded_coach_context_sections as bounded_coach_context_sections_value,
@@ -159,6 +168,10 @@ MORNING_CHECKIN_LOCK = threading.Lock()
 GARMIN_LOCK = threading.Lock()
 EXTERNAL_CALENDAR_LOCK = threading.Lock()
 WEATHER_LOCK = threading.Lock()
+SYNC_JOB_WORKER_LOCK = threading.Lock()
+SYNC_JOB_WAKE = threading.Event()
+SYNC_JOB_STOP = threading.Event()
+SYNC_JOB_WORKER: threading.Thread | None = None
 SESSION_LOCK = threading.RLock()
 SESSIONS: dict[str, dict[str, Any]] = {}
 RATE_LIMIT_LOCK = threading.Lock()
@@ -172,6 +185,8 @@ DELETE_DRAFT_RE = re.compile(r"^/api/drafts/([0-9a-f-]+)$")
 PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
 LIBRARY_PLAN_BATCH_RE = re.compile(r"^/api/library/plan$")
 ACTIVITY_FEEDBACK_RE = re.compile(r"^/api/activities/([^/]+)/feedback$")
+SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
+SYNC_JOB_RESOLVE_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)/resolve$")
 COMPETITION_CONFLICT_RE = re.compile(r"^/api/competitions/([0-9a-f-]+)/resolve$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
@@ -1368,6 +1383,11 @@ PROVIDER_REFRESH_LABELS = {
     ("weather", "forecast"): "Open-Meteo",
     ("calendar", "events"): "Gemeinsamer Kalender",
 }
+SYNC_JOB_MAX_ATTEMPTS = 3
+SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
+SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
+SYNC_JOB_POLL_SECONDS = 1.0
+SYNC_JOB_LIST_LIMIT = 50
 
 CHANGE_HISTORY_RETENTION_DAYS = 180
 CHANGE_HISTORY_MAX_ROWS = 500
@@ -2221,6 +2241,7 @@ def initialise_database() -> None:
                 raise
         if _foreign_key_violations(db):
             raise RuntimeError("Die Datenbank enthält verwaiste Fremdschlüssel-Datensätze; Restore erforderlich.")
+    resume_interrupted_sync_jobs()
 
 
 def _provider_refresh_cleanup(db: Any) -> None:
@@ -2309,6 +2330,338 @@ def _provider_refresh_error_code(error: BaseException) -> str:
     if "network" in reason or isinstance(error, TimeoutError):
         return "network_error"
     return "provider_error"
+
+
+def _sync_job_error_class(error: BaseException) -> str:
+    """Map provider exceptions to bounded, retry-safe job classes."""
+    reason = str(getattr(error, "reason", "") or "").strip().casefold()
+    if reason in {"unsupported_job", "invalid_job_request", "invalid_job_resolution"}:
+        return reason
+    code = _provider_refresh_error_code(error)
+    return {
+        "provider_network_error": "network_error",
+        "provider_http_error": "temporary_error",
+        "provider_client_error": "client_error",
+        "provider_error": "temporary_error",
+    }.get(code, code)
+
+
+def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, Any]:
+    """Validate the small provider-specific payload stored in the database."""
+    try:
+        envelope = validate_job_request(provider, job_type, payload)
+    except ValueError as exc:
+        raise AppError(400, str(exc), reason="invalid_job_request") from exc
+    values = envelope["payload"]
+    allowed = {
+        "intervals": {"days", "reason"},
+        "garmin": {"days", "reason"},
+        "calendar": {"reason"},
+        "weather": {"force", "reason"},
+    }[envelope["provider"]]
+    unknown = set(values) - allowed
+    if unknown:
+        raise AppError(400, "Der Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
+    normalized: dict[str, Any] = {}
+    if "days" in values:
+        try:
+            days = int(values["days"])
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Der Synchronisationszeitraum ist ungültig.", reason="invalid_job_request") from exc
+        if days != ALL_SYNC_DAYS and (days < 1 or days > 3660):
+            raise AppError(400, "Der Synchronisationszeitraum ist zu groß.", reason="invalid_job_request")
+        normalized["days"] = days
+    if "force" in values:
+        if not isinstance(values["force"], bool):
+            raise AppError(400, "force muss ein Boolean sein.", reason="invalid_job_request")
+        normalized["force"] = values["force"]
+    if values.get("reason") is not None:
+        normalized["reason"] = str(values["reason"]).strip()[:80] or "job"
+    return {"provider": envelope["provider"], "type": envelope["type"], "payload": normalized}
+
+
+def _decode_sync_job_payload(value: Any) -> dict[str, Any]:
+    try:
+        payload = json.loads(value or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _sync_job_dto(job: Any, items: list[Any]) -> dict[str, Any]:
+    item_dtos: list[dict[str, Any]] = []
+    for item in items:
+        item_dtos.append({
+            "id": item["id"],
+            "item_key": item["item_key"],
+            "operation": item["operation"],
+            "remote_id": item.get("remote_id"),
+            "status": item["status"],
+            "attempts": int(item.get("attempts") or 0),
+            "error_class": item.get("error_class"),
+            "error_detail": item.get("error_detail"),
+            "created_at": item.get("created_at"),
+            "updated_at": item.get("updated_at"),
+        })
+    completed, total = bounded_progress(item_dtos)
+    status = str(job.get("status") or aggregate_job_status(item_dtos))
+    return {
+        "id": job["id"],
+        "provider": job["provider"],
+        "type": job["type"],
+        "status": status,
+        "payload": _decode_sync_job_payload(job.get("payload")),
+        "requested_by": job.get("requested_by") or "system",
+        "attempts": int(job.get("attempts") or 0),
+        "progress": {"completed": completed, "total": total},
+        "available_at": job.get("available_at"),
+        "started_at": job.get("started_at"),
+        "finished_at": job.get("finished_at"),
+        "error_class": job.get("error_class"),
+        "items": item_dtos,
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+    }
+
+
+def sync_job_state(job_id: str) -> dict[str, Any]:
+    """Return one persisted job without exposing provider credentials."""
+    with DB_LOCK, database() as db:
+        job = db.execute("SELECT * FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
+        if not job:
+            raise AppError(404, "Synchronisationsjob nicht gefunden.", reason="sync_job_not_found")
+        items = db.execute("SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)).fetchall()
+        return _sync_job_dto(job, items)
+
+
+def sync_jobs_state(limit: int = SYNC_JOB_LIST_LIMIT) -> list[dict[str, Any]]:
+    bounded_limit = max(1, min(int(limit), SYNC_JOB_LIST_LIMIT))
+    with DB_LOCK, database() as db:
+        jobs = db.execute("SELECT * FROM sync_jobs ORDER BY created_at DESC LIMIT ?", (bounded_limit,)).fetchall()
+        result: list[dict[str, Any]] = []
+        for job in jobs:
+            items = db.execute("SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job["id"],)).fetchall()
+            result.append(_sync_job_dto(job, items))
+        return result
+
+
+def _sync_job_active(provider: str, job_type: str = "refresh") -> bool:
+    with DB_LOCK, database() as db:
+        row = db.execute(
+            "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? AND status IN ('queued', 'running') LIMIT 1",
+            (provider, job_type),
+        ).fetchone()
+    return bool(row)
+
+
+def enqueue_sync_job(
+    provider: str,
+    job_type: str = "refresh",
+    payload: Any = None,
+    *,
+    requested_by: str = "system",
+    item_operations: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Persist a resumable job and wake the background worker."""
+    envelope = _sync_job_payload(provider, job_type, payload)
+    requested = str(requested_by or "system").strip().casefold()[:40] or "system"
+    now = utc_now()
+    job_id = uuid.uuid4().hex
+    operations = item_operations or [{"item_key": f"{envelope['provider']}:{envelope['type']}", "operation": envelope["type"]}]
+    if not 1 <= len(operations) <= 1000:
+        raise AppError(400, "Ein Job muss zwischen 1 und 1000 Operationen enthalten.", reason="invalid_job_request")
+    with DB_LOCK, database() as db:
+        db.execute(
+            "INSERT INTO sync_jobs(id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, available_at, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'queued', ?, ?, 0, ?, 0, ?, ?, ?)",
+            (job_id, envelope["provider"], envelope["type"], json.dumps(envelope["payload"], ensure_ascii=False, separators=(",", ":")), requested, len(operations), now, now, now),
+        )
+        for index, operation in enumerate(operations):
+            if not isinstance(operation, dict):
+                raise AppError(400, "Job-Operationen müssen Objekte sein.", reason="invalid_job_request")
+            item_key = str(operation.get("item_key") or f"item-{index}").strip()[:160]
+            item_operation = str(operation.get("operation") or envelope["type"]).strip()[:80]
+            if not item_key or not item_operation:
+                raise AppError(400, "Job-Operationen benötigen Schlüssel und Typ.", reason="invalid_job_request")
+            payload_hash = str(operation.get("payload_hash") or "")[:128]
+            if not payload_hash:
+                payload_hash = hashlib.sha256(
+                    json.dumps({"operation": item_operation, "payload": envelope["payload"]}, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+            db.execute(
+                "INSERT INTO sync_job_items(id, job_id, item_key, operation, payload_hash, status, attempts, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'queued', 0, ?, ?)",
+                (f"{job_id}-{index}", job_id, item_key, item_operation, payload_hash, now, now),
+            )
+    SYNC_JOB_WAKE.set()
+    return sync_job_state(job_id)
+
+
+def resume_interrupted_sync_jobs() -> int:
+    """Make jobs interrupted by a process restart eligible again."""
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        jobs = db.execute("SELECT id FROM sync_jobs WHERE status='running'").fetchall()
+        for job in jobs:
+            db.execute(
+                "UPDATE sync_jobs SET status='queued', available_at=?, started_at=NULL, error_class='process_interrupted', updated_at=? WHERE id=?",
+                (now, now, job["id"]),
+            )
+            db.execute(
+                "UPDATE sync_job_items SET status='queued', error_class='process_interrupted', error_detail=NULL, updated_at=? WHERE job_id=? AND status='running'",
+                (now, job["id"]),
+            )
+    if jobs:
+        SYNC_JOB_WAKE.set()
+    return len(jobs)
+
+
+def _claim_sync_job() -> dict[str, Any] | None:
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        job = db.execute(
+            "SELECT * FROM sync_jobs WHERE status='queued' AND (available_at IS NULL OR available_at<=?) ORDER BY created_at, id LIMIT 1",
+            (now,),
+        ).fetchone()
+        if not job:
+            return None
+        db.execute(
+            "UPDATE sync_jobs SET status='running', attempts=attempts+1, started_at=?, finished_at=NULL, error_class=NULL, updated_at=? WHERE id=? AND status='queued'",
+            (now, now, job["id"]),
+        )
+        db.execute(
+            "UPDATE sync_job_items SET status='running', attempts=attempts+1, error_class=NULL, error_detail=NULL, updated_at=? WHERE job_id=? AND status='queued'",
+            (now, job["id"]),
+        )
+        return {**dict(job), "attempts": int(job.get("attempts") or 0) + 1}
+
+
+def _sync_job_update(job_id: str, item_status: str, *, error_class: str | None = None, error_detail: str | None = None) -> None:
+    if item_status not in ITEM_STATUSES:
+        raise ValueError("invalid sync item status")
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        db.execute(
+            "UPDATE sync_job_items SET status=?, error_class=?, error_detail=?, updated_at=? WHERE job_id=?",
+            (item_status, error_class, error_detail, now, job_id),
+        )
+        items = db.execute("SELECT status FROM sync_job_items WHERE job_id=?", (job_id,)).fetchall()
+        item_values = [dict(item) for item in items]
+        status = aggregate_job_status(item_values)
+        completed, total = bounded_progress(item_values)
+        finished = now if status in {"completed", "partial", "failed"} else None
+        db.execute(
+            "UPDATE sync_jobs SET status=?, progress_total=?, progress_completed=?, finished_at=?, error_class=?, updated_at=? WHERE id=?",
+            (status, total, completed, finished, error_class, now, job_id),
+        )
+
+
+def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
+    payload = _decode_sync_job_payload(job.get("payload"))
+    provider = str(job["provider"])
+    job_type = str(job["type"])
+    reason = str(payload.get("reason") or "Persistenter Providerjob")
+    if job_type == "plan_push":
+        raise AppError(409, "Plan-Push-Jobs werden erst durch den autorisierten Planungsworkflow ausgeführt.", reason="unsupported_job")
+    if provider == "intervals":
+        days = ALL_SYNC_DAYS if job_type == "historical_backfill" else int(payload.get("days") or sync_period("intervals"))
+        result = sync_intervals(reason=reason, activity_days=days, operation_id=job["id"])
+        if result.get("status") == "already_running":
+            return result
+        try:
+            competition_result = sync_competitions(reason=reason, push_local=False, operation_id=job["id"])
+        except Exception:
+            result["status"] = "partial"
+            result["competitions"] = {"status": "error"}
+        else:
+            result["competitions"] = competition_result
+        return result
+    if provider == "garmin":
+        days = ALL_SYNC_DAYS if job_type == "historical_backfill" else int(payload.get("days") or sync_period("garmin"))
+        return sync_garmin(days=days, operation_id=job["id"], reason=reason)
+    if provider == "calendar":
+        return sync_external_calendar(reason=reason, operation_id=job["id"])
+    if provider == "weather":
+        return sync_weather(reason=reason, force=bool(payload.get("force", True)), operation_id=job["id"])
+    raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
+
+
+def _run_claimed_sync_job(job: dict[str, Any]) -> None:
+    job_id = job["id"]
+    try:
+        result = _execute_sync_job(job)
+        result_status = result.get("status") if isinstance(result, dict) else "ok"
+        if result_status == "already_running":
+            raise AppError(409, "Der Provider ist noch beschäftigt.", reason="temporary_error")
+        _sync_job_update(job_id, "partial" if result_status == "partial" else "completed")
+    except Exception as exc:
+        error_class = _sync_job_error_class(exc)
+        detail = redact_text(str(getattr(exc, "message", "") or exc))[:500]
+        if is_retryable_error(error_class) and int(job.get("attempts") or 1) < SYNC_JOB_MAX_ATTEMPTS:
+            delay = retry_delay(int(job.get("attempts") or 1), base_seconds=SYNC_JOB_RETRY_BASE_SECONDS, max_seconds=SYNC_JOB_RETRY_MAX_SECONDS)
+            now = utc_now()
+            available = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
+            with DB_LOCK, database() as db:
+                db.execute(
+                    "UPDATE sync_job_items SET status='queued', error_class=?, error_detail=?, updated_at=? WHERE job_id=?",
+                    (error_class, detail, now, job_id),
+                )
+                db.execute(
+                    "UPDATE sync_jobs SET status='queued', available_at=?, finished_at=NULL, error_class=?, updated_at=? WHERE id=?",
+                    (available, error_class, now, job_id),
+                )
+            SYNC_JOB_WAKE.set()
+            return
+        _sync_job_update(job_id, "failed", error_class=error_class, error_detail=detail)
+        LOGGER.error(
+            "Persistent synchronization job failed",
+            extra={"event": "sync_job_failed", "context": {"job_id": job_id, "provider": job.get("provider"), "type": job.get("type"), "error_class": error_class}},
+        )
+
+
+def _sync_job_worker_loop() -> None:
+    while not SYNC_JOB_STOP.is_set():
+        job = _claim_sync_job()
+        if job:
+            _run_claimed_sync_job(job)
+            continue
+        SYNC_JOB_WAKE.wait(SYNC_JOB_POLL_SECONDS)
+        SYNC_JOB_WAKE.clear()
+
+
+def start_sync_job_worker() -> None:
+    """Start one daemon worker after database initialization and HTTP setup."""
+    global SYNC_JOB_WORKER
+    with SYNC_JOB_WORKER_LOCK:
+        if SYNC_JOB_WORKER is not None and SYNC_JOB_WORKER.is_alive():
+            return
+        resume_interrupted_sync_jobs()
+        SYNC_JOB_STOP.clear()
+        SYNC_JOB_WORKER = threading.Thread(target=_sync_job_worker_loop, name="sync-job-worker", daemon=True)
+        SYNC_JOB_WORKER.start()
+
+
+def resolve_sync_job(job_id: str, payload: Any) -> dict[str, Any]:
+    """Explicitly requeue a failed/partial job for another attempt."""
+    if not isinstance(payload, dict) or str(payload.get("action") or "").strip().casefold() != "retry":
+        raise AppError(400, "Ein Job kann nur ausdrücklich mit action=retry erneut gestartet werden.", reason="invalid_job_resolution")
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        job = db.execute("SELECT status FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
+        if not job:
+            raise AppError(404, "Synchronisationsjob nicht gefunden.", reason="sync_job_not_found")
+        if job["status"] not in {"failed", "partial"}:
+            raise AppError(409, "Nur fehlgeschlagene oder teilweise Jobs können erneut gestartet werden.", reason="invalid_job_resolution")
+        db.execute(
+            "UPDATE sync_jobs SET status='queued', attempts=0, available_at=?, started_at=NULL, finished_at=NULL, error_class=NULL, progress_completed=0, updated_at=? WHERE id=?",
+            (now, now, job_id),
+        )
+        db.execute(
+            "UPDATE sync_job_items SET status='queued', attempts=0, error_class=NULL, error_detail=NULL, updated_at=? WHERE job_id=?",
+            (now, job_id),
+        )
+    SYNC_JOB_WAKE.set()
+    return sync_job_state(job_id)
 
 
 def provider_freshness_state() -> list[dict[str, Any]]:
@@ -9142,13 +9495,15 @@ def set_sync_operation_state(
 
 def sync_status_state() -> dict[str, Any]:
     running = SYNC_LOCK.locked() or get_kv("sync_running") == "1"
-    return project_sync_status(
+    result = project_sync_status(
         running=running,
         get_value=get_kv,
         state_versions=state_versions(),
         provider_freshness=provider_freshness_state(),
         maintenance=MAINTENANCE_GATE.state(),
     )
+    result["jobs"] = sync_jobs_state()
+    return result
 
 
 def start_sync_operation(activity_days: int, reason: str = "manual") -> dict[str, Any]:
@@ -12642,6 +12997,7 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
                 "last_sync_at": get_kv("last_sync_at"), "last_error": get_kv("last_sync_error") or None,
                 "running": get_kv("sync_running") == "1", "status": get_kv("sync_status") or None,
                 "last_window_start": get_kv("last_sync_window_start"), "last_window_end": get_kv("last_sync_window_end"),
+                "jobs": sync_jobs_state(),
             },
             "library_sync": {"last_sync_at": get_kv("last_library_sync_at"), "last_error": get_kv("last_library_sync_error") or None, "state": workout_library_sync_summary()},
             "sync_settings": {"intervals_days": sync_period("intervals"), "garmin_days": sync_period("garmin")},
@@ -12814,6 +13170,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "status": get_kv("sync_status") or None,
                 "last_window_start": get_kv("last_sync_window_start"),
                 "last_window_end": get_kv("last_sync_window_end"),
+                "jobs": sync_jobs_state(),
             },
             "library_sync": {
                 "last_sync_at": get_kv("last_library_sync_at"),
@@ -13749,6 +14106,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 schedule_morning_checkin()
                 query = parse_qs(urlparse(self.path).query)
                 self.send_json(200, public_bootstrap(local_only=query.get("local", ["0"])[0] == "1"))
+            elif match := SYNC_JOB_RE.match(path):
+                require_auth(self)
+                self.send_json(200, sync_job_state(match.group(1)))
             elif path == "/api/sync/status":
                 require_auth(self)
                 self.send_json(200, sync_status_state())
@@ -13961,6 +14321,22 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path == "/api/transcribe":
                 content_type = self.headers.get("Content-Type", "")
                 self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
+            elif path == "/api/sync/jobs":
+                payload = self.read_json()
+                if not isinstance(payload, dict):
+                    raise AppError(400, "Ein Synchronisationsjob muss als Objekt gesendet werden.", reason="invalid_job_request")
+                envelope = payload.get("payload")
+                if envelope is None:
+                    envelope = {key: payload[key] for key in ("days", "force", "reason") if key in payload}
+                job = enqueue_sync_job(
+                    payload.get("provider"),
+                    payload.get("type", "refresh"),
+                    envelope,
+                    requested_by="user",
+                )
+                self.send_json(202, job)
+            elif match := SYNC_JOB_RESOLVE_RE.match(path):
+                self.send_json(200, resolve_sync_job(match.group(1), self.read_json()))
             elif path == "/api/coach/actions/preview":
                 self.send_json(200, create_coach_action_preview(self.read_json(), session["csrf_hash"]))
             elif path == "/api/change-history/undo/preview":
@@ -14322,17 +14698,21 @@ def daily_sync_loop() -> None:
     while True:
         time.sleep(300)
         if get_profile().get("weather_location", "").strip():
-            safe_weather_sync("dreistündliche automatische Aktualisierung")
+            if not _sync_job_active("weather"):
+                enqueue_sync_job("weather", "refresh", {"force": False, "reason": "dreistündliche automatische Aktualisierung"}, requested_by="scheduler")
         if not (CONFIG.intervals_api_key or CONFIG.calendar_ical_url):
             continue
         if CONFIG.calendar_ical_url and daily_sync_due("calendar"):
-            safe_external_calendar_sync("tägliche automatische Aktualisierung")
+            if not _sync_job_active("calendar"):
+                enqueue_sync_job("calendar", "refresh", {"reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
         if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
             if daily_sync_due("garmin"):
-                safe_garmin_sync("tägliche automatische Aktualisierung")
+                if not _sync_job_active("garmin"):
+                    enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
         if not CONFIG.intervals_api_key or not daily_sync_due("intervals") or get_kv("sync_running") == "1" or INTERVALS_RESYNC_GATE.is_resetting():
             continue
-        safe_sync("tägliche automatische Aktualisierung", activity_days=sync_period("intervals"))
+        if not _sync_job_active("intervals"):
+            enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
 
 
 def safe_garmin_sync(reason: str, operation_id: str | None = None) -> None:
@@ -14391,18 +14771,19 @@ def main() -> None:
         raise SystemExit(configuration_error)
     LOGGER.info("Intervals Coach starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
     initialise_database()
-    if CONFIG.intervals_api_key or CONFIG.calendar_ical_url:
-        if CONFIG.calendar_ical_url:
-            threading.Thread(target=safe_external_calendar_sync, args=("startup",), daemon=True).start()
-        if CONFIG.intervals_api_key:
-            threading.Thread(target=safe_sync, args=("startup", sync_period("intervals")), daemon=True).start()
-        if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
-            threading.Thread(target=safe_garmin_sync, args=("startup",), daemon=True).start()
-    if get_profile().get("weather_location", "").strip():
-        threading.Thread(target=safe_weather_sync, args=("startup",), daemon=True).start()
-    threading.Thread(target=daily_sync_loop, daemon=True).start()
     server = CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
     server.allow_reuse_address = True
+    start_sync_job_worker()
+    if CONFIG.intervals_api_key or CONFIG.calendar_ical_url:
+        if CONFIG.calendar_ical_url:
+            enqueue_sync_job("calendar", "refresh", {"reason": "startup"}, requested_by="startup")
+        if CONFIG.intervals_api_key:
+            enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "startup"}, requested_by="startup")
+        if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
+            enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "startup"}, requested_by="startup")
+    if get_profile().get("weather_location", "").strip():
+        enqueue_sync_job("weather", "refresh", {"force": True, "reason": "startup"}, requested_by="startup")
+    threading.Thread(target=daily_sync_loop, daemon=True).start()
     LOGGER.info("Intervals Coach listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
     try:
         server.serve_forever()

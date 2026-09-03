@@ -209,6 +209,9 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM coach_action_proposals")
             db.execute("DELETE FROM change_history")
             db.execute("DELETE FROM provider_refresh_history")
+            db.execute("DELETE FROM sync_job_items")
+            db.execute("DELETE FROM sync_jobs")
+            db.execute("DELETE FROM provider_sync_cursors")
             db.execute("DELETE FROM public_event_candidates")
             db.execute("DELETE FROM public_event_sources")
             db.execute("DELETE FROM external_calendar_events")
@@ -248,6 +251,34 @@ class CoachTests(unittest.TestCase):
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 6)
+
+    def test_persistent_sync_job_claim_resume_retry_and_completion(self):
+        job = server.enqueue_sync_job("intervals", "refresh", {"days": 7}, requested_by="user")
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(job["progress"], {"completed": 0, "total": 1})
+        claimed = server._claim_sync_job()
+        self.assertEqual(claimed["id"], job["id"])
+        self.assertEqual(server.sync_job_state(job["id"])["status"], "running")
+        self.assertEqual(server.resume_interrupted_sync_jobs(), 1)
+        self.assertEqual(server.sync_job_state(job["id"])["status"], "queued")
+        claimed = server._claim_sync_job()
+        with patch.object(server, "_execute_sync_job", return_value={"status": "ok"}):
+            server._run_claimed_sync_job(claimed)
+        completed = server.sync_job_state(job["id"])
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(completed["progress"], {"completed": 1, "total": 1})
+        self.assertEqual(completed["items"][0]["status"], "completed")
+
+    def test_persistent_sync_job_retries_only_safe_transient_errors(self):
+        job = server.enqueue_sync_job("weather", "refresh", {"force": True})
+        claimed = server._claim_sync_job()
+        with patch.object(server, "_execute_sync_job", side_effect=server.AppError(503, "temporär", reason="network_error")):
+            server._run_claimed_sync_job(claimed)
+        state = server.sync_job_state(job["id"])
+        self.assertEqual(state["status"], "queued")
+        self.assertEqual(state["error_class"], "network_error")
+        self.assertEqual(state["items"][0]["status"], "queued")
+        self.assertIsNotNone(state["available_at"])
 
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = server.utc_now()
