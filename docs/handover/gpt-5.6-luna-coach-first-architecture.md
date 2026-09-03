@@ -199,15 +199,17 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 2. Persistente Providerjobs
 
-- [ ] `sync_jobs`, `sync_job_items`, Cursor, Statusautomat, Retry und Fortschrittsaggregation implementieren.
-- [ ] Jobs überleben Prozessneustart und Client-Trennung.
-- [ ] Fehlerklassen und Diagnosefelder strikt redigieren.
+- [x] `sync_jobs`, `sync_job_items`, Cursor, Statusautomat, Retry und Fortschrittsaggregation implementieren.
+- [x] Jobs überleben Prozessneustart und Client-Trennung.
+- [x] Fehlerklassen und Diagnosefelder strikt redigieren.
 
 **Subsysteme:** `backend/sync`, Provideradapter, HTTP-Handler, Diagnostics.  
 **Definition of Done:** Jeder Job liefert `queued|running|completed|partial|failed`; Status ist abrufbar und resumable.  
 **Tests:** Queue, Retry, Restart-Fortsetzung, Teilfehler, Idempotenz, Status-API, Redaction.  
 **Seiteneffekte:** Kein synchrones Warten auf Providerantworten im Request-Thread.  
-**Evidence:** `- Test/Commit: …`
+**Evidence:**
+
+- Ergebnis: `python -m unittest discover -s tests -v` mit 352 Tests grün und 3 erwarteten SQLCipher-Skips; Job-Vertrag, Claim/Resume, Retry, Completion und Schema-/API-Regressionen grün; Syntaxcheck und `docker build -t ai-coach:local .` grün. Commit: `a3a780d`.
 
 ### 3. Inkrementelle Provider-Synchronisation
 
