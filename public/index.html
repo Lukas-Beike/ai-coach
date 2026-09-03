@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg?v=161" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=161">
+    <link rel="icon" href="/icon.svg?v=163" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=163">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -144,17 +144,11 @@
         </dialog>
         <section id="planGoalsSegment" class="plan-segment" data-plan-segment-panel="goals" aria-labelledby="planGoalsTitle" hidden>
           <div class="plan-segment-heading"><div><span class="eyebrow">ZIELE UND MEHRWOCHENPLÄNE</span><h3 id="planGoalsTitle">Ziele &amp; Pläne</h3></div><span class="segment-status">Lokal gespeichert · Wettkampf-Push separat</span></div>
-        <details id="plannedCompetitionsSection" class="settings-section collapsible-section">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Zielwettkämpfe</span><span id="plannedCompetitionsSummary" class="collapsible-summary-meta">Noch keine Wettkämpfe</span></summary>
-          <p>Trage Wettkämpfe lokal ein. Der separate Remote-Push zu Intervals.icu erfordert eine Vorschau und Bestätigung.</p>
+        <section id="plannedCompetitionsSection" class="settings-section">
+          <div class="settings-section-heading"><div><h4>Zielwettkämpfe</h4><p>Diese Übersicht ist schreibgeschützt. Hinzufügen, Überarbeiten, Löschen und Synchronisieren erledigt ausschließlich dein Coach.</p></div><span id="plannedCompetitionsSummary" class="tab-sync-detail">Noch keine Wettkämpfe</span></div>
           <div id="competitionList" class="competition-list"></div>
-          <div class="settings-inline-action competition-sync-actions">
-            <div><strong>Remote-Ziel: Intervals.icu</strong><span id="competitionSyncDetail">Status: noch nicht synchronisiert</span></div>
-            <button type="button" id="competitionSyncButton" class="secondary-button">Vorschau für Wettkampf-Push</button>
-          </div>
-          <button type="button" id="addCompetitionButton" class="secondary-button">Wettkampf hinzufügen</button>
-          <button type="submit" form="profileForm">Wettkämpfe speichern</button>
-        </details>
+          <button type="button" id="competitionCoachButton" class="secondary-button">Mit Coach bearbeiten</button>
+        </section>
           <div id="trainingPlans" class="training-plans"></div>
         </section>
         <section id="planLibrarySegment" class="plan-segment" data-plan-segment-panel="templates" aria-labelledby="planLibraryTitle" hidden>
@@ -423,12 +417,12 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=161" defer></script>
-  <script src="/navigation.js?v=161" defer></script>
-  <script src="/state.js?v=161" defer></script>
-  <script src="/views.js?v=161" defer></script>
-  <script src="/forms.js?v=161" defer></script>
-  <script src="/components.js?v=161" defer></script>
-  <script src="/app.js?v=161" defer></script>
+  <script src="/api.js?v=163" defer></script>
+  <script src="/navigation.js?v=163" defer></script>
+  <script src="/state.js?v=163" defer></script>
+  <script src="/views.js?v=163" defer></script>
+  <script src="/forms.js?v=163" defer></script>
+  <script src="/components.js?v=163" defer></script>
+  <script src="/app.js?v=163" defer></script>
 </body>
 </html>
