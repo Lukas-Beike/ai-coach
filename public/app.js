@@ -4750,7 +4750,8 @@ confirmationDialog?.addEventListener("close", () => settleConfirmation(false));
 document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
-  applyNavigationRoute(link.dataset.route, { historyMode: "push" });
+  const linkedRoute = String(link.getAttribute("href") || "").replace(/^#/, "").trim();
+  applyNavigationRoute(linkedRoute || link.dataset.route, { historyMode: "push" });
 }));
 document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

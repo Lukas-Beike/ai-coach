@@ -528,7 +528,7 @@ h2 {
 .today-item { display: grid; gap: 3px; min-width: 0; }
 .today-item strong { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
 .today-item span { color: var(--muted); font-size: .7rem; }
-.today-card .secondary-button { justify-self: start; min-height: 40px; }
+.today-card .secondary-button { justify-self: start; min-height: 44px; }
 .today-adjustment { border-color: rgba(255, 69, 58, .45); }
 .today-priority { grid-column: 1 / -1; border-color: rgba(52, 207, 161, .42); background: linear-gradient(145deg, rgba(52, 207, 161, .12), var(--surface-raised)); }
 .today-priority h3 { color: var(--accent-bright); }
@@ -901,6 +901,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
 
 @media (max-width: 559px) {
   .shell { padding-right: 12px; padding-left: 12px; }
+  #chatPanel { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
   .composer { width: 100%; }
   .topbar { padding-right: 2px; padding-left: 2px; }
   .topbar { padding-top: 20px; padding-bottom: 12px; }
@@ -998,6 +999,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
+}
+@media (max-height: 500px) and (min-width: 560px) {
+  #chatPanel .composer { position: relative; bottom: auto; }
 }
 .change-history-list {
   display: grid;

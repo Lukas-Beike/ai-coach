@@ -20,7 +20,6 @@ async function login(page) {
   await expect(loginDialog).toBeVisible();
   await page.getByLabel("Passwort").fill(APP_PASSWORD);
   await page.getByRole("button", { name: "Anmelden" }).click();
-  await page.getByLabel("Passwort").fill("");
   await expect(loginDialog).toBeHidden();
   await expect(page.locator("#appShell")).toBeVisible();
 }
@@ -52,11 +51,10 @@ test.describe("critical browser states", () => {
     await expect(page.getByRole("heading", { name: "Anmelden" })).toBeVisible();
     await page.getByLabel("Passwort").fill(APP_PASSWORD);
     await page.getByRole("button", { name: "Anmelden" }).click();
-    await page.getByLabel("Passwort").fill("");
     await expect(page.locator("#loginDialog")).toBeHidden();
     await expect(page.locator("#appShell")).toBeVisible();
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#profile$/);
+    await expect(page).toHaveURL(/#more\/profile$/);
     await expect(page.locator("#profilePanel")).toBeFocused();
     await expect(page.locator(".dirty-indicator")).toHaveCount(5);
     const hiddenIndicators = await page.locator(".dirty-indicator").evaluateAll((nodes) => nodes.every((node) => node.hidden));
@@ -115,7 +113,7 @@ test.describe("critical browser states", () => {
     await page.getByRole("link", { name: "Plan", exact: true }).click();
     await expect(page.locator("#planCalendarSegment")).toBeVisible();
     await expect(page.getByRole("link", { name: "Kalender", exact: true })).toHaveAttribute("aria-current", "page");
-    await page.getByRole("link", { name: "Bibliothek", exact: true }).click();
+    await page.getByRole("link", { name: "Vorlagen", exact: true }).click();
     await expect(page).toHaveURL(/#plan\/templates$/);
     await expect(page.locator("#planLibrarySegment")).toBeVisible();
     await expect(page.locator("#planCalendarSegment")).toBeHidden();
@@ -150,8 +148,11 @@ test.describe("critical browser states", () => {
     const safetyLayout = await page.evaluate(() => {
       const hint = document.querySelector("#chatPanel .fine-print").getBoundingClientRect();
       const composer = document.querySelector("#chatForm").getBoundingClientRect();
-      const navigation = document.querySelector(".bottom-nav").getBoundingClientRect();
-      return { hintBottom: hint.bottom, composerTop: composer.top, navigationTop: navigation.top };
+      const navigationNode = document.querySelector(".bottom-nav");
+      const navigation = navigationNode && getComputedStyle(navigationNode).display !== "none"
+        ? navigationNode.getBoundingClientRect()
+        : null;
+      return { hintBottom: hint.bottom, composerTop: composer.top, navigationTop: navigation?.top ?? Number.POSITIVE_INFINITY };
     });
     expect(safetyLayout.hintBottom).toBeLessThanOrEqual(Math.min(safetyLayout.composerTop, safetyLayout.navigationTop));
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
