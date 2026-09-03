@@ -7,6 +7,7 @@ import json
 import uuid
 import sqlite3
 import shutil
+import time
 import zipfile
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
@@ -6134,6 +6135,14 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(pair["canonical_id"], "i-wahoo")
         self.assertEqual(pair["duplicate_id"], "i-garmin")
 
+    def test_latest_intervals_duplicate_is_ignored_when_a_newer_activity_is_unrelated(self):
+        pair = [
+            {"id": "i-wahoo", "type": "Ride", "source": "Wahoo", "start_date_local": "2026-08-29T07:00:00", "moving_time": 7200, "distance": 60200},
+            {"id": "i-garmin", "type": "Ride", "source": "Garmin", "start_date_local": "2026-08-29T07:04:00", "moving_time": 7160, "distance": 59800},
+            {"id": "i-run", "type": "Run", "source": "Garmin", "start_date_local": "2026-08-30T07:00:00", "moving_time": 3600, "distance": 10000},
+        ]
+        self.assertIsNone(server.latest_wahoo_garmin_duplicate({"raw_provider_data": {"activities": pair}}))
+
     def test_intervals_duplicate_requires_matching_start_duration_and_distance(self):
         wahoo = {
             "id": "wahoo", "type": "Ride", "source": "Wahoo", "start_date_local": "2026-08-29T07:00:00",
@@ -6184,6 +6193,51 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(actions["adjust_plan"])
         self.assertEqual([item["name"] for item in actions["plan_blockers"]], ["Lange Ausfahrt"])
         self.assertEqual(actions["horizon_days"], 3)
+
+    def test_sync_intervals_waits_for_active_sync_and_uses_its_new_snapshot(self):
+        server.set_kv("last_sync_at", "old-sync")
+        server.SYNC_LOCK.acquire()
+
+        def finish_active_sync():
+            time.sleep(0.1)
+            server.set_kv("last_sync_at", "new-sync")
+            server.SYNC_LOCK.release()
+
+        worker = threading.Thread(target=finish_active_sync)
+        worker.start()
+        try:
+            result = server.sync_intervals(
+                "latest activity test",
+                activity_days=7,
+                wait_for_existing=True,
+            )
+        finally:
+            worker.join(timeout=2)
+            if server.SYNC_LOCK.locked():
+                server.SYNC_LOCK.release()
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["waited_for_existing"])
+        self.assertEqual(result["synced_at"], "new-sync")
+
+    def test_morning_checkin_prompt_rejects_questions_and_failed_refresh(self):
+        self.assertFalse(server.prompt_requests_morning_checkin("Warum fehlt mein Morgen-Check-in?"))
+        self.assertFalse(server.prompt_requests_morning_checkin("Bitte keinen Morgen-Check-in ausführen."))
+        intent = {
+            "intent": "advice", "operation": None, "target_system": "none",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": [],
+            "follow_up_operations": [],
+        }
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-checkin-review"
+        ), patch.object(server, "prompt_requests_fresh_data", return_value=True), patch.object(
+            server, "sync_intervals", side_effect=RuntimeError("refresh unavailable")
+        ), patch.object(server, "responses_request", return_value={"output_text": "Check-in konnte nicht aktualisiert werden."}):
+            result = server.chat_with_coach(
+                "Gib mir den heutigen Morgen-Check-in. Lade aktuelle Daten.",
+                client_turn_id="turn-checkin-refresh-failed",
+            )
+        self.assertNotEqual(server.get_kv("morning_checkin_status"), "ready")
+        self.assertNotIn("coach_quick_actions", result)
 
     def test_diagnostics_redact_credentials_from_logs(self):
         server.initialise_logging()
