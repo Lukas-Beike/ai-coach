@@ -9,7 +9,7 @@ if (!APP_PASSWORD || APP_PASSWORD.length < 12) {
 const navigation = [
   ["Coach", "chatPanel", "coach"],
   ["Heute", "todayPanel", "today"],
-  ["Plan", "workoutsPanel", "plan/calendar"],
+  ["Bibliothek", "workoutsPanel", "plan"],
   ["Analyse", "dataPanel", "analysis/performance"],
   ["Mehr", "settingsPanel", "more"],
 ];
@@ -56,10 +56,10 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#more\/profile$/);
     await expect(page.locator("#profilePanel")).toBeFocused();
-    await expect(page.locator(".dirty-indicator")).toHaveCount(5);
+    await expect(page.locator(".dirty-indicator")).toHaveCount(3);
     const hiddenIndicators = await page.locator(".dirty-indicator").evaluateAll((nodes) => nodes.every((node) => node.hidden));
     expect(hiddenIndicators).toBe(true);
-    await expect(page.locator("#remoteDeleteNotice")).toBeHidden();
+    await expect(page.locator("#remoteDeleteNotice")).toHaveCount(0);
     for (const [label, panelId, route] of navigation) {
       await page.getByRole("link", { name: label, exact: true }).click();
       await expect(page.locator(`#${panelId}`)).toHaveClass(/active/);
@@ -110,22 +110,13 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
     await expect(page.locator("#profileContextNotice")).toBeVisible();
 
-    await page.getByRole("link", { name: "Plan", exact: true }).click();
-    await expect(page.locator("#planCalendarSegment")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Kalender", exact: true })).toHaveAttribute("aria-current", "page");
-    await page.getByRole("link", { name: "Vorlagen", exact: true }).click();
-    await expect(page).toHaveURL(/#plan\/templates$/);
-    await expect(page.locator("#planLibrarySegment")).toBeVisible();
-    await expect(page.locator("#planCalendarSegment")).toBeHidden();
-    await expect(page.getByText("Lokal speichern · Remote-Sync nur mit Vorschau", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Vorschau für Bibliotheks- und Planungssync", exact: true })).toBeVisible();
-    await page.getByRole("link", { name: "Ziele & Pläne", exact: true }).click();
-    await expect(page).toHaveURL(/#plan\/goals$/);
-    await expect(page.locator("#planGoalsSegment")).toBeVisible();
-    await expect(page.locator("#planLibrarySegment")).toBeHidden();
+    await page.getByRole("link", { name: "Bibliothek", exact: true }).click();
+    await expect(page).toHaveURL(/#plan$/);
+    await expect(page.getByRole("heading", { name: "Bibliothek", exact: true })).toBeVisible();
+    await expect(page.locator("#libraryLoadButton, #libraryFilter, #librarySelectVisibleButton, #librarySyncSelectedButton")).toHaveCount(0);
     await page.goto("/#planned/goals");
-    await expect(page.locator("#planGoalsSegment")).toBeVisible();
-    await expect(page).toHaveURL(/#plan\/goals$/);
+    await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#plan$/);
 
     await page.getByRole("link", { name: "Heute", exact: true }).click();
     await expect(page.locator("#todayPanel .today-priority")).toContainText("Coach-Einordnung");

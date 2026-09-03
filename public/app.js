@@ -22,20 +22,6 @@ function renderMoreSegments(segment = moreSegmentFromRoute()) {
   });
 }
 
-function renderPlanSegments(segment = state.planSegment) {
-  const selected = ["calendar", "templates", "goals"].includes(segment) ? segment : "calendar";
-  state.planSegment = selected;
-  document.querySelectorAll("[data-plan-segment-panel]").forEach((panel) => {
-    panel.hidden = panel.dataset.planSegmentPanel !== selected;
-  });
-  document.querySelectorAll("[data-plan-segment]").forEach((link) => {
-    const active = link.dataset.planSegment === selected;
-    link.classList.toggle("active", active);
-    if (active) link.setAttribute("aria-current", "page");
-    else link.removeAttribute("aria-current");
-  });
-}
-
 function renderAnalysisSegments(segment = state.analysisSegment) {
   const selected = ["history", "performance"].includes(segment) ? segment : "performance";
   state.analysisSegment = selected;
@@ -53,8 +39,8 @@ function renderAnalysisSegments(segment = state.analysisSegment) {
 function currentPlanLoadAreas() {
   const areas = new Set(["chat", "activities", "performance", "feedback", "profile", "weather"]);
   const route = baseRoute();
-  if (route === "today" || (route === "plan" && state.planSegment !== "templates")) areas.add("plan");
-  if (route === "plan" && state.planSegment === "templates") areas.add("library");
+  if (route === "today") areas.add("plan");
+  if (route === "plan") areas.add("library");
   return [...areas];
 }
 
@@ -62,8 +48,8 @@ function ensureRouteData(route = state.route) {
   if (!state.data || state.loadPromise) return;
   const requested = [];
   const panelRoute = baseRoute(route);
-  if ((panelRoute === "today" || (panelRoute === "plan" && state.planSegment !== "templates")) && !state.loadedAreas.has("plan")) requested.push("plan");
-  if (panelRoute === "plan" && state.planSegment === "templates" && !state.loadedAreas.has("library")) requested.push("library");
+  if (panelRoute === "today" && !state.loadedAreas.has("plan")) requested.push("plan");
+  if (panelRoute === "plan" && !state.loadedAreas.has("library")) requested.push("library");
   if (requested.length) load("/api/bootstrap?local=1", requested);
 }
 
@@ -74,8 +60,6 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   if (currentPanel !== NAV_ROUTES[panelRoute] && !(await confirmDiscardChanges())) return false;
   if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges()) discardUnsavedChanges();
-  if (currentPanel === "workoutsPanel" && mainRoute !== "plan") state.planSegmentScroll[state.planSegment] = window.scrollY;
-  if (currentPanel === "workoutsPanel" && mainRoute === "plan" && state.planSegment !== planSegmentFromRoute(panelRoute)) state.planSegmentScroll[state.planSegment] = window.scrollY;
   document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
   const navigation = document.querySelector(`.nav-item[data-route="${navigationRoute}"]`);
   const panel = document.querySelector(`#${NAV_ROUTES[panelRoute]}`);
@@ -88,10 +72,7 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   panel.classList.add("active");
   state.route = panelRoute;
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
-  if (mainRoute === "plan") {
-    renderPlanSegments(planSegmentFromRoute(panelRoute));
-    renderActivePlanSegment(state.data);
-  }
+  if (mainRoute === "plan" && state.data) renderLibrary(state.data.library || []);
   if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
   const targetHash = `#${panelRoute}`;
   if (window.location.hash !== targetHash) {
@@ -103,8 +84,7 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   if (state.data && mainRoute === "more") loadContextPreview();
   if (state.data && mainRoute === "more") loadLogs();
   if (state.data && mainRoute === "more") loadChangeHistory();
-  const targetScroll = mainRoute === "plan" ? (state.planSegmentScroll[state.planSegment] || 0) : 0;
-  requestAnimationFrame(() => window.scrollTo({ top: targetScroll, behavior: "auto" }));
+  requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
   if (mainRoute === "coach") {
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
     else scrollChatToLatest(true);
@@ -191,23 +171,19 @@ function showLogin() {
   state.chatResponseStarted = false;
   state.chatResponseScrollPending = false;
   state.loadedAreas.clear();
-  state.planSegment = "calendar";
   state.analysisSegment = "performance";
   state.profileDirty = false;
   state.checkinDirty = false;
   state.chatDraftDirty = false;
   state.activityFeedbackDirty.clear();
   state.planningEditDirty.clear();
-  state.libraryDateDirty.clear();
   state.activityFeedbackDrafts.clear();
   state.planningDrafts.clear();
-  state.libraryDateDrafts.clear();
   state.activityFromDate = "";
   state.activityToDate = "";
   state.activityVisibleCount = 250;
   setDirtyIndicator("activityDirtyIndicator", false);
   setDirtyIndicator("planningDirtyIndicator", false);
-  setDirtyIndicator("libraryDirtyIndicator", false);
   $("#appShell").hidden = true;
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
@@ -400,12 +376,6 @@ function renderMaintenanceStatus(maintenance) {
     return;
   }
   statusCard.hidden = false;
-  if (!missing.length && !error && (pendingLocal || syncConflicts)) {
-    $("#statusTitle").textContent = syncConflicts ? "Coach benötigt Aufmerksamkeit" : "Lokale Planung wartet auf Sync";
-    $("#statusDetail").textContent = syncConflicts
-      ? `${syncConflicts} Konflikt${syncConflicts === 1 ? "" : "e"} in der lokalen Planung zu klären`
-      : `${pendingLocal} lokale Änderung${pendingLocal === 1 ? "" : "en"} wartet auf Remote-Sync`;
-  }
   statusCard.classList.remove("working");
   statusCard.classList.add("warning");
   $("#statusTitle").textContent = "Wartungsmodus aktiv";
@@ -786,29 +756,6 @@ function notifyState(data) {
 
 function todayIso() { return timezoneDateKey(state.data?.profile?.timezone, new Date()); }
 
-function adaptivePreviewMarkup(preview) {
-  const signals = preview.signals?.length
-    ? `Signale: ${preview.signals.map((signal) => escapeHtml(String(signal))).join(", ")}`
-    : "Keine kritischen lokalen Signale erkannt.";
-  const changes = (preview.changes || []).map((change) => `<div class="replan-change"><strong>${escapeHtml(String(change.date || ""))}: ${escapeHtml(String(change.name || "Einheit"))}${change.after?.name ? ` → ${escapeHtml(String(change.after.name))}` : ""}</strong><br>${escapeHtml(String(change.before?.description || ""))}<br>→ ${escapeHtml(String(change.after?.description || ""))}</div>`).join("");
-  const pause = preview.illness_pause;
-  const pauseMarkup = pause && !pause.approved ? `<div class="illness-pause-preview"><strong>Krankheitspause</strong><span>${escapeHtml(String(pause.forecast || "Vorsichtige Prognose"))}</span><span>Vorgeschlagen: ${escapeHtml(String(pause.recommended_pause_days || ""))} Tage (${escapeHtml(String(pause.start_date || ""))} bis ${escapeHtml(String(pause.end_date || ""))})</span><label><input id="syncIllnessToIntervals" type="checkbox"> Krankheitstage zusätzlich als <code>SICK</code>-Einträge nach Intervals.icu synchronisieren</label></div>` : "";
-  return `<div><strong>${escapeHtml(String(preview.message || "Adaptive Prüfung"))}</strong><br>${signals}</div>${pauseMarkup}${changes || "<div>Es gibt keine lokalen Einheiten, die angepasst werden müssen.</div>"}<small>${escapeHtml(String(preview.scope || ""))}</small>`;
-}
-
-function openAdaptivePlanningDialog(preview) {
-  const dialog = $("#adaptivePlanningDialog");
-  const node = $("#adaptivePlanningPreview");
-  const apply = $("#applyAdaptivePlanningButton");
-  if (!dialog || !node || !preview) return;
-  node.innerHTML = adaptivePreviewMarkup(preview);
-  if (apply) {
-    apply.hidden = !(preview.changes || []).length && !(preview.illness_pause && !preview.illness_pause.approved);
-    apply.dataset.adjustmentId = preview.id || "";
-  }
-  showAccessibleDialog(dialog, $("#cancelAdaptivePlanningButton"));
-}
-
 function renderAdaptivePlanning(data) {
   const planning = data.planning || {};
   const next = planning.season?.next_event;
@@ -831,19 +778,12 @@ function renderAdaptivePlanning(data) {
     : count === 1
     ? "Ein zukünftiger Entwurf braucht eine Anpassung."
     : `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
-  const notice = $("#adaptivePlanningNotice");
   const coachNotice = $("#coachAdaptivePlanningNotice");
-  if (notice) {
-    notice.hidden = !required;
-    const captionNode = $("#adaptivePlanningCaption");
-    if (captionNode) captionNode.textContent = required ? caption : "";
-    const button = $("#adaptivePlanningButton");
-    if (button) {
-      button.disabled = Boolean(state.localSync.adaptivePlanning);
-      button.textContent = state.localSync.adaptivePlanning ? "Prüfung läuft…" : illnessNeedsForecast ? "Krankheitspause prüfen" : "Vorschau prüfen";
-    }
+  if (coachNotice) {
+    coachNotice.hidden = !required;
+    const detail = coachNotice.querySelector("small");
+    if (detail) detail.textContent = required ? `${caption} Bitte den Coach um die Anpassung.` : "";
   }
-  if (coachNotice) coachNotice.hidden = !required;
 }
 
 function renderExternalCalendar(data) {
@@ -1106,25 +1046,6 @@ async function retryProvider(provider, button) {
   }
 }
 
-function renderRemoteDeleteNotice() {
-  const root = $("#remoteDeleteNotice");
-  if (!root) return;
-  root.replaceChildren();
-  const failure = state.remoteDeleteFailure;
-  root.hidden = !failure;
-  if (!failure) return;
-  const title = document.createElement("strong");
-  title.textContent = `Remote-Löschung fehlgeschlagen: ${failure.name || "Geplante Einheit"}`;
-  const message = document.createElement("span");
-  message.textContent = `${failure.message || "Der Remote-Kalendereintrag wurde nicht bestätigt gelöscht."} Bitte synchronisieren und den Eintrag erneut prüfen.`;
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "secondary-button";
-  close.textContent = "Hinweis schließen";
-  close.addEventListener("click", () => { state.remoteDeleteFailure = null; renderRemoteDeleteNotice(); });
-  root.append(title, message, close);
-}
-
 function formatTime(value) {
   if (!value) return "Noch nicht aktualisiert";
   const dt = new Date(value);
@@ -1142,8 +1063,7 @@ function hasUnsavedChanges() {
     || state.chatDraftDirty
     || Boolean($("#messageInput")?.value.trim())
     || state.activityFeedbackDirty.size > 0
-    || state.planningEditDirty.size > 0
-    || state.libraryDateDirty.size > 0;
+    || state.planningEditDirty.size > 0;
 }
 
 function setDirtyIndicator(id, dirty) {
@@ -1161,13 +1081,10 @@ function discardUnsavedChanges() {
   state.chatDraftDirty = false;
   state.activityFeedbackDirty.clear();
   state.planningEditDirty.clear();
-  state.libraryDateDirty.clear();
   state.activityFeedbackDrafts.clear();
   state.planningDrafts.clear();
-  state.libraryDateDrafts.clear();
   setDirtyIndicator("activityDirtyIndicator", false);
   setDirtyIndicator("planningDirtyIndicator", false);
-  setDirtyIndicator("libraryDirtyIndicator", false);
   if (state.data) render(state.data);
 }
 
@@ -1179,30 +1096,19 @@ function renderStatus(data) {
   if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
   const performanceRefresh = data.performance_refresh || {};
   const openaiStatus = data.usage?.status || {};
-  const libraryState = data.library_sync?.state || {};
-  const pendingLocal = Number(libraryState.local || 0) + Number(libraryState.sync_error || 0)
-    + Number(libraryState.planned_local || 0) + Number(libraryState.planned_sync_error || 0);
-  const remoteMissing = Number(libraryState.remote_missing || 0) + Number(libraryState.planned_remote_missing || 0);
-  const syncConflicts = Number(libraryState.planned_conflicts || 0);
   const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error || performanceRefresh.last_error
     || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const statusCard = $("#statusCard");
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
-  const hasProblem = Boolean(missing.length || error || pendingLocal || remoteMissing || syncConflicts);
+  const hasProblem = Boolean(missing.length || error);
   statusCard.hidden = !hasProblem || activePanel === "settingsPanel";
   statusCard.classList.toggle("warning", hasProblem);
   $("#statusTitle").textContent = missing.length
     ? `Einrichtung nötig: ${missing.join(" + ")}`
-    : error ? "Coach benötigt Aufmerksamkeit"
-      : syncConflicts ? "Sync-Konflikte benötigen eine Entscheidung"
-        : pendingLocal ? "Lokale Änderungen warten auf Sync"
-          : remoteMissing ? "Remote-Löschungen benötigen eine Entscheidung" : "Coach ist bereit";
+    : error ? "Coach benötigt Aufmerksamkeit" : "Coach ist bereit";
   $("#statusDetail").textContent = missing.length
     ? "Ergänze die fehlende Serverkonfiguration"
-    : error || (syncConflicts ? `${syncConflicts} Planungskonflikt(e) im Plan-Bereich auflösen`
-      : pendingLocal ? `${pendingLocal} lokale Änderung(en) über die Sync-Vorschau übertragen`
-        : remoteMissing ? `${remoteMissing} Remote-Löschung(en) im Plan-Bereich prüfen`
-          : (morning.status === "ready" ? `Morgen-Check-in abgeschlossen: ${dateLabel(morning.date)}` : "Bereit für deine nächste Frage"));
+    : error || (morning.status === "ready" ? `Morgen-Check-in abgeschlossen: ${dateLabel(morning.date)}` : "Bereit für deine nächste Frage");
   statusCard.classList.remove("working");
 }
 
@@ -1317,6 +1223,16 @@ function todayAction(text, handler, className = "secondary-button") {
   button.textContent = text;
   button.addEventListener("click", handler);
   return button;
+}
+
+async function askCoach(message) {
+  const applied = await applyNavigationRoute("coach", { historyMode: "push", focus: false });
+  if (!applied) return;
+  const input = $("#messageInput");
+  if (!input) return;
+  input.value = message;
+  input.dispatchEvent(new Event("input"));
+  $("#chatForm")?.requestSubmit();
 }
 
 function todayActivityDate(activity) {
@@ -1541,26 +1457,6 @@ function renderDailyPlanningContext(date, todayKey) {
     root.append(empty);
   }
   return root;
-}
-
-async function resolvePlannedConflict(localId, strategy, button) {
-  if (!localId || !button) return;
-  if (!await requestConfirmation(strategy === "adopt_remote"
-    ? "Die Remote-Version dieser Planung übernehmen? Die lokale Änderung wird verworfen."
-    : "Die lokale Version behalten und beim nächsten Remote-Sync übertragen?", { title: "Synchronisationskonflikt lösen?" })) return;
-  button.disabled = true;
-  try {
-    await api(`/api/planned/local/${encodeURIComponent(localId)}/resolve`, {
-      method: "POST",
-      body: JSON.stringify({ strategy }),
-    });
-    toast(strategy === "adopt_remote" ? "Remote-Planung übernommen" : "Lokale Planung priorisiert");
-    invalidateContextPreview();
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    button.disabled = false;
-  }
 }
 
 function distanceLabel(value) {
@@ -1804,50 +1700,6 @@ function renderActivities(activities) {
   }
 }
 
-function renderParallelCyclingWarning(groups) {
-  const root = $("#parallelCyclingWarning");
-  if (!root) return;
-  root.replaceChildren();
-  root.hidden = !groups?.length;
-  if (!groups?.length) return;
-
-  const title = document.createElement("strong");
-  title.textContent = "Parallele Radeinheiten erkannt";
-  const intro = document.createElement("p");
-  intro.textContent = "Bitte auswählen, welche Einheit aus Intervals.icu gelöscht werden soll. Es wird nur die ausgewählte Einheit per API entfernt.";
-  root.append(title, intro);
-  groups.forEach((group, groupIndex) => {
-    const groupRoot = document.createElement("div");
-    groupRoot.className = "parallel-cycling-group";
-    const options = document.createElement("div");
-    options.className = "parallel-cycling-options";
-    group.forEach((event, eventIndex) => {
-      const label = document.createElement("label");
-      label.className = "parallel-cycling-option";
-      const radio = document.createElement("input");
-      radio.type = "radio";
-      radio.name = `parallel-cycling-${groupIndex}`;
-      radio.value = String(event.id);
-      radio.checked = eventIndex === 0;
-      const text = document.createElement("span");
-      text.textContent = `${event.name || "Radeinheit"} · ${dateLabel(event.start_date_local || event.date)}${event.type ? ` · ${event.type}` : ""}`;
-      label.append(radio, text);
-      options.append(label);
-    });
-    const deleteButton = document.createElement("button");
-    deleteButton.type = "button";
-    deleteButton.className = "secondary-button danger-button";
-    deleteButton.textContent = "Ausgewählte Einheit löschen";
-    deleteButton.addEventListener("click", () => {
-      const selectedId = options.querySelector("input:checked")?.value;
-      const selected = group.find((event) => String(event.id) === selectedId);
-            if (selected) deletePlanned(selected.local_id || selected.id, deleteButton, selected.name);
-    });
-    groupRoot.append(options, deleteButton);
-    root.append(groupRoot);
-  });
-}
-
 function renderExternalCalendarMarker(event) {
   const root = document.createElement("div");
   root.className = "planned-calendar-marker";
@@ -1994,7 +1846,6 @@ function renderLocalPlanningActions(event, body) {
 
 function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContext = [], competitions = []) {
   setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
-  renderParallelCyclingWarning(state.data?.parallel_cycling || []);
   const root = $("#plannedCalendar");
   state.data.daily_planning_context = Array.isArray(dailyPlanningContext) ? dailyPlanningContext : [];
   root.querySelectorAll("details.planned-week").forEach((week) => state.plannedWeekOpen.set(week.dataset.week, week.open));
@@ -2174,27 +2025,6 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
             }
             body.append(complianceRoot);
           }
-          if (event.sync_status === "conflict" && event.local_id) {
-            const conflictRoot = document.createElement("div");
-            conflictRoot.className = "competition-conflict planned-conflict";
-            const remote = event.sync_conflict?.remote || {};
-            const conflictText = document.createElement("span");
-            conflictText.textContent = remote.name
-              ? `Konflikt: Remote enthält „${remote.name}“ am ${String(remote.date || remote.start_date_local || "").slice(0, 10)}.`
-              : "Konflikt: Die lokale und die Remote-Planung wurden gleichzeitig geändert.";
-            const conflictActions = document.createElement("div");
-            conflictActions.className = "competition-conflict-actions";
-            for (const [strategy, label] of [["keep_local", "Lokal behalten"], ["adopt_remote", "Remote übernehmen"]]) {
-              const conflictButton = document.createElement("button");
-              conflictButton.type = "button";
-              conflictButton.className = "secondary-button";
-              conflictButton.textContent = label;
-              conflictButton.addEventListener("click", () => resolvePlannedConflict(event.local_id, strategy, conflictButton));
-              conflictActions.append(conflictButton);
-            }
-            conflictRoot.append(conflictText, conflictActions);
-            body.append(conflictRoot);
-          }
           const privateAdjustment = event.private_calendar_adjustment;
           if (privateAdjustment) {
             const originRoot = document.createElement("div");
@@ -2252,17 +2082,6 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
             body.append(identity);
           }
           if (!event.is_competition) renderLocalPlanningActions(event, body);
-          if (event.id != null && event.is_remote && isCoachOwnedWorkout(event)) {
-            const actions = document.createElement("div");
-            actions.className = "card-actions";
-            const button = document.createElement("button");
-            button.type = "button";
-            button.className = "secondary-button danger-button";
-            button.textContent = "Einheit löschen";
-            button.addEventListener("click", () => deletePlanned(event.local_id || event.id, button, event.name));
-            actions.append(button);
-            body.append(actions);
-          }
           details.append(body);
           entries.append(details);
         });
@@ -2279,24 +2098,6 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
     }
     weekRoot.append(weekDays);
     root.append(weekRoot);
-  }
-}
-
-async function deletePlanned(eventId, button, name) {
-  if (!await requestConfirmation(`„${name || "Geplante Einheit"}“ wirklich lokal archivieren und für den nächsten Sync vormerken?`, { title: "Planung archivieren?" })) return;
-  button.disabled = true;
-  button.textContent = "Wird gelöscht…";
-  try {
-    await api(`/api/planned/${encodeURIComponent(eventId)}`, { method: "DELETE" });
-    state.remoteDeleteFailure = null;
-    toast("Geplante Einheit lokal entfernt; Sync vorgemerkt");
-    await load();
-  } catch (error) {
-    state.remoteDeleteFailure = { name: name || "Geplante Einheit", message: error.message };
-    renderRemoteDeleteNotice();
-    toast(error.message, true);
-    button.disabled = false;
-    button.textContent = "Einheit löschen";
   }
 }
 
@@ -2427,16 +2228,16 @@ async function executeCoachActionProposal(proposal, button) {
     const receiptMessage = duplicateDelete
       ? "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten."
       : result.local_planned
-      ? `${result.local_planned} Einheit(en) lokal geplant. Remote-Sync bleibt eine separate Freigabe.`
-      : "Planung lokal gespeichert. Sie bleibt bis zur separaten Sync-Freigabe lokal.";
+      ? `${result.local_planned} Einheit(en) lokal geplant.`
+      : "Planung lokal gespeichert.";
     addCoachReceipt({
       title: duplicateDelete ? "Duplikat gelöscht" : "Planung gespeichert",
       message: receiptMessage,
-      details: duplicateDelete ? ["Wahoo bleibt die kanonische Radaufzeichnung"] : [result.sync_job_id ? `Syncjob ${result.sync_job_id} eingereiht` : "Keine implizite Remote-Änderung"],
+      details: duplicateDelete ? ["Wahoo bleibt die kanonische Radaufzeichnung"] : [result.sync_job_ids?.length ? `${result.sync_job_ids.length} Syncjobs eingereiht` : result.sync_job_id ? `Syncjob ${result.sync_job_id} eingereiht` : "Keine implizite Remote-Änderung"],
     });
     toast(duplicateDelete ? "Garmin-Duplikat gelöscht" : result.local_planned ? `${result.local_planned} Einheit(en) lokal geplant` : "Planung lokal gespeichert");
     await load("/api/bootstrap?local=1", duplicateDelete ? ["activities"] : ["plan", "library"]);
-    if (!duplicateDelete) applyNavigationRoute("plan/calendar", { historyMode: "push" });
+    if (!duplicateDelete) applyNavigationRoute("plan", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Planung nicht gespeichert", message: error.message, status: "error" });
     toast(error.message, true);
@@ -2658,56 +2459,19 @@ function renderTrainingPlans(plans, workouts) {
   });
 }
 
-function selectedLibraryWorkouts() {
-  const workouts = Array.isArray(state.data?.library) ? state.data.library : [];
-  return workouts.filter((workout) => state.librarySelection.has(String(workout.id)));
-}
-
-function updateLibraryBulkControls() {
-  const count = state.librarySelection.size;
-  const summary = $("#librarySelectionSummary");
-  if (summary) summary.textContent = count ? `${count} Einheit${count === 1 ? "" : "en"} ausgewählt · lokale und Remote-Wirkung vorab prüfen` : "Keine Einheiten ausgewählt";
-  const clear = $("#libraryClearSelectionButton");
-  if (clear) clear.hidden = count === 0;
-  ["libraryMarkButton", "libraryUnmarkButton", "libraryArchiveButton", "librarySyncSelectedButton"].forEach((id) => {
-    const button = $("#" + id);
-    if (button) button.disabled = count === 0 || state.libraryBulkBusy;
-  });
-}
-
-function clearLibrarySelection() {
-  state.librarySelection.clear();
-  updateLibraryBulkControls();
-  document.querySelectorAll(".library-select-checkbox").forEach((checkbox) => { checkbox.checked = false; });
-}
-
 function renderLibrary(workouts) {
   const root = $("#library");
   if (!root) return;
-  setDirtyIndicator("libraryDirtyIndicator", state.libraryDateDirty.size > 0);
   root.replaceChildren();
   const allWorkouts = Array.isArray(workouts) ? workouts : [];
-  const knownIds = new Set(allWorkouts.map((workout) => String(workout.id)));
-  state.librarySelection = new Set([...state.librarySelection].filter((id) => knownIds.has(id)));
-  const filter = state.libraryFilter || "active";
-  const filterSelect = $("#libraryFilter");
-  filterSelect?.querySelector('option[value="planned"]')?.remove();
-  if (filterSelect && filterSelect.value !== filter) filterSelect.value = filter;
-  const visible = allWorkouts.filter((workout) => {
-    if (filter === "archived") return Boolean(workout.archived);
-    if (filter === "all") return true;
-    if (filter === "templates") return !workout.archived && !workout.date;
-    if (filter === "planned") return !workout.archived && Boolean(workout.date);
-    return !workout.archived;
-  });
+  const visible = allWorkouts.filter((workout) => !workout.archived && !workout.date);
   const librarySummary = $("#librarySummary");
-  if (librarySummary) librarySummary.textContent = `${visible.length} von ${allWorkouts.length} Einheiten`;
-  updateLibraryBulkControls();
+  if (librarySummary) librarySummary.textContent = `${visible.length} Einheit${visible.length === 1 ? "" : "en"}`;
   renderLibraryPagination();
   if (!visible.length) {
     const empty = document.createElement("p");
     empty.className = "context-empty";
-    empty.textContent = filter === "archived" ? "Keine archivierten Einheiten vorhanden." : "Keine Einheiten für diesen Filter gefunden.";
+    empty.textContent = "Noch keine Einheiten in der Bibliothek.";
     root.append(empty);
     return;
   }
@@ -2722,6 +2486,7 @@ function renderLibrary(workouts) {
     .forEach(([sport, sportWorkouts]) => {
       const section = document.createElement("details");
       section.className = "library-sport";
+      section.open = true;
       const summary = document.createElement("summary");
       const title = document.createElement("strong");
       title.textContent = sport;
@@ -2732,110 +2497,15 @@ function renderLibrary(workouts) {
       sportWorkouts.forEach((workout) => {
         const card = document.createElement("article");
         card.className = "library-card";
-        if (workout.archived) card.classList.add("library-card-archived");
-        const selectLabel = document.createElement("label");
-        selectLabel.className = "library-select-label";
-        selectLabel.textContent = "Auswählen";
-        const checkbox = document.createElement("input");
-        checkbox.className = "library-select-checkbox";
-        checkbox.type = "checkbox";
-        checkbox.checked = state.librarySelection.has(String(workout.id));
-        checkbox.setAttribute("aria-label", `${workout.name || "Bibliothekseinheit"} auswählen`);
-        checkbox.addEventListener("change", () => {
-          const key = String(workout.id);
-          if (checkbox.checked) state.librarySelection.add(key);
-          else state.librarySelection.delete(key);
-          updateLibraryBulkControls();
-        });
-        selectLabel.prepend(checkbox);
         const heading = document.createElement("div");
         const cardTitle = document.createElement("h4");
         cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
         const meta = document.createElement("span");
-        const syncLabel = workout.sync_status === "remote_missing"
-          ? "Remote nicht gefunden - wird beim nächsten Sync neu abgeglichen"
-          : workout.sync_status === "sync_error"
-            ? "Synchronisationsfehler - beim nächsten Sync erneut versuchen"
-            : workout.sync_status === "syncing"
-              ? "Synchronisierung läuft"
-              : workout.sync_status === "local"
-                ? "Lokal - noch nicht synchronisiert"
-                : workout.external_id
-                  ? "Mit Intervals.icu synchronisiert"
-                  : "Lokal";
-        meta.textContent = [workout.date ? `Geplant: ${dateLabel(workout.date)}` : null, workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null, workout.local_marked ? "Lokal markiert" : null, syncLabel].filter(Boolean).join(" - ");
+        meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null].filter(Boolean).join(" · ");
         heading.append(cardTitle, meta);
         const description = document.createElement("p");
         description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
-        const controls = document.createElement("div");
-        controls.className = "library-controls";
-        const dateLabelNode = document.createElement("label");
-        dateLabelNode.textContent = "Datum";
-        const dateInput = document.createElement("input");
-        dateInput.type = "date";
-        dateInput.value = state.libraryDateDrafts.get(String(workout.id))
-          ?? addDateKey(timezoneDateKey(state.data?.profile?.timezone, new Date()), 1);
-        const markLibraryDateDirty = () => {
-          const key = String(workout.id);
-          state.libraryDateDrafts.set(key, dateInput.value);
-          state.libraryDateDirty.add(key);
-          setDirtyIndicator("libraryDirtyIndicator", true);
-        };
-        dateInput.addEventListener("input", markLibraryDateDirty);
-        dateInput.addEventListener("change", markLibraryDateDirty);
-        dateLabelNode.append(dateInput);
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "secondary-button";
-        button.textContent = "Als lokale Einheit einplanen";
-        button.addEventListener("click", () => planLibraryWorkout(workout.id, dateInput, button));
-        controls.append(dateLabelNode, button);
-        if (!workout.date) {
-          const editor = document.createElement("details");
-          editor.className = "library-editor";
-          const editorSummary = document.createElement("summary");
-          editorSummary.textContent = "Vorlage bearbeiten";
-          const form = document.createElement("form");
-          form.className = "library-edit-form";
-          const nameInput = document.createElement("input");
-          nameInput.value = workout.name || "";
-          nameInput.maxLength = 200;
-          nameInput.required = true;
-          const descriptionInput = document.createElement("textarea");
-          descriptionInput.value = workout.description || "";
-          descriptionInput.maxLength = 12000;
-          descriptionInput.rows = 3;
-          const save = document.createElement("button");
-          save.type = "submit";
-          save.className = "secondary-button";
-          save.textContent = "Speichern";
-          form.append(nameInput, descriptionInput, save);
-          form.addEventListener("submit", async (event) => {
-            event.preventDefault();
-            save.disabled = true;
-            try { await updateLibraryEntry(workout.id, { action: "update", name: nameInput.value, description: descriptionInput.value }); toast("Bibliothekseinheit gespeichert"); await load(); }
-            catch (error) { toast(error.message, true); save.disabled = false; }
-          });
-          editor.append(editorSummary, form);
-          controls.append(editor);
-          const archive = document.createElement("button");
-          archive.type = "button";
-          archive.className = "secondary-button";
-          archive.textContent = workout.archived ? "Wiederherstellen" : "Archivieren";
-          archive.addEventListener("click", () => updateLibraryEntry(workout.id, { action: workout.archived ? "restore" : "archive" }));
-          controls.append(archive);
-          if (!workout.external_id) {
-            const remove = document.createElement("button");
-            remove.type = "button";
-            remove.className = "secondary-button danger-button";
-            remove.textContent = "Löschen";
-            remove.addEventListener("click", () => {
-              requestConfirmation(`„${workout.name || "Bibliothekseinheit"}“ wirklich lokal löschen?`, { title: "Vorlage löschen?" }).then((confirmed) => { if (confirmed) updateLibraryEntry(workout.id, { action: "delete" }); });
-            });
-            controls.append(remove);
-          }
-        }
-        card.append(selectLabel, heading, description, controls);
+        card.append(heading, description);
         cards.append(card);
       });
       section.append(cards);
@@ -2851,7 +2521,7 @@ function renderLibraryPagination() {
   const more = document.createElement("button");
   more.type = "button";
   more.className = "secondary-button";
-  more.textContent = "Weitere lokale Vorlagen laden";
+  more.textContent = "Weitere Einheiten laden";
   more.addEventListener("click", loadMoreLibrary);
   pagination.append(more);
 }
@@ -2861,7 +2531,7 @@ async function loadMoreLibrary() {
   const cursor = state.data?.library_next_cursor;
   if (!pagination || !cursor) return;
   const button = pagination.querySelector("button");
-  if (button) { button.disabled = true; button.textContent = "Weitere Vorlagen werden geladen…"; }
+  if (button) { button.disabled = true; button.textContent = "Weitere Einheiten werden geladen…"; }
   try {
     const result = await api(`/api/library?limit=100&cursor=${encodeURIComponent(cursor)}`);
     state.data.library = [...(state.data.library || []), ...(result.workouts || [])];
@@ -2871,164 +2541,6 @@ async function loadMoreLibrary() {
     toast(error.message, true);
     if (button) button.disabled = false;
   }
-}
-
-function describeLibraryBulkPreview(preview, remote = false) {
-  const entries = Array.isArray(preview.entries) ? preview.entries : [];
-  const lines = entries.slice(0, 8).map((entry) => {
-    if (remote) return `${entry.name || "Einheit"} · Status: ${entry.sync_status || "lokal"}`;
-    const fields = Object.entries(entry.fields || {}).map(([key, value]) => `${key}: ${value.before} → ${value.after}`);
-    return `${entry.name || "Einheit"}${fields.length ? ` · ${fields.join(", ")}` : " · keine Änderung"}`;
-  });
-  if (entries.length > lines.length) lines.push(`… und ${entries.length - lines.length} weitere`);
-  return lines.join("\n");
-}
-
-async function executeLibraryActionPreview(preview, message) {
-  if (!await requestConfirmation(message + "\n\n" + describeLibraryBulkPreview(preview, preview.target_system === "intervals"), { title: "Bulk-Aktion bestätigen?" })) return null;
-  if (preview.target_system === "local") {
-    return api("/api/library/bulk", { method: "POST", body: JSON.stringify(preview.payload) });
-  }
-  const job = await api("/api/sync/jobs", {
-    method: "POST",
-    body: JSON.stringify({ provider: "intervals", type: "plan_push", payload: { ...preview.payload, reason: "manueller Bibliothekssync" } }),
-  });
-  return { status: "queued", sync_job_id: job.id, job, results: [], failed_object_ids: [] };
-}
-
-function renderLibraryBulkResult(result) {
-  const root = $("#libraryBulkResult");
-  if (!root) return;
-  root.replaceChildren();
-  if (!result) return;
-  const summary = document.createElement("strong");
-  summary.textContent = result.status === "partial" ? "Teilweise ausgeführt" : result.status === "error" ? "Nicht ausgeführt" : "Bulk-Aktion abgeschlossen";
-  root.append(summary);
-  if (Array.isArray(result.results)) {
-    const list = document.createElement("ul");
-    result.results.forEach((item) => {
-      const row = document.createElement("li");
-      row.textContent = `${item.library_workout_id}: ${item.status}${item.error ? ` · ${item.error}` : ""}`;
-      list.append(row);
-    });
-    root.append(list);
-  }
-  if (Array.isArray(result.failed_object_ids) && result.failed_object_ids.length) {
-    const retry = document.createElement("span");
-    retry.textContent = "Die fehlgeschlagenen Einheiten sind wieder ausgewählt und können nach erneuter Vorschau wiederholt werden.";
-    root.append(retry);
-  }
-}
-
-async function runLibraryBulkLocalAction(action) {
-  const selected = selectedLibraryWorkouts();
-  if (!selected.length) return;
-  const entries = selected.map((workout) => ({ library_workout_id: String(workout.id) }));
-  state.libraryBulkBusy = true;
-  updateLibraryBulkControls();
-  try {
-    const preview = await api("/api/library/bulk/preview", { method: "POST", body: JSON.stringify({ action, entries }) });
-    const message = action === "archive"
-      ? `Nur lokal archivieren? ${selected.length} Einheit(en) werden nicht gelöscht und kein Remote-System wird beschrieben.`
-      : `Nur lokal ${action === "mark" ? "markieren" : "die Markierung entfernen"}? ${selected.length} Einheit(en) werden geändert.`;
-    const result = await executeLibraryActionPreview(preview, message);
-    if (!result) return;
-    renderLibraryBulkResult(result);
-    toast("Lokale Bulk-Aktion abgeschlossen");
-    clearLibrarySelection();
-    await load();
-  } catch (error) { toast(error.message, true); }
-  finally { state.libraryBulkBusy = false; updateLibraryBulkControls(); }
-}
-
-async function runLibraryBulkRemoteSync() {
-  const selected = selectedLibraryWorkouts();
-  if (!selected.length) return;
-  state.libraryBulkBusy = true;
-  updateLibraryBulkControls();
-  try {
-    const preview = await api("/api/library/bulk-sync/preview", {
-      method: "POST",
-      body: JSON.stringify({ entries: selected.map((workout) => ({ library_workout_id: String(workout.id) })) }),
-    });
-    const plannedCount = selected.filter((workout) => workout.date).length;
-    const plannedNotice = plannedCount
-      ? ` Davon werden ${plannedCount} datierte Planung(en) ebenfalls im Kalender angelegt oder aktualisiert.`
-      : "";
-    const result = await executeLibraryActionPreview(preview, `Remote-Sync zu Intervals.icu für exakt ${selected.length} ausgewählte Einheit(en) freigeben?${plannedNotice}`);
-    if (!result) return;
-    renderLibraryBulkResult(result);
-    state.librarySelection = new Set(result.failed_object_ids || []);
-    toast(result.status === "partial" ? "Remote-Sync teilweise abgeschlossen" : "Remote-Sync abgeschlossen");
-    await load();
-  } catch (error) { toast(error.message, true); }
-  finally { state.libraryBulkBusy = false; updateLibraryBulkControls(); }
-}
-
-async function loadLibrary() {
-  const button = $("#libraryLoadButton");
-  const root = $("#library");
-  if (!button || !root) return;
-  if (state.data?.provider_resync?.intervals?.running || state.localSync.intervalsFull) {
-    toast("Intervals.icu wird gerade vollständig neu geladen.", true);
-    return;
-  }
-  button.disabled = true;
-  button.textContent = "Bibliothek wird geladen…";
-  try {
-    const preview = await api("/api/planning/sync/preview", { method: "POST", body: "{}" });
-    const summary = preview.summary || {};
-    const changeCount = Object.entries(summary)
-      .filter(([key]) => key !== "planned")
-      .reduce((total, [, value]) => total + Number(value || 0), 0);
-    const plannedCount = Number(summary.planned || 0);
-    const confirmed = await requestConfirmation(
-      `Bibliothekssync zu Intervals.icu freigeben? ${changeCount} lokale Einträge: ` +
-      `${summary.new || 0} neu, ${summary.changed || 0} geändert, ` +
-      `${summary.missing || 0} fehlend, ${summary.error_retry || 0} Fehlerwiederholung` +
-      `${plannedCount ? `; ${plannedCount} datierte Planung(en) werden ebenfalls in den Kalender übertragen` : ""}. ` +
-      "Die Vorschau ist nur 10 Minuten gültig."
-    );
-    if (!confirmed) return;
-    const result = await api("/api/planning/sync/approved", {
-      method: "POST",
-      body: JSON.stringify({ confirm: "LIBRARY_SYNC", fingerprint: preview.fingerprint }),
-    });
-    toast(result.status === "queued" ? `${result.job_ids?.length || 0} Bibliotheks-Syncjob(s) eingereiht` : "Bibliothek ist bereits aktuell");
-    await load();
-  } catch (error) {
-    root.replaceChildren();
-    const message = document.createElement("p");
-    message.className = "error";
-    message.textContent = error.message;
-    root.append(message);
-  } finally {
-    button.disabled = false;
-    button.textContent = "Vorschau für Bibliotheks- und Planungssync";
-  }
-}
-
-async function updateLibraryEntry(id, payload) {
-  try {
-    await api(`/api/library/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(payload) });
-    toast(payload.action === "archive" ? "Bibliothekseinheit archiviert" : payload.action === "restore" ? "Bibliothekseinheit wiederhergestellt" : payload.action === "delete" ? "Bibliothekseinheit gelöscht" : "Bibliothekseinheit gespeichert");
-    await load();
-  } catch (error) { toast(error.message, true); }
-}
-
-async function planLibraryWorkout(workoutId, dateInput, button) {
-  if (!dateInput.value) { toast("Bitte ein Datum auswählen", true); return; }
-  button.disabled = true;
-  button.textContent = "Lokale Einheit wird gespeichert…";
-  try {
-    await api("/api/library/" + encodeURIComponent(workoutId) + "/plan", { method: "POST", body: JSON.stringify({ date: dateInput.value }) });
-    state.libraryDateDirty.delete(String(workoutId));
-    state.libraryDateDrafts.delete(String(workoutId));
-    setDirtyIndicator("libraryDirtyIndicator", state.libraryDateDirty.size > 0);
-    toast("Lokale Bibliothekseinheit gespeichert");
-    await load();
-  } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Als lokale Einheit einplanen"; }
 }
 
 function renderProfile(profile) {
@@ -3215,19 +2727,7 @@ function competitionCard(competition = {}, index = 0) {
   priority.textContent = `${competition.priority || "B"}-Wettkampf`;
   top.append(title, priority);
 
-  if (competition.sync_state === "conflict") {
-    const conflict = document.createElement("div");
-    conflict.className = "competition-conflict";
-    const remote = (() => {
-      try { return JSON.parse(competition.sync_conflict || "{}").remote || {}; } catch (_) { return {}; }
-    })();
-    const message = document.createElement("span");
-    message.textContent = remote.name
-      ? `Konflikt mit „${remote.name}“ am ${dateLabel(remote.event_date || "")}. Bitte mit dem Coach klären.`
-      : "Das Remote-Event konnte nicht eindeutig zugeordnet werden. Bitte mit dem Coach klären.";
-    conflict.append(message);
-    card.append(conflict);
-  } else if (competition.sync_state === "local_override") {
+  if (competition.sync_state === "local_override") {
     const status = document.createElement("small");
     status.className = "competition-sync-state";
     status.textContent = "Lokal priorisiert · der Coach kann den nächsten Sync ausführen";
@@ -3883,7 +3383,6 @@ function render(data) {
   const firstRender = !state.data;
   state.data = data;
   renderAppVersion(data.app);
-  renderRemoteDeleteNotice();
   renderCoachOverview(data);
   renderCoachReceipts();
   renderQuickMessageTemplates();
@@ -3892,31 +3391,10 @@ function render(data) {
   renderMessages(data.messages, firstRender);
   renderToday(data);
   renderActivities(data.activities || []);
-  renderPlanned(data.planned || [], data.external_calendar?.events || [], data.daily_planning_context || [], data.competitions || []);
-  renderActivePlanSegment(data);
-  const librarySyncDetail = $("#librarySyncDetail");
-  if (librarySyncDetail) {
-    const libraryState = data.library_sync?.state || {};
-    const pending = Number(libraryState.local || 0) + Number(libraryState.sync_error || 0)
-      + Number(libraryState.planned_local || 0) + Number(libraryState.planned_sync_error || 0);
-    const missing = Number(libraryState.remote_missing || 0) + Number(libraryState.planned_remote_missing || 0);
-    const conflicts = Number(libraryState.planned_conflicts || 0);
-    const stateHint = [
-      pending ? `${pending} lokale Einheit${pending === 1 ? "" : "en"} noch nicht synchronisiert` : null,
-      missing ? `${missing} Remote-Einheit${missing === 1 ? "" : "en"} nicht gefunden` : null,
-      conflicts ? `${conflicts} Konflikt${conflicts === 1 ? "" : "e"} zu klären` : null,
-    ].filter(Boolean).join(" · ");
-    librarySyncDetail.textContent = data.library_sync?.last_error
-      ? data.library_sync.last_error
-      : data.library_sync?.last_sync_at
-        ? ["Letzte Aktualisierung: " + formatTime(data.library_sync.last_sync_at), stateHint].filter(Boolean).join(" · ")
-        : stateHint || "Noch nicht synchronisiert";
-    librarySyncDetail.classList.toggle("error", Boolean(data.library_sync?.last_error || libraryState.sync_error));
-  }
+  renderLibrary(data.library || []);
   renderProfile(data.profile);
   renderCheckins(data.checkins || data.local_feedback?.recent || [], data.profile?.timezone);
   renderGarmin(data.garmin);
-  if (state.planSegment === "goals") renderCompetitions(data.competitions || []);
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
   renderPerformance(data.performance);
@@ -4079,28 +3557,17 @@ async function pollChatStatus() {
 
 async function loadInitialState() {
   const route = routeFromHash();
-  const segment = planSegmentFromRoute(route);
   state.analysisSegment = analysisSegmentFromRoute(route);
   const areas = ["chat", "activities", "performance", "feedback", "profile"];
   areas.push("weather");
-  if (route === "today" || (baseRoute(route) === "plan" && segment !== "templates")) areas.push("plan");
-  if (baseRoute(route) === "plan" && segment === "templates") areas.push("library");
+  if (route === "today") areas.push("plan");
+  if (baseRoute(route) === "plan") areas.push("library");
   await load("/api/bootstrap?local=1", areas);
   if (state.data?.profile?.weather_location) {
     await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
   }
   connectStateEvents();
   scheduleChatStatusPoll(0);
-}
-
-function renderActivePlanSegment(data = state.data) {
-  if (!data) return;
-  renderPlanSegments(state.planSegment);
-  if (state.planSegment === "templates") renderLibrary(data.library || []);
-  if (state.planSegment === "goals") {
-    renderCompetitions(data.competitions || []);
-    renderTrainingPlans(data.plans || [], data.library || []);
-  }
 }
 
 function queueChatMessage(message, mode) {
@@ -4578,61 +4045,6 @@ async function saveActivityFeedback(event, activity, button) {
   }
 }
 
-async function prepareReplan() {
-  const button = $("#adaptivePlanningButton");
-  if (!button) return;
-  state.localSync.adaptivePlanning = true;
-  button.disabled = true;
-  button.textContent = "Prüfung läuft…";
-  try {
-    const result = await api("/api/planning/replan", { method: "POST", body: JSON.stringify({ apply: false }) });
-    await load();
-    if (result.changes?.length || result.illness_pause) openAdaptivePlanningDialog(result);
-    else toast("Keine Planungsanpassung nötig");
-  } catch (error) { toast(error.message, true); }
-  finally {
-    state.localSync.adaptivePlanning = false;
-    renderAdaptivePlanning(state.data || {});
-  }
-}
-
-async function applyReplan() {
-  const button = $("#applyAdaptivePlanningButton");
-  const adjustmentId = button?.dataset.adjustmentId;
-  const syncIllness = Boolean($("#syncIllnessToIntervals")?.checked);
-  const confirmation = syncIllness
-    ? "Krankheitspause bestätigen, die nächsten Tage im lokalen Check-in füllen, die Planung umbauen und Krankheitstage als SICK-Einträge nach Intervals.icu synchronisieren?"
-    : "Krankheitspause bestätigen, die nächsten Tage im lokalen Check-in füllen und die lokale Planung umbauen? Intervals.icu wird dabei nicht verändert.";
-  if (!button || !adjustmentId || !await requestConfirmation(confirmation, { title: "Adaptive Planung anwenden?" })) return;
-  button.disabled = true;
-  try {
-    const changes = state.data?.planning?.latest_replan?.changes || [];
-    const illnessPause = state.data?.planning?.latest_replan?.illness_pause || null;
-    const preview = await api("/api/coach/actions/preview", {
-      method: "POST",
-      body: JSON.stringify({
-        action_type: "apply_adaptive_replan",
-        target_system: syncIllness ? "local+intervals" : "local",
-        object_ids: { adjustment_id: adjustmentId },
-        diff: { changes, illness_pause: illnessPause },
-        payload: { adjustment_id: adjustmentId, sync_illness_to_intervals: syncIllness },
-      }),
-    });
-    const confirmed = await api("/api/coach/actions/confirm", {
-      method: "POST",
-      body: JSON.stringify({ proposal_id: preview.proposed_action.id }),
-    });
-    const result = await api("/api/coach/actions/execute", {
-      method: "POST",
-      body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
-    });
-    $("#adaptivePlanningDialog")?.close();
-    toast(result.intervals_sync?.status === "error" ? "Lokale Krankheitspause angewendet; Intervals.icu-Synchronisierung fehlgeschlagen" : "Krankheitspause und adaptive Anpassung angewendet");
-    await load();
-  } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; }
-}
-
 async function downloadDatabaseBackup() {
   const button = $("#backupDownloadButton");
   if (button) button.disabled = true;
@@ -4856,11 +4268,6 @@ document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("
   const linkedRoute = String(link.getAttribute("href") || "").replace(/^#/, "").trim();
   applyNavigationRoute(linkedRoute || link.dataset.route, { historyMode: "push" });
 }));
-document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEventListener("click", (event) => {
-  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  event.preventDefault();
-  applyNavigationRoute(`plan/${link.dataset.planSegment}`, { historyMode: "push" });
-}));
 document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
@@ -4912,13 +4319,9 @@ $("#garminFullResyncButton").addEventListener("click", () => fullResync("garmin"
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#checkinForm").addEventListener("submit", saveCheckin);
 $("#checkinCloseButton").addEventListener("click", () => $("#checkinDialog")?.close());
-$("#adaptivePlanningButton").addEventListener("click", prepareReplan);
-$("#applyAdaptivePlanningButton").addEventListener("click", applyReplan);
-$("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptivePlanningDialog")?.close());
-$("#coachAdaptivePlanningButton").addEventListener("click", () => applyNavigationRoute("plan/calendar", { historyMode: "push" }));
+$("#coachAdaptivePlanningButton").addEventListener("click", () => askCoach("Prüfe meine nächsten geplanten Einheiten und schlage sinnvolle Anpassungen vor."));
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
-$("#competitionCoachButton").addEventListener("click", askCoachAboutCompetitions);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
@@ -4933,16 +4336,6 @@ $("#notificationEnableButton").addEventListener("click", enableNotifications);
 $("#backupDownloadButton").addEventListener("click", downloadDatabaseBackup);
 $("#backupRestoreButton").addEventListener("click", restoreDatabaseBackup);
 $("#logoutButton").addEventListener("click", logout);
-$("#libraryLoadButton").addEventListener("click", loadLibrary);
-$("#libraryFilter").addEventListener("change", (event) => { state.libraryFilter = event.target.value; clearLibrarySelection(); renderLibrary(state.data?.library || []); });
-$("#librarySelectVisibleButton").addEventListener("click", () => {
-  document.querySelectorAll(".library-select-checkbox").forEach((checkbox) => { checkbox.checked = true; checkbox.dispatchEvent(new Event("change")); });
-});
-$("#libraryClearSelectionButton").addEventListener("click", clearLibrarySelection);
-$("#libraryMarkButton").addEventListener("click", () => runLibraryBulkLocalAction("mark"));
-$("#libraryUnmarkButton").addEventListener("click", () => runLibraryBulkLocalAction("unmark"));
-$("#libraryArchiveButton").addEventListener("click", () => runLibraryBulkLocalAction("archive"));
-$("#librarySyncSelectedButton").addEventListener("click", runLibraryBulkRemoteSync);
 $("#systemContextPreviewButton").addEventListener("click", () => {
   $("#systemContextPreviewButton").dataset.loaded = "false";
   loadContextPreview();
