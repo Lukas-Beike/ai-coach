@@ -3413,6 +3413,17 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["daily_stats"][1]["totalSteps"], 1234)
         self.assertEqual(result["provider_sync"]["pagination"]["daily_stats"]["records"], 2)
 
+    def test_garmin_capability_breaker_pauses_repeated_same_error(self):
+        error = server.AppError(503, "provider unavailable", reason="network_error")
+        for _ in range(server.GARMIN_CAPABILITY_FAILURE_LIMIT):
+            server._garmin_capability_failure("body_battery", error)
+        self.assertFalse(server._garmin_capability_allowed("body_battery"))
+        state = server._garmin_capability_state("body_battery")
+        self.assertEqual(state["count"], server.GARMIN_CAPABILITY_FAILURE_LIMIT)
+        self.assertEqual(state["error_class"], "network_error")
+        server._garmin_capability_success("body_battery")
+        self.assertTrue(server._garmin_capability_allowed("body_battery"))
+
     def test_intervals_collection_rejects_repeated_full_page(self):
         client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         page = [{"id": f"activity-{index}"} for index in range(500)]
@@ -3433,6 +3444,8 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(snapshot["provider_sync"]["pagination"]["activities"]["complete"])
         self.assertEqual(snapshot["provider_sync"]["pagination"]["activities"]["records"], 1)
         self.assertTrue(snapshot["provider_sync"]["pagination"]["events"]["complete"])
+        self.assertEqual(snapshot["raw_provider_data"]["activities"][0]["id"], "activity-1")
+        self.assertEqual(snapshot["raw_provider_data"]["wellness"][0]["id"], "2026-08-31")
 
     def test_chat_creation_request_creates_local_action_preview(self):
         future_date = (date.today() + timedelta(days=1)).isoformat()

@@ -3127,6 +3127,25 @@ def sync_date_windows(days: int, end_date: date | None = None) -> list[tuple[dat
     )
 
 
+def provider_sync_cursor(provider: str, stream: str) -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        row = db.execute(
+            "SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors WHERE provider=? AND stream=?",
+            (provider, stream),
+        ).fetchone()
+    return dict(row) if row else {"provider": provider, "stream": stream, "cursor": None, "high_water_mark": None, "updated_at": None}
+
+
+def update_provider_sync_cursor(provider: str, stream: str, cursor: str, high_water_mark: str | None = None) -> None:
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        db.execute(
+            "INSERT INTO provider_sync_cursors(provider, stream, cursor, high_water_mark, updated_at) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(provider, stream) DO UPDATE SET cursor=excluded.cursor, high_water_mark=excluded.high_water_mark, updated_at=excluded.updated_at",
+            (str(provider)[:40], str(stream)[:80], str(cursor)[:120], str(high_water_mark or "")[:120], now),
+        )
+
+
 def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
     if db is not None:
         KEY_VALUE_REPOSITORY.set(db, key, value)
@@ -3815,6 +3834,67 @@ def persist_garmin_error(message: Any, source: str = "sync") -> None:
     set_kv("last_garmin_error", json.dumps([{"source": source, "message": safe_message}], ensure_ascii=False))
 
 
+GARMIN_CAPABILITY_FAILURE_LIMIT = 3
+GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
+
+
+def _garmin_capability_state(source: str) -> dict[str, Any]:
+    try:
+        value = json.loads(get_kv(f"garmin_capability_{source}") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        value = {}
+    return value if isinstance(value, dict) else {}
+
+
+def _garmin_capability_allowed(source: str) -> bool:
+    state = _garmin_capability_state(source)
+    paused_until = str(state.get("paused_until") or "")
+    try:
+        return datetime.fromisoformat(paused_until.replace("Z", "+00:00")) <= datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        return True
+
+
+def _garmin_capability_failure(source: str, error: BaseException) -> None:
+    state = _garmin_capability_state(source)
+    error_class = _sync_job_error_class(error)
+    if state.get("error_class") != error_class:
+        state = {"error_class": error_class, "count": 0}
+    count = int(state.get("count") or 0) + 1
+    state["count"] = count
+    state["last_failed_at"] = utc_now()
+    if count >= GARMIN_CAPABILITY_FAILURE_LIMIT:
+        state["paused_until"] = (datetime.now(timezone.utc) + timedelta(seconds=GARMIN_CAPABILITY_PAUSE_SECONDS)).isoformat()
+    set_kv(f"garmin_capability_{source}", json.dumps(state, ensure_ascii=False, separators=(",", ":")))
+
+
+def _garmin_capability_success(source: str) -> None:
+    if _garmin_capability_state(source):
+        set_kv(f"garmin_capability_{source}", "")
+
+
+def _merge_garmin_records(incoming: Any, previous: Any) -> list[Any]:
+    """Merge bounded-window Garmin results without discarding older snapshots."""
+    values = []
+    if isinstance(incoming, list):
+        values.extend(incoming)
+    if isinstance(previous, list):
+        values.extend(previous)
+    merged: list[Any] = []
+    seen: set[tuple[str, str]] = set()
+    for value in values:
+        if not isinstance(value, dict):
+            merged.append(value)
+            continue
+        identity = first_present(value, ("id", "activityId", "calendarDate", "summaryDate", "date", "startTime"))
+        key = ("identity", str(identity)) if identity not in (None, "") else ("payload", json.dumps(value, sort_keys=True, ensure_ascii=False, default=str))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(value)
+    return merged
+
+
 @observed_sync("garmin", "data")
 @maintenance_operation
 @garmin_operation
@@ -3845,6 +3925,7 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
             set_kv("last_garmin_sync_at", payload["synced_at"])
             mark_daily_sync("garmin")
             set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
+            update_provider_sync_cursor("garmin", "data", payload.get("end", ""), payload["synced_at"])
             return {"status": "partial" if payload.get("errors") else "ok", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
         except Exception as exc:
             error = redact_text(str(exc))[:1000]
@@ -3902,7 +3983,15 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
                 exc_info=(type(exc), exc, exc.__traceback__),
             ),
             status=lambda message: set_kv("garmin_sync_status", message),
+            capability_allowed=_garmin_capability_allowed,
+            capability_failure=_garmin_capability_failure,
+            capability_success=_garmin_capability_success,
         )
+        for collection in ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr"):
+            if collection in previous or collection in payload:
+                payload[collection] = _merge_garmin_records(payload.get(collection), previous.get(collection))
+        if previous.get("start") and payload.get("start"):
+            payload["start"] = min(str(previous["start"]), str(payload["start"]))
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
         payload["sport_max_hr"] = merge_garmin_max_hr(
             garmin_activity_max_hr(payload.get("activities")), previous.get("sport_max_hr")
@@ -3914,6 +4003,7 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
         set_kv("last_garmin_sync_at", payload["synced_at"])
         mark_daily_sync("garmin")
         set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
+        update_provider_sync_cursor("garmin", "data", windows[-1][1].isoformat(), payload["synced_at"])
         return {"status": "partial" if payload["errors"] else "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
@@ -6629,7 +6719,7 @@ def weather_state(
 ) -> dict[str, Any]:
     query = get_profile().get("weather_location", "").strip()[:200]
     if not query:
-        return {"configured": False, "provider": "Open-Meteo", "days": [], "recommendations": [], "message": "Hinterlege im Profil einen Wetterort (Stadt oder PLZ)."}
+        return {"configured": False, "state": "not_configured", "provider": "Open-Meteo", "days": [], "recommendations": [], "message": "Hinterlege im Profil einen Wetterort (Stadt oder PLZ)."}
     try:
         cached = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
     except (TypeError, json.JSONDecodeError):
@@ -6697,13 +6787,14 @@ def weather_state(
         if not refresh:
             return {
                 "configured": True,
+                "state": "loading",
                 "provider": "Open-Meteo",
                 "days": [],
                 "recommendations": [],
                 "loading": True,
                 "message": "Wetterdaten werden nachgeladen.",
             }
-        return {"configured": True, "provider": "Open-Meteo", "days": [], "recommendations": [], "error": error or "Wetterdaten sind nicht verfügbar."}
+        return {"configured": True, "state": "error", "provider": "Open-Meteo", "days": [], "recommendations": [], "error": error or "Wetterdaten sind nicht verfügbar."}
     forecast = cached.get("forecast")
     recommendations = []
     today = local_now().date()
@@ -6721,6 +6812,7 @@ def weather_state(
             recommendations.append(recommendation)
     result = {
         "configured": True,
+        "state": "stale" if error else "ready",
         "provider": "Open-Meteo",
         "attribution": "Wetterdaten: Open-Meteo.com (CC BY 4.0)",
         "model": cached.get("model"),
@@ -7261,6 +7353,15 @@ class IntervalsClient:
         )
         athlete_data = self.get(f"/athlete/{athlete}")
         incoming = compact_snapshot(athlete_data, activities, wellness, events, history_days=request_days)
+        # Keep the complete provider collections in the durable snapshot. The
+        # compact fields above are the read model; Coach projection is the only
+        # layer allowed to reduce them for prompt size.
+        incoming["raw_provider_data"] = {
+            "athlete": athlete_data if isinstance(athlete_data, dict) else {},
+            "activities": activities,
+            "wellness": wellness,
+            "upcoming_calendar": events,
+        }
         incoming["provider_sync"] = {
             "pagination": self.pagination,
             "calendar_window": {"start": calendar_start.isoformat(), "end": calendar_end.isoformat()},
@@ -7270,6 +7371,13 @@ class IntervalsClient:
         merged = dict(incoming)
         merged["recent_activities"] = deduplicate_api_records(incoming["recent_activities"] + existing.get("recent_activities", []))[:500]
         merged["recent_wellness"] = deduplicate_api_records(incoming["recent_wellness"] + existing.get("recent_wellness", []))[-(max(42, activity_days) + 1):]
+        previous_raw = existing.get("raw_provider_data") if isinstance(existing.get("raw_provider_data"), dict) else {}
+        merged["raw_provider_data"] = {
+            "athlete": incoming["raw_provider_data"]["athlete"],
+            "activities": deduplicate_api_records(incoming["raw_provider_data"]["activities"] + (previous_raw.get("activities") or [])),
+            "wellness": deduplicate_api_records(incoming["raw_provider_data"]["wellness"] + (previous_raw.get("wellness") or [])),
+            "upcoming_calendar": incoming["raw_provider_data"]["upcoming_calendar"],
+        }
         merged["incremental"] = True
         merged["incremental_window_days"] = request_days
         return merged
@@ -10438,6 +10546,8 @@ def sync_intervals(
         set_kv("morning_checkin_error", "")
         period_label = "alle verfügbaren Daten" if activity_days == ALL_SYNC_DAYS else f"letzte {activity_days} Tage"
         sync_window = sync_date_windows(activity_days)
+        update_provider_sync_cursor("intervals", "activities", sync_window[-1][1].isoformat(), snapshot["synced_at"])
+        update_provider_sync_cursor("intervals", "wellness", sync_window[-1][1].isoformat(), snapshot["synced_at"])
         set_kv("last_sync_window_start", sync_window[0][0].isoformat())
         set_kv("last_sync_window_end", sync_window[-1][1].isoformat())
         pagination = snapshot.get("provider_sync", {}).get("pagination", {}) if isinstance(snapshot, dict) else {}

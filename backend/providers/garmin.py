@@ -8,6 +8,7 @@ and returns a bounded, provider-labelled collection result.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from typing import Any
 
@@ -16,6 +17,9 @@ ExternalCall = Callable[[str, str, Callable[[], Any], dict[str, Any] | None], An
 Redact = Callable[[str], str]
 WarningLogger = Callable[[str, str, BaseException], None]
 StatusCallback = Callable[[str], None]
+CapabilityAllowed = Callable[[str], bool]
+CapabilityFailure = Callable[[str, BaseException], None]
+CapabilitySuccess = Callable[[str], None]
 
 
 def collect_garmin_data(
@@ -29,6 +33,9 @@ def collect_garmin_data(
     redact: Redact,
     warn: WarningLogger | None = None,
     status: StatusCallback | None = None,
+    capability_allowed: CapabilityAllowed | None = None,
+    capability_failure: CapabilityFailure | None = None,
+    capability_success: CapabilitySuccess | None = None,
 ) -> dict[str, Any]:
     """Collect Garmin ranges through injected application boundaries.
 
@@ -53,6 +60,11 @@ def collect_garmin_data(
 
     def fetch_range(key: str, fetch: Any, window_start: date, window_end: date) -> None:
         stats = pagination.setdefault(key, {"windows": len(windows), "records": 0, "complete": True})
+        if capability_allowed is not None and not capability_allowed(key):
+            stats["complete"] = False
+            stats["paused"] = True
+            stats["error"] = "capability_paused"
+            return
         try:
             value = external_call(
                 "garmin",
@@ -65,18 +77,34 @@ def collect_garmin_data(
                 stats["records"] = int(stats["records"]) + len(value)
             elif value is not None and key not in payload:
                 payload[key] = value
+            if capability_success:
+                capability_success(key)
         except Exception as exc:
             stats["complete"] = False
             stats["error"] = redact(str(exc))[:500]
+            if capability_failure:
+                capability_failure(key, exc)
             add_error(key, exc)
 
     for index, (window_start, window_end) in enumerate(windows, 1):
         if status:
             status(f"Garmin: Zeitraum {index}/{len(windows)} wird synchronisiert…")
-        fetch_range("sleep", client.get_sleep_daily, window_start, window_end)
-        fetch_range("hrv", client.get_hrv_data_range, window_start, window_end)
-        fetch_range("body_battery", client.get_body_battery, window_start, window_end)
-        fetch_range("activities", client.get_activities_by_date, window_start, window_end)
+        requests = (
+            ("sleep", client.get_sleep_daily),
+            ("hrv", client.get_hrv_data_range),
+            ("body_battery", client.get_body_battery),
+            ("activities", client.get_activities_by_date),
+        )
+        # Garmin's range endpoints are independent. Keep the concurrency
+        # deliberately at two calls so the provider is not flooded and the
+        # persisted job can still report one bounded window at a time.
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="garmin-range") as executor:
+            futures = [
+                executor.submit(fetch_range, key, fetch, window_start, window_end)
+                for key, fetch in requests
+            ]
+            for future in futures:
+                future.result()
 
     daily_stats_fetch = getattr(client, "get_user_summary", None) or getattr(client, "get_stats", None)
     if callable(daily_stats_fetch):
