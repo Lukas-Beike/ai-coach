@@ -46,7 +46,7 @@ test.describe("critical browser states", () => {
   test("login, main views, dialog and profile form state", async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);
 
-    await page.goto("/#profile");
+    await page.goto("/#more/profile");
     await expect(page.locator("#loginDialog")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Anmelden" })).toBeVisible();
     await page.getByLabel("Passwort").fill(APP_PASSWORD);
@@ -114,7 +114,7 @@ test.describe("critical browser states", () => {
     await expect(page).toHaveURL(/#plan$/);
     await expect(page.getByRole("heading", { name: "Bibliothek", exact: true })).toBeVisible();
     await expect(page.locator("#libraryLoadButton, #libraryFilter, #librarySelectVisibleButton, #librarySyncSelectedButton")).toHaveCount(0);
-    await page.goto("/#planned/goals");
+    await page.goto("/#plan");
     await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#plan$/);
 
@@ -153,7 +153,7 @@ test.describe("critical browser states", () => {
     await page.keyboard.press("Enter");
     await expect(page.locator("#todayPanel")).toHaveClass(/active/);
 
-    await page.goto("/#profile");
+    await page.goto("/#more/profile");
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
     const profileName = page.getByLabel("Name");
     await profileName.fill("Fixture Athlete");
