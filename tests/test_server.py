@@ -283,6 +283,137 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("secret-pass", state["items"][0]["error_detail"])
         self.assertNotIn("private-token-aaaaaaaa", state["items"][0]["error_detail"])
 
+    def test_plan_push_job_preserves_all_failed_object_outcomes(self):
+        local_id = str(uuid.uuid4())
+        job = server.enqueue_sync_job(
+            "intervals",
+            "plan_push",
+            {"entries": [{"library_workout_id": local_id, "expected_payload_hash": "a" * 64}]},
+            requested_by="coach",
+            item_operations=[{"item_key": local_id, "operation": "plan_push", "payload_hash": "a" * 64}],
+        )
+        claimed = server._claim_sync_job()
+        result = {"status": "error", "results": [{"library_workout_id": local_id, "status": "conflict", "error": "changed"}]}
+        with patch.object(server, "_execute_sync_job", return_value=result):
+            server._run_claimed_sync_job(claimed)
+        state = server.sync_job_state(job["id"])
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["items"][0]["status"], "failed")
+        self.assertEqual(state["progress"], {"completed": 1, "total": 1})
+
+    def test_structured_command_api_failure_is_terminal_and_replayable(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-failure"
+        ), patch.object(server, "responses_request", side_effect=RuntimeError("provider request failed")) as request:
+            with self.assertRaises(RuntimeError):
+                server.chat_with_coach("Erstelle einen Entwurf", client_turn_id="turn-terminal-failure")
+            replay = server.chat_with_coach("Erstelle einen Entwurf", client_turn_id="turn-terminal-failure")
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(replay["status"], "failed")
+        self.assertIn("provider request failed", replay["error"])
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT status FROM coach_commands WHERE client_turn_id=?", ("turn-terminal-failure",)).fetchone()
+        self.assertEqual(command["status"], "completed")
+
+    def test_structured_coach_refreshes_requested_data_before_coaching(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-fresh", "arguments": json.dumps({"payload": {"plan_name": "Fresh", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}})}]},
+            {"output_text": "Der Entwurf ist gespeichert."},
+        ]
+        order = []
+
+        def refresh(*args, **kwargs):
+            order.append("refresh")
+            return {"status": "ok"}
+
+        def response(payload):
+            order.append("coach")
+            return responses.pop(0)
+
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-fresh"
+        ), patch.object(server, "sync_intervals", side_effect=refresh), patch.object(
+            server, "responses_request", side_effect=response
+        ):
+            result = server.chat_with_coach("Lade bitte meine letzten Einheiten und erstelle einen Entwurf.", client_turn_id="turn-fresh")
+        self.assertEqual(result["command_receipts"][0]["tool"], "stage_training_plan")
+        self.assertEqual(order[0], "refresh")
+
+    def test_structured_commit_rejects_model_artifact_outside_classified_scope(self):
+        artifact = server._stage_coach_artifact(
+            "conversation-scope", "turn-scope", {"plan_name": "Scoped", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}
+        )
+        intent = {
+            "intent": "local_action",
+            "operation": "commit_training_plan",
+            "target_system": "local",
+            "artifact_id": artifact["artifact_id"],
+            "ambiguities": [],
+            "authorization_scope": [f"artifact:{artifact['artifact_id']}"],
+        }
+        with self.assertRaises(server.AppError) as denied:
+            server._structured_coach_tool_result(
+                "commit_training_plan",
+                {"artifact_id": str(uuid.uuid4())},
+                intent=intent,
+                conversation_id="conversation-scope",
+                client_turn_id="turn-scope",
+                session_csrf_hash="",
+                sync_job_ids=[],
+            )
+        self.assertEqual(denied.exception.reason, "intent_scope_denied")
+
+    def test_structured_plan_push_declares_and_uses_bounded_entries(self):
+        local_id = str(uuid.uuid4())
+        entry = {"library_workout_id": local_id, "expected_payload_hash": "b" * 64}
+        intent = {
+            "intent": "remote_sync",
+            "operation": "start_intervals_plan_sync",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": [f"library_workout:{local_id}"],
+        }
+        with patch.object(server, "enqueue_sync_job", return_value={"id": "job-plan-push"}) as enqueue:
+            result = server._structured_coach_tool_result(
+                "start_intervals_plan_sync",
+                {"entries": [entry]},
+                intent=intent,
+                conversation_id="conversation-push",
+                client_turn_id="turn-push",
+                session_csrf_hash="",
+                sync_job_ids=[],
+            )
+        schema = next(tool for tool in server.COACH_STRUCTURED_TOOLS if tool["name"] == "start_intervals_plan_sync")["parameters"]
+        self.assertIn("entries", schema["properties"])
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(enqueue.call_args.kwargs["item_operations"][0]["item_key"], local_id)
+
+    def test_startup_sync_does_not_duplicate_resumed_jobs(self):
+        config = replace(server.CONFIG, intervals_api_key="configured", calendar_ical_url="", garmin_email="", garmin_tokenstore="")
+        with patch.object(server, "CONFIG", config), patch.object(server, "_sync_job_active", return_value=True) as active, patch.object(
+            server, "enqueue_sync_job"
+        ) as enqueue:
+            server.enqueue_startup_sync_jobs()
+        self.assertGreaterEqual(active.call_count, 1)
+        enqueue.assert_not_called()
+
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = server.utc_now()
         with server.DB_LOCK, server.database() as db:

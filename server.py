@@ -2653,6 +2653,67 @@ def _sync_job_update(job_id: str, item_status: str, *, error_class: str | None =
         )
 
 
+def _sync_job_item_results(result: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(result, dict) or not isinstance(result.get("results"), list):
+        return None
+    return [item for item in result["results"] if isinstance(item, dict)]
+
+
+def _sync_job_update_from_result(job_id: str, result: Any, *, fallback_status: str) -> None:
+    """Persist per-object plan-push outcomes and derive the aggregate status."""
+    item_results = _sync_job_item_results(result)
+    if not item_results:
+        _sync_job_update(job_id, fallback_status)
+        return
+    now = utc_now()
+    provider = None
+    job_type = None
+    with DB_LOCK, database() as db:
+        job = db.execute("SELECT provider, type FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
+        if job:
+            provider = job["provider"]
+            job_type = job["type"]
+        stored_items = db.execute("SELECT id, item_key FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)).fetchall()
+        stored_by_key = {str(item.get("item_key") or ""): item for item in stored_items}
+        for index, item in enumerate(item_results):
+            item_key = str(item.get("library_workout_id") or item.get("item_key") or "").strip()
+            target = stored_by_key.get(item_key)
+            if target is None and len(stored_items) == 1:
+                target = stored_items[0]
+            if target is None and index < len(stored_items):
+                target = stored_items[index]
+            if target is None:
+                continue
+            outcome = str(item.get("status") or "error").strip().casefold()
+            item_state = "completed" if outcome in {"synced", "already_synced", "skipped"} else "failed"
+            detail = redact_text(str(item.get("error") or ""))[:500] or None
+            db.execute(
+                "UPDATE sync_job_items SET status=?, error_class=?, error_detail=?, updated_at=? WHERE id=?",
+                (item_state, None if item_state == "completed" else "plan_push_error", detail, now, target["id"]),
+            )
+        items = db.execute("SELECT status FROM sync_job_items WHERE job_id=?", (job_id,)).fetchall()
+        item_values = [dict(item) for item in items]
+        status = aggregate_job_status(item_values)
+        completed, total = bounded_progress(item_values)
+        finished = now if status in {"completed", "partial", "failed"} else None
+        db.execute(
+            "UPDATE sync_jobs SET status=?, progress_total=?, progress_completed=?, finished_at=?, error_class=?, updated_at=? WHERE id=?",
+            (status, total, completed, finished, None if status == "completed" else "plan_push_error", now, job_id),
+        )
+    if provider and job_type:
+        publish_state_event(
+            "job",
+            {
+                "job_id": job_id,
+                "provider": provider,
+                "type": job_type,
+                "status": status,
+                "progress": {"completed": completed, "total": total},
+                "error_class": None if status == "completed" else "plan_push_error",
+            },
+        )
+
+
 def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
     payload = _decode_sync_job_payload(job.get("payload"))
     provider = str(job["provider"])
@@ -2692,7 +2753,8 @@ def _run_claimed_sync_job(job: dict[str, Any]) -> None:
         result_status = result.get("status") if isinstance(result, dict) else "ok"
         if result_status == "already_running":
             raise AppError(409, "Der Provider ist noch beschäftigt.", reason="temporary_error")
-        _sync_job_update(job_id, "partial" if result_status == "partial" else "completed")
+        fallback_status = "partial" if result_status == "partial" else "failed" if result_status in {"error", "failed"} else "completed"
+        _sync_job_update_from_result(job_id, result, fallback_status=fallback_status)
     except Exception as exc:
         error_class = _sync_job_error_class(exc)
         detail = redact_text(str(getattr(exc, "message", "") or exc))[:500]
@@ -12801,6 +12863,18 @@ def _canonical_coach_tool(name: str, description: str) -> dict[str, Any]:
                 "payload": {"type": "object"},
                 "template": {"type": "object"},
                 "changes": {"type": "array", "items": {"type": "object"}},
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "library_workout_id": {"type": "string"},
+                            "expected_payload_hash": {"type": "string"},
+                        },
+                        "required": ["library_workout_id", "expected_payload_hash"],
+                        "additionalProperties": False,
+                    },
+                },
                 "artifact_id": {"type": "string"},
                 "local_id": {"type": "string"},
                 "job_id": {"type": "string"},
@@ -12826,6 +12900,19 @@ COACH_STRUCTURED_TOOLS = [
     _canonical_coach_tool("resolve_training_sync_conflict", "Explicitly retry a failed or partial synchronization job."),
     _canonical_coach_tool("undo_training_change", "Return an undo preview for a local change; do not apply it silently."),
 ]
+
+
+def _coach_scope_values(intent: dict[str, Any]) -> set[str]:
+    scope = intent.get("authorization_scope")
+    if not isinstance(scope, list):
+        return set()
+    return {str(value).strip()[:120] for value in scope if isinstance(value, str) and value.strip()}
+
+
+def _require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
+    scope = _coach_scope_values(intent)
+    if not any(token in scope for token in tokens):
+        raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.", reason="intent_scope_denied")
 
 
 def _structured_training_state() -> dict[str, Any]:
@@ -12916,15 +13003,19 @@ def _structured_coach_tool_result(
     if name == "stage_training_plan":
         if operation != "stage_training_plan":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "local_plan")
         payload = _structured_artifact_payload(arguments)
         _validate_structured_plan_limits(payload)
         return _stage_coach_artifact(conversation_id, client_turn_id, payload)
     if name == "commit_training_plan":
         if operation != "commit_training_plan":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        artifact_id = str(arguments.get("artifact_id") or intent.get("artifact_id") or "").strip()
+        artifact_id = str(intent.get("artifact_id") or "").strip()
         if not artifact_id:
             raise AppError(400, "Zum Speichern wird ein lokales Planartefakt benötigt.", reason="artifact_required")
+        if str(arguments.get("artifact_id") or artifact_id).strip() != artifact_id:
+            raise AppError(403, "Das Planartefakt stimmt nicht mit der klassifizierten Aktion überein.", reason="intent_scope_denied")
+        _require_coach_scope(intent, f"artifact:{artifact_id}")
         with DB_LOCK, database() as db:
             artifact = db.execute("SELECT * FROM coach_plan_artifacts WHERE id=?", (artifact_id,)).fetchone()
             if not artifact:
@@ -12946,6 +13037,13 @@ def _structured_coach_tool_result(
     if name == "apply_training_changes":
         if operation != "apply_training_changes":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        changes = arguments.get("changes")
+        if not isinstance(changes, list):
+            raise AppError(400, "Coach-Änderungen müssen als Liste gesendet werden.", reason="invalid_change")
+        for change in changes:
+            if isinstance(change, dict) and change.get("local_id"):
+                local_id = str(change["local_id"]).strip()
+                _require_coach_scope(intent, f"planned_unit:{local_id}")
         return _apply_structured_training_changes(arguments)
     if name == "apply_training_changes_legacy":
         if operation != "apply_training_changes":
@@ -12983,37 +13081,61 @@ def _structured_coach_tool_result(
         template = arguments.get("template") if isinstance(arguments.get("template"), dict) else arguments
         if str(template.get("action") or "create").strip().casefold() == "update":
             local_id = str(template.get("local_id") or "").strip()
+            _require_coach_scope(intent, f"library_workout:{local_id}")
             updated = update_workout_library_entry(local_id, template)
             return {"ok": True, "stored_locally": True, "template": updated}
+        _require_coach_scope(intent, "local_template")
         return {"ok": True, "stored_locally": True, "template": create_local_library_template(template)}
     if name == "start_provider_refresh":
         if operation != "start_provider_refresh":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         provider = str(intent.get("target_system") or "")
+        _require_coach_scope(intent, f"{provider}_refresh")
         job = enqueue_sync_job(provider, "refresh", arguments, requested_by="coach")
         sync_job_ids.append(job["id"])
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
     if name == "start_intervals_plan_sync":
         if operation != "start_intervals_plan_sync" or intent.get("target_system") != "intervals":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        job = enqueue_sync_job("intervals", "plan_push", arguments, requested_by="coach")
+        entries = arguments.get("entries")
+        if entries is None and isinstance(arguments.get("payload"), dict):
+            entries = arguments["payload"].get("entries")
+        normalized_entries = _library_bulk_request_entries(entries, require_hash=True)
+        for entry in normalized_entries:
+            _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
+        payload = {"entries": normalized_entries, "reason": str(arguments.get("reason") or "coach")[:200]}
+        item_operations = [
+            {
+                "item_key": entry["library_workout_id"],
+                "operation": "plan_push",
+                "payload_hash": entry["expected_payload_hash"],
+            }
+            for entry in normalized_entries
+        ]
+        job = enqueue_sync_job("intervals", "plan_push", payload, requested_by="coach", item_operations=item_operations)
         sync_job_ids.append(job["id"])
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
     if name == "get_sync_job":
-        return {"ok": True, "job": sync_job_state(str(arguments.get("job_id") or "").strip())}
+        job_id = str(arguments.get("job_id") or "").strip()
+        _require_coach_scope(intent, f"sync_job:{job_id}")
+        return {"ok": True, "job": sync_job_state(job_id)}
     if name == "resolve_training_sync_conflict":
         if operation != "resolve_training_sync_conflict":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        job = resolve_sync_job(str(arguments.get("job_id") or "").strip(), {"action": "retry"})
+        job_id = str(arguments.get("job_id") or "").strip()
+        _require_coach_scope(intent, f"sync_job:{job_id}")
+        job = resolve_sync_job(job_id, {"action": "retry"})
         return {"ok": True, "status": "queued", "job": job}
     if name == "undo_training_change":
         if operation != "undo_training_change":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        return {"ok": True, **_history_preview(arguments.get("change_id"), session_csrf_hash)}
+        change_id = str(arguments.get("change_id") or "").strip()
+        _require_coach_scope(intent, f"change:{change_id}")
+        return {"ok": True, **_history_preview(change_id, session_csrf_hash)}
     raise AppError(400, "Unbekanntes Coach-Werkzeug.", reason="unknown_coach_tool")
 
 
-def _chat_with_structured_coach(
+def _chat_with_structured_coach_impl(
     message: str,
     *,
     intent: dict[str, Any],
@@ -13022,6 +13144,7 @@ def _chat_with_structured_coach(
     on_text_delta: Any = None,
     cancel_event: threading.Event | None = None,
     session_csrf_hash: str = "",
+    refresh_error: str | None = None,
 ) -> dict[str, Any]:
     with DB_LOCK, database() as db:
         existing_command = db.execute("SELECT receipt, status FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
@@ -13034,12 +13157,19 @@ def _chat_with_structured_coach(
             (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent, ensure_ascii=False, separators=(",", ":")), str(intent.get("target_system") or "none"), intent.get("artifact_id"), utc_now(), utc_now()),
         )
     add_message("user", message)
+    model_instructions = build_training_context()
+    if refresh_error:
+        model_instructions += (
+            "\n\n[Systemhinweis: Die angeforderte Intervals.icu-Aktualisierung ist fehlgeschlagen. "
+            "Nutze den letzten verfügbaren Snapshot, weise auf dessen möglichen veralteten Stand hin "
+            "und stelle ihn nicht als aktuell dar.]"
+        )
     requested_operation = intent.get("operation")
     forced_tool = requested_operation if requested_operation in COACH_CANONICAL_TOOL_NAMES else "none"
     request_payload = {
         "model": selected_model(),
         "conversation": conversation_id,
-        "instructions": build_training_context(),
+        "instructions": model_instructions,
         "input": message,
         "tools": COACH_STRUCTURED_TOOLS,
         "tool_choice": {"type": "function", "name": forced_tool} if forced_tool != "none" and intent.get("intent") in {"local_action", "remote_sync"} else "auto",
@@ -13089,7 +13219,7 @@ def _chat_with_structured_coach(
         followup_payload = {
             "model": selected_model(),
             "conversation": conversation_id,
-            "instructions": build_training_context(),
+            "instructions": model_instructions,
             "input": tool_outputs,
             "tools": COACH_STRUCTURED_TOOLS,
             "tool_choice": "none",
@@ -13114,6 +13244,37 @@ def _chat_with_structured_coach(
             (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
         )
     return receipt
+
+
+def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, Any], error: BaseException) -> dict[str, Any]:
+    """Make a failed external/model turn replayable without rerunning tools."""
+    safe_error = redact_text(str(getattr(error, "message", "") or error))[:1000]
+    receipt = {
+        "message": None,
+        "command_receipts": [],
+        "sync_job_ids": [],
+        "intent": intent,
+        "tool_rounds": 0,
+        "status": "failed",
+        "error": safe_error,
+    }
+    with DB_LOCK, database() as db:
+        db.execute(
+            "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+            (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+        )
+    return receipt
+
+
+def _chat_with_structured_coach(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Run a structured turn and close its durable command on every failure."""
+    intent = kwargs.get("intent") if isinstance(kwargs.get("intent"), dict) else {}
+    client_turn_id = str(kwargs.get("client_turn_id") or (args[2] if len(args) > 2 else ""))
+    try:
+        return _chat_with_structured_coach_impl(*args, **kwargs)
+    except Exception as exc:
+        _persist_structured_command_failure(client_turn_id, intent, exc)
+        raise
 
 
 def coach_intent_artifact_refs() -> list[dict[str, Any]]:
@@ -13193,6 +13354,17 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         if existing_command:
             raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
         structured_intent = request_coach_intent(message)
+        refresh_error = None
+        if prompt_requests_fresh_data(message) and not (
+            structured_intent.get("operation") == "start_provider_refresh"
+            and structured_intent.get("target_system") == "intervals"
+        ):
+            add_message("event", "Aktuelle Intervals.icu-Trainingsdaten werden geladen…")
+            try:
+                sync_intervals("Chat-Anfrage", activity_days=sync_period("intervals"))
+            except Exception as exc:
+                refresh_error = redact_text(str(exc))[:1000]
+                add_message("event", f"Aktuelle Daten konnten nicht geladen werden: {refresh_error}")
         return _chat_with_structured_coach(
             message,
             intent=structured_intent,
@@ -13201,6 +13373,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             on_text_delta=on_text_delta,
             cancel_event=cancel_event,
             session_csrf_hash=session_csrf_hash,
+            refresh_error=refresh_error,
         )
     refresh_error = None
     if structured_intent is not None:
@@ -15586,6 +15759,19 @@ def safe_weather_sync(reason: str, operation_id: str | None = None) -> None:
         )
 
 
+def enqueue_startup_sync_jobs() -> None:
+    """Queue configured startup refreshes without duplicating resumed jobs."""
+    if CONFIG.intervals_api_key or CONFIG.calendar_ical_url:
+        if CONFIG.calendar_ical_url and not _sync_job_active("calendar", "refresh"):
+            enqueue_sync_job("calendar", "refresh", {"reason": "startup"}, requested_by="startup")
+        if CONFIG.intervals_api_key and not _sync_job_active("intervals", "refresh"):
+            enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "startup"}, requested_by="startup")
+        if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))) and not _sync_job_active("garmin", "refresh"):
+            enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "startup"}, requested_by="startup")
+    if get_profile().get("weather_location", "").strip() and not _sync_job_active("weather", "refresh"):
+        enqueue_sync_job("weather", "refresh", {"force": True, "reason": "startup"}, requested_by="startup")
+
+
 def main() -> None:
     initialise_logging()
     configuration_error = security_configuration_error()
@@ -15597,15 +15783,7 @@ def main() -> None:
     server = CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
     server.allow_reuse_address = True
     start_sync_job_worker()
-    if CONFIG.intervals_api_key or CONFIG.calendar_ical_url:
-        if CONFIG.calendar_ical_url:
-            enqueue_sync_job("calendar", "refresh", {"reason": "startup"}, requested_by="startup")
-        if CONFIG.intervals_api_key:
-            enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "startup"}, requested_by="startup")
-        if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
-            enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "startup"}, requested_by="startup")
-    if get_profile().get("weather_location", "").strip():
-        enqueue_sync_job("weather", "refresh", {"force": True, "reason": "startup"}, requested_by="startup")
+    enqueue_startup_sync_jobs()
     threading.Thread(target=daily_sync_loop, daemon=True).start()
     LOGGER.info("Intervals Coach listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
     try:

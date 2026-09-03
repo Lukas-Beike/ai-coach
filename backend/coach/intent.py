@@ -49,7 +49,11 @@ def intent_request_payload(message: str, artifact_refs: list[dict[str, Any]], al
         "instructions": (
             "Classify exactly the user's current Coach request. Return only the JSON schema. "
             "Do not infer authorization from previous turns. Advice is non-mutating. "
-            "Only use targets explicitly listed in allowed_targets."
+            "Only use targets explicitly listed in allowed_targets. "
+            "authorization_scope must contain exact operation or object tokens: "
+            "local_plan, local_template, artifact:<id>, planned_unit:<id>, "
+            "library_workout:<id>, sync_job:<id>, change:<id>, intervals_refresh, "
+            "garmin_refresh, calendar_refresh, or weather_refresh."
         ),
         "input": json.dumps({
             "message": str(message)[:12000],
@@ -118,4 +122,3 @@ def parse_intent_response(response: Any) -> dict[str, Any]:
         "ambiguities": [item[:300] for item in ambiguities[:8]],
         "authorization_scope": [item[:120] for item in scope[:8]],
     }
-
