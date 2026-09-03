@@ -1268,25 +1268,21 @@ function renderToday(data) {
   if (detail) detail.textContent = syncMessages.length ? syncMessages.join(" · ") : `Stand: ${dateLabel(todayKey)}`;
 
   const adjustment = data.planning?.latest_replan;
-  const priorityCard = todayCard("Priorität heute", "today-priority");
+  const priorityCard = todayCard("Coach-Einordnung", "today-priority");
   if (checkin?.illness) {
-    todayCardText(priorityCard, `Krankheit gemeldet: ${checkin.illness}. Belastung heute vorsichtig bewerten.`, "today-card-summary");
-    priorityCard.append(todayAction("Check-in prüfen", () => openCheckinEditor(todayKey)));
+    todayCardText(priorityCard, `Im Morgen-Check-in ist Krankheit vermerkt: ${checkin.illness}. Die Belastung für heute wird vorsichtig eingeordnet.`, "today-card-summary");
   } else if (adjustment?.changes?.length || adjustment?.illness_pause) {
-    todayCardText(priorityCard, "Eine lokale Plananpassung wartet auf deine Prüfung.", "today-card-summary");
-    priorityCard.append(todayAction("Plananpassung prüfen", () => applyNavigationRoute("plan/calendar", { historyMode: "push" })));
+    todayCardText(priorityCard, "Für die lokale Planung liegt eine Anpassung vor. Sie wird in der Einordnung für heute berücksichtigt.", "today-card-summary");
   } else if (todayWorkouts.length) {
-    todayCardText(priorityCard, `${todayWorkouts.length} geplante Einheit${todayWorkouts.length === 1 ? "" : "en"} für heute. Prüfe sie mit dem Coach, wenn sich deine Tagesform verändert hat.`, "today-card-summary");
-    priorityCard.append(todayAction("Coach fragen", () => applyNavigationRoute("coach", { historyMode: "push" })));
+    todayCardText(priorityCard, `${todayWorkouts.length} geplante Einheit${todayWorkouts.length === 1 ? "" : "en"} für heute. Die verfügbaren Quellen und der Morgen-Check-in bilden die Grundlage der Einordnung.`, "today-card-summary");
   } else if (!checkin) {
-    todayCardText(priorityCard, "Noch kein Check-in für heute. Ein kurzer Check-in hilft bei der Einordnung des Tages.");
-    priorityCard.append(todayAction("Check-in ausfüllen", () => openCheckinEditor(todayKey)));
+    todayCardText(priorityCard, "Für heute liegt noch kein Morgen-Check-in vor. Die Einordnung basiert deshalb auf den verfügbaren Quellendaten.", "today-card-summary");
   } else {
-    todayCardText(priorityCard, "Keine dringende Anpassung erkannt. Deine Daten bleiben als Orientierung sichtbar.", "today-card-summary");
+    todayCardText(priorityCard, "Die verfügbaren Quellen und der Morgen-Check-in zeigen keine dringende Anpassung für heute.", "today-card-summary");
   }
   root.append(priorityCard);
 
-  const checkinCard = todayCard("Tages-Check-in", "today-checkin");
+  const checkinCard = todayCard("Morgen-Check-in", "today-checkin");
   if (checkin) {
     const values = [
       checkin.day_form,
@@ -1319,15 +1315,14 @@ function renderToday(data) {
     const title = document.createElement("strong");
     title.textContent = event.name || "Geplante Einheit";
     const meta = document.createElement("span");
-    meta.textContent = [event.type || event.category, formatDuration(event.moving_time), distanceLabel(event.distance)].filter(Boolean).join(" · ") || "Details in Plan";
+    meta.textContent = [event.type || event.category, formatDuration(event.moving_time), distanceLabel(event.distance)].filter(Boolean).join(" · ") || "Kein Umfang hinterlegt";
     item.append(title, meta);
     workoutCard.append(item);
   });
-    workoutCard.append(todayAction("Plan öffnen", () => applyNavigationRoute("plan/calendar", { historyMode: "push" })));
   root.append(workoutCard);
 
   const weatherCard = todayCard("Wetter", "today-weather");
-  if (!data.weather?.configured) todayCardText(weatherCard, "Kein Wetterort hinterlegt. Du kannst ihn im Profil ergänzen.");
+  if (!data.weather?.configured) todayCardText(weatherCard, "Kein Wetterort hinterlegt.");
   else if (data.weather?.error && !data.weather?.days?.length) todayCardText(weatherCard, data.weather.error, "today-empty today-error");
   else if (!weather) todayCardText(weatherCard, "Für heute ist noch keine Wettervorhersage geladen.");
   else todayCardText(weatherCard, [weatherIconFor(weather), weather.condition || "Vorhersage", weatherNumber(weather.temperature_min, " °C"), weatherNumber(weather.temperature_max, " °C"), weatherNumber(weather.precipitation_probability_max, " % Regen")].join(" · "), "today-card-summary");
@@ -1336,15 +1331,13 @@ function renderToday(data) {
   const feedbackCard = todayCard("Offene Rückmeldung", "today-feedback");
   const openFeedback = (data.activities || []).find((activity) => todayActivityDate(activity) && !activity.activity_feedback);
   if (openFeedback) {
-    todayCardText(feedbackCard, `Rückmeldung zu „${openFeedback.name || "letzter Aktivität"}“ ergänzen.`, "today-card-summary");
-    feedbackCard.append(todayAction("Verlauf öffnen", () => applyNavigationRoute("analysis/history", { historyMode: "push" })));
+    todayCardText(feedbackCard, `Noch keine Rückmeldung zu „${openFeedback.name || "letzter Aktivität"}“ gespeichert.`, "today-card-summary");
   } else todayCardText(feedbackCard, "Keine offene Rückmeldung zu den geladenen Aktivitäten.");
   root.append(feedbackCard);
 
   if (adjustment && (adjustment.changes?.length || adjustment.illness_pause)) {
     const adjustmentCard = todayCard("Aktuelle Plananpassung", "today-adjustment");
-    todayCardText(adjustmentCard, "Eine Planänderung wartet auf deine Prüfung.", "today-card-summary");
-    adjustmentCard.append(todayAction("Plananpassung prüfen", () => applyNavigationRoute("plan/calendar", { historyMode: "push" })));
+    todayCardText(adjustmentCard, "Eine lokale Planänderung liegt vor.", "today-card-summary");
     root.append(adjustmentCard);
   }
 }
