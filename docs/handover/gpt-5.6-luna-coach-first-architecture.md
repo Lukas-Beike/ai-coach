@@ -171,8 +171,8 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 0. Vorbereitung und Baseline
 
-- [ ] `AGENTS.md`, `public/AGENTS.md` und `tests/AGENTS.md` vollständig lesen.
-- [ ] Worktree/Branch und Arbeitsregeln prüfen; Primärcheckout, `.env`, `/data` und `Task.md` nicht verändern.
+- [x] `AGENTS.md`, `public/AGENTS.md` und `tests/AGENTS.md` vollständig lesen.
+- [x] Worktree/Branch und Arbeitsregeln prüfen; Primärcheckout, `.env`, `/data` und `Task.md` nicht verändern.
 - [x] Baseline mit `python -m unittest discover -s tests -v`, `python -m py_compile server.py tests/test_server.py` und Docker-Build dokumentieren.
 
 **Subsysteme:** Git, Tests, Docker.  
