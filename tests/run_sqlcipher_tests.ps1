@@ -7,6 +7,10 @@ $ErrorActionPreference = "Stop"
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $testsDirectory = Join-Path $repositoryRoot "tests"
 $publicDirectory = Join-Path $repositoryRoot "public"
+$serverFile = Join-Path $repositoryRoot "server.py"
+$e2eDirectory = Join-Path $repositoryRoot "e2e"
+$playwrightConfig = Join-Path $repositoryRoot "playwright.config.cjs"
+$githubDirectory = Join-Path $repositoryRoot ".github"
 
 Write-Host "Building isolated SQLCipher test image: $ImageTag"
 & docker build --tag $ImageTag $repositoryRoot
@@ -28,6 +32,11 @@ Write-Host "Running the container unit-test suite with a read-only source mount.
     --tmpfs /tmp `
     --volume "${testsDirectory}:/review/tests:ro" `
     --volume "${publicDirectory}:/review/public:ro" `
+    --volume "${serverFile}:/review/server.py:ro" `
+    --volume "${playwrightConfig}:/review/playwright.config.cjs:ro" `
+    --volume "${e2eDirectory}:/app/e2e:ro" `
+    --volume "${e2eDirectory}:/review/e2e:ro" `
+    --volume "${githubDirectory}:/review/.github:ro" `
     --env "PYTHONPATH=/app:/review/tests" `
     --workdir /app `
     $ImageTag `
