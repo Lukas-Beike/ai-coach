@@ -37,7 +37,7 @@ function renderPlanSegments(segment = state.planSegment) {
 }
 
 function renderAnalysisSegments(segment = state.analysisSegment) {
-  const selected = ["history", "performance"].includes(segment) ? segment : "history";
+  const selected = ["history", "performance"].includes(segment) ? segment : "performance";
   state.analysisSegment = selected;
   document.querySelectorAll("[data-analysis-segment-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.analysisSegmentPanel !== selected;
@@ -192,7 +192,7 @@ function showLogin() {
   state.chatResponseScrollPending = false;
   state.loadedAreas.clear();
   state.planSegment = "calendar";
-  state.analysisSegment = "history";
+  state.analysisSegment = "performance";
   state.profileDirty = false;
   state.checkinDirty = false;
   state.chatDraftDirty = false;

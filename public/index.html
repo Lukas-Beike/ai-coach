@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg?v=159" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=159">
+    <link rel="icon" href="/icon.svg?v=160" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=160">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -26,7 +26,7 @@
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
       <a class="nav-item" href="#today" aria-controls="todayPanel" aria-label="Heute" data-panel="todayPanel" data-route="today"><svg class="nav-icon" aria-hidden="true"><use href="#icon-today"></use></svg><span>Heute</span></a>
       <a class="nav-item" href="#plan/calendar" aria-controls="workoutsPanel" aria-label="Plan" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Plan</span></a>
-      <a class="nav-item" href="#analysis/history" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
+      <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span><small id="desktopNavVersion" class="nav-version"></small></a>
     </aside>
     <header class="topbar">
@@ -192,10 +192,14 @@
           <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Verlauf und Leistungsdaten in einem Bereich</span></div>
         </div>
         <nav class="analysis-segment-nav" aria-label="Analysebereiche">
-          <a href="#analysis/history" data-analysis-segment="history" aria-current="page">Verlauf</a>
-          <a href="#analysis/performance" data-analysis-segment="performance">Leistung</a>
+          <a href="#analysis/performance" data-analysis-segment="performance" aria-current="page">Leistung</a>
+          <a href="#analysis/history" data-analysis-segment="history">Verlauf</a>
         </nav>
-        <section id="analysisHistorySegment" class="analysis-segment" data-analysis-segment-panel="history" aria-labelledby="analysisHistoryTitle">
+        <section id="analysisPerformanceSegment" class="analysis-segment" data-analysis-segment-panel="performance" aria-labelledby="analysisPerformanceTitle">
+          <div class="analysis-segment-heading"><div><span class="eyebrow">LEISTUNG</span><h3 id="analysisPerformanceTitle">Leistungsdaten</h3></div></div>
+          <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
+        </section>
+        <section id="analysisHistorySegment" class="analysis-segment" data-analysis-segment-panel="history" aria-labelledby="analysisHistoryTitle" hidden>
           <div class="analysis-segment-heading"><div><span class="eyebrow">TRAININGSVERLAUF</span><h3 id="analysisHistoryTitle">Aktivitäten <span id="activityDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3></div><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
           <div class="activity-date-filter" aria-label="Aktivitäten nach Zeitraum filtern">
             <label for="activityFromDate">Von<input id="activityFromDate" type="date"></label>
@@ -205,10 +209,6 @@
           <div id="activityStats" class="activity-stats-summary" aria-label="Aktivitätsstatistik"></div>
           <div id="activityFilters" class="activity-filters" aria-label="Aktivitätstypen filtern"></div>
           <div id="activities" class="activities"></div>
-        </section>
-        <section id="analysisPerformanceSegment" class="analysis-segment" data-analysis-segment-panel="performance" aria-labelledby="analysisPerformanceTitle" hidden>
-          <div class="analysis-segment-heading"><div><span class="eyebrow">LEISTUNG</span><h3 id="analysisPerformanceTitle">Leistungsdaten</h3></div></div>
-          <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
         </section>
       </section>
 
@@ -382,7 +382,7 @@
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
       <a class="nav-item" href="#today" aria-controls="todayPanel" aria-label="Heute" data-panel="todayPanel" data-route="today"><svg class="nav-icon" aria-hidden="true"><use href="#icon-today"></use></svg><span>Heute</span></a>
       <a class="nav-item" href="#plan/calendar" aria-controls="workoutsPanel" aria-label="Plan" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Plan</span></a>
-      <a class="nav-item" href="#analysis/history" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
+      <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </nav>
   </div>
@@ -427,12 +427,12 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=159" defer></script>
-  <script src="/navigation.js?v=159" defer></script>
-  <script src="/state.js?v=159" defer></script>
-  <script src="/views.js?v=159" defer></script>
-  <script src="/forms.js?v=159" defer></script>
-  <script src="/components.js?v=159" defer></script>
-  <script src="/app.js?v=159" defer></script>
+  <script src="/api.js?v=160" defer></script>
+  <script src="/navigation.js?v=160" defer></script>
+  <script src="/state.js?v=160" defer></script>
+  <script src="/views.js?v=160" defer></script>
+  <script src="/forms.js?v=160" defer></script>
+  <script src="/components.js?v=160" defer></script>
+  <script src="/app.js?v=160" defer></script>
 </body>
 </html>

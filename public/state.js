@@ -39,7 +39,7 @@ const state = {
   plannedWeekOpen: new Map(),
   planSegment: "calendar",
   planSegmentScroll: { calendar: 0, templates: 0, goals: 0 },
-  analysisSegment: "history",
+  analysisSegment: "performance",
   loadedAreas: new Set(),
   voiceRecorder: null,
   voiceStream: null,
