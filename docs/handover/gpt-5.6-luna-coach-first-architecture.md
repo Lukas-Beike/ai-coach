@@ -248,7 +248,7 @@ Additive, transaktionale Migration von Schema 5:
 **Definition of Done:** Ein eindeutiger Benutzerauftrag beendet den gesamten lokalen Workflow in demselben Turn; Remotejobs werden eindeutig eingereiht.  
 **Tests:** 28er-Batch, Revision, Konflikt, Undo, Remote-Job, keine Duplikate, adaptive Vorschau.  
 **Seiteneffekte:** Kein stiller Remote-Write; keine Teilcommits.  
-**Evidence:** `- Test/Commit: …`
+**Evidence:** `- Test/Commit: eec187a enthält die laufende Tool-Integration; Task bleibt offen, bis atomare Batch-Änderungen und die UI-Adapterablösung vollständig verifiziert sind.`
 
 ### 6. Bootstrap v3 und SSE
 
