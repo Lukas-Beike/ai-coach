@@ -228,15 +228,15 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 4. Structured Intent und Coach-Orchestrator
 
-- [ ] Intent-Schema, isolierten Intent-Schritt, Autorisierungsumfang und Fail-closed-Verhalten implementieren.
-- [ ] Tool-Loop mit maximal sechs Runden und unveränderter Tool-Liste in Folgerunden implementieren.
-- [ ] Conversation-/Artifact-Referenzen und `client_turn_id` durchgängig propagieren.
+- [x] Intent-Schema, isolierten Intent-Schritt, Autorisierungsumfang und Fail-closed-Verhalten implementieren.
+- [x] Tool-Loop mit maximal sechs Runden und unveränderter Tool-Liste in Folgerunden implementieren.
+- [x] Conversation-/Artifact-Referenzen und `client_turn_id` durchgängig propagieren.
 
 **Subsysteme:** Coach, OpenAI-Client, Conversation-State, HTTP-Chat.  
 **Definition of Done:** Natürliche deutsche Aktionssätze werden ohne Regex erkannt; Beratungsfragen mutieren nicht.  
 **Tests:** „Plan sieht gut aus …“, „Jetzt speichern“, Hypothese, Mehrdeutigkeit, Intent-Timeout, Mehrfach-Toolrunde, Wiederholung.  
 **Seiteneffekte:** Keine externen Providertexte im Intentprompt; keine unautorisierte Mutation.  
-**Evidence:** `- Test/Commit: …`
+**Evidence:** `- Test: python -m unittest discover -s tests -v` — 360 Tests grün, 3 erwartete SQLCipher-Skips; zusätzlich Syntaxcheck und fokussierte Intent-/Job-Tests grün. `POST /api/chat` und `/api/chat/stream` verlangen `client_turn_id`; Wiederholungen sind über `coach_commands` idempotent, Providerrefreshes werden als persistente Jobs eingereiht. Commit: `312ad2a`.
 
 ### 5. Vollständige Planungs- und Sync-Tools
 
