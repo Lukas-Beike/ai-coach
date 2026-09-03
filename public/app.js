@@ -99,10 +99,8 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
 
 async function syncNavigationRoute() {
   const route = routeFromHash();
-  const rawRoute = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
-  const isLegacyAlias = rawRoute && rawRoute !== route;
   const applied = await applyNavigationRoute(route, {
-    historyMode: isLegacyAlias || !hashContainsKnownRoute() ? "replace" : "none",
+    historyMode: !hashContainsKnownRoute() ? "replace" : "none",
   });
   if (!applied && state.route) window.history.replaceState({ route: state.route }, "", `#${state.route}`);
 }
@@ -176,14 +174,11 @@ function showLogin() {
   state.checkinDirty = false;
   state.chatDraftDirty = false;
   state.activityFeedbackDirty.clear();
-  state.planningEditDirty.clear();
   state.activityFeedbackDrafts.clear();
-  state.planningDrafts.clear();
   state.activityFromDate = "";
   state.activityToDate = "";
   state.activityVisibleCount = 250;
   setDirtyIndicator("activityDirtyIndicator", false);
-  setDirtyIndicator("planningDirtyIndicator", false);
   $("#appShell").hidden = true;
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
@@ -1062,8 +1057,7 @@ function hasUnsavedChanges() {
     || state.checkinDirty
     || state.chatDraftDirty
     || Boolean($("#messageInput")?.value.trim())
-    || state.activityFeedbackDirty.size > 0
-    || state.planningEditDirty.size > 0;
+    || state.activityFeedbackDirty.size > 0;
 }
 
 function setDirtyIndicator(id, dirty) {
@@ -1080,11 +1074,8 @@ function discardUnsavedChanges() {
   state.checkinDirty = false;
   state.chatDraftDirty = false;
   state.activityFeedbackDirty.clear();
-  state.planningEditDirty.clear();
   state.activityFeedbackDrafts.clear();
-  state.planningDrafts.clear();
   setDirtyIndicator("activityDirtyIndicator", false);
-  setDirtyIndicator("planningDirtyIndicator", false);
   if (state.data) render(state.data);
 }
 
@@ -1129,75 +1120,6 @@ function dateLabel(value) {
 }
 
 const CALENDAR_DISPLAY_DEFAULTS = { past_weeks: 1, future_weeks: 4 };
-
-function complianceMetricLabel(compliance) {
-  if (!compliance || compliance.planned_value == null || compliance.actual_value == null) return "";
-  if (compliance.basis === "training_load") return `Belastung ${formatWhole(compliance.actual_value)} / ${formatWhole(compliance.planned_value)}`;
-  if (compliance.basis === "duration") return `${formatDuration(compliance.actual_value)} / ${formatDuration(compliance.planned_value)}`;
-  return "";
-}
-
-function complianceLabel(compliance) {
-  if (!compliance) return "";
-  if (compliance.status === "planned") return "Noch nicht absolviert";
-  if (compliance.status === "missed") return "Nicht umgesetzt · 0%";
-  if (compliance.percentage == null) return "Absolviert · Vergleich nicht verfügbar";
-  const metric = complianceMetricLabel(compliance);
-  return `Umsetzung ${compliance.percentage}%${metric ? ` · ${metric}` : ""}`;
-}
-
-function plannedWeekLabel(start) {
-  const end = new Date(start);
-  end.setDate(end.getDate() + 6);
-  const format = new Intl.DateTimeFormat("de-DE", { day: "numeric", month: "short" });
-  return `${format.format(start)} – ${format.format(end)} ${end.getFullYear()}`;
-}
-
-function plannedComplianceForWeek(weekKey) {
-  return (state.data?.planning_compliance || []).find((item) => item.week_start === weekKey) || null;
-}
-
-function plannedWeekSummary(events, weekKey) {
-  const duration = events.reduce((total, event) => total + (Number(event.moving_time) || 0), 0);
-  const distance = events.reduce((total, event) => total + (Number(event.distance) || 0), 0);
-  const load = events.reduce((total, event) => total + (Number(event.icu_training_load) || 0), 0);
-  const compliance = plannedComplianceForWeek(weekKey);
-  const values = [`${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}`];
-  if (compliance) {
-    values.push(`${compliance.completed_units}/${compliance.planned_units} umgesetzt (${compliance.unit_percentage}%)`);
-    if (compliance.percentage != null) values.push(`Umsetzung ${compliance.percentage}%`);
-  }
-  if (duration > 0) values.push(`${(duration / 3600).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} h`);
-  if (distance > 0) values.push(`${(distance / 1000).toLocaleString("de-DE", { maximumFractionDigits: 0 })} km`);
-  if (load > 0) values.push(`Belastung ${Math.round(load).toLocaleString("de-DE")}`);
-  return values.join(" · ");
-}
-
-function weatherForDate(date) {
-  return (state.data?.weather?.days || []).find((item) => item.date === date) || null;
-}
-
-function renderPlannedDayWeather(weather) {
-  if (!weather) return null;
-  const root = document.createElement("span");
-  root.className = "planned-day-weather";
-  const icon = document.createElement("span");
-  icon.className = "weather-icon";
-  icon.setAttribute("aria-hidden", "true");
-  icon.textContent = weatherIconFor(weather);
-  const condition = document.createElement("strong");
-  condition.textContent = weather.condition || "Wetter";
-  const summary = document.createElement("span");
-  summary.className = "planned-day-weather-summary";
-  const temperatures = [weatherNumber(weather.temperature_min, " °C"), weatherNumber(weather.temperature_max, " °C")]
-    .filter(Boolean)
-    .join(" bis ");
-  summary.textContent = [temperatures, weatherNumber(weather.precipitation_probability_max, " % Regen")]
-    .filter(Boolean)
-    .join(" · ");
-  root.append(icon, condition, summary);
-  return root;
-}
 
 function todayCard(title, className = "") {
   const card = document.createElement("section");
@@ -1349,114 +1271,6 @@ function renderToday(data) {
     todayCardText(adjustmentCard, "Eine lokale Planänderung liegt vor.", "today-card-summary");
     root.append(adjustmentCard);
   }
-}
-
-function planningContextForDate(date) {
-  return (state.data?.daily_planning_context || []).find((item) => item.date === date) || { date };
-}
-
-function planningContextNumber(value, suffix = "") {
-  const number = Number(value);
-  return Number.isFinite(number) ? `${number % 1 ? number.toLocaleString("de-DE", { maximumFractionDigits: 1 }) : number}${suffix}` : null;
-}
-
-function renderDailyPlanningContext(date, todayKey) {
-  const context = planningContextForDate(date);
-  const checkin = context.checkin;
-  const recovery = context.recovery;
-  const health = context.health;
-  const weather = context.weather;
-  const activityFeedback = Array.isArray(context.activity_feedback) ? context.activity_feedback : [];
-  const appointments = Array.isArray(context.appointments) ? context.appointments : [];
-  const hasSignals = checkin || recovery || health || weather || appointments.length || activityFeedback.length;
-  if (!hasSignals && dateKeyDifference(date, todayKey) > 0) return document.createDocumentFragment();
-  const root = document.createElement("details");
-  root.className = "planned-day-context";
-  const heading = document.createElement("summary");
-  heading.className = "planned-day-context-heading";
-  const headingTitle = document.createElement("strong");
-  headingTitle.textContent = "Tageskontext";
-  heading.append(headingTitle);
-  root.append(heading);
-  const signals = document.createElement("div");
-  signals.className = "planned-day-context-signals";
-  const addSignal = (label, value, className = "", target = signals) => {
-    if (!value) return;
-    const signal = document.createElement("div");
-    signal.className = `planned-day-signal${className ? ` ${className}` : ""}`;
-    const title = document.createElement("span");
-    title.className = "planned-day-signal-label";
-    title.textContent = label;
-    const detail = document.createElement("span");
-    detail.textContent = value;
-    signal.append(title, detail);
-    target.append(signal);
-    return signal;
-  };
-  if (recovery) {
-    const recoveryValues = [
-      planningContextNumber(recovery.sleep_hours, " h Schlaf"),
-      planningContextNumber(recovery.sleep_score, " Schlafscore"),
-      planningContextNumber(recovery.hrv, " ms HRV"),
-      planningContextNumber(recovery.readiness, " Readiness"),
-      planningContextNumber(recovery.resting_hr, " bpm Ruhepuls"),
-      planningContextNumber(recovery.body_battery, " Body Battery"),
-    ].filter(Boolean);
-    addSignal("Erholung", recoveryValues.join(" · "), "recovery");
-    const recoverySources = [...new Set(Object.values(recovery.sources || {}).filter(Boolean))];
-    if (recoverySources.length) addSignal("Quelle Erholung", recoverySources.join(" · "), "signal-source");
-  }
-  if (health) {
-    const healthValues = [
-      planningContextNumber(health.steps, " Schritte"),
-      planningContextNumber(health.floors, " Stockwerke"),
-      planningContextNumber(health.calories, " kcal"),
-    ].filter(Boolean);
-    addSignal("Gesundheit", healthValues.join(" · "), "health");
-    if (health.source) addSignal("Quelle Gesundheit", health.source, "signal-source");
-  }
-  if (weather) {
-    const weatherValues = [
-      weather.condition,
-      planningContextNumber(weather.temperature_min, " °C"),
-      planningContextNumber(weather.temperature_max, " °C"),
-      planningContextNumber(weather.precipitation_probability_max, " % Regen"),
-      planningContextNumber(weather.wind_gusts_max, " km/h Böen"),
-    ].filter(Boolean);
-    addSignal("Wetter", weatherValues.join(" · "), "weather");
-    addSignal("Quelle Wetter", "Open-Meteo", "signal-source");
-  }
-  if (checkin) {
-    const checkinValues = [
-      checkin.day_form ? `Tagesform: ${checkin.day_form}` : null,
-      checkin.soreness != null ? `Muskelkater ${checkin.soreness}/10` : null,
-      checkin.stress != null ? `Stress ${checkin.stress}/10` : null,
-      checkin.motivation != null ? `Motivation ${checkin.motivation}/10` : null,
-      checkin.available_minutes != null ? `${checkin.available_minutes} Min. verfügbar` : null,
-      checkin.pain ? "Schmerz notiert" : null,
-      checkin.availability_notes || checkin.notes ? "Notizen vorhanden" : null,
-    ].filter(Boolean);
-    addSignal("Tages-Check-in", checkinValues.join(" · ") || "Gespeichert", "checkin");
-    if (checkin.illness) addSignal("Krankheit (wichtig)", checkin.illness, "illness");
-  }
-  if (appointments.length) {
-    const appointmentValues = appointments.map((event) => {
-      const time = event.all_day ? "ganztägig" : event.start_local ? formatTime(event.start_local) : "Termin";
-      return `${event.name || "Kalendereintrag"} (${time})`;
-    });
-    addSignal("Termine", appointmentValues.join(" · "), "appointments");
-  }
-  if (activityFeedback.length) {
-    addSignal("Aktivitätsfeedback", `${activityFeedback.length} Rückmeldung${activityFeedback.length === 1 ? "" : "en"} vorhanden`, "feedback");
-  }
-  if (hasSignals) root.append(signals);
-  else {
-    const empty = document.createElement("span");
-    empty.className = "planned-day-context-empty";
-    empty.textContent = "Noch keine Tagesinfos hinterlegt.";
-    root.append(empty);
-  }
-  return root;
 }
 
 function distanceLabel(value) {
@@ -1697,407 +1511,6 @@ function renderActivities(activities) {
       }
     });
     root.append(loadMore);
-  }
-}
-
-function renderExternalCalendarMarker(event) {
-  const root = document.createElement("div");
-  root.className = "planned-calendar-marker";
-  root.setAttribute("role", "note");
-  const title = document.createElement("strong");
-  title.textContent = event.name || "Kalendereintrag";
-  const markers = [
-    Number(event.training_relevant) === 0 ? "Kein Training" : null,
-    Number(event.no_intensity) === 1 ? "Keine Intensität" : null,
-    Number(event.short_only) === 1 ? "Nur kurz" : null,
-  ].filter(Boolean);
-  const label = document.createElement("span");
-  label.textContent = markers.join(" · ") || "Kalenderhinweis";
-  const time = event.all_day ? "Ganztägig" : `${formatTime(event.start_local)} – ${formatTime(event.end_local)}`;
-  const meta = document.createElement("small");
-  meta.textContent = `${time} · ${event.duration_minutes || 0} Min.`;
-  root.append(title, label, meta);
-  return root;
-}
-
-function renderLocalPlanningActions(event, body) {
-  if (!event?.is_local || !event.local_id) return;
-  const actions = document.createElement("div");
-  actions.className = "card-actions local-planning-actions";
-  const editor = document.createElement("details");
-  const editorSummary = document.createElement("summary");
-  editorSummary.textContent = "Lokale Planung bearbeiten oder verschieben";
-  const form = document.createElement("form");
-  form.className = "local-planning-form";
-  form.addEventListener("input", () => {
-    const key = String(event.local_id);
-    state.planningDrafts.set(key, {
-      date: dateInput.value,
-      name: nameInput.value,
-      duration: durationInput.value,
-      description: descriptionInput.value,
-    });
-    state.planningEditDirty.add(key);
-    setDirtyIndicator("planningDirtyIndicator", true);
-  });
-  const planningDraft = state.planningDrafts.get(String(event.local_id)) || {};
-  const dateLabel = document.createElement("label");
-  dateLabel.textContent = "Datum";
-  const dateInput = document.createElement("input");
-  dateInput.type = "date";
-  dateInput.required = true;
-  dateInput.value = planningDraft.date ?? plannedEventDate(event);
-  dateLabel.append(dateInput);
-  const nameLabel = document.createElement("label");
-  nameLabel.textContent = "Name";
-  const nameInput = document.createElement("input");
-  nameInput.type = "text";
-  nameInput.maxLength = 200;
-  nameInput.required = true;
-  nameInput.value = planningDraft.name ?? event.name ?? "Geplante Einheit";
-  nameLabel.append(nameInput);
-  const durationLabel = document.createElement("label");
-  durationLabel.textContent = "Dauer (Minuten)";
-  const durationInput = document.createElement("input");
-  durationInput.type = "number";
-  durationInput.min = "5";
-  durationInput.max = "600";
-  durationInput.required = true;
-  durationInput.value = planningDraft.duration ?? (event.duration_minutes || Math.round(Number(event.moving_time || 0) / 60) || 30);
-  durationLabel.append(durationInput);
-  const descriptionLabel = document.createElement("label");
-  descriptionLabel.textContent = "Workout-Text";
-  const descriptionInput = document.createElement("textarea");
-  descriptionInput.rows = 4;
-  descriptionInput.maxLength = 12000;
-  descriptionInput.required = true;
-  descriptionInput.value = planningDraft.description ?? event.description ?? "";
-  descriptionLabel.append(descriptionInput);
-  const saveButton = document.createElement("button");
-  saveButton.type = "submit";
-  saveButton.className = "secondary-button";
-  saveButton.textContent = "Lokale Planung speichern";
-  form.append(dateLabel, nameLabel, durationLabel, descriptionLabel, saveButton);
-  form.addEventListener("submit", async (submitEvent) => {
-    submitEvent.preventDefault();
-    saveButton.disabled = true;
-    saveButton.setAttribute("aria-busy", "true");
-    saveButton.textContent = "Lokale Planung wird gespeichert…";
-    try {
-      await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, {
-        method: "POST",
-        body: JSON.stringify({
-          action: "update",
-          date: dateInput.value,
-          name: nameInput.value,
-          duration_minutes: Number(durationInput.value),
-          description: descriptionInput.value,
-        }),
-      });
-      state.planningEditDirty.delete(String(event.local_id));
-      state.planningDrafts.delete(String(event.local_id));
-      setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
-      toast("Lokale Planung gespeichert");
-      await load();
-    } catch (error) {
-      toast(error.message, true);
-      saveButton.disabled = false;
-      saveButton.removeAttribute("aria-busy");
-      saveButton.textContent = "Lokale Planung speichern";
-    }
-  });
-  editor.append(editorSummary, form);
-  actions.append(editor);
-  const archiveButton = document.createElement("button");
-  archiveButton.type = "button";
-  archiveButton.className = "secondary-button";
-  archiveButton.textContent = event.archived ? "Lokale Einheit wiederherstellen" : "Lokale Einheit archivieren";
-  archiveButton.addEventListener("click", async () => {
-    archiveButton.disabled = true;
-    try {
-      await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, { method: "POST", body: JSON.stringify({ action: event.archived ? "restore" : "archive" }) });
-      toast(event.archived ? "Lokale Einheit wiederhergestellt" : "Lokale Einheit archiviert");
-      await load();
-    } catch (error) { toast(error.message, true); archiveButton.disabled = false; }
-  });
-  actions.append(archiveButton);
-  const deleteButton = document.createElement("button");
-  deleteButton.type = "button";
-  deleteButton.className = "secondary-button danger-button";
-  deleteButton.textContent = "Nur lokal entfernen";
-  deleteButton.addEventListener("click", async () => {
-    if (!await requestConfirmation(`„${event.name || "Geplante Einheit"}“ wirklich nur aus der lokalen Planung entfernen?`, { title: "Lokale Planung entfernen?" })) return;
-    deleteButton.disabled = true;
-    try {
-      await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, {
-        method: "POST",
-        body: JSON.stringify({ action: "delete" }),
-      });
-      toast("Lokale Planung entfernt");
-      await load();
-    } catch (error) {
-      toast(error.message, true);
-      deleteButton.disabled = false;
-    }
-  });
-  actions.append(deleteButton);
-  body.append(actions);
-}
-
-function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContext = [], competitions = []) {
-  setDirtyIndicator("planningDirtyIndicator", state.planningEditDirty.size > 0);
-  const root = $("#plannedCalendar");
-  state.data.daily_planning_context = Array.isArray(dailyPlanningContext) ? dailyPlanningContext : [];
-  root.querySelectorAll("details.planned-week").forEach((week) => state.plannedWeekOpen.set(week.dataset.week, week.open));
-  root.replaceChildren();
-  if (!planned.length && !externalCalendarEvents.length && !competitions.length) {
-    root.append(state.data && !state.loadedAreas.has("plan") ? createSkeletonStack(4) : createEmptyState(
-      "Noch kein lokaler Plan",
-      "Plane eine Einheit mit dem Coach oder öffne eine Vorlage. Remote-Termine werden erst nach einem lokalen Import angezeigt.",
-      todayAction("Coach öffnen", () => applyNavigationRoute("coach", { historyMode: "push" }), "btn primary"),
-    ));
-    return;
-  }
-  const eventsByDate = new Map();
-  (planned || []).forEach((event) => {
-    const date = plannedEventDate(event);
-    if (!date) return;
-    if (!eventsByDate.has(date)) eventsByDate.set(date, []);
-    eventsByDate.get(date).push(event);
-  });
-  (competitions || []).forEach((competition) => {
-    if (!competition || !competition.event_date) return;
-    const date = String(competition.event_date).slice(0, 10);
-    if (!eventsByDate.has(date)) eventsByDate.set(date, []);
-    eventsByDate.get(date).push({
-      ...competition,
-      date,
-      start_date_local: competition.start_date_local || `${date}T00:00:00`,
-      type: competition.sport || "Wettkampf",
-      category: competition.category || `RACE_${competition.priority || "B"}`,
-      is_competition: true,
-      is_local: true,
-      sync_source: competition.external_id ? "local+intervals" : "local",
-      sync_status: competition.sync_state || "local",
-    });
-  });
-  const calendarEventsByDate = new Map();
-  (externalCalendarEvents || [])
-    .filter((event) => event && Number(event.training_relevant) === 1)
-    .forEach((event) => {
-      const date = String(event.event_date || "").slice(0, 10);
-      if (!date) return;
-      if (!calendarEventsByDate.has(date)) calendarEventsByDate.set(date, []);
-      calendarEventsByDate.get(date).push(event);
-    });
-
-  const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
-  const today = dateFromKey(todayKey);
-  const calendarDisplay = state.data?.calendar_display || {};
-  const configuredPastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
-  const configuredFutureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
-  const providerWindow = state.data?.planning_view?.provider_window || {};
-  const windowStartKey = String(providerWindow.start || "").slice(0, 10);
-  const windowEndKey = String(providerWindow.end || "").slice(0, 10);
-  const loadedPastWeeks = windowStartKey ? Math.max(0, Math.ceil(dateKeyDifference(todayKey, windowStartKey) / 7)) : configuredPastWeeks;
-  const loadedFutureWeeks = windowEndKey ? Math.max(0, Math.ceil(dateKeyDifference(windowEndKey, todayKey) / 7)) : configuredFutureWeeks;
-  const pastWeeks = Math.min(configuredPastWeeks, loadedPastWeeks);
-  const futureWeeks = Math.min(configuredFutureWeeks, loadedFutureWeeks);
-  const historyStart = new Date(today);
-  historyStart.setDate(today.getDate() - pastWeeks * 7);
-  const firstWeek = plannedWeekStart(historyStart);
-  const currentWeekIndex = pastWeeks;
-  const calendarWeeks = pastWeeks + 1 + futureWeeks;
-  for (let weekIndex = 0; weekIndex < calendarWeeks; weekIndex += 1) {
-    const weekStart = new Date(firstWeek);
-    weekStart.setDate(firstWeek.getDate() + weekIndex * 7);
-    const weekKey = localDateKey(weekStart);
-    const weekEvents = [];
-    for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
-      const date = new Date(weekStart);
-      date.setDate(weekStart.getDate() + dayIndex);
-      weekEvents.push(...(eventsByDate.get(localDateKey(date)) || []));
-    }
-
-    const weekRoot = document.createElement("details");
-    weekRoot.className = "planned-week";
-    weekRoot.dataset.week = weekKey;
-    weekRoot.open = state.plannedWeekOpen.has(weekKey) ? state.plannedWeekOpen.get(weekKey) : weekIndex === currentWeekIndex;
-    weekRoot.addEventListener("toggle", () => state.plannedWeekOpen.set(weekKey, weekRoot.open));
-    const weekHeading = document.createElement("summary");
-    weekHeading.className = "planned-week-heading";
-    const weekTitle = document.createElement("span");
-    weekTitle.className = "planned-week-title";
-    weekTitle.textContent = plannedWeekLabel(weekStart);
-    if (weekIndex === currentWeekIndex) {
-      const current = document.createElement("small");
-      current.textContent = "Diese Woche";
-      weekTitle.append(current);
-    }
-    const weekSummary = document.createElement("span");
-    weekSummary.className = "planned-week-summary";
-    weekSummary.textContent = plannedWeekSummary(weekEvents, weekKey);
-    weekHeading.append(weekTitle, weekSummary);
-    weekRoot.append(weekHeading);
-
-    const weekDays = document.createElement("div");
-    weekDays.className = "planned-week-days";
-    for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
-      const day = new Date(weekStart);
-      day.setDate(weekStart.getDate() + dayIndex);
-      const date = localDateKey(day);
-      const events = eventsByDate.get(date) || [];
-      const calendarEvents = calendarEventsByDate.get(date) || [];
-      const dayRoot = document.createElement("section");
-      dayRoot.className = "planned-day";
-      dayRoot.classList.toggle("has-planned-events", events.length > 0);
-
-      const heading = document.createElement("div");
-      heading.className = "planned-day-heading";
-      const headingMain = document.createElement("div");
-      headingMain.className = "planned-day-heading-main";
-      const title = document.createElement("h3");
-      title.textContent = plannedDayLabel(day, dateKeyDifference(date, todayKey));
-      headingMain.append(title);
-      const weather = planningContextForDate(date).weather || weatherForDate(date);
-      const weatherRoot = renderPlannedDayWeather(weather);
-      if (weatherRoot) headingMain.append(weatherRoot);
-      const count = document.createElement("span");
-      count.className = "planned-day-count";
-      count.textContent = events.length ? `${events.length} ${events.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
-      heading.append(headingMain, count);
-      dayRoot.append(heading);
-
-      const dailyContext = renderDailyPlanningContext(date, todayKey);
-
-      if (!events.length && !calendarEvents.length) {
-        const empty = document.createElement("p");
-        empty.className = "planned-day-empty";
-        empty.textContent = "Keine Einheit geplant";
-        dayRoot.append(empty);
-      } else if (events.length) {
-        const entries = document.createElement("div");
-        entries.className = "planned-day-entries";
-        events.forEach((event) => {
-          const details = document.createElement("details");
-          details.className = "planned-entry";
-          const summary = document.createElement("summary");
-          const summaryMain = document.createElement("span");
-          summaryMain.className = "planned-summary-main";
-          const eventTitle = document.createElement("strong");
-          eventTitle.textContent = event.name || "Geplante Einheit";
-          const meta = document.createElement("span");
-          meta.className = "planned-meta";
-          const compliance = event.compliance;
-          const complianceSummary = compliance?.percentage != null ? `Umsetzung ${compliance.percentage}%` : compliance?.status === "missed" ? "Nicht umgesetzt" : compliance?.status === "completed" ? "Absolviert" : null;
-          const syncLabel = event.is_competition
-            ? "Wettkampf"
-            : event.sync_source === "local+intervals"
-            ? "Lokal + Intervals.icu"
-            : event.sync_source === "local"
-              ? "Nur lokal"
-              : "Intervals.icu";
-          meta.textContent = [event.type, event.category, event.moving_time ? `Dauer ${formatDuration(event.moving_time)}` : null, syncLabel, event.sync_status, complianceSummary].filter(Boolean).join(" · ");
-          summaryMain.append(eventTitle, meta);
-          const recommendation = event.weather_recommendation;
-          if (recommendation) {
-            const weatherSlot = document.createElement("span");
-            weatherSlot.className = "planned-weather-slot";
-            weatherSlot.textContent = `${weatherIconFor(recommendation)} Beste Zeit ${recommendation.suggested_time}${recommendation.availability ? ` · ${recommendation.availability}` : ""}`;
-            summaryMain.append(weatherSlot);
-          }
-          summary.append(summaryMain);
-          if (compliance) details.classList.add(`planned-compliance-${compliance.status}`);
-          details.append(summary);
-
-          const body = document.createElement("div");
-          body.className = "planned-entry-body";
-          if (compliance) {
-            const complianceRoot = document.createElement("div");
-            complianceRoot.className = "planned-compliance";
-            const complianceTitle = document.createElement("strong");
-            complianceTitle.textContent = complianceLabel(compliance);
-            complianceRoot.append(complianceTitle);
-            if (compliance.status === "completed" && compliance.activity_name) {
-              const completed = document.createElement("span");
-              completed.textContent = `Absolviert: ${compliance.activity_name}`;
-              complianceRoot.append(completed);
-            }
-            body.append(complianceRoot);
-          }
-          const privateAdjustment = event.private_calendar_adjustment;
-          if (privateAdjustment) {
-            const originRoot = document.createElement("div");
-            originRoot.className = "planned-origin";
-            const originTitle = document.createElement("strong");
-            originTitle.textContent = privateAdjustment.label || "Aufgrund privater Termine angepasst";
-            originRoot.append(originTitle);
-            const durationChange = document.createElement("span");
-            const originalMinutes = Number(privateAdjustment.original_duration_minutes);
-            const adjustedMinutes = Number(privateAdjustment.adjusted_duration_minutes);
-            if (Number.isFinite(originalMinutes) && Number.isFinite(adjustedMinutes)) {
-              durationChange.textContent = `Dauer: ${originalMinutes} Min. → ${adjustedMinutes} Min. · Intensität reduziert`;
-              originRoot.append(durationChange);
-            }
-            if (privateAdjustment.reason) {
-              const reason = document.createElement("span");
-              reason.textContent = privateAdjustment.reason;
-              originRoot.append(reason);
-            }
-            body.append(originRoot);
-          }
-          if (event.description) {
-            const description = document.createElement("div");
-            description.className = "planned-description";
-            description.textContent = event.description;
-            body.append(description);
-          }
-          if (recommendation) {
-            const recommendation = document.createElement("div");
-            recommendation.className = "planned-weather-recommendation";
-            const icon = document.createElement("span");
-            icon.className = "weather-icon";
-            icon.setAttribute("aria-hidden", "true");
-            icon.textContent = weatherIconFor(event.weather_recommendation);
-            const recommendationTitle = document.createElement("strong");
-            recommendationTitle.textContent = `Beste Wetterzeit: ${event.weather_recommendation.suggested_time}${event.weather_recommendation.availability ? ` · ${event.weather_recommendation.availability}` : ""}`;
-            const recommendationReason = document.createElement("span");
-            const direction = weatherDirection(event.weather_recommendation.wind_direction);
-            recommendationReason.textContent = `${event.weather_recommendation.reason || "Günstigstes verfügbares Zeitfenster laut Vorhersage."}${direction ? ` Windrichtung: ${direction}.` : ""}`;
-            recommendation.append(icon, recommendationTitle, recommendationReason);
-            body.append(recommendation);
-          }
-          if (event.local_id) {
-            const identity = document.createElement("small");
-            identity.className = "planned-sync-identity";
-            identity.textContent = [
-              event.local_id ? `Lokal-ID: ${event.local_id}` : null,
-              event.remote_id ? `Remote-ID: ${event.remote_id}` : null,
-            ].filter(Boolean).join(" · ");
-            body.append(identity);
-          } else if (event.remote_id) {
-            const identity = document.createElement("small");
-            identity.className = "planned-sync-identity";
-            identity.textContent = `Remote-ID: ${event.remote_id}`;
-            body.append(identity);
-          }
-          if (!event.is_competition) renderLocalPlanningActions(event, body);
-          details.append(body);
-          entries.append(details);
-        });
-        dayRoot.append(entries);
-      }
-      dayRoot.append(dailyContext);
-      if (calendarEvents.length) {
-        const calendarRoot = document.createElement("div");
-        calendarRoot.className = "planned-calendar-markers";
-        calendarEvents.forEach((event) => calendarRoot.append(renderExternalCalendarMarker(event)));
-        dayRoot.append(calendarRoot);
-      }
-      weekDays.append(dayRoot);
-    }
-    weekRoot.append(weekDays);
-    root.append(weekRoot);
   }
 }
 
@@ -2592,9 +2005,6 @@ function openCheckinEditor(date) {
   populateCheckin(checkin, state.data?.profile?.timezone);
   renderCheckins(state.data?.checkins || [], state.data?.profile?.timezone);
   if (state.route !== "today") applyNavigationRoute("today", { historyMode: "push", focus: false });
-  // The dialog may still be nested in a hidden panel in older cached markup.
-  // Move it to the document root before opening so that panel cannot suppress the modal.
-  if (dialog.parentElement?.classList.contains("panel")) document.body.append(dialog);
   showAccessibleDialog(dialog, form.elements.soreness);
 }
 
