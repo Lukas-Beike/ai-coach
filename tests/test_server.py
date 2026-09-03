@@ -414,6 +414,33 @@ class CoachTests(unittest.TestCase):
         self.assertGreaterEqual(active.call_count, 1)
         enqueue.assert_not_called()
 
+    def test_startup_historical_backfill_resumes_before_saved_cursor(self):
+        config = replace(server.CONFIG, intervals_api_key="configured", calendar_ical_url="", garmin_email="", garmin_tokenstore="")
+        with patch.object(server, "CONFIG", config), patch.object(server, "_sync_job_active", return_value=False), patch.object(
+            server, "provider_sync_cursor", return_value={"cursor": "2026-08-01"}
+        ), patch.object(server, "enqueue_sync_job") as enqueue:
+            server.enqueue_startup_sync_jobs()
+        historical = next(call for call in enqueue.call_args_list if call.args[1] == "historical_backfill")
+        self.assertEqual(historical.args[2]["end_date"], "2026-07-31")
+
+    def test_historical_snapshot_merge_preserves_current_read_model(self):
+        current = {
+            "synced_at": "current",
+            "recent_activities": [{"id": "new"}],
+            "raw_provider_data": {"athlete": {"id": "athlete"}, "activities": [{"id": "new"}], "wellness": [], "upcoming_calendar": []},
+        }
+        historical = {
+            "synced_at": "historical",
+            "recent_activities": [{"id": "old"}],
+            "raw_provider_data": {"athlete": {}, "activities": [{"id": "old"}], "wellness": [{"id": "wellness-old"}], "upcoming_calendar": []},
+            "provider_sync": {"calendar_window": {"start": "2020-01-01", "end": "2020-03-30"}},
+        }
+        merged = server.merge_historical_snapshot(current, historical)
+        self.assertEqual(merged["recent_activities"], current["recent_activities"])
+        self.assertEqual({item["id"] for item in merged["raw_provider_data"]["activities"]}, {"new", "old"})
+        self.assertEqual(merged["raw_provider_data"]["wellness"], [{"id": "wellness-old"}])
+        self.assertEqual(merged["synced_at"], "current")
+
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = server.utc_now()
         with server.DB_LOCK, server.database() as db:

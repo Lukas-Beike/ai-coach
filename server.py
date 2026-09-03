@@ -10528,6 +10528,31 @@ def save_snapshot(snapshot: dict[str, Any], update_full_sync: bool = True) -> No
             set_kv("last_performance_refresh_at", snapshot["synced_at"], db)
 
 
+def merge_historical_snapshot(current: dict[str, Any] | None, historical: dict[str, Any]) -> dict[str, Any]:
+    """Merge historical provider collections without replacing the current read model."""
+    if not isinstance(current, dict):
+        return historical
+    merged = dict(current)
+    current_raw = current.get("raw_provider_data") if isinstance(current.get("raw_provider_data"), dict) else {}
+    historical_raw = historical.get("raw_provider_data") if isinstance(historical.get("raw_provider_data"), dict) else {}
+    merged["raw_provider_data"] = {
+        "athlete": current_raw.get("athlete") or historical_raw.get("athlete") or {},
+        "activities": deduplicate_api_records(
+            (current_raw.get("activities") or []) + (historical_raw.get("activities") or [])
+        ),
+        "wellness": deduplicate_api_records(
+            (current_raw.get("wellness") or []) + (historical_raw.get("wellness") or [])
+        ),
+        "upcoming_calendar": current_raw.get("upcoming_calendar") or [],
+    }
+    merged["historical_sync"] = {
+        "synced_at": historical.get("synced_at"),
+        "window": historical.get("provider_sync", {}).get("calendar_window", {})
+        if isinstance(historical.get("provider_sync"), dict) else {},
+    }
+    return merged
+
+
 def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any], str, str] | None:
     if str(event.get("category") or "WORKOUT").upper() != "WORKOUT":
         return None
@@ -10788,7 +10813,11 @@ def sync_intervals(
             fetch_kwargs["end_date"] = end_date
         snapshot = IntervalsClient().fetch_snapshot(**fetch_kwargs)
         set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
-        save_snapshot(snapshot)
+        if end_date is not None:
+            snapshot = merge_historical_snapshot(latest_snapshot(), snapshot)
+            save_snapshot(snapshot, update_full_sync=False)
+        else:
+            save_snapshot(snapshot)
         calendar_window = snapshot.get("provider_sync", {}).get("calendar_window", {}) if isinstance(snapshot.get("provider_sync"), dict) else {}
         planned_import = {"imported": 0, "updated": 0, "conflicts": 0}
         if end_date is None:
@@ -15970,14 +15999,28 @@ def enqueue_startup_sync_jobs() -> None:
     if CONFIG.intervals_api_key and not _sync_job_active("intervals", "historical_backfill"):
         cursor = provider_sync_cursor("intervals", "historical").get("cursor")
         if not cursor or str(cursor) > SYNC_EARLIEST_DATE.isoformat():
-            enqueue_sync_job("intervals", "historical_backfill", {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}, requested_by="startup")
+            try:
+                resume_end = date.fromisoformat(str(cursor)[:10]) - timedelta(days=1) if cursor else None
+            except ValueError:
+                resume_end = None
+            payload = {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}
+            if resume_end is not None:
+                payload["end_date"] = resume_end.isoformat()
+            enqueue_sync_job("intervals", "historical_backfill", payload, requested_by="startup")
     garmin_configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
     if garmin_configured and not _sync_job_active("garmin", "refresh"):
         enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "startup"}, requested_by="startup")
     if garmin_configured and not _sync_job_active("garmin", "historical_backfill"):
         cursor = provider_sync_cursor("garmin", "historical").get("cursor")
         if not cursor or str(cursor) > SYNC_EARLIEST_DATE.isoformat():
-            enqueue_sync_job("garmin", "historical_backfill", {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}, requested_by="startup")
+            try:
+                resume_end = date.fromisoformat(str(cursor)[:10]) - timedelta(days=1) if cursor else None
+            except ValueError:
+                resume_end = None
+            payload = {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}
+            if resume_end is not None:
+                payload["end_date"] = resume_end.isoformat()
+            enqueue_sync_job("garmin", "historical_backfill", payload, requested_by="startup")
     if get_profile().get("weather_location", "").strip() and not _sync_job_active("weather", "refresh"):
         enqueue_sync_job("weather", "refresh", {"force": True, "reason": "startup"}, requested_by="startup")
 
