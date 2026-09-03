@@ -37,7 +37,7 @@ const state = {
   libraryDateDrafts: new Map(),
   plannedWeekOpen: new Map(),
   planSegment: "calendar",
-  planSegmentScroll: { calendar: 0, library: 0, goals: 0 },
+  planSegmentScroll: { calendar: 0, templates: 0, goals: 0 },
   loadedAreas: new Set(),
   voiceRecorder: null,
   voiceStream: null,

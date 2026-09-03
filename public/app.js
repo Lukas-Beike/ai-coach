@@ -23,7 +23,7 @@ function renderMoreSegments(segment = moreSegmentFromRoute()) {
 }
 
 function renderPlanSegments(segment = state.planSegment) {
-  const selected = ["calendar", "library", "goals"].includes(segment) ? segment : "calendar";
+  const selected = ["calendar", "templates", "goals"].includes(segment) ? segment : "calendar";
   state.planSegment = selected;
   document.querySelectorAll("[data-plan-segment-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.planSegmentPanel !== selected;
@@ -39,8 +39,8 @@ function renderPlanSegments(segment = state.planSegment) {
 function currentPlanLoadAreas() {
   const areas = new Set(["chat", "activities", "performance", "feedback", "profile", "weather"]);
   const route = baseRoute();
-  if (route === "today" || (route === "planned" && state.planSegment !== "library")) areas.add("plan");
-  if (route === "planned" && state.planSegment === "library") areas.add("library");
+  if (route === "today" || (route === "plan" && state.planSegment !== "templates")) areas.add("plan");
+  if (route === "plan" && state.planSegment === "templates") areas.add("library");
   return [...areas];
 }
 
@@ -48,8 +48,8 @@ function ensureRouteData(route = state.route) {
   if (!state.data || state.loadPromise) return;
   const requested = [];
   const panelRoute = baseRoute(route);
-  if ((panelRoute === "today" || (panelRoute === "planned" && state.planSegment !== "library")) && !state.loadedAreas.has("plan")) requested.push("plan");
-  if (panelRoute === "planned" && state.planSegment === "library" && !state.loadedAreas.has("library")) requested.push("library");
+  if ((panelRoute === "today" || (panelRoute === "plan" && state.planSegment !== "templates")) && !state.loadedAreas.has("plan")) requested.push("plan");
+  if (panelRoute === "plan" && state.planSegment === "templates" && !state.loadedAreas.has("library")) requested.push("library");
   if (requested.length) load("/api/bootstrap?local=1", requested);
 }
 
@@ -60,19 +60,21 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   if (currentPanel !== NAV_ROUTES[panelRoute] && !(await confirmDiscardChanges())) return false;
   if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges()) discardUnsavedChanges();
-  if (currentPanel === "workoutsPanel" && mainRoute !== "planned") state.planSegmentScroll[state.planSegment] = window.scrollY;
-  if (currentPanel === "workoutsPanel" && mainRoute === "planned" && state.planSegment !== planSegmentFromRoute(panelRoute)) state.planSegmentScroll[state.planSegment] = window.scrollY;
+  if (currentPanel === "workoutsPanel" && mainRoute !== "plan") state.planSegmentScroll[state.planSegment] = window.scrollY;
+  if (currentPanel === "workoutsPanel" && mainRoute === "plan" && state.planSegment !== planSegmentFromRoute(panelRoute)) state.planSegmentScroll[state.planSegment] = window.scrollY;
   document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
   const navigation = document.querySelector(`.nav-item[data-route="${navigationRoute}"]`);
   const panel = document.querySelector(`#${NAV_ROUTES[panelRoute]}`);
   if (!navigation || !panel) return false;
-  navigation.classList.add("active");
   document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
-  navigation.setAttribute("aria-current", "page");
+  document.querySelectorAll(`.nav-item[data-route="${navigationRoute}"]`).forEach((item) => {
+    item.classList.add("active");
+    item.setAttribute("aria-current", "page");
+  });
   panel.classList.add("active");
   state.route = panelRoute;
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
-  if (mainRoute === "planned") {
+  if (mainRoute === "plan") {
     renderPlanSegments(planSegmentFromRoute(panelRoute));
     renderActivePlanSegment(state.data);
   }
@@ -83,10 +85,10 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   }
   if (state.data) renderStatus(state.data);
   updateHeaderAction();
-  if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadContextPreview();
-  if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadLogs();
+  if (state.data && mainRoute === "more") loadContextPreview();
+  if (state.data && mainRoute === "more") loadLogs();
   if (state.data && mainRoute === "more") loadChangeHistory();
-  const targetScroll = mainRoute === "planned" ? (state.planSegmentScroll[state.planSegment] || 0) : 0;
+  const targetScroll = mainRoute === "plan" ? (state.planSegmentScroll[state.planSegment] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo({ top: targetScroll, behavior: "auto" }));
   if (mainRoute === "coach") {
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
@@ -102,7 +104,11 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
 
 async function syncNavigationRoute() {
   const route = routeFromHash();
-  const applied = await applyNavigationRoute(route, { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
+  const rawRoute = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
+  const isLegacyAlias = rawRoute && rawRoute !== route;
+  const applied = await applyNavigationRoute(route, {
+    historyMode: isLegacyAlias || !hashContainsKnownRoute() ? "replace" : "none",
+  });
   if (!applied && state.route) window.history.replaceState({ route: state.route }, "", `#${state.route}`);
 }
 
@@ -561,6 +567,11 @@ function formatVoiceDuration() {
   return `${String(Math.floor(elapsed / 1000)).padStart(2, "0")} s / 60 s`;
 }
 
+function setVoiceButtonIcon(icon) {
+  const button = $("#voiceButton");
+  if (button) button.innerHTML = `<svg class="nav-icon" aria-hidden="true"><use href="#icon-${icon}"></use></svg>`;
+}
+
 function updateVoiceButton() {
   const button = $("#voiceButton");
   if (!button) return;
@@ -571,15 +582,15 @@ function updateVoiceButton() {
   button.classList.toggle("transcribing", transcribing);
   button.setAttribute("aria-pressed", recording ? "true" : "false");
   if (recording) {
-    button.textContent = "■";
+    setVoiceButtonIcon("stop");
     button.setAttribute("aria-label", "Spracheingabe beenden");
     button.title = "Spracheingabe beenden";
   } else if (transcribing) {
-    button.textContent = "…";
+    button.innerHTML = "<span class=\"button-spinner\" aria-hidden=\"true\"></span>";
     button.setAttribute("aria-label", "Audio wird transkribiert");
     button.title = "Audio wird transkribiert";
   } else {
-    button.textContent = "🎙";
+    setVoiceButtonIcon("microphone");
     button.setAttribute("aria-label", "Spracheingabe starten");
     button.title = "Spracheingabe starten";
   }
@@ -1180,7 +1191,7 @@ function renderToday(data) {
     item.append(title, meta);
     workoutCard.append(item);
   });
-  workoutCard.append(todayAction("Plan öffnen", () => applyNavigationRoute("planned", { historyMode: "push" })));
+    workoutCard.append(todayAction("Plan öffnen", () => applyNavigationRoute("plan/calendar", { historyMode: "push" })));
   root.append(workoutCard);
 
   const weatherCard = todayCard("Wetter", "today-weather");
@@ -1194,7 +1205,7 @@ function renderToday(data) {
   const openFeedback = (data.activities || []).find((activity) => todayActivityDate(activity) && !activity.activity_feedback);
   if (openFeedback) {
     todayCardText(feedbackCard, `Rückmeldung zu „${openFeedback.name || "letzter Aktivität"}“ ergänzen.`, "today-card-summary");
-    feedbackCard.append(todayAction("Verlauf öffnen", () => applyNavigationRoute("activities", { historyMode: "push" })));
+    feedbackCard.append(todayAction("Verlauf öffnen", () => applyNavigationRoute("analysis/history", { historyMode: "push" })));
   } else todayCardText(feedbackCard, "Keine offene Rückmeldung zu den geladenen Aktivitäten.");
   root.append(feedbackCard);
 
@@ -1202,7 +1213,7 @@ function renderToday(data) {
   if (adjustment && (adjustment.changes?.length || adjustment.illness_pause)) {
     const adjustmentCard = todayCard("Aktuelle Plananpassung", "today-adjustment");
     todayCardText(adjustmentCard, "Eine Planänderung wartet auf deine Prüfung.", "today-card-summary");
-    adjustmentCard.append(todayAction("Plananpassung prüfen", () => applyNavigationRoute("planned", { historyMode: "push" })));
+    adjustmentCard.append(todayAction("Plananpassung prüfen", () => applyNavigationRoute("plan/calendar", { historyMode: "push" })));
     root.append(adjustmentCard);
   }
 }
@@ -2178,7 +2189,7 @@ async function executeCoachActionProposal(proposal, button) {
     renderCoachActionReview();
     toast(result.local_planned ? `${result.local_planned} Einheit(en) lokal geplant` : "Planung lokal gespeichert");
     await load("/api/bootstrap?local=1", ["plan", "library"]);
-    applyNavigationRoute("planned", { historyMode: "push" });
+    applyNavigationRoute("plan/calendar", { historyMode: "push" });
   } catch (error) {
     toast(error.message, true);
     button.disabled = false;
@@ -3357,8 +3368,10 @@ function renderThinkingLevel(thinkingLevel) {
 
 function renderAppVersion(app = {}) {
   const versionNode = $("#appVersion");
+  const desktopVersionNode = $("#desktopNavVersion");
   const updateNode = $("#appUpdateIndicator");
   if (versionNode) versionNode.textContent = app.version ? `v${app.version}` : "";
+  if (desktopVersionNode) desktopVersionNode.textContent = app.version ? `v${app.version}` : "";
   if (!updateNode) return;
   const release = app.github_release || {};
   const hasNewerVersion = release.status === "ok" && release.is_newer;
@@ -3857,8 +3870,8 @@ async function loadInitialState() {
   const segment = planSegmentFromRoute(route);
   const areas = ["chat", "activities", "performance", "feedback", "profile"];
   areas.push("weather");
-  if (route === "today" || (baseRoute(route) === "planned" && segment !== "library")) areas.push("plan");
-  if (baseRoute(route) === "planned" && segment === "library") areas.push("library");
+  if (route === "today" || (baseRoute(route) === "plan" && segment !== "templates")) areas.push("plan");
+  if (baseRoute(route) === "plan" && segment === "templates") areas.push("library");
   await load("/api/bootstrap?local=1", areas);
   if (state.data?.profile?.weather_location) {
     await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
@@ -3870,7 +3883,7 @@ async function loadInitialState() {
 function renderActivePlanSegment(data = state.data) {
   if (!data) return;
   renderPlanSegments(state.planSegment);
-  if (state.planSegment === "library") renderLibrary(data.library || []);
+  if (state.planSegment === "templates") renderLibrary(data.library || []);
   if (state.planSegment === "goals") {
     renderCompetitions(data.competitions || []);
     renderTrainingPlans(data.plans || [], data.library || []);
@@ -4629,7 +4642,7 @@ document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("
 document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
-  applyNavigationRoute(`planned/${link.dataset.planSegment}`, { historyMode: "push" });
+  applyNavigationRoute(`plan/${link.dataset.planSegment}`, { historyMode: "push" });
 }));
 document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -4673,7 +4686,7 @@ $("#checkinCloseButton").addEventListener("click", () => $("#checkinDialog")?.cl
 $("#adaptivePlanningButton").addEventListener("click", prepareReplan);
 $("#applyAdaptivePlanningButton").addEventListener("click", applyReplan);
 $("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptivePlanningDialog")?.close());
-$("#coachAdaptivePlanningButton").addEventListener("click", () => applyNavigationRoute("planned", { historyMode: "push" }));
+$("#coachAdaptivePlanningButton").addEventListener("click", () => applyNavigationRoute("plan/calendar", { historyMode: "push" }));
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
 $("#competitionList").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
