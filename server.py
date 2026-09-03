@@ -2404,6 +2404,8 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
     except ValueError as exc:
         raise AppError(400, str(exc), reason="invalid_job_request") from exc
     values = envelope["payload"]
+    if envelope["type"] == "historical_backfill" and envelope["provider"] not in {"intervals", "garmin"}:
+        raise AppError(400, "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig.", reason="invalid_job_request")
     if envelope["type"] == "plan_push":
         if envelope["provider"] != "intervals":
             raise AppError(400, "Plan-Push-Jobs sind nur für Intervals.icu zulässig.", reason="invalid_job_request")
@@ -2422,8 +2424,8 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
             normalized_entries.append({"library_workout_id": str(entry["library_workout_id"]), "expected_payload_hash": payload_hash})
         return {"provider": envelope["provider"], "type": envelope["type"], "payload": {"entries": normalized_entries, "reason": str(values.get("reason") or "job").strip()[:80] or "job"}}
     allowed = {
-        "intervals": {"days", "reason"},
-        "garmin": {"days", "reason"},
+        "intervals": {"days", "reason", "end_date"},
+        "garmin": {"days", "reason", "end_date"},
         "calendar": {"reason"},
         "weather": {"force", "reason"},
     }[envelope["provider"]]
@@ -2443,6 +2445,11 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
         if not isinstance(values["force"], bool):
             raise AppError(400, "force muss ein Boolean sein.", reason="invalid_job_request")
         normalized["force"] = values["force"]
+    if "end_date" in values:
+        try:
+            normalized["end_date"] = date.fromisoformat(str(values["end_date"])[:10]).isoformat()
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Das Backfill-Enddatum ist ungültig.", reason="invalid_job_request") from exc
     if values.get("reason") is not None:
         normalized["reason"] = str(values["reason"]).strip()[:80] or "job"
     return {"provider": envelope["provider"], "type": envelope["type"], "payload": normalized}
@@ -2688,8 +2695,8 @@ def _sync_job_update_from_result(job_id: str, result: Any, *, fallback_status: s
             item_state = "completed" if outcome in {"synced", "already_synced", "skipped"} else "failed"
             detail = redact_text(str(item.get("error") or ""))[:500] or None
             db.execute(
-                "UPDATE sync_job_items SET status=?, error_class=?, error_detail=?, updated_at=? WHERE id=?",
-                (item_state, None if item_state == "completed" else "plan_push_error", detail, now, target["id"]),
+                "UPDATE sync_job_items SET status=?, remote_id=COALESCE(?, remote_id), error_class=?, error_detail=?, updated_at=? WHERE id=?",
+                (item_state, str(item.get("remote_id") or "").strip() or None, None if item_state == "completed" else "plan_push_error", detail, now, target["id"]),
             )
         items = db.execute("SELECT status FROM sync_job_items WHERE job_id=?", (job_id,)).fetchall()
         item_values = [dict(item) for item in items]
@@ -2724,8 +2731,19 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
     if job_type == "plan_push":
         raise AppError(409, "Plan-Push-Jobs werden erst durch den autorisierten Planungsworkflow ausgeführt.", reason="unsupported_job")
     if provider == "intervals":
-        days = ALL_SYNC_DAYS if job_type == "historical_backfill" else int(payload.get("days") or sync_period("intervals"))
-        result = sync_intervals(reason=reason, activity_days=days, operation_id=job["id"])
+        historical_end = None
+        if job_type == "historical_backfill":
+            days = max(1, min(int(payload.get("days") or SYNC_CHUNK_DAYS), SYNC_CHUNK_DAYS))
+            historical_end = date.fromisoformat(str(payload.get("end_date") or (local_now().date() - timedelta(days=sync_period("intervals"))).isoformat())[:10])
+        else:
+            days = int(payload.get("days") or sync_period("intervals"))
+        sync_kwargs = {"reason": reason, "activity_days": days, "operation_id": job["id"]}
+        if historical_end is not None:
+            sync_kwargs["end_date"] = historical_end
+        result = sync_intervals(**sync_kwargs)
+        if historical_end is not None:
+            next_end = historical_end - timedelta(days=days)
+            result["historical_next_end"] = next_end.isoformat() if next_end >= SYNC_EARLIEST_DATE else None
         if result.get("status") == "already_running":
             return result
         try:
@@ -2737,8 +2755,20 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
             result["competitions"] = competition_result
         return result
     if provider == "garmin":
-        days = ALL_SYNC_DAYS if job_type == "historical_backfill" else int(payload.get("days") or sync_period("garmin"))
-        return sync_garmin(days=days, operation_id=job["id"], reason=reason)
+        historical_end = None
+        if job_type == "historical_backfill":
+            days = max(1, min(int(payload.get("days") or SYNC_CHUNK_DAYS), SYNC_CHUNK_DAYS))
+            historical_end = date.fromisoformat(str(payload.get("end_date") or (local_now().date() - timedelta(days=sync_period("garmin"))).isoformat())[:10])
+        else:
+            days = int(payload.get("days") or sync_period("garmin"))
+        sync_kwargs = {"days": days, "operation_id": job["id"], "reason": reason}
+        if historical_end is not None and garmin_fixture_path() is None:
+            sync_kwargs["end_date"] = historical_end
+        result = sync_garmin(**sync_kwargs)
+        if historical_end is not None:
+            next_end = historical_end - timedelta(days=days)
+            result["historical_next_end"] = next_end.isoformat() if next_end >= SYNC_EARLIEST_DATE else None
+        return result
     if provider == "calendar":
         return sync_external_calendar(reason=reason, operation_id=job["id"])
     if provider == "weather":
@@ -2755,6 +2785,12 @@ def _run_claimed_sync_job(job: dict[str, Any]) -> None:
             raise AppError(409, "Der Provider ist noch beschäftigt.", reason="temporary_error")
         fallback_status = "partial" if result_status == "partial" else "failed" if result_status in {"error", "failed"} else "completed"
         _sync_job_update_from_result(job_id, result, fallback_status=fallback_status)
+        if job.get("type") == "historical_backfill" and fallback_status == "completed" and isinstance(result, dict) and result.get("historical_next_end"):
+            enqueue_sync_job(
+                job["provider"], "historical_backfill",
+                {"days": SYNC_CHUNK_DAYS, "end_date": result["historical_next_end"], "reason": "fortgesetzter historischer Backfill"},
+                requested_by="backfill",
+            )
     except Exception as exc:
         error_class = _sync_job_error_class(exc)
         detail = redact_text(str(getattr(exc, "message", "") or exc))[:500]
@@ -2818,7 +2854,7 @@ def resolve_sync_job(job_id: str, payload: Any) -> dict[str, Any]:
             (now, now, job_id),
         )
         db.execute(
-            "UPDATE sync_job_items SET status='queued', attempts=0, error_class=NULL, error_detail=NULL, updated_at=? WHERE job_id=?",
+            "UPDATE sync_job_items SET status='queued', attempts=0, error_class=NULL, error_detail=NULL, updated_at=? WHERE job_id=? AND status IN ('failed', 'partial')",
             (now, job_id),
         )
     SYNC_JOB_WAKE.set()
@@ -4059,7 +4095,7 @@ def _merge_garmin_records(incoming: Any, previous: Any) -> list[Any]:
 @observed_sync("garmin", "data")
 @maintenance_operation
 @garmin_operation
-def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "background") -> dict[str, Any]:
+def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "background", end_date: date | None = None) -> dict[str, Any]:
     fixture = garmin_fixture_path()
     if Garmin is None and fixture is None:
         LOGGER.warning(
@@ -4087,6 +4123,8 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
             mark_daily_sync("garmin")
             set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
             update_provider_sync_cursor("garmin", "data", payload.get("end", ""), payload["synced_at"])
+            if end_date is not None:
+                update_provider_sync_cursor("garmin", "historical", SYNC_EARLIEST_DATE.isoformat(), payload["synced_at"])
             return {"status": "partial" if payload.get("errors") else "ok", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
         except Exception as exc:
             error = redact_text(str(exc))[:1000]
@@ -4108,7 +4146,7 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
     if not GARMIN_LOCK.acquire(blocking=False):
         return {"status": "already_running"}
     try:
-        today = local_now().date()
+        today = end_date or local_now().date()
         windows = sync_date_windows(days, today)
         start = windows[0][0]
         previous = garmin_snapshot()
@@ -4165,6 +4203,8 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
         mark_daily_sync("garmin")
         set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
         update_provider_sync_cursor("garmin", "data", windows[-1][1].isoformat(), payload["synced_at"])
+        if end_date is not None:
+            update_provider_sync_cursor("garmin", "historical", windows[0][0].isoformat(), payload["synced_at"])
         return {"status": "partial" if payload["errors"] else "ok", "synced_at": payload["synced_at"], "errors": len(payload["errors"]), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
@@ -7493,9 +7533,9 @@ class IntervalsClient:
             raise AppError(502, "Intervals.icu hat keine geplante Einheit zurÃ¼ckgegeben.")
         return result[0]
 
-    def fetch_snapshot(self, activity_days: int = 42) -> dict[str, Any]:
+    def fetch_snapshot(self, activity_days: int = 42, end_date: date | None = None) -> dict[str, Any]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
-        today = local_now().date()
+        today = end_date or local_now().date()
         calendar_start = today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)
         calendar_end = today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)
         existing = latest_snapshot() or {}
@@ -10528,7 +10568,12 @@ def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any],
     return normalized, remote_id, identity
 
 
-def upsert_remote_planned_units(events: list[Any] | None) -> dict[str, int]:
+def upsert_remote_planned_units(
+    events: list[Any] | None,
+    *,
+    calendar_start: str | None = None,
+    calendar_end: str | None = None,
+) -> dict[str, int]:
     """Import provider calendar workouts into the local canonical plan.
 
     Local dirty rows are never overwritten. A changed provider row is kept as
@@ -10596,8 +10641,8 @@ def upsert_remote_planned_units(events: list[Any] | None) -> dict[str, int]:
         # missing event as a remote deletion when the row falls inside the
         # successfully received window; never tombstone units beyond it.
         valid_dates = [value for value in incoming_dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)]
-        window_start = min(valid_dates) if valid_dates else None
-        window_end = max(valid_dates) if valid_dates else None
+        window_start = str(calendar_start or "")[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(calendar_start or "")[:10]) else (min(valid_dates) if valid_dates else None)
+        window_end = str(calendar_end or "")[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(calendar_end or "")[:10]) else (max(valid_dates) if valid_dates else None)
         for row in rows:
             try:
                 payload = json.loads(row.get("payload") or "{}")
@@ -10724,6 +10769,7 @@ def sync_intervals(
     reason: str = "manual",
     activity_days: int | None = None,
     operation_id: str | None = None,
+    end_date: date | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
@@ -10737,10 +10783,20 @@ def sync_intervals(
         set_sync_operation_state(operation_id, "running", "fetching", 10, "Intervals.icu-Daten werden gelesen…")
         set_kv("sync_running", "1")
         set_kv("sync_status", "Intervals.icu: Synchronisierung läuft…")
-        snapshot = IntervalsClient().fetch_snapshot(activity_days=activity_days)
+        fetch_kwargs = {"activity_days": activity_days}
+        if end_date is not None:
+            fetch_kwargs["end_date"] = end_date
+        snapshot = IntervalsClient().fetch_snapshot(**fetch_kwargs)
         set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
         save_snapshot(snapshot)
-        planned_import = upsert_remote_planned_units(snapshot.get("upcoming_calendar", []))
+        calendar_window = snapshot.get("provider_sync", {}).get("calendar_window", {}) if isinstance(snapshot.get("provider_sync"), dict) else {}
+        planned_import = {"imported": 0, "updated": 0, "conflicts": 0}
+        if end_date is None:
+            planned_import = upsert_remote_planned_units(
+                snapshot.get("upcoming_calendar", []),
+                calendar_start=calendar_window.get("start"),
+                calendar_end=calendar_window.get("end"),
+            )
         mark_daily_sync("intervals")
         # Seed the local template catalog from the provider once. This is a
         # read-only, idempotent import: existing local templates are preserved
@@ -10760,9 +10816,11 @@ def sync_intervals(
         # network error that may otherwise keep the global status in warning.
         set_kv("morning_checkin_error", "")
         period_label = "alle verfügbaren Daten" if activity_days == ALL_SYNC_DAYS else f"letzte {activity_days} Tage"
-        sync_window = sync_date_windows(activity_days)
+        sync_window = sync_date_windows(activity_days, end_date)
         update_provider_sync_cursor("intervals", "activities", sync_window[-1][1].isoformat(), snapshot["synced_at"])
         update_provider_sync_cursor("intervals", "wellness", sync_window[-1][1].isoformat(), snapshot["synced_at"])
+        if end_date is not None:
+            update_provider_sync_cursor("intervals", "historical", sync_window[0][0].isoformat(), snapshot["synced_at"])
         set_kv("last_sync_window_start", sync_window[0][0].isoformat())
         set_kv("last_sync_window_end", sync_window[-1][1].isoformat())
         pagination = snapshot.get("provider_sync", {}).get("pagination", {}) if isinstance(snapshot, dict) else {}
@@ -12837,6 +12895,7 @@ COACH_INTENT_TOOL_MAP = {
 }
 COACH_INTENT_MAX_ATTEMPTS = 2
 COACH_TOOL_MAX_ROUNDS = 6
+COACH_COMMAND_STALE_SECONDS = 15 * 60
 COACH_CANONICAL_TOOL_NAMES = (
     "read_training_state",
     "stage_training_plan",
@@ -13001,14 +13060,14 @@ def _structured_coach_tool_result(
     if name == "read_training_state":
         return {"ok": True, **_structured_training_state()}
     if name == "stage_training_plan":
-        if operation != "stage_training_plan":
+        if "stage_training_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         _require_coach_scope(intent, "local_plan")
         payload = _structured_artifact_payload(arguments)
         _validate_structured_plan_limits(payload)
         return _stage_coach_artifact(conversation_id, client_turn_id, payload)
     if name == "commit_training_plan":
-        if operation != "commit_training_plan":
+        if "commit_training_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         artifact_id = str(intent.get("artifact_id") or "").strip()
         if not artifact_id:
@@ -13020,22 +13079,30 @@ def _structured_coach_tool_result(
             artifact = db.execute("SELECT * FROM coach_plan_artifacts WHERE id=?", (artifact_id,)).fetchone()
             if not artifact:
                 raise AppError(404, "Planartefakt nicht gefunden.", reason="artifact_not_found")
+            if str(artifact.get("conversation_id") or "") != str(conversation_id):
+                raise AppError(403, "Das Planartefakt gehört nicht zu dieser Coach-Conversation.", reason="artifact_scope_denied")
             if artifact["status"] == "committed":
                 return {"ok": True, "status": "already_applied", "artifact_id": artifact_id}
-            if int(artifact["base_revision"] or 0) != int((_structured_training_state().get("planning_revision") or 0)):
+            revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+            current_revision = int((revision_row or {}).get("revision") or 0)
+            if int(artifact["base_revision"] or 0) != current_revision:
                 raise AppError(409, "Der lokale Plan wurde inzwischen geändert.", reason="planning_revision_conflict")
             payload = json.loads(artifact["payload"] or "{}")
-        _validate_structured_plan_limits(payload, command_limit=True)
-        entries = save_workout_library_entries(
-            payload.get("workouts") or [],
-            plan_name=str(payload.get("plan_name") or "Coach-Plan"),
-            goal=str(payload.get("goal") or ""),
-        )
-        with DB_LOCK, database() as db:
-            db.execute("UPDATE coach_plan_artifacts SET status='committed', updated_at=? WHERE id=? AND status='draft'", (utc_now(), artifact_id))
-        return {"ok": True, "status": "committed", "artifact_id": artifact_id, "library_entry_ids": [entry["id"] for entry in entries]}
+            _validate_structured_plan_limits(payload, command_limit=True)
+            entries = save_workout_library_entries(
+                payload.get("workouts") or [],
+                plan_name=str(payload.get("plan_name") or "Coach-Plan"),
+                goal=str(payload.get("goal") or ""),
+            )
+            updated = db.execute(
+                "UPDATE coach_plan_artifacts SET status='committed', updated_at=? WHERE id=? AND conversation_id=? AND status='draft'",
+                (utc_now(), artifact_id, conversation_id),
+            )
+            if updated.rowcount != 1:
+                raise AppError(409, "Das Planartefakt wurde inzwischen verarbeitet.", reason="artifact_revision_conflict")
+            return {"ok": True, "status": "committed", "artifact_id": artifact_id, "library_entry_ids": [entry["id"] for entry in entries]}
     if name == "apply_training_changes":
-        if operation != "apply_training_changes":
+        if "apply_training_changes" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         changes = arguments.get("changes")
         if not isinstance(changes, list):
@@ -13046,7 +13113,7 @@ def _structured_coach_tool_result(
                 _require_coach_scope(intent, f"planned_unit:{local_id}")
         return _apply_structured_training_changes(arguments)
     if name == "apply_training_changes_legacy":
-        if operation != "apply_training_changes":
+        if "apply_training_changes" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         changes = arguments.get("changes") or []
         if not isinstance(changes, list) or not changes or len(changes) > 28:
@@ -13076,7 +13143,7 @@ def _structured_coach_tool_result(
             revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
         return {"ok": True, "status": "applied", "planning_revision": int((revision or {}).get("revision") or current_revision), "changes": applied}
     if name == "manage_training_templates":
-        if operation != "manage_training_templates":
+        if "manage_training_templates" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         template = arguments.get("template") if isinstance(arguments.get("template"), dict) else arguments
         if str(template.get("action") or "create").strip().casefold() == "update":
@@ -13087,7 +13154,7 @@ def _structured_coach_tool_result(
         _require_coach_scope(intent, "local_template")
         return {"ok": True, "stored_locally": True, "template": create_local_library_template(template)}
     if name == "start_provider_refresh":
-        if operation != "start_provider_refresh":
+        if "start_provider_refresh" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         provider = str(intent.get("target_system") or "")
         _require_coach_scope(intent, f"{provider}_refresh")
@@ -13095,7 +13162,7 @@ def _structured_coach_tool_result(
         sync_job_ids.append(job["id"])
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
     if name == "start_intervals_plan_sync":
-        if operation != "start_intervals_plan_sync" or intent.get("target_system") != "intervals":
+        if "start_intervals_plan_sync" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         entries = arguments.get("entries")
         if entries is None and isinstance(arguments.get("payload"), dict):
@@ -13120,19 +13187,93 @@ def _structured_coach_tool_result(
         _require_coach_scope(intent, f"sync_job:{job_id}")
         return {"ok": True, "job": sync_job_state(job_id)}
     if name == "resolve_training_sync_conflict":
-        if operation != "resolve_training_sync_conflict":
+        if "resolve_training_sync_conflict" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         job_id = str(arguments.get("job_id") or "").strip()
         _require_coach_scope(intent, f"sync_job:{job_id}")
         job = resolve_sync_job(job_id, {"action": "retry"})
         return {"ok": True, "status": "queued", "job": job}
     if name == "undo_training_change":
-        if operation != "undo_training_change":
+        if "undo_training_change" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         change_id = str(arguments.get("change_id") or "").strip()
         _require_coach_scope(intent, f"change:{change_id}")
         return {"ok": True, **_history_preview(change_id, session_csrf_hash)}
     raise AppError(400, "Unbekanntes Coach-Werkzeug.", reason="unknown_coach_tool")
+
+
+def _structured_authorized_operations(intent: dict[str, Any]) -> set[str]:
+    """Return the operation sequence explicitly authorized for this turn."""
+    operations = {str(intent.get("operation") or "").strip()}
+    follow_ups = intent.get("follow_up_operations")
+    if isinstance(follow_ups, list):
+        operations.update(str(value).strip() for value in follow_ups if str(value).strip())
+    return operations
+
+
+def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf_hash: str = "") -> dict[str, Any]:
+    """Execute one explicitly validated local planning command idempotently."""
+    if not isinstance(payload, dict):
+        raise AppError(400, "Das Planungskommando muss ein Objekt sein.", reason="invalid_planning_command")
+    client_turn_id = str(payload.get("client_turn_id") or "").strip()
+    operation = str(payload.get("operation") or "").strip()
+    if not client_turn_id or len(client_turn_id) > 120:
+        raise AppError(400, "client_turn_id ist für Planungskommandos erforderlich.", reason="invalid_client_turn")
+    if operation not in {"commit_training_plan", "apply_training_changes", "manage_training_templates"}:
+        raise AppError(400, "Das Planungskommando ist nicht zulässig.", reason="invalid_planning_command")
+    intent = {
+        "intent": "local_action",
+        "operation": operation,
+        "target_system": "local",
+        "artifact_id": str(payload.get("artifact_id") or "").strip() or None,
+        "ambiguities": [],
+        "authorization_scope": [],
+        "follow_up_operations": [],
+    }
+    arguments = payload.get("arguments") if isinstance(payload.get("arguments"), dict) else dict(payload)
+    if operation == "commit_training_plan":
+        artifact_id = str(payload.get("artifact_id") or "").strip()
+        if not artifact_id:
+            raise AppError(400, "Zum Speichern wird ein Planartefakt benötigt.", reason="artifact_required")
+        intent["authorization_scope"].append(f"artifact:{artifact_id}")
+        expected_revision = payload.get("expected_revision")
+        with DB_LOCK, database() as db:
+            row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        if expected_revision is not None and int(expected_revision) != int((row or {}).get("revision") or 0):
+            raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
+        arguments = {**arguments, "artifact_id": artifact_id}
+    elif operation == "apply_training_changes":
+        changes = arguments.get("changes") if isinstance(arguments.get("changes"), list) else []
+        for change in changes:
+            if isinstance(change, dict) and change.get("local_id"):
+                intent["authorization_scope"].append(f"planned_unit:{change['local_id']}")
+    elif operation == "manage_training_templates":
+        template = arguments.get("template") if isinstance(arguments.get("template"), dict) else arguments
+        if str(template.get("action") or "create").strip().casefold() == "update" and template.get("local_id"):
+            intent["authorization_scope"].append(f"library_workout:{template['local_id']}")
+        else:
+            intent["authorization_scope"].append("local_template")
+    with DB_LOCK, database() as db:
+        existing = db.execute("SELECT conversation_id, status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        if existing and existing.get("status") == "completed" and existing.get("receipt"):
+            if str(existing.get("conversation_id") or "") != str(conversation_id):
+                raise AppError(403, "Dieses Planungskommando gehört zu einer anderen Conversation.", reason="command_scope_denied")
+            return json.loads(existing["receipt"])
+        if existing:
+            raise AppError(409, "Dieses Planungskommando wird bereits verarbeitet.", reason="client_turn_in_progress")
+        db.execute(
+            "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'local', ?, 'running', ?, ?)",
+            (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent, separators=(",", ":")), payload.get("artifact_id"), utc_now(), utc_now()),
+        )
+    try:
+        sync_job_ids: list[str] = []
+        result = _structured_coach_tool_result(operation, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids)
+        receipt = {"message": None, "command_receipts": [{"tool": operation, "result": result}], "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": 1, "status": "completed"}
+    except Exception as exc:
+        return _persist_structured_command_failure(client_turn_id, intent, exc)
+    with DB_LOCK, database() as db:
+        db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'", (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id))
+    return receipt
 
 
 def _chat_with_structured_coach_impl(
@@ -13147,7 +13288,19 @@ def _chat_with_structured_coach_impl(
     refresh_error: str | None = None,
 ) -> dict[str, Any]:
     with DB_LOCK, database() as db:
-        existing_command = db.execute("SELECT receipt, status FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        existing_command = db.execute("SELECT receipt, status, updated_at FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        if existing_command and existing_command.get("status") == "running":
+            age = db.execute("SELECT (julianday('now') - julianday(?)) * 86400 AS age", (existing_command.get("updated_at"),)).fetchone()
+            if float((age or {}).get("age") or 0) > COACH_COMMAND_STALE_SECONDS:
+                try:
+                    recovered = json.loads(existing_command.get("receipt") or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    recovered = {}
+                if not isinstance(recovered, dict):
+                    recovered = {}
+                recovered.update({"status": "failed", "error": "Die vorherige Coach-Verarbeitung wurde nach einem Prozessabbruch wieder freigegeben."})
+                db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'", (json.dumps(recovered, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id))
+                return recovered
         if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
             return json.loads(existing_command["receipt"])
         if existing_command:
@@ -13181,6 +13334,7 @@ def _chat_with_structured_coach_impl(
     sync_job_ids: list[str] = []
     command_receipts: list[dict[str, Any]] = []
     tool_outputs: list[dict[str, Any]] = []
+    executed_tools: set[str] = set()
     rounds = 0
     while rounds < COACH_TOOL_MAX_ROUNDS:
         tool_outputs = []
@@ -13196,7 +13350,12 @@ def _chat_with_structured_coach_impl(
             else:
                 if name not in COACH_CANONICAL_TOOL_NAMES:
                     raise AppError(403, "Nicht kanonisches Coach-Werkzeug.", reason="tool_scope_denied")
-                if name not in {"read_training_state", "get_sync_job"} and (intent.get("intent") not in {"local_action", "remote_sync"} or name != requested_operation):
+                if name in executed_tools and name not in {"read_training_state", "get_sync_job"}:
+                    raise AppError(409, "Dieses Coach-Werkzeug wurde in diesem Turn bereits ausgeführt.", reason="duplicate_tool_call")
+                if name not in {"read_training_state", "get_sync_job"} and (
+                    intent.get("intent") not in {"local_action", "remote_sync"}
+                    or name not in _structured_authorized_operations(intent)
+                ):
                     raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
                 try:
                     arguments = json.loads(item.get("arguments") or "{}")
@@ -13204,13 +13363,23 @@ def _chat_with_structured_coach_impl(
                         raise AppError(400, "Coach-Aktionsargumente müssen ein Objekt sein.")
                     result = _structured_coach_tool_result(name, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids)
                     if result.get("artifact_id"):
+                        intent["artifact_id"] = result["artifact_id"]
+                        scope = intent.setdefault("authorization_scope", [])
+                        if f"artifact:{result['artifact_id']}" not in scope:
+                            scope.append(f"artifact:{result['artifact_id']}")
                         with DB_LOCK, database() as db:
                             db.execute("UPDATE coach_commands SET artifact_id=?, updated_at=? WHERE client_turn_id=? AND status='running'", (result["artifact_id"], utc_now(), client_turn_id))
                 except (AppError, TypeError, ValueError, json.JSONDecodeError) as exc:
                     result = {"ok": False, "error": redact_text(str(exc))[:1000]}
             command_receipts.append({"call_id": call_id, "tool": name, "result": result})
+            executed_tools.add(name)
             remember_chat_tool_result(call_id, name, result)
             tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
+            with DB_LOCK, database() as db:
+                db.execute(
+                    "UPDATE coach_commands SET receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+                    (json.dumps({"message": None, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": rounds, "status": "running"}, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+                )
         if not tool_outputs:
             break
         rounds += 1
@@ -13222,7 +13391,7 @@ def _chat_with_structured_coach_impl(
             "instructions": model_instructions,
             "input": tool_outputs,
             "tools": COACH_STRUCTURED_TOOLS,
-            "tool_choice": "none",
+            "tool_choice": "auto",
             "parallel_tool_calls": False,
             "max_output_tokens": coach_output_token_budget(message, followup=True),
             "truncation": "auto",
@@ -13259,6 +13428,16 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         "error": safe_error,
     }
     with DB_LOCK, database() as db:
+        existing = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        if existing and existing.get("receipt"):
+            try:
+                partial = json.loads(existing["receipt"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                partial = {}
+            if isinstance(partial, dict):
+                receipt["command_receipts"] = partial.get("command_receipts") or []
+                receipt["sync_job_ids"] = partial.get("sync_job_ids") or []
+                receipt["tool_rounds"] = partial.get("tool_rounds") or 0
         db.execute(
             "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
             (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
@@ -13277,17 +13456,23 @@ def _chat_with_structured_coach(*args: Any, **kwargs: Any) -> dict[str, Any]:
         raise
 
 
-def coach_intent_artifact_refs() -> list[dict[str, Any]]:
-    """Return local artifact identifiers only; provider payloads stay out."""
+def coach_intent_artifact_refs(conversation_id: str | None = None) -> list[dict[str, Any]]:
+    """Return only local artifact identifiers for the active conversation."""
     with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT id, conversation_id, status, base_revision, created_at FROM coach_plan_artifacts "
-            "ORDER BY created_at DESC LIMIT 20"
-        ).fetchall()
+        if conversation_id:
+            rows = db.execute(
+                "SELECT id, conversation_id, status, base_revision, created_at FROM coach_plan_artifacts "
+                "WHERE conversation_id=? ORDER BY created_at DESC LIMIT 20", (conversation_id,)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT id, conversation_id, status, base_revision, created_at FROM coach_plan_artifacts "
+                "ORDER BY created_at DESC LIMIT 20"
+            ).fetchall()
     return [dict(row) for row in rows]
 
 
-def request_coach_intent(message: str) -> dict[str, Any]:
+def request_coach_intent(message: str, conversation_id: str | None = None) -> dict[str, Any]:
     """Classify one turn in an isolated low-reasoning structured request."""
     allowed_targets = ["local"]
     if CONFIG.intervals_api_key:
@@ -13298,7 +13483,7 @@ def request_coach_intent(message: str) -> dict[str, Any]:
         allowed_targets.append("calendar")
     if get_profile().get("weather_location", "").strip():
         allowed_targets.append("weather")
-    payload = intent_request_payload(message, coach_intent_artifact_refs(), allowed_targets)
+    payload = intent_request_payload(message, coach_intent_artifact_refs(conversation_id), allowed_targets)
     payload["model"] = selected_model()
     for attempt in range(COACH_INTENT_MAX_ATTEMPTS):
         try:
@@ -13317,6 +13502,7 @@ def request_coach_intent(message: str) -> dict[str, Any]:
                 "artifact_id": None,
                 "ambiguities": ["Die strukturierte Aktionsklassifikation konnte nicht sicher validiert werden."],
                 "authorization_scope": [],
+                "follow_up_operations": [],
                 "error_class": "intent_invalid",
             }
 
@@ -13345,7 +13531,19 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         if not client_turn_id or len(client_turn_id) > 120:
             raise AppError(400, "client_turn_id muss eine begrenzte, nicht leere Kennung sein.", reason="invalid_client_turn")
         with DB_LOCK, database() as db:
-            existing_command = db.execute("SELECT receipt, status FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+            existing_command = db.execute("SELECT receipt, status, updated_at FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+            if existing_command and existing_command.get("status") == "running":
+                age = db.execute("SELECT (julianday('now') - julianday(?)) * 86400 AS age", (existing_command.get("updated_at"),)).fetchone()
+                if float((age or {}).get("age") or 0) > COACH_COMMAND_STALE_SECONDS:
+                    try:
+                        recovered = json.loads(existing_command.get("receipt") or "{}")
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        recovered = {}
+                    if not isinstance(recovered, dict):
+                        recovered = {}
+                    recovered.update({"status": "failed", "error": "Die vorherige Coach-Verarbeitung wurde nach einem Prozessabbruch wieder freigegeben."})
+                    db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'", (json.dumps(recovered, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id))
+                    existing_command = {"status": "completed", "receipt": json.dumps(recovered)}
         if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
             try:
                 return json.loads(existing_command["receipt"])
@@ -13353,7 +13551,8 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                 pass
         if existing_command:
             raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
-        structured_intent = request_coach_intent(message)
+        conversation_id = ensure_conversation()
+        structured_intent = request_coach_intent(message, conversation_id)
         refresh_error = None
         if prompt_requests_fresh_data(message) and not (
             structured_intent.get("operation") == "start_provider_refresh"
@@ -13368,7 +13567,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         return _chat_with_structured_coach(
             message,
             intent=structured_intent,
-            conversation_id=ensure_conversation(),
+            conversation_id=conversation_id,
             client_turn_id=client_turn_id,
             on_text_delta=on_text_delta,
             cancel_event=cancel_event,
@@ -14002,7 +14201,8 @@ def planning_sync_preview() -> dict[str, Any]:
         try:
             snapshot = IntervalsClient().fetch_snapshot(activity_days=sync_period("intervals"))
             save_snapshot(snapshot)
-            remote_refresh = {"status": "ok", **upsert_remote_planned_units(snapshot.get("upcoming_calendar", []))}
+            calendar_window = snapshot.get("provider_sync", {}).get("calendar_window", {}) if isinstance(snapshot.get("provider_sync"), dict) else {}
+            remote_refresh = {"status": "ok", **upsert_remote_planned_units(snapshot.get("upcoming_calendar", []), calendar_start=calendar_window.get("start"), calendar_end=calendar_window.get("end"))}
         except Exception as exc:
             # Local planning remains usable; the preview explicitly reports
             # that its remote baseline may be stale.
@@ -15303,6 +15503,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path == "/api/transcribe":
                 content_type = self.headers.get("Content-Type", "")
                 self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
+            elif path == "/api/planning/commands":
+                self.send_json(200, execute_planning_command(self.read_json(), conversation_id=ensure_conversation(), session_csrf_hash=session["csrf_hash"]))
             elif path == "/api/sync/jobs":
                 payload = self.read_json()
                 if not isinstance(payload, dict):
@@ -15365,11 +15567,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/garmin/sync":
                 payload = self.read_json()
                 days = set_sync_period("garmin", payload.get("days", sync_period("garmin")))
-                self.send_json(200, sync_garmin(days=days, reason="manual", operation_id=uuid.uuid4().hex))
+                self.send_json(202, enqueue_sync_job("garmin", "refresh", {"days": days, "reason": "manual"}, requested_by="user"))
             elif path == "/api/external-calendar/sync":
-                self.send_json(200, sync_external_calendar(reason="manuell", operation_id=uuid.uuid4().hex))
+                self.send_json(202, enqueue_sync_job("calendar", "refresh", {"reason": "manuell"}, requested_by="user"))
             elif path == "/api/weather/sync":
-                self.send_json(200, sync_weather(reason="manuell", force=True, operation_id=uuid.uuid4().hex))
+                self.send_json(202, enqueue_sync_job("weather", "refresh", {"reason": "manuell", "force": True}, requested_by="user"))
             elif path == "/api/garmin/full-resync":
                 payload = self.read_json()
                 if payload.get("confirm") != "FULL_RESYNC":
@@ -15761,13 +15963,21 @@ def safe_weather_sync(reason: str, operation_id: str | None = None) -> None:
 
 def enqueue_startup_sync_jobs() -> None:
     """Queue configured startup refreshes without duplicating resumed jobs."""
-    if CONFIG.intervals_api_key or CONFIG.calendar_ical_url:
-        if CONFIG.calendar_ical_url and not _sync_job_active("calendar", "refresh"):
-            enqueue_sync_job("calendar", "refresh", {"reason": "startup"}, requested_by="startup")
-        if CONFIG.intervals_api_key and not _sync_job_active("intervals", "refresh"):
-            enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "startup"}, requested_by="startup")
-        if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))) and not _sync_job_active("garmin", "refresh"):
-            enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "startup"}, requested_by="startup")
+    if CONFIG.calendar_ical_url and not _sync_job_active("calendar", "refresh"):
+        enqueue_sync_job("calendar", "refresh", {"reason": "startup"}, requested_by="startup")
+    if CONFIG.intervals_api_key and not _sync_job_active("intervals", "refresh"):
+        enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "startup"}, requested_by="startup")
+    if CONFIG.intervals_api_key and not _sync_job_active("intervals", "historical_backfill"):
+        cursor = provider_sync_cursor("intervals", "historical").get("cursor")
+        if not cursor or str(cursor) > SYNC_EARLIEST_DATE.isoformat():
+            enqueue_sync_job("intervals", "historical_backfill", {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}, requested_by="startup")
+    garmin_configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
+    if garmin_configured and not _sync_job_active("garmin", "refresh"):
+        enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "startup"}, requested_by="startup")
+    if garmin_configured and not _sync_job_active("garmin", "historical_backfill"):
+        cursor = provider_sync_cursor("garmin", "historical").get("cursor")
+        if not cursor or str(cursor) > SYNC_EARLIEST_DATE.isoformat():
+            enqueue_sync_job("garmin", "historical_backfill", {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}, requested_by="startup")
     if get_profile().get("weather_location", "").strip() and not _sync_job_active("weather", "refresh"):
         enqueue_sync_job("weather", "refresh", {"force": True, "reason": "startup"}, requested_by="startup")
 

@@ -879,8 +879,8 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   main { grid-area: main; min-width: 0; }
   .bottom-nav { display: none; }
   .section-heading { margin-top: 8px; }
-  .messages { min-height: 520px; }
-  .composer { bottom: 16px; }
+  .messages { min-height: 0; }
+  .composer { position: relative; bottom: auto; }
 }
 
 @media (min-width: 1100px) {
@@ -892,7 +892,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .topbar { padding-top: 32px; }
   #chatPanel { max-width: 1100px; }
   #chatPanel .messages, #chatPanel .composer, #chatPanel .coach-action-review { max-width: 760px; }
-  #settingsPanel { display: grid; grid-template-columns: minmax(190px, 220px) minmax(0, 1fr); align-items: start; gap: 0 24px; }
+  #settingsPanel.active { display: grid; grid-template-columns: minmax(190px, 220px) minmax(0, 1fr); align-items: start; gap: 0 24px; }
   #settingsPanel > .section-heading { grid-column: 1 / -1; }
   #settingsPanel > .more-segment-nav { position: sticky; top: 24px; grid-column: 1; display: grid; align-content: start; gap: 4px; margin: 0; }
   #settingsPanel > .more-segment-nav a { flex: none; min-height: 46px; justify-content: start; padding: 10px 12px; text-align: left; }
@@ -905,6 +905,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .composer { width: 100%; }
   .topbar { padding-right: 2px; padding-left: 2px; }
   .topbar { padding-top: 20px; padding-bottom: 12px; }
+  .coach-provider-status { grid-template-columns: 1fr; }
   h1 { font-size: 1.55rem; }
   h2 { font-size: 1.35rem; }
   .section-heading { align-items: flex-start; margin: 16px 0 18px; }
@@ -963,7 +964,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
 
 @media (min-width: 700px) {
   .shell { padding-right: 28px; padding-left: 28px; }
-  .messages { min-height: 520px; }
+  .messages { min-height: 0; }
   .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .connection-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }

@@ -30,7 +30,7 @@ OPERATION_VALUES = frozenset({
 INTENT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["intent", "operation", "target_system", "artifact_id", "ambiguities", "authorization_scope"],
+    "required": ["intent", "operation", "target_system", "artifact_id", "ambiguities", "authorization_scope", "follow_up_operations"],
     "properties": {
         "intent": {"type": "string", "enum": sorted(INTENT_VALUES)},
         "operation": {"type": ["string", "null"], "enum": [*sorted(OPERATION_VALUES), None]},
@@ -38,17 +38,26 @@ INTENT_SCHEMA: dict[str, Any] = {
         "artifact_id": {"type": ["string", "null"]},
         "ambiguities": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
         "authorization_scope": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+        "follow_up_operations": {"type": "array", "items": {"type": "string", "enum": sorted(OPERATION_VALUES)}, "maxItems": 4},
     },
 }
 
 
-def intent_request_payload(message: str, artifact_refs: list[dict[str, Any]], allowed_targets: list[str]) -> dict[str, Any]:
+def intent_request_payload(
+    message: str,
+    artifact_refs: list[dict[str, Any]],
+    allowed_targets: list[str],
+) -> dict[str, Any]:
     """Build the isolated low-reasoning intent request without provider data."""
     return {
         "model": "gpt-5.6-luna",
         "instructions": (
             "Classify exactly the user's current Coach request. Return only the JSON schema. "
             "Do not infer authorization from previous turns. Advice is non-mutating. "
+            "If the user explicitly requests a same-turn follow-up such as saving a newly created plan, "
+            "include the additional operation in follow_up_operations. Never add an operation that is not "
+            "explicitly requested in the current message. Ambiguous actions must use needs_clarification "
+            "and exactly one concrete question in ambiguities. "
             "Only use targets explicitly listed in allowed_targets. "
             "authorization_scope must contain exact operation or object tokens: "
             "local_plan, local_template, artifact:<id>, planned_unit:<id>, "
@@ -102,12 +111,21 @@ def parse_intent_response(response: Any) -> dict[str, Any]:
         raise ValueError("intent response contains an unsupported operation")
     ambiguities = value.get("ambiguities")
     scope = value.get("authorization_scope")
+    follow_up_operations = value.get("follow_up_operations") or []
     if not isinstance(ambiguities, list) or not all(isinstance(item, str) for item in ambiguities):
         raise ValueError("intent ambiguities must be a string list")
     if not isinstance(scope, list) or not all(isinstance(item, str) for item in scope):
         raise ValueError("intent authorization scope must be a string list")
+    if not isinstance(follow_up_operations, list) or not all(item in OPERATION_VALUES for item in follow_up_operations):
+        raise ValueError("intent follow-up operations must be a supported operation list")
+    if intent == "needs_clarification" and len(ambiguities) != 1:
+        raise ValueError("clarification must contain exactly one question")
     if intent in {"advice", "needs_clarification"} and operation is not None:
         raise ValueError("non-action intent cannot contain an operation")
+    if follow_up_operations and intent not in {"local_action", "remote_sync"}:
+        raise ValueError("only an action intent can contain follow-up operations")
+    if follow_up_operations and operation is None:
+        raise ValueError("follow-up operations require a primary operation")
     if intent in {"advice", "needs_clarification"} and target != "none":
         raise ValueError("non-action intent cannot contain a target")
     if intent == "local_action" and target != "local":
@@ -121,4 +139,5 @@ def parse_intent_response(response: Any) -> dict[str, Any]:
         "artifact_id": str(value.get("artifact_id") or "")[:120] or None,
         "ambiguities": [item[:300] for item in ambiguities[:8]],
         "authorization_scope": [item[:120] for item in scope[:8]],
+        "follow_up_operations": [item for item in follow_up_operations[:4]],
     }

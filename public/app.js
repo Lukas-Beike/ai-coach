@@ -566,6 +566,16 @@ function setupConnectivityStatus() {
   window.addEventListener("online", () => connectStateEvents());
 }
 
+async function waitForSyncJob(jobId) {
+  if (!jobId) return { status: "unknown" };
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const job = await api(`/api/sync/jobs/${encodeURIComponent(jobId)}`);
+    if (["completed", "partial", "failed"].includes(job.status)) return job;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error("Die Synchronisierung läuft länger als erwartet. Der Job kann unter Betrieb & Diagnose weiter verfolgt werden.");
+}
+
 function setVoiceStatus(message = "", error = false) {
   const node = $("#voiceStatus");
   if (!node) return;
@@ -974,6 +984,27 @@ function renderCoachReceipts() {
 function addCoachReceipt(receipt) {
   state.coachReceipts = [...(state.coachReceipts || []), { ...receipt, createdAt: Date.now() }].slice(-3);
   renderCoachReceipts();
+}
+
+function addStructuredCoachReceipts(payload) {
+  const receipts = Array.isArray(payload?.command_receipts) ? payload.command_receipts : [];
+  const jobIds = Array.isArray(payload?.sync_job_ids) ? payload.sync_job_ids : [];
+  receipts.forEach((entry) => {
+    const result = entry?.result || {};
+    const tool = entry?.tool || "Coach-Aktion";
+    const failed = result.ok === false;
+    const details = [];
+    if (result.artifact_id) details.push(`Planartefakt ${result.artifact_id} · ${result.status || "bereit"}`);
+    if (Array.isArray(result.library_entry_ids) && result.library_entry_ids.length) details.push(`${result.library_entry_ids.length} lokale Einheit(en) gespeichert`);
+    if (result.sync_job_id) details.push(`Syncjob ${result.sync_job_id} eingereiht`);
+    if (result.remote_untouched) details.push("Remote-Provider unverändert");
+    addCoachReceipt({
+      title: failed ? `${tool} fehlgeschlagen` : `${tool} ausgeführt`,
+      message: failed ? (result.error || "Die Aktion konnte nicht ausgeführt werden.") : (result.status || "Lokale Aktion bestätigt."),
+      status: failed ? "error" : "success",
+      details: [...details, ...jobIds.filter((id) => !details.some((detail) => detail.includes(id))).map((id) => `Syncjob ${id} eingereiht`)],
+    });
+  });
 }
 
 async function retryProvider(provider, button) {
@@ -4082,6 +4113,7 @@ async function requestCoachResponse(message) {
         request.responseMessageId = payload.message?.id || null;
         state.chatStreamText = "";
         state.coachActionProposals = Array.isArray(payload?.proposed_actions) ? payload.proposed_actions : [];
+        addStructuredCoachReceipts(payload);
         renderMessages(state.data?.messages || [], false);
         updateChatControls();
       }
@@ -4279,7 +4311,9 @@ async function syncGarmin() {
   try {
     const configuredDays = $("#garminSyncDays")?.value || state.data?.sync_settings?.garmin_days || 30;
     const result = await api("/api/garmin/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
-    toast(result.status === "ok" ? `Garmin synchronisiert${result.activities ? ` · ${result.activities} Aktivitäten` : ""}` : "Garmin-Synchronisierung läuft bereits");
+    const completed = await waitForSyncJob(result.id);
+    if (completed.status === "failed") throw new Error(completed.error_class || "Garmin-Synchronisierung fehlgeschlagen.");
+    toast(`Garmin ${completed.status === "partial" ? "teilweise " : ""}synchronisiert`);
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
@@ -4294,8 +4328,9 @@ async function syncExternalCalendar() {
   button.textContent = "Synchronisierung läuft…";
   try {
     const result = await api("/api/external-calendar/sync", { method: "POST", body: "{}" });
-    toast(result.status === "ok" ? `Kalender synchronisiert · ${result.events || 0} Einträge` : "Kalender wird bereits synchronisiert");
-    if (result.replan_changes) toast(`${result.replan_changes} lokale Bibliothekseinheit(en) als Anpassung vorgeschlagen`);
+    const completed = await waitForSyncJob(result.id);
+    if (completed.status === "failed") throw new Error(completed.error_class || "Kalender-Synchronisierung fehlgeschlagen.");
+    toast(`Kalender ${completed.status === "partial" ? "teilweise " : ""}synchronisiert`);
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
@@ -4311,7 +4346,9 @@ async function syncWeather() {
   button.textContent = "Wetter wird aktualisiert…";
   try {
     const result = await api("/api/weather/sync", { method: "POST", body: "{}" });
-    toast(result.status === "ok" ? "Open-Meteo-Wetter aktualisiert" : result.status === "stale" ? "Open-Meteo nicht erreichbar · letzte Daten bleiben sichtbar" : "Bitte zuerst einen Wetterort im Profil hinterlegen", result.status === "stale");
+    const completed = await waitForSyncJob(result.id);
+    if (completed.status === "failed") throw new Error(completed.error_class || "Wetter-Synchronisierung fehlgeschlagen.");
+    toast(completed.status === "partial" ? "Open-Meteo teilweise aktualisiert" : "Open-Meteo-Wetter aktualisiert");
     invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
