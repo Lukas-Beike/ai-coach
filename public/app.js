@@ -36,6 +36,20 @@ function renderPlanSegments(segment = state.planSegment) {
   });
 }
 
+function renderAnalysisSegments(segment = state.analysisSegment) {
+  const selected = ["history", "performance"].includes(segment) ? segment : "history";
+  state.analysisSegment = selected;
+  document.querySelectorAll("[data-analysis-segment-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.analysisSegmentPanel !== selected;
+  });
+  document.querySelectorAll("[data-analysis-segment]").forEach((link) => {
+    const active = link.dataset.analysisSegment === selected;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+}
+
 function currentPlanLoadAreas() {
   const areas = new Set(["chat", "activities", "performance", "feedback", "profile", "weather"]);
   const route = baseRoute();
@@ -78,6 +92,7 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
     renderPlanSegments(planSegmentFromRoute(panelRoute));
     renderActivePlanSegment(state.data);
   }
+  if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
   const targetHash = `#${panelRoute}`;
   if (window.location.hash !== targetHash) {
     if (historyMode === "push") window.history.pushState({ route: panelRoute }, "", targetHash);
@@ -177,6 +192,7 @@ function showLogin() {
   state.chatResponseScrollPending = false;
   state.loadedAreas.clear();
   state.planSegment = "calendar";
+  state.analysisSegment = "history";
   state.profileDirty = false;
   state.checkinDirty = false;
   state.chatDraftDirty = false;
@@ -894,6 +910,72 @@ function renderProviderFreshness(data) {
   });
 }
 
+function coachProviderLabel(provider) {
+  return { intervals: "Intervals.icu", garmin: "Garmin", weather: "Wetter", calendar: "Kalender" }[provider] || provider;
+}
+
+function coachStatusLabel(status) {
+  return {
+    ready: "Bereit",
+    loading: "Wird geladen",
+    stale: "Letzte Daten",
+    degraded: "Teilweise",
+    error: "Fehler",
+    not_configured: "Nicht eingerichtet",
+  }[status] || "Unbekannt";
+}
+
+function renderCoachOverview(data) {
+  const root = $("#coachProviderStatus");
+  const ready = $("#coachReadyStatus");
+  const intro = $("#coachOverviewStatus");
+  if (!root || !ready) return;
+  root.replaceChildren();
+  const configured = data.configured || {};
+  const providers = data.provider_states || {};
+  const entries = ["intervals", "garmin", "weather"].map((provider) => {
+    const providerState = providers[provider] || {};
+    const status = providerState.status || (configured[provider] === false ? "not_configured" : "loading");
+    return { provider, status };
+  });
+  entries.forEach(({ provider, status }) => {
+    const item = document.createElement("div");
+    item.className = "coach-provider-item";
+    item.append(document.createElement("span"));
+    const copy = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = coachProviderLabel(provider);
+    const detail = document.createElement("small");
+    detail.textContent = coachStatusLabel(status);
+    copy.append(name, detail);
+    item.append(copy);
+    item.dataset.status = status;
+    root.append(item);
+  });
+  const hasError = entries.some(({ status }) => status === "error");
+  const hasLoading = entries.some(({ status }) => status === "loading");
+  const missing = !configured.openai || !configured.intervals;
+  const overall = missing ? "not_configured" : hasError ? "error" : hasLoading ? "loading" : "ready";
+  ready.dataset.status = overall;
+  ready.textContent = missing ? "Einrichtung nötig" : coachStatusLabel(overall);
+  if (intro) intro.textContent = missing
+    ? "OpenAI und Intervals.icu werden für Coach-Antworten benötigt."
+    : hasError ? "Eine Datenquelle braucht Aufmerksamkeit; bereits geladene Daten bleiben sichtbar."
+      : "Verlauf, Planung und Erholung sind im Coach-Kontext gebündelt.";
+}
+
+function renderCoachReceipts() {
+  const root = $("#coachReceipts");
+  if (!root) return;
+  root.replaceChildren();
+  (state.coachReceipts || []).slice(-3).reverse().forEach((receipt) => root.append(createActionReceipt(receipt)));
+}
+
+function addCoachReceipt(receipt) {
+  state.coachReceipts = [...(state.coachReceipts || []), { ...receipt, createdAt: Date.now() }].slice(-3);
+  renderCoachReceipts();
+}
+
 async function retryProvider(provider, button) {
   if (button) button.disabled = true;
   try {
@@ -1154,6 +1236,25 @@ function renderToday(data) {
   status.textContent = syncMessages.join(" · ");
   if (detail) detail.textContent = syncMessages.length ? syncMessages.join(" · ") : `Stand: ${dateLabel(todayKey)}`;
 
+  const adjustment = data.planning?.latest_replan;
+  const priorityCard = todayCard("Priorität heute", "today-priority");
+  if (checkin?.illness) {
+    todayCardText(priorityCard, `Krankheit gemeldet: ${checkin.illness}. Belastung heute vorsichtig bewerten.`, "today-card-summary");
+    priorityCard.append(todayAction("Check-in prüfen", () => openCheckinEditor(todayKey)));
+  } else if (adjustment?.changes?.length || adjustment?.illness_pause) {
+    todayCardText(priorityCard, "Eine lokale Plananpassung wartet auf deine Prüfung.", "today-card-summary");
+    priorityCard.append(todayAction("Plananpassung prüfen", () => applyNavigationRoute("plan/calendar", { historyMode: "push" })));
+  } else if (todayWorkouts.length) {
+    todayCardText(priorityCard, `${todayWorkouts.length} geplante Einheit${todayWorkouts.length === 1 ? "" : "en"} für heute. Prüfe sie mit dem Coach, wenn sich deine Tagesform verändert hat.`, "today-card-summary");
+    priorityCard.append(todayAction("Coach fragen", () => applyNavigationRoute("coach", { historyMode: "push" })));
+  } else if (!checkin) {
+    todayCardText(priorityCard, "Noch kein Check-in für heute. Ein kurzer Check-in hilft bei der Einordnung des Tages.");
+    priorityCard.append(todayAction("Check-in ausfüllen", () => openCheckinEditor(todayKey)));
+  } else {
+    todayCardText(priorityCard, "Keine dringende Anpassung erkannt. Deine Daten bleiben als Orientierung sichtbar.", "today-card-summary");
+  }
+  root.append(priorityCard);
+
   const checkinCard = todayCard("Tages-Check-in", "today-checkin");
   if (checkin) {
     const values = [
@@ -1209,7 +1310,6 @@ function renderToday(data) {
   } else todayCardText(feedbackCard, "Keine offene Rückmeldung zu den geladenen Aktivitäten.");
   root.append(feedbackCard);
 
-  const adjustment = data.planning?.latest_replan;
   if (adjustment && (adjustment.changes?.length || adjustment.illness_pause)) {
     const adjustmentCard = todayCard("Aktuelle Plananpassung", "today-adjustment");
     todayCardText(adjustmentCard, "Eine Planänderung wartet auf deine Prüfung.", "today-card-summary");
@@ -1782,6 +1882,14 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
   state.data.daily_planning_context = Array.isArray(dailyPlanningContext) ? dailyPlanningContext : [];
   root.querySelectorAll("details.planned-week").forEach((week) => state.plannedWeekOpen.set(week.dataset.week, week.open));
   root.replaceChildren();
+  if (!planned.length && !externalCalendarEvents.length && !competitions.length) {
+    root.append(state.data && !state.loadedAreas.has("plan") ? createSkeletonStack(4) : createEmptyState(
+      "Noch kein lokaler Plan",
+      "Plane eine Einheit mit dem Coach oder öffne eine Vorlage. Remote-Termine werden erst nach einem lokalen Import angezeigt.",
+      todayAction("Coach öffnen", () => applyNavigationRoute("coach", { historyMode: "push" }), "btn primary"),
+    ));
+    return;
+  }
   const eventsByDate = new Map();
   (planned || []).forEach((event) => {
     const date = plannedEventDate(event);
@@ -2187,10 +2295,15 @@ async function executeCoachActionProposal(proposal, button) {
     });
     state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
     renderCoachActionReview();
+    const receiptMessage = result.local_planned
+      ? `${result.local_planned} Einheit(en) lokal geplant. Remote-Sync bleibt eine separate Freigabe.`
+      : "Planung lokal gespeichert. Sie bleibt bis zur separaten Sync-Freigabe lokal.";
+    addCoachReceipt({ title: "Planung gespeichert", message: receiptMessage, details: [result.sync_job_id ? `Syncjob ${result.sync_job_id} eingereiht` : "Keine implizite Remote-Änderung"] });
     toast(result.local_planned ? `${result.local_planned} Einheit(en) lokal geplant` : "Planung lokal gespeichert");
     await load("/api/bootstrap?local=1", ["plan", "library"]);
     applyNavigationRoute("plan/calendar", { historyMode: "push" });
   } catch (error) {
+    addCoachReceipt({ title: "Planung nicht gespeichert", message: error.message, status: "error" });
     toast(error.message, true);
     button.disabled = false;
   }
@@ -2228,12 +2341,8 @@ function renderMessages(messages, forceScroll = false) {
   root.dataset.signature = signature;
   root.replaceChildren();
   if (!visibleMessages.length && !state.chatRequest && !state.chatQueue.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    const title = document.createElement("strong");
-    title.textContent = "Dein Coach ist bereit";
-    empty.append(title, document.createTextNode("Lege deine Ziele im Profil fest. Bitte den Coach jederzeit, deine letzten Einheiten neu zu analysieren."));
-    root.append(empty);
+    if ($("#appShell")?.classList.contains("is-loading")) root.append(createSkeletonStack(4));
+    else root.append(createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest oder starte mit einer Schnellaktion."));
   }
   for (const message of visibleMessages) {
     const node = document.createElement("div");
@@ -3304,18 +3413,19 @@ function updateHeaderAction() {
   const panel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   if (panel === "dataPanel") {
     button.hidden = false;
-    button.dataset.action = "performance";
-    button.title = "Aktuelle Leistungsdaten von Intervals.icu aktualisieren";
-    button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
-    button.textContent = state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin
-      ? "Synchronisierung läuft…"
-      : button.disabled ? "Leistungsdaten werden aktualisiert…" : "Leistungsdaten aktualisieren";
-  } else if (panel === "activitiesPanel") {
-    button.hidden = false;
-    button.dataset.action = "activities";
-    button.title = "Aktivitäten der letzten 90 Tage von Intervals.icu laden";
-    button.disabled = Boolean(state.data?.sync?.running || state.data?.provider_resync?.intervals?.running || state.localSync.intervals || state.localSync.intervalsFull);
-    button.textContent = button.disabled ? "Synchronisierung läuft…" : "Aktivitäten aktualisieren";
+    if (state.analysisSegment === "performance") {
+      button.dataset.action = "performance";
+      button.title = "Aktuelle Leistungsdaten von Intervals.icu aktualisieren";
+      button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
+      button.textContent = state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin
+        ? "Synchronisierung läuft…"
+        : button.disabled ? "Leistungsdaten werden aktualisiert…" : "Leistungsdaten aktualisieren";
+    } else {
+      button.dataset.action = "activities";
+      button.title = "Aktivitäten der letzten 90 Tage von Intervals.icu laden";
+      button.disabled = Boolean(state.data?.sync?.running || state.data?.provider_resync?.intervals?.running || state.localSync.intervals || state.localSync.intervalsFull);
+      button.textContent = button.disabled ? "Synchronisierung läuft…" : "Aktivitäten aktualisieren";
+    }
   } else {
     button.hidden = true;
     button.disabled = false;
@@ -3674,6 +3784,8 @@ function render(data) {
   state.data = data;
   renderAppVersion(data.app);
   renderRemoteDeleteNotice();
+  renderCoachOverview(data);
+  renderCoachReceipts();
   renderQuickMessageTemplates();
   notifyState(data);
   renderStatus(data);
@@ -3868,6 +3980,7 @@ async function pollChatStatus() {
 async function loadInitialState() {
   const route = routeFromHash();
   const segment = planSegmentFromRoute(route);
+  state.analysisSegment = analysisSegmentFromRoute(route);
   const areas = ["chat", "activities", "performance", "feedback", "profile"];
   areas.push("weather");
   if (route === "today" || (baseRoute(route) === "plan" && segment !== "templates")) areas.push("plan");
@@ -4644,6 +4757,11 @@ document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEvent
   event.preventDefault();
   applyNavigationRoute(`plan/${link.dataset.planSegment}`, { historyMode: "push" });
 }));
+document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  applyNavigationRoute(`analysis/${link.dataset.analysisSegment}`, { historyMode: "push" });
+}));
 document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
@@ -4661,6 +4779,14 @@ $("#quickMessageTemplates").addEventListener("click", (event) => {
   if (!button || state.busy) return;
   const input = $("#messageInput");
   input.value = button.dataset.message || "";
+  input.dispatchEvent(new Event("input"));
+  $("#chatForm").requestSubmit();
+});
+$("#coachQuickActions").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-coach-message]");
+  if (!button || state.busy) return;
+  const input = $("#messageInput");
+  input.value = button.dataset.coachMessage || "";
   input.dispatchEvent(new Event("input"));
   $("#chatForm").requestSubmit();
 });

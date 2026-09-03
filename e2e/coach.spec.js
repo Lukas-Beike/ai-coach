@@ -9,9 +9,8 @@ if (!APP_PASSWORD || APP_PASSWORD.length < 12) {
 const navigation = [
   ["Coach", "chatPanel", "coach"],
   ["Heute", "todayPanel", "today"],
-  ["Verlauf", "activitiesPanel", "activities"],
-  ["Plan", "workoutsPanel", "planned"],
-  ["Leistung", "dataPanel", "performance"],
+  ["Plan", "workoutsPanel", "plan/calendar"],
+  ["Analyse", "dataPanel", "analysis/history"],
   ["Mehr", "settingsPanel", "more"],
 ];
 
@@ -70,13 +69,19 @@ test.describe("critical browser states", () => {
       await expect(page.getByRole("link", { name: label, exact: true })).toHaveAttribute("href", `#${route}`);
     }
 
+    await page.getByRole("link", { name: "Analyse", exact: true }).click();
+    await expect(page).toHaveURL(/#analysis\/history$/);
     await page.getByRole("link", { name: "Leistung", exact: true }).click();
-    await expect(page).toHaveURL(/#performance$/);
+    await expect(page).toHaveURL(/#analysis\/performance$/);
     await page.goBack();
+    await expect(page.locator("#dataPanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#analysis\/history$/);
+    await page.getByRole("link", { name: "Mehr", exact: true }).click();
     await expect(page.locator("#settingsPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#more$/);
-    await page.goForward();
+    await page.goto("/#analysis/performance");
     await expect(page.locator("#dataPanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#analysis\/performance$/);
     await page.goto("/#unknown-route");
     await expect(page.locator("#chatPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#coach$/);
@@ -111,20 +116,21 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#planCalendarSegment")).toBeVisible();
     await expect(page.getByRole("link", { name: "Kalender", exact: true })).toHaveAttribute("aria-current", "page");
     await page.getByRole("link", { name: "Bibliothek", exact: true }).click();
-    await expect(page).toHaveURL(/#planned\/library$/);
+    await expect(page).toHaveURL(/#plan\/templates$/);
     await expect(page.locator("#planLibrarySegment")).toBeVisible();
     await expect(page.locator("#planCalendarSegment")).toBeHidden();
     await expect(page.getByText("Lokal speichern · Remote-Sync nur mit Vorschau", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Vorschau für Bibliotheks- und Planungssync", exact: true })).toBeVisible();
     await page.getByRole("link", { name: "Ziele & Pläne", exact: true }).click();
-    await expect(page).toHaveURL(/#planned\/goals$/);
+    await expect(page).toHaveURL(/#plan\/goals$/);
     await expect(page.locator("#planGoalsSegment")).toBeVisible();
     await expect(page.locator("#planLibrarySegment")).toBeHidden();
     await page.goto("/#planned/goals");
     await expect(page.locator("#planGoalsSegment")).toBeVisible();
+    await expect(page).toHaveURL(/#plan\/goals$/);
 
     await page.getByRole("link", { name: "Heute", exact: true }).click();
-    await expect(page.getByRole("button", { name: /Check-in (ausfüllen|bearbeiten)/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Check-in (ausfüllen|prüfen)/ })).toBeVisible();
     await expect(page.locator("#checkinDialog")).toBeHidden();
     await expect(page.locator("#chatPanel")).toContainText("Morgen-Check-in");
 

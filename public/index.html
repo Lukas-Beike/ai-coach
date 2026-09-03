@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg?v=152" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=152">
+    <link rel="icon" href="/icon.svg?v=153" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=153">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -45,6 +45,18 @@
       <section id="connectivityNotice" class="connectivity-notice" role="status" aria-live="polite" hidden></section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
+        <section id="coachOverview" class="coach-overview card" aria-labelledby="coachOverviewTitle">
+          <div class="coach-overview-heading">
+            <div><span class="eyebrow">DEIN TRAININGSCOACH</span><h2 id="coachOverviewTitle">Was möchtest du heute klären?</h2><p id="coachOverviewStatus">Verlauf, Planung und Erholung sind im Coach-Kontext gebündelt.</p></div>
+            <span id="coachReadyStatus" class="status-chip" data-status="loading">Wird geprüft</span>
+          </div>
+          <div id="coachProviderStatus" class="coach-provider-status" aria-label="Datenquellenstatus"></div>
+          <div id="coachQuickActions" class="coach-quick-actions" aria-label="Schnellaktionen">
+            <button type="button" class="btn secondary" data-coach-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
+            <button type="button" class="btn secondary" data-coach-message="Analysiere meine letzte absolvierte Einheit anhand der aktuellen Intervals.icu-Daten. Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit?">Letzte Einheit analysieren</button>
+            <button type="button" class="btn ghost" data-coach-message="Zeige mir kurz den Stand meiner nächsten geplanten Einheiten und ob eine Anpassung sinnvoll ist.">Plan prüfen</button>
+          </div>
+        </section>
         <div id="coachAdaptivePlanningNotice" class="adaptive-planning-notice coach-adaptive-planning-notice" hidden role="status">
           <div><strong>Deine Planung braucht eine Anpassung</strong><small>Öffne „Plan“, um die Vorschläge zu prüfen.</small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Plan öffnen</button>
@@ -57,6 +69,7 @@
           </div>
           <div id="coachActionReviewContent"></div>
         </section>
+        <section id="coachReceipts" class="coach-receipts" aria-label="Aktionsstatus" aria-live="polite"></section>
         <form id="chatForm" class="composer">
           <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
             <span class="quick-message-label">Schnellstart</span>
@@ -85,20 +98,6 @@
         </div>
         <div id="todayStatus" class="today-status" role="status" aria-live="polite"></div>
         <div id="todaySummary" class="today-grid"></div>
-      </section>
-
-      <section id="activitiesPanel" class="panel" aria-label="Aktivitäten">
-        <div class="section-heading">
-          <div><span class="eyebrow">TRAININGSVERLAUF</span><h2>Aktivitäten <span id="activityDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
-        </div>
-        <div class="activity-date-filter" aria-label="Aktivitäten nach Zeitraum filtern">
-          <label for="activityFromDate">Von<input id="activityFromDate" type="date"></label>
-          <label for="activityToDate">Bis<input id="activityToDate" type="date"></label>
-          <button type="button" id="activityFilterReset" class="activity-filter-button clear">Filter zurücksetzen</button>
-        </div>
-        <div id="activityStats" class="activity-stats-summary" aria-label="Aktivitätsstatistik"></div>
-        <div id="activityFilters" class="activity-filters" aria-label="Aktivitätstypen filtern"></div>
-        <div id="activities" class="activities"></div>
       </section>
 
       <section id="workoutsPanel" class="panel" aria-label="Geplante Einheiten">
@@ -188,11 +187,29 @@
         </section>
       </section>
 
-      <section id="dataPanel" class="panel" aria-label="Leistungsdaten">
+      <section id="dataPanel" class="panel" aria-label="Analyse">
         <div class="section-heading">
-          <div><span class="eyebrow">LEISTUNG</span><h2>Leistungsdaten</h2></div>
+          <div><span class="eyebrow">AUSWERTUNG</span><h2>Analyse</h2><span class="tab-sync-detail">Verlauf und Leistungsdaten in einem Bereich</span></div>
         </div>
-        <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
+        <nav class="analysis-segment-nav" aria-label="Analysebereiche">
+          <a href="#analysis/history" data-analysis-segment="history" aria-current="page">Verlauf</a>
+          <a href="#analysis/performance" data-analysis-segment="performance">Leistung</a>
+        </nav>
+        <section id="analysisHistorySegment" class="analysis-segment" data-analysis-segment-panel="history" aria-labelledby="analysisHistoryTitle">
+          <div class="analysis-segment-heading"><div><span class="eyebrow">TRAININGSVERLAUF</span><h3 id="analysisHistoryTitle">Aktivitäten <span id="activityDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h3></div><span id="activitySyncDetail" class="tab-sync-detail"></span></div>
+          <div class="activity-date-filter" aria-label="Aktivitäten nach Zeitraum filtern">
+            <label for="activityFromDate">Von<input id="activityFromDate" type="date"></label>
+            <label for="activityToDate">Bis<input id="activityToDate" type="date"></label>
+            <button type="button" id="activityFilterReset" class="activity-filter-button clear">Filter zurücksetzen</button>
+          </div>
+          <div id="activityStats" class="activity-stats-summary" aria-label="Aktivitätsstatistik"></div>
+          <div id="activityFilters" class="activity-filters" aria-label="Aktivitätstypen filtern"></div>
+          <div id="activities" class="activities"></div>
+        </section>
+        <section id="analysisPerformanceSegment" class="analysis-segment" data-analysis-segment-panel="performance" aria-labelledby="analysisPerformanceTitle" hidden>
+          <div class="analysis-segment-heading"><div><span class="eyebrow">LEISTUNG</span><h3 id="analysisPerformanceTitle">Leistungsdaten</h3></div></div>
+          <div id="performanceSummary" class="performance-card" aria-live="polite"></div>
+        </section>
       </section>
 
       <section id="profilePanel" class="panel" aria-label="Athletenprofil">
@@ -410,12 +427,12 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=152" defer></script>
-  <script src="/navigation.js?v=152" defer></script>
-  <script src="/state.js?v=152" defer></script>
-  <script src="/views.js?v=152" defer></script>
-  <script src="/forms.js?v=152" defer></script>
-  <script src="/components.js?v=152" defer></script>
-  <script src="/app.js?v=152" defer></script>
+  <script src="/api.js?v=153" defer></script>
+  <script src="/navigation.js?v=153" defer></script>
+  <script src="/state.js?v=153" defer></script>
+  <script src="/views.js?v=153" defer></script>
+  <script src="/forms.js?v=153" defer></script>
+  <script src="/components.js?v=153" defer></script>
+  <script src="/app.js?v=153" defer></script>
 </body>
 </html>

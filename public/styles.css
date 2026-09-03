@@ -184,6 +184,46 @@ h2 {
 
 .panel { display: none; min-width: 0; }
 .panel.active { display: block; }
+.coach-overview { display: grid; gap: 16px; margin: 4px 0 16px; padding: 18px; }
+.coach-overview-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.coach-overview-heading > div { display: grid; gap: 6px; min-width: 0; }
+.coach-overview-heading h2 { margin: 0; font-size: clamp(1.25rem, 4vw, 1.75rem); }
+.coach-overview-heading p { margin: 0; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.coach-overview-heading .status-chip { flex: 0 0 auto; }
+.coach-provider-status { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.coach-provider-item { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: rgba(255, 255, 255, .025); }
+.coach-provider-item > span { width: 8px; height: 8px; border-radius: 999px; background: var(--subtle); }
+.coach-provider-item[data-status="ready"] > span { background: var(--accent-bright); }
+.coach-provider-item[data-status="loading"] > span { background: var(--orange); animation: pulse 1.2s ease-in-out infinite; }
+.coach-provider-item[data-status="error"] > span, .coach-provider-item[data-status="stale"] > span { background: var(--danger); }
+.coach-provider-item > div { display: grid; gap: 2px; min-width: 0; }
+.coach-provider-item strong { overflow: hidden; color: var(--ink); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.coach-provider-item small { color: var(--subtle); font-size: .64rem; }
+.coach-quick-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.coach-quick-actions .btn { flex: 1 1 180px; font-size: .74rem; }
+.coach-receipts { display: grid; gap: 8px; margin: 0 0 14px; }
+.coach-receipts:empty { display: none; }
+.action-receipt { text-align: left; }
+.action-receipt.is-error { border-color: rgba(255, 69, 58, .4); color: #ffb0aa; background: rgba(255, 69, 58, .08); }
+.action-receipt-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.action-receipt-heading strong { color: var(--ink); font-size: .78rem; }
+.action-receipt p { margin: 0; color: var(--muted); font-size: .74rem; line-height: 1.4; }
+.action-receipt ul { display: grid; gap: 3px; margin: 0; padding-left: 17px; color: var(--subtle); font-size: .68rem; }
+.analysis-segment-nav { display: flex; gap: 4px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(255, 255, 255, .025); }
+.analysis-segment-nav a { display: grid; min-height: 44px; flex: 1 1 140px; place-items: center; border-radius: var(--radius-sm); color: var(--muted); font-size: .75rem; font-weight: 750; text-decoration: none; }
+.analysis-segment-nav a:hover, .analysis-segment-nav a.active { color: var(--ink); background: var(--accent-soft); }
+.analysis-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.analysis-segment { min-width: 0; }
+.analysis-segment-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.analysis-segment-heading > div { display: grid; gap: 4px; min-width: 0; }
+.analysis-segment-heading h3 { margin: 0; color: var(--ink); font-size: 1.05rem; }
+.analysis-segment-heading .tab-sync-detail { margin: 0; text-align: right; }
+.skeleton-stack { display: grid; gap: 10px; width: min(100%, 640px); margin: auto; padding: 28px 8px; }
+.skeleton-row { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(255, 255, 255, .025); }
+.skeleton-avatar { flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%; }
+.skeleton-copy { display: grid; flex: 1; gap: 8px; }
+.skeleton-copy .skeleton { width: 70%; }
+.skeleton-copy .skeleton-short { width: 42%; }
 #chatPanel { position: relative; display: none; flex-direction: column; min-height: min(100dvh, 920px); }
 #chatPanel.active { display: flex; }
 .messages {
@@ -490,6 +530,8 @@ h2 {
 .today-item span { color: var(--muted); font-size: .7rem; }
 .today-card .secondary-button { justify-self: start; min-height: 40px; }
 .today-adjustment { border-color: rgba(255, 69, 58, .45); }
+.today-priority { grid-column: 1 / -1; border-color: rgba(52, 207, 161, .42); background: linear-gradient(145deg, rgba(52, 207, 161, .12), var(--surface-raised)); }
+.today-priority h3 { color: var(--accent-bright); }
 @media (max-width: 559px) {
   .today-grid { grid-template-columns: 1fr; }
   .today-card { padding: 14px; }
@@ -850,6 +892,11 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .topbar { padding-top: 32px; }
   #chatPanel { max-width: 1100px; }
   #chatPanel .messages, #chatPanel .composer, #chatPanel .coach-action-review { max-width: 760px; }
+  #settingsPanel { display: grid; grid-template-columns: minmax(190px, 220px) minmax(0, 1fr); align-items: start; gap: 0 24px; }
+  #settingsPanel > .section-heading { grid-column: 1 / -1; }
+  #settingsPanel > .more-segment-nav { position: sticky; top: 24px; grid-column: 1; display: grid; align-content: start; gap: 4px; margin: 0; }
+  #settingsPanel > .more-segment-nav a { flex: none; min-height: 46px; justify-content: start; padding: 10px 12px; text-align: left; }
+  #settingsPanel > details { grid-column: 2; width: 100%; }
 }
 
 @media (max-width: 559px) {
@@ -922,6 +969,21 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .connection-card { align-items: stretch; flex-direction: column; }
   .connection-card .secondary-button { margin-top: auto; }
   .activity-stats-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .today-priority { grid-column: 1 / -1; }
+}
+
+@media (min-width: 900px) {
+  .planned-week-days { grid-template-columns: repeat(7, minmax(0, 1fr)); align-items: start; }
+  .planned-day-heading { display: grid; align-content: start; min-height: 92px; padding: 11px; }
+  .planned-day-heading-main { display: grid; gap: 7px; }
+  .planned-day-heading h3 { font-size: .78rem; }
+  .planned-day-weather { display: grid; grid-template-columns: auto 1fr; }
+  .planned-day-weather-summary { grid-column: 1 / -1; white-space: normal; }
+  .planned-day-count { text-align: left; }
+  .planned-day-empty { margin: -2px 11px 11px; font-size: .68rem; }
+  .planned-entry > summary { padding: 11px; }
+  .planned-summary-main strong { font-size: .78rem; }
+  .planned-meta, .planned-weather-slot { font-size: .64rem; }
 }
 
 button:focus-visible, a:focus-visible, summary:focus-visible {

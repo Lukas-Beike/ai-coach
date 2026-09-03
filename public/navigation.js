@@ -52,6 +52,11 @@ function planSegmentFromRoute(route = state.route) {
   return ["calendar", "templates", "goals"].includes(segment) ? segment : "calendar";
 }
 
+function analysisSegmentFromRoute(route = state.route) {
+  const segment = String(route || "").split("/")[1];
+  return ["history", "performance"].includes(segment) ? segment : "history";
+}
+
 function baseRoute(route = state.route) {
   return String(route || DEFAULT_NAV_ROUTE).split("/")[0];
 }
