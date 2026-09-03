@@ -1411,8 +1411,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('/views.js?v=149', index)
         self.assertIn('/forms.js?v=149', index)
         self.assertIn('/components.js?v=149', index)
-        self.assertIn('/app.js?v=149', index)
-        self.assertIn('intervals-coach-v149', service_worker)
+        self.assertIn('/app.js?v=150', index)
+        self.assertIn('intervals-coach-v150', service_worker)
         self.assertIn('"/navigation.js?v=149"', service_worker)
         self.assertIn('"/state.js?v=149"', service_worker)
         self.assertIn('"/views.js?v=149"', service_worker)
@@ -1437,7 +1437,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
         self.assertLess(index.index('/forms.js?v=149'), index.index('/components.js?v=149'))
-        self.assertLess(index.index('/components.js?v=149'), index.index('/app.js?v=149'))
+        self.assertLess(index.index('/components.js?v=149'), index.index('/app.js?v=150'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
 
@@ -3913,6 +3913,76 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.prompt_requests_fresh_data("Please load my latest workouts and review them."))
         self.assertFalse(server.prompt_requests_fresh_data("Was soll ich morgen trainieren?"))
 
+    def test_structured_coach_intent_retries_once_and_fails_closed(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        with patch.object(server, "responses_request", side_effect=[{"output_text": "not-json"}, {"output_text": json.dumps(intent)}]) as request:
+            result = server.request_coach_intent("Erstelle einen Plan")
+        self.assertEqual(result["operation"], "stage_training_plan")
+        self.assertEqual(request.call_count, 2)
+        with patch.object(server, "responses_request", return_value={"output_text": "not-json"}):
+            failed = server.request_coach_intent("Jetzt speichern")
+        self.assertEqual(failed["intent"], "needs_clarification")
+        self.assertEqual(failed["target_system"], "none")
+
+    def test_structured_coach_loop_keeps_tools_and_returns_command_receipt(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-1", "arguments": json.dumps({"payload": {"plan_name": "Test", "workouts": []}})}]},
+            {"output_text": "Der Entwurf ist gespeichert."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-test"
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach("Erstelle einen Entwurf", client_turn_id="turn-structured-1")
+        self.assertEqual(result["command_receipts"][0]["tool"], "stage_training_plan")
+        self.assertEqual(result["tool_rounds"], 1)
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(request.call_args_list[0].args[0]["tools"], request.call_args_list[1].args[0]["tools"])
+        self.assertEqual(result["sync_job_ids"], [])
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-structured-1",)).fetchone()
+        self.assertEqual(command["status"], "completed")
+        self.assertIn("Der Entwurf ist gespeichert.", command["receipt"])
+
+    def test_structured_provider_refresh_is_queued_and_not_run_in_chat_request(self):
+        intent = {
+            "intent": "remote_sync",
+            "operation": "start_provider_refresh",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["intervals_refresh"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "start_provider_refresh", "call_id": "call-refresh", "arguments": json.dumps({"days": 3})}]},
+            {"output_text": "Die Aktualisierung wurde eingereiht."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-test"
+        ), patch.object(server, "responses_request", side_effect=responses), patch.object(
+            server, "sync_intervals", side_effect=AssertionError("provider must run in worker")
+        ):
+            result = server.chat_with_coach("Aktualisiere Intervals", client_turn_id="turn-structured-refresh")
+        self.assertEqual(len(result["sync_job_ids"]), 1)
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "queued")
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute("SELECT provider, type, requested_by FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)).fetchone()
+        self.assertEqual(dict(row), {"provider": "intervals", "type": "refresh", "requested_by": "coach"})
+
     def test_context_preview_exposes_context_and_last_chat_input(self):
         server.add_message("user", "Wie soll ich morgen trainieren?")
         preview = server.context_preview()
@@ -5612,7 +5682,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('"/forms.js?v=149"', source)
         self.assertIn('"/components.js?v=149"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=149"', source)
+        self.assertIn('"/app.js?v=150"', source)
         self.assertIn('"/icon.svg?v=149"', source)
         self.assertIn('"/styles.css?v=149"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
@@ -6166,7 +6236,7 @@ class CoachTests(unittest.TestCase):
         operation_id = "operation-disconnect-test"
         cancel_event = threading.Event()
         handler = server.RequestHandler.__new__(server.RequestHandler)
-        handler.read_json = Mock(return_value={"message": "Bleibt bestehen"})
+        handler.read_json = Mock(return_value={"message": "Bleibt bestehen", "client_turn_id": "turn-disconnect-test"})
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock(side_effect=[None, server.ClientDisconnected()])
@@ -6478,8 +6548,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("function runLibraryBulkRemoteSync()", app)
         self.assertIn("expected_payload_hash", (server.PUBLIC_DIR.parent / "server.py").read_text(encoding="utf-8"))
         self.assertIn("librarySelection", state)
-        self.assertIn("intervals-coach-v149", worker)
-        self.assertIn("/app.js?v=149", index)
+        self.assertIn("intervals-coach-v150", worker)
+        self.assertIn("/app.js?v=150", index)
 
 if __name__ == "__main__":
     unittest.main()

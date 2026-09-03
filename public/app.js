@@ -3825,7 +3825,8 @@ async function requestCoachResponse(message) {
     renderMessages(state.data.messages, true);
   }
   state.chatStreamText = "";
-  const request = { phase: "running", message, operationId: null, responseMessageId: null, cancelRequested: false };
+  const clientTurnId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `turn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const request = { phase: "running", message, clientTurnId, operationId: null, responseMessageId: null, cancelRequested: false };
   state.chatRequest = request;
   const stream = { controller: new AbortController(), operationId: null, cancelRequested: false, request, serverError: false };
   state.chatStream = stream;
@@ -3838,7 +3839,7 @@ async function requestCoachResponse(message) {
       credentials: "same-origin",
       signal: stream.controller.signal,
       headers: { "Content-Type": "application/json", "X-CSRF-Token": cookie("ic_csrf") },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, client_turn_id: clientTurnId }),
     });
     if (!response.ok) {
       if (response.status === 401) stream.serverError = true;

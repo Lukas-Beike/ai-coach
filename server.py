@@ -70,6 +70,7 @@ from backend.coach.context import (
     compact_coach_local_planned_workouts as compact_coach_local_planned_workouts_value,
     compact_coach_planned_event as compact_coach_planned_event_value,
 )
+from backend.coach.intent import intent_request_payload, parse_intent_response
 from backend.http_api.responses import (
     header_items as response_header_items,
     json_bytes as response_json_bytes,
@@ -12608,6 +12609,318 @@ def unregister_chat_stream(session_csrf_hash: str, operation_id: str) -> None:
             CHAT_STREAMS.pop(session_csrf_hash, None)
 
 
+COACH_INTENT_TOOL_MAP = {
+    "stage_training_plan": "save_workout_library_entries",
+    "commit_training_plan": "save_workout_library_entries",
+    "apply_training_changes": "apply_workout_library_plan",
+    "manage_training_templates": "save_library_template",
+    "start_provider_refresh": {
+        "intervals": "refresh_intervals_data",
+        "garmin": "refresh_garmin_data",
+        "calendar": "refresh_external_calendar",
+        "weather": "refresh_weather",
+    },
+}
+COACH_INTENT_MAX_ATTEMPTS = 2
+COACH_TOOL_MAX_ROUNDS = 6
+COACH_CANONICAL_TOOL_NAMES = (
+    "read_training_state",
+    "stage_training_plan",
+    "commit_training_plan",
+    "apply_training_changes",
+    "manage_training_templates",
+    "start_provider_refresh",
+    "start_intervals_plan_sync",
+    "get_sync_job",
+    "resolve_training_sync_conflict",
+    "undo_training_change",
+)
+
+
+def _canonical_coach_tool(name: str, description: str) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "name": name,
+        "description": description,
+        "strict": False,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "payload": {"type": "object"},
+                "template": {"type": "object"},
+                "changes": {"type": "array", "items": {"type": "object"}},
+                "artifact_id": {"type": "string"},
+                "job_id": {"type": "string"},
+                "change_id": {"type": "string"},
+                "days": {"type": "integer"},
+            },
+            "additionalProperties": False,
+        },
+    }
+
+
+COACH_STRUCTURED_TOOLS = [
+    _canonical_coach_tool("read_training_state", "Read the current local training state and references."),
+    _canonical_coach_tool("stage_training_plan", "Store a local, referenceable training-plan artifact."),
+    _canonical_coach_tool("commit_training_plan", "Commit a referenced local training-plan artifact atomically."),
+    _canonical_coach_tool("apply_training_changes", "Apply explicitly authorized local training changes."),
+    _canonical_coach_tool("manage_training_templates", "Create or update a local training template."),
+    _canonical_coach_tool("start_provider_refresh", "Queue an explicitly requested read-only provider refresh."),
+    _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu plan push."),
+    _canonical_coach_tool("get_sync_job", "Read one local synchronization job."),
+    _canonical_coach_tool("resolve_training_sync_conflict", "Explicitly retry a failed or partial synchronization job."),
+    _canonical_coach_tool("undo_training_change", "Return an undo preview for a local change; do not apply it silently."),
+]
+
+
+def _structured_training_state() -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+    return {
+        "planning_revision": int((revision or {}).get("revision") or 0),
+        "artifact_refs": coach_intent_artifact_refs(),
+        "jobs": sync_jobs_state(),
+    }
+
+
+def _structured_artifact_payload(arguments: dict[str, Any]) -> dict[str, Any]:
+    payload = arguments.get("payload")
+    if isinstance(payload, dict):
+        return payload
+    return {key: value for key, value in arguments.items() if key not in {"artifact_id", "expected_revision"}}
+
+
+def _stage_coach_artifact(conversation_id: str, client_turn_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        base_revision = int((revision_row or {}).get("revision") or 0)
+        artifact_id = str(uuid.uuid4())
+        now = utc_now()
+        db.execute(
+            "INSERT INTO coach_plan_artifacts(id, conversation_id, client_turn_id, base_revision, status, payload, created_at, updated_at) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)",
+            (artifact_id, conversation_id, client_turn_id, base_revision, json.dumps(payload, ensure_ascii=False, separators=(",", ":")), now, now),
+        )
+    return {"ok": True, "status": "draft", "artifact_id": artifact_id, "base_revision": base_revision}
+
+
+def _structured_coach_tool_result(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    intent: dict[str, Any],
+    conversation_id: str,
+    client_turn_id: str,
+    sync_job_ids: list[str],
+) -> dict[str, Any]:
+    operation = intent.get("operation")
+    if name == "read_training_state":
+        return {"ok": True, **_structured_training_state()}
+    if name == "stage_training_plan":
+        if operation != "stage_training_plan":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        return _stage_coach_artifact(conversation_id, client_turn_id, _structured_artifact_payload(arguments))
+    if name == "commit_training_plan":
+        if operation != "commit_training_plan":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        artifact_id = str(arguments.get("artifact_id") or intent.get("artifact_id") or "").strip()
+        if not artifact_id:
+            raise AppError(400, "Zum Speichern wird ein lokales Planartefakt benötigt.", reason="artifact_required")
+        with DB_LOCK, database() as db:
+            artifact = db.execute("SELECT * FROM coach_plan_artifacts WHERE id=?", (artifact_id,)).fetchone()
+            if not artifact:
+                raise AppError(404, "Planartefakt nicht gefunden.", reason="artifact_not_found")
+            if artifact["status"] == "committed":
+                return {"ok": True, "status": "already_applied", "artifact_id": artifact_id}
+            if int(artifact["base_revision"] or 0) != int((_structured_training_state().get("planning_revision") or 0)):
+                raise AppError(409, "Der lokale Plan wurde inzwischen geändert.", reason="planning_revision_conflict")
+            payload = json.loads(artifact["payload"] or "{}")
+        entries = save_workout_library_entries(
+            payload.get("workouts") or [],
+            plan_name=str(payload.get("plan_name") or "Coach-Plan"),
+            goal=str(payload.get("goal") or ""),
+        )
+        with DB_LOCK, database() as db:
+            db.execute("UPDATE coach_plan_artifacts SET status='committed', updated_at=? WHERE id=? AND status='draft'", (utc_now(), artifact_id))
+        return {"ok": True, "status": "committed", "artifact_id": artifact_id, "library_entry_ids": [entry["id"] for entry in entries]}
+    if name == "apply_training_changes":
+        if operation != "apply_training_changes":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        return {"ok": True, "status": "applied", "changes": arguments.get("changes") or []}
+    if name == "manage_training_templates":
+        if operation != "manage_training_templates":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        return {"ok": True, "stored_locally": True, "template": create_local_library_template(arguments.get("template") if isinstance(arguments.get("template"), dict) else arguments)}
+    if name == "start_provider_refresh":
+        if operation != "start_provider_refresh":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        provider = str(intent.get("target_system") or "")
+        job = enqueue_sync_job(provider, "refresh", arguments, requested_by="coach")
+        sync_job_ids.append(job["id"])
+        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
+    if name == "start_intervals_plan_sync":
+        if operation != "start_intervals_plan_sync" or intent.get("target_system") != "intervals":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        job = enqueue_sync_job("intervals", "plan_push", arguments, requested_by="coach")
+        sync_job_ids.append(job["id"])
+        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
+    if name == "get_sync_job":
+        return {"ok": True, "job": sync_job_state(str(arguments.get("job_id") or "").strip())}
+    if name == "resolve_training_sync_conflict":
+        if operation != "resolve_training_sync_conflict":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        job = resolve_sync_job(str(arguments.get("job_id") or "").strip(), {"action": "retry"})
+        return {"ok": True, "status": "queued", "job": job}
+    if name == "undo_training_change":
+        if operation != "undo_training_change":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        return {"ok": True, "status": "preview_required", "change_id": str(arguments.get("change_id") or "")}
+    raise AppError(400, "Unbekanntes Coach-Werkzeug.", reason="unknown_coach_tool")
+
+
+def _chat_with_structured_coach(
+    message: str,
+    *,
+    intent: dict[str, Any],
+    conversation_id: str,
+    client_turn_id: str,
+    on_text_delta: Any = None,
+    cancel_event: threading.Event | None = None,
+    session_csrf_hash: str = "",
+) -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        existing_command = db.execute("SELECT receipt, status FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
+            return json.loads(existing_command["receipt"])
+        if existing_command:
+            raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
+        db.execute(
+            "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)",
+            (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent, ensure_ascii=False, separators=(",", ":")), str(intent.get("target_system") or "none"), intent.get("artifact_id"), utc_now(), utc_now()),
+        )
+    add_message("user", message)
+    requested_operation = intent.get("operation")
+    forced_tool = requested_operation if requested_operation in COACH_CANONICAL_TOOL_NAMES else "none"
+    request_payload = {
+        "model": selected_model(),
+        "conversation": conversation_id,
+        "instructions": build_training_context(),
+        "input": message,
+        "tools": COACH_STRUCTURED_TOOLS,
+        "tool_choice": {"type": "function", "name": forced_tool} if forced_tool != "none" and intent.get("intent") in {"local_action", "remote_sync"} else "auto",
+        "parallel_tool_calls": False,
+        "max_output_tokens": coach_output_token_budget(message),
+        "truncation": "auto",
+    }
+    response = responses_stream_request(request_payload, on_text_delta, cancel_event) if on_text_delta is not None else responses_request(request_payload)
+    sync_job_ids: list[str] = []
+    command_receipts: list[dict[str, Any]] = []
+    tool_outputs: list[dict[str, Any]] = []
+    rounds = 0
+    while rounds < COACH_TOOL_MAX_ROUNDS:
+        tool_outputs = []
+        for item in response.get("output", []):
+            _raise_chat_cancelled(cancel_event)
+            if not isinstance(item, dict) or item.get("type") != "function_call":
+                continue
+            call_id = str(item.get("call_id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            cached = cached_chat_tool_result(call_id)
+            if cached is not None:
+                result = cached
+            else:
+                if name not in COACH_CANONICAL_TOOL_NAMES:
+                    raise AppError(403, "Nicht kanonisches Coach-Werkzeug.", reason="tool_scope_denied")
+                if name not in {"read_training_state", "get_sync_job"} and (intent.get("intent") not in {"local_action", "remote_sync"} or name != requested_operation):
+                    raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
+                try:
+                    arguments = json.loads(item.get("arguments") or "{}")
+                    if not isinstance(arguments, dict):
+                        raise AppError(400, "Coach-Aktionsargumente müssen ein Objekt sein.")
+                    result = _structured_coach_tool_result(name, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, sync_job_ids=sync_job_ids)
+                except (AppError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                    result = {"ok": False, "error": redact_text(str(exc))[:1000]}
+            command_receipts.append({"call_id": call_id, "tool": name, "result": result})
+            remember_chat_tool_result(call_id, name, result)
+            tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
+        if not tool_outputs:
+            break
+        rounds += 1
+        if rounds >= COACH_TOOL_MAX_ROUNDS:
+            break
+        followup_payload = {
+            "model": selected_model(),
+            "conversation": conversation_id,
+            "instructions": build_training_context(),
+            "input": tool_outputs,
+            "tools": COACH_STRUCTURED_TOOLS,
+            "tool_choice": "none",
+            "parallel_tool_calls": False,
+            "max_output_tokens": coach_output_token_budget(message, followup=True),
+            "truncation": "auto",
+        }
+        response = responses_stream_request(followup_payload, on_text_delta, cancel_event) if on_text_delta is not None else responses_request(followup_payload)
+    text = output_text(response)
+    if not text:
+        text = "Die Coach-Antwort enthält keine Textantwort. Bitte erneut versuchen."
+    receipt = {
+        "message": add_message("assistant", text),
+        "command_receipts": command_receipts,
+        "sync_job_ids": sync_job_ids,
+        "intent": intent,
+        "tool_rounds": rounds,
+    }
+    with DB_LOCK, database() as db:
+        db.execute(
+            "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+            (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+        )
+    return receipt
+
+
+def coach_intent_artifact_refs() -> list[dict[str, Any]]:
+    """Return local artifact identifiers only; provider payloads stay out."""
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT id, conversation_id, status, base_revision, created_at FROM coach_plan_artifacts "
+            "ORDER BY created_at DESC LIMIT 20"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def request_coach_intent(message: str) -> dict[str, Any]:
+    """Classify one turn in an isolated low-reasoning structured request."""
+    allowed_targets = ["local"]
+    if CONFIG.intervals_api_key:
+        allowed_targets.append("intervals")
+    if CONFIG.garmin_email or garmin_fixture_path() is not None or Path(CONFIG.garmin_tokenstore).exists():
+        allowed_targets.append("garmin")
+    if CONFIG.calendar_ical_url:
+        allowed_targets.append("calendar")
+    if get_profile().get("weather_location", "").strip():
+        allowed_targets.append("weather")
+    payload = intent_request_payload(message, coach_intent_artifact_refs(), allowed_targets)
+    payload["model"] = selected_model()
+    for attempt in range(COACH_INTENT_MAX_ATTEMPTS):
+        try:
+            return parse_intent_response(responses_request(payload))
+        except (AppError, TypeError, ValueError, json.JSONDecodeError):
+            if attempt + 1 < COACH_INTENT_MAX_ATTEMPTS:
+                continue
+            LOGGER.warning(
+                "Coach intent validation failed; mutation disabled",
+                extra={"event": "coach_intent_failed", "context": {"attempts": COACH_INTENT_MAX_ATTEMPTS}},
+            )
+            return {
+                "intent": "needs_clarification",
+                "operation": None,
+                "target_system": "none",
+                "artifact_id": None,
+                "ambiguities": ["Die strukturierte Aktionsklassifikation konnte nicht sicher validiert werden."],
+                "authorization_scope": [],
+                "error_class": "intent_invalid",
+            }
+
+
 def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
     """Return the status of the chat operation belonging to this session."""
     with CHAT_STREAM_LOCK:
@@ -12619,18 +12932,50 @@ def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
 
 @maintenance_operation
 @serialise_conversation
-def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "") -> dict[str, Any]:
+def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str | None = None) -> dict[str, Any]:
     _raise_chat_cancelled(cancel_event)
     message = message.strip()
     if not message:
         raise AppError(400, "Die Nachricht darf nicht leer sein.")
     if len(message) > 12_000:
         raise AppError(400, "Die Nachricht ist zu lang.")
+    structured_intent: dict[str, Any] | None = None
+    if client_turn_id is not None:
+        client_turn_id = str(client_turn_id).strip()
+        if not client_turn_id or len(client_turn_id) > 120:
+            raise AppError(400, "client_turn_id muss eine begrenzte, nicht leere Kennung sein.", reason="invalid_client_turn")
+        with DB_LOCK, database() as db:
+            existing_command = db.execute("SELECT receipt, status FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
+            try:
+                return json.loads(existing_command["receipt"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+        if existing_command:
+            raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
+        structured_intent = request_coach_intent(message)
+        return _chat_with_structured_coach(
+            message,
+            intent=structured_intent,
+            conversation_id=ensure_conversation(),
+            client_turn_id=client_turn_id,
+            on_text_delta=on_text_delta,
+            cancel_event=cancel_event,
+            session_csrf_hash=session_csrf_hash,
+        )
     refresh_error = None
-    requested_tool = requested_coach_tool(message)
-    if requested_tool in MUTATING_COACH_TOOL_NAMES and requested_tool not in {"save_competition", "save_checkin", "apply_adaptive_replan", "update_training_plan", "save_library_template"}:
-        requested_tool = None
-    if prompt_requests_fresh_data(message) and requested_tool != "refresh_intervals_data":
+    if structured_intent is not None:
+        intent_operation = structured_intent.get("operation")
+        requested_tool = COACH_INTENT_TOOL_MAP.get(intent_operation)
+        if isinstance(requested_tool, dict):
+            requested_tool = requested_tool.get(structured_intent.get("target_system"))
+        if structured_intent.get("intent") not in {"local_action", "remote_sync"}:
+            allow_mutations = False
+    else:
+        requested_tool = requested_coach_tool(message)
+        if requested_tool in MUTATING_COACH_TOOL_NAMES and requested_tool not in {"save_competition", "save_checkin", "apply_adaptive_replan", "update_training_plan", "save_library_template"}:
+            requested_tool = None
+    if structured_intent is None and prompt_requests_fresh_data(message) and requested_tool != "refresh_intervals_data":
         add_message("event", "Aktuelle Intervals.icu-Trainingsdaten werden geladen…")
         try:
             sync_intervals("Chat-Anfrage", activity_days=sync_period("intervals"))
@@ -12638,6 +12983,21 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             refresh_error = redact_text(str(exc))[:1000]
             add_message("event", f"Aktuelle Daten konnten nicht geladen werden: {refresh_error}")
     conversation_id = ensure_conversation()
+    if client_turn_id:
+        intent_payload = json.dumps(structured_intent or {}, ensure_ascii=False, separators=(",", ":"))
+        with DB_LOCK, database() as db:
+            existing_command = db.execute("SELECT receipt, status FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+            if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
+                try:
+                    return json.loads(existing_command["receipt"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+            if existing_command:
+                raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
+            db.execute(
+                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'running', ?, ?)",
+                (uuid.uuid4().hex, client_turn_id, conversation_id, intent_payload, str((structured_intent or {}).get("target_system") or "none"), utc_now(), utc_now()),
+            )
     add_message("user", message)
     model_message = message
     if refresh_error:
@@ -12647,8 +13007,12 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         )
     # Explicit planning requests may mutate only the local plan. Remote
     # synchronization remains a separate preview and confirmation action.
-    apply_library_plan = allow_mutations and prompt_requests_library_plan_application(message)
-    create_workout = allow_mutations and not apply_library_plan and prompt_requests_workout_creation(message)
+    apply_library_plan = allow_mutations and (
+        requested_tool == "apply_workout_library_plan" if structured_intent is not None else prompt_requests_library_plan_application(message)
+    )
+    create_workout = allow_mutations and not apply_library_plan and (
+        requested_tool == "save_workout_library_entries" if structured_intent is not None else prompt_requests_workout_creation(message)
+    )
     tool_choice = (
         "none"
         if not allow_mutations
@@ -12734,6 +13098,9 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                 if item.get("name") == "apply_workout_library_plan" and not apply_library_plan:
                     blocked_mutation = True
                     raise AppError(400, "Das Anwenden eines Bibliotheksplans muss in der aktuellen Nachricht ausdrücklich angefordert werden.")
+            if structured_intent is not None and item.get("name") in MUTATING_COACH_TOOL_NAMES and item.get("name") != requested_tool:
+                blocked_mutation = True
+                raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
             if item.get("name") in {
                 "refresh_intervals_data",
                 "refresh_current_performance",
@@ -12903,7 +13270,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         else:
             text = "Der Coach hat keine Textantwort zurückgegeben. Bitte erneut versuchen und bei Wiederholung die Diagnose prüfen."
     assistant_message = add_message("assistant", text)
-    return {
+    receipt = {
         "message": assistant_message,
         "library_entries": created_library_entries,
         "planned_library_entries": planned_library_entries,
@@ -12912,6 +13279,13 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         "checkins": saved_checkins,
         "training_plans": updated_training_plans,
     }
+    if client_turn_id:
+        with DB_LOCK, database() as db:
+            db.execute(
+                "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+                (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+            )
+    return receipt
 
 
 def local_now() -> datetime:
@@ -14386,6 +14760,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def handle_chat_stream(self, session: dict[str, Any]) -> None:
         payload = self.read_json()
+        client_turn_id = str(payload.get("client_turn_id") or "").strip()
+        if not client_turn_id:
+            raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
         operation_id, cancel_event = register_chat_stream(session["csrf_hash"])
         client_connected = True
 
@@ -14413,6 +14790,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 on_text_delta=lambda delta: send_event("delta", {"text": delta}),
                 cancel_event=cancel_event,
                 session_csrf_hash=session["csrf_hash"],
+                client_turn_id=client_turn_id,
             )
             send_event("completed", result)
         except AppError as exc:
@@ -14460,7 +14838,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.handle_chat_stream(session)
             elif path == "/api/chat":
                 payload = self.read_json()
-                self.send_json(200, chat_with_coach(str(payload.get("message", "")), session_csrf_hash=session["csrf_hash"]))
+                client_turn_id = str(payload.get("client_turn_id") or "").strip()
+                if not client_turn_id:
+                    raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
+                self.send_json(200, chat_with_coach(str(payload.get("message", "")), session_csrf_hash=session["csrf_hash"], client_turn_id=client_turn_id))
             elif path == "/api/sync":
                 payload = self.read_json()
                 days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))
