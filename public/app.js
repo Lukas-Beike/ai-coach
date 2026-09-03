@@ -3118,7 +3118,7 @@ function competitionCard(competition = {}, index = 0) {
   const additionalGrid = document.createElement("div");
   additionalGrid.className = "competition-card-facts competition-additional-grid";
   additionalGrid.append(
-    competitionFact("Startzeit", competition.start_date_local ? formatTime(competition.start_date_local) : ""),
+    competitionFact("Startzeit", competition.start_date_local ? formatLocalCompetitionTime(competition.start_date_local) : ""),
     competitionFact("Erwartete Dauer (hh:mm)", formatDuration(competition.moving_time)),
     competitionFact("Streckenprofil", competition.course_profile),
     competitionFact("Beschreibung", competition.description),
@@ -3154,10 +3154,21 @@ function renderCompetitions(competitions) {
 function askCoachAboutCompetitions() {
   const input = $("#messageInput");
   if (!input) return;
+  if (input.value.trim()) {
+    applyNavigationRoute("coach", { historyMode: "push" });
+    requestAnimationFrame(() => input.focus());
+    return;
+  }
   input.value = "Ich möchte meine Zielwettkämpfe hinzufügen oder überarbeiten.";
   input.dispatchEvent(new Event("input"));
   applyNavigationRoute("coach", { historyMode: "push" });
   requestAnimationFrame(() => input.focus());
+}
+
+function formatLocalCompetitionTime(value) {
+  const raw = String(value || "");
+  const match = raw.match(/(?:T|\s)(\d{2}:\d{2})(?::\d{2})?/);
+  return match ? match[1] : formatTime(value);
 }
 
 function formatDuration(seconds) {
