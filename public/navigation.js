@@ -19,32 +19,16 @@ const NAV_LINK_ROUTES = Object.freeze({
   analysis: "analysis",
   more: "more",
 });
-const NAV_ALIASES = Object.freeze({
-  activities: "analysis/history",
-  performance: "analysis/performance",
-  planned: "plan",
-  "planned/calendar": "plan",
-  "planned/library": "plan",
-  "planned/goals": "plan",
-  profile: "more/profile",
-  settings: "more",
-  "plan/calendar": "plan",
-  "plan/templates": "plan",
-  "plan/goals": "plan",
-  "plan/library": "plan",
-});
 const DEFAULT_NAV_ROUTE = "coach";
 
 function routeFromHash(hash = window.location.hash) {
   const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
-  const route = NAV_ALIASES[rawRoute] || rawRoute;
-  return Object.prototype.hasOwnProperty.call(NAV_ROUTES, route) ? route : DEFAULT_NAV_ROUTE;
+  return Object.prototype.hasOwnProperty.call(NAV_ROUTES, rawRoute) ? rawRoute : DEFAULT_NAV_ROUTE;
 }
 
 function hashContainsKnownRoute(hash = window.location.hash) {
   const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
-  const route = NAV_ALIASES[rawRoute] || rawRoute;
-  return Object.prototype.hasOwnProperty.call(NAV_ROUTES, route);
+  return Object.prototype.hasOwnProperty.call(NAV_ROUTES, rawRoute);
 }
 
 function analysisSegmentFromRoute(route = state.route) {

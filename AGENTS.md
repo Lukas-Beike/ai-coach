@@ -26,9 +26,8 @@ private VPN; it must not be exposed directly to the public internet.
 - Preserve the root `.env`, `/data`, the encrypted database, Garmin token store,
   and database recovery backups. Do not delete, reset, truncate, or replace the
   live database except through the implemented, validated restore workflow.
-- An existing plaintext SQLite database may be migrated to SQLCipher. The
-  migration intentionally leaves a recoverable `*.plaintext-backup-*` file;
-  treat that file as sensitive plaintext data.
+- A new database is created directly as SQLCipher when `APP_PASSWORD` is
+  configured. There is no in-place database upgrade path.
 - Workouts created by the coach are local training-library entries until the
   athlete explicitly synchronizes the library to Intervals.icu. Do not add
   implicit remote workout writes.
@@ -61,7 +60,7 @@ private VPN; it must not be exposed directly to the public internet.
   documentation; keep it consistent with behavior changes.
 
 The database contains more than chat history: profile, competitions and sync
-tombstones, snapshots, legacy workout drafts/library, training plans, athlete
+tombstones, snapshots, workout library, training plans, athlete
 check-ins, plan adjustments, public calendar sources/candidates, sessions,
 settings, Garmin snapshots, OpenAI conversation state, usage data, and sync
 status. Treat all of it as durable athlete data.

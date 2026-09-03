@@ -41,8 +41,7 @@ from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlpars
 from urllib.request import Request, urlopen
 
 from backend.db import row_factory as database_row_factory
-from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository, WorkoutDraftRepository
-from backend.db import schema_version as database_schema_version
+from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 from backend.providers.garmin import collect_garmin_data
@@ -50,7 +49,7 @@ from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_
 from backend.sync.windows import split_date_windows
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.orchestration import run_read_sync_pipeline
-from backend.sync.daily import daily_marker_key, daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
+from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
 from backend.sync.jobs import (
     JOB_STATUSES,
     ITEM_STATUSES,
@@ -86,7 +85,6 @@ from backend.http_api.requests import (
 from backend.backup.export import (
     application_state as export_application_state,
     decode_payload as export_decode_payload,
-    iter_workout_drafts as export_workout_drafts,
     iter_workout_library as export_workout_library,
     manifest as export_manifest,
     write_jsonl_rows as export_jsonl_rows,
@@ -182,18 +180,9 @@ STATE_EVENTS: deque[dict[str, Any]] = deque(maxlen=500)
 STATE_EVENT_NEXT_ID = 0
 RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMITS: dict[str, list[float]] = {}
-PUSH_RE = re.compile(r"^/api/workouts/([0-9a-f-]+)/push$")
-DELETE_PLANNED_RE = re.compile(r"^/api/planned/([^/]+)$")
-LOCAL_PLANNED_RE = re.compile(r"^/api/planned/local/([0-9a-f-]+)$")
-PLANNED_CONFLICT_RE = re.compile(r"^/api/planned/local/([0-9a-f-]+)/resolve$")
-LIBRARY_ENTRY_RE = re.compile(r"^/api/library/([0-9a-f-]+)$")
-DELETE_DRAFT_RE = re.compile(r"^/api/drafts/([0-9a-f-]+)$")
-PLAN_LIBRARY_RE = re.compile(r"^/api/library/([^/]+)/plan$")
-LIBRARY_PLAN_BATCH_RE = re.compile(r"^/api/library/plan$")
 ACTIVITY_FEEDBACK_RE = re.compile(r"^/api/activities/([^/]+)/feedback$")
 SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
 SYNC_JOB_RESOLVE_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)/resolve$")
-COMPETITION_CONFLICT_RE = re.compile(r"^/api/competitions/([0-9a-f-]+)/resolve$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
 
@@ -1372,7 +1361,6 @@ CHAT_REPOSITORY = ChatRepository(utc_now)
 CHECKIN_REPOSITORY = CheckinRepository(utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(utc_now)
 SNAPSHOT_REPOSITORY = SnapshotRepository()
-WORKOUT_DRAFT_REPOSITORY = WorkoutDraftRepository()
 
 
 def security_configuration_error() -> str | None:
@@ -1397,63 +1385,10 @@ def _configure_cipher(db: Any, password: str) -> None:
     db.execute("PRAGMA cipher_memory_security = ON")
 
 
-def _database_header(path: Path) -> bytes:
-    try:
-        with path.open("rb") as handle:
-            return handle.read(16)
-    except OSError:
-        return b""
-
-
-def migrate_plaintext_database() -> None:
-    """Encrypt an existing SQLite database once, keeping a recoverable backup."""
-    if not CONFIG.app_password or not DB_PATH.is_file() or _database_header(DB_PATH) != b"SQLite format 3\x00":
-        return
-    if not SQLCIPHER_AVAILABLE:
-        raise RuntimeError("SQLCipher is required to migrate the existing database.")
-    backup = DATA_DIR / f"{DB_PATH.name}.plaintext-backup-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-    temporary = DATA_DIR / f".{DB_PATH.name}.{secrets.token_hex(8)}.encrypted"
-    source = sqlite3.connect(DB_PATH, timeout=20)
-    source.execute("PRAGMA foreign_keys = ON")
-    target = None
-    try:
-        # Include pending WAL content in both the migration and the recovery
-        # copy before replacing the database file.
-        source.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        source.execute("PRAGMA journal_mode=DELETE")
-        source.commit()
-        shutil.copy2(DB_PATH, backup)
-        target = sqlite_backend.connect(temporary, timeout=20)
-        _configure_cipher(target, CONFIG.app_password)
-        target.execute("PRAGMA foreign_keys = ON")
-        target.executescript("\n".join(source.iterdump()))
-        target.commit()
-        target.close()
-        target = None
-        source.close()
-        source = None
-        os.replace(temporary, DB_PATH)
-        LOGGER.warning(
-            "Existing database encrypted",
-            extra={"event": "database_migrated_to_sqlcipher", "context": {"backup": backup.name}},
-        )
-    except Exception:
-        if target is not None:
-            target.close()
-        if source is not None:
-            source.close()
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-
-
 # A request-scoped connection lets composite reads reuse one SQLCipher setup.
 # The outer caller still owns DB_LOCK; nested database() calls only reuse it.
 DATABASE_CONTEXT: ContextVar[Any | None] = ContextVar("database_context", default=None)
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_context", default=None)
-CURRENT_DATABASE_SCHEMA_VERSION = 7
 DATABASE_MANAGER: DatabaseManager | None = None
 DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
 
@@ -1631,56 +1566,6 @@ def observed_sync(provider: str, area: str = "default"):
     return decorator
 
 
-def _record_database_migration(db: Any, version: int, name: str) -> None:
-    db.execute(
-        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
-        (version, name, utc_now()),
-    )
-
-
-def _foreign_key_violations(db: Any) -> int:
-    return len(db.execute("PRAGMA foreign_key_check").fetchall())
-
-
-def _migrate_public_calendar_foreign_key(db: Any) -> None:
-    foreign_keys = db.execute("PRAGMA foreign_key_list(public_event_candidates)").fetchall()
-    if any(str(row.get("on_delete") or "").upper() == "CASCADE" for row in foreign_keys):
-        return
-    db.execute(
-        """
-        CREATE TABLE public_event_candidates_migration (
-            id TEXT PRIMARY KEY,
-            source_id TEXT NOT NULL,
-            uid TEXT NOT NULL,
-            name TEXT NOT NULL,
-            event_date TEXT NOT NULL,
-            sport TEXT NOT NULL,
-            distance TEXT NOT NULL DEFAULT '',
-            location TEXT NOT NULL DEFAULT '',
-            url TEXT NOT NULL DEFAULT '',
-            description TEXT NOT NULL DEFAULT '',
-            imported_competition_id TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(source_id, uid),
-            FOREIGN KEY(source_id) REFERENCES public_event_sources(id) ON DELETE CASCADE
-        )
-        """
-    )
-    db.execute(
-        """
-        INSERT INTO public_event_candidates_migration
-        (id, source_id, uid, name, event_date, sport, distance, location, url,
-         description, imported_competition_id, created_at, updated_at)
-        SELECT id, source_id, uid, name, event_date, sport, distance, location,
-               url, description, imported_competition_id, created_at, updated_at
-        FROM public_event_candidates
-        """
-    )
-    db.execute("DROP TABLE public_event_candidates")
-    db.execute("ALTER TABLE public_event_candidates_migration RENAME TO public_event_candidates")
-
-
 def database_manager() -> DatabaseManager:
     """Return the manager for the active path and secure configuration."""
     global DATABASE_MANAGER, DATABASE_MANAGER_SIGNATURE
@@ -1694,7 +1579,6 @@ def database_manager() -> DatabaseManager:
         if CONFIG.app_password:
             if not SQLCIPHER_AVAILABLE:
                 raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
-            migrate_plaintext_database()
         DATABASE_MANAGER = DatabaseManager(
             DB_PATH,
             sqlite_backend if CONFIG.app_password else sqlite3,
@@ -1726,17 +1610,6 @@ def database():
 
 def initialise_database() -> None:
     with DB_LOCK, database() as db:
-        db.execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations ("
-            "version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)"
-        )
-        migration_version = database_schema_version(db)
-        if migration_version > CURRENT_DATABASE_SCHEMA_VERSION:
-            raise RuntimeError("Die Datenbank verwendet eine nicht unterstützte Schema-Version.")
-        # Refuse legacy databases with orphaned relations before any
-        # compatibility migration can change their contents.
-        if _foreign_key_violations(db):
-            raise RuntimeError("Die Datenbank enthält verwaiste Fremdschlüssel-Datensätze; Restore erforderlich.")
         db.executescript(
             """
             PRAGMA journal_mode=WAL;
@@ -1761,15 +1634,6 @@ def initialise_database() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 payload TEXT NOT NULL,
                 created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS workout_drafts (
-                id TEXT PRIMARY KEY,
-                payload TEXT NOT NULL,
-                status TEXT NOT NULL,
-                intervals_event_id TEXT,
-                error TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
             );
              CREATE TABLE IF NOT EXISTS workout_library (
                  id TEXT PRIMARY KEY,
@@ -2037,206 +1901,14 @@ def initialise_database() -> None:
             );
             """
         )
-        # Additive migrations for databases created before bidirectional
-        # competition synchronization was introduced.
-        for column, definition in (
-            ("intervals_event_id", "TEXT"),
-            ("external_id", "TEXT"),
-            ("sync_dirty", "INTEGER NOT NULL DEFAULT 1"),
-            ("sync_state", "TEXT NOT NULL DEFAULT 'local'"),
-            ("sync_conflict", "TEXT NOT NULL DEFAULT ''"),
-            ("last_synced_at", "TEXT"),
-            ("category", "TEXT NOT NULL DEFAULT 'RACE_B'"),
-            ("start_date_local", "TEXT"),
-            ("description", "TEXT NOT NULL DEFAULT ''"),
-            ("moving_time", "INTEGER"),
-        ):
-            existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(competitions)").fetchall()}
-            if column not in existing_columns:
-                db.execute(f"ALTER TABLE competitions ADD COLUMN {column} {definition}")
         db.execute(
-            "UPDATE competitions SET sync_state=CASE WHEN sync_dirty=0 THEN 'synced' ELSE 'local' END "
-            "WHERE sync_state IS NULL OR sync_state=''"
+            "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
+            (utc_now(),),
         )
-        db.execute("UPDATE competitions SET sync_conflict='' WHERE sync_conflict IS NULL")
-        library_columns = {row["name"] for row in db.execute("PRAGMA table_info(workout_library)").fetchall()}
-        added_library_sync_state = False
-        for column, definition in (
-            ("local_id", "TEXT"),
-            ("external_id", "TEXT"),
-            ("sync_dirty", "INTEGER NOT NULL DEFAULT 1"),
-            ("sync_state", "TEXT NOT NULL DEFAULT 'local'"),
-            ("sync_error", "TEXT"),
-            ("last_synced_at", "TEXT"),
-        ):
-            if column not in library_columns:
-                db.execute(f"ALTER TABLE workout_library ADD COLUMN {column} {definition}")
-                if column == "sync_state":
-                    added_library_sync_state = True
-        # Older versions used Intervals.icu's remote ID as the library key.
-        # Migrate every row to one canonical local UUID. Keep the old storage
-        # ID and any old local ID as aliases while repairing draft references;
-        # this makes the migration safe for both the original schema and the
-        # intermediate schema that already had a non-UUID local_id.
-        library_rows = db.execute("SELECT id, local_id, external_id, sync_state, sync_error, last_synced_at, updated_at, payload FROM workout_library").fetchall()
-        old_storage_ids = {str(row.get("id") or "") for row in library_rows}
-        seen_library_local_ids: set[str] = set()
-        library_identity_map: dict[str, str] = {}
-        migrated_library_rows: list[dict[str, Any]] = []
-        for row in library_rows:
-            old_storage_id = str(row.get("id") or "").strip()
-            old_local_id = str(row.get("local_id") or "").strip()
-            try:
-                candidate = str(uuid.UUID(old_local_id))
-            except (ValueError, AttributeError):
-                candidate = ""
-            if not candidate or candidate in seen_library_local_ids or (candidate in old_storage_ids and candidate != old_storage_id):
-                candidate = str(uuid.uuid4())
-                while candidate in old_storage_ids or candidate in seen_library_local_ids:
-                    candidate = str(uuid.uuid4())
-            seen_library_local_ids.add(candidate)
-            try:
-                payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                payload = {}
-            if not isinstance(payload, dict):
-                payload = {}
-            old_payload_id = str(payload.get("id") or "").strip()
-            external_id = str(row.get("external_id") or payload.get("external_id") or "").strip() or None
-            if external_id is None and not old_local_id:
-                external_id = old_storage_id or None
-            if added_library_sync_state:
-                sync_state = "synced" if external_id else "local"
-            else:
-                sync_state = str(row.get("sync_state") or "").strip()
-                if sync_state not in {"local", "syncing", "synced", "sync_error", "remote_missing"}:
-                    sync_state = "synced" if external_id else "local"
-            sync_error = str(row.get("sync_error") or "").strip() or None
-            if sync_state != "sync_error":
-                sync_error = None
-            last_synced_at = row.get("last_synced_at") or (utc_now() if external_id and sync_state == "synced" else None)
-            updated_at = row.get("updated_at") or utc_now()
-            payload["id"] = candidate
-            payload["external_id"] = external_id
-            payload["sync_status"] = sync_state
-            migrated_library_rows.append({
-                "old_id": old_storage_id,
-                "local_id": candidate,
-                "external_id": external_id,
-                "sync_state": sync_state,
-                "sync_error": sync_error,
-                "last_synced_at": last_synced_at,
-                "updated_at": updated_at,
-                "payload": json.dumps(payload, ensure_ascii=False),
-            })
-            for alias in (old_storage_id, old_local_id, old_payload_id):
-                if alias:
-                    library_identity_map.setdefault(alias, candidate)
-
-        # Move primary keys through temporary values so a generated UUID can
-        # never collide with another row's previous provider ID.
-        for row in migrated_library_rows:
-            temporary_id = f"__library_migration__{uuid.uuid4().hex}"
-            db.execute("UPDATE workout_library SET id=? WHERE id=?", (temporary_id, row["old_id"]))
-            row["temporary_id"] = temporary_id
-        for row in migrated_library_rows:
-            sync_dirty = 0 if row["sync_state"] in {"synced", "remote_missing"} else 1
-            db.execute(
-                "UPDATE workout_library SET id=?, local_id=?, external_id=?, sync_dirty=?, sync_state=?, sync_error=?, last_synced_at=?, updated_at=?, payload=? WHERE id=?",
-                (row["local_id"], row["local_id"], row["external_id"], sync_dirty, row["sync_state"], row["sync_error"], row["last_synced_at"], row["updated_at"], row["payload"], row["temporary_id"]),
-            )
-
-        # Drafts created before the canonical local UUID was introduced may
-        # still point to the provider ID. Repair them in the same transaction.
-        for row in db.execute("SELECT id, payload FROM workout_drafts").fetchall():
-            try:
-                draft_payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                continue
-            if not isinstance(draft_payload, dict):
-                continue
-            old_reference = str(draft_payload.get("library_workout_id") or "").strip()
-            new_reference = library_identity_map.get(old_reference)
-            if new_reference:
-                draft_payload["library_workout_id"] = new_reference
-                db.execute(
-                    "UPDATE workout_drafts SET payload=?, updated_at=? WHERE id=?",
-                    (json.dumps(draft_payload, ensure_ascii=False), utc_now(), row["id"]),
-                )
-        # Existing drafts are retained as legacy records, but dated entries
-        # are copied into the local library so the active application has one
-        # planning store after upgrading.
-        if get_kv("legacy_drafts_migrated", db) != "1":
-            for row in db.execute("SELECT id, payload FROM workout_drafts").fetchall():
-                try:
-                    legacy = json.loads(row.get("payload") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    continue
-                if not isinstance(legacy, dict) or not legacy.get("date"):
-                    continue
-                try:
-                    date.fromisoformat(str(legacy["date"])[:10])
-                    duration = max(5, int(legacy.get("duration_minutes") or 30))
-                except (TypeError, ValueError):
-                    continue
-                create_local_workout_library_entry({
-                    "date": str(legacy["date"])[:10],
-                    "sport": legacy.get("sport") or "Ride",
-                    "name": legacy.get("name") or "Coach-Einheit",
-                    "description": legacy.get("description") or "",
-                    "duration_minutes": duration,
-                    "target": legacy.get("target") or "AUTO",
-                    "rationale": legacy.get("rationale") or "Aus einem älteren lokalen Entwurf übernommen.",
-                    "plan_id": legacy.get("plan_id"),
-                    "plan_name": legacy.get("plan_name"),
-                    "source": "legacy-draft",
-                }, db=db)
-            set_kv("legacy_drafts_migrated", "1", db)
-        if added_library_sync_state:
-            db.execute("UPDATE workout_library SET sync_state=CASE WHEN external_id IS NULL THEN 'local' ELSE 'synced' END")
-        else:
-            db.execute("UPDATE workout_library SET sync_state=CASE WHEN external_id IS NULL THEN 'local' ELSE 'synced' END WHERE sync_state IS NULL OR sync_state=''")
-        interrupted_rows = db.execute("SELECT id, payload FROM workout_library WHERE sync_state='syncing'").fetchall()
-        for row in interrupted_rows:
-            try:
-                payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                payload = {}
-            if not isinstance(payload, dict):
-                payload = {}
-            payload["sync_status"] = "sync_error"
-            db.execute(
-                "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='sync_error', sync_error=? WHERE id=?",
-                (json.dumps(payload, ensure_ascii=False), "Vorherige Synchronisierung wurde unterbrochen.", row["id"]),
-            )
-        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_workout_library_local_id ON workout_library(local_id) WHERE local_id IS NOT NULL")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_workout_library_external_id ON workout_library(external_id) WHERE external_id IS NOT NULL")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_planned_units_local_id ON planned_units(local_id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_planned_units_external_id ON planned_units(external_id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_planned_units_date ON planned_units(json_extract(payload, '$.date'))")
-        external_columns = {row["name"] for row in db.execute("PRAGMA table_info(external_calendar_events)").fetchall()}
-        if "training_relevant" not in external_columns:
-            db.execute("ALTER TABLE external_calendar_events ADD COLUMN training_relevant INTEGER NOT NULL DEFAULT 1")
-        if "no_intensity" not in external_columns:
-            db.execute("ALTER TABLE external_calendar_events ADD COLUMN no_intensity INTEGER NOT NULL DEFAULT 0")
-        if "short_only" not in external_columns:
-            db.execute("ALTER TABLE external_calendar_events ADD COLUMN short_only INTEGER NOT NULL DEFAULT 0")
-        checkin_columns = {row["name"] for row in db.execute("PRAGMA table_info(athlete_checkins)").fetchall()}
-        if "day_form" not in checkin_columns:
-            db.execute("ALTER TABLE athlete_checkins ADD COLUMN day_form TEXT NOT NULL DEFAULT ''")
-        db.execute(
-            "UPDATE competitions SET category=CASE WHEN priority IN ('A','B','C') THEN 'RACE_' || priority ELSE 'RACE_B' END "
-            "WHERE category IS NULL OR category=''"
-        )
-        db.execute(
-            "UPDATE competitions SET start_date_local=event_date || 'T00:00:00' "
-            "WHERE start_date_local IS NULL OR start_date_local=''"
-        )
-        db.execute(
-            "UPDATE competitions SET description=notes WHERE (description IS NULL OR description='') AND notes <> ''"
-        )
-        # Older databases do not have a plan identifier on drafts. Keeping it
-        # in the JSON payload makes this migration additive and reversible.
         if get_kv("profile", db) is None:
             set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
         # A process cannot continue a reset after a restart. Clear only the
@@ -2250,133 +1922,6 @@ def initialise_database() -> None:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
             db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
             db.execute("DELETE FROM snapshots WHERE created_at < ?", (cutoff,))
-        migration_version = database_schema_version(db)
-        if migration_version > CURRENT_DATABASE_SCHEMA_VERSION:
-            raise RuntimeError("Die Datenbank verwendet eine nicht unterstützte Schema-Version.")
-        if migration_version < 1:
-            _record_database_migration(db, 1, "legacy-schema-baseline")
-        if migration_version < 2:
-            if _foreign_key_violations(db):
-                raise RuntimeError("Die Datenbank enthält verwaiste Fremdschlüssel-Datensätze; Restore erforderlich.")
-            savepoint = "schema_migration_2"
-            db.execute(f"SAVEPOINT {savepoint}")
-            try:
-                _migrate_public_calendar_foreign_key(db)
-                _record_database_migration(db, 2, "public-calendar-foreign-key-cascade")
-                db.execute(f"RELEASE SAVEPOINT {savepoint}")
-            except Exception:
-                db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-                db.execute(f"RELEASE SAVEPOINT {savepoint}")
-                raise
-        if migration_version < 3:
-            _record_database_migration(db, 3, "local-change-history")
-        if migration_version < 4:
-            _record_database_migration(db, 4, "provider-refresh-history")
-        if migration_version < 5:
-            savepoint = "schema_migration_5"
-            db.execute(f"SAVEPOINT {savepoint}")
-            try:
-                # Dated library rows were the former representation of local
-                # calendar units. Move them into the dedicated planning table
-                # while retaining their local and remote identities.
-                dated_rows = db.execute(
-                    "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at "
-                    "FROM workout_library WHERE json_extract(payload, '$.date') IS NOT NULL"
-                ).fetchall()
-                for row in dated_rows:
-                    try:
-                        payload = json.loads(row.get("payload") or "{}")
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        payload = {}
-                    if not isinstance(payload, dict) or not payload.get("date"):
-                        continue
-                    payload["id"] = str(row.get("local_id") or row.get("id") or uuid.uuid4())
-                    payload["sync_status"] = str(row.get("sync_state") or payload.get("sync_status") or "local")
-                    payload["origin"] = str(payload.get("origin") or payload.get("source") or "legacy")[:40]
-                    remote_event_id = str(payload.get("remote_event_id") or "").strip()
-                    remote_external_id = str(payload.get("remote_event_external_id") or "").strip()
-                    external_id = remote_external_id or (str(row.get("external_id") or "").strip() if remote_event_id else "") or None
-                    payload["external_id"] = external_id
-                    baseline_hash = _planned_unit_payload_hash(payload) if row.get("sync_state") == "synced" else None
-                    db.execute(
-                        "INSERT OR IGNORE INTO planned_units(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)",
-                        (
-                            payload["id"], payload["id"], external_id, json.dumps(payload, ensure_ascii=False),
-                            int(row.get("sync_dirty") or 0), str(row.get("sync_state") or "local"),
-                            row.get("sync_error"), baseline_hash, row.get("last_synced_at"),
-                            row.get("updated_at") or utc_now(), row.get("updated_at") or utc_now(),
-                        ),
-                    )
-                    db.execute("DELETE FROM workout_library WHERE id=?", (row["id"],))
-                _record_database_migration(db, 5, "dedicated-local-planned-units")
-                db.execute(f"RELEASE SAVEPOINT {savepoint}")
-            except Exception:
-                db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-                db.execute(f"RELEASE SAVEPOINT {savepoint}")
-                raise
-        if migration_version < 6:
-            savepoint = "schema_migration_6"
-            db.execute(f"SAVEPOINT {savepoint}")
-            try:
-                planned_columns = {row["name"] for row in db.execute("PRAGMA table_info(planned_units)").fetchall()}
-                for column, definition in (
-                    ("plan_id", "TEXT"),
-                    ("revision", "INTEGER NOT NULL DEFAULT 0"),
-                    ("tombstone", "INTEGER NOT NULL DEFAULT 0"),
-                    ("command_id", "TEXT"),
-                ):
-                    if column not in planned_columns:
-                        db.execute(f"ALTER TABLE planned_units ADD COLUMN {column} {definition}")
-                db.execute(
-                    "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
-                    (utc_now(),),
-                )
-                _record_database_migration(db, 6, "coach-first-command-and-sync-state")
-                db.execute(f"RELEASE SAVEPOINT {savepoint}")
-            except Exception:
-                db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-                db.execute(f"RELEASE SAVEPOINT {savepoint}")
-                raise
-        if migration_version < 7:
-            savepoint = "schema_migration_7"
-            db.execute(f"SAVEPOINT {savepoint}")
-            try:
-                # Future planning is local-authoritative. Existing provider
-                # conflicts therefore resolve to the preserved local payload;
-                # no athlete-owned workout is deleted during the migration.
-                rows = db.execute(
-                    "SELECT local_id, payload FROM planned_units "
-                    "WHERE sync_state IN ('conflict', 'remote_missing')"
-                ).fetchall()
-                for row in rows:
-                    try:
-                        payload = json.loads(row.get("payload") or "{}")
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        payload = {}
-                    if not isinstance(payload, dict) or payload.get("local_deleted"):
-                        continue
-                    payload["sync_status"] = "local"
-                    db.execute(
-                        "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', "
-                        "sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
-                        (json.dumps(payload, ensure_ascii=False), utc_now(), row["local_id"]),
-                    )
-                # Upgraded installations have already completed their one-time
-                # Intervals.icu planning import. Fresh databases leave this
-                # marker empty until the first successful provider sync.
-                if get_kv("planned_units_initial_import_at", db) is None:
-                    prior_sync = get_kv("last_sync_at", db)
-                    if prior_sync:
-                        set_kv("planned_units_initial_import_at", prior_sync, db)
-                _record_database_migration(db, 7, "local-authoritative-planning")
-                db.execute(f"RELEASE SAVEPOINT {savepoint}")
-            except Exception:
-                db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-                db.execute(f"RELEASE SAVEPOINT {savepoint}")
-                raise
-        if _foreign_key_violations(db):
-            raise RuntimeError("Die Datenbank enthält verwaiste Fremdschlüssel-Datensätze; Restore erforderlich.")
     resume_interrupted_sync_jobs()
 
 
@@ -5001,9 +4546,6 @@ def competition_start(value: Any, fallback_date: Any = None) -> tuple[str, str]:
         raise AppError(400, "Der Startzeitpunkt des Wettkampfs muss ein gültiges Datum sein.") from exc
     if parsed.tzinfo is not None:
         parsed = parsed.replace(tzinfo=None)
-    # The date input is retained for compatibility with older clients. If it
-    # changed while the datetime field still contains the old date, honour the
-    # explicit date and keep the entered local time.
     if fallback:
         try:
             fallback_day = date.fromisoformat(fallback)
@@ -6393,7 +5935,7 @@ def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
             if payload["distance"].is_integer():
                 payload["distance"] = int(payload["distance"])
         except ValueError:
-            # Keep free-form legacy values local instead of sending invalid API data.
+            # Keep free-form values local instead of sending invalid API data.
             pass
     if competition.get("target") not in (None, ""):
         payload["target"] = competition_target(competition.get("target"))
@@ -7634,9 +7176,9 @@ def is_planned_workout_event(event: Any) -> bool:
     category = str(event.get("category") or "").strip().upper()
     if category:
         return category == "WORKOUT"
-    # Older cached event records may not contain category. Only infer a
-    # workout when the record has a duration, so races and calendar notes are
-    # not counted as missed training.
+    # Provider records may omit category. Only infer a workout when the record
+    # has a duration, so races and calendar notes are not counted as missed
+    # training.
     return as_number(first_present(event, ("moving_time", "elapsed_time"))) is not None
 
 
@@ -8018,8 +7560,7 @@ class IntervalsClient:
         }
         folder_id = self._folder_id(workout.get("folder_id"))
         # Intervals.icu requires folder_id for workout updates as well as
-        # creates. Older locally cached entries may not have retained the
-        # remote folder, so use the private Coach folder as a safe fallback.
+        # creates. Resolve a missing folder through the private Coach folder.
         payload["folder_id"] = folder_id if folder_id is not None else self.get_or_create_workout_folder()
         result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", payload)
         if not isinstance(result, dict):
@@ -8154,14 +7695,6 @@ class IntervalsClient:
         snapshot["provider_sync"] = {"pagination": self.pagination}
         return snapshot
 
-    def push_workout(self, draft_id: str, workout: dict[str, Any]) -> dict[str, Any]:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        payload = workout_event_payload(draft_id, workout)
-        result = self.post(f"/athlete/{athlete}/events/bulk", [payload], {"upsert": "true"})
-        if not isinstance(result, list) or not result:
-            raise AppError(502, "Intervals.icu hat nach dem Übertragen keine Kalendereinheit zurückgegeben.")
-        return result[0]
-
     def delete_event(self, event_id: str) -> Any:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         return self.delete(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")
@@ -8258,7 +7791,7 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
     }
 
 
-def workout_event_payload(draft_id: str, workout: dict[str, Any]) -> dict[str, Any]:
+def workout_event_payload(workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:
     try:
         workout_date = date.fromisoformat(str(workout["date"]))
     except (KeyError, TypeError, ValueError) as exc:
@@ -8276,11 +7809,11 @@ def workout_event_payload(draft_id: str, workout: dict[str, Any]) -> dict[str, A
         "description": str(workout.get("description") or "")[:12000],
         "moving_time": duration * 60,
         "target": workout.get("target") if workout.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
-        "external_id": f"{COACH_EVENT_EXTERNAL_PREFIX}{draft_id}",
+        "external_id": f"{COACH_EVENT_EXTERNAL_PREFIX}{workout_id}",
     }
 
 
-def normalize_workout_draft(workout: Any) -> dict[str, Any]:
+def normalize_workout(workout: Any) -> dict[str, Any]:
     if not isinstance(workout, dict):
         raise AppError(400, "Jede geplante Einheit muss ein Objekt sein.")
     draft = {
@@ -8379,7 +7912,7 @@ def calendar_conflicts(
             library_entry = json.loads(row.get("payload") or "{}")
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        if not isinstance(library_entry, dict) or library_entry.get("source") not in {"coach", "library", "legacy-draft", "intervals"}:
+        if not isinstance(library_entry, dict) or library_entry.get("source") not in {"coach", "library", "intervals"}:
             continue
         matches, match = _calendar_items_conflict(workout, library_entry)
         if matches:
@@ -8395,38 +7928,6 @@ def calendar_conflicts(
     return conflicts
 
 
-def save_workout_drafts(
-    workouts: list[dict[str, Any]],
-    plan_name: str = "",
-    goal: str = "",
-) -> list[dict[str, Any]]:
-    if not isinstance(workouts, list) or not workouts:
-        raise AppError(400, "Mindestens eine Einheit ist erforderlich.")
-    normalized_workouts = [normalize_workout_draft(item) for item in workouts]
-    plan_id = str(uuid.uuid4()) if plan_name.strip() else ""
-    created: list[dict[str, Any]] = []
-    now = utc_now()
-    with DB_LOCK, database() as db:
-        normalized_workouts = attach_cached_library_entries(normalized_workouts, db=db)
-        if plan_id:
-            dates = sorted(item["date"] for item in normalized_workouts)
-            TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, plan_name.strip()[:200], goal.strip()[:2000], dates[0], dates[-1], "draft", now
-            )
-            _record_change(db, "training_plan", plan_id, "create", None, {
-                "id": plan_id, "name": plan_name.strip()[:200], "goal": goal.strip()[:2000],
-                "start_date": dates[0], "end_date": dates[-1], "status": "draft",
-            })
-        for workout in normalized_workouts:
-            if plan_id:
-                workout = {**workout, "plan_id": plan_id, "plan_name": plan_name.strip()[:200]}
-            draft_id = str(uuid.uuid4())
-            workout_event_payload(draft_id, workout)
-            WORKOUT_DRAFT_REPOSITORY.create(db, draft_id, json.dumps(workout, ensure_ascii=False), now)
-            created.append({"id": draft_id, "status": "draft", **workout, "created_at": now, "updated_at": now})
-    return created
-
-
 def save_workout_library_entries(
     workouts: list[dict[str, Any]],
     plan_name: str = "",
@@ -8435,7 +7936,7 @@ def save_workout_library_entries(
     """Store planned coach sessions locally, reusing cached templates first."""
     if not isinstance(workouts, list) or not workouts:
         raise AppError(400, "Mindestens eine Einheit ist erforderlich.")
-    normalized_workouts = [normalize_workout_draft(item) for item in workouts]
+    normalized_workouts = [normalize_workout(item) for item in workouts]
     plan_id = str(uuid.uuid4()) if plan_name.strip() else ""
     created: list[dict[str, Any]] = []
     now = utc_now()
@@ -8561,24 +8062,7 @@ def update_training_plan(plan_id: Any, values: Any) -> dict[str, Any]:
     return result
 
 
-def list_workout_drafts(limit: int = 50) -> list[dict[str, Any]]:
-    with DB_LOCK, database() as db:
-        rows = WORKOUT_DRAFT_REPOSITORY.list(db, limit)
-    drafts = []
-    for row in rows:
-        drafts.append({
-            "id": row["id"],
-            "status": row["status"],
-            "intervals_event_id": row["intervals_event_id"],
-            "error": row["error"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-            **json.loads(row["payload"]),
-        })
-    return drafts
-
-
-def draft_is_hard(workout: dict[str, Any]) -> bool:
+def workout_is_hard(workout: dict[str, Any]) -> bool:
     text = f"{workout.get('name', '')} {workout.get('description', '')}".casefold()
     return any(term in text for term in ("interval", "vo2", "threshold", "tempo", "sprint", "race", "105%", "110%", "115%"))
 
@@ -8687,17 +8171,6 @@ def coach_quick_actions_state() -> dict[str, Any]:
                 continue
             trigger_values = change.get("blocking_triggers")
             triggers = {str(value) for value in trigger_values} if isinstance(trigger_values, list) else set()
-            # Existing previews from older versions did not persist typed triggers.
-            if not triggers:
-                reason = str((change.get("after") or {}).get("rationale") or "").casefold()
-                if "illness" in reason or "krank" in reason:
-                    triggers.add("illness")
-                if "pain" in reason or "injur" in reason or "schmerz" in reason or "verletz" in reason:
-                    triggers.add("injury")
-                if "calendar" in reason or "kalender" in reason:
-                    triggers.add("calendar")
-                if "weather" in reason or "wetter" in reason:
-                    triggers.add("weather")
             relevant = sorted(triggers.intersection({"calendar", "illness", "injury", "weather"}))
             if today <= change_date <= horizon and relevant:
                 blockers.append({
@@ -8872,11 +8345,11 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 f"'{longest_event.get('name') or 'calendar event'}' for about {total_event_minutes} minutes"
             )
         no_intensity_events = [event for event in calendar_events if bool(event.get("no_intensity"))]
-        no_intensity_limited = bool(no_intensity_events) and draft_is_hard(draft)
+        no_intensity_limited = bool(no_intensity_events) and workout_is_hard(draft)
         calendar_limited = bool(calendar_events) and (
-            draft_is_hard(draft) or (duration is not None and calendar_limit is not None and duration > calendar_limit)
+            workout_is_hard(draft) or (duration is not None and calendar_limit is not None and duration > calendar_limit)
         )
-        if illness_active or severe or (high_load and draft_is_hard(draft)) or limited or calendar_limited or no_intensity_limited or weather_reason:
+        if illness_active or severe or (high_load and workout_is_hard(draft)) or limited or calendar_limited or no_intensity_limited or weather_reason:
             reasons: list[str] = []
             blocking_triggers: list[str] = []
             if illness_active:
@@ -8886,7 +8359,7 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 reasons.append("pain or high soreness reported")
                 if feedback.get("pain"):
                     blocking_triggers.append("injury")
-            if high_load and draft_is_hard(draft):
+            if high_load and workout_is_hard(draft):
                 reasons.append("recovery signal suggests reducing intensity")
             if limited and not severe:
                 reasons.append(f"only {available_minutes} minutes are available")
@@ -9323,33 +8796,6 @@ def create_local_planned_unit(workout: dict[str, Any], db: Any | None = None) ->
 
 
 def list_planned_units(limit: int = 500, include_archived: bool = False) -> list[dict[str, Any]]:
-    # Compatibility guard for databases or integrations that inserted a
-    # dated library row after the one-time schema migration. Move it lazily so
-    # the invariant "workout_library contains templates only" is restored.
-    with DB_LOCK, database() as db:
-        legacy_rows = db.execute(
-            "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at "
-            "FROM workout_library WHERE json_extract(payload, '$.date') IS NOT NULL"
-        ).fetchall()
-        for row in legacy_rows:
-            try:
-                payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                continue
-            if not isinstance(payload, dict):
-                continue
-            local_id = str(row.get("local_id") or row.get("id") or "")
-            try:
-                entry = normalize_planned_unit(payload, local_id=local_id, external_id=row.get("external_id"), sync_status=str(row.get("sync_state") or "local"))
-            except AppError:
-                continue
-            baseline = _planned_unit_payload_hash(entry) if str(row.get("sync_state")) == "synced" else None
-            db.execute(
-                "INSERT OR IGNORE INTO planned_units(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)",
-                (local_id, local_id, row.get("external_id"), json.dumps(entry, ensure_ascii=False), int(row.get("sync_dirty") or 0), str(row.get("sync_state") or "local"), row.get("sync_error"), baseline, row.get("last_synced_at"), row.get("updated_at") or utc_now(), row.get("updated_at") or utc_now()),
-            )
-            db.execute("DELETE FROM workout_library WHERE id=?", (row.get("id"),))
     with DB_LOCK, database() as db:
         rows = db.execute(
             "SELECT local_id, payload, sync_state, sync_error, sync_conflict FROM planned_units "
@@ -9874,8 +9320,8 @@ def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | N
         raise AppError(500, "Die lokale Planung ist beschädigt.") from exc
     if not isinstance(workout, dict):
         raise AppError(500, "Die lokale Planung ist beschädigt.")
-    # Future planning is local-authoritative. Legacy conflict rows therefore
-    # push the preserved local payload; no manual conflict decision is needed.
+    # Future planning is local-authoritative, so an approved push uses the
+    # preserved local payload without a separate conflict decision.
     if workout.get("local_deleted"):
         remote_id = str(workout.get("remote_event_id") or "").strip()
         if remote_id:
@@ -9889,8 +9335,8 @@ def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | N
     if remote_external_id:
         event_payload["external_id"] = remote_external_id
     elif workout.get("remote_event_id"):
-        # Provider event IDs are also stable identities. Retain them when an
-        # older or manually-created provider event has no external_id.
+        # Provider event IDs are also stable identities. Retain them when a
+        # provider event has no external_id.
         event_payload["id"] = str(workout["remote_event_id"])[:120]
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
@@ -9898,8 +9344,8 @@ def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | N
     event = result[0] if result else None
     if not isinstance(event, dict) or not str(event.get("id") or "").strip():
         raise AppError(502, "Intervals.icu hat keine geplante Einheit zurückgegeben.")
-    # Keep the client-generated external identity even when a provider test or
-    # older API response omits echoing it. This makes retries idempotent.
+    # Keep the client-generated external identity when the provider omits it
+    # from the response. This makes retries idempotent.
     update_planned_unit_sync_state(
         normalized_id,
         "synced",
@@ -10107,35 +9553,6 @@ def _validate_workout_library_sync_confirmation(payload: dict[str, Any]) -> None
         raise AppError(409, "Die Bibliothek wurde seit der Vorschau geändert. Bitte erneut prüfen.")
 
 
-def enqueue_workout_library_sync_jobs(payload: Any) -> dict[str, Any]:
-    """Queue an explicitly approved library snapshot in bounded plan-push jobs."""
-    if not isinstance(payload, dict):
-        raise AppError(400, "Die Bibliothekssynchronisierung muss als Objekt gesendet werden.")
-    _validate_workout_library_sync_confirmation(payload)
-    summary, entries, fingerprint = _workout_library_sync_snapshot()
-    if fingerprint != str(payload.get("fingerprint") or "").strip().lower():
-        raise AppError(409, "Die Bibliothek wurde seit der Vorschau geaendert. Bitte erneut pruefen.")
-    selected = [
-        {"library_workout_id": entry["local_id"], "expected_payload_hash": entry["payload_hash"]}
-        for entry in entries
-    ]
-    jobs = []
-    for offset in range(0, len(selected), 28):
-        jobs.append(enqueue_sync_job(
-            "intervals",
-            "plan_push",
-            {"entries": selected[offset:offset + 28], "reason": "manueller Bibliothekssync"},
-            requested_by="user",
-        ))
-    return {
-        "status": "queued" if jobs else "completed",
-        "fingerprint": fingerprint,
-        "summary": summary,
-        "job_ids": [job["id"] for job in jobs],
-        "jobs": jobs,
-    }
-
-
 @maintenance_operation
 @intervals_operation
 def refresh_workout_library(reason: str = "manual") -> dict[str, Any]:
@@ -10167,15 +9584,6 @@ def refresh_workout_library(reason: str = "manual") -> dict[str, Any]:
         "synced_at": synced_at,
         "library_state": workout_library_sync_summary(),
     }
-
-
-def create_library_workouts(workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    raise AppError(410, "Bibliothekseinheiten werden über den lokalen Bibliothekssync übertragen.")
-
-
-def plan_library_workout(workout_id: str, plan_date: str) -> dict[str, Any]:
-    """Create a dated local copy of a library workout without remote writes."""
-    return create_local_library_plan(workout_id, plan_date)
 
 
 @intervals_operation
@@ -10213,66 +9621,10 @@ def _sync_local_workout_calendar_entry(local_id: str, synced: dict[str, Any]) ->
     return event
 
 
-def delete_workout_draft(draft_id: str) -> dict[str, Any]:
-    try:
-        normalized_id = str(uuid.UUID(str(draft_id)))
-    except (ValueError, AttributeError) as exc:
-        raise AppError(400, "UngÃ¼ltige Entwurfs-ID.") from exc
-    with DB_LOCK, database() as db:
-        row = WORKOUT_DRAFT_REPOSITORY.get(db, normalized_id)
-        if not row:
-            raise AppError(404, "Trainingsentwurf nicht gefunden.")
-        WORKOUT_DRAFT_REPOSITORY.delete(db, normalized_id)
-    name = "Einheit"
-    try:
-        name = str(json.loads(row["payload"]).get("name") or name)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        pass
-    add_message("event", f"Entwurf â€ž{name}â€œ wurde lokal gelÃ¶scht.")
-    return {"status": "deleted", "draft_id": normalized_id}
-
-
 def save_snapshot_view(snapshot: dict[str, Any]) -> None:
     """Persist a local view change without changing synchronization timestamps."""
     with DB_LOCK, database() as db:
         SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot.get("synced_at") or utc_now())
-
-
-@maintenance_operation
-def delete_planned_event(event_id: str) -> dict[str, Any]:
-    # Deletions are local tombstones. The dedicated planning sync handles the
-    # corresponding remote deletion after preview and confirmation.
-    try:
-        local_id = str(uuid.UUID(str(event_id or "").strip()))
-    except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Planungs-ID.") from exc
-    deleted = update_local_planned_workout(local_id, {"action": "delete"})
-    return {"status": "deleted", "event_id": local_id, "local_id": deleted["local_id"], "sync_pending": True}
-    normalized_id = str(event_id or "").strip()
-    if not normalized_id or len(normalized_id) > 120 or "/" in normalized_id:
-        raise AppError(400, "UngÃ¼ltige Kalender-ID.")
-    if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
-    snapshot = latest_snapshot()
-    planned = snapshot.get("upcoming_calendar", []) if isinstance(snapshot, dict) else []
-    event = next((item for item in planned if isinstance(item, dict) and str(item.get("id")) == normalized_id), None)
-    if event is None:
-        raise AppError(404, "Geplante Einheit wurde im lokalen Kalender nicht gefunden. Bitte zuerst synchronisieren.")
-    event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
-    event_external_id = str(event.get("external_id") or "")
-    if (
-        str(event.get("category") or "").upper() != "WORKOUT"
-        or not event_external_id.startswith(COACH_EVENT_EXTERNAL_PREFIX)
-        or event_date < local_now().date().isoformat()
-    ):
-        raise AppError(403, "Nur zukünftige, von Intervals Coach angelegte Workouts können hier gelöscht werden.")
-    IntervalsClient().delete_event(normalized_id)
-    if isinstance(snapshot, dict):
-        snapshot["upcoming_calendar"] = [item for item in planned if str(item.get("id")) != normalized_id]
-        save_snapshot_view(snapshot)
-    name = str(event.get("name") or "Einheit")
-    add_message("event", f"Geplante Einheit â€ž{name}â€œ wurde aus Intervals.icu gelÃ¶scht.")
-    return {"status": "deleted", "event_id": normalized_id}
 
 
 def get_workout_library() -> list[dict[str, Any]]:
@@ -10480,7 +9832,7 @@ def sync_browser_state(
     freshness: list[dict[str, Any]] | None = None,
     jobs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Keep the browser's legacy display status while adding live progress."""
+    """Return the bounded sync projection consumed by the browser."""
     result = sync_public_state(freshness=freshness, jobs=jobs)
     # Bootstrap already carries these projections at the top level. Keeping
     # them out of the nested sync card preserves its bounded payload size.
@@ -10623,7 +9975,7 @@ def apply_workout_library_plan(
         seen_dates[plan_date] = workout_id
         source = request["workout"]
         source_date = str(source.get("date") or "")[:10]
-        already_planned = source_date == plan_date and source.get("source") in {"coach", "library", "legacy-draft"}
+        already_planned = source_date == plan_date and source.get("source") in {"coach", "library"}
         request["already_planned"] = already_planned
         if not already_planned:
             conflicts.extend(calendar_conflicts({"date": plan_date}, {workout_id}))
@@ -10760,12 +10112,6 @@ def _library_bulk_preview(action: str, entries: Any) -> dict[str, Any]:
     }
 
 
-def library_bulk_preview(values: Any) -> dict[str, Any]:
-    if not isinstance(values, dict):
-        raise AppError(400, "Die Bulk-Vorschau muss ein Objekt sein.")
-    return _library_bulk_preview(values.get("action"), values.get("entries"))
-
-
 def _apply_bulk_local_library_action(payload: dict[str, Any]) -> dict[str, Any]:
     preview = _library_bulk_preview(payload.get("action"), payload.get("entries"))
     requested = _library_bulk_request_entries(payload.get("entries"), require_hash=True)
@@ -10854,14 +10200,6 @@ def _selected_library_sync_preview(entries: Any) -> dict[str, Any]:
     }
 
 
-def selected_library_sync_preview(values: Any) -> dict[str, Any]:
-    if not isinstance(values, dict):
-        raise AppError(400, "Die Remote-Bulk-Vorschau muss ein Objekt sein.")
-    if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
-    return _selected_library_sync_preview(values.get("entries"))
-
-
 def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
@@ -10921,36 +10259,6 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
     failed = [item["library_workout_id"] for item in results if item["status"] in {"error", "conflict"}]
     status = "ok" if not failed else "partial" if len(failed) < len(results) else "error"
     return {"ok": not failed, "status": status, "results": results, "failed_object_ids": failed, "retry_scope": "Nur fehlgeschlagene Objekte erneut auswählen." if failed else None}
-
-
-def create_local_library_plan(workout_id: str, plan_date: str) -> dict[str, Any]:
-    try:
-        normalized_id = str(uuid.UUID(str(workout_id)))
-    except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Bibliothekseinheiten-ID.") from exc
-    try:
-        date.fromisoformat(str(plan_date))
-    except (TypeError, ValueError) as exc:
-        raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.") from exc
-    with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (normalized_id,)).fetchone()
-    if not row:
-        raise AppError(404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.")
-    workout = json.loads(row["payload"])
-    if calendar_conflicts({"date": str(plan_date)}, {normalized_id}):
-        raise AppError(409, "Für dieses Datum existiert bereits eine Kalendereinheit. Bitte zuerst synchronisieren und den Konflikt prüfen.")
-    entry = create_local_workout_library_entry({
-        "date": str(plan_date),
-        "sport": workout.get("type") or "Ride",
-        "name": workout.get("name") or "Bibliotheks-Einheit",
-        "description": workout.get("description") or "",
-        "duration_minutes": max(5, round(float(workout.get("moving_time") or 300) / 60)),
-        "target": workout.get("target") or "AUTO",
-        "source": "library",
-        "rationale": "Aus der lokalen Trainingsbibliothek übernommen.",
-    })
-    add_message("event", f"Lokale Bibliothekseinheit wurde für den {plan_date} gespeichert.")
-    return {"status": "local", "workout_id": normalized_id, "library_entry": entry}
 
 
 def update_local_planned_workout(local_id: str, values: Any) -> dict[str, Any]:
@@ -11095,56 +10403,6 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
             )
     saved = next((item for item in list_planned_units(1000, include_archived=True) if item.get("id") == normalized_id), None)
     return {"status": "resolved", "strategy": selected, "planned_unit": saved}
-
-
-def create_local_library_draft(workout_id: str, plan_date: str) -> dict[str, Any]:
-    """Compatibility alias for clients from the former draft workflow."""
-    return create_local_library_plan(workout_id, plan_date)
-
-
-@intervals_operation
-def push_draft(draft_id: str) -> dict[str, Any]:
-    if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
-    with DB_LOCK, database() as db:
-        row = WORKOUT_DRAFT_REPOSITORY.get(db, draft_id)
-    if not row:
-        raise AppError(404, "Trainingsentwurf nicht gefunden.")
-    workout = json.loads(row["payload"])
-    if row["status"] == "pushed":
-        raise AppError(409, "Dieser Entwurf wurde bereits übertragen.")
-    conflicts = calendar_conflicts(workout)
-    if conflicts:
-        raise AppError(409, "Für dieses Datum existiert bereits eine Kalendereinheit. Bitte zuerst synchronisieren und den Konflikt prüfen.")
-    try:
-        library_workout_id = str(workout.get("library_workout_id") or "").strip()
-        if library_workout_id:
-            with DB_LOCK, database() as db:
-                library_row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (library_workout_id,)).fetchone()
-            if not library_row:
-                raise AppError(409, "Die zugeordnete Bibliothekseinheit ist nicht mehr vorhanden. Bitte die Bibliothek synchronisieren.")
-            library_workout = sync_local_workout_library_entry(library_workout_id)
-            external_id = str(library_workout.get("external_id") or "").strip()
-            if not external_id:
-                raise AppError(502, "Die Bibliothekseinheit hat nach der Synchronisierung keine externe ID.")
-            event = plan_library_workout_remote(external_id, library_workout, workout["date"])
-        else:
-            event = IntervalsClient().push_workout(draft_id, workout)
-    except Exception as exc:
-        with DB_LOCK, database() as db:
-            db.execute(
-                "UPDATE workout_drafts SET status='error', error=?, updated_at=? WHERE id=?",
-                (redact_text(str(exc))[:1000], utc_now(), draft_id),
-            )
-        raise
-    event_id = str(event.get("id", ""))
-    with DB_LOCK, database() as db:
-        db.execute(
-            "UPDATE workout_drafts SET status='pushed', intervals_event_id=?, error=NULL, updated_at=? WHERE id=?",
-            (event_id, utc_now(), draft_id),
-        )
-    add_message("event", f"„{workout.get('name', 'Einheit')}“ wurde für den {workout.get('date')} zu Intervals.icu übertragen.")
-    return {"draft_id": draft_id, "status": "pushed", "event": event}
 
 
 def latest_snapshot() -> dict[str, Any] | None:
@@ -12484,8 +11742,6 @@ def _openai_usage_summary_unlocked() -> dict[str, Any]:
         usage = {}
     if not isinstance(usage, dict) or usage.get("date") != today:
         usage = {"date": today, "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    for legacy_budget_key in ("request_limit", "token_limit", "budget_tokens", "budget_remaining"):
-        usage.pop(legacy_budget_key, None)
     try:
         rate_limits = json.loads(get_kv("openai_rate_limits") or "{}")
     except (TypeError, json.JSONDecodeError):
@@ -13407,7 +12663,7 @@ def _coach_workout_action_preview(action_type: str, arguments: dict[str, Any]) -
         workouts = arguments.get("workouts")
         if not isinstance(workouts, list) or not workouts:
             raise AppError(400, "Die Coach-Vorschau enthält keine geplanten Einheiten.")
-        normalized = [normalize_workout_draft(item) for item in workouts]
+        normalized = [normalize_workout(item) for item in workouts]
         diff = [{
             "type": "create",
             "date": item["date"],
@@ -13962,7 +13218,7 @@ def _pending_plan_push_entries() -> list[dict[str, str]]:
 
 
 def _mark_local_planning_authoritative(local_ids: list[str] | None = None) -> int:
-    """Clear legacy planning conflicts before an explicitly requested push."""
+    """Make selected local planning rows authoritative before an explicit push."""
     normalized_ids = {str(value).strip() for value in (local_ids or []) if str(value).strip()}
     with DB_LOCK, database() as db:
         if normalized_ids:
@@ -14119,36 +13375,6 @@ def _structured_coach_tool_result(
                 local_id = str(change["local_id"]).strip()
                 _require_coach_scope(intent, f"planned_unit:{local_id}", "local_plan")
         return _apply_structured_training_changes(arguments)
-    if name == "apply_training_changes_legacy":
-        if "apply_training_changes" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        changes = arguments.get("changes") or []
-        if not isinstance(changes, list) or not changes or len(changes) > 28:
-            raise AppError(400, "Ein Coach-Kommando darf höchstens 28 Änderungen enthalten.", reason="change_limit")
-        expected_revision = arguments.get("expected_revision")
-        with DB_LOCK, database() as db:
-            revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
-            current_revision = int((revision_row or {}).get("revision") or 0)
-        if expected_revision is not None and int(expected_revision) != current_revision:
-            raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
-        with DB_LOCK, database() as db:
-            for change in changes:
-                if not isinstance(change, dict) or not change.get("local_id"):
-                    raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
-                expected_hash = str(change.get("expected_payload_hash") or "").strip().lower()
-                if expected_hash:
-                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (str(change["local_id"]),)).fetchone()
-                    if not row or _library_payload_hash(row["payload"]) != expected_hash:
-                        raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
-        applied = []
-        for change in changes:
-            if not isinstance(change, dict) or not change.get("local_id"):
-                raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
-            applied.append(update_local_planned_workout(change["local_id"], change))
-        with DB_LOCK, database() as db:
-            db.execute("UPDATE planning_state SET revision=revision+1, updated_at=? WHERE id=1", (utc_now(),))
-            revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
-        return {"ok": True, "status": "applied", "planning_revision": int((revision or {}).get("revision") or current_revision), "changes": applied}
     if name == "manage_training_templates":
         if "manage_training_templates" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
@@ -14998,41 +14224,11 @@ def local_now() -> datetime:
         return datetime.now().astimezone()
 
 
-DAILY_SYNC_LEGACY_KEYS = {
-    "intervals": "last_sync_at",
-    "garmin": "last_garmin_sync_at",
-    "calendar": "last_external_calendar_sync_at",
-}
-
-
-def local_date_from_timestamp(value: Any, timezone_value: Any = None) -> str | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    try:
-        from zoneinfo import ZoneInfo
-        return parsed.astimezone(ZoneInfo(timezone_name(timezone_value or get_profile().get("timezone")))).date().isoformat()
-    except Exception:
-        return parsed.astimezone().date().isoformat()
-
-
-def daily_sync_marker_key(source: str) -> str:
-    return daily_marker_key(source, DAILY_SYNC_LEGACY_KEYS)
-
-
 def daily_sync_due(source: str, now: datetime | None = None) -> bool:
     return daily_sync_is_due(
         source,
         now or local_now(),
-        legacy_keys=DAILY_SYNC_LEGACY_KEYS,
         get_value=get_kv,
-        set_value=set_kv,
-        local_date=local_date_from_timestamp,
     )
 
 
@@ -15040,9 +14236,7 @@ def mark_daily_sync(source: str, now: datetime | None = None) -> None:
     mark_daily_sync_value(
         source,
         now or local_now(),
-        legacy_keys=DAILY_SYNC_LEGACY_KEYS,
         set_value=set_kv,
-        local_date=local_date_from_timestamp,
     )
 
 
@@ -15114,30 +14308,6 @@ def schedule_morning_checkin() -> None:
     set_kv("morning_checkin_attempted", checkin_date)
     threading.Thread(target=run_morning_checkin, args=(checkin_date,), daemon=True).start()
 
-
-def add_private_calendar_context_to_planned(
-    planned: list[dict[str, Any]], drafts: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Expose only recorded iCalendar-driven adjustments on linked events."""
-    by_event_id = {
-        str(draft.get("intervals_event_id")): draft
-        for draft in drafts
-        if draft.get("intervals_event_id")
-    }
-    by_external_id = {
-        f"intervals-coach-{draft.get('id')}": draft
-        for draft in drafts
-        if draft.get("id")
-    }
-    enriched: list[dict[str, Any]] = []
-    for event in planned:
-        draft = by_event_id.get(str(event.get("id"))) or by_external_id.get(str(event.get("external_id") or ""))
-        context = draft.get("private_calendar_adjustment") if isinstance(draft, dict) else None
-        copy = dict(event)
-        if isinstance(context, dict):
-            copy["private_calendar_adjustment"] = context
-        enriched.append(copy)
-    return enriched
 
 
 def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -15321,9 +14491,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "start": (today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)).isoformat(),
                 "end": (today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat(),
             }
-        legacy_drafts = list_workout_drafts()
         planned, planning_compliance = planning_compliance_state(planned, activities)
-        planned = add_private_calendar_context_to_planned(planned, legacy_drafts)
         if local_only:
             weather = weather_state(planned, refresh=False)
 
@@ -15493,7 +14661,6 @@ def diagnostic_report() -> dict[str, Any]:
     garmin_status = garmin_public_state()
     with DB_LOCK, database() as db:
         message_count = db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"]
-        draft_count = db.execute("SELECT COUNT(*) AS count FROM workout_drafts").fetchone()["count"]
         library_count = db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"]
         competition_count = db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()["count"]
         checkin_count = db.execute("SELECT COUNT(*) AS count FROM athlete_checkins").fetchone()["count"]
@@ -15545,7 +14712,7 @@ def diagnostic_report() -> dict[str, Any]:
             "date": get_kv("morning_checkin_date"),
             "last_error": redact_text(get_kv("morning_checkin_error") or "") or None,
         },
-        "database": {"messages": message_count, "workout_drafts_legacy": draft_count, "workout_library": library_count, "workout_library_state": workout_library_sync_summary(), "competitions": competition_count, "athlete_checkins": checkin_count, "activity_feedback": activity_feedback_count, "external_calendar_events": len(list_external_calendar_events())},
+        "database": {"messages": message_count, "workout_library": library_count, "workout_library_state": workout_library_sync_summary(), "competitions": competition_count, "athlete_checkins": checkin_count, "activity_feedback": activity_feedback_count, "external_calendar_events": len(list_external_calendar_events())},
         "logs": recent_log_entries(),
         "debug_capture": {**diagnostic_capture_status(), "entries": diagnostic_capture_entries()},
         "note": "Zugangsdaten, Tokens, Rohantworten und Athleteninhalte sind ausgeschlossen; die optionale Diagnoseaufzeichnung speichert nur technische Antwortformen und Metadaten.",
@@ -15556,7 +14723,6 @@ def privacy_export() -> dict[str, Any]:
     with DB_LOCK, database() as db:
         messages = [dict(row) for row in db.execute("SELECT role, content, created_at FROM messages ORDER BY id").fetchall()]
         snapshots = [json.loads(row["payload"]) for row in db.execute("SELECT payload FROM snapshots ORDER BY id").fetchall()]
-        drafts = list_workout_drafts()
         library = list_workout_library(include_archived=True)
         competitions = list_competitions()
         tool_calls = [dict(row) for row in db.execute("SELECT call_id, tool_name, result, created_at FROM chat_tool_calls ORDER BY created_at").fetchall()]
@@ -15592,7 +14758,6 @@ def privacy_export() -> dict[str, Any]:
         "messages": messages,
         "chat_tool_calls": tool_calls,
         "snapshots": snapshots,
-        "legacy_workout_drafts": drafts,
         "workout_library": library,
         "training_plans": list_training_plans(),
         "plan_adjustments": adjustments,
@@ -15615,7 +14780,6 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "coach_plan_artifacts.jsonl",
     "coach_commands.jsonl",
     "snapshots.jsonl",
-    "legacy_workout_drafts.jsonl",
     "workout_library.jsonl",
     "planned_units.jsonl",
     "training_plans.jsonl",
@@ -15641,10 +14805,6 @@ def _export_jsonl_rows(archive: zipfile.ZipFile, name: str, rows: Any, deadline:
         now=time.monotonic,
         timeout_error=lambda: AppError(408, "Der Export überschreitet das Zeitlimit."),
     )
-
-
-def _export_workout_drafts(db: Any) -> Any:
-    yield from export_workout_drafts(db, decode=_export_payload)
 
 
 def _export_workout_library(db: Any) -> Any:
@@ -15734,7 +14894,6 @@ def _privacy_export_file() -> Path:
                 (_export_payload(row["payload"]) for row in db.execute("SELECT payload FROM snapshots ORDER BY id")),
                 deadline,
             )
-            _export_jsonl_rows(archive, "legacy_workout_drafts.jsonl", _export_workout_drafts(db), deadline)
             _export_jsonl_rows(archive, "workout_library.jsonl", _export_workout_library(db), deadline)
             _export_jsonl_rows(archive, "planned_units.jsonl", _export_planned_units(db), deadline)
             _export_jsonl_rows(
@@ -15796,7 +14955,6 @@ def _privacy_export_file() -> Path:
                 json.dumps(
                     export_manifest(
                         archive.namelist(),
-                        schema_version=database_schema_version(db),
                         exported_at=utc_now(),
                         format_version=PRIVACY_EXPORT_FORMAT_VERSION,
                         jsonl_files=PRIVACY_EXPORT_JSONL_FILES,
@@ -15817,12 +14975,10 @@ def _privacy_export_file() -> Path:
 
 
 CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
-    "schema_migrations": {"version", "name", "applied_at"},
     "kv": {"key", "value", "updated_at"},
     "messages": {"id", "role", "content", "created_at"},
     "chat_tool_calls": {"call_id", "tool_name", "result", "created_at"},
     "snapshots": {"id", "payload", "created_at"},
-    "workout_drafts": {"id", "payload", "status", "intervals_event_id", "error", "created_at", "updated_at"},
     "workout_library": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "last_synced_at", "updated_at"},
     "planned_units": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "sync_conflict", "baseline_hash", "last_synced_at", "plan_id", "revision", "tombstone", "command_id", "created_at", "updated_at"},
     "planning_state": {"id", "revision", "updated_at"},
@@ -15845,6 +15001,16 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "short_only", "updated_at"},
     "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
 }
+
+
+def database_schema_is_current(db: Any) -> bool:
+    tables = {row["name"] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if set(CURRENT_DATABASE_SCHEMA) - tables:
+        return False
+    return all(
+        not columns - {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        for table, columns in CURRENT_DATABASE_SCHEMA.items()
+    )
 
 
 def _checkpoint_database_locked() -> None:
@@ -15922,9 +15088,6 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
             if CONFIG.app_password:
                 _configure_cipher(connection, CONFIG.app_password)
             connection.execute("PRAGMA foreign_keys = ON")
-            schema_version = database_schema_version(connection)
-            if schema_version != CURRENT_DATABASE_SCHEMA_VERSION:
-                raise AppError(400, "Das Backup verwendet eine nicht unterstützte Datenbank-Schema-Version.")
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
             if set(CURRENT_DATABASE_SCHEMA) - tables:
                 raise AppError(400, "Das Backup verwendet kein vollständiges aktuelles Datenbankschema.")
@@ -15987,7 +15150,7 @@ def delete_remote_conversation(conversation_id: str) -> bool:
 PRIVACY_DELETE_SCOPE = (
     ("chats", "Chats, Coach-Werkzeug- und Aktionsprotokolle", ("messages", "chat_tool_calls", "coach_commands", "coach_plan_artifacts", "coach_action_proposals")),
     ("snapshots", "Trainings-Snapshots", ("snapshots",)),
-    ("library", "Workout-Bibliothek, geplante Einheiten und Entwürfe", ("workout_drafts", "workout_library", "planned_units")),
+    ("library", "Workout-Bibliothek und geplante Einheiten", ("workout_library", "planned_units")),
     ("competitions", "Wettkämpfe und Sync-Vormerkungen", ("competitions", "competition_sync_tombstones")),
     ("plans", "Trainingspläne", ("training_plans", "planning_state")),
     ("checkins", "Tages-Check-ins", ("athlete_checkins",)),
@@ -16145,7 +15308,7 @@ def readiness_state() -> dict[str, Any]:
     try:
         with DB_LOCK, database() as db:
             checks["database"] = bool(db.execute("SELECT 1").fetchone())
-            checks["schema"] = database_schema_version(db) == CURRENT_DATABASE_SCHEMA_VERSION
+            checks["schema"] = database_schema_is_current(db)
     except Exception:
         pass
     probe: Path | None = None
@@ -16627,19 +15790,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if payload.get("confirm") != "FULL_RESYNC":
                     raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
                 self.send_json(200, full_provider_resync("intervals", operation_id=uuid.uuid4().hex))
-            elif match := COMPETITION_CONFLICT_RE.match(path):
-                payload = self.read_json()
-                self.send_json(200, resolve_competition_conflict(unquote(match.group(1)), payload.get("strategy")))
-            elif path == "/api/competitions/sync":
-                raise AppError(410, "Wettkampf-Remote-Sync benötigt die separate Coach-Aktionsbestätigung.")
-            elif path == "/api/competitions/sync/preview":
-                self.read_json()
-                self.send_json(200, competition_sync_preview())
-            elif path == "/api/competitions/sync/approved":
-                payload = self.read_json()
-                if payload.get("confirm") != "COMPETITION_SYNC":
-                    raise AppError(400, "Zum Wettkampf-Sync muss COMPETITION_SYNC bestaetigt werden.")
-                self.send_json(200, sync_competitions("approved UI sync", push_local=True, expected_fingerprint=payload.get("fingerprint")))
             elif path == "/api/performance/refresh":
                 self.send_json(200, refresh_current_performance())
             elif path == "/api/garmin/sync":
@@ -16666,85 +15816,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, save_checkin(self.read_json()))
             elif match := ACTIVITY_FEEDBACK_RE.match(path):
                 self.send_json(200, save_activity_feedback(unquote(match.group(1)), self.read_json()))
-            elif path == "/api/planning/replan":
-                payload = self.read_json()
-                if payload.get("apply"):
-                    raise AppError(410, "Adaptive Änderungen benötigen die separate Coach-Aktionsbestätigung.")
-                self.send_json(200, adaptive_replan_preview())
-            elif path == "/api/planning/sync/preview":
-                self.read_json()
-                self.send_json(200, planning_sync_preview())
-            elif path == "/api/planning/sync/approved":
-                self.send_json(202, enqueue_workout_library_sync_jobs(self.read_json()))
-            elif path == "/api/library/sync/preview":
-                self.read_json()
-                self.send_json(200, workout_library_sync_preview())
-            elif path == "/api/library/bulk/preview":
-                self.send_json(200, library_bulk_preview(self.read_json()))
-            elif path == "/api/library/bulk":
-                self.send_json(200, _apply_bulk_local_library_action(self.read_json()))
-            elif path == "/api/library/bulk-sync/preview":
-                self.send_json(200, selected_library_sync_preview(self.read_json()))
             elif path == "/api/change-history/undo":
                 self.send_json(200, _apply_change_undo(self.read_json()))
-            elif path in {"/api/library/sync", "/api/planning/sync"}:
-                raise AppError(410, "Bibliotheks-Remote-Sync benötigt die separate Coach-Aktionsbestätigung.")
-            elif match := LIBRARY_ENTRY_RE.match(path):
-                self.send_json(200, update_workout_library_entry(unquote(match.group(1)), self.read_json()))
-            elif match := PLANNED_CONFLICT_RE.match(path):
-                payload = self.read_json()
-                self.send_json(200, resolve_planned_unit_conflict(unquote(match.group(1)), payload.get("strategy")))
-            elif match := LOCAL_PLANNED_RE.match(path):
-                self.send_json(200, update_local_planned_workout(unquote(match.group(1)), self.read_json()))
-            elif LIBRARY_PLAN_BATCH_RE.match(path):
-                payload = self.read_json()
-                self.send_json(200, apply_workout_library_plan(
-                    payload.get("entries") or [],
-                ))
-            elif match := PLAN_LIBRARY_RE.match(path):
-                payload = self.read_json()
-                self.send_json(200, plan_library_workout(match.group(1), payload.get("date")))
-            elif path == "/api/drafts":
-                raise AppError(410, "Lokale Trainingsentwürfe wurden durch die Trainingsbibliothek ersetzt.")
-            elif match := PUSH_RE.match(path):
-                raise AppError(410, "Einheiten werden nicht mehr einzeln freigegeben. Synchronisiere die lokale Trainingsbibliothek.")
             else:
                 raise AppError(404, "Nicht gefunden.")
-
-    def do_DELETE(self) -> None:
-        try:
-            with MAINTENANCE_GATE.operation():
-                self._do_DELETE()
-        except AppError as exc:
-            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]})
-
-    def _do_DELETE(self) -> None:
-        self.request_id = uuid.uuid4().hex[:12]
-        try:
-            path = urlparse(self.path).path
-            session = require_auth(self)
-            require_csrf(self, session)
-            if match := DELETE_PLANNED_RE.match(path):
-                self.send_json(200, delete_planned_event(match.group(1)))
-            elif match := DELETE_DRAFT_RE.match(path):
-                raise AppError(410, "Lokale Trainingsentwürfe wurden durch die Trainingsbibliothek ersetzt.")
-            else:
-                raise AppError(404, "Nicht gefunden.")
-        except AppError as exc:
-            if exc.status >= 500:
-                LOGGER.error(
-                    exc.message,
-                    extra={"event": "http_app_error", "context": {"method": "DELETE", "path": self.path, "status": exc.status, "request_id": self.request_id}},
-                    exc_info=True,
-                )
-            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]})
-        except Exception:
-            LOGGER.error(
-                "Unhandled DELETE error",
-                extra={"event": "http_unhandled_error", "context": {"method": "DELETE", "path": self.path, "request_id": self.request_id}},
-                exc_info=True,
-            )
-            self.send_json(500, {"error": "Interner Serverfehler."})
 
     def do_PUT(self) -> None:
         try:

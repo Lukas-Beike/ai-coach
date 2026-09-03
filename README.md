@@ -207,8 +207,8 @@ GitHub release information is checked at most every 15 minutes. The morning
 check-in is generated at most once per local calendar day when its required
 integrations are configured.
 
-The six main views use stable hash links: `#coach`, `#today`, `#activities`,
-`#planned`, `#performance`, and `#more`. Navigation is implemented with real
+The five main views use stable hash links: `#coach`, `#today`, `#plan`,
+`#analysis`, and `#more`. Navigation is implemented with real
 links, so direct links, reload, browser back/forward, keyboard access, and
 screen-reader announcements remain available. An unknown hash falls back to
 `#coach`; a deep link is retained through the login flow. The `#today` view
@@ -346,16 +346,9 @@ is used as the SQLCipher database key. It is never stored by the application
 and cannot be recovered if lost. The password must be at least 12 characters
 long.
 
-When an existing unencrypted database is first started with `APP_PASSWORD`,
-the application migrates it to SQLCipher and keeps a file named
-`*.plaintext-backup-*` in the data directory. Protect this backup like any
-other unencrypted copy of the database.
-
-The database schema has a monotone version recorded in `schema_migrations`.
-Startup applies supported migrations idempotently and validates declared
-foreign keys on every connection. Existing orphaned relations or an unknown
-schema version stop startup and require the documented restore workflow; the
-database file is not replaced automatically. The public-calendar candidate
+The database is created with the current SQLCipher schema on first startup.
+Restore accepts only a complete database with that current schema and checks
+its integrity before replacing the active file. The public-calendar candidate
 relation explicitly cascades when its source is deleted.
 
 `/api/health` is a liveness probe: it only confirms that the HTTP process can
@@ -365,15 +358,14 @@ answer. `/api/readiness` is a separate infrastructure probe and returns HTTP
 safe booleans and status values, never paths, secrets, or athlete data.
 
 Backend modularization starts with dependency-light database primitives in the
-`backend.db` package; its first repository is the explicit
+`backend.db` package. Its repositories provide explicit
 `KeyValueRepository`, `ProfileRepository`, `CompetitionRepository`,
 `TrainingPlanRepository`, `PlanAdjustmentRepository`,
 `ChatRepository`,
 `CheckinRepository`,
-`ActivityFeedbackRepository`, `SnapshotRepository`, and
-`WorkoutDraftRepository` interfaces in
-`backend/db/repositories.py`. The HTTP application remains the compatibility
-boundary. The Intervals.icu provider's bounded, duplicate-page-safe collection
+`ActivityFeedbackRepository`, and `SnapshotRepository` interfaces in
+`backend/db/repositories.py`. The Intervals.icu provider's bounded,
+duplicate-page-safe collection
 pagination is isolated in `backend/providers/intervals.py`; it receives the
 transport and error factory explicitly and has no dependency on application
 state. Further provider operations, synchronization, coaching,
@@ -385,8 +377,8 @@ as application code and do not change the
 SQLCipher, authentication, or persistence contracts.
 
 The first frontend boundary is `public/api.js`. It owns same-origin JSON and
-audio requests, CSRF headers, and common HTTP error handling; `app.js` keeps
-the existing compatibility wrappers and supplies the login callback. The API
+audio requests, CSRF headers, and common HTTP error handling; `app.js` supplies
+the login callback. The API
 client has no dependency on application state or views. Future frontend
 boundaries (`state`, `navigation`, `views`, `forms`, and `components`) depend
 on this client through explicit interfaces, with no new framework and no
@@ -567,7 +559,7 @@ connection are handled as normal aborted requests rather than internal server
 failures.
 
 The **System** tab allows the athlete to export local data as JSON or delete
-local chats, snapshots, legacy drafts, active and archived library entries,
+local chats, snapshots, active and archived library entries,
 competitions, plans, check-ins, feedback, provider snapshots, calendar imports,
 and profile state. It also shows a bounded local change history for profile,
 library, competition, and plan changes. History entries expose only changed
@@ -597,7 +589,7 @@ the backup database. Before replacement, the current database is retained as a
 
 Database backups are checkpointed and downloaded in bounded file chunks. The
 privacy export is an incrementally written ZIP archive: large collections are
-JSONL entries and `manifest.json` records the export format, schema version,
+JSONL entries and `manifest.json` records the export format, format version,
 categories, and complete status. Temporary export files are removed after the
 download, including after a client disconnect. Export generation enforces a
 100 MB size limit, a 120-second time limit, and a free-space check before it

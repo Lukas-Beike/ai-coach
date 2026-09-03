@@ -105,35 +105,8 @@ function addDateKey(value, days) {
   return localDateKey(date);
 }
 
-function dateKeyDifference(left, right) {
-  const a = dateFromKey(left);
-  const b = dateFromKey(right);
-  if (Number.isNaN(a.valueOf()) || Number.isNaN(b.valueOf())) return 0;
-  return Math.round((Date.UTC(a.getFullYear(), a.getMonth(), a.getDate()) - Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())) / 86400000);
-}
-
 function plannedEventDate(event) {
   return String(event?.start_date_local || event?.date || "").slice(0, 10);
-}
-
-function isCoachOwnedWorkout(event) {
-  return String(event?.category || "").toUpperCase() === "WORKOUT"
-    && String(event?.external_id || "").startsWith("intervals-coach-");
-}
-
-function plannedDayLabel(date, offset) {
-  const formatted = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(date);
-  if (offset === 0) return `Heute · ${formatted}`;
-  if (offset === 1) return `Morgen · ${formatted}`;
-  return formatted;
-}
-
-function plannedWeekStart(date) {
-  const start = new Date(date);
-  const day = start.getDay();
-  start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
-  start.setHours(0, 0, 0, 0);
-  return start;
 }
 
 function weatherIcon(code) {
