@@ -146,11 +146,11 @@ jobs:
           coverage run --branch tests/run_tests.py --shard 1 --total 4
           coverage report --fail-under=0
       - name: Run lint baseline
-          run: ruff check tests/run_tests.py
+        run: ruff check tests/run_tests.py
       - name: Run formatter baseline
-          run: ruff format --check tests/run_tests.py
+        run: ruff format --check tests/run_tests.py
       - name: Run lightweight type baseline
-          run: mypy --ignore-missing-imports --follow-imports=skip tests/run_tests.py
+        run: mypy --ignore-missing-imports --follow-imports=skip tests/run_tests.py
 
   image_sbom:
     name: Image SBOM
