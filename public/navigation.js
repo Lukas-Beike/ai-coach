@@ -1,46 +1,60 @@
 const NAV_ROUTES = Object.freeze({
   coach: "chatPanel",
   today: "todayPanel",
-  activities: "activitiesPanel",
-  planned: "workoutsPanel",
-  "planned/calendar": "workoutsPanel",
-  "planned/library": "workoutsPanel",
-  "planned/goals": "workoutsPanel",
-  performance: "dataPanel",
+  plan: "workoutsPanel",
+  "plan/calendar": "workoutsPanel",
+  "plan/templates": "workoutsPanel",
+  "plan/goals": "workoutsPanel",
+  analysis: "dataPanel",
+  "analysis/history": "dataPanel",
+  "analysis/performance": "dataPanel",
   more: "settingsPanel",
   "more/connections": "settingsPanel",
   "more/coach": "settingsPanel",
   "more/privacy": "settingsPanel",
   "more/operations": "settingsPanel",
   "more/profile": "profilePanel",
-  profile: "profilePanel",
-  settings: "settingsPanel",
 });
 const NAV_LINK_ROUTES = Object.freeze({
   coach: "coach",
   today: "today",
-  activities: "activities",
-  planned: "planned",
-  performance: "performance",
+  plan: "plan",
+  analysis: "analysis",
   more: "more",
-  profile: "more",
+});
+const NAV_ALIASES = Object.freeze({
+  activities: "analysis/history",
+  performance: "analysis/performance",
+  planned: "plan/calendar",
+  "planned/calendar": "plan/calendar",
+  "planned/library": "plan/templates",
+  "planned/goals": "plan/goals",
+  profile: "more/profile",
   settings: "more",
+  "plan/library": "plan/templates",
 });
 const DEFAULT_NAV_ROUTE = "coach";
 
 function routeFromHash(hash = window.location.hash) {
-  const route = String(hash || "").replace(/^#/, "").toLowerCase();
+  const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
+  const route = NAV_ALIASES[rawRoute] || rawRoute;
   return Object.prototype.hasOwnProperty.call(NAV_ROUTES, route) ? route : DEFAULT_NAV_ROUTE;
 }
 
 function hashContainsKnownRoute(hash = window.location.hash) {
-  const route = String(hash || "").replace(/^#/, "").toLowerCase();
+  const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
+  const route = NAV_ALIASES[rawRoute] || rawRoute;
   return Object.prototype.hasOwnProperty.call(NAV_ROUTES, route);
 }
 
 function planSegmentFromRoute(route = state.route) {
   const segment = String(route || "").split("/")[1];
-  return ["calendar", "library", "goals"].includes(segment) ? segment : "calendar";
+  return ["calendar", "templates", "goals"].includes(segment) ? segment : "calendar";
+}
+
+function analysisSegmentFromRoute(route = state.route) {
+  const segment = String(route || "").split("/")[1];
+  return ["history", "performance"].includes(segment) ? segment : "history";
 }
 
 function baseRoute(route = state.route) {

@@ -21,7 +21,10 @@ module.exports = defineConfig({
     serviceWorkers: "block",
   },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
+    { name: "mobile-small", use: { ...devices["Pixel 5"], viewport: { width: 320, height: 568 } } },
     { name: "mobile", use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } } },
+    { name: "tablet", use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } } },
+    { name: "tablet-landscape", use: { ...devices["Desktop Chrome"], viewport: { width: 844, height: 390 } } },
+    { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } } },
   ],
 });

@@ -23,7 +23,7 @@ function renderMoreSegments(segment = moreSegmentFromRoute()) {
 }
 
 function renderPlanSegments(segment = state.planSegment) {
-  const selected = ["calendar", "library", "goals"].includes(segment) ? segment : "calendar";
+  const selected = ["calendar", "templates", "goals"].includes(segment) ? segment : "calendar";
   state.planSegment = selected;
   document.querySelectorAll("[data-plan-segment-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.planSegmentPanel !== selected;
@@ -36,11 +36,25 @@ function renderPlanSegments(segment = state.planSegment) {
   });
 }
 
+function renderAnalysisSegments(segment = state.analysisSegment) {
+  const selected = ["history", "performance"].includes(segment) ? segment : "history";
+  state.analysisSegment = selected;
+  document.querySelectorAll("[data-analysis-segment-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.analysisSegmentPanel !== selected;
+  });
+  document.querySelectorAll("[data-analysis-segment]").forEach((link) => {
+    const active = link.dataset.analysisSegment === selected;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+}
+
 function currentPlanLoadAreas() {
   const areas = new Set(["chat", "activities", "performance", "feedback", "profile", "weather"]);
   const route = baseRoute();
-  if (route === "today" || (route === "planned" && state.planSegment !== "library")) areas.add("plan");
-  if (route === "planned" && state.planSegment === "library") areas.add("library");
+  if (route === "today" || (route === "plan" && state.planSegment !== "templates")) areas.add("plan");
+  if (route === "plan" && state.planSegment === "templates") areas.add("library");
   return [...areas];
 }
 
@@ -48,34 +62,37 @@ function ensureRouteData(route = state.route) {
   if (!state.data || state.loadPromise) return;
   const requested = [];
   const panelRoute = baseRoute(route);
-  if ((panelRoute === "today" || (panelRoute === "planned" && state.planSegment !== "library")) && !state.loadedAreas.has("plan")) requested.push("plan");
-  if (panelRoute === "planned" && state.planSegment === "library" && !state.loadedAreas.has("library")) requested.push("library");
+  if ((panelRoute === "today" || (panelRoute === "plan" && state.planSegment !== "templates")) && !state.loadedAreas.has("plan")) requested.push("plan");
+  if (panelRoute === "plan" && state.planSegment === "templates" && !state.loadedAreas.has("library")) requested.push("library");
   if (requested.length) load("/api/bootstrap?local=1", requested);
 }
 
-function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
+async function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
   const panelRoute = NAV_ROUTES[route] ? route : DEFAULT_NAV_ROUTE;
   const mainRoute = baseRoute(panelRoute);
   const navigationRoute = NAV_LINK_ROUTES[mainRoute] || mainRoute;
   const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
-  if (currentPanel !== NAV_ROUTES[panelRoute] && !confirmDiscardChanges()) return false;
+  if (currentPanel !== NAV_ROUTES[panelRoute] && !(await confirmDiscardChanges())) return false;
   if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges()) discardUnsavedChanges();
-  if (currentPanel === "workoutsPanel" && mainRoute !== "planned") state.planSegmentScroll[state.planSegment] = window.scrollY;
-  if (currentPanel === "workoutsPanel" && mainRoute === "planned" && state.planSegment !== planSegmentFromRoute(panelRoute)) state.planSegmentScroll[state.planSegment] = window.scrollY;
+  if (currentPanel === "workoutsPanel" && mainRoute !== "plan") state.planSegmentScroll[state.planSegment] = window.scrollY;
+  if (currentPanel === "workoutsPanel" && mainRoute === "plan" && state.planSegment !== planSegmentFromRoute(panelRoute)) state.planSegmentScroll[state.planSegment] = window.scrollY;
   document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
   const navigation = document.querySelector(`.nav-item[data-route="${navigationRoute}"]`);
   const panel = document.querySelector(`#${NAV_ROUTES[panelRoute]}`);
   if (!navigation || !panel) return false;
-  navigation.classList.add("active");
   document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
-  navigation.setAttribute("aria-current", "page");
+  document.querySelectorAll(`.nav-item[data-route="${navigationRoute}"]`).forEach((item) => {
+    item.classList.add("active");
+    item.setAttribute("aria-current", "page");
+  });
   panel.classList.add("active");
   state.route = panelRoute;
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
-  if (mainRoute === "planned") {
+  if (mainRoute === "plan") {
     renderPlanSegments(planSegmentFromRoute(panelRoute));
     renderActivePlanSegment(state.data);
   }
+  if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
   const targetHash = `#${panelRoute}`;
   if (window.location.hash !== targetHash) {
     if (historyMode === "push") window.history.pushState({ route: panelRoute }, "", targetHash);
@@ -83,10 +100,10 @@ function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}
   }
   if (state.data) renderStatus(state.data);
   updateHeaderAction();
-  if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadContextPreview();
-  if (state.data && (panelRoute === "settings" || panelRoute === "more")) loadLogs();
+  if (state.data && mainRoute === "more") loadContextPreview();
+  if (state.data && mainRoute === "more") loadLogs();
   if (state.data && mainRoute === "more") loadChangeHistory();
-  const targetScroll = mainRoute === "planned" ? (state.planSegmentScroll[state.planSegment] || 0) : 0;
+  const targetScroll = mainRoute === "plan" ? (state.planSegmentScroll[state.planSegment] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo({ top: targetScroll, behavior: "auto" }));
   if (mainRoute === "coach") {
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
@@ -100,9 +117,13 @@ function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}
   return true;
 }
 
-function syncNavigationRoute() {
+async function syncNavigationRoute() {
   const route = routeFromHash();
-  const applied = applyNavigationRoute(route, { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
+  const rawRoute = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
+  const isLegacyAlias = rawRoute && rawRoute !== route;
+  const applied = await applyNavigationRoute(route, {
+    historyMode: isLegacyAlias || !hashContainsKnownRoute() ? "replace" : "none",
+  });
   if (!applied && state.route) window.history.replaceState({ route: state.route }, "", `#${state.route}`);
 }
 
@@ -154,6 +175,15 @@ function cookie(name) {
 function showLogin() {
   if (state.chatStatusTimer) clearTimeout(state.chatStatusTimer);
   state.chatStatusTimer = null;
+  state.stateEventSource?.close();
+  state.stateEventSource = null;
+  if (state.stateEventReconnectTimer) clearTimeout(state.stateEventReconnectTimer);
+  if (state.stateEventRefreshTimer) clearTimeout(state.stateEventRefreshTimer);
+  state.stateEventReconnectTimer = null;
+  state.stateEventRefreshTimer = null;
+  state.stateEventRefreshAreas.clear();
+  state.stateEventLastId = 0;
+  state.stateEventBackoff = 1000;
   state.data = null;
   state.busy = false;
   state.chatRequest = null;
@@ -162,6 +192,7 @@ function showLogin() {
   state.chatResponseScrollPending = false;
   state.loadedAreas.clear();
   state.planSegment = "calendar";
+  state.analysisSegment = "history";
   state.profileDirty = false;
   state.checkinDirty = false;
   state.chatDraftDirty = false;
@@ -181,6 +212,37 @@ function showLogin() {
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
   showAccessibleDialog(dialog, $("#loginPassword"));
+}
+
+let confirmationResolver = null;
+
+function requestConfirmation(message, { title = "Aktion bestätigen", inputLabel = "", expectedText = "" } = {}) {
+  const dialog = $("#confirmationDialog");
+  const form = $("#confirmationDialogForm");
+  const messageNode = $("#confirmationDialogMessage");
+  const titleNode = $("#confirmationDialogTitle");
+  const inputLabelNode = $("#confirmationDialogInputLabel");
+  const input = $("#confirmationDialogInput");
+  if (!dialog || !form || !messageNode || !titleNode || !inputLabelNode || !input) return Promise.resolve(false);
+  if (confirmationResolver) confirmationResolver(false);
+  dialog.dataset.expectedText = expectedText;
+  titleNode.textContent = title;
+  messageNode.textContent = message;
+  inputLabelNode.hidden = !expectedText;
+  inputLabelNode.firstChild.textContent = inputLabel || "Bestätigungstext";
+  input.value = "";
+  input.required = Boolean(expectedText);
+  input.setCustomValidity("");
+  return new Promise((resolve) => {
+    confirmationResolver = resolve;
+    showAccessibleDialog(dialog, expectedText ? input : $("#confirmationDialogCancel"));
+  });
+}
+
+function settleConfirmation(value) {
+  const resolve = confirmationResolver;
+  confirmationResolver = null;
+  if (resolve) resolve(value);
 }
 
 function showAppShellLoading() {
@@ -210,6 +272,60 @@ function finishAppShellLoading() {
 
 async function api(path, options = {}) {
   return window.AppApi.request(path, options, showLogin);
+}
+
+function scheduleStateEventRefresh(areas) {
+  (areas || []).forEach((area) => state.stateEventRefreshAreas.add(area));
+  if (state.stateEventRefreshTimer) clearTimeout(state.stateEventRefreshTimer);
+  state.stateEventRefreshTimer = setTimeout(() => {
+    state.stateEventRefreshTimer = null;
+    const requested = [...state.stateEventRefreshAreas];
+    state.stateEventRefreshAreas.clear();
+    load("/api/bootstrap?local=1", requested).catch(() => {});
+  }, 150);
+}
+
+function handleStateEvent(event) {
+  if (event.lastEventId) state.stateEventLastId = Number(event.lastEventId) || state.stateEventLastId;
+  let payload = {};
+  try { payload = JSON.parse(event.data || "{}"); } catch (_) { return; }
+  if (payload.latest_event_id !== undefined) state.stateEventLastId = Number(payload.latest_event_id) || state.stateEventLastId;
+  if (event.type === "reset") {
+    scheduleStateEventRefresh(["chat", "plan", "library", "performance", "feedback", "profile"]);
+    return;
+  }
+  const areas = {
+    coach: ["chat"],
+    planning: ["plan", "library"],
+    provider: [],
+    job: [],
+    sync: [],
+  }[event.type];
+  if (areas) scheduleStateEventRefresh(areas);
+}
+
+function scheduleStateEventReconnect() {
+  if (state.stateEventReconnectTimer || !state.data || !navigator.onLine) return;
+  const delay = state.stateEventBackoff;
+  state.stateEventBackoff = Math.min(state.stateEventBackoff * 2, 30_000);
+  state.stateEventReconnectTimer = setTimeout(() => {
+    state.stateEventReconnectTimer = null;
+    connectStateEvents();
+  }, delay);
+}
+
+function connectStateEvents() {
+  if (!state.data || !("EventSource" in window) || state.stateEventSource) return;
+  const source = new EventSource(`/api/state/events?since=${encodeURIComponent(state.stateEventLastId)}`, { withCredentials: true });
+  state.stateEventSource = source;
+  source.onopen = () => { state.stateEventBackoff = 1000; };
+  ["provider", "job", "planning", "coach", "sync", "reset"].forEach((name) => source.addEventListener(name, handleStateEvent));
+  source.onerror = () => {
+    if (state.stateEventSource !== source) return;
+    source.close();
+    state.stateEventSource = null;
+    scheduleStateEventReconnect();
+  };
 }
 
 function syncPollLeaseAvailable() {
@@ -447,6 +563,7 @@ function setupConnectivityStatus() {
   renderConnectivityStatus();
   window.addEventListener("online", () => renderConnectivityStatus(true));
   window.addEventListener("offline", () => renderConnectivityStatus(false));
+  window.addEventListener("online", () => connectStateEvents());
 }
 
 function setVoiceStatus(message = "", error = false) {
@@ -466,6 +583,11 @@ function formatVoiceDuration() {
   return `${String(Math.floor(elapsed / 1000)).padStart(2, "0")} s / 60 s`;
 }
 
+function setVoiceButtonIcon(icon) {
+  const button = $("#voiceButton");
+  if (button) button.innerHTML = `<svg class="nav-icon" aria-hidden="true"><use href="#icon-${icon}"></use></svg>`;
+}
+
 function updateVoiceButton() {
   const button = $("#voiceButton");
   if (!button) return;
@@ -476,15 +598,15 @@ function updateVoiceButton() {
   button.classList.toggle("transcribing", transcribing);
   button.setAttribute("aria-pressed", recording ? "true" : "false");
   if (recording) {
-    button.textContent = "■";
+    setVoiceButtonIcon("stop");
     button.setAttribute("aria-label", "Spracheingabe beenden");
     button.title = "Spracheingabe beenden";
   } else if (transcribing) {
-    button.textContent = "…";
+    button.innerHTML = "<span class=\"button-spinner\" aria-hidden=\"true\"></span>";
     button.setAttribute("aria-label", "Audio wird transkribiert");
     button.title = "Audio wird transkribiert";
   } else {
-    button.textContent = "🎙";
+    setVoiceButtonIcon("microphone");
     button.setAttribute("aria-label", "Spracheingabe starten");
     button.title = "Spracheingabe starten";
   }
@@ -788,6 +910,72 @@ function renderProviderFreshness(data) {
   });
 }
 
+function coachProviderLabel(provider) {
+  return { intervals: "Intervals.icu", garmin: "Garmin", weather: "Wetter", calendar: "Kalender" }[provider] || provider;
+}
+
+function coachStatusLabel(status) {
+  return {
+    ready: "Bereit",
+    loading: "Wird geladen",
+    stale: "Letzte Daten",
+    degraded: "Teilweise",
+    error: "Fehler",
+    not_configured: "Nicht eingerichtet",
+  }[status] || "Unbekannt";
+}
+
+function renderCoachOverview(data) {
+  const root = $("#coachProviderStatus");
+  const ready = $("#coachReadyStatus");
+  const intro = $("#coachOverviewStatus");
+  if (!root || !ready) return;
+  root.replaceChildren();
+  const configured = data.configured || {};
+  const providers = data.provider_states || {};
+  const entries = ["intervals", "garmin", "weather"].map((provider) => {
+    const providerState = providers[provider] || {};
+    const status = providerState.status || (configured[provider] === false ? "not_configured" : "loading");
+    return { provider, status };
+  });
+  entries.forEach(({ provider, status }) => {
+    const item = document.createElement("div");
+    item.className = "coach-provider-item";
+    item.append(document.createElement("span"));
+    const copy = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = coachProviderLabel(provider);
+    const detail = document.createElement("small");
+    detail.textContent = coachStatusLabel(status);
+    copy.append(name, detail);
+    item.append(copy);
+    item.dataset.status = status;
+    root.append(item);
+  });
+  const hasError = entries.some(({ status }) => status === "error");
+  const hasLoading = entries.some(({ status }) => status === "loading");
+  const missing = !configured.openai || !configured.intervals;
+  const overall = missing ? "not_configured" : hasError ? "error" : hasLoading ? "loading" : "ready";
+  ready.dataset.status = overall;
+  ready.textContent = missing ? "Einrichtung nötig" : coachStatusLabel(overall);
+  if (intro) intro.textContent = missing
+    ? "OpenAI und Intervals.icu werden für Coach-Antworten benötigt."
+    : hasError ? "Eine Datenquelle braucht Aufmerksamkeit; bereits geladene Daten bleiben sichtbar."
+      : "Verlauf, Planung und Erholung sind im Coach-Kontext gebündelt.";
+}
+
+function renderCoachReceipts() {
+  const root = $("#coachReceipts");
+  if (!root) return;
+  root.replaceChildren();
+  (state.coachReceipts || []).slice(-3).reverse().forEach((receipt) => root.append(createActionReceipt(receipt)));
+}
+
+function addCoachReceipt(receipt) {
+  state.coachReceipts = [...(state.coachReceipts || []), { ...receipt, createdAt: Date.now() }].slice(-3);
+  renderCoachReceipts();
+}
+
 async function retryProvider(provider, button) {
   if (button) button.disabled = true;
   try {
@@ -845,8 +1033,8 @@ function setDirtyIndicator(id, dirty) {
   if (indicator) indicator.hidden = !dirty;
 }
 
-function confirmDiscardChanges() {
-  return !hasUnsavedChanges() || window.confirm("Ungespeicherte Änderungen verwerfen?");
+async function confirmDiscardChanges() {
+  return !hasUnsavedChanges() || Boolean(await requestConfirmation("Ungespeicherte Änderungen verwerfen?", { title: "Änderungen verwerfen?" }));
 }
 
 function discardUnsavedChanges() {
@@ -1048,6 +1236,25 @@ function renderToday(data) {
   status.textContent = syncMessages.join(" · ");
   if (detail) detail.textContent = syncMessages.length ? syncMessages.join(" · ") : `Stand: ${dateLabel(todayKey)}`;
 
+  const adjustment = data.planning?.latest_replan;
+  const priorityCard = todayCard("Priorität heute", "today-priority");
+  if (checkin?.illness) {
+    todayCardText(priorityCard, `Krankheit gemeldet: ${checkin.illness}. Belastung heute vorsichtig bewerten.`, "today-card-summary");
+    priorityCard.append(todayAction("Check-in prüfen", () => openCheckinEditor(todayKey)));
+  } else if (adjustment?.changes?.length || adjustment?.illness_pause) {
+    todayCardText(priorityCard, "Eine lokale Plananpassung wartet auf deine Prüfung.", "today-card-summary");
+    priorityCard.append(todayAction("Plananpassung prüfen", () => applyNavigationRoute("plan/calendar", { historyMode: "push" })));
+  } else if (todayWorkouts.length) {
+    todayCardText(priorityCard, `${todayWorkouts.length} geplante Einheit${todayWorkouts.length === 1 ? "" : "en"} für heute. Prüfe sie mit dem Coach, wenn sich deine Tagesform verändert hat.`, "today-card-summary");
+    priorityCard.append(todayAction("Coach fragen", () => applyNavigationRoute("coach", { historyMode: "push" })));
+  } else if (!checkin) {
+    todayCardText(priorityCard, "Noch kein Check-in für heute. Ein kurzer Check-in hilft bei der Einordnung des Tages.");
+    priorityCard.append(todayAction("Check-in ausfüllen", () => openCheckinEditor(todayKey)));
+  } else {
+    todayCardText(priorityCard, "Keine dringende Anpassung erkannt. Deine Daten bleiben als Orientierung sichtbar.", "today-card-summary");
+  }
+  root.append(priorityCard);
+
   const checkinCard = todayCard("Tages-Check-in", "today-checkin");
   if (checkin) {
     const values = [
@@ -1085,7 +1292,7 @@ function renderToday(data) {
     item.append(title, meta);
     workoutCard.append(item);
   });
-  workoutCard.append(todayAction("Plan öffnen", () => applyNavigationRoute("planned", { historyMode: "push" })));
+    workoutCard.append(todayAction("Plan öffnen", () => applyNavigationRoute("plan/calendar", { historyMode: "push" })));
   root.append(workoutCard);
 
   const weatherCard = todayCard("Wetter", "today-weather");
@@ -1099,15 +1306,14 @@ function renderToday(data) {
   const openFeedback = (data.activities || []).find((activity) => todayActivityDate(activity) && !activity.activity_feedback);
   if (openFeedback) {
     todayCardText(feedbackCard, `Rückmeldung zu „${openFeedback.name || "letzter Aktivität"}“ ergänzen.`, "today-card-summary");
-    feedbackCard.append(todayAction("Verlauf öffnen", () => applyNavigationRoute("activities", { historyMode: "push" })));
+    feedbackCard.append(todayAction("Verlauf öffnen", () => applyNavigationRoute("analysis/history", { historyMode: "push" })));
   } else todayCardText(feedbackCard, "Keine offene Rückmeldung zu den geladenen Aktivitäten.");
   root.append(feedbackCard);
 
-  const adjustment = data.planning?.latest_replan;
   if (adjustment && (adjustment.changes?.length || adjustment.illness_pause)) {
     const adjustmentCard = todayCard("Aktuelle Plananpassung", "today-adjustment");
     todayCardText(adjustmentCard, "Eine Planänderung wartet auf deine Prüfung.", "today-card-summary");
-    adjustmentCard.append(todayAction("Plananpassung prüfen", () => applyNavigationRoute("planned", { historyMode: "push" })));
+    adjustmentCard.append(todayAction("Plananpassung prüfen", () => applyNavigationRoute("plan/calendar", { historyMode: "push" })));
     root.append(adjustmentCard);
   }
 }
@@ -1222,9 +1428,9 @@ function renderDailyPlanningContext(date, todayKey) {
 
 async function resolvePlannedConflict(localId, strategy, button) {
   if (!localId || !button) return;
-  if (!window.confirm(strategy === "adopt_remote"
+  if (!await requestConfirmation(strategy === "adopt_remote"
     ? "Die Remote-Version dieser Planung übernehmen? Die lokale Änderung wird verworfen."
-    : "Die lokale Version behalten und beim nächsten Remote-Sync übertragen?")) return;
+    : "Die lokale Version behalten und beim nächsten Remote-Sync übertragen?", { title: "Synchronisationskonflikt lösen?" })) return;
   button.disabled = true;
   try {
     await api(`/api/planned/local/${encodeURIComponent(localId)}/resolve`, {
@@ -1651,7 +1857,7 @@ function renderLocalPlanningActions(event, body) {
   deleteButton.className = "secondary-button danger-button";
   deleteButton.textContent = "Nur lokal entfernen";
   deleteButton.addEventListener("click", async () => {
-    if (!window.confirm(`„${event.name || "Geplante Einheit"}“ wirklich nur aus der lokalen Planung entfernen?`)) return;
+    if (!await requestConfirmation(`„${event.name || "Geplante Einheit"}“ wirklich nur aus der lokalen Planung entfernen?`, { title: "Lokale Planung entfernen?" })) return;
     deleteButton.disabled = true;
     try {
       await api(`/api/planned/local/${encodeURIComponent(event.local_id)}`, {
@@ -1676,6 +1882,14 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
   state.data.daily_planning_context = Array.isArray(dailyPlanningContext) ? dailyPlanningContext : [];
   root.querySelectorAll("details.planned-week").forEach((week) => state.plannedWeekOpen.set(week.dataset.week, week.open));
   root.replaceChildren();
+  if (!planned.length && !externalCalendarEvents.length && !competitions.length) {
+    root.append(state.data && !state.loadedAreas.has("plan") ? createSkeletonStack(4) : createEmptyState(
+      "Noch kein lokaler Plan",
+      "Plane eine Einheit mit dem Coach oder öffne eine Vorlage. Remote-Termine werden erst nach einem lokalen Import angezeigt.",
+      todayAction("Coach öffnen", () => applyNavigationRoute("coach", { historyMode: "push" }), "btn primary"),
+    ));
+    return;
+  }
   const eventsByDate = new Map();
   (planned || []).forEach((event) => {
     const date = plannedEventDate(event);
@@ -1952,7 +2166,7 @@ function renderPlanned(planned, externalCalendarEvents = [], dailyPlanningContex
 }
 
 async function deletePlanned(eventId, button, name) {
-  if (!window.confirm(`„${name || "Geplante Einheit"}“ wirklich lokal archivieren und für den nächsten Sync vormerken?`)) return;
+  if (!await requestConfirmation(`„${name || "Geplante Einheit"}“ wirklich lokal archivieren und für den nächsten Sync vormerken?`, { title: "Planung archivieren?" })) return;
   button.disabled = true;
   button.textContent = "Wird gelöscht…";
   try {
@@ -2081,10 +2295,15 @@ async function executeCoachActionProposal(proposal, button) {
     });
     state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
     renderCoachActionReview();
+    const receiptMessage = result.local_planned
+      ? `${result.local_planned} Einheit(en) lokal geplant. Remote-Sync bleibt eine separate Freigabe.`
+      : "Planung lokal gespeichert. Sie bleibt bis zur separaten Sync-Freigabe lokal.";
+    addCoachReceipt({ title: "Planung gespeichert", message: receiptMessage, details: [result.sync_job_id ? `Syncjob ${result.sync_job_id} eingereiht` : "Keine implizite Remote-Änderung"] });
     toast(result.local_planned ? `${result.local_planned} Einheit(en) lokal geplant` : "Planung lokal gespeichert");
     await load("/api/bootstrap?local=1", ["plan", "library"]);
-    applyNavigationRoute("planned", { historyMode: "push" });
+    applyNavigationRoute("plan/calendar", { historyMode: "push" });
   } catch (error) {
+    addCoachReceipt({ title: "Planung nicht gespeichert", message: error.message, status: "error" });
     toast(error.message, true);
     button.disabled = false;
   }
@@ -2122,12 +2341,8 @@ function renderMessages(messages, forceScroll = false) {
   root.dataset.signature = signature;
   root.replaceChildren();
   if (!visibleMessages.length && !state.chatRequest && !state.chatQueue.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    const title = document.createElement("strong");
-    title.textContent = "Dein Coach ist bereit";
-    empty.append(title, document.createTextNode("Lege deine Ziele im Profil fest. Bitte den Coach jederzeit, deine letzten Einheiten neu zu analysieren."));
-    root.append(empty);
+    if ($("#appShell")?.classList.contains("is-loading")) root.append(createSkeletonStack(4));
+    else root.append(createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest oder starte mit einer Schnellaktion."));
   }
   for (const message of visibleMessages) {
     const node = document.createElement("div");
@@ -2480,7 +2695,7 @@ function renderLibrary(workouts) {
             remove.className = "secondary-button danger-button";
             remove.textContent = "Löschen";
             remove.addEventListener("click", () => {
-              if (window.confirm(`„${workout.name || "Bibliothekseinheit"}“ wirklich lokal löschen?`)) updateLibraryEntry(workout.id, { action: "delete" });
+              requestConfirmation(`„${workout.name || "Bibliothekseinheit"}“ wirklich lokal löschen?`, { title: "Vorlage löschen?" }).then((confirmed) => { if (confirmed) updateLibraryEntry(workout.id, { action: "delete" }); });
             });
             controls.append(remove);
           }
@@ -2535,25 +2750,15 @@ function describeLibraryBulkPreview(preview, remote = false) {
 }
 
 async function executeLibraryActionPreview(preview, message) {
-  if (!window.confirm(message + "\n\n" + describeLibraryBulkPreview(preview, preview.target_system === "intervals"))) return null;
-  const actionPreview = await api("/api/coach/actions/preview", {
+  if (!await requestConfirmation(message + "\n\n" + describeLibraryBulkPreview(preview, preview.target_system === "intervals"), { title: "Bulk-Aktion bestätigen?" })) return null;
+  if (preview.target_system === "local") {
+    return api("/api/library/bulk", { method: "POST", body: JSON.stringify(preview.payload) });
+  }
+  const job = await api("/api/sync/jobs", {
     method: "POST",
-    body: JSON.stringify({
-      action_type: preview.action === "sync_selected_workout_library" ? preview.action : "bulk_update_workout_library",
-      target_system: preview.target_system,
-      object_ids: preview.object_ids,
-      diff: preview.entries,
-      payload: preview.payload,
-    }),
+    body: JSON.stringify({ provider: "intervals", type: "plan_push", payload: { ...preview.payload, reason: "manueller Bibliothekssync" } }),
   });
-  const confirmed = await api("/api/coach/actions/confirm", {
-    method: "POST",
-    body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
-  });
-  return api("/api/coach/actions/execute", {
-    method: "POST",
-    body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
-  });
+  return { status: "queued", sync_job_id: job.id, job, results: [], failed_object_ids: [] };
 }
 
 function renderLibraryBulkResult(result) {
@@ -2642,7 +2847,7 @@ async function loadLibrary() {
       .filter(([key]) => key !== "planned")
       .reduce((total, [, value]) => total + Number(value || 0), 0);
     const plannedCount = Number(summary.planned || 0);
-    const confirmed = window.confirm(
+    const confirmed = await requestConfirmation(
       `Bibliothekssync zu Intervals.icu freigeben? ${changeCount} lokale Einträge: ` +
       `${summary.new || 0} neu, ${summary.changed || 0} geändert, ` +
       `${summary.missing || 0} fehlend, ${summary.error_retry || 0} Fehlerwiederholung` +
@@ -2650,24 +2855,11 @@ async function loadLibrary() {
       "Die Vorschau ist nur 10 Minuten gültig."
     );
     if (!confirmed) return;
-    const actionPreview = await api("/api/coach/actions/preview", {
+    const result = await api("/api/planning/sync/approved", {
       method: "POST",
-      body: JSON.stringify({
-        action_type: "sync_workout_library",
-        target_system: "intervals",
-        object_ids: {},
-        diff: preview.entries || [],
-        payload: { fingerprint: preview.fingerprint },
-      }),
+      body: JSON.stringify({ confirm: "LIBRARY_SYNC", fingerprint: preview.fingerprint }),
     });
-    const confirmedAction = await api("/api/coach/actions/confirm", {
-      method: "POST",
-      body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
-    });
-    await api("/api/coach/actions/execute", {
-      method: "POST",
-      body: JSON.stringify({ action_token: confirmedAction.action_token, payload_hash: confirmedAction.proposed_action.payload_hash }),
-    });
+    toast(result.status === "queued" ? `${result.job_ids?.length || 0} Bibliotheks-Syncjob(s) eingereiht` : "Bibliothek ist bereits aktuell");
     await load();
   } catch (error) {
     root.replaceChildren();
@@ -3221,18 +3413,19 @@ function updateHeaderAction() {
   const panel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   if (panel === "dataPanel") {
     button.hidden = false;
-    button.dataset.action = "performance";
-    button.title = "Aktuelle Leistungsdaten von Intervals.icu aktualisieren";
-    button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
-    button.textContent = state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin
-      ? "Synchronisierung läuft…"
-      : button.disabled ? "Leistungsdaten werden aktualisiert…" : "Leistungsdaten aktualisieren";
-  } else if (panel === "activitiesPanel") {
-    button.hidden = false;
-    button.dataset.action = "activities";
-    button.title = "Aktivitäten der letzten 90 Tage von Intervals.icu laden";
-    button.disabled = Boolean(state.data?.sync?.running || state.data?.provider_resync?.intervals?.running || state.localSync.intervals || state.localSync.intervalsFull);
-    button.textContent = button.disabled ? "Synchronisierung läuft…" : "Aktivitäten aktualisieren";
+    if (state.analysisSegment === "performance") {
+      button.dataset.action = "performance";
+      button.title = "Aktuelle Leistungsdaten von Intervals.icu aktualisieren";
+      button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
+      button.textContent = state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin
+        ? "Synchronisierung läuft…"
+        : button.disabled ? "Leistungsdaten werden aktualisiert…" : "Leistungsdaten aktualisieren";
+    } else {
+      button.dataset.action = "activities";
+      button.title = "Aktivitäten der letzten 90 Tage von Intervals.icu laden";
+      button.disabled = Boolean(state.data?.sync?.running || state.data?.provider_resync?.intervals?.running || state.localSync.intervals || state.localSync.intervalsFull);
+      button.textContent = button.disabled ? "Synchronisierung läuft…" : "Aktivitäten aktualisieren";
+    }
   } else {
     button.hidden = true;
     button.disabled = false;
@@ -3285,8 +3478,10 @@ function renderThinkingLevel(thinkingLevel) {
 
 function renderAppVersion(app = {}) {
   const versionNode = $("#appVersion");
+  const desktopVersionNode = $("#desktopNavVersion");
   const updateNode = $("#appUpdateIndicator");
   if (versionNode) versionNode.textContent = app.version ? `v${app.version}` : "";
+  if (desktopVersionNode) desktopVersionNode.textContent = app.version ? `v${app.version}` : "";
   if (!updateNode) return;
   const release = app.github_release || {};
   const hasNewerVersion = release.status === "ok" && release.is_newer;
@@ -3549,13 +3744,12 @@ async function loadChangeHistory() {
 }
 
 async function undoChange(changeId, button) {
-  if (!window.confirm("Diese Änderung lokal zurücknehmen? Es wird kein Remote-Provider beschrieben. Neuere Änderungen führen zu einem Konflikt.")) return;
+  if (!await requestConfirmation("Diese Änderung lokal zurücknehmen? Es wird kein Remote-Provider beschrieben. Neuere Änderungen führen zu einem Konflikt.", { title: "Lokale Änderung zurücknehmen?" })) return;
   button.disabled = true;
   try {
     const preview = await api("/api/change-history/undo/preview", { method: "POST", body: JSON.stringify({ change_id: changeId }) });
-    if (!window.confirm("Undo-Vorschau bestätigen? Die Mutation bleibt lokal; ein späterer Remote-Sync muss separat geprüft werden.")) return;
-    const confirmed = await api("/api/coach/actions/confirm", { method: "POST", body: JSON.stringify({ proposal_id: preview.proposed_action.id }) });
-    await api("/api/coach/actions/execute", { method: "POST", body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }) });
+    if (!await requestConfirmation("Undo-Vorschau bestätigen? Die Mutation bleibt lokal; ein späterer Remote-Sync muss separat geprüft werden.", { title: "Undo-Vorschau bestätigen?" })) return;
+    await api("/api/change-history/undo", { method: "POST", body: JSON.stringify(preview.proposed_action.payload) });
     toast("Lokale Änderung zurückgenommen");
     await load();
     await loadChangeHistory();
@@ -3590,6 +3784,8 @@ function render(data) {
   state.data = data;
   renderAppVersion(data.app);
   renderRemoteDeleteNotice();
+  renderCoachOverview(data);
+  renderCoachReceipts();
   renderQuickMessageTemplates();
   notifyState(data);
   renderStatus(data);
@@ -3784,21 +3980,23 @@ async function pollChatStatus() {
 async function loadInitialState() {
   const route = routeFromHash();
   const segment = planSegmentFromRoute(route);
+  state.analysisSegment = analysisSegmentFromRoute(route);
   const areas = ["chat", "activities", "performance", "feedback", "profile"];
   areas.push("weather");
-  if (route === "today" || (baseRoute(route) === "planned" && segment !== "library")) areas.push("plan");
-  if (baseRoute(route) === "planned" && segment === "library") areas.push("library");
+  if (route === "today" || (baseRoute(route) === "plan" && segment !== "templates")) areas.push("plan");
+  if (baseRoute(route) === "plan" && segment === "templates") areas.push("library");
   await load("/api/bootstrap?local=1", areas);
   if (state.data?.profile?.weather_location) {
     await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
   }
+  connectStateEvents();
   scheduleChatStatusPoll(0);
 }
 
 function renderActivePlanSegment(data = state.data) {
   if (!data) return;
   renderPlanSegments(state.planSegment);
-  if (state.planSegment === "library") renderLibrary(data.library || []);
+  if (state.planSegment === "templates") renderLibrary(data.library || []);
   if (state.planSegment === "goals") {
     renderCompetitions(data.competitions || []);
     renderTrainingPlans(data.plans || [], data.library || []);
@@ -3825,7 +4023,8 @@ async function requestCoachResponse(message) {
     renderMessages(state.data.messages, true);
   }
   state.chatStreamText = "";
-  const request = { phase: "running", message, operationId: null, responseMessageId: null, cancelRequested: false };
+  const clientTurnId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `turn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const request = { phase: "running", message, clientTurnId, operationId: null, responseMessageId: null, cancelRequested: false };
   state.chatRequest = request;
   const stream = { controller: new AbortController(), operationId: null, cancelRequested: false, request, serverError: false };
   state.chatStream = stream;
@@ -3838,7 +4037,7 @@ async function requestCoachResponse(message) {
       credentials: "same-origin",
       signal: stream.controller.signal,
       headers: { "Content-Type": "application/json", "X-CSRF-Token": cookie("ic_csrf") },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, client_turn_id: clientTurnId }),
     });
     if (!response.ok) {
       if (response.status === 401) stream.serverError = true;
@@ -4039,25 +4238,11 @@ async function syncCompetitions() {
     });
     const details = actions.length ? `\n\n${actions.join("\n")}` : "\n\nKeine Remote-Änderungen erforderlich.";
     const message = `Intervals.icu-Wettkampf-Sync bestätigen?\n\nErstellen: ${summary.create || 0} · Ändern: ${summary.change || 0} · Löschen: ${summary.delete || 0} · Konflikte: ${summary.conflict || 0}${details}`;
-    if (!window.confirm(message)) return;
+    if (!await requestConfirmation(message, { title: "Wettkampf-Sync bestätigen?" })) return;
     button.textContent = "Synchronisierung läuft…";
-    const actionPreview = await api("/api/coach/actions/preview", {
+    const result = await api("/api/competitions/sync/approved", {
       method: "POST",
-      body: JSON.stringify({
-        action_type: "sync_competitions",
-        target_system: "intervals",
-        object_ids: {},
-        diff: preview.actions || [],
-        payload: { fingerprint: preview.fingerprint },
-      }),
-    });
-    const confirmedAction = await api("/api/coach/actions/confirm", {
-      method: "POST",
-      body: JSON.stringify({ proposal_id: actionPreview.proposed_action.id }),
-    });
-    const result = await api("/api/coach/actions/execute", {
-      method: "POST",
-      body: JSON.stringify({ action_token: confirmedAction.action_token, payload_hash: confirmedAction.proposed_action.payload_hash }),
+      body: JSON.stringify({ confirm: "COMPETITION_SYNC", fingerprint: preview.fingerprint }),
     });
     if (result.status === "already_running") toast("Zielwettkämpfe werden bereits synchronisiert");
     else toast(`Zielwettkämpfe synchronisiert · ${result.pushed || 0} übertragen · ${result.imported || 0} importiert${result.conflicts ? ` · ${result.conflicts} Konflikt(e) bitte prüfen` : ""}${result.skipped ? ` · ${result.skipped} nicht unterstützte Sportart(en) übersprungen` : ""}`);
@@ -4142,7 +4327,7 @@ async function fullResync(source) {
   const button = $(isGarmin ? "#garminFullResyncButton" : "#systemIntervalsFullResyncButton");
   if (!button) return;
   const providerLabel = isGarmin ? "Garmin" : "Intervals.icu";
-  if (!window.confirm(`Alle lokal gespeicherten ${providerLabel}-Daten löschen und vollständig neu laden? Die Daten in ${providerLabel} bleiben unverändert.`)) return;
+  if (!await requestConfirmation(`Alle lokal gespeicherten ${providerLabel}-Daten löschen und vollständig neu laden? Die Daten in ${providerLabel} bleiben unverändert.`, { title: `${providerLabel}-Daten vollständig neu laden?` })) return;
   const stateKey = isGarmin ? "garminFull" : "intervalsFull";
   state.localSync[stateKey] = true;
   button.disabled = true;
@@ -4165,7 +4350,7 @@ async function fullResync(source) {
 
 async function resetCoachChat() {
   const button = $("#chatResetButton");
-  if (!button || !window.confirm("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?")) return;
+  if (!button || !await requestConfirmation("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?", { title: "Coach-Chat zurücksetzen?" })) return;
   button.disabled = true;
   button.textContent = "Wird zurückgesetzt…";
   try {
@@ -4255,7 +4440,7 @@ function setupPwaUpdates() {
 }
 
 async function applyPwaUpdate() {
-  if (!confirmDiscardChanges()) return;
+  if (!await confirmDiscardChanges()) return;
   try {
     const registration = await navigator.serviceWorker.getRegistration();
     if (!registration?.waiting) {
@@ -4349,7 +4534,7 @@ async function applyReplan() {
   const confirmation = syncIllness
     ? "Krankheitspause bestätigen, die nächsten Tage im lokalen Check-in füllen, die Planung umbauen und Krankheitstage als SICK-Einträge nach Intervals.icu synchronisieren?"
     : "Krankheitspause bestätigen, die nächsten Tage im lokalen Check-in füllen und die lokale Planung umbauen? Intervals.icu wird dabei nicht verändert.";
-  if (!button || !adjustmentId || !window.confirm(confirmation)) return;
+  if (!button || !adjustmentId || !await requestConfirmation(confirmation, { title: "Adaptive Planung anwenden?" })) return;
   button.disabled = true;
   try {
     const changes = state.data?.planning?.latest_replan?.changes || [];
@@ -4399,7 +4584,7 @@ async function downloadDatabaseBackup() {
 async function restoreDatabaseBackup() {
   const input = $("#backupFileInput");
   const file = input?.files?.[0];
-  if (!file || !window.confirm("Das aktuelle Datenbank-Backup wird vorher gesichert und durch die ausgewählte Datei ersetzt. Fortfahren?")) return;
+  if (!file || !await requestConfirmation("Das aktuelle Datenbank-Backup wird vorher gesichert und durch die ausgewählte Datei ersetzt. Fortfahren?", { title: "Datenbank-Backup wiederherstellen?" })) return;
   const button = $("#backupRestoreButton");
   button.disabled = true;
   try {
@@ -4509,12 +4694,12 @@ async function deletePrivacyData() {
       `${(preview.remote_untouched || []).join("\n")}\n\n` +
       `${preview.openai_conversation || "Eine vorhandene OpenAI-Konversation wird separat behandelt."}\n\n` +
       "Erstelle bei Bedarf vorher ein verschlüsseltes Backup oder einen Export. Dieser Schritt kann nicht rückgängig gemacht werden.";
-    if (!window.confirm(scope)) return;
-    const confirmation = window.prompt(`Zur Bestätigung exakt eingeben: ${preview.confirmation_text}`, "");
-    if (confirmation !== preview.confirmation_text) {
-      toast("Löschen abgebrochen: Bestätigungstext stimmt nicht überein.", true);
-      return;
-    }
+    const confirmation = await requestConfirmation(scope, {
+      title: "Lokale Daten endgültig löschen?",
+      inputLabel: "Bestätigungstext",
+      expectedText: preview.confirmation_text,
+    });
+    if (!confirmation) return;
     const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: confirmation }) });
     const notice = $("#privacyDeleteNotice");
     if (notice) {
@@ -4535,20 +4720,48 @@ async function deletePrivacyData() {
 }
 
 async function logout() {
-  if (!confirmDiscardChanges()) return;
+  if (!await confirmDiscardChanges()) return;
   try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
   showLogin();
 }
 
+const confirmationDialog = $("#confirmationDialog");
+const confirmationForm = $("#confirmationDialogForm");
+const confirmationInput = $("#confirmationDialogInput");
+confirmationForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const expectedText = confirmationDialog?.dataset.expectedText || "";
+  if (expectedText && confirmationInput?.value !== expectedText) {
+    confirmationInput?.setCustomValidity("Bestätigungstext stimmt nicht überein.");
+    confirmationInput?.reportValidity();
+    confirmationInput?.focus();
+    return;
+  }
+  confirmationInput?.setCustomValidity("");
+  settleConfirmation(expectedText ? confirmationInput.value : true);
+  confirmationDialog?.close();
+});
+$("#confirmationDialogCancel")?.addEventListener("click", () => {
+  settleConfirmation(false);
+  confirmationDialog?.close();
+});
+confirmationDialog?.addEventListener("close", () => settleConfirmation(false));
+
 document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
-  applyNavigationRoute(link.dataset.route, { historyMode: "push" });
+  const linkedRoute = String(link.getAttribute("href") || "").replace(/^#/, "").trim();
+  applyNavigationRoute(linkedRoute || link.dataset.route, { historyMode: "push" });
 }));
 document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
-  applyNavigationRoute(`planned/${link.dataset.planSegment}`, { historyMode: "push" });
+  applyNavigationRoute(`plan/${link.dataset.planSegment}`, { historyMode: "push" });
+}));
+document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  applyNavigationRoute(`analysis/${link.dataset.analysisSegment}`, { historyMode: "push" });
 }));
 document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -4567,6 +4780,14 @@ $("#quickMessageTemplates").addEventListener("click", (event) => {
   if (!button || state.busy) return;
   const input = $("#messageInput");
   input.value = button.dataset.message || "";
+  input.dispatchEvent(new Event("input"));
+  $("#chatForm").requestSubmit();
+});
+$("#coachQuickActions").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-coach-message]");
+  if (!button || state.busy) return;
+  const input = $("#messageInput");
+  input.value = button.dataset.coachMessage || "";
   input.dispatchEvent(new Event("input"));
   $("#chatForm").requestSubmit();
 });
@@ -4592,7 +4813,7 @@ $("#checkinCloseButton").addEventListener("click", () => $("#checkinDialog")?.cl
 $("#adaptivePlanningButton").addEventListener("click", prepareReplan);
 $("#applyAdaptivePlanningButton").addEventListener("click", applyReplan);
 $("#cancelAdaptivePlanningButton").addEventListener("click", () => $("#adaptivePlanningDialog")?.close());
-$("#coachAdaptivePlanningButton").addEventListener("click", () => applyNavigationRoute("planned", { historyMode: "push" }));
+$("#coachAdaptivePlanningButton").addEventListener("click", () => applyNavigationRoute("plan/calendar", { historyMode: "push" }));
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
 $("#competitionList").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
