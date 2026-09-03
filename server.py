@@ -2354,6 +2354,23 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
     except ValueError as exc:
         raise AppError(400, str(exc), reason="invalid_job_request") from exc
     values = envelope["payload"]
+    if envelope["type"] == "plan_push":
+        if envelope["provider"] != "intervals":
+            raise AppError(400, "Plan-Push-Jobs sind nur für Intervals.icu zulässig.", reason="invalid_job_request")
+        if set(values) - {"entries", "reason"}:
+            raise AppError(400, "Ein Plan-Push-Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
+        entries = values.get("entries")
+        if not isinstance(entries, list) or not 1 <= len(entries) <= 28:
+            raise AppError(400, "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten.", reason="invalid_job_request")
+        normalized_entries = []
+        for entry in entries:
+            if not isinstance(entry, dict) or not re.fullmatch(r"[0-9a-f-]{36}", str(entry.get("library_workout_id") or "")):
+                raise AppError(400, "Jede Plan-Push-Einheit benötigt eine lokale UUID.", reason="invalid_job_request")
+            payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
+            if not re.fullmatch(r"[0-9a-f]{64}", payload_hash):
+                raise AppError(400, "Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash.", reason="invalid_job_request")
+            normalized_entries.append({"library_workout_id": str(entry["library_workout_id"]), "expected_payload_hash": payload_hash})
+        return {"provider": envelope["provider"], "type": envelope["type"], "payload": {"entries": normalized_entries, "reason": str(values.get("reason") or "job").strip()[:80] or "job"}}
     allowed = {
         "intervals": {"days", "reason"},
         "garmin": {"days", "reason"},
@@ -2562,6 +2579,8 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
     provider = str(job["provider"])
     job_type = str(job["type"])
     reason = str(payload.get("reason") or "Persistenter Providerjob")
+    if job_type == "plan_push" and provider == "intervals":
+        return _sync_selected_workout_library({"entries": payload.get("entries")})
     if job_type == "plan_push":
         raise AppError(409, "Plan-Push-Jobs werden erst durch den autorisierten Planungsworkflow ausgeführt.", reason="unsupported_job")
     if provider == "intervals":
@@ -12650,8 +12669,11 @@ def _canonical_coach_tool(name: str, description: str) -> dict[str, Any]:
                 "template": {"type": "object"},
                 "changes": {"type": "array", "items": {"type": "object"}},
                 "artifact_id": {"type": "string"},
+                "local_id": {"type": "string"},
                 "job_id": {"type": "string"},
                 "change_id": {"type": "string"},
+                "expected_payload_hash": {"type": "string"},
+                "expected_revision": {"type": "integer"},
                 "days": {"type": "integer"},
             },
             "additionalProperties": False,
@@ -12690,6 +12712,24 @@ def _structured_artifact_payload(arguments: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in arguments.items() if key not in {"artifact_id", "expected_revision"}}
 
 
+def _validate_structured_plan_limits(payload: dict[str, Any], *, command_limit: bool = False) -> None:
+    workouts = payload.get("workouts")
+    if not isinstance(workouts, list) or not workouts:
+        raise AppError(400, "Ein Planartefakt benötigt mindestens eine Einheit.", reason="plan_limit")
+    if len(workouts) > (28 if command_limit else 366):
+        raise AppError(400, "Ein Coach-Kommando darf höchstens 28 Einheiten ändern; ein Artefakt höchstens 366.", reason="plan_limit")
+    dates = []
+    for workout in workouts:
+        if not isinstance(workout, dict):
+            raise AppError(400, "Jede Planeinheit muss ein Objekt sein.", reason="invalid_plan")
+        try:
+            dates.append(date.fromisoformat(str(workout.get("date") or "")[:10]))
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Jede Planeinheit benötigt ein gültiges Datum.", reason="invalid_plan") from exc
+    if dates and (max(dates) - min(dates)).days > 730:
+        raise AppError(400, "Ein Planartefakt darf höchstens 730 Tage umfassen.", reason="plan_limit")
+
+
 def _stage_coach_artifact(conversation_id: str, client_turn_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     with DB_LOCK, database() as db:
         revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
@@ -12710,6 +12750,7 @@ def _structured_coach_tool_result(
     intent: dict[str, Any],
     conversation_id: str,
     client_turn_id: str,
+    session_csrf_hash: str,
     sync_job_ids: list[str],
 ) -> dict[str, Any]:
     operation = intent.get("operation")
@@ -12718,7 +12759,9 @@ def _structured_coach_tool_result(
     if name == "stage_training_plan":
         if operation != "stage_training_plan":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        return _stage_coach_artifact(conversation_id, client_turn_id, _structured_artifact_payload(arguments))
+        payload = _structured_artifact_payload(arguments)
+        _validate_structured_plan_limits(payload)
+        return _stage_coach_artifact(conversation_id, client_turn_id, payload)
     if name == "commit_training_plan":
         if operation != "commit_training_plan":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
@@ -12734,6 +12777,7 @@ def _structured_coach_tool_result(
             if int(artifact["base_revision"] or 0) != int((_structured_training_state().get("planning_revision") or 0)):
                 raise AppError(409, "Der lokale Plan wurde inzwischen geändert.", reason="planning_revision_conflict")
             payload = json.loads(artifact["payload"] or "{}")
+        _validate_structured_plan_limits(payload, command_limit=True)
         entries = save_workout_library_entries(
             payload.get("workouts") or [],
             plan_name=str(payload.get("plan_name") or "Coach-Plan"),
@@ -12745,11 +12789,42 @@ def _structured_coach_tool_result(
     if name == "apply_training_changes":
         if operation != "apply_training_changes":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        return {"ok": True, "status": "applied", "changes": arguments.get("changes") or []}
+        changes = arguments.get("changes") or []
+        if not isinstance(changes, list) or not changes or len(changes) > 28:
+            raise AppError(400, "Ein Coach-Kommando darf höchstens 28 Änderungen enthalten.", reason="change_limit")
+        expected_revision = arguments.get("expected_revision")
+        with DB_LOCK, database() as db:
+            revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+            current_revision = int((revision_row or {}).get("revision") or 0)
+        if expected_revision is not None and int(expected_revision) != current_revision:
+            raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
+        with DB_LOCK, database() as db:
+            for change in changes:
+                if not isinstance(change, dict) or not change.get("local_id"):
+                    raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
+                expected_hash = str(change.get("expected_payload_hash") or "").strip().lower()
+                if expected_hash:
+                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (str(change["local_id"]),)).fetchone()
+                    if not row or _planned_unit_payload_hash(row["payload"]) != expected_hash:
+                        raise AppError(409, "Eine Planänderung ist seit der Vorschau veraltet.", reason="payload_hash_conflict")
+        applied = []
+        for change in changes:
+            if not isinstance(change, dict) or not change.get("local_id"):
+                raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
+            applied.append(update_local_planned_workout(change["local_id"], change))
+        with DB_LOCK, database() as db:
+            db.execute("UPDATE planning_state SET revision=revision+1, updated_at=? WHERE id=1", (utc_now(),))
+            revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        return {"ok": True, "status": "applied", "planning_revision": int((revision or {}).get("revision") or current_revision), "changes": applied}
     if name == "manage_training_templates":
         if operation != "manage_training_templates":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        return {"ok": True, "stored_locally": True, "template": create_local_library_template(arguments.get("template") if isinstance(arguments.get("template"), dict) else arguments)}
+        template = arguments.get("template") if isinstance(arguments.get("template"), dict) else arguments
+        if str(template.get("action") or "create").strip().casefold() == "update":
+            local_id = str(template.get("local_id") or "").strip()
+            updated = update_workout_library_entry(local_id, template)
+            return {"ok": True, "stored_locally": True, "template": updated}
+        return {"ok": True, "stored_locally": True, "template": create_local_library_template(template)}
     if name == "start_provider_refresh":
         if operation != "start_provider_refresh":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
@@ -12773,7 +12848,7 @@ def _structured_coach_tool_result(
     if name == "undo_training_change":
         if operation != "undo_training_change":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        return {"ok": True, "status": "preview_required", "change_id": str(arguments.get("change_id") or "")}
+        return {"ok": True, **_history_preview(arguments.get("change_id"), session_csrf_hash)}
     raise AppError(400, "Unbekanntes Coach-Werkzeug.", reason="unknown_coach_tool")
 
 
@@ -12836,7 +12911,10 @@ def _chat_with_structured_coach(
                     arguments = json.loads(item.get("arguments") or "{}")
                     if not isinstance(arguments, dict):
                         raise AppError(400, "Coach-Aktionsargumente müssen ein Objekt sein.")
-                    result = _structured_coach_tool_result(name, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, sync_job_ids=sync_job_ids)
+                    result = _structured_coach_tool_result(name, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids)
+                    if result.get("artifact_id"):
+                        with DB_LOCK, database() as db:
+                            db.execute("UPDATE coach_commands SET artifact_id=?, updated_at=? WHERE client_turn_id=? AND status='running'", (result["artifact_id"], utc_now(), client_turn_id))
                 except (AppError, TypeError, ValueError, json.JSONDecodeError) as exc:
                     result = {"ok": False, "error": redact_text(str(exc))[:1000]}
             command_receipts.append({"call_id": call_id, "tool": name, "result": result})

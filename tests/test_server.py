@@ -3941,7 +3941,7 @@ class CoachTests(unittest.TestCase):
             "authorization_scope": ["local_plan"],
         }
         responses = [
-            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-1", "arguments": json.dumps({"payload": {"plan_name": "Test", "workouts": []}})}]},
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-1", "arguments": json.dumps({"payload": {"plan_name": "Test", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}})}]},
             {"output_text": "Der Entwurf ist gespeichert."},
         ]
         with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
@@ -3982,6 +3982,16 @@ class CoachTests(unittest.TestCase):
         with server.DB_LOCK, server.database() as db:
             row = db.execute("SELECT provider, type, requested_by FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)).fetchone()
         self.assertEqual(dict(row), {"provider": "intervals", "type": "refresh", "requested_by": "coach"})
+
+    def test_plan_push_job_requires_bounded_selected_hashed_entries(self):
+        local_id = str(uuid.uuid4())
+        entry = {"library_workout_id": local_id, "expected_payload_hash": "a" * 64}
+        job = server.enqueue_sync_job("intervals", "plan_push", {"entries": [entry]}, requested_by="coach")
+        self.assertEqual(job["type"], "plan_push")
+        self.assertEqual(job["payload"], {"entries": [entry], "reason": "job"})
+        with self.assertRaises(server.AppError) as too_many:
+            server.enqueue_sync_job("intervals", "plan_push", {"entries": [entry] * 29}, requested_by="coach")
+        self.assertEqual(too_many.exception.reason, "invalid_job_request")
 
     def test_context_preview_exposes_context_and_last_chat_input(self):
         server.add_message("user", "Wie soll ich morgen trainieren?")
