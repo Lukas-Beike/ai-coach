@@ -1,0 +1,56 @@
+name: Auto-rebase squash auto-merge PRs
+
+on:
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: auto-rebase-develop
+  cancel-in-progress: false
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rebase eligible pull requests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t pull_requests < <(
+            gh pr list \
+              --repo "$REPOSITORY" \
+              --base develop \
+              --state open \
+              --limit 1000 \
+              --json number,headRefName,isCrossRepository,autoMergeRequest \
+              --jq '
+                .[]
+                | select(.isCrossRepository == false)
+                | select(.autoMergeRequest != null)
+                | select(.autoMergeRequest.mergeMethod == "SQUASH")
+                | [.number, .headRefName]
+                | @tsv
+              '
+          )
+
+          if ((${#pull_requests[@]} == 0)); then
+            echo "No open same-repository PR with squash auto-merge found."
+            exit 0
+          fi
+
+          for pull_request in "${pull_requests[@]}"; do
+            IFS=$'\t' read -r pull_request_number head_ref <<< "$pull_request"
+            echo "Rebasing PR #$pull_request_number ($head_ref) onto develop."
+            gh pr update-branch "$pull_request_number" \
+              --repo "$REPOSITORY" \
+              --rebase
+          done
