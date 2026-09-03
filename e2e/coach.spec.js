@@ -10,7 +10,7 @@ const navigation = [
   ["Coach", "chatPanel", "coach"],
   ["Heute", "todayPanel", "today"],
   ["Plan", "workoutsPanel", "plan/calendar"],
-  ["Analyse", "dataPanel", "analysis/history"],
+  ["Analyse", "dataPanel", "analysis/performance"],
   ["Mehr", "settingsPanel", "more"],
 ];
 
@@ -68,12 +68,12 @@ test.describe("critical browser states", () => {
     }
 
     await page.getByRole("link", { name: "Analyse", exact: true }).click();
-    await expect(page).toHaveURL(/#analysis\/history$/);
-    await page.getByRole("link", { name: "Leistung", exact: true }).click();
     await expect(page).toHaveURL(/#analysis\/performance$/);
+    await page.getByRole("link", { name: "Verlauf", exact: true }).click();
+    await expect(page).toHaveURL(/#analysis\/history$/);
     await page.goBack();
     await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#analysis\/history$/);
+    await expect(page).toHaveURL(/#analysis\/performance$/);
     await page.getByRole("link", { name: "Mehr", exact: true }).click();
     await expect(page.locator("#settingsPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#more$/);

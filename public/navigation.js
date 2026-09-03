@@ -54,7 +54,7 @@ function planSegmentFromRoute(route = state.route) {
 
 function analysisSegmentFromRoute(route = state.route) {
   const segment = String(route || "").split("/")[1];
-  return ["history", "performance"].includes(segment) ? segment : "history";
+  return ["history", "performance"].includes(segment) ? segment : "performance";
 }
 
 function baseRoute(route = state.route) {
