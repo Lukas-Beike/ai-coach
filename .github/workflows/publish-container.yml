@@ -95,6 +95,10 @@ jobs:
           --pids-limit=256 --memory=512m --cpus=1 --tmpfs /tmp
           --volume "${GITHUB_WORKSPACE}/tests:/review/tests:ro"
           --volume "${GITHUB_WORKSPACE}/public:/review/public:ro"
+          --volume "${GITHUB_WORKSPACE}/server.py:/review/server.py:ro"
+          --volume "${GITHUB_WORKSPACE}/playwright.config.cjs:/review/playwright.config.cjs:ro"
+          --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro"
+          --volume "${GITHUB_WORKSPACE}/e2e:/review/e2e:ro"
           --volume "${GITHUB_WORKSPACE}/.github:/review/.github:ro"
           --env PYTHONPATH=/app:/review/tests --workdir /app ai-coach:test
           python /review/tests/run_tests.py
@@ -120,10 +124,9 @@ jobs:
           echo "All native shards, syntax checks, and container tests passed."
 
   quality:
-    name: Quality baseline (advisory)
+    name: Quality baseline
     needs: test
     if: needs.test.result == 'success'
-    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -196,25 +199,32 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Build isolated application image
         run: docker build --tag ai-coach:e2e .
-      - name: Start isolated fixture application
+      - name: Run browser smoke and accessibility checks
         shell: bash
         run: |
           set -euo pipefail
-          docker run --detach --name ai-coach-e2e --publish 8090:8090 \
-            --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
-            --pids-limit=256 --memory=512m --cpus=1 \
-            --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
-            ai-coach:e2e >/dev/null
-          for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:8090/api/health >/dev/null; then
-              exit 0
-            fi
-            sleep 2
+          projects=(mobile-small mobile tablet tablet-landscape desktop)
+          cleanup() { docker rm --force ai-coach-e2e >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          for project in "${projects[@]}"; do
+            cleanup
+            docker run --detach --name ai-coach-e2e --publish 8090:8090 \
+              --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
+              --pids-limit=256 --memory=512m --cpus=1 \
+              --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
+              ai-coach:e2e >/dev/null
+            for attempt in {1..30}; do
+              if curl --fail --silent http://127.0.0.1:8090/api/health >/dev/null; then
+                break
+              fi
+              if [[ "$attempt" == "30" ]]; then
+                echo "The isolated fixture application did not become healthy for $project."
+                exit 1
+              fi
+              sleep 2
+            done
+            npm run test:e2e -- --project "$project"
           done
-          echo "The isolated fixture application did not become healthy."
-          exit 1
-      - name: Run browser smoke and accessibility checks
-        run: npm run test:e2e
       - name: Upload browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -231,7 +241,7 @@ jobs:
 
   build-and-push:
     if: (github.event_name == 'release' && github.event.action == 'published') || (github.event_name == 'workflow_dispatch' && inputs.publish_container == true)
-    needs: test
+    needs: [test, e2e, quality]
     runs-on: ubuntu-latest
     permissions:
       contents: read

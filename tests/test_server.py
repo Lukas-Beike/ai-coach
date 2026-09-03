@@ -209,6 +209,9 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM coach_action_proposals")
             db.execute("DELETE FROM change_history")
             db.execute("DELETE FROM provider_refresh_history")
+            db.execute("DELETE FROM sync_job_items")
+            db.execute("DELETE FROM sync_jobs")
+            db.execute("DELETE FROM provider_sync_cursors")
             db.execute("DELETE FROM public_event_candidates")
             db.execute("DELETE FROM public_event_sources")
             db.execute("DELETE FROM external_calendar_events")
@@ -234,16 +237,209 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
             migrations = db.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
             self.assertEqual(backend_db.schema_version(db), server.CURRENT_DATABASE_SCHEMA_VERSION)
-        self.assertEqual([row["version"] for row in migrations], [1, 2, 3, 4, 5])
+            tables = {row["name"] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            self.assertTrue({"planning_state", "coach_plan_artifacts", "coach_commands", "sync_jobs", "sync_job_items", "provider_sync_cursors"} <= tables)
+            planned_columns = {row["name"] for row in db.execute("PRAGMA table_info(planned_units)").fetchall()}
+            self.assertTrue({"plan_id", "revision", "tombstone", "command_id"} <= planned_columns)
+        self.assertEqual([row["version"] for row in migrations], [1, 2, 3, 4, 5, 6])
         self.assertEqual(migrations[0]["name"], "legacy-schema-baseline")
         self.assertEqual(migrations[1]["name"], "public-calendar-foreign-key-cascade")
         self.assertEqual(migrations[2]["name"], "local-change-history")
         self.assertEqual(migrations[3]["name"], "provider-refresh-history")
         self.assertEqual(migrations[4]["name"], "dedicated-local-planned-units")
-
+        self.assertEqual(migrations[5]["name"], "coach-first-command-and-sync-state")
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 5)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 6)
+
+    def test_persistent_sync_job_claim_resume_retry_and_completion(self):
+        job = server.enqueue_sync_job("intervals", "refresh", {"days": 7}, requested_by="user")
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(job["progress"], {"completed": 0, "total": 1})
+        claimed = server._claim_sync_job()
+        self.assertEqual(claimed["id"], job["id"])
+        self.assertEqual(server.sync_job_state(job["id"])["status"], "running")
+        self.assertEqual(server.resume_interrupted_sync_jobs(), 1)
+        self.assertEqual(server.sync_job_state(job["id"])["status"], "queued")
+        claimed = server._claim_sync_job()
+        with patch.object(server, "_execute_sync_job", return_value={"status": "ok"}):
+            server._run_claimed_sync_job(claimed)
+        completed = server.sync_job_state(job["id"])
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(completed["progress"], {"completed": 1, "total": 1})
+        self.assertEqual(completed["items"][0]["status"], "completed")
+
+    def test_persistent_sync_job_retries_only_safe_transient_errors(self):
+        job = server.enqueue_sync_job("weather", "refresh", {"force": True})
+        claimed = server._claim_sync_job()
+        provider_detail = "https://athlete:secret-pass@example.invalid/private-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        with patch.object(server, "_execute_sync_job", side_effect=server.AppError(503, provider_detail, reason="network_error")):
+            server._run_claimed_sync_job(claimed)
+        state = server.sync_job_state(job["id"])
+        self.assertEqual(state["status"], "queued")
+        self.assertEqual(state["error_class"], "network_error")
+        self.assertEqual(state["items"][0]["status"], "queued")
+        self.assertIsNotNone(state["available_at"])
+        self.assertNotIn("secret-pass", state["items"][0]["error_detail"])
+        self.assertNotIn("private-token-aaaaaaaa", state["items"][0]["error_detail"])
+
+    def test_plan_push_job_preserves_all_failed_object_outcomes(self):
+        local_id = str(uuid.uuid4())
+        job = server.enqueue_sync_job(
+            "intervals",
+            "plan_push",
+            {"entries": [{"library_workout_id": local_id, "expected_payload_hash": "a" * 64}]},
+            requested_by="coach",
+            item_operations=[{"item_key": local_id, "operation": "plan_push", "payload_hash": "a" * 64}],
+        )
+        claimed = server._claim_sync_job()
+        result = {"status": "error", "results": [{"library_workout_id": local_id, "status": "conflict", "error": "changed"}]}
+        with patch.object(server, "_execute_sync_job", return_value=result):
+            server._run_claimed_sync_job(claimed)
+        state = server.sync_job_state(job["id"])
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["items"][0]["status"], "failed")
+        self.assertEqual(state["progress"], {"completed": 1, "total": 1})
+
+    def test_structured_command_api_failure_is_terminal_and_replayable(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-failure"
+        ), patch.object(server, "responses_request", side_effect=RuntimeError("provider request failed")) as request:
+            with self.assertRaises(RuntimeError):
+                server.chat_with_coach("Erstelle einen Entwurf", client_turn_id="turn-terminal-failure")
+            replay = server.chat_with_coach("Erstelle einen Entwurf", client_turn_id="turn-terminal-failure")
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(replay["status"], "failed")
+        self.assertIn("provider request failed", replay["error"])
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT status FROM coach_commands WHERE client_turn_id=?", ("turn-terminal-failure",)).fetchone()
+        self.assertEqual(command["status"], "completed")
+
+    def test_structured_coach_refreshes_requested_data_before_coaching(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-fresh", "arguments": json.dumps({"payload": {"plan_name": "Fresh", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}})}]},
+            {"output_text": "Der Entwurf ist gespeichert."},
+        ]
+        order = []
+
+        def refresh(*args, **kwargs):
+            order.append("refresh")
+            return {"status": "ok"}
+
+        def response(payload):
+            order.append("coach")
+            return responses.pop(0)
+
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-fresh"
+        ), patch.object(server, "sync_intervals", side_effect=refresh), patch.object(
+            server, "responses_request", side_effect=response
+        ):
+            result = server.chat_with_coach("Lade bitte meine letzten Einheiten und erstelle einen Entwurf.", client_turn_id="turn-fresh")
+        self.assertEqual(result["command_receipts"][0]["tool"], "stage_training_plan")
+        self.assertEqual(order[0], "refresh")
+
+    def test_structured_commit_rejects_model_artifact_outside_classified_scope(self):
+        artifact = server._stage_coach_artifact(
+            "conversation-scope", "turn-scope", {"plan_name": "Scoped", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}
+        )
+        intent = {
+            "intent": "local_action",
+            "operation": "commit_training_plan",
+            "target_system": "local",
+            "artifact_id": artifact["artifact_id"],
+            "ambiguities": [],
+            "authorization_scope": [f"artifact:{artifact['artifact_id']}"],
+        }
+        with self.assertRaises(server.AppError) as denied:
+            server._structured_coach_tool_result(
+                "commit_training_plan",
+                {"artifact_id": str(uuid.uuid4())},
+                intent=intent,
+                conversation_id="conversation-scope",
+                client_turn_id="turn-scope",
+                session_csrf_hash="",
+                sync_job_ids=[],
+            )
+        self.assertEqual(denied.exception.reason, "intent_scope_denied")
+
+    def test_structured_plan_push_declares_and_uses_bounded_entries(self):
+        local_id = str(uuid.uuid4())
+        entry = {"library_workout_id": local_id, "expected_payload_hash": "b" * 64}
+        intent = {
+            "intent": "remote_sync",
+            "operation": "start_intervals_plan_sync",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": [f"library_workout:{local_id}"],
+        }
+        with patch.object(server, "enqueue_sync_job", return_value={"id": "job-plan-push"}) as enqueue:
+            result = server._structured_coach_tool_result(
+                "start_intervals_plan_sync",
+                {"entries": [entry]},
+                intent=intent,
+                conversation_id="conversation-push",
+                client_turn_id="turn-push",
+                session_csrf_hash="",
+                sync_job_ids=[],
+            )
+        schema = next(tool for tool in server.COACH_STRUCTURED_TOOLS if tool["name"] == "start_intervals_plan_sync")["parameters"]
+        self.assertIn("entries", schema["properties"])
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(enqueue.call_args.kwargs["item_operations"][0]["item_key"], local_id)
+
+    def test_startup_sync_does_not_duplicate_resumed_jobs(self):
+        config = replace(server.CONFIG, intervals_api_key="configured", calendar_ical_url="", garmin_email="", garmin_tokenstore="")
+        with patch.object(server, "CONFIG", config), patch.object(server, "_sync_job_active", return_value=True) as active, patch.object(
+            server, "enqueue_sync_job"
+        ) as enqueue:
+            server.enqueue_startup_sync_jobs()
+        self.assertGreaterEqual(active.call_count, 1)
+        enqueue.assert_not_called()
+
+    def test_startup_historical_backfill_resumes_before_saved_cursor(self):
+        config = replace(server.CONFIG, intervals_api_key="configured", calendar_ical_url="", garmin_email="", garmin_tokenstore="")
+        with patch.object(server, "CONFIG", config), patch.object(server, "_sync_job_active", return_value=False), patch.object(
+            server, "provider_sync_cursor", return_value={"cursor": "2026-08-01"}
+        ), patch.object(server, "enqueue_sync_job") as enqueue:
+            server.enqueue_startup_sync_jobs()
+        historical = next(call for call in enqueue.call_args_list if call.args[1] == "historical_backfill")
+        self.assertEqual(historical.args[2]["end_date"], "2026-07-31")
+
+    def test_historical_snapshot_merge_preserves_current_read_model(self):
+        current = {
+            "synced_at": "current",
+            "recent_activities": [{"id": "new"}],
+            "raw_provider_data": {"athlete": {"id": "athlete"}, "activities": [{"id": "new"}], "wellness": [], "upcoming_calendar": []},
+        }
+        historical = {
+            "synced_at": "historical",
+            "recent_activities": [{"id": "old"}],
+            "raw_provider_data": {"athlete": {}, "activities": [{"id": "old"}], "wellness": [{"id": "wellness-old"}], "upcoming_calendar": []},
+            "provider_sync": {"calendar_window": {"start": "2020-01-01", "end": "2020-03-30"}},
+        }
+        merged = server.merge_historical_snapshot(current, historical)
+        self.assertEqual(merged["recent_activities"], current["recent_activities"])
+        self.assertEqual({item["id"] for item in merged["raw_provider_data"]["activities"]}, {"new", "old"})
+        self.assertEqual(merged["raw_provider_data"]["wellness"], [{"id": "wellness-old"}])
+        self.assertEqual(merged["synced_at"], "current")
 
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = server.utc_now()
@@ -766,7 +962,7 @@ class CoachTests(unittest.TestCase):
         with server.DB_LOCK, server.database() as db:
             for table in expected_tables - {"kv"}:
                 self.assertEqual(db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"], 0)
-            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 5)
+            self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()["count"], 6)
 
     def test_weather_refresh_rechecks_adaptive_planning(self):
         server.save_profile({"weather_location": "Berlin"})
@@ -981,12 +1177,43 @@ class CoachTests(unittest.TestCase):
         for index in range(500):
             server.add_message("user", f"message {index}")
         bootstrap = server.public_bootstrap(local_only=True)
-        self.assertEqual(bootstrap["schema_version"], 2)
-        self.assertEqual(bootstrap["messages"], [])
+        self.assertEqual(bootstrap["schema_version"], 3)
+        self.assertEqual(len(bootstrap["messages"]), 100)
         self.assertEqual(bootstrap["activities"], [])
+        self.assertTrue(all(bootstrap["skeleton"].values()))
+        self.assertIn("plan_revision", bootstrap)
+        self.assertIn("provider_states", bootstrap)
+        self.assertIn("running_jobs", bootstrap)
         self.assertIn("activities", bootstrap["state_versions"])
         self.assertIn("garmin", bootstrap["state_versions"])
         self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 20_000)
+
+    def test_bootstrap_never_refreshes_github_or_provider_network(self):
+        with patch.object(server, "fetch_github_latest_release", side_effect=AssertionError("network")):
+            bootstrap = server.public_bootstrap(local_only=False)
+        self.assertEqual(bootstrap["schema_version"], 3)
+        self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
+
+    def test_state_events_report_missed_retention_and_redact_content(self):
+        with server.STATE_EVENT_CONDITION:
+            server.STATE_EVENTS.clear()
+            server.STATE_EVENT_NEXT_ID = 0
+        for index in range(501):
+            server.publish_state_event("job", {"job_id": f"job-{index}", "status": "running", "progress": {"completed": index, "total": 501}})
+        gap = server.state_events_since(0)
+        self.assertTrue(gap["gap"])
+        self.assertEqual(gap["events"], [])
+        current = server.state_events_since(gap["latest_event_id"] - 1)
+        self.assertFalse(current["gap"])
+        self.assertEqual(len(current["events"]), 1)
+        self.assertNotIn("athlete content", json.dumps(current))
+
+    def test_state_events_validate_cursor_and_publish_job_progress(self):
+        with self.assertRaises(server.AppError) as raised:
+            server.state_events_since("not-a-number")
+        self.assertEqual(raised.exception.reason, "invalid_event_cursor")
+        event = server.publish_state_event("job", {"job_id": "job-1", "status": "completed", "progress": {"completed": 1, "total": 1}})
+        self.assertEqual(server.state_events_since(event["event_id"] - 1)["events"][0]["data"]["progress"]["completed"], 1)
 
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
@@ -1003,6 +1230,9 @@ class CoachTests(unittest.TestCase):
         self.assertIn('areas.push("weather")', app)
         self.assertIn('fetch("/api/chat/stream"', app)
         self.assertIn('api("/api/chat/status")', app)
+        self.assertIn('new EventSource(`/api/state/events?since=', app)
+        self.assertIn('function connectStateEvents()', app)
+        self.assertIn('event.type === "reset"', app)
         self.assertIn('garmin: ["performance"]', app)
         self.assertIn("function scrollChatToResponseStart()", app)
         self.assertIn("async function loadChatHistoryFresh()", app)
@@ -1016,7 +1246,9 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn(">Neue Nachricht<", index)
         styles = (Path(__file__).resolve().parents[1] / "public" / "styles.css").read_text(encoding="utf-8")
         self.assertIn(".chat-jump", styles)
-        self.assertIn("bottom: calc(84px + env(safe-area-inset-bottom))", styles)
+        self.assertIn("position: sticky", styles)
+        self.assertNotIn("--bottom-nav-clearance", styles)
+        self.assertNotIn("--chat-fixed-ui-clearance", styles)
         self.assertIn('async function cancelChat()', app)
         self.assertIn('markdownToHtml(state.chatStreamText)', app)
         self.assertIn('api("/api/activities?limit=250")', app)
@@ -1370,19 +1602,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=149', index)
-        self.assertIn('/navigation.js?v=149', index)
-        self.assertIn('/state.js?v=149', index)
-        self.assertIn('/views.js?v=149', index)
-        self.assertIn('/forms.js?v=149', index)
-        self.assertIn('/components.js?v=149', index)
-        self.assertIn('/app.js?v=149', index)
-        self.assertIn('intervals-coach-v149', service_worker)
-        self.assertIn('"/navigation.js?v=149"', service_worker)
-        self.assertIn('"/state.js?v=149"', service_worker)
-        self.assertIn('"/views.js?v=149"', service_worker)
-        self.assertIn('"/forms.js?v=149"', service_worker)
-        self.assertIn('"/components.js?v=149"', service_worker)
+        self.assertIn('/api.js?v=159', index)
+        self.assertIn('/navigation.js?v=159', index)
+        self.assertIn('/state.js?v=159', index)
+        self.assertIn('/views.js?v=159', index)
+        self.assertIn('/forms.js?v=159', index)
+        self.assertIn('/components.js?v=159', index)
+        self.assertIn('/app.js?v=159', index)
+        self.assertIn('intervals-coach-v159', service_worker)
+        self.assertIn('"/navigation.js?v=159"', service_worker)
+        self.assertIn('"/state.js?v=159"', service_worker)
+        self.assertIn('"/views.js?v=159"', service_worker)
+        self.assertIn('"/forms.js?v=159"', service_worker)
+        self.assertIn('"/components.js?v=159"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('function executeCoachActionProposal(', app)
@@ -1401,29 +1633,63 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=149'), index.index('/components.js?v=149'))
-        self.assertLess(index.index('/components.js?v=149'), index.index('/app.js?v=149'))
+        self.assertLess(index.index('/forms.js?v=159'), index.index('/components.js?v=159'))
+        self.assertLess(index.index('/components.js?v=159'), index.index('/app.js?v=159'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
+        self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
 
     def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
-        for route in ("coach", "today", "activities", "planned", "performance", "more"):
+        for route in ("coach", "today", "plan/calendar", "analysis/history", "more"):
             self.assertIn(f'href="#{route}"', index)
         self.assertIn('window.addEventListener("hashchange", syncNavigationRoute)', app)
         self.assertIn("window.history.pushState", app)
         self.assertIn("panel.focus({ preventScroll: true })", app)
         self.assertIn('today: "todayPanel"', navigation)
+        self.assertIn('activities: "analysis/history"', navigation)
+        self.assertIn('planned: "plan/calendar"', navigation)
+        self.assertIn('performance: "analysis/performance"', navigation)
+        self.assertIn('class="desktop-nav"', index)
+        self.assertIn('class="icon-sprite"', index)
+        self.assertEqual(index.count('class="bottom-nav"'), 1)
+        self.assertEqual(index[index.index('<nav class="bottom-nav"'):].split('</nav>', 1)[0].count('class="nav-item'), 5)
         self.assertIn('function renderToday(data)', app)
+
+    def test_task8_coach_first_views_have_shared_states_and_analysis_segments(self):
+        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+        components = (Path(__file__).resolve().parents[1] / "public" / "components.js").read_text(encoding="utf-8")
+        index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
+        state = (Path(__file__).resolve().parents[1] / "public" / "state.js").read_text(encoding="utf-8")
+        styles = (Path(__file__).resolve().parents[1] / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn('id="coachOverview"', index)
+        self.assertIn('id="coachQuickActions"', index)
+        self.assertIn('id="coachProviderStatus"', index)
+        self.assertIn('id="coachReceipts"', index)
+        self.assertIn('function renderCoachOverview(data)', app)
+        self.assertIn('function renderCoachReceipts()', app)
+        self.assertIn('function createActionReceipt(', components)
+        self.assertIn('createSkeletonStack(4)', app)
+        self.assertIn('id="todaySummary"', index)
+        self.assertIn('today-priority', app)
+        self.assertIn('id="analysisHistorySegment"', index)
+        self.assertIn('id="analysisPerformanceSegment"', index)
+        self.assertIn('function analysisSegmentFromRoute(', (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8"))
+        self.assertIn('function renderAnalysisSegments(', app)
+        self.assertIn('analysis-segment-nav', styles)
+        self.assertIn('planned-week-days { grid-template-columns: repeat(7', styles)
+        self.assertIn('analysisSegment: "history"', state)
+        self.assertIn('coachReceipts: []', state)
+        self.assertNotIn('id="activitiesPanel"', index)
 
     def test_plan_segments_are_deep_linked_and_library_is_lazy_paginated(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
-        self.assertIn('"planned/library": "workoutsPanel"', navigation)
-        self.assertIn('"planned/goals": "workoutsPanel"', navigation)
+        self.assertIn('"plan/templates": "workoutsPanel"', navigation)
+        self.assertIn('"plan/goals": "workoutsPanel"', navigation)
         self.assertIn('function ensureRouteData(route = state.route)', app)
         self.assertIn('load("/api/bootstrap?local=1", requested)', app)
         self.assertIn('api("/api/library?limit=100")', app)
@@ -1431,9 +1697,9 @@ class CoachTests(unittest.TestCase):
         self.assertIn('id="planCalendarSegment"', index)
         self.assertIn('id="planLibrarySegment"', index)
         self.assertIn('id="planGoalsSegment"', index)
-        self.assertIn('href="#planned/calendar"', index)
-        self.assertIn('href="#planned/library"', index)
-        self.assertIn('href="#planned/goals"', index)
+        self.assertIn('href="#plan/calendar"', index)
+        self.assertIn('href="#plan/templates"', index)
+        self.assertIn('href="#plan/goals"', index)
         self.assertEqual(index.count('id="libraryLoadButton"'), 1)
         self.assertEqual(index.count('id="libraryDirtyIndicator"'), 1)
 
@@ -1775,7 +2041,8 @@ class CoachTests(unittest.TestCase):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
         self.assertNotIn('id="feedbackForm"', markup)
         self.assertNotIn("Lokales Athleten-Feedback", markup)
-        self.assertIn('id="activitiesPanel"', markup)
+        self.assertIn('id="analysisHistorySegment"', markup)
+        self.assertIn('data-analysis-segment="history"', markup)
 
     def test_settings_do_not_render_calendar_events_or_public_competition_import(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
@@ -1800,7 +2067,9 @@ class CoachTests(unittest.TestCase):
             b"BEGIN:VEVENT\r\nUID:no-intensity\r\nDTSTART;VALUE=DATE:20260905\r\n"
             b"SUMMARY:Evening event\r\nDESCRIPTION: [NO_INTENSITY] Training remains possible, but easy\r\nEND:VEVENT\r\n"
             b"BEGIN:VEVENT\r\nUID:other-marker\r\nDTSTART;VALUE=DATE:20260906\r\n"
-            b"SUMMARY:Other marker\r\nDESCRIPTION: [OTHER_TAG] Keine besondere Wirkung\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            b"SUMMARY:Other marker\r\nDESCRIPTION: [OTHER_TAG] Keine besondere Wirkung\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            window_start=date(2026, 9, 2),
+            window_end=date(2026, 9, 8),
         )
         self.assertEqual(events[0]["duration_minutes"], 180)
         self.assertEqual(events[0]["event_date"], "2026-09-02")
@@ -2010,6 +2279,8 @@ class CoachTests(unittest.TestCase):
         )
         config = replace(server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics")
         with patch.object(server, "CONFIG", config), patch.object(server, "fetch_calendar_feed", return_value=payload), patch.object(
+            server, "local_now", return_value=datetime(2026, 9, 2, tzinfo=timezone.utc)
+        ), patch.object(
             server, "check_adaptive_replan", return_value={"needs_replan": True, "replan_changes": 2}
         ) as check:
             result = server.sync_external_calendar("test")
@@ -3374,6 +3645,61 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["daily_stats"][1]["totalSteps"], 1234)
         self.assertEqual(result["provider_sync"]["pagination"]["daily_stats"]["records"], 2)
 
+    def test_garmin_capability_breaker_pauses_repeated_same_error(self):
+        error = server.AppError(503, "provider unavailable", reason="network_error")
+        for _ in range(server.GARMIN_CAPABILITY_FAILURE_LIMIT):
+            server._garmin_capability_failure("body_battery", error)
+        self.assertFalse(server._garmin_capability_allowed("body_battery"))
+        state = server._garmin_capability_state("body_battery")
+        self.assertEqual(state["count"], server.GARMIN_CAPABILITY_FAILURE_LIMIT)
+        self.assertEqual(state["error_class"], "network_error")
+        server._garmin_capability_success("body_battery")
+        self.assertTrue(server._garmin_capability_allowed("body_battery"))
+
+    def test_garmin_range_collector_never_exceeds_two_parallel_calls(self):
+        from backend.providers.garmin import collect_garmin_data
+
+        class FakeGarmin:
+            def __init__(self):
+                self.active = 0
+                self.maximum = 0
+                self.lock = threading.Lock()
+
+            def range_call(self, start, end):
+                with self.lock:
+                    self.active += 1
+                    self.maximum = max(self.maximum, self.active)
+                server.time.sleep(0.01)
+                with self.lock:
+                    self.active -= 1
+                return [{"date": start, "end": end}]
+
+            get_sleep_daily = range_call
+            get_hrv_data_range = range_call
+            get_body_battery = range_call
+            get_activities_by_date = range_call
+
+            def get_training_readiness(self, current):
+                return {"date": current}
+
+            def get_race_predictions(self):
+                return []
+
+            def get_max_metrics(self, current):
+                return {"date": current}
+
+        fake = FakeGarmin()
+        collect_garmin_data(
+            fake,
+            [(date(2026, 8, 30), date(2026, 8, 31))],
+            start=date(2026, 8, 30),
+            today=date(2026, 8, 31),
+            synced_at="2026-09-01T00:00:00+00:00",
+            external_call=lambda _service, _source, operation, _details: operation(),
+            redact=lambda value: value,
+        )
+        self.assertEqual(fake.maximum, 2)
+
     def test_intervals_collection_rejects_repeated_full_page(self):
         client = server.IntervalsClient(replace(server.CONFIG, intervals_api_key="test-key"))
         page = [{"id": f"activity-{index}"} for index in range(500)]
@@ -3394,6 +3720,8 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(snapshot["provider_sync"]["pagination"]["activities"]["complete"])
         self.assertEqual(snapshot["provider_sync"]["pagination"]["activities"]["records"], 1)
         self.assertTrue(snapshot["provider_sync"]["pagination"]["events"]["complete"])
+        self.assertEqual(snapshot["raw_provider_data"]["activities"][0]["id"], "activity-1")
+        self.assertEqual(snapshot["raw_provider_data"]["wellness"][0]["id"], "2026-08-31")
 
     def test_chat_creation_request_creates_local_action_preview(self):
         future_date = (date.today() + timedelta(days=1)).isoformat()
@@ -3816,6 +4144,152 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.prompt_requests_fresh_data("Lade bitte meine letzten Einheiten und analysiere sie."))
         self.assertTrue(server.prompt_requests_fresh_data("Please load my latest workouts and review them."))
         self.assertFalse(server.prompt_requests_fresh_data("Was soll ich morgen trainieren?"))
+
+    def test_structured_coach_intent_retries_once_and_fails_closed(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        with patch.object(server, "responses_request", side_effect=[{"output_text": "not-json"}, {"output_text": json.dumps(intent)}]) as request:
+            result = server.request_coach_intent("Erstelle einen Plan")
+        self.assertEqual(result["operation"], "stage_training_plan")
+        self.assertEqual(request.call_count, 2)
+        with patch.object(server, "responses_request", return_value={"output_text": "not-json"}):
+            failed = server.request_coach_intent("Jetzt speichern")
+        self.assertEqual(failed["intent"], "needs_clarification")
+        self.assertEqual(failed["target_system"], "none")
+
+    def test_structured_coach_loop_keeps_tools_and_returns_command_receipt(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-1", "arguments": json.dumps({"payload": {"plan_name": "Test", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}})}]},
+            {"output_text": "Der Entwurf ist gespeichert."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-test"
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach("Erstelle einen Entwurf", client_turn_id="turn-structured-1")
+        self.assertEqual(result["command_receipts"][0]["tool"], "stage_training_plan")
+        self.assertEqual(result["tool_rounds"], 1)
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(request.call_args_list[0].args[0]["tools"], request.call_args_list[1].args[0]["tools"])
+        self.assertEqual(result["sync_job_ids"], [])
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-structured-1",)).fetchone()
+        self.assertEqual(command["status"], "completed")
+        self.assertIn("Der Entwurf ist gespeichert.", command["receipt"])
+
+    def test_task9_duplicate_coach_turn_replays_receipt_without_reexecution(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-replay", "arguments": json.dumps({"payload": {"plan_name": "Replay", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}})}]},
+            {"output_text": "Der Entwurf ist gespeichert."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent) as classify, patch.object(
+            server, "ensure_conversation", return_value="conversation-replay"
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            first = server.chat_with_coach("Erstelle einen Entwurf", client_turn_id="turn-task9-replay")
+            replay = server.chat_with_coach("Erstelle einen Entwurf", client_turn_id="turn-task9-replay")
+        self.assertEqual(replay, first)
+        self.assertEqual(classify.call_count, 1)
+        self.assertEqual(request.call_count, 2)
+        with server.DB_LOCK, server.database() as db:
+            command_count = db.execute("SELECT COUNT(*) AS count FROM coach_commands WHERE client_turn_id=?", ("turn-task9-replay",)).fetchone()["count"]
+        self.assertEqual(command_count, 1)
+
+    def test_task9_failed_coach_tool_is_completed_with_safe_error_receipt(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-invalid-plan", "arguments": json.dumps({"payload": {"plan_name": "Ungültig", "workouts": []}})}]},
+            {"output_text": "Der Plan konnte nicht gespeichert werden. Bitte ergänze mindestens eine Einheit."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-error"
+        ), patch.object(server, "responses_request", side_effect=responses):
+            result = server.chat_with_coach("Speichere den leeren Plan", client_turn_id="turn-task9-error")
+        receipt = result["command_receipts"][0]["result"]
+        self.assertFalse(receipt["ok"])
+        self.assertIn("mindestens eine Einheit", receipt["error"])
+        self.assertNotIn("nichts gespeichert", result["message"]["content"].casefold())
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-task9-error",)).fetchone()
+        self.assertEqual(command["status"], "completed")
+        self.assertIn("mindestens eine Einheit", command["receipt"])
+
+    def test_structured_provider_refresh_is_queued_and_not_run_in_chat_request(self):
+        intent = {
+            "intent": "remote_sync",
+            "operation": "start_provider_refresh",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["intervals_refresh"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "start_provider_refresh", "call_id": "call-refresh", "arguments": json.dumps({"days": 3})}]},
+            {"output_text": "Die Aktualisierung wurde eingereiht."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-test"
+        ), patch.object(server, "responses_request", side_effect=responses), patch.object(
+            server, "sync_intervals", side_effect=AssertionError("provider must run in worker")
+        ):
+            result = server.chat_with_coach("Aktualisiere Intervals", client_turn_id="turn-structured-refresh")
+        self.assertEqual(len(result["sync_job_ids"]), 1)
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "queued")
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute("SELECT provider, type, requested_by FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)).fetchone()
+        self.assertEqual(dict(row), {"provider": "intervals", "type": "refresh", "requested_by": "coach"})
+
+    def test_plan_push_job_requires_bounded_selected_hashed_entries(self):
+        local_id = str(uuid.uuid4())
+        entry = {"library_workout_id": local_id, "expected_payload_hash": "a" * 64}
+        job = server.enqueue_sync_job("intervals", "plan_push", {"entries": [entry]}, requested_by="coach")
+        self.assertEqual(job["type"], "plan_push")
+        self.assertEqual(job["payload"], {"entries": [entry], "reason": "job"})
+        with self.assertRaises(server.AppError) as too_many:
+            server.enqueue_sync_job("intervals", "plan_push", {"entries": [entry] * 29}, requested_by="coach")
+        self.assertEqual(too_many.exception.reason, "invalid_job_request")
+
+    def test_structured_training_change_batch_rolls_back_on_late_failure(self):
+        planned = server.create_local_planned_unit({
+            "date": "2099-01-02", "sport": "Ride", "name": "Original",
+            "description": "- 30m 60%", "duration_minutes": 30, "target": "AUTO",
+        })
+        with self.assertRaises(server.AppError):
+            server._apply_structured_training_changes({
+                "changes": [
+                    {"local_id": planned["id"], "action": "update", "date": "2099-01-02", "name": "Changed"},
+                    {"local_id": str(uuid.uuid4()), "action": "update", "date": "2099-01-02", "name": "Missing"},
+                ],
+            })
+        saved = next(item for item in server.list_planned_units(100, include_archived=True) if item["id"] == planned["id"])
+        self.assertEqual(saved["name"], "Original")
 
     def test_context_preview_exposes_context_and_last_chat_input(self):
         server.add_message("user", "Wie soll ich morgen trainieren?")
@@ -5284,6 +5758,27 @@ class CoachTests(unittest.TestCase):
         self.assertIn("remoteDeleteFailure", app_source)
         self.assertIn("renderRemoteDeleteNotice", app_source)
 
+    def test_frontend_uses_accessible_confirmation_dialogs(self):
+        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        app_source = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="confirmationDialog"', markup)
+        self.assertIn('id="confirmationDialogInput"', markup)
+        self.assertIn("function requestConfirmation(", app_source)
+        self.assertIn("confirmationForm?.addEventListener(\"submit\"", app_source)
+        self.assertNotIn("window.confirm", app_source)
+        self.assertNotIn("window.prompt", app_source)
+
+    def test_task9_browser_regression_contract_covers_routes_and_responsive_guards(self):
+        e2e_source = (server.PUBLIC_DIR.parent / "e2e" / "coach.spec.js").read_text(encoding="utf-8")
+        playwright_config = (server.PUBLIC_DIR.parent / "playwright.config.cjs").read_text(encoding="utf-8")
+        for route in ("#coach", "#today", "plan/calendar", "analysis/history", "#more"):
+            self.assertIn(route, e2e_source)
+        for guard in ("expectNoBrowserErrorsOrOverflow", "reducedMotion", 'fontSize = "200%"', "touch targets below 44"):
+            self.assertIn(guard, e2e_source)
+        self.assertIn('name: "desktop"', playwright_config)
+        self.assertIn('name: "mobile"', playwright_config)
+        self.assertIn("width: 390, height: 844", playwright_config)
+
     def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
         today = server.local_now().date()
         daily_dates = [(today + timedelta(days=offset)).isoformat() for offset in range(14)]
@@ -5292,7 +5787,7 @@ class CoachTests(unittest.TestCase):
         for day_offset, day in enumerate(daily_dates):
             for hour in range(24):
                 hourly_times.append(f"{day}T{hour:02d}:00")
-                hourly_precipitation.append(5 if day_offset == 1 and hour in (8, 9) else 70)
+                hourly_precipitation.append(5 if day_offset == 1 and hour in (16, 17) else 70)
         forecast = {
             "daily": {
                 "time": daily_dates,
@@ -5509,16 +6004,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=149"', source)
-        self.assertIn('"/navigation.js?v=149"', source)
-        self.assertIn('"/state.js?v=149"', source)
-        self.assertIn('"/views.js?v=149"', source)
-        self.assertIn('"/forms.js?v=149"', source)
-        self.assertIn('"/components.js?v=149"', source)
+        self.assertIn('"/api.js?v=159"', source)
+        self.assertIn('"/navigation.js?v=159"', source)
+        self.assertIn('"/state.js?v=159"', source)
+        self.assertIn('"/views.js?v=159"', source)
+        self.assertIn('"/forms.js?v=159"', source)
+        self.assertIn('"/components.js?v=159"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=149"', source)
-        self.assertIn('"/icon.svg?v=149"', source)
-        self.assertIn('"/styles.css?v=149"', source)
+        self.assertIn('"/app.js?v=159"', source)
+        self.assertIn('"/icon.svg?v=159"', source)
+        self.assertIn('"/styles.css?v=159"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6070,7 +6565,7 @@ class CoachTests(unittest.TestCase):
         operation_id = "operation-disconnect-test"
         cancel_event = threading.Event()
         handler = server.RequestHandler.__new__(server.RequestHandler)
-        handler.read_json = Mock(return_value={"message": "Bleibt bestehen"})
+        handler.read_json = Mock(return_value={"message": "Bleibt bestehen", "client_turn_id": "turn-disconnect-test"})
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock(side_effect=[None, server.ClientDisconnected()])
@@ -6279,7 +6774,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=149', index)
+        self.assertIn('v=159', index)
 
     def test_library_bulk_local_actions_preview_diff_and_hash_conflict(self):
         first = server.create_local_workout_library_entry({
@@ -6382,8 +6877,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("function runLibraryBulkRemoteSync()", app)
         self.assertIn("expected_payload_hash", (server.PUBLIC_DIR.parent / "server.py").read_text(encoding="utf-8"))
         self.assertIn("librarySelection", state)
-        self.assertIn("intervals-coach-v149", worker)
-        self.assertIn("/app.js?v=149", index)
+        self.assertIn("intervals-coach-v159", worker)
+        self.assertIn("/app.js?v=159", index)
 
 if __name__ == "__main__":
     unittest.main()

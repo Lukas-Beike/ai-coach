@@ -9,9 +9,8 @@ if (!APP_PASSWORD || APP_PASSWORD.length < 12) {
 const navigation = [
   ["Coach", "chatPanel", "coach"],
   ["Heute", "todayPanel", "today"],
-  ["Verlauf", "activitiesPanel", "activities"],
-  ["Plan", "workoutsPanel", "planned"],
-  ["Leistung", "dataPanel", "performance"],
+  ["Plan", "workoutsPanel", "plan/calendar"],
+  ["Analyse", "dataPanel", "analysis/history"],
   ["Mehr", "settingsPanel", "more"],
 ];
 
@@ -21,7 +20,6 @@ async function login(page) {
   await expect(loginDialog).toBeVisible();
   await page.getByLabel("Passwort").fill(APP_PASSWORD);
   await page.getByRole("button", { name: "Anmelden" }).click();
-  await page.getByLabel("Passwort").fill("");
   await expect(loginDialog).toBeHidden();
   await expect(page.locator("#appShell")).toBeVisible();
 }
@@ -53,11 +51,10 @@ test.describe("critical browser states", () => {
     await expect(page.getByRole("heading", { name: "Anmelden" })).toBeVisible();
     await page.getByLabel("Passwort").fill(APP_PASSWORD);
     await page.getByRole("button", { name: "Anmelden" }).click();
-    await page.getByLabel("Passwort").fill("");
     await expect(page.locator("#loginDialog")).toBeHidden();
     await expect(page.locator("#appShell")).toBeVisible();
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#profile$/);
+    await expect(page).toHaveURL(/#more\/profile$/);
     await expect(page.locator("#profilePanel")).toBeFocused();
     await expect(page.locator(".dirty-indicator")).toHaveCount(5);
     const hiddenIndicators = await page.locator(".dirty-indicator").evaluateAll((nodes) => nodes.every((node) => node.hidden));
@@ -70,13 +67,19 @@ test.describe("critical browser states", () => {
       await expect(page.getByRole("link", { name: label, exact: true })).toHaveAttribute("href", `#${route}`);
     }
 
+    await page.getByRole("link", { name: "Analyse", exact: true }).click();
+    await expect(page).toHaveURL(/#analysis\/history$/);
     await page.getByRole("link", { name: "Leistung", exact: true }).click();
-    await expect(page).toHaveURL(/#performance$/);
+    await expect(page).toHaveURL(/#analysis\/performance$/);
     await page.goBack();
+    await expect(page.locator("#dataPanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#analysis\/history$/);
+    await page.getByRole("link", { name: "Mehr", exact: true }).click();
     await expect(page.locator("#settingsPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#more$/);
-    await page.goForward();
+    await page.goto("/#analysis/performance");
     await expect(page.locator("#dataPanel")).toHaveClass(/active/);
+    await expect(page).toHaveURL(/#analysis\/performance$/);
     await page.goto("/#unknown-route");
     await expect(page.locator("#chatPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#coach$/);
@@ -110,21 +113,22 @@ test.describe("critical browser states", () => {
     await page.getByRole("link", { name: "Plan", exact: true }).click();
     await expect(page.locator("#planCalendarSegment")).toBeVisible();
     await expect(page.getByRole("link", { name: "Kalender", exact: true })).toHaveAttribute("aria-current", "page");
-    await page.getByRole("link", { name: "Bibliothek", exact: true }).click();
-    await expect(page).toHaveURL(/#planned\/library$/);
+    await page.getByRole("link", { name: "Vorlagen", exact: true }).click();
+    await expect(page).toHaveURL(/#plan\/templates$/);
     await expect(page.locator("#planLibrarySegment")).toBeVisible();
     await expect(page.locator("#planCalendarSegment")).toBeHidden();
     await expect(page.getByText("Lokal speichern · Remote-Sync nur mit Vorschau", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Vorschau für Bibliotheks- und Planungssync", exact: true })).toBeVisible();
     await page.getByRole("link", { name: "Ziele & Pläne", exact: true }).click();
-    await expect(page).toHaveURL(/#planned\/goals$/);
+    await expect(page).toHaveURL(/#plan\/goals$/);
     await expect(page.locator("#planGoalsSegment")).toBeVisible();
     await expect(page.locator("#planLibrarySegment")).toBeHidden();
     await page.goto("/#planned/goals");
     await expect(page.locator("#planGoalsSegment")).toBeVisible();
+    await expect(page).toHaveURL(/#plan\/goals$/);
 
     await page.getByRole("link", { name: "Heute", exact: true }).click();
-    await expect(page.getByRole("button", { name: /Check-in (ausfüllen|bearbeiten)/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Check-in (ausfüllen|prüfen)/ })).toBeVisible();
     await expect(page.locator("#checkinDialog")).toBeHidden();
     await expect(page.locator("#chatPanel")).toContainText("Morgen-Check-in");
 
@@ -144,8 +148,11 @@ test.describe("critical browser states", () => {
     const safetyLayout = await page.evaluate(() => {
       const hint = document.querySelector("#chatPanel .fine-print").getBoundingClientRect();
       const composer = document.querySelector("#chatForm").getBoundingClientRect();
-      const navigation = document.querySelector(".bottom-nav").getBoundingClientRect();
-      return { hintBottom: hint.bottom, composerTop: composer.top, navigationTop: navigation.top };
+      const navigationNode = document.querySelector(".bottom-nav");
+      const navigation = navigationNode && getComputedStyle(navigationNode).display !== "none"
+        ? navigationNode.getBoundingClientRect()
+        : null;
+      return { hintBottom: hint.bottom, composerTop: composer.top, navigationTop: navigation?.top ?? Number.POSITIVE_INFINITY };
     });
     expect(safetyLayout.hintBottom).toBeLessThanOrEqual(Math.min(safetyLayout.composerTop, safetyLayout.navigationTop));
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
@@ -174,7 +181,7 @@ test.describe("critical browser states", () => {
     expect(loginResults.violations, "Login accessibility violations").toEqual([]);
     await login(page);
 
-    for (const [label, panelId] of navigation.filter(([name]) => ["Coach", "Heute", "Mehr"].includes(name))) {
+    for (const [label, panelId] of navigation) {
       await page.getByRole("link", { name: label, exact: true }).click();
       await expect(page.locator(`#${panelId}`)).toHaveClass(/active/);
       const results = await new AxeBuilder({ page })
@@ -186,6 +193,23 @@ test.describe("critical browser states", () => {
 
     await expectNoBrowserErrorsOrOverflow(page, browserErrors);
     await page.screenshot({ path: testInfo.outputPath("settings-core.png"), fullPage: true });
+  });
+
+  test("inactive panels stay hidden and compact labels remain readable", async ({ page }) => {
+    const browserErrors = installBrowserGuards(page);
+    await login(page);
+    await page.getByRole("link", { name: "Coach", exact: true }).click();
+    const panelState = await page.locator("main .panel").evaluateAll((panels) => panels.map((panel) => ({
+      id: panel.id,
+      active: panel.classList.contains("active"),
+      display: getComputedStyle(panel).display,
+    })));
+    expect(panelState.filter((panel) => !panel.active && panel.display !== "none"), "inactive panels must not leak into the active view").toEqual([]);
+    const clippedLabels = await page.locator(".coach-provider-item strong:visible").evaluateAll((nodes) => nodes
+      .filter((node) => node.scrollWidth > node.clientWidth || node.getBoundingClientRect().right > window.innerWidth + 1)
+      .map((node) => node.textContent));
+    expect(clippedLabels, "visible provider labels must fit their cards").toEqual([]);
+    await expectNoBrowserErrorsOrOverflow(page, browserErrors);
   });
 
 });
