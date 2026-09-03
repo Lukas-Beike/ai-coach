@@ -1017,7 +1017,7 @@ UPDATE_LIBRARY_TEMPLATE_TOOL = {
 LIBRARY_PLAN_TOOL = {
     "type": "function",
     "name": "apply_workout_library_plan",
-    "description": "Apply already saved local training-library templates to dated local planned units. The tool checks existing calendar conflicts and never writes to Intervals.icu; remote synchronization is a separate confirmed action.",
+    "description": "Apply already saved local training-library templates to dated local planned units. The tool checks existing calendar conflicts and never writes to Intervals.icu; an explicitly named Coach sync can push the local result later.",
     "strict": True,
     "parameters": {
         "type": "object",
@@ -1112,7 +1112,7 @@ COMPETITION_SAVE_TOOL = {
 COMPETITION_DELETE_TOOL = {
     "type": "function",
     "name": "delete_competition",
-    "description": "Delete one locally stored target competition by local UUID. A linked remote event becomes a pending deletion for the next separately confirmed competition sync.",
+    "description": "Delete one locally stored target competition by local UUID. A linked remote event becomes a pending deletion for the next explicitly named Coach competition sync.",
     "strict": True,
     "parameters": {
         "type": "object",
@@ -11474,7 +11474,6 @@ def sync_intervals(
             fetch_kwargs["end_date"] = end_date
         snapshot = IntervalsClient().fetch_snapshot(**fetch_kwargs)
         planning_imported_at = get_kv("planned_units_initial_import_at")
-        had_previous_intervals_sync = bool(get_kv("last_sync_at"))
         set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
         if end_date is not None:
             snapshot = merge_historical_snapshot(latest_snapshot(), snapshot)
@@ -11483,18 +11482,13 @@ def sync_intervals(
             save_snapshot(snapshot)
         calendar_window = snapshot.get("provider_sync", {}).get("calendar_window", {}) if isinstance(snapshot.get("provider_sync"), dict) else {}
         planned_import = {"imported": 0, "updated": 0, "conflicts": 0}
-        if end_date is None and not planning_imported_at and not had_previous_intervals_sync:
+        if end_date is None and not planning_imported_at:
             planned_import = upsert_remote_planned_units(
                 snapshot.get("upcoming_calendar", []),
                 calendar_start=calendar_window.get("start"),
                 calendar_end=calendar_window.get("end"),
             )
             set_kv("planned_units_initial_import_at", snapshot["synced_at"])
-        elif end_date is None and not planning_imported_at:
-            # Databases upgraded from an earlier release have already consumed
-            # their initial provider plan. Mark that fact without importing the
-            # current remote calendar again.
-            set_kv("planned_units_initial_import_at", get_kv("last_sync_at") or snapshot["synced_at"])
         mark_daily_sync("intervals")
         # Seed the local template catalog from the provider once. This is a
         # read-only, idempotent import: existing local templates are preserved
@@ -13728,14 +13722,22 @@ COACH_TOOL_MAX_ROUNDS = 6
 COACH_COMMAND_STALE_SECONDS = 15 * 60
 COACH_CANONICAL_TOOL_NAMES = (
     "read_training_state",
+    "list_competitions",
+    "list_training_plans",
     "stage_training_plan",
     "commit_training_plan",
     "apply_training_changes",
     "manage_training_templates",
+    "save_competition",
+    "delete_competition",
     "start_provider_refresh",
     "start_intervals_plan_sync",
+    "sync_competitions",
     "get_sync_job",
     "resolve_training_sync_conflict",
+    "preview_adaptive_replan",
+    "apply_adaptive_replan",
+    "update_training_plan",
     "undo_training_change",
 )
 
@@ -13767,8 +13769,29 @@ def _canonical_coach_tool(name: str, description: str) -> dict[str, Any]:
                 },
                 "artifact_id": {"type": "string"},
                 "local_id": {"type": "string"},
+                "competition_id": {"type": "string"},
+                "plan_id": {"type": "string"},
                 "job_id": {"type": "string"},
                 "change_id": {"type": "string"},
+                "adjustment_id": {"type": "string"},
+                "strategy": {"type": "string", "enum": ["keep_local", "adopt_remote"]},
+                "action": {"type": "string"},
+                "name": {"type": "string"},
+                "event_date": {"type": "string"},
+                "sport": {"type": "string"},
+                "priority": {"type": "string"},
+                "distance": {"type": "string"},
+                "target": {"type": "string"},
+                "goal": {"type": "string"},
+                "start_date": {"type": "string"},
+                "end_date": {"type": "string"},
+                "status": {"type": "string"},
+                "sync_illness_to_intervals": {"type": "boolean"},
+                "course_profile": {"type": "string"},
+                "notes": {"type": "string"},
+                "description": {"type": "string"},
+                "moving_time_seconds": {"type": "integer"},
+                "reason": {"type": "string"},
                 "expected_payload_hash": {"type": "string"},
                 "expected_revision": {"type": "integer"},
                 "days": {"type": "integer"},
@@ -13780,16 +13803,27 @@ def _canonical_coach_tool(name: str, description: str) -> dict[str, Any]:
 
 COACH_STRUCTURED_TOOLS = [
     _canonical_coach_tool("read_training_state", "Read the current local training state and references."),
+    _canonical_coach_tool("list_competitions", "Read locally stored target competitions."),
+    _canonical_coach_tool("list_training_plans", "Read locally stored training-plan metadata."),
     _canonical_coach_tool("stage_training_plan", "Store a local, referenceable training-plan artifact."),
     _canonical_coach_tool("commit_training_plan", "Commit a referenced local training-plan artifact atomically."),
     _canonical_coach_tool("apply_training_changes", "Apply explicitly authorized local training changes."),
     _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template."),
+    _canonical_coach_tool("save_competition", "Create or update one locally stored target competition."),
+    _canonical_coach_tool("delete_competition", "Delete one locally stored target competition."),
     _canonical_coach_tool("start_provider_refresh", "Queue an explicitly requested read-only provider refresh."),
     _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu push for all pending local planning, or for the supplied entries."),
+    _canonical_coach_tool("sync_competitions", "Execute an explicitly requested push of local target competitions to Intervals.icu."),
     _canonical_coach_tool("get_sync_job", "Read one local synchronization job."),
-    _canonical_coach_tool("resolve_training_sync_conflict", "Explicitly retry a failed or partial synchronization job."),
+    _canonical_coach_tool("resolve_training_sync_conflict", "Explicitly keep the local planning version or retry a failed synchronization job."),
+    _canonical_coach_tool("preview_adaptive_replan", "Calculate a local adaptive planning preview without changing workouts."),
+    _canonical_coach_tool("apply_adaptive_replan", "Apply the latest adaptive planning preview after explicit Coach approval."),
+    _canonical_coach_tool("update_training_plan", "Update or delete local training-plan metadata."),
     _canonical_coach_tool("undo_training_change", "Return an undo preview for a local change; do not apply it silently."),
 ]
+
+
+STRUCTURED_READ_ONLY_TOOLS = {"read_training_state", "list_competitions", "list_training_plans", "get_sync_job"}
 
 
 def _coach_scope_values(intent: dict[str, Any]) -> set[str]:
@@ -13837,6 +13871,8 @@ def _structured_training_state() -> dict[str, Any]:
     return {
         "planning_revision": int((revision or {}).get("revision") or 0),
         "artifact_refs": coach_intent_artifact_refs(),
+        "competitions": list_competitions(include_sync=True),
+        "training_plans": list_training_plans(100),
         "planned_units": [ref for row in planned_rows if (ref := target_ref(row, planned=True)) is not None],
         "training_templates": [ref for row in template_rows if (ref := target_ref(row, planned=False)) is not None],
         "jobs": sync_jobs_state(),
@@ -13848,6 +13884,13 @@ def _structured_artifact_payload(arguments: dict[str, Any]) -> dict[str, Any]:
     if isinstance(payload, dict):
         return payload
     return {key: value for key, value in arguments.items() if key not in {"artifact_id", "expected_revision"}}
+
+
+def _structured_action_payload(arguments: dict[str, Any]) -> dict[str, Any]:
+    payload = arguments.get("payload")
+    if isinstance(payload, dict):
+        return {**arguments, **payload}
+    return arguments
 
 
 def _validate_structured_plan_limits(payload: dict[str, Any], *, command_limit: bool = False) -> None:
@@ -13918,6 +13961,55 @@ def _pending_plan_push_entries() -> list[dict[str, str]]:
     ]
 
 
+def _mark_local_planning_authoritative(local_ids: list[str] | None = None) -> int:
+    """Clear legacy planning conflicts before an explicitly requested push."""
+    normalized_ids = {str(value).strip() for value in (local_ids or []) if str(value).strip()}
+    with DB_LOCK, database() as db:
+        if normalized_ids:
+            placeholders = ",".join("?" for _ in normalized_ids)
+            rows = db.execute(
+                f"SELECT local_id, payload FROM planned_units WHERE local_id IN ({placeholders})",
+                tuple(normalized_ids),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT local_id, payload FROM planned_units WHERE sync_state IN ('conflict', 'remote_missing', 'sync_error')"
+            ).fetchall()
+        now = utc_now()
+        changed = 0
+        for row in rows:
+            try:
+                payload = json.loads(row.get("payload") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            if not isinstance(payload, dict) or payload.get("local_deleted"):
+                continue
+            payload["sync_status"] = "local"
+            db.execute(
+                "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                (json.dumps(payload, ensure_ascii=False), now, row["local_id"]),
+            )
+            changed += 1
+    return changed
+
+
+def _mark_local_competitions_authoritative() -> int:
+    """Make local competition rows win when the athlete explicitly pushes them."""
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT id, intervals_event_id FROM competitions WHERE sync_dirty=1 OR sync_state='conflict'"
+        ).fetchall()
+        now = utc_now()
+        for row in rows:
+            # A missing remote event must be recreated from the local payload;
+            # its old provider id cannot be used as an update target anymore.
+            db.execute(
+                "UPDATE competitions SET intervals_event_id=NULL, sync_dirty=1, sync_state='local_override', sync_conflict='', updated_at=? WHERE id=?",
+                (now, row["id"]),
+            )
+    return len(rows)
+
+
 def _enqueue_coach_plan_push(entries: list[dict[str, str]], sync_job_ids: list[str], *, reason: str) -> dict[str, Any]:
     """Queue a complete explicit Coach plan push in provider-sized chunks."""
     jobs: list[dict[str, Any]] = []
@@ -13957,6 +14049,10 @@ def _structured_coach_tool_result(
     operation = intent.get("operation")
     if name == "read_training_state":
         return {"ok": True, **_structured_training_state()}
+    if name == "list_competitions":
+        return {"ok": True, "competitions": list_competitions(include_sync=True)}
+    if name == "list_training_plans":
+        return {"ok": True, "training_plans": list_training_plans(100)}
     if name == "stage_training_plan":
         if "stage_training_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
@@ -14062,6 +14158,20 @@ def _structured_coach_tool_result(
             _require_coach_scope(intent, "local_template")
             results.append(create_local_library_template(template))
         return {"ok": True, "stored_locally": True, "templates": results, "template": results[0] if len(results) == 1 else None}
+    if name == "save_competition":
+        if "save_competition" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
+        payload = _structured_action_payload(arguments)
+        competition_id = str(payload.get("competition_id") or "").strip()
+        _require_coach_scope(intent, f"competition:{competition_id}" if competition_id else "local_competitions")
+        return {"ok": True, **save_coach_competition(payload)}
+    if name == "delete_competition":
+        if "delete_competition" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
+        payload = _structured_action_payload(arguments)
+        competition_id = str(payload.get("competition_id") or "").strip()
+        _require_coach_scope(intent, f"competition:{competition_id}", "local_competitions")
+        return {"ok": True, **delete_coach_competition(competition_id)}
     if name == "start_provider_refresh":
         if "start_provider_refresh" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
@@ -14078,11 +14188,13 @@ def _structured_coach_tool_result(
             entries = arguments["payload"].get("entries")
         if entries is None:
             _require_coach_scope(intent, "local_plan")
+            _mark_local_planning_authoritative()
             normalized_entries = _pending_plan_push_entries()
         else:
             normalized_entries = _library_bulk_request_entries(entries, require_hash=True)
             for entry in normalized_entries:
                 _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
+            _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
         return _enqueue_coach_plan_push(
             normalized_entries,
             sync_job_ids,
@@ -14092,13 +14204,57 @@ def _structured_coach_tool_result(
         job_id = str(arguments.get("job_id") or "").strip()
         _require_coach_scope(intent, f"sync_job:{job_id}")
         return {"ok": True, "job": sync_job_state(job_id)}
+    if name == "sync_competitions":
+        if "sync_competitions" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "local_competitions")
+        _mark_local_competitions_authoritative()
+        return {"ok": True, **sync_competitions("Bestätigter Coach-Auftrag", push_local=True)}
     if name == "resolve_training_sync_conflict":
         if "resolve_training_sync_conflict" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        payload = _structured_action_payload(arguments)
+        local_id = str(payload.get("local_id") or "").strip()
+        strategy = str(payload.get("strategy") or "keep_local").strip().casefold()
+        if local_id:
+            _require_coach_scope(intent, f"planned_unit:{local_id}", f"competition:{local_id}")
+            with DB_LOCK, database() as db:
+                planned = db.execute("SELECT 1 FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            if planned:
+                return {"ok": True, **resolve_planned_unit_conflict(local_id, strategy)}
+            return {"ok": True, **resolve_competition_conflict(local_id, strategy)}
         job_id = str(arguments.get("job_id") or "").strip()
         _require_coach_scope(intent, f"sync_job:{job_id}")
         job = resolve_sync_job(job_id, {"action": "retry"})
         return {"ok": True, "status": "queued", "job": job}
+    if name == "preview_adaptive_replan":
+        if "preview_adaptive_replan" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "adaptive_replan")
+        return {"ok": True, **adaptive_replan_preview()}
+    if name == "apply_adaptive_replan":
+        if "apply_adaptive_replan" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        payload = _structured_action_payload(arguments)
+        adjustment_id = str(payload.get("adjustment_id") or "").strip()
+        _require_coach_scope(intent, f"adaptive_replan:{adjustment_id}", "adaptive_replan")
+        sync_illness = bool(payload.get("sync_illness_to_intervals"))
+        if sync_illness and (
+            intent.get("target_system") != "intervals"
+            or "intervals_sync" not in _coach_scope_values(intent)
+        ):
+            raise AppError(403, "Der Intervals.icu-Sync der Krankheitspause muss ausdrücklich benannt werden.", reason="intent_scope_denied")
+        latest = latest_replan_preview()
+        if not latest or str(latest.get("id")) != adjustment_id or latest.get("status") != "preview":
+            raise AppError(409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen.")
+        return {"ok": True, **apply_adaptive_replan(adjustment_id, sync_illness_to_intervals=sync_illness)}
+    if name == "update_training_plan":
+        if "update_training_plan" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        payload = _structured_action_payload(arguments)
+        plan_id = str(payload.get("plan_id") or "").strip()
+        _require_coach_scope(intent, f"training_plan:{plan_id}", "local_plan")
+        return {"ok": True, **update_training_plan(plan_id, payload)}
     if name == "undo_training_change":
         if "undo_training_change" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
@@ -14265,9 +14421,9 @@ def _chat_with_structured_coach_impl(
             else:
                 if name not in COACH_CANONICAL_TOOL_NAMES:
                     raise AppError(403, "Nicht kanonisches Coach-Werkzeug.", reason="tool_scope_denied")
-                if name in executed_tools and name not in {"read_training_state", "get_sync_job"}:
+                if name in executed_tools and name not in STRUCTURED_READ_ONLY_TOOLS:
                     raise AppError(409, "Dieses Coach-Werkzeug wurde in diesem Turn bereits ausgeführt.", reason="duplicate_tool_call")
-                if name not in {"read_training_state", "get_sync_job"} and (
+                if name not in STRUCTURED_READ_ONLY_TOOLS and (
                     intent.get("intent") not in {"local_action", "remote_sync"}
                     or name not in _structured_authorized_operations(intent)
                 ):

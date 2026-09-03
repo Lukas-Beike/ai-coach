@@ -16,14 +16,21 @@ INTENT_VALUES = frozenset({"advice", "local_action", "remote_sync", "needs_clari
 TARGET_VALUES = frozenset({"none", "local", "intervals", "garmin", "calendar", "weather"})
 OPERATION_VALUES = frozenset({
     "read_training_state",
+    "list_competitions",
+    "list_training_plans",
     "stage_training_plan",
     "commit_training_plan",
     "apply_training_changes",
     "manage_training_templates",
+    "save_competition",
+    "delete_competition",
     "start_provider_refresh",
     "start_intervals_plan_sync",
+    "sync_competitions",
     "get_sync_job",
     "resolve_training_sync_conflict",
+    "preview_adaptive_replan",
+    "apply_adaptive_replan",
     "undo_training_change",
 })
 
@@ -59,13 +66,18 @@ def intent_request_payload(
             "explicitly requested in the current message. Ambiguous actions must use needs_clarification "
             "and exactly one concrete question in ambiguities. "
             "An explicit request to create, edit, move, archive, restore, or delete local planning is a local_action. "
+            "An explicit request to list competitions or training plans is a local_action using the matching read operation. "
+            "An explicit request to add, edit, or delete a competition is a local_action using the matching competition operation. "
             "An explicit request to synchronize the local plan or library to Intervals.icu is a remote_sync using "
             "start_intervals_plan_sync; use local_plan scope when the athlete requests all pending entries. "
+            "An explicit request to synchronize competitions to Intervals.icu is a remote_sync using sync_competitions. "
+            "An explicit request to preview or apply adaptive planning is a local_action using the matching operation. "
             "Only use targets explicitly listed in allowed_targets. "
             "authorization_scope must contain exact operation or object tokens: "
-            "local_plan, local_template, artifact:<id>, planned_unit:<id>, "
+            "local_plan, local_template, local_competitions, artifact:<id>, planned_unit:<id>, "
             "library_workout:<id>, sync_job:<id>, change:<id>, intervals_refresh, "
-            "garmin_refresh, calendar_refresh, or weather_refresh."
+            "garmin_refresh, calendar_refresh, weather_refresh, competition:<id>, "
+            "adaptive_replan, adaptive_replan:<id>, or intervals_sync."
         ),
         "input": json.dumps({
             "message": str(message)[:12000],

@@ -39,6 +39,19 @@ class CoachIntentContractTests(unittest.TestCase):
                 "authorization_scope": [],
             })})
 
+    def test_parse_intent_accepts_explicit_competition_sync_operation(self):
+        result = parse_intent_response({"output_text": json.dumps({
+            "intent": "remote_sync",
+            "operation": "sync_competitions",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_competitions"],
+            "follow_up_operations": [],
+        })})
+        self.assertEqual(result["operation"], "sync_competitions")
+        self.assertEqual(result["target_system"], "intervals")
+
 
 if __name__ == "__main__":
     unittest.main()

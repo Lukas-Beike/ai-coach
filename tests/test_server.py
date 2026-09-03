@@ -445,6 +445,59 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["status"], "queued")
         self.assertEqual(enqueue.call_args.kwargs["item_operations"][0]["item_key"], local_id)
 
+    def test_structured_coach_exposes_competitions_plans_and_adaptive_operations(self):
+        names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
+        self.assertTrue({
+            "list_competitions", "save_competition", "delete_competition", "sync_competitions",
+            "list_training_plans", "update_training_plan", "preview_adaptive_replan", "apply_adaptive_replan",
+        } <= names)
+
+        competition = server.save_coach_competition({
+            "name": "Local Race", "event_date": "2099-01-01", "sport": "Cycling", "priority": "A",
+        })["competition"]
+        intent = {
+            "intent": "local_action", "operation": "save_competition", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_competitions"],
+        }
+        listed = server._structured_coach_tool_result(
+            "list_competitions", {}, intent=intent, conversation_id="conversation-competition",
+            client_turn_id="turn-competition", session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(listed["competitions"][0]["id"], competition["id"])
+
+        with patch.object(server, "sync_competitions", return_value={"status": "ok", "pushed": 1}) as sync:
+            synced = server._structured_coach_tool_result(
+                "sync_competitions", {},
+                intent={**intent, "operation": "sync_competitions", "intent": "remote_sync", "target_system": "intervals"},
+                conversation_id="conversation-competition", client_turn_id="turn-competition-sync",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+        self.assertEqual(synced["pushed"], 1)
+        sync.assert_called_once_with("Bestätigter Coach-Auftrag", push_local=True)
+
+    def test_structured_coach_can_keep_a_planning_conflict_local_before_push(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Local",
+            "description": "- 30m easy",
+        })
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE planned_units SET sync_state='conflict', sync_dirty=1, sync_conflict=? WHERE local_id=?",
+                (json.dumps({"type": "remote_changed", "remote": {"name": "Remote"}}), planned["id"]),
+            )
+        result = server._structured_coach_tool_result(
+            "resolve_training_sync_conflict",
+            {"local_id": planned["id"], "strategy": "keep_local"},
+            intent={
+                "intent": "local_action", "operation": "resolve_training_sync_conflict", "target_system": "local",
+                "artifact_id": None, "ambiguities": [], "authorization_scope": [f"planned_unit:{planned['id']}"],
+            },
+            conversation_id="conversation-conflict", client_turn_id="turn-conflict",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["planned_unit"]["sync_status"], "local")
+        self.assertEqual(result["planned_unit"]["name"], "Local")
+
     def test_structured_state_exposes_current_local_targets_and_hashes(self):
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
@@ -1765,8 +1818,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function competitionCard(', app)
         self.assertNotIn('function competitionEditor(', app)
         self.assertNotIn('function syncCompetitions(', app)
-        self.assertIn('id="competitionCoachButton"', index)
-        self.assertIn('schreibgeschützt', index)
+        self.assertNotIn('id="competitionCoachButton"', index)
+        self.assertIn('id="workoutsPanel"', index)
         self.assertIn('function showAccessibleDialog(', components)
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
@@ -4801,6 +4854,29 @@ class CoachTests(unittest.TestCase):
         planned = server.list_planned_units()
         self.assertEqual([item["name"] for item in planned], ["Initiale Planung"])
         self.assertEqual(server.get_kv("planned_units_initial_import_at"), "first")
+
+    def test_initial_planning_import_retries_after_import_failure(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        snapshot = {
+            "synced_at": "retryable", "athlete": {}, "recent_activities": [], "recent_wellness": [],
+            "upcoming_calendar": [{
+                "id": "retry-plan", "category": "WORKOUT", "type": "Ride", "name": "Retry Plan",
+                "start_date_local": tomorrow + "T08:00:00", "moving_time": 1800,
+            }],
+        }
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", side_effect=[snapshot, snapshot]
+        ), patch.object(
+            server, "upsert_remote_planned_units", side_effect=[RuntimeError("import failed"), {"imported": 1, "updated": 0, "conflicts": 0}]
+        ) as import_units, patch.object(server, "refresh_workout_library", return_value={"workouts": 0}):
+            with self.assertRaises(RuntimeError):
+                server.sync_intervals("initial attempt", activity_days=42)
+            self.assertIsNone(server.get_kv("planned_units_initial_import_at"))
+            server.sync_intervals("retry", activity_days=42)
+
+        self.assertEqual(import_units.call_count, 2)
+        self.assertEqual(server.get_kv("planned_units_initial_import_at"), "retryable")
 
     def test_planning_sync_preview_never_refreshes_remote_planning(self):
         with patch.object(server.IntervalsClient, "fetch_snapshot") as fetch_snapshot:

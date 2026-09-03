@@ -486,9 +486,8 @@ local athlete data.
 
 The adaptive planning action is surfaced as a compact hint on the Coach tab when
 a weather or shared calendar refresh finds future local planned units that need
-adjustment. It
-produces a change preview; only after explicit approval are eligible local
-library entries updated.
+adjustment. It produces a change preview; asking the Coach to apply the preview
+is the explicit approval and updates eligible local library entries.
 It does not overwrite, delete, or reschedule remote Intervals.icu calendar
 events.
 
@@ -496,11 +495,11 @@ External calendar events are only planning signals. The heuristic uses the event
 date, start/end time, duration, and all-day status to identify library entries
 that are hard or long. It does not infer or diagnose an infection from a family event;
 illness must still be entered in the athlete check-in. Every suggested change
-remains a local preview and requires **Anpassung anwenden**.
+remains a local preview and requires an explicit Coach request to apply it.
 
 Confirmed illness pauses can optionally be synchronized as explicit `SICK`
-calendar entries to Intervals.icu. This remote calendar write is always a
-separate athlete-selected option and is never performed by the preview itself.
+calendar entries to Intervals.icu. This remote calendar write happens only when
+the athlete explicitly names that synchronization in Coach Chat.
 
 
 ## Docker and Unraid
