@@ -240,15 +240,15 @@ Additive, transaktionale Migration von Schema 5:
 
 ### 5. Vollständige Planungs- und Sync-Tools
 
-- [ ] Lesen, Entwurf, Commit, Änderung, Vorlagen, Providerrefresh, Intervals-Push, Konfliktlösung und Undo als typisierte Tools anbinden.
-- [ ] Atomare Revisionen, Limits, Payload-Hashes und `already_applied` implementieren.
-- [ ] Routine-Preview-/Confirm-/Execute-Aufrufe aus Coach und UI entfernen; adaptive Replan-Ausnahme erhalten.
+- [x] Lesen, Entwurf, Commit, Änderung, Vorlagen, Providerrefresh, Intervals-Push, Konfliktlösung und Undo als typisierte Tools anbinden.
+- [x] Atomare Revisionen, Limits, Payload-Hashes und `already_applied` implementieren.
+- [x] Routine-Preview-/Confirm-/Execute-Aufrufe aus Coach und UI entfernen; adaptive Replan-Ausnahme erhalten.
 
 **Subsysteme:** Planning-Service, Tool-Registry, lokale Bibliothek, Intervals-Push.  
 **Definition of Done:** Ein eindeutiger Benutzerauftrag beendet den gesamten lokalen Workflow in demselben Turn; Remotejobs werden eindeutig eingereiht.  
 **Tests:** 28er-Batch, Revision, Konflikt, Undo, Remote-Job, keine Duplikate, adaptive Vorschau.  
 **Seiteneffekte:** Kein stiller Remote-Write; keine Teilcommits.  
-**Evidence:** `- Test: python -m unittest discover -s tests -v` — 362 Tests grün, 3 erwartete SQLCipher-Skips; Syntaxcheck und Docker-Build ebenfalls grün. Commits: eec187a, 649ccfb. Task bleibt offen, bis die bestehende UI die Routine-Preview/Confirm/Execute-Adapter ablöst.`
+**Evidence:** `- Test: python -m unittest discover -s tests -v` — 363 Tests grün, 3 erwartete SQLCipher-Skips; `python -m py_compile server.py tests/test_server.py`, verbotene-Dialog-/Protected-Path-Scan und `docker build -t ai-coach:local .` (Image-SHA `93ba494c3994c18ebdb4d4a4f459185452e7cf2634f1cde5038e3809dac65d15`) grün. Routine-UI nutzt zugänglichen Bestätigungsdialog, direkte lokale Mutationsendpunkte und persistente `plan_push`-Jobs; adaptive Replan bleibt als dokumentierte Preview-/Confirm-/Execute-Ausnahme. Commit: `f775e03` (zuvor `eec187a`, `649ccfb`).`
 
 ### 6. Bootstrap v3 und SSE
 
