@@ -128,7 +128,8 @@ test.describe("critical browser states", () => {
     await expect(page).toHaveURL(/#plan\/goals$/);
 
     await page.getByRole("link", { name: "Heute", exact: true }).click();
-    await expect(page.getByRole("button", { name: /Check-in (ausfüllen|prüfen)/ })).toBeVisible();
+    await expect(page.locator("#todayPanel .today-priority")).toContainText("Coach-Einordnung");
+    await expect(page.locator("#todayPanel .today-checkin")).toContainText("Morgen-Check-in");
     await expect(page.locator("#checkinDialog")).toBeHidden();
     await expect(page.locator("#chatPanel")).toContainText("Morgen-Check-in");
 

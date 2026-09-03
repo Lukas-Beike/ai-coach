@@ -89,8 +89,13 @@ button, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 30px 4px 20px;
+  justify-content: flex-end;
+  padding: 0 4px;
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 h1, h2, h3, p { margin-top: 0; }
@@ -100,14 +105,6 @@ h1 {
   font-weight: 750;
   letter-spacing: -.045em;
   line-height: 1.03;
-}
-.app-version {
-  color: var(--muted);
-  font-size: .32em;
-  font-weight: 600;
-  letter-spacing: .02em;
-  white-space: nowrap;
-  vertical-align: baseline;
 }
 .app-update-indicator {
   display: inline-grid;
@@ -120,7 +117,6 @@ h1 {
   text-decoration: none;
   vertical-align: .42em;
 }
-.app-update-warning { display: block; width: 100%; height: 100%; }
 .app-update-indicator:hover { color: #ffe566; background: rgba(255, 214, 10, .14); }
 .app-update-indicator[hidden] { display: none; }
 .pwa-update-button { padding: 0; border: 0; font: inherit; cursor: pointer; }
@@ -156,6 +152,7 @@ h2 {
 .icon-button:active { transform: scale(.94); }
 .icon-button.busy { animation: spin 1s linear infinite; }
 .top-action { padding: 9px 12px; font-size: .72rem; white-space: nowrap; }
+.settings-app-version { margin: 0; color: var(--subtle); font-size: .7rem; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .status-card {
@@ -851,7 +848,6 @@ input:focus, textarea:focus, select:focus { border-color: rgba(52, 207, 161, .72
 .nav-item:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .nav-item b { display: inline-grid; min-width: 16px; height: 16px; margin-left: 2px; place-items: center; border-radius: 50%; color: #fff; background: var(--accent); font-size: .62rem; }
 .nav-item b:empty { display: none; }
-.nav-version { display: block; margin-top: 8px; color: var(--subtle); font-size: 11px; font-weight: 500; }
 .collapsible-section > summary, .planned-week > summary, .library-sport > summary { min-height: 44px; }
 
 dialog { width: min(90vw, 420px); border: 1px solid var(--line); border-radius: 22px; padding: 24px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow); }
@@ -874,8 +870,7 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .desktop-nav .nav-item.active { color: var(--ink); background: var(--accent-soft); }
   .desktop-nav .nav-item.active .nav-icon { color: var(--accent-bright); }
   .desktop-nav .nav-item:last-child { margin-top: auto; }
-  .desktop-nav .nav-version { display: none; }
-  .topbar { grid-area: header; min-width: 0; padding-top: 24px; }
+  .topbar { grid-area: header; min-width: 0; }
   main { grid-area: main; min-width: 0; }
   .bottom-nav { display: none; }
   .section-heading { margin-top: 8px; }
@@ -888,8 +883,6 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .desktop-nav { padding: 32px 16px; }
   .desktop-nav .nav-item { display: flex; min-height: 48px; flex-direction: row; justify-content: flex-start; gap: 12px; padding: 10px 14px; }
   .desktop-nav .nav-item > span { display: inline; font-size: 14px; font-weight: 700; }
-  .desktop-nav .nav-version { display: block; margin-left: auto; }
-  .topbar { padding-top: 32px; }
   #chatPanel { max-width: 1100px; }
   #chatPanel .messages, #chatPanel .composer, #chatPanel .coach-action-review { max-width: 760px; }
   #settingsPanel.active { display: grid; grid-template-columns: minmax(190px, 220px) minmax(0, 1fr); align-items: start; gap: 0 24px; }
@@ -903,8 +896,6 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .shell { padding-right: 12px; padding-left: 12px; }
   #chatPanel { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
   .composer { width: 100%; }
-  .topbar { padding-right: 2px; padding-left: 2px; }
-  .topbar { padding-top: 20px; padding-bottom: 12px; }
   .coach-provider-status { grid-template-columns: 1fr; }
   h1 { font-size: 1.55rem; }
   h2 { font-size: 1.35rem; }

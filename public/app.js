@@ -3481,23 +3481,8 @@ function renderThinkingLevel(thinkingLevel) {
 }
 
 function renderAppVersion(app = {}) {
-  const versionNode = $("#appVersion");
-  const desktopVersionNode = $("#desktopNavVersion");
-  const updateNode = $("#appUpdateIndicator");
-  if (versionNode) versionNode.textContent = app.version ? `v${app.version}` : "";
-  if (desktopVersionNode) desktopVersionNode.textContent = app.version ? `v${app.version}` : "";
-  if (!updateNode) return;
-  const release = app.github_release || {};
-  const hasNewerVersion = release.status === "ok" && release.is_newer;
-  updateNode.hidden = !hasNewerVersion;
-  if (hasNewerVersion) {
-    updateNode.href = release.url;
-    updateNode.title = `Neuere Version verfügbar: v${release.version}`;
-    updateNode.setAttribute("aria-label", `Neuere Version verfügbar: v${release.version}`);
-  } else {
-    updateNode.removeAttribute("href");
-    updateNode.removeAttribute("title");
-  }
+  const settingsVersionNode = $("#settingsAppVersion");
+  if (settingsVersionNode) settingsVersionNode.textContent = app.version ? `v${app.version}` : "unbekannt";
 }
 
 function renderGithubRelease(app = {}) {

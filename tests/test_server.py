@@ -5801,6 +5801,15 @@ class CoachTests(unittest.TestCase):
         self.assertIn(f'intervals-coach-v{asset_version}', service_worker)
         self.assertIn(f'/app.js?v={asset_version}', service_worker)
 
+    def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
+        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        app_source = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn("PRIVATER TRAININGSBEREICH", markup)
+        self.assertNotIn('id="appVersion"', markup)
+        self.assertNotIn('id="desktopNavVersion"', markup)
+        self.assertIn('id="settingsAppVersion"', markup)
+        self.assertIn('$("#settingsAppVersion")', app_source)
+
     def test_privacy_and_remote_delete_ui_has_explicit_failure_states(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
         app_source = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")

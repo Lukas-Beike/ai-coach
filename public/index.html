@@ -27,14 +27,13 @@
       <a class="nav-item" href="#today" aria-controls="todayPanel" aria-label="Heute" data-panel="todayPanel" data-route="today"><svg class="nav-icon" aria-hidden="true"><use href="#icon-today"></use></svg><span>Heute</span></a>
       <a class="nav-item" href="#plan/calendar" aria-controls="workoutsPanel" aria-label="Plan" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Plan</span></a>
       <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
-      <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span><small id="desktopNavVersion" class="nav-version"></small></a>
+      <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </aside>
     <header class="topbar">
-      <div>
-        <span class="eyebrow">PRIVATER TRAININGSBEREICH</span>
-        <h1>Intervals Coach <small id="appVersion" class="app-version" aria-label="Version"></small><a id="appUpdateIndicator" class="app-update-indicator" href="#" target="_blank" rel="noopener noreferrer" hidden aria-label="Neuere Version verfügbar" title="Neuere Version verfügbar"><svg class="app-update-warning" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.5 21 20H3L12 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 9v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="17" r="1" fill="currentColor"></circle></svg></a><button id="pwaUpdateButton" class="app-update-indicator pwa-update-button" type="button" hidden aria-label="Neue App-Version laden" title="Neue App-Version laden"><svg class="nav-icon" aria-hidden="true"><use href="#icon-refresh"></use></svg></button></h1>
+      <div class="topbar-actions">
+        <button id="headerActionButton" class="secondary-button top-action" type="button" hidden></button>
+        <button id="pwaUpdateButton" class="app-update-indicator pwa-update-button" type="button" hidden aria-label="Neue App-Version laden" title="Neue App-Version laden"><svg class="nav-icon" aria-hidden="true"><use href="#icon-refresh"></use></svg></button>
       </div>
-      <button id="headerActionButton" class="secondary-button top-action" type="button" hidden></button>
     </header>
 
     <main>
@@ -260,7 +259,7 @@
 
       <section id="settingsPanel" class="panel" aria-label="Systemeinstellungen">
         <div class="section-heading">
-          <div><span class="eyebrow">MEHR</span><h2>Bereiche &amp; Einstellungen</h2></div>
+          <div><span class="eyebrow">MEHR</span><h2>Bereiche &amp; Einstellungen</h2><p class="settings-app-version">Version <span id="settingsAppVersion">wird geladen…</span></p></div>
         </div>
         <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
           <a href="#more/profile" data-more-segment="profile">Athletenprofil</a>
@@ -389,7 +388,6 @@
   <div id="authLoading" class="auth-loading" role="status" aria-live="polite">Trainingsbereich wird gepr&uuml;ft&hellip;</div>
   <dialog id="loginDialog" aria-labelledby="loginTitle">
     <form id="loginForm" method="dialog">
-      <span class="eyebrow">PRIVATER TRAININGSBEREICH</span>
       <h2 id="loginTitle">Anmelden</h2>
       <p>Gib das im Container gesetzte APP_PASSWORD ein.</p>
       <label for="loginPassword">Passwort<input id="loginPassword" type="password" autocomplete="current-password" required></label>
