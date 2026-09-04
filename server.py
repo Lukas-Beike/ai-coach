@@ -126,7 +126,7 @@ STATIC_TARGETS = {
 VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.6.2"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -1918,6 +1918,11 @@ def initialise_database() -> None:
         for provider_keys in PROVIDER_RESYNC_KEYS.values():
             set_kv(provider_keys["running"], "0", db)
             set_kv(provider_keys["status"], "", db)
+        # A process cannot continue a morning check-in after a restart. Clear
+        # its transient marker so an interrupted run is not shown as active.
+        set_kv("morning_checkin_running", "0", db)
+        if get_kv("morning_checkin_status", db) == "working":
+            set_kv("morning_checkin_status", "waiting", db)
         retention_setting = int(getattr(CONFIG, "data_retention_days", -1))
         if retention_setting != ALL_SYNC_DAYS:
             retention_days = max(30, min(retention_setting, 3650))

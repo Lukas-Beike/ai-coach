@@ -257,6 +257,10 @@ function finishAppShellLoading() {
   if (!$("#loginDialog")?.open) shell.hidden = false;
   shell.classList.remove("is-loading");
   shell.removeAttribute("aria-busy");
+  // The first local bootstrap deliberately renders the chat while the shell is
+  // still loading. Re-render after removing that state so its placeholder is
+  // replaced even if a deferred domain request has not settled yet.
+  renderMessages(state.data?.messages || [], true);
   applyNavigationRoute(routeFromHash(), { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
 }
 
@@ -832,6 +836,18 @@ const PROVIDER_FRESHNESS_ERRORS = {
   provider_error: "Providerfehler",
 };
 
+const PROVIDER_LABELS = {
+  intervals: "Intervals.icu",
+  garmin: "Garmin",
+  calendar: "Gemeinsamer Kalender",
+  weather: "Open-Meteo",
+};
+
+function coachProviderLabel(provider) {
+  const key = String(provider || "").trim().toLowerCase();
+  return PROVIDER_LABELS[key] || "Provider";
+}
+
 function providerRequiresManualAttention(entry) {
   if (!entry?.configured) return false;
   if (["auth_required", "invalid_configuration"].includes(entry.error_code)) return true;
@@ -1185,6 +1201,9 @@ function renderToday(data) {
   const todayKey = timezoneDateKey(data.profile?.timezone, new Date());
   const context = (data.daily_planning_context || []).find((item) => item.date === todayKey) || {};
   const checkin = data.local_feedback?.today || data.checkins?.find((item) => item.checkin_date === todayKey) || context.checkin;
+  const morning = data.morning_checkin || {};
+  const automaticMorningRunning = morning.running || morning.status === "working";
+  const automaticMorningReady = morning.status === "ready" && morning.date === todayKey;
   const recovery = context.recovery || data.performance?.recovery || {};
   const todayWorkouts = (data.planned || []).filter((event) => plannedEventDate(event) === todayKey);
   const weather = context.weather || (data.weather?.days || []).find((item) => item.date === todayKey);
@@ -1209,6 +1228,10 @@ function renderToday(data) {
     todayCardText(priorityCard, "Für die lokale Planung liegt eine Anpassung vor. Sie wird in der Einordnung für heute berücksichtigt.", "today-card-summary");
   } else if (todayWorkouts.length) {
     todayCardText(priorityCard, `${todayWorkouts.length} geplante Einheit${todayWorkouts.length === 1 ? "" : "en"} für heute. Die verfügbaren Quellen und der Morgen-Check-in bilden die Grundlage der Einordnung.`, "today-card-summary");
+  } else if (automaticMorningRunning) {
+    todayCardText(priorityCard, "Der Morgen-Check-in wird noch erstellt.", "today-card-summary");
+  } else if (automaticMorningReady) {
+    todayCardText(priorityCard, "Der Morgen-Check-in ist abgeschlossen. Die Einordnung basiert auf dem aktualisierten Snapshot.", "today-card-summary");
   } else if (!checkin) {
     todayCardText(priorityCard, "Für heute liegt noch kein Morgen-Check-in vor. Die Einordnung basiert deshalb auf den verfügbaren Quellendaten.", "today-card-summary");
   } else {
@@ -1227,6 +1250,10 @@ function renderToday(data) {
       checkin.illness ? `Krankheit: ${checkin.illness}` : null,
     ].filter(Boolean);
     todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
+  } else if (automaticMorningRunning) {
+    todayCardText(checkinCard, "Der Morgen-Check-in wird noch erstellt.", "today-card-summary");
+  } else if (automaticMorningReady) {
+    todayCardText(checkinCard, "Morgen-Check-in abgeschlossen. Die ausführliche Einordnung findest du im Coach-Chat.", "today-card-summary");
   } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
   root.append(checkinCard);
 
@@ -1674,11 +1701,13 @@ function createPendingMessage(entry) {
 
 function renderMessages(messages, forceScroll = false) {
   const root = $("#messages");
+  const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
   // Synchronisation and refresh notices belong to their respective tabs,
   // not to the personal conversation history.
   const visibleMessages = (messages || []).filter((message) => message.role !== "event");
   const signature = JSON.stringify([
     visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content]),
+    appShellLoading,
     state.busy,
     state.chatStreamText,
     state.chatServerOperationId,
@@ -1693,7 +1722,7 @@ function renderMessages(messages, forceScroll = false) {
   root.dataset.signature = signature;
   root.replaceChildren();
   if (!visibleMessages.length && !state.chatRequest && !state.chatQueue.length) {
-    if ($("#appShell")?.classList.contains("is-loading")) root.append(createSkeletonStack(4));
+    if (appShellLoading) root.append(createSkeletonStack(4));
     else root.append(createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest oder starte mit einer Schnellaktion."));
   }
   for (const message of visibleMessages) {
@@ -1892,6 +1921,27 @@ function planWeekLabel(weekStartKey) {
   return `${startLabel} – ${endLabel}`;
 }
 
+function plannedWeatherLabel(weather) {
+  if (!weather || typeof weather !== "object") return "";
+  const hasForecast = weather.condition || weather.weather_code != null
+    || weather.temperature_min != null || weather.temperature_max != null;
+  if (!hasForecast) return "";
+  return [
+    weatherIconFor(weather),
+    weather.condition,
+    weatherNumber(weather.temperature_min, " °C"),
+    weatherNumber(weather.temperature_max, " °C"),
+  ].filter((value) => value && value !== "–").join(" · ");
+}
+
+function plannedAppointmentLabel(event) {
+  if (!event || typeof event !== "object") return "";
+  const name = String(event.name || "Trainingstermin").trim() || "Trainingstermin";
+  if (event.all_day) return `${name} · ganztägig`;
+  const time = String(event.start_local || "").match(/(?:T|\s)(\d{2}:\d{2})/);
+  return time ? `${name} · ${time[1]}` : name;
+}
+
 function renderPlanned(planned) {
   const root = $("#plannedCalendar");
   const summary = $("#plannedSummary");
@@ -1908,6 +1958,11 @@ function renderPlanned(planned) {
   const pastWeeks = calendarDisplayValue(display.past_weeks, 1);
   const futureWeeks = calendarDisplayValue(display.future_weeks, 4);
   const firstWeekKey = addDateKey(currentWeekKey, -7 * pastWeeks);
+  const planningContextByDate = new Map(
+    (Array.isArray(state.data?.daily_planning_context) ? state.data.daily_planning_context : [])
+      .filter((item) => item && item.date)
+      .map((item) => [String(item.date).slice(0, 10), item]),
+  );
   const eventsByDate = new Map();
   entries.forEach((entry) => {
     const key = plannedEventDate(entry);
@@ -1934,16 +1989,54 @@ function renderPlanned(planned) {
     for (let offset = 0; offset < 7; offset += 1) {
       const dateKey = addDateKey(weekKey, offset);
       const dayEntries = eventsByDate.get(dateKey) || [];
+      const dayContext = planningContextByDate.get(dateKey) || {};
+      const weather = dayContext.weather || (Array.isArray(state.data?.weather?.days)
+        ? state.data.weather.days.find((item) => item && item.date === dateKey)
+        : null);
       const day = document.createElement("section");
       day.className = `planned-day${dateKey === todayKey ? " is-today" : ""}`;
       const dayHeading = document.createElement("div");
       dayHeading.className = "planned-day-heading";
+      const dayHeadingMain = document.createElement("div");
+      dayHeadingMain.className = "planned-day-heading-main";
       const dayTitle = document.createElement("h5");
       dayTitle.textContent = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(dateFromKey(dateKey));
+      dayHeadingMain.append(dayTitle);
+      const weatherLabel = plannedWeatherLabel(weather);
+      if (weatherLabel) {
+        const weatherText = document.createElement("span");
+        weatherText.className = "planned-day-weather";
+        weatherText.textContent = weatherLabel;
+        weatherText.title = "Wettervorhersage";
+        dayHeadingMain.append(weatherText);
+      }
       const dayCount = document.createElement("span");
       dayCount.textContent = dayEntries.length ? `${dayEntries.length} ${dayEntries.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
-      dayHeading.append(dayTitle, dayCount);
+      dayHeading.append(dayHeadingMain, dayCount);
       day.append(dayHeading);
+
+      const appointments = (Array.isArray(dayContext.appointments) ? dayContext.appointments : [])
+        .filter((event) => event && event.training_relevant !== false)
+        .map(plannedAppointmentLabel)
+        .filter(Boolean);
+      if (appointments.length) {
+        const calendarNotice = document.createElement("p");
+        calendarNotice.className = "planned-day-context planned-day-calendar";
+        calendarNotice.textContent = `Kalender: ${appointments.join(", ")}`;
+        day.append(calendarNotice);
+      }
+      const checkin = dayContext.checkin && typeof dayContext.checkin === "object" ? dayContext.checkin : {};
+      const illness = String(checkin.illness || "").trim();
+      const pain = String(checkin.pain || "").trim();
+      if (illness || pain) {
+        const healthNotice = document.createElement("p");
+        healthNotice.className = "planned-day-context planned-day-health";
+        healthNotice.textContent = [
+          illness ? `Krankheit: ${illness}` : "",
+          pain ? `Verletzung/Beschwerden: ${pain}` : "",
+        ].filter(Boolean).join(" · ");
+        day.append(healthNotice);
+      }
       if (!dayEntries.length) {
         const empty = document.createElement("p");
         empty.className = "planned-day-empty";
@@ -1951,14 +2044,17 @@ function renderPlanned(planned) {
         day.append(empty);
       }
       dayEntries.forEach((entry) => {
-        const card = document.createElement("article");
+        const card = document.createElement("details");
         card.className = "planned-entry";
+        card.open = false;
+        const cardSummary = document.createElement("summary");
         const cardTitle = document.createElement("strong");
         cardTitle.textContent = entry.name || "Geplante Einheit";
         const meta = document.createElement("span");
         meta.className = "planned-meta";
         meta.textContent = [activitySportLabel(entry), entry.duration_minutes ? `${entry.duration_minutes} Min.` : entry.moving_time ? formatDuration(entry.moving_time) : null].filter(Boolean).join(" · ");
-        card.append(cardTitle, meta);
+        cardSummary.append(cardTitle, meta);
+        card.append(cardSummary);
         if (entry.description) {
           const description = document.createElement("p");
           description.className = "planned-description";
@@ -2000,7 +2096,7 @@ function renderLibrary(workouts) {
     .forEach(([sport, sportWorkouts]) => {
       const section = document.createElement("details");
       section.className = "library-sport";
-      section.open = true;
+      section.open = false;
       const summary = document.createElement("summary");
       const title = document.createElement("strong");
       title.textContent = sport;
