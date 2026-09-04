@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b0b0d">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg?v=165" type="image/svg+xml">
-    <link rel="stylesheet" href="/styles.css?v=165">
+    <link rel="icon" href="/icon.svg?v=166" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css?v=166">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -25,7 +25,7 @@
     <aside class="desktop-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
       <a class="nav-item" href="#today" aria-controls="todayPanel" aria-label="Heute" data-panel="todayPanel" data-route="today"><svg class="nav-icon" aria-hidden="true"><use href="#icon-today"></use></svg><span>Heute</span></a>
-      <a class="nav-item" href="#plan" aria-controls="workoutsPanel" aria-label="Bibliothek" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Bibliothek</span></a>
+      <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Geplant" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Geplant</span></a>
       <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </aside>
@@ -48,16 +48,6 @@
       </section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
-        <section id="coachOverview" class="coach-overview card" aria-labelledby="coachOverviewTitle">
-          <div class="coach-overview-heading">
-            <div><span class="eyebrow">DEIN TRAININGSCOACH</span><h2 id="coachOverviewTitle">Was möchtest du heute klären?</h2><p>Verlauf, Planung und Erholung sind im Coach-Kontext gebündelt.</p></div>
-          </div>
-          <div id="coachQuickActions" class="coach-quick-actions" aria-label="Schnellaktionen">
-            <button id="coachMorningCheckinButton" type="button" class="btn secondary" data-coach-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
-            <button id="coachLatestActivityButton" type="button" class="btn secondary" data-coach-message="Aktualisiere zuerst meine Intervals.icu-Daten. Analysiere danach meine letzte absolvierte Einheit: Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit? Nutze bei einer nahezu gleichen Wahoo- und Garmin-Radaufzeichnung immer Wahoo.">Letzte Einheit analysieren</button>
-            <button id="coachAdjustPlanButton" type="button" class="btn ghost" data-coach-message="Zeige mir die konkrete Anpassung für die erkannte Blockade in den kommenden drei Tagen als Vorschlag. Berücksichtige den neuen Kalendertermin, Krankheit, Verletzung oder unmögliches Wetter und ändere noch nichts ohne meine Freigabe." hidden>Plan anpassen</button>
-          </div>
-        </section>
         <div id="coachAdaptivePlanningNotice" class="adaptive-planning-notice coach-adaptive-planning-notice" hidden role="status">
           <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
@@ -101,12 +91,22 @@
         <div id="todaySummary" class="today-grid"></div>
       </section>
 
-      <section id="workoutsPanel" class="panel" aria-label="Trainingsbibliothek">
+      <section id="workoutsPanel" class="panel" aria-label="Geplante Einheiten und Trainingsbibliothek">
         <div class="section-heading">
-          <div><span class="eyebrow">TRAININGSBIBLIOTHEK</span><h2>Bibliothek</h2><span id="librarySummary" class="tab-sync-detail"></span></div>
+          <div><span class="eyebrow">TRAININGSPLANUNG</span><h2>Geplant</h2><span class="tab-sync-detail">Nur lesen · Änderungen laufen über den Coach</span></div>
         </div>
-        <div id="library" class="library" aria-live="polite"></div>
-        <div id="libraryPagination" class="library-pagination"></div>
+        <nav class="plan-segment-nav" aria-label="Geplante Bereiche">
+          <a href="#plan/overview" data-plan-segment="overview" aria-current="page">Übersicht</a>
+          <a href="#plan/library" data-plan-segment="library">Bibliothek</a>
+        </nav>
+        <section id="planOverviewSegment" class="plan-segment" data-plan-segment-panel="overview" aria-labelledby="planOverviewTitle">
+          <div class="plan-segment-heading"><div><span class="eyebrow">KALENDER</span><h3 id="planOverviewTitle">Geplante Einheiten</h3><span id="plannedSummary" class="tab-sync-detail"></span></div></div>
+          <div id="plannedCalendar" class="planned-calendar" aria-live="polite"></div>
+        </section>
+        <section id="planLibrarySegment" class="plan-segment" data-plan-segment-panel="library" aria-labelledby="planLibraryTitle" hidden>
+          <div class="plan-segment-heading"><div><span class="eyebrow">TRAININGSBIBLIOTHEK</span><h3 id="planLibraryTitle">Bibliothek</h3><span id="librarySummary" class="tab-sync-detail"></span></div></div>
+          <div id="library" class="library" aria-live="polite"></div>
+        </section>
         <dialog id="checkinDialog" class="checkin-dialog" aria-labelledby="checkinTitle" aria-describedby="checkinDescription">
           <div class="checkin-dialog-content">
             <div class="settings-section-heading">
@@ -335,7 +335,7 @@
     <nav class="bottom-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
       <a class="nav-item" href="#today" aria-controls="todayPanel" aria-label="Heute" data-panel="todayPanel" data-route="today"><svg class="nav-icon" aria-hidden="true"><use href="#icon-today"></use></svg><span>Heute</span></a>
-      <a class="nav-item" href="#plan" aria-controls="workoutsPanel" aria-label="Bibliothek" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Bibliothek</span></a>
+      <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Geplant" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Geplant</span></a>
       <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </nav>
@@ -369,12 +369,12 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=165" defer></script>
-  <script src="/navigation.js?v=165" defer></script>
-  <script src="/state.js?v=165" defer></script>
-  <script src="/views.js?v=165" defer></script>
-  <script src="/forms.js?v=165" defer></script>
-  <script src="/components.js?v=165" defer></script>
-  <script src="/app.js?v=165" defer></script>
+  <script src="/api.js?v=166" defer></script>
+  <script src="/navigation.js?v=166" defer></script>
+  <script src="/state.js?v=166" defer></script>
+  <script src="/views.js?v=166" defer></script>
+  <script src="/forms.js?v=166" defer></script>
+  <script src="/components.js?v=166" defer></script>
+  <script src="/app.js?v=166" defer></script>
 </body>
 </html>

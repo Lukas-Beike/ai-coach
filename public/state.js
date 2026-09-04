@@ -32,6 +32,7 @@ const state = {
   activityVisibleCount: 250,
   activityFeedbackDirty: new Set(),
   activityFeedbackDrafts: new Map(),
+  planSegment: "overview",
   analysisSegment: "performance",
   loadedAreas: new Set(),
   voiceRecorder: null,

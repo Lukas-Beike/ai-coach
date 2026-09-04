@@ -36,11 +36,28 @@ function renderAnalysisSegments(segment = state.analysisSegment) {
   });
 }
 
+function renderPlanSegments(segment = state.planSegment) {
+  const selected = ["overview", "library"].includes(segment) ? segment : "overview";
+  state.planSegment = selected;
+  document.querySelectorAll("[data-plan-segment-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.planSegmentPanel !== selected;
+  });
+  document.querySelectorAll("[data-plan-segment]").forEach((link) => {
+    const active = link.dataset.planSegment === selected;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+}
+
 function currentPlanLoadAreas() {
   const areas = new Set(["chat", "activities", "performance", "feedback", "profile", "weather"]);
   const route = baseRoute();
   if (route === "today") areas.add("plan");
-  if (route === "plan") areas.add("library");
+  if (route === "plan") {
+    areas.add("plan");
+    areas.add("library");
+  }
   return [...areas];
 }
 
@@ -49,6 +66,7 @@ function ensureRouteData(route = state.route) {
   const requested = [];
   const panelRoute = baseRoute(route);
   if (panelRoute === "today" && !state.loadedAreas.has("plan")) requested.push("plan");
+  if (panelRoute === "plan" && !state.loadedAreas.has("plan")) requested.push("plan");
   if (panelRoute === "plan" && !state.loadedAreas.has("library")) requested.push("library");
   if (requested.length) load("/api/bootstrap?local=1", requested);
 }
@@ -72,7 +90,7 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   panel.classList.add("active");
   state.route = panelRoute;
   if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
-  if (mainRoute === "plan" && state.data) renderLibrary(state.data.library || []);
+  if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
   if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
   const targetHash = `#${panelRoute}`;
   if (window.location.hash !== targetHash) {
@@ -169,6 +187,7 @@ function showLogin() {
   state.chatResponseStarted = false;
   state.chatResponseScrollPending = false;
   state.loadedAreas.clear();
+  state.planSegment = "overview";
   state.analysisSegment = "performance";
   state.profileDirty = false;
   state.checkinDirty = false;
@@ -982,18 +1001,8 @@ function renderProviderFreshness(data) {
 
 function renderCoachOverview(data) {
   const actions = data.coach_quick_actions || {};
-  const morning = $("#coachMorningCheckinButton");
   const quickMorning = $("#quickMorningCheckinButton");
-  const adjust = $("#coachAdjustPlanButton");
-  if (morning) morning.hidden = actions.morning_checkin === false;
   if (quickMorning) quickMorning.hidden = actions.morning_checkin === false;
-  if (adjust) {
-    adjust.hidden = actions.adjust_plan !== true;
-    const blockers = Array.isArray(actions.plan_blockers) ? actions.plan_blockers : [];
-    adjust.title = blockers.length
-      ? `Plananpassung nötig: ${blockers.map((item) => `${dateLabel(item.date)} · ${item.name}`).join(", ")}`
-      : "";
-  }
 }
 
 function renderCoachReceipts() {
@@ -1219,12 +1228,6 @@ function renderToday(data) {
     ].filter(Boolean);
     todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
   } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
-  const checkinButton = document.createElement("button");
-  checkinButton.type = "button";
-  checkinButton.className = "secondary-button today-checkin-action";
-  checkinButton.textContent = checkin ? "Check-in prüfen" : "Check-in ausfüllen";
-  checkinButton.addEventListener("click", () => openCheckinEditor(todayKey));
-  checkinCard.append(checkinButton);
   root.append(checkinCard);
 
   const readinessCard = todayCard("Readiness & Erholung", "today-readiness");
@@ -1872,6 +1875,105 @@ function renderTrainingPlans(plans, workouts) {
   });
 }
 
+function planWeekStart(dateKey) {
+  const value = dateFromKey(dateKey);
+  if (Number.isNaN(value.valueOf())) return "";
+  const weekday = value.getDay();
+  value.setDate(value.getDate() - (weekday === 0 ? 6 : weekday - 1));
+  return localDateKey(value);
+}
+
+function planWeekLabel(weekStartKey) {
+  const start = dateFromKey(weekStartKey);
+  const end = dateFromKey(addDateKey(weekStartKey, 6));
+  if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf())) return weekStartKey;
+  const startLabel = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit" }).format(start);
+  const endLabel = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }).format(end);
+  return `${startLabel} – ${endLabel}`;
+}
+
+function renderPlanned(planned) {
+  const root = $("#plannedCalendar");
+  const summary = $("#plannedSummary");
+  if (!root) return;
+  root.replaceChildren();
+  const entries = (Array.isArray(planned) ? planned : [])
+    .filter((item) => item && !item.archived && !item.local_deleted && plannedEventDate(item))
+    .sort((left, right) => plannedEventDate(left).localeCompare(plannedEventDate(right)));
+  if (summary) summary.textContent = `${entries.length} geplante Einheit${entries.length === 1 ? "" : "en"}`;
+
+  const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
+  const currentWeekKey = planWeekStart(todayKey);
+  const display = state.data?.calendar_display || {};
+  const pastWeeks = calendarDisplayValue(display.past_weeks, 1);
+  const futureWeeks = calendarDisplayValue(display.future_weeks, 4);
+  const firstWeekKey = addDateKey(currentWeekKey, -7 * pastWeeks);
+  const eventsByDate = new Map();
+  entries.forEach((entry) => {
+    const key = plannedEventDate(entry);
+    if (!eventsByDate.has(key)) eventsByDate.set(key, []);
+    eventsByDate.get(key).push(entry);
+  });
+
+  for (let weekIndex = 0; weekIndex < pastWeeks + futureWeeks + 1; weekIndex += 1) {
+    const weekKey = addDateKey(firstWeekKey, weekIndex * 7);
+    const week = document.createElement("section");
+    week.className = "planned-week";
+    const heading = document.createElement("div");
+    heading.className = "planned-week-heading";
+    const title = document.createElement("h4");
+    title.textContent = planWeekLabel(weekKey);
+    const count = document.createElement("span");
+    const weekEntries = Array.from({ length: 7 }, (_, offset) => eventsByDate.get(addDateKey(weekKey, offset)) || []).flat();
+    count.textContent = `${weekEntries.length} Einheit${weekEntries.length === 1 ? "" : "en"}`;
+    heading.append(title, count);
+    week.append(heading);
+
+    const days = document.createElement("div");
+    days.className = "planned-week-days";
+    for (let offset = 0; offset < 7; offset += 1) {
+      const dateKey = addDateKey(weekKey, offset);
+      const dayEntries = eventsByDate.get(dateKey) || [];
+      const day = document.createElement("section");
+      day.className = `planned-day${dateKey === todayKey ? " is-today" : ""}`;
+      const dayHeading = document.createElement("div");
+      dayHeading.className = "planned-day-heading";
+      const dayTitle = document.createElement("h5");
+      dayTitle.textContent = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(dateFromKey(dateKey));
+      const dayCount = document.createElement("span");
+      dayCount.textContent = dayEntries.length ? `${dayEntries.length} ${dayEntries.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
+      dayHeading.append(dayTitle, dayCount);
+      day.append(dayHeading);
+      if (!dayEntries.length) {
+        const empty = document.createElement("p");
+        empty.className = "planned-day-empty";
+        empty.textContent = "Keine Einheit geplant";
+        day.append(empty);
+      }
+      dayEntries.forEach((entry) => {
+        const card = document.createElement("article");
+        card.className = "planned-entry";
+        const cardTitle = document.createElement("strong");
+        cardTitle.textContent = entry.name || "Geplante Einheit";
+        const meta = document.createElement("span");
+        meta.className = "planned-meta";
+        meta.textContent = [activitySportLabel(entry), entry.duration_minutes ? `${entry.duration_minutes} Min.` : entry.moving_time ? formatDuration(entry.moving_time) : null].filter(Boolean).join(" · ");
+        card.append(cardTitle, meta);
+        if (entry.description) {
+          const description = document.createElement("p");
+          description.className = "planned-description";
+          description.textContent = entry.description;
+          card.append(description);
+        }
+        day.append(card);
+      });
+      days.append(day);
+    }
+    week.append(days);
+    root.append(week);
+  }
+}
+
 function renderLibrary(workouts) {
   const root = $("#library");
   if (!root) return;
@@ -1880,7 +1982,6 @@ function renderLibrary(workouts) {
   const visible = allWorkouts.filter((workout) => !workout.archived && !workout.date);
   const librarySummary = $("#librarySummary");
   if (librarySummary) librarySummary.textContent = `${visible.length} Einheit${visible.length === 1 ? "" : "en"}`;
-  renderLibraryPagination();
   if (!visible.length) {
     const empty = document.createElement("p");
     empty.className = "context-empty";
@@ -1924,36 +2025,6 @@ function renderLibrary(workouts) {
       section.append(cards);
       root.append(section);
     });
-}
-
-function renderLibraryPagination() {
-  const pagination = $("#libraryPagination");
-  if (!pagination) return;
-  pagination.replaceChildren();
-  if (!state.data?.library_next_cursor) return;
-  const more = document.createElement("button");
-  more.type = "button";
-  more.className = "secondary-button";
-  more.textContent = "Weitere Einheiten laden";
-  more.addEventListener("click", loadMoreLibrary);
-  pagination.append(more);
-}
-
-async function loadMoreLibrary() {
-  const pagination = $("#libraryPagination");
-  const cursor = state.data?.library_next_cursor;
-  if (!pagination || !cursor) return;
-  const button = pagination.querySelector("button");
-  if (button) { button.disabled = true; button.textContent = "Weitere Einheiten werden geladen…"; }
-  try {
-    const result = await api(`/api/library?limit=100&cursor=${encodeURIComponent(cursor)}`);
-    state.data.library = [...(state.data.library || []), ...(result.workouts || [])];
-    state.data.library_next_cursor = result.next_cursor;
-    renderLibrary(state.data.library);
-  } catch (error) {
-    toast(error.message, true);
-    if (button) button.disabled = false;
-  }
 }
 
 function renderProfile(profile) {
@@ -2801,6 +2872,7 @@ function render(data) {
   renderMessages(data.messages, firstRender);
   renderToday(data);
   renderActivities(data.activities || []);
+  renderPlanned(data.planned || []);
   renderLibrary(data.library || []);
   renderProfile(data.profile);
   renderCheckins(data.checkins || data.local_feedback?.recent || [], data.profile?.timezone);
@@ -2967,11 +3039,12 @@ async function pollChatStatus() {
 
 async function loadInitialState() {
   const route = routeFromHash();
+  state.planSegment = planSegmentFromRoute(route);
   state.analysisSegment = analysisSegmentFromRoute(route);
   const areas = ["chat", "activities", "performance", "feedback", "profile"];
   areas.push("weather");
   if (route === "today") areas.push("plan");
-  if (baseRoute(route) === "plan") areas.push("library");
+  if (baseRoute(route) === "plan") areas.push("plan", "library");
   await load("/api/bootstrap?local=1", areas);
   if (state.data?.profile?.weather_location) {
     await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
@@ -3683,6 +3756,11 @@ document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addE
   event.preventDefault();
   applyNavigationRoute(`analysis/${link.dataset.analysisSegment}`, { historyMode: "push" });
 }));
+document.querySelectorAll("[data-plan-segment]").forEach((link) => link.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  applyNavigationRoute(`plan/${link.dataset.planSegment}`, { historyMode: "push" });
+}));
 document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
@@ -3700,14 +3778,6 @@ $("#quickMessageTemplates").addEventListener("click", (event) => {
   if (!button || state.busy) return;
   const input = $("#messageInput");
   input.value = button.dataset.message || "";
-  input.dispatchEvent(new Event("input"));
-  $("#chatForm").requestSubmit();
-});
-$("#coachQuickActions").addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-coach-message]");
-  if (!button || state.busy) return;
-  const input = $("#messageInput");
-  input.value = button.dataset.coachMessage || "";
   input.dispatchEvent(new Event("input"));
   $("#chatForm").requestSubmit();
 });
