@@ -167,7 +167,7 @@ class ChatRepository:
 
     def list(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT id, role, content, created_at FROM messages ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT id, role, content, created_at FROM messages WHERE role != 'event' ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(row) for row in reversed(rows)]
 
