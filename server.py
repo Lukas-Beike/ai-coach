@@ -127,6 +127,7 @@ VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "f
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 APP_VERSION = "1.6.0"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -398,6 +399,7 @@ def env_bool(name: str, default: bool = False) -> bool:
 class Config:
     port: int = int(os.environ.get("PORT", "8090"))
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
+    openai_base_url: str = os.environ.get("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)
     openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.6-sol")
     intervals_api_key: str = os.environ.get("INTERVALS_API_KEY", "")
     intervals_athlete_id: str = os.environ.get("INTERVALS_ATHLETE_ID", "0")
@@ -11815,6 +11817,23 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
     return result
 
 
+def openai_endpoint(path: str) -> str:
+    """Resolve an OpenAI-compatible API path against the configured base URL."""
+    base_url = str(getattr(CONFIG, "openai_base_url", DEFAULT_OPENAI_BASE_URL) or DEFAULT_OPENAI_BASE_URL).strip() or DEFAULT_OPENAI_BASE_URL
+    parsed = urlparse(base_url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise AppError(500, "OPENAI_BASE_URL muss eine gültige HTTP(S)-Basis-URL ohne Zugangsdaten oder Query-Parameter sein.")
+    normalized_path = "/" + str(path or "").lstrip("/")
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/") + normalized_path, "", "", ""))
+
+
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
@@ -11823,7 +11842,7 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     result = http_json(
         "POST",
-        "https://api.openai.com/v1" + path,
+        openai_endpoint(path),
         request_payload,
         {"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
@@ -11902,7 +11921,7 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     )
     result = http_json(
         "POST",
-        "https://api.openai.com/v1/audio/transcriptions",
+        openai_endpoint("/audio/transcriptions"),
         headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=90,
         service="openai",
@@ -11952,8 +11971,10 @@ def openai_stream_request(
     request_payload = {**payload, "stream": True}
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     body = json.dumps(request_payload).encode("utf-8")
+    endpoint = openai_endpoint("/responses")
+    parsed_endpoint = urlparse(endpoint)
     request = Request(
-        "https://api.openai.com/v1/responses",
+        endpoint,
         data=body,
         headers={
             "Accept": "text/event-stream",
@@ -11967,8 +11988,8 @@ def openai_stream_request(
     context = {
         "service": "openai",
         "method": "POST",
-        "host": "api.openai.com",
-        "path": "/v1/responses",
+        "host": parsed_endpoint.netloc,
+        "path": _safe_provider_path(parsed_endpoint.path),
         "timeout_seconds": OPENAI_RESPONSE_TIMEOUT_SECONDS,
         "request_bytes": len(body),
     }
@@ -15215,7 +15236,7 @@ def delete_remote_conversation(conversation_id: str) -> bool:
         return False
     http_json(
         "DELETE",
-        "https://api.openai.com/v1/conversations/" + quote(conversation_id, safe=""),
+        openai_endpoint("/conversations/" + quote(conversation_id, safe="")),
         headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
         timeout=30,
         service="openai",
