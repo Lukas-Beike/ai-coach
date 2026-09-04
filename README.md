@@ -70,7 +70,10 @@ It is not intended to be exposed directly to the public internet.
   Markdown, and **Abbrechen** cancels the active request while **Steuern**
   remains a separate queued follow-up action. Reloading the page or losing the
   streaming connection does not cancel the server-side coach request; its
-  persisted answer appears in the chat after the next load.
+  persisted answer appears in the chat after the next load. Planning requests
+  longer than seven calendar days or containing more than seven requested
+  units are persisted as background jobs and use OpenAI background responses;
+  their response ID and progress survive a page reload or process restart.
 - The Coach start card contains only contextual quick actions, not provider
   connection badges. The morning check-in disappears after it completed for
   the athlete's local day. "Plan anpassen" appears only for an unapplied
@@ -189,7 +192,9 @@ It is not intended to be exposed directly to the public internet.
   token budget; requests continue until OpenAI rejects them because the
   account or project quota is exhausted. An explicitly cancelled stream never
   executes a partial tool call; a lost browser connection leaves the request
-  running so its completed answer can be recovered after reload.
+  running so its completed answer can be recovered after reload. One-week
+  plans and requests for at most seven units remain synchronous; larger plans
+  return control to the browser immediately and are polled from durable state.
 
 ## Loading and synchronization
 

@@ -1678,6 +1678,7 @@ function updateChatQueueStatus() {
 }
 
 function coachWorkingLabel() {
+  if (state.chatRequest?.background) return "Längerer Plan läuft im Hintergrund · du kannst die Seite neu laden…";
   if (state.chatRequest?.phase === "recovering") return "Verbindung unterbrochen · die Antwort wird im Hintergrund fertiggestellt…";
   if (state.chatRequest?.phase === "reconciling") return "Antwort wird sicher übernommen…";
   return "Coach arbeitet an deiner Antwort…";
@@ -3436,8 +3437,11 @@ async function pollChatStatus() {
     running = status.status === "running";
     if (running) {
       state.chatServerOperationId = status.operation_id || null;
-      if (!state.chatRequest) state.chatRequest = { phase: "recovering", operationId: state.chatServerOperationId, message: null };
-      else if (state.chatRequest.phase === "recovering") state.chatRequest.operationId = state.chatServerOperationId;
+      if (!state.chatRequest) state.chatRequest = { phase: "recovering", operationId: state.chatServerOperationId, message: null, background: status.mode === "background" };
+      else if (state.chatRequest.phase === "recovering") {
+        state.chatRequest.operationId = state.chatServerOperationId;
+        state.chatRequest.background = status.mode === "background";
+      }
       if (!state.busy) {
         state.busy = true;
         renderQuickMessageTemplates();
@@ -3517,6 +3521,7 @@ async function requestCoachResponse(message) {
   updateChatControls();
   renderMessages(state.data?.messages || [], true);
   let completed = false;
+  let background = false;
   try {
     const response = await fetch("/api/chat/stream", {
       method: "POST",
@@ -3556,6 +3561,15 @@ async function requestCoachResponse(message) {
         state.chatResponseStarted = state.chatResponseStarted || responseJustStarted;
         if (responseJustStarted) state.chatResponseScrollPending = true;
         scheduleChatStreamRender(responseJustStarted);
+      } else if (event === "background") {
+        background = true;
+        request.background = true;
+        request.phase = "recovering";
+        stream.operationId = payload.operation_id || stream.operationId;
+        request.operationId = stream.operationId;
+        state.chatServerOperationId = stream.operationId;
+        renderMessages(state.data?.messages || [], false);
+        updateChatControls();
       } else if (event === "error") {
         stream.serverError = true;
         const error = new Error(payload.message || "Die Coach-Anfrage ist fehlgeschlagen.");
@@ -3588,6 +3602,10 @@ async function requestCoachResponse(message) {
     }
     buffer += decoder.decode();
     if (buffer.trim()) consume(buffer);
+    if (background) {
+      scheduleChatStatusPoll(0);
+      return "recovering";
+    }
     if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
     await loadChatHistoryFresh();
     if (completed) scrollChatToResponseStart();
