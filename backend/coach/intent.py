@@ -23,6 +23,8 @@ OPERATION_VALUES = frozenset({
     "commit_training_plan",
     "apply_training_changes",
     "manage_training_templates",
+    "save_checkin",
+    "save_activity_feedback",
     "save_competition",
     "delete_competition",
     "start_provider_refresh",
@@ -67,6 +69,12 @@ def intent_request_payload(
             "explicitly requested in the current message. Ambiguous actions must use needs_clarification "
             "and exactly one concrete question in ambiguities. "
             "An explicit request to create, edit, move, archive, restore, or delete local planning is a local_action. "
+            "For a request to actually create dated workouts, use stage_training_plan and include "
+            "commit_training_plan in follow_up_operations so the plan is saved in the same turn. Only omit the "
+            "commit step when the user explicitly asks for a draft, preview, proposal, or hypothetical plan. "
+            "An explicit request to save the athlete's stated daily condition or availability is a local_action "
+            "using save_checkin. An explicit message containing the athlete's actual observations about a completed "
+            "activity is a local_action using save_activity_feedback; never invent feedback. "
             "An explicit request to list competitions or training plans is a local_action using the matching read operation. "
             "An explicit request to rename, edit, or delete training-plan metadata is a local_action using update_training_plan. "
             "An explicit request to add, edit, or delete a competition is a local_action using the matching competition operation. "
@@ -79,7 +87,7 @@ def intent_request_payload(
             "local_plan, local_template, local_competitions, artifact:<id>, planned_unit:<id>, "
             "library_workout:<id>, sync_job:<id>, change:<id>, intervals_refresh, "
             "garmin_refresh, calendar_refresh, weather_refresh, competition:<id>, "
-            "adaptive_replan, adaptive_replan:<id>, or intervals_sync."
+            "adaptive_replan, adaptive_replan:<id>, local_checkin, activity_feedback, or intervals_sync."
         ),
         "input": json.dumps({
             "message": str(message)[:12000],

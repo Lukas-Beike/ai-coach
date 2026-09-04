@@ -2,6 +2,8 @@ const NAV_ROUTES = Object.freeze({
   coach: "chatPanel",
   today: "todayPanel",
   plan: "workoutsPanel",
+  "plan/overview": "workoutsPanel",
+  "plan/library": "workoutsPanel",
   analysis: "dataPanel",
   "analysis/history": "dataPanel",
   "analysis/performance": "dataPanel",
@@ -34,6 +36,11 @@ function hashContainsKnownRoute(hash = window.location.hash) {
 function analysisSegmentFromRoute(route = state.route) {
   const segment = String(route || "").split("/")[1];
   return ["history", "performance"].includes(segment) ? segment : "performance";
+}
+
+function planSegmentFromRoute(route = state.route) {
+  const segment = String(route || "").split("/")[1];
+  return ["overview", "library"].includes(segment) ? segment : "overview";
 }
 
 function baseRoute(route = state.route) {
