@@ -9,7 +9,7 @@ if (!APP_PASSWORD || APP_PASSWORD.length < 12) {
 const navigation = [
   ["Coach", "chatPanel", "coach"],
   ["Heute", "todayPanel", "today"],
-  ["Bibliothek", "workoutsPanel", "plan"],
+  ["Geplant", "workoutsPanel", "plan/overview"],
   ["Analyse", "dataPanel", "analysis/performance"],
   ["Mehr", "settingsPanel", "more"],
 ];
@@ -110,8 +110,11 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
     await expect(page.locator("#profileContextNotice")).toBeVisible();
 
-    await page.getByRole("link", { name: "Bibliothek", exact: true }).click();
-    await expect(page).toHaveURL(/#plan$/);
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    await expect(page).toHaveURL(/#plan\/overview$/);
+    await expect(page.getByRole("heading", { name: "Geplant", exact: true })).toBeVisible();
+    await page.locator(".plan-segment-nav").getByRole("link", { name: "Bibliothek", exact: true }).click();
+    await expect(page).toHaveURL(/#plan\/library$/);
     await expect(page.getByRole("heading", { name: "Bibliothek", exact: true })).toBeVisible();
     await expect(page.locator("#libraryLoadButton, #libraryFilter, #librarySelectVisibleButton, #librarySyncSelectedButton")).toHaveCount(0);
     await page.goto("/#plan");
