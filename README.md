@@ -770,7 +770,9 @@ merge successful update pull requests.
 
 The required `Codex code review` check uses OpenAI's official Codex pull-request
 review workflow for pull requests to `develop` and `main`, then posts Codex's
-final review message on the pull request. Configure an `OPENAI_API_KEY`
+final review message on the pull request. The check fails when Codex reports
+one or more actionable findings, and fails closed if the required status marker
+is missing or invalid. Configure an `OPENAI_API_KEY`
 repository Actions secret before enabling the check. It runs only for pull
 requests from branches in this repository, so forks never receive access to
 that secret. Codex receives a read-only workspace and no application, provider,
