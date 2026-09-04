@@ -15078,6 +15078,12 @@ def _claim_background_coach_job() -> dict[str, Any] | None:
             receipt = _coach_command_receipt(row.get("receipt"))
             if receipt.get("mode") != "background":
                 continue
+            try:
+                retry_after = float(receipt.get("retry_after") or 0)
+            except (TypeError, ValueError):
+                retry_after = 0
+            if retry_after > time.time():
+                continue
             claimed = db.execute(
                 "UPDATE coach_commands SET status='running', updated_at=? WHERE client_turn_id=? AND status='queued'",
                 (utc_now(), row["client_turn_id"]),
@@ -15085,6 +15091,32 @@ def _claim_background_coach_job() -> dict[str, Any] | None:
             if claimed == 1:
                 return {**dict(row), "status": "running", "receipt": receipt}
     return None
+
+
+def _requeue_background_coach_job(client_turn_id: str, reason: str) -> None:
+    """Return a job to the durable queue after transient Coach contention."""
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        if not row:
+            return
+        receipt = _coach_command_receipt(row.get("receipt"))
+        try:
+            attempts = max(0, int(receipt.get("contention_attempts") or 0)) + 1
+        except (TypeError, ValueError):
+            attempts = 1
+        delay = min(60, 2 ** min(attempts, 5))
+        receipt.update({
+            "status": "queued",
+            "phase": "waiting_for_coach_slot",
+            "retry_reason": reason,
+            "contention_attempts": attempts,
+            "retry_after": time.time() + delay,
+        })
+        db.execute(
+            "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+            (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+        )
+    COACH_JOB_WAKE.set()
 
 
 def _background_coach_message(job: dict[str, Any]) -> str:
@@ -15116,6 +15148,16 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
             client_turn_id=client_turn_id,
             background_job=True,
         )
+    except AppError as exc:
+        if exc.reason in {"chat_queue_full", "chat_request_timeout"}:
+            _requeue_background_coach_job(client_turn_id, exc.reason)
+            LOGGER.warning(
+                "Persistent Coach background job requeued after contention",
+                extra={"event": "coach_background_job_requeued", "context": {"operation_id": operation_id, "reason": exc.reason}},
+            )
+        else:
+            _persist_structured_command_failure(client_turn_id, {}, exc)
+
     except Exception as exc:
         _persist_structured_command_failure(client_turn_id, {}, exc)
         LOGGER.error(

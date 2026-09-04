@@ -4970,6 +4970,29 @@ class CoachTests(unittest.TestCase):
             server._run_background_coach_job(job)
         self.assertEqual(seen["session_csrf_hash"], csrf_hash)
 
+    def test_background_worker_requeues_transient_coach_contention(self):
+        server.enqueue_background_coach_job(
+            "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
+            "turn-background-requeue",
+            "csrf-background-requeue",
+            operation_id="operation-background-requeue",
+        )
+        job = server._claim_background_coach_job()
+        with patch.object(
+            server,
+            "chat_with_coach",
+            side_effect=server.AppError(429, "busy", reason="chat_queue_full"),
+        ):
+            server._run_background_coach_job(job)
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute(
+                "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-background-requeue'"
+            ).fetchone()
+        receipt = json.loads(command["receipt"])
+        self.assertEqual(command["status"], "queued")
+        self.assertEqual(receipt["phase"], "waiting_for_coach_slot")
+        self.assertGreater(float(receipt["retry_after"]), time.time())
+
     def test_background_coach_worker_completes_durable_turn(self):
         server.enqueue_background_coach_job(
             "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
