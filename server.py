@@ -1419,7 +1419,7 @@ SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
 SYNC_JOB_POLL_SECONDS = 1.0
 SYNC_JOB_LIST_LIMIT = 50
-GARMIN_BODY_BATTERY_RETRY_SECONDS = 2 * 60 * 60
+GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 DIAGNOSTIC_CAPTURE_DURATION_SECONDS = 60 * 60
 DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 1500
 DIAGNOSTIC_CAPTURE_STATE_KEY = "diagnostic_capture_state"
@@ -2538,7 +2538,7 @@ def _scheduled_provider_retry_at(db: Any, provider: str) -> str | None:
     now = datetime.now(timezone.utc)
     rows = db.execute(
         "SELECT available_at FROM sync_jobs "
-        "WHERE provider=? AND type IN ('refresh', 'body_battery_retry') "
+        "WHERE provider=? AND type='refresh' "
         "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
         (provider,),
     ).fetchall()
@@ -2565,7 +2565,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
         ("intervals", "activities"): get_kv("last_sync_error"),
         ("intervals", "competitions"): get_kv("last_competition_sync_error"),
         ("intervals", "performance"): get_kv("last_performance_error"),
-        ("garmin", "data"): get_kv("last_garmin_error"),
+        ("garmin", "data"): bool(_garmin_core_error_entries()),
         ("weather", "forecast"): get_kv(WEATHER_FAILURE_KEY),
         ("calendar", "events"): get_kv("last_external_calendar_sync_error"),
     }
@@ -4016,93 +4016,203 @@ def _garmin_error_entries() -> list[dict[str, Any]]:
     return [entry for entry in errors if isinstance(entry, dict)] if isinstance(errors, list) else []
 
 
+def _garmin_core_error_entries() -> list[dict[str, Any]]:
+    """Ignore legacy Body-Battery-only errors for the core Garmin status."""
+    return [entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"]
+
+
 def _set_garmin_error_entries(errors: list[dict[str, Any]]) -> None:
     set_kv("last_garmin_error", json.dumps(errors, ensure_ascii=False, separators=(",", ":")) if errors else "")
 
 
-def _schedule_body_battery_retry(days: int) -> dict[str, Any] | None:
-    """Queue exactly one targeted retry two hours after a partial Garmin sync."""
-    if _sync_job_active("garmin", "body_battery_retry"):
+def _garmin_timestamp(value: Any) -> datetime | None:
+    """Normalize Garmin epoch-milliseconds or ISO timestamps to UTC."""
+    number = as_number(value)
+    if number is not None:
+        try:
+            seconds = float(number) / 1000 if float(number) > 10_000_000_000 else float(number)
+            return datetime.fromtimestamp(seconds, timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+    if not isinstance(value, str):
         return None
-    available_at = (datetime.now(timezone.utc) + timedelta(seconds=GARMIN_BODY_BATTERY_RETRY_SECONDS)).isoformat()
-    return enqueue_sync_job(
-        "garmin",
-        "body_battery_retry",
-        {"days": days, "reason": "Automatischer Body-Battery-Retry"},
-        requested_by="system",
-        available_at=available_at,
-    )
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
 
 
-@observed_sync("garmin", "data")
+def _garmin_sleep_bounds(payload: Any) -> tuple[datetime | None, datetime | None]:
+    """Read the authoritative sleep interval from a detailed Garmin response."""
+    pending = [payload]
+    visited = 0
+    while pending and visited < 100:
+        current = pending.pop(0)
+        visited += 1
+        if isinstance(current, dict):
+            start = _garmin_timestamp(first_present(current, (
+                "sleepStartTimestampGMT", "sleepStartTimestamp", "startTimestampGMT",
+            )))
+            end = _garmin_timestamp(first_present(current, (
+                "sleepEndTimestampGMT", "sleepEndTimestamp", "endTimestampGMT",
+            )))
+            if start is not None and end is not None and start <= end:
+                return start, end
+            nested = current.get("dailySleepDTO")
+            if isinstance(nested, dict):
+                pending.insert(0, nested)
+            pending.extend(value for value in current.values() if isinstance(value, (dict, list)))
+        elif isinstance(current, list):
+            pending.extend(current[:50])
+    return None, None
+
+
+def _garmin_body_battery_samples(records: Any) -> list[dict[str, Any]]:
+    """Return validated timestamp/level samples from Garmin's daily reports."""
+    values = records if isinstance(records, list) else [records]
+    samples: dict[str, dict[str, Any]] = {}
+    for record in values:
+        if not isinstance(record, dict):
+            continue
+        raw_samples = record.get("bodyBatteryValuesArray") or record.get("body_battery_values_array")
+        if not isinstance(raw_samples, list):
+            continue
+        for sample in raw_samples:
+            if not isinstance(sample, (list, tuple)) or len(sample) < 2:
+                continue
+            observed_at = _garmin_timestamp(sample[0])
+            level = as_number(sample[1])
+            if observed_at is None or level is None or not 0 <= float(level) <= 100:
+                continue
+            key = observed_at.isoformat()
+            samples[key] = {"observed_at": key, "value": int(round(float(level)))}
+    return sorted(samples.values(), key=lambda sample: sample["observed_at"])
+
+
+def _morning_body_battery_record(
+    checkin_date: date,
+    sleep_payload: Any,
+    body_battery_payload: Any,
+    *,
+    attempted_at: str | None = None,
+) -> dict[str, Any]:
+    """Derive the evening and current-morning level for one completed sleep."""
+    attempted_at = attempted_at or utc_now()
+    sleep_start, sleep_end = _garmin_sleep_bounds(sleep_payload)
+    record: dict[str, Any] = {
+        "sleep_date": checkin_date.isoformat(),
+        "attempted_at": attempted_at,
+        "status": "not_available_today",
+        "before_sleep": None,
+        "morning": None,
+        "source": "Garmin Connect",
+    }
+    if sleep_start is None or sleep_end is None:
+        return record
+    record["sleep_start_at"] = sleep_start.isoformat()
+    record["sleep_end_at"] = sleep_end.isoformat()
+    attempted = _garmin_timestamp(attempted_at) or datetime.now(timezone.utc)
+    samples = _garmin_body_battery_samples(body_battery_payload)
+    before_lower_bound = sleep_start - timedelta(hours=4)
+    before = [sample for sample in samples if before_lower_bound <= _garmin_timestamp(sample["observed_at"]) <= sleep_start]
+    morning = [sample for sample in samples if sleep_end <= _garmin_timestamp(sample["observed_at"]) <= attempted]
+    if before:
+        record["before_sleep"] = before[-1]
+    if morning:
+        record["morning"] = morning[-1]
+    if record["before_sleep"] is not None and record["morning"] is not None:
+        record["status"] = "ready"
+    return record
+
+
+def _garmin_morning_body_battery(snapshot: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    value = (snapshot or garmin_snapshot()).get("morning_body_battery")
+    return value if isinstance(value, dict) else None
+
+
 @maintenance_operation
 @garmin_operation
-def sync_garmin_body_battery_retry(days: int = 30, operation_id: str | None = None, reason: str = "body-battery-retry") -> dict[str, Any]:
-    """Refresh only Body Battery while preserving the last complete Garmin snapshot."""
-    fixture = garmin_fixture_path()
-    if fixture is not None:
-        payload = load_garmin_fixture(days)
-        records = payload.get("body_battery")
-        if not isinstance(records, list):
-            return {"status": "partial", "errors": 1, "source": "fixture"}
-        previous = garmin_snapshot()
-        previous["body_battery"] = _merge_garmin_records(records, previous.get("body_battery"))
-        previous["synced_at"] = payload["synced_at"]
-        set_kv("garmin_snapshot", json.dumps(previous, ensure_ascii=False, separators=(",", ":")))
-        _set_garmin_error_entries([entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"])
-        return {"status": "ok", "errors": 0, "source": "fixture", "records": len(records)}
-    if Garmin is None:
-        raise AppError(503, "Die optionale Garmin-Bibliothek ist nicht installiert.")
-    if not CONFIG.garmin_email and not Path(CONFIG.garmin_tokenstore).exists():
-        raise AppError(503, "Garmin ist nicht konfiguriert.")
-    if not GARMIN_LOCK.acquire(blocking=False):
-        return {"status": "already_running"}
+def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
+    """Load Body Battery once with the completed night's exact sleep bounds."""
+    previous = garmin_snapshot()
+    existing = _garmin_morning_body_battery(previous)
+    if existing and existing.get("sleep_date") == checkin_date.isoformat():
+        return {"status": "already_loaded", "sleep_date": checkin_date.isoformat()}
+
+    def persist(record: dict[str, Any], records: Any = None) -> dict[str, Any]:
+        current = garmin_snapshot()
+        if isinstance(records, list):
+            current["body_battery"] = _merge_garmin_records(records, current.get("body_battery"))
+        current["morning_body_battery"] = record
+        set_kv("garmin_snapshot", json.dumps(current, ensure_ascii=False, separators=(",", ":")))
+        _set_garmin_error_entries(_garmin_core_error_entries())
+        return {"status": record["status"], "sleep_date": record["sleep_date"], "records": len(records) if isinstance(records, list) else 0}
+
+    if garmin_fixture_path() is not None:
+        payload = load_garmin_fixture(2)
+        sleep_payload = {"dailySleepDTO": latest_garmin_record(payload.get("sleep"))}
+        return persist(_morning_body_battery_record(checkin_date, sleep_payload, payload.get("body_battery")), payload.get("body_battery"))
+    if Garmin is None or not (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()):
+        return persist(_morning_body_battery_record(checkin_date, {}, []))
+    if not GARMIN_LOCK.acquire(timeout=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS):
+        return persist(_morning_body_battery_record(checkin_date, {}, []))
     try:
-        today = local_now().date()
-        windows = sync_date_windows(days, today)
-        previous = garmin_snapshot()
+        existing = _garmin_morning_body_battery(garmin_snapshot())
+        if existing and existing.get("sleep_date") == checkin_date.isoformat():
+            return {"status": "already_loaded", "sleep_date": checkin_date.isoformat()}
         client = Garmin(CONFIG.garmin_email or None, CONFIG.garmin_password or None)
-        mfa_status, _ = external_call(
-            "garmin", "login", lambda: client.login(CONFIG.garmin_tokenstore),
-            {"email_configured": bool(CONFIG.garmin_email), "tokenstore_exists": Path(CONFIG.garmin_tokenstore).exists()},
-        )
-        if mfa_status:
-            raise AppError(401, "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb des Servers eingerichtet werden.")
-        records: list[Any] = []
         try:
-            for window_start, window_end in windows:
-                value = external_call(
-                    "garmin", "body_battery",
-                    lambda window_start=window_start, window_end=window_end: client.get_body_battery(window_start.isoformat(), window_end.isoformat()),
-                    {"window_start": window_start.isoformat(), "window_end": window_end.isoformat()},
-                )
-                if isinstance(value, list):
-                    records.extend(value)
-                elif value is not None:
-                    records.append(value)
-        except Exception as exc:
-            _garmin_capability_failure("body_battery", exc)
-            errors = [entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"]
-            errors.append({"source": "body_battery", "message": redact_text(str(exc))[:500]})
-            _set_garmin_error_entries(errors)
-            return {"status": "partial", "errors": 1, "records": 0}
-        previous["body_battery"] = _merge_garmin_records(records, previous.get("body_battery"))
-        previous["synced_at"] = utc_now()
-        previous.setdefault("provider_sync", {}).setdefault("pagination", {})["body_battery"] = {
-            "windows": len(windows), "records": len(records), "complete": True,
-        }
-        set_kv("garmin_snapshot", json.dumps(previous, ensure_ascii=False, separators=(",", ":")))
-        _garmin_capability_success("body_battery")
-        _set_garmin_error_entries([entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"])
-        return {"status": "ok", "errors": 0, "records": len(records)}
+            mfa_status, _ = external_call(
+                "garmin", "login", lambda: client.login(CONFIG.garmin_tokenstore),
+                {"email_configured": bool(CONFIG.garmin_email), "tokenstore_exists": Path(CONFIG.garmin_tokenstore).exists()},
+            )
+            if mfa_status:
+                return persist(_morning_body_battery_record(checkin_date, {}, []))
+            sleep_payload = external_call(
+                "garmin", "morning_sleep", lambda: client.get_sleep_data(checkin_date.isoformat()),
+                {"date": checkin_date.isoformat()},
+            )
+            sleep_start, _sleep_end = _garmin_sleep_bounds(sleep_payload)
+            if sleep_start is None:
+                return persist(_morning_body_battery_record(checkin_date, sleep_payload, []))
+            try:
+                from zoneinfo import ZoneInfo
+                local_zone = ZoneInfo(timezone_name(get_profile().get("timezone")))
+            except Exception:
+                local_zone = local_now().tzinfo or timezone.utc
+            range_start = sleep_start.astimezone(local_zone).date()
+            records = external_call(
+                "garmin", "body_battery",
+                lambda: client.get_body_battery(range_start.isoformat(), checkin_date.isoformat()),
+                {"window_start": range_start.isoformat(), "window_end": checkin_date.isoformat(), "purpose": "morning_recovery"},
+            )
+            records = records if isinstance(records, list) else []
+            return persist(_morning_body_battery_record(checkin_date, sleep_payload, records), records)
+        except Exception:
+            return persist(_morning_body_battery_record(checkin_date, {}, []))
     finally:
         GARMIN_LOCK.release()
 
 
+@maintenance_operation
+@garmin_operation
+def sync_garmin_body_battery_retry(days: int = 30, operation_id: str | None = None, reason: str = "body-battery-retry") -> dict[str, Any]:
+    """Finish legacy queued retries without repeating Garmin requests."""
+    _set_garmin_error_entries(_garmin_core_error_entries())
+    return {"status": "ok", "skipped": True, "reason": "superseded_by_morning_body_battery"}
+
+
 @observed_sync("garmin", "data")
 @maintenance_operation
 @garmin_operation
-def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "background", end_date: date | None = None) -> dict[str, Any]:
+def sync_garmin(
+    days: int = 30,
+    operation_id: str | None = None,
+    reason: str = "background",
+    end_date: date | None = None,
+    wait_for_existing: bool = False,
+) -> dict[str, Any]:
     fixture = garmin_fixture_path()
     if Garmin is None and fixture is None:
         LOGGER.warning(
@@ -4124,6 +4234,8 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
             )
             payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
             payload.setdefault("provider_sync", {"pagination": {"fixture": {"windows": 1, "records": len(payload.get("activities") or []), "complete": True}}})
+            if isinstance(previous.get("morning_body_battery"), dict):
+                payload["morning_body_battery"] = previous["morning_body_battery"]
             append_garmin_performance_history(payload, previous)
             set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             set_kv("last_garmin_sync_at", payload["synced_at"])
@@ -4151,7 +4263,25 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
         persist_garmin_error("GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist nicht konfiguriert.", "configuration")
         raise AppError(503, "GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist nicht konfiguriert.")
     if not GARMIN_LOCK.acquire(blocking=False):
-        return {"status": "already_running"}
+        if not wait_for_existing:
+            return {"status": "already_running"}
+        previous_sync_at = get_kv("last_garmin_sync_at")
+        deadline = time.monotonic() + GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            remaining = max(0.05, min(1.0, deadline - time.monotonic()))
+            if GARMIN_LOCK.acquire(timeout=remaining):
+                try:
+                    current_sync_at = get_kv("last_garmin_sync_at")
+                    if current_sync_at and current_sync_at != previous_sync_at:
+                        return {"status": "ok", "waited_for_existing": True, "synced_at": current_sync_at}
+                finally:
+                    GARMIN_LOCK.release()
+                break
+        raise AppError(
+            503,
+            "Die laufende Garmin-Synchronisierung konnte nicht abgeschlossen werden.",
+            reason="provider_busy",
+        )
     try:
         today = end_date or local_now().date()
         windows = sync_date_windows(days, today)
@@ -4192,10 +4322,14 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
             capability_allowed=_garmin_capability_allowed,
             capability_failure=_garmin_capability_failure,
             capability_success=_garmin_capability_success,
+            include_recovery=end_date is None and days != ALL_SYNC_DAYS,
+            include_current_metrics=end_date is None and days != ALL_SYNC_DAYS,
         )
         for collection in ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr"):
             if collection in previous or collection in payload:
                 payload[collection] = _merge_garmin_records(payload.get(collection), previous.get(collection))
+        if isinstance(previous.get("morning_body_battery"), dict):
+            payload["morning_body_battery"] = previous["morning_body_battery"]
         if previous.get("start") and payload.get("start"):
             payload["start"] = min(str(previous["start"]), str(payload["start"]))
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
@@ -4212,19 +4346,12 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
         update_provider_sync_cursor("garmin", "data", windows[-1][1].isoformat(), payload["synced_at"])
         if end_date is not None:
             update_provider_sync_cursor("garmin", "historical", windows[0][0].isoformat(), payload["synced_at"])
-        current_errors = [error for error in payload.get("errors", []) if error]
-        body_battery_failed = bool(current_errors) and all(
-            isinstance(error, dict) and error.get("source") == "body_battery"
-            for error in current_errors
-        )
-        retry_job = _schedule_body_battery_retry(days) if body_battery_failed and end_date is None else None
         return {
             "status": "partial" if payload["errors"] else "ok",
             "synced_at": payload["synced_at"],
             "errors": len(payload["errors"]),
             "activities": len(payload.get("activities") or []),
             "pagination": payload["provider_sync"]["pagination"],
-            "body_battery_retry_at": retry_job.get("available_at") if retry_job else None,
         }
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
@@ -4240,11 +4367,7 @@ def garmin_public_state() -> dict[str, Any]:
     performance_metrics = garmin_performance_metrics(snapshot)
     canonical = latest_snapshot()
     filtered_activities, skipped = filter_garmin_activities(snapshot.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
-    raw_error = get_kv("last_garmin_error") or ""
-    try:
-        parsed_error = json.loads(raw_error) if raw_error else None
-    except json.JSONDecodeError:
-        parsed_error = raw_error
+    parsed_error = _garmin_core_error_entries() or None
     parsed_error = sanitize_log_value(parsed_error)
     return {
         "available": Garmin is not None or garmin_fixture_path() is not None,
@@ -4274,6 +4397,7 @@ def garmin_public_state() -> dict[str, Any]:
         "has_max_hr": any(performance_metrics[key]["value"] is not None for key in ("cycling_max_hr_bpm", "running_max_hr_bpm")),
         "has_vo2max": any(performance_metrics[key]["value"] is not None for key in ("cycling_vo2max_ml_kg_min", "running_vo2max_ml_kg_min")),
         "has_estimated_run_times": any(performance_metrics[key]["value"] is not None for key in ("run_5k_seconds", "run_10k_seconds", "run_half_marathon_seconds", "run_marathon_seconds")),
+        "morning_body_battery": _garmin_morning_body_battery(snapshot),
     }
 
 
@@ -4288,7 +4412,7 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
             "hrv": compact_garmin_recovery(snapshot.get("hrv")),
             "resting_hr": compact_garmin_recovery(snapshot.get("resting_hr")),
             "readiness": compact_garmin_recovery(snapshot.get("readiness")),
-            "body_battery": compact_garmin_recovery(snapshot.get("body_battery")),
+            "body_battery": _garmin_morning_body_battery(snapshot) or {},
         },
         "scope": "Nur der aktuellste Garmin-Recovery-Datensatz. Leistungswerte und Aktivitäten stehen in den deduplizierten bzw. abgeleiteten Abschnitten.",
         "errors": [redact_text(str(error))[:300] for error in snapshot.get("errors", []) if error][:20],
@@ -5510,7 +5634,6 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         ("hrv", "Garmin Connect"),
         ("resting_hr", "Garmin Connect"),
         ("readiness", "Garmin Connect"),
-        ("body_battery", "Garmin Connect"),
     ):
         for record_date, record in _dated_garmin_recovery_records(garmin.get(section)):
             recovery = recovery_by_date.setdefault(record_date, {})
@@ -5536,8 +5659,13 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                 )
             elif section == "readiness":
                 _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(record, ("trainingReadinessScore", "overallReadinessScore", "readinessScore", "score", "trainingReadiness"))), source_name)
-            else:
-                _add_planning_recovery_value(recovery, "body_battery", first_present(record, ("bodyBattery", "charged")), source_name)
+    morning_body_battery = _garmin_morning_body_battery(garmin)
+    if morning_body_battery and morning_body_battery.get("status") == "ready":
+        record_date = _planning_context_date(morning_body_battery.get("sleep_date"))
+        morning = morning_body_battery.get("morning")
+        if record_date and isinstance(morning, dict):
+            recovery = recovery_by_date.setdefault(record_date, {})
+            _add_planning_recovery_value(recovery, "body_battery", morning.get("value"), "Garmin Connect")
     return recovery_by_date
 
 
@@ -14412,9 +14540,13 @@ def run_morning_checkin(checkin_date: str) -> None:
         add_message("event", "Morgen-Check-in: Aktuelle Garmin-/Intervals.icu-Daten werden geladen…")
         if garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())):
             try:
-                sync_garmin(days=sync_period("garmin"))
+                sync_garmin(days=sync_period("garmin"), reason="Morgen-Check-in", wait_for_existing=True)
             except Exception:
                 LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
+            try:
+                sync_garmin_morning_body_battery(date.fromisoformat(checkin_date))
+            except Exception:
+                LOGGER.warning("Morning Body Battery synchronization failed", extra={"event": "morning_body_battery_sync_failed"}, exc_info=True)
         sync_result = sync_intervals("Morgen-Check-in", activity_days=sync_period("intervals"))
         if sync_result.get("status") == "already_running":
             deadline = time.monotonic() + 120

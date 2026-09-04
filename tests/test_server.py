@@ -1787,19 +1787,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=170', index)
-        self.assertIn('/navigation.js?v=170', index)
-        self.assertIn('/state.js?v=170', index)
-        self.assertIn('/views.js?v=170', index)
-        self.assertIn('/forms.js?v=170', index)
-        self.assertIn('/components.js?v=170', index)
-        self.assertIn('/app.js?v=170', index)
-        self.assertIn('intervals-coach-v170', service_worker)
-        self.assertIn('"/navigation.js?v=170"', service_worker)
-        self.assertIn('"/state.js?v=170"', service_worker)
-        self.assertIn('"/views.js?v=170"', service_worker)
-        self.assertIn('"/forms.js?v=170"', service_worker)
-        self.assertIn('"/components.js?v=170"', service_worker)
+        self.assertIn('/api.js?v=171', index)
+        self.assertIn('/navigation.js?v=171', index)
+        self.assertIn('/state.js?v=171', index)
+        self.assertIn('/views.js?v=171', index)
+        self.assertIn('/forms.js?v=171', index)
+        self.assertIn('/components.js?v=171', index)
+        self.assertIn('/app.js?v=171', index)
+        self.assertIn('intervals-coach-v171', service_worker)
+        self.assertIn('"/navigation.js?v=171"', service_worker)
+        self.assertIn('"/state.js?v=171"', service_worker)
+        self.assertIn('"/views.js?v=171"', service_worker)
+        self.assertIn('"/forms.js?v=171"', service_worker)
+        self.assertIn('"/components.js?v=171"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1825,8 +1825,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=170'), index.index('/components.js?v=170'))
-        self.assertLess(index.index('/components.js?v=170'), index.index('/app.js?v=170'))
+        self.assertLess(index.index('/forms.js?v=171'), index.index('/components.js?v=171'))
+        self.assertLess(index.index('/components.js?v=171'), index.index('/app.js?v=171'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -3692,7 +3692,7 @@ class CoachTests(unittest.TestCase):
                 raise RuntimeError("secret provider detail")
 
             def get_body_battery(self, start, end):
-                return [{"date": start, "battery": 80}]
+                raise AssertionError("Body Battery must not be part of the range collector")
 
             def get_activities_by_date(self, start, end):
                 return [{"start": start, "end": end}]
@@ -3763,6 +3763,33 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["daily_stats"][1]["totalSteps"], 1234)
         self.assertEqual(result["provider_sync"]["pagination"]["daily_stats"]["records"], 2)
 
+    def test_historical_garmin_collection_excludes_recovery_and_current_metrics(self):
+        from backend.providers.garmin import collect_garmin_data
+
+        class FakeGarmin:
+            def get_activities_by_date(self, start, end):
+                return [{"start": start, "end": end}]
+
+            def __getattr__(self, name):
+                raise AssertionError(f"historical collector called {name}")
+
+        result = collect_garmin_data(
+            FakeGarmin(),
+            [(date(2026, 1, 1), date(2026, 3, 31))],
+            start=date(2026, 1, 1),
+            today=date(2026, 3, 31),
+            synced_at="2026-09-01T00:00:00+00:00",
+            external_call=lambda _service, _source, operation, _details: operation(),
+            redact=lambda value: value,
+            include_recovery=False,
+            include_current_metrics=False,
+        )
+
+        self.assertEqual(len(result["activities"]), 1)
+        self.assertNotIn("sleep", result)
+        self.assertNotIn("body_battery", result)
+        self.assertEqual(set(result["provider_sync"]["pagination"]), {"activities"})
+
     def test_garmin_capability_breaker_pauses_repeated_same_error(self):
         error = server.AppError(503, "provider unavailable", reason="network_error")
         for _ in range(server.GARMIN_CAPABILITY_FAILURE_LIMIT):
@@ -3773,6 +3800,70 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["error_class"], "network_error")
         server._garmin_capability_success("body_battery")
         self.assertTrue(server._garmin_capability_allowed("body_battery"))
+
+    def test_morning_body_battery_uses_timestamped_levels_not_daily_charge(self):
+        record = server._morning_body_battery_record(
+            date(2026, 9, 4),
+            {"dailySleepDTO": {
+                "sleepStartTimestampGMT": "2026-09-03T21:30:00+00:00",
+                "sleepEndTimestampGMT": "2026-09-04T05:45:00+00:00",
+            }},
+            [{
+                "charged": 100,
+                "bodyBatteryValuesArray": [
+                    ["2026-09-03T21:25:00+00:00", 57],
+                    ["2026-09-04T05:45:00+00:00", 78],
+                ],
+            }],
+            attempted_at="2026-09-04T07:00:00+00:00",
+        )
+
+        self.assertEqual(record["status"], "ready")
+        self.assertEqual(record["before_sleep"]["value"], 57)
+        self.assertEqual(record["morning"]["value"], 78)
+
+    def test_morning_body_battery_loads_once_for_the_sleep_window(self):
+        class FakeGarmin:
+            sleep_calls = []
+            body_battery_calls = []
+
+            def __init__(self, *_args):
+                pass
+
+            def login(self, _tokenstore):
+                return False, None
+
+            def get_sleep_data(self, checkin_date):
+                self.sleep_calls.append(checkin_date)
+                return {"dailySleepDTO": {
+                    "sleepStartTimestampGMT": "2026-09-03T21:30:00+00:00",
+                    "sleepEndTimestampGMT": "2026-09-04T05:45:00+00:00",
+                }}
+
+            def get_body_battery(self, start, end):
+                self.body_battery_calls.append((start, end))
+                return [{"bodyBatteryValuesArray": [
+                    ["2026-09-03T21:25:00+00:00", 57],
+                    ["2026-09-04T05:45:00+00:00", 78],
+                ]}]
+
+        config = replace(server.CONFIG, garmin_email="test@example.invalid", garmin_password="test")
+        with patch.object(server, "CONFIG", config), patch.object(server, "Garmin", FakeGarmin):
+            first = server.sync_garmin_morning_body_battery(date(2026, 9, 4))
+            second = server.sync_garmin_morning_body_battery(date(2026, 9, 4))
+
+        self.assertEqual(first["status"], "ready")
+        self.assertEqual(second["status"], "already_loaded")
+        self.assertEqual(FakeGarmin.sleep_calls, ["2026-09-04"])
+        self.assertEqual(FakeGarmin.body_battery_calls, [("2026-09-03", "2026-09-04")])
+        self.assertEqual(server.garmin_public_state()["morning_body_battery"]["morning"]["value"], 78)
+
+    def test_body_battery_only_error_does_not_degrade_garmin_public_state(self):
+        server.set_kv("last_garmin_error", json.dumps([
+            {"source": "body_battery", "message": "optional request unavailable"},
+        ]))
+
+        self.assertIsNone(server.garmin_public_state()["last_error"])
 
     def test_garmin_range_collector_never_exceeds_two_parallel_calls(self):
         from backend.providers.garmin import collect_garmin_data
@@ -6234,16 +6325,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=170"', source)
-        self.assertIn('"/navigation.js?v=170"', source)
-        self.assertIn('"/state.js?v=170"', source)
-        self.assertIn('"/views.js?v=170"', source)
-        self.assertIn('"/forms.js?v=170"', source)
-        self.assertIn('"/components.js?v=170"', source)
+        self.assertIn('"/api.js?v=171"', source)
+        self.assertIn('"/navigation.js?v=171"', source)
+        self.assertIn('"/state.js?v=171"', source)
+        self.assertIn('"/views.js?v=171"', source)
+        self.assertIn('"/forms.js?v=171"', source)
+        self.assertIn('"/components.js?v=171"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=170"', source)
-        self.assertIn('"/icon.svg?v=170"', source)
-        self.assertIn('"/styles.css?v=170"', source)
+        self.assertIn('"/app.js?v=171"', source)
+        self.assertIn('"/icon.svg?v=171"', source)
+        self.assertIn('"/styles.css?v=171"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6552,23 +6643,20 @@ class CoachTests(unittest.TestCase):
         server.external_call("garmin", "body_battery", lambda: {"new_marker": "not captured"})
         self.assertNotIn("not captured", json.dumps(server.diagnostic_report(), ensure_ascii=False))
 
-    def test_body_battery_retry_is_delayed_and_runs_only_the_targeted_operation(self):
-        scheduled = server._schedule_body_battery_retry(30)
-        self.assertIsNotNone(scheduled)
-        self.assertEqual(scheduled["provider"], "garmin")
-        self.assertEqual(scheduled["type"], "body_battery_retry")
-        retry_at = datetime.fromisoformat(scheduled["available_at"].replace("Z", "+00:00"))
-        remaining = (retry_at - datetime.now(timezone.utc)).total_seconds()
-        self.assertGreater(remaining, server.GARMIN_BODY_BATTERY_RETRY_SECONDS - 5)
-        self.assertLessEqual(remaining, server.GARMIN_BODY_BATTERY_RETRY_SECONDS + 5)
-        self.assertIsNone(server._schedule_body_battery_retry(30))
-        with patch.object(server, "sync_garmin_body_battery_retry", return_value={"status": "ok", "records": 2}) as retry:
+    def test_legacy_body_battery_retry_job_is_completed_without_another_request(self):
+        with patch.object(server, "sync_garmin_body_battery_retry", wraps=server.sync_garmin_body_battery_retry) as retry:
             result = server._execute_sync_job({
-                "id": scheduled["id"], "provider": "garmin", "type": "body_battery_retry",
-                "payload": json.dumps({"days": 30, "reason": "test"}),
+                "id": "legacy-body-battery-job", "provider": "garmin", "type": "body_battery_retry",
+                "payload": json.dumps({"days": 30, "reason": "legacy"}),
             })
         self.assertEqual(result["status"], "ok")
-        retry.assert_called_once_with(days=30, operation_id=scheduled["id"], reason="test")
+        self.assertTrue(result["skipped"])
+        retry.assert_called_once_with(days=30, operation_id="legacy-body-battery-job", reason="legacy")
+        with server.DB_LOCK, server.database() as db:
+            refreshes = db.execute(
+                "SELECT COUNT(*) AS count FROM provider_refresh_history WHERE provider='garmin' AND area='data'"
+            ).fetchone()["count"]
+        self.assertEqual(refreshes, 0)
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.initialise_logging()
@@ -7183,7 +7271,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=170', index)
+        self.assertIn('v=171', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
@@ -7301,8 +7389,8 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("resolvePlannedConflict", app)
         self.assertNotIn("Lokal behalten", app)
         self.assertNotIn("Remote übernehmen", app)
-        self.assertIn("intervals-coach-v170", worker)
-        self.assertIn("/app.js?v=170", index)
+        self.assertIn("intervals-coach-v171", worker)
+        self.assertIn("/app.js?v=171", index)
 
     def test_obsolete_direct_planning_routes_are_removed(self):
         source = Path(server.__file__).read_text(encoding="utf-8")

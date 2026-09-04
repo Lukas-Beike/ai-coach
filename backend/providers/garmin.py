@@ -36,6 +36,8 @@ def collect_garmin_data(
     capability_allowed: CapabilityAllowed | None = None,
     capability_failure: CapabilityFailure | None = None,
     capability_success: CapabilitySuccess | None = None,
+    include_recovery: bool = True,
+    include_current_metrics: bool = True,
 ) -> dict[str, Any]:
     """Collect Garmin ranges through injected application boundaries.
 
@@ -89,12 +91,12 @@ def collect_garmin_data(
     for index, (window_start, window_end) in enumerate(windows, 1):
         if status:
             status(f"Garmin: Zeitraum {index}/{len(windows)} wird synchronisiert…")
-        requests = (
-            ("sleep", client.get_sleep_daily),
-            ("hrv", client.get_hrv_data_range),
-            ("body_battery", client.get_body_battery),
-            ("activities", client.get_activities_by_date),
-        )
+        requests = [("activities", client.get_activities_by_date)]
+        if include_recovery:
+            requests[0:0] = [
+                ("sleep", client.get_sleep_daily),
+                ("hrv", client.get_hrv_data_range),
+            ]
         # Garmin's range endpoints are independent. Keep the concurrency
         # deliberately at two calls so the provider is not flooded and the
         # persisted job can still report one bounded window at a time.
@@ -106,7 +108,10 @@ def collect_garmin_data(
             for future in futures:
                 future.result()
 
-    daily_stats_fetch = getattr(client, "get_user_summary", None) or getattr(client, "get_stats", None)
+    daily_stats_fetch = (
+        getattr(client, "get_user_summary", None) or getattr(client, "get_stats", None)
+        if include_recovery else None
+    )
     if callable(daily_stats_fetch):
         stats = pagination.setdefault("daily_stats", {"windows": len(windows), "records": 0, "complete": True})
         for window_start, window_end in windows:
@@ -132,7 +137,7 @@ def collect_garmin_data(
                     add_error("daily_stats", exc)
                 current += timedelta(days=1)
 
-    heart_rate_fetch = getattr(client, "get_heart_rates", None)
+    heart_rate_fetch = getattr(client, "get_heart_rates", None) if include_recovery else None
     if callable(heart_rate_fetch):
         stats = pagination.setdefault("resting_hr", {"windows": len(windows), "records": 0, "complete": True})
         for window_start, window_end in windows:
@@ -156,7 +161,7 @@ def collect_garmin_data(
                     add_error("resting_hr", exc)
                 current += timedelta(days=1)
 
-    heart_rate_zones_fetch = getattr(client, "get_heart_rate_zones", None)
+    heart_rate_zones_fetch = getattr(client, "get_heart_rate_zones", None) if include_current_metrics else None
     if callable(heart_rate_zones_fetch):
         try:
             payload["heart_rate_zones"] = external_call(
@@ -165,33 +170,34 @@ def collect_garmin_data(
         except Exception as exc:
             add_error("heart_rate_zones", exc)
 
-    max_metrics_start = today - timedelta(days=89)
-    max_metrics_range = getattr(client, "get_max_metrics_range", None)
-    max_metrics_fetch = (
-        (lambda: max_metrics_range(max_metrics_start.isoformat(), today.isoformat()))
-        if callable(max_metrics_range)
-        else (lambda: client.get_max_metrics(today.isoformat()))
-    )
-    for key, fetch, details in (
-        ("readiness", lambda: client.get_training_readiness(today.isoformat()), {"date": today.isoformat()}),
-        ("race_predictions", client.get_race_predictions, None),
-        (
-            "max_metrics",
-            max_metrics_fetch,
-            {
-                "window_start": max_metrics_start.isoformat(),
-                "window_end": today.isoformat(),
-                "range_supported": callable(max_metrics_range),
-            },
-        ),
-    ):
-        try:
-            payload[key] = external_call("garmin", key, fetch, details)
-        except Exception as exc:
-            add_error(key, exc)
+    if include_current_metrics:
+        max_metrics_start = today - timedelta(days=89)
+        max_metrics_range = getattr(client, "get_max_metrics_range", None)
+        max_metrics_fetch = (
+            (lambda: max_metrics_range(max_metrics_start.isoformat(), today.isoformat()))
+            if callable(max_metrics_range)
+            else (lambda: client.get_max_metrics(today.isoformat()))
+        )
+        for key, fetch, details in (
+            ("readiness", lambda: client.get_training_readiness(today.isoformat()), {"date": today.isoformat()}),
+            ("race_predictions", client.get_race_predictions, None),
+            (
+                "max_metrics",
+                max_metrics_fetch,
+                {
+                    "window_start": max_metrics_start.isoformat(),
+                    "window_end": today.isoformat(),
+                    "range_supported": callable(max_metrics_range),
+                },
+            ),
+        ):
+            try:
+                payload[key] = external_call("garmin", key, fetch, details)
+            except Exception as exc:
+                add_error(key, exc)
 
-    cycling_ftp_fetch = getattr(client, "get_cycling_ftp", None)
-    if not callable(cycling_ftp_fetch):
+    cycling_ftp_fetch = getattr(client, "get_cycling_ftp", None) if include_current_metrics else None
+    if include_current_metrics and not callable(cycling_ftp_fetch):
         connectapi = getattr(client, "connectapi", None)
         if callable(connectapi):
             cycling_ftp_fetch = lambda: connectapi(
@@ -203,7 +209,7 @@ def collect_garmin_data(
         except Exception as exc:
             add_error("cycling_ftp", exc)
 
-    running_threshold_fetch = getattr(client, "get_lactate_threshold", None)
+    running_threshold_fetch = getattr(client, "get_lactate_threshold", None) if include_current_metrics else None
     if callable(running_threshold_fetch):
         try:
             payload["running_threshold"] = external_call(
@@ -216,7 +222,7 @@ def collect_garmin_data(
                 add_error("running_threshold", exc)
         except Exception as exc:
             add_error("running_threshold", exc)
-    elif callable(getattr(client, "connectapi", None)):
+    elif include_current_metrics and callable(getattr(client, "connectapi", None)):
         connectapi = client.connectapi
         try:
             payload["running_threshold"] = {
@@ -239,7 +245,10 @@ def collect_garmin_data(
     # method; garmin_performance_metrics() can read heartRateCycling from the
     # running_threshold payload and falls back to the other source sections.
 
-    weight_fetch = getattr(client, "get_weigh_ins", None) or getattr(client, "get_body_composition", None)
+    weight_fetch = (
+        getattr(client, "get_weigh_ins", None) or getattr(client, "get_body_composition", None)
+        if include_current_metrics else None
+    )
     if callable(weight_fetch):
         try:
             weight_start = today - timedelta(days=89)

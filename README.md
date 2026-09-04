@@ -201,11 +201,15 @@ locally and can be changed in that tab.
 The browser refreshes the local/remote view every minute while the PWA is
 visible and polls more frequently while a manual synchronization is running.
 Large Intervals.icu responses are fetched in bounded pages and the latest
-sync reports the fetched page/window counts; incomplete Garmin ranges remain
-visible as partial provider status instead of being presented as complete.
-If only Garmin Body Battery is unavailable, the last known value remains
-available and the app queues one targeted retry after two hours; it does not
-repeat the complete Garmin synchronization for that capability alone.
+sync reports the fetched page/window counts; incomplete required Garmin ranges
+remain visible as partial provider status instead of being presented as complete.
+Garmin Body Battery is deliberately separate from the regular and historical
+Garmin synchronization. It is fetched once during the morning check-in, only
+for the completed sleep window (at most the previous and current calendar
+day). The app stores the last level before sleep and the newest available level
+after waking. A missing optional morning value neither retries in the background
+nor marks the complete Garmin connection as incomplete; the last valid dated
+pair remains available.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
@@ -299,8 +303,8 @@ While a provider synchronization is running, the connections view shows its
 current phase and, where the provider reports one, a progress indicator. A
 site-wide notice headed **“Anbindung benötigt Aufmerksamkeit”** is displayed
 only for errors that require manual intervention (for example, renewed login
-or invalid configuration). Partial data with a scheduled automatic retry,
-including the two-hour Garmin Body Battery retry, does not raise that notice.
+or invalid configuration). An unavailable optional morning Body Battery value
+is rendered neutrally and does not raise that notice or schedule a retry.
 
 The library has no multi-selection, local marking, manual planning, conflict
 resolution, or synchronization controls. The Coach receives bounded local IDs
