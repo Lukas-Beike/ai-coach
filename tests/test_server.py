@@ -311,6 +311,18 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("secret-pass", state["items"][0]["error_detail"])
         self.assertNotIn("private-token-aaaaaaaa", state["items"][0]["error_detail"])
 
+    def test_persisted_job_is_revalidated_before_provider_dispatch(self):
+        with patch.object(server, "sync_garmin") as sync:
+            with self.assertRaises(server.AppError) as raised:
+                server._execute_sync_job({
+                    "id": "unsupported-job",
+                    "provider": "garmin",
+                    "type": "removed_job_type",
+                    "payload": "{}",
+                })
+        self.assertEqual(raised.exception.reason, "invalid_job_request")
+        sync.assert_not_called()
+
     def test_plan_push_job_preserves_all_failed_object_outcomes(self):
         local_id = str(uuid.uuid4())
         job = server.enqueue_sync_job(
