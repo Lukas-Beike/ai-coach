@@ -832,6 +832,18 @@ const PROVIDER_FRESHNESS_ERRORS = {
   provider_error: "Providerfehler",
 };
 
+const PROVIDER_LABELS = {
+  intervals: "Intervals.icu",
+  garmin: "Garmin",
+  calendar: "Gemeinsamer Kalender",
+  weather: "Open-Meteo",
+};
+
+function coachProviderLabel(provider) {
+  const key = String(provider || "").trim().toLowerCase();
+  return PROVIDER_LABELS[key] || "Provider";
+}
+
 function providerRequiresManualAttention(entry) {
   if (!entry?.configured) return false;
   if (["auth_required", "invalid_configuration"].includes(entry.error_code)) return true;
