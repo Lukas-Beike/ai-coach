@@ -4868,6 +4868,17 @@ class CoachTests(unittest.TestCase):
             server.responses_request({"model": "gpt-5.6-sol", "input": "test"})
         self.assertEqual(captured["reasoning"], {"effort": "low"})
 
+    def test_openai_background_creation_defers_usage_recording(self):
+        response = {"id": "resp_background_usage", "status": "queued", "usage": {}}
+        with patch.object(server, "http_json", return_value=response), patch.object(
+            server, "record_openai_usage"
+        ) as record_usage:
+            server.openai_request(
+                "/responses",
+                {"model": "gpt-5.6-sol", "background": True, "store": True, "input": "test"},
+            )
+        record_usage.assert_not_called()
+
     def test_multi_week_training_plan_gets_room_for_reasoning_and_output(self):
         self.assertTrue(server.prompt_requests_long_plan(
             "Lege einen Trainingsplan für die kommenden 4 Wochen an."

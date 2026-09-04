@@ -12119,7 +12119,10 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     result = _validate_openai_response(path, result)
     if not isinstance(result, dict):
         raise AppError(502, "OpenAI hat eine unerwartete Antwort zurückgegeben.")
-    record_openai_usage(result, path.strip("/") or "request")
+    # Background Responses are billed/observed when their final result is
+    # retrieved; counting the queued creation would double-count one turn.
+    if not (path == "/responses" and request_payload.get("background") is True):
+        record_openai_usage(result, path.strip("/") or "request")
     return result
 
 
