@@ -2095,9 +2095,10 @@ function plannedAppointmentLabel(event) {
 }
 
 function plannedWeekSummary(weekKey, weekEndKey, weekEntries, compliance, todayKey) {
+  const plannedEntryCount = weekEntries.filter((entry) => !entry.is_completed_activity).length;
   const plannedUnits = Number.isFinite(Number(compliance?.planned_units))
     ? Number(compliance.planned_units)
-    : weekEntries.length;
+    : plannedEntryCount;
   const completedUnits = Number.isFinite(Number(compliance?.completed_units))
     ? Number(compliance.completed_units)
     : 0;
