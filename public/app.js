@@ -326,8 +326,16 @@ function scheduleStateEventRefresh(areas) {
     state.stateEventRefreshTimer = null;
     const requested = [...state.stateEventRefreshAreas];
     state.stateEventRefreshAreas.clear();
+    // A state event can arrive while a domain refresh is in flight. Keep the
+    // requested areas queued instead of silently coalescing them into that
+    // older request.
+    if (state.loadPromise) {
+      requested.forEach((area) => state.stateEventRefreshAreas.add(area));
+      scheduleStateEventRefresh([]);
+      return;
+    }
     load("/api/bootstrap?local=1", requested).catch(() => {});
-  }, 150);
+  }, 400);
 }
 
 function handleStateEvent(event) {
@@ -342,11 +350,12 @@ function handleStateEvent(event) {
   const areas = {
     coach: ["chat"],
     planning: ["plan", "library"],
-    provider: [],
+    provider: payload.status === "loading" ? [] : payload.area === "performance" ? ["performance"] : ["activities", "performance"],
     job: [],
-    sync: [],
+    sync: ["activities", "performance", "plan", "library"],
   }[event.type];
-  if (areas) scheduleStateEventRefresh(areas);
+  if (event.type === "sync" && !["completed", "error"].includes(payload.status)) return;
+  if (areas?.length) scheduleStateEventRefresh(areas);
 }
 
 function scheduleStateEventReconnect() {

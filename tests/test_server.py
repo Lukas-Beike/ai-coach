@@ -1403,6 +1403,14 @@ class CoachTests(unittest.TestCase):
         search = server.paged_chat_history(limit=10, search="searchable 3")
         self.assertEqual([item["content"] for item in search["messages"]], ["searchable 3"])
 
+    def test_chat_history_excludes_legacy_sync_events_before_pagination(self):
+        for index in range(105):
+            server.add_message("event", f"sync notice {index}")
+        server.add_message("user", "Bleibt sichtbar")
+        self.assertEqual([message["content"] for message in server.list_messages()], ["Bleibt sichtbar"])
+        history = server.paged_chat_history(limit=100)
+        self.assertEqual([message["content"] for message in history["messages"]], ["Bleibt sichtbar"])
+
     def test_library_pagination_has_stable_type_name_id_cursor(self):
         server.upsert_workout_library([
             {"id": f"template-{index}", "name": f"Template {index}", "type": "Ride", "description": "- 30m Z2"}
@@ -6942,6 +6950,69 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["output_text"], "ok")
         self.assertEqual(calls, ["/responses", "/responses"])
         sleep.assert_called_once_with(1)
+
+    def test_openai_conversation_state_error_is_classified_without_provider_text(self):
+        raw_error = json.dumps({
+            "error": {
+                "code": "invalid_function_call_output",
+                "type": "invalid_request_error",
+                "param": "input[0]",
+                "message": "secret tool call detail must never be stored",
+            },
+        }).encode("utf-8")
+        details = server.openai_error_details(400, raw_error)
+        self.assertEqual(details["reason"], "conversation_state_invalid")
+        diagnostic = server.openai_error_diagnostic_details(raw_error, {"x-request-id": "req_test_123"})
+        self.assertEqual(diagnostic["error_code"], "invalid_function_call_output")
+        self.assertEqual(diagnostic["parameter"], "input[0]")
+        self.assertNotIn("secret", json.dumps(diagnostic))
+
+    def test_initial_conversation_state_error_rotates_once_before_tools_run(self):
+        intent = {
+            "intent": "advice", "operation": None, "target_system": "none",
+            "artifact_id": None, "authorization_scope": [], "follow_up_operations": [],
+        }
+        completed = {
+            "status": "completed",
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": "Wiederhergestellt."}]}],
+        }
+        with patch.object(
+            server, "responses_request", side_effect=[server.AppError(400, "stale", reason="conversation_state_invalid"), completed]
+        ) as request, patch.object(server, "replace_stale_openai_conversation", return_value="conversation-recovered") as recover:
+            result = server._chat_with_structured_coach_impl(
+                "Bitte analysiere die Einheit.", intent=intent, conversation_id="conversation-stale", client_turn_id="turn-recovery"
+            )
+        self.assertEqual(result["message"]["content"], "Wiederhergestellt.")
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(request.call_args_list[1].args[0]["conversation"], "conversation-recovered")
+        recover.assert_called_once_with("conversation-stale")
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT conversation_id FROM coach_commands WHERE client_turn_id='turn-recovery'").fetchone()
+        self.assertEqual(command["conversation_id"], "conversation-recovered")
+        self.assertEqual([message["role"] for message in server.list_messages()], ["user", "assistant"])
+
+    def test_streaming_openai_400_is_captured_without_error_message_or_payload(self):
+        raw_error = json.dumps({
+            "error": {
+                "code": "invalid_function_call_output",
+                "type": "invalid_request_error",
+                "message": "athlete-private provider failure",
+            },
+        }).encode("utf-8")
+        upstream_error = server.HTTPError(
+            "https://api.openai.com/v1/responses", 400, "Bad Request", {"x-request-id": "req_test_456"}, BytesIO(raw_error)
+        )
+        server.set_diagnostic_capture(True)
+        config = replace(server.CONFIG, openai_api_key="openai-test")
+        with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError) as raised:
+                server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+        self.assertEqual(raised.exception.reason, "conversation_state_invalid")
+        captured = server.diagnostic_capture_entries()
+        failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
+        self.assertEqual(failed["details"]["error_code"], "invalid_function_call_output")
+        self.assertEqual(failed["details"]["request_id"], "req_test_456")
+        self.assertNotIn("athlete-private", json.dumps(captured))
 
     def test_openai_stream_request_emits_deltas_and_validates_only_final_response(self):
         response_payload = {

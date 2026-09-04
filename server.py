@@ -160,6 +160,7 @@ COMPETITION_SYNC_LOCK = threading.Lock()
 COMPETITION_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
 PERFORMANCE_LOCK = threading.Lock()
 OPENAI_CONVERSATION_LOCK = threading.Lock()
+DIAGNOSTIC_CAPTURE_LOCK = threading.RLock()
 CHAT_STREAM_LOCK = threading.Lock()
 CHAT_STREAMS: dict[str, dict[str, Any]] = {}
 CHAT_QUEUE_LIMIT = 3
@@ -3166,24 +3167,29 @@ def set_diagnostic_capture(enabled: Any) -> dict[str, Any]:
     """Enable a one-hour, user-initiated technical capture or stop it early."""
     if enabled is not True and enabled is not False:
         raise AppError(400, "Die Diagnoseaufzeichnung erwartet enabled=true oder enabled=false.")
-    if enabled:
-        now = datetime.now(timezone.utc)
-        expires_at = (now + timedelta(seconds=DIAGNOSTIC_CAPTURE_DURATION_SECONDS)).isoformat()
-        set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, json.dumps({"started_at": now.isoformat(), "expires_at": expires_at}, separators=(",", ":")))
-        set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, "[]")
-    else:
-        set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, "")
+    with DIAGNOSTIC_CAPTURE_LOCK:
+        if enabled:
+            now = datetime.now(timezone.utc)
+            expires_at = (now + timedelta(seconds=DIAGNOSTIC_CAPTURE_DURATION_SECONDS)).isoformat()
+            set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, json.dumps({"started_at": now.isoformat(), "expires_at": expires_at}, separators=(",", ":")))
+            set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, "[]")
+        else:
+            set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, "")
     return diagnostic_capture_status()
 
 
 def capture_diagnostic_event(event: str, details: dict[str, Any]) -> None:
     """Persist bounded response metadata only while the athlete enabled capture."""
-    if not diagnostic_capture_status()["active"]:
-        return
-    entry = {"timestamp": utc_now(), "event": str(event)[:80], "details": sanitize_log_value(details)}
-    entries = diagnostic_capture_entries()
-    entries.append(entry)
-    set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, json.dumps(entries[-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:], ensure_ascii=False, separators=(",", ":")))
+    # A capture is written by sync workers as well as the coach request. Keep
+    # the read-modify-write sequence atomic so concurrent providers cannot
+    # silently discard the most useful event.
+    with DIAGNOSTIC_CAPTURE_LOCK:
+        if not diagnostic_capture_status()["active"]:
+            return
+        entry = {"timestamp": utc_now(), "event": str(event)[:80], "details": sanitize_log_value(details)}
+        entries = diagnostic_capture_entries()
+        entries.append(entry)
+        set_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY, json.dumps(entries[-DIAGNOSTIC_CAPTURE_MAX_ENTRIES:], ensure_ascii=False, separators=(",", ":")))
 
 
 def garmin_snapshot() -> dict[str, Any]:
@@ -6516,6 +6522,37 @@ OPENAI_RATE_LIMIT_HEADERS = {
 OPENAI_STATUS_KEY = "openai_status"
 
 
+def _safe_openai_error_token(value: Any) -> str | None:
+    """Keep a provider error classifier without retaining provider text."""
+    token = str(value or "").strip().casefold()
+    if not token or len(token) > 160 or not re.fullmatch(r"[a-z0-9_.\[\]-]+", token):
+        return None
+    return token
+
+
+def openai_error_diagnostic_details(raw_body: bytes, headers: Any = None) -> dict[str, Any]:
+    """Return safe OpenAI error metadata; never retain an upstream message/body."""
+    payload: Any = None
+    try:
+        payload = json.loads(raw_body) if raw_body else None
+    except (TypeError, json.JSONDecodeError):
+        payload = None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    error = error if isinstance(error, dict) else {}
+    details: dict[str, Any] = {"error_body_bytes": min(len(raw_body or b""), MAX_EXTERNAL_RESPONSE_BYTES + 1)}
+    for source, target in (("code", "error_code"), ("type", "error_type"), ("param", "parameter")):
+        token = _safe_openai_error_token(error.get(source))
+        if token:
+            details[target] = token
+    try:
+        request_id = _safe_openai_error_token(headers.get("x-request-id")) if headers is not None else None
+    except (AttributeError, TypeError):
+        request_id = None
+    if request_id:
+        details["request_id"] = request_id
+    return details
+
+
 def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     """Classify an OpenAI error without exposing the provider's raw message."""
     payload: Any = None
@@ -6535,6 +6572,13 @@ def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     ):
         reason = "conversation_locked"
         message = "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen."
+    elif status == 400 and (
+        code in {"conversation_not_found", "invalid_conversation", "conversation_state_invalid", "invalid_function_call_output"}
+        or "function_call_output" in searchable
+        or ("conversation" in searchable and any(marker in searchable for marker in ("state", "previous", "invalid", "not found")))
+    ):
+        reason = "conversation_state_invalid"
+        message = "Der Zustand der OpenAI-Konversation ist nach einer unterbrochenen Anfrage nicht mehr verwendbar. Der Coach stellt die Verbindung einmalig wieder her."
     elif code == "credit_balance_exhausted":
         reason = "credit_balance_exhausted"
         message = "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
@@ -9174,7 +9218,10 @@ def paged_chat_history(cursor: Any = None, limit: Any = None, search: Any = None
     page_size = api_page_limit(limit, API_PAGE_DEFAULT, CHAT_PAGE_MAX)
     term = str(search or "").strip()[:200]
     params: list[Any] = []
-    clauses = []
+    # Synchronisation notices were stored as role=event by earlier versions.
+    # They are operational state, never conversation history, and must not
+    # push actual athlete/coach turns out of a page.
+    clauses = ["role != 'event'"]
     if term:
         clauses.append("content LIKE ? ESCAPE '\\'")
         escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -10922,7 +10969,6 @@ def sync_intervals(
         set_kv("last_sync_window_end", sync_window[-1][1].isoformat())
         pagination = snapshot.get("provider_sync", {}).get("pagination", {}) if isinstance(snapshot, dict) else {}
         set_kv("last_sync_pagination", json.dumps(pagination, ensure_ascii=False, separators=(",", ":")))
-        add_message("event", f"Trainingsdaten aktualisiert ({reason}, {period_label}).")
         set_sync_operation_state(operation_id, "completed", "complete", 100, "Intervals.icu-Synchronisierung abgeschlossen.")
         set_kv("sync_operation_finished_at", utc_now())
         return {
@@ -10971,7 +11017,7 @@ def refresh_current_performance() -> dict[str, Any]:
         snapshot = IntervalsClient().fetch_performance_snapshot(latest_snapshot())
         save_snapshot(snapshot, update_full_sync=False)
         set_kv("last_performance_error", "")
-        add_message("event", "Aktuelle Leistungsdaten aktualisiert; Aktivitäten wurden nicht neu geladen.")
+        publish_state_event("provider", {"provider": "intervals", "area": "performance", "status": "ready"})
         return {"status": "ok", "refreshed_at": snapshot["synced_at"]}
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
@@ -12139,6 +12185,13 @@ def openai_stream_request(
         "request_bytes": len(body),
     }
     LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": context})
+    capture_diagnostic_event("openai_stream_started", {
+        "service": "openai",
+        "method": "POST",
+        "host": _safe_url_netloc(parsed_endpoint),
+        "path": context["path"],
+        "request_bytes": len(body),
+    })
     final_response: dict[str, Any] | None = None
     stream_bytes = 0
     event_name = ""
@@ -12211,6 +12264,11 @@ def openai_stream_request(
             raise AppError(502, "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.", reason="invalid_response")
         final_response = _validate_openai_response("/responses", final_response)
         record_openai_usage(final_response, "responses_stream")
+        capture_diagnostic_event("openai_stream_completed", {
+            "service": "openai", "status": 200,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "response_bytes": stream_bytes,
+        })
         LOGGER.info(
             "External HTTP request completed",
             extra={"event": "external_request_completed", "context": {**context, "status": 200, "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes}},
@@ -12220,11 +12278,19 @@ def openai_stream_request(
         if cancel_event is not None and cancel_event.is_set() and final_response is None:
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
         log_failure(exc.reason or "request_failed", exc.status, level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING)
+        capture_diagnostic_event("openai_stream_failed", {
+            "service": "openai", "status": exc.status, "reason": exc.reason or "request_failed",
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
+        })
         raise
     except ClientDisconnected:
         if final_response is None:
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
         log_failure("client_disconnected", 499, level=logging.INFO)
+        capture_diagnostic_event("openai_stream_failed", {
+            "service": "openai", "status": 499, "reason": "client_disconnected",
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
+        })
         raise
     except HTTPError as exc:
         raw_error = _read_http_error_body(exc)
@@ -12232,6 +12298,11 @@ def openai_stream_request(
         details = openai_error_details(status, raw_error)
         record_openai_status(details)
         log_failure(details["reason"], status)
+        capture_diagnostic_event("openai_stream_failed", {
+            "service": "openai", "status": status, "reason": details["reason"],
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
+            **openai_error_diagnostic_details(raw_error, getattr(exc, "headers", None)),
+        })
         raise AppError(status, details["message"], reason=details["reason"]) from exc
     except TimeoutError as exc:
         if cancel_event is not None and cancel_event.is_set():
@@ -12241,6 +12312,10 @@ def openai_stream_request(
         details = {"state": "error", "reason": "provider_timeout", "message": "OpenAI hat nicht rechtzeitig geantwortet.", "http_status": 504}
         record_openai_status(details)
         log_failure("provider_timeout", 504)
+        capture_diagnostic_event("openai_stream_failed", {
+            "service": "openai", "status": 504, "reason": "provider_timeout",
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
+        })
         raise AppError(504, details["message"], reason="provider_timeout") from exc
     except (URLError, OSError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
@@ -12249,6 +12324,10 @@ def openai_stream_request(
             raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
         record_openai_status({"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503})
         log_failure("provider_unavailable", 503)
+        capture_diagnostic_event("openai_stream_failed", {
+            "service": "openai", "status": 503, "reason": "provider_unavailable",
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
+        })
         raise AppError(503, "OpenAI ist vorübergehend nicht verfügbar.", reason="provider_unavailable") from exc
 
 
@@ -12282,6 +12361,28 @@ def ensure_conversation() -> str:
         raise AppError(502, "OpenAI hat keine Konversations-ID zurückgegeben.")
     set_kv("openai_conversation_id", conversation_id)
     return conversation_id
+
+
+def replace_stale_openai_conversation(expected_conversation_id: str) -> str:
+    """Create a new remote conversation without deleting local chat history.
+
+    This is deliberately only used before a turn has executed any coach tool.
+    The old conversation is left untouched: it can still be active remotely and
+    deleting it would make recovery less safe.
+    """
+    with OPENAI_CONVERSATION_LOCK:
+        current = str(get_kv("openai_conversation_id") or "")
+        if current and current != expected_conversation_id:
+            return current
+        result = openai_request("/conversations", {
+            "metadata": {"app": "intervals-coach", "purpose": "personal-coach", "recovered": "true"},
+        })
+        conversation_id = result.get("id") if isinstance(result, dict) else None
+        if not isinstance(conversation_id, str) or not conversation_id.strip():
+            raise AppError(502, "OpenAI hat keine Konversations-ID für die Wiederherstellung zurückgegeben.")
+        set_kv("openai_conversation_id", conversation_id)
+        set_kv("openai_conversation_recovered_at", utc_now())
+        return conversation_id
 
 
 def reset_coach_chat() -> dict[str, Any]:
@@ -13906,7 +14007,44 @@ def _chat_with_structured_coach_impl(
         "max_output_tokens": coach_output_token_budget(message),
         "truncation": "auto",
     }
-    response = responses_stream_request(request_payload, on_text_delta, cancel_event) if on_text_delta is not None else responses_request(request_payload)
+    initial_delta_emitted = False
+
+    def on_initial_text_delta(delta: str) -> None:
+        nonlocal initial_delta_emitted
+        initial_delta_emitted = True
+        if on_text_delta is not None:
+            on_text_delta(delta)
+
+    try:
+        response = (
+            responses_stream_request(request_payload, on_initial_text_delta, cancel_event)
+            if on_text_delta is not None else responses_request(request_payload)
+        )
+    except AppError as exc:
+        # A stopped container can leave the remote conversation with an
+        # unresolved response/tool state. Recover once before any local tool
+        # can have run; never retry a follow-up request with side effects.
+        if exc.reason != "conversation_state_invalid" or initial_delta_emitted:
+            raise
+        recovered_conversation_id = replace_stale_openai_conversation(conversation_id)
+        if recovered_conversation_id == conversation_id:
+            raise
+        conversation_id = recovered_conversation_id
+        request_payload["conversation"] = conversation_id
+        with DB_LOCK, database() as db:
+            db.execute(
+                "UPDATE coach_commands SET conversation_id=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+                (conversation_id, utc_now(), client_turn_id),
+            )
+        LOGGER.warning(
+            "Recovered stale OpenAI conversation before executing coach tools",
+            extra={"event": "openai_conversation_recovered", "context": {"reason": exc.reason}},
+        )
+        capture_diagnostic_event("openai_conversation_recovered", {"service": "openai", "reason": exc.reason})
+        response = (
+            responses_stream_request(request_payload, on_initial_text_delta, cancel_event)
+            if on_text_delta is not None else responses_request(request_payload)
+        )
     sync_job_ids: list[str] = []
     command_receipts: list[dict[str, Any]] = []
     tool_outputs: list[dict[str, Any]] = []
@@ -14144,7 +14282,6 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             structured_intent.get("operation") == "start_provider_refresh"
             and structured_intent.get("target_system") == "intervals"
         )):
-            add_message("event", "Aktuelle Intervals.icu-Trainingsdaten werden geladen…")
             try:
                 sync_result = sync_intervals(
                     "Chat-Anfrage",
@@ -14159,7 +14296,6 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                     )
             except Exception as exc:
                 refresh_error = redact_text(str(exc))[:1000]
-                add_message("event", f"Aktuelle Daten konnten nicht geladen werden: {refresh_error}")
                 if latest_activity_analysis:
                     raise AppError(
                         503,
