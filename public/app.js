@@ -2248,6 +2248,9 @@ function renderGarmin(garmin) {
     return;
   }
   const performanceSources = [garmin.has_vo2max ? "VO2max" : null, garmin.has_estimated_run_times ? "Laufprognosen" : null, garmin.has_max_hr ? "Max HF" : null, garmin.has_weight ? "Gewicht" : null].filter(Boolean);
+  const morningBodyBattery = garmin.morning_body_battery || {};
+  const beforeSleepBattery = Number(morningBodyBattery.before_sleep?.value);
+  const morningBattery = Number(morningBodyBattery.morning?.value);
   const paginationDetail = Object.entries(garmin.pagination || {})
     .filter(([, value]) => value && (Number(value.windows) > 1 || value.complete === false))
     .map(([name, value]) => `${name}: ${value.records || 0} Datensätze in ${value.windows || 0} Zeitfenstern${value.complete === false ? " · unvollständig" : ""}`)
@@ -2260,6 +2263,11 @@ function renderGarmin(garmin) {
     : garmin.source === "fixture" ? "Testdatei ist konfiguriert; synchronisiere sie mit dem Button."
       : "Noch kein Garmin-Abruf durchgeführt.";
   if (performanceSources.length) detail.textContent += ` · ${performanceSources.join("/")} aus Garmin`;
+  if (morningBodyBattery.status === "ready" && Number.isFinite(beforeSleepBattery) && Number.isFinite(morningBattery)) {
+    detail.textContent += ` · Body Battery morgens: ${beforeSleepBattery} vor dem Schlafen → ${morningBattery} aktuell`;
+  } else if (morningBodyBattery.sleep_date) {
+    detail.textContent += " · Body Battery: heute Morgen nicht verfügbar";
+  }
   if (paginationDetail) detail.textContent += ` · ${paginationDetail}`;
   if (fullButton) {
     fullButton.disabled = fullRunning || Boolean(state.data?.garmin_sync?.running || state.localSync.garmin);
