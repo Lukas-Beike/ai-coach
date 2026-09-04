@@ -1954,7 +1954,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function ensureRouteData(route = state.route)', app)
         self.assertIn('load("/api/bootstrap?local=1", requested)', app)
         self.assertIn('api("/api/library?limit=100")', app)
-        self.assertIn('aria-label="Geplante Einheiten und Trainingsbibliothek"', index)
+        self.assertIn('aria-label="Trainingskalender und Trainingsbibliothek"', index)
+        self.assertIn('id="planOverviewTitle">Trainingskalender</h3>', index)
         self.assertIn('id="library"', index)
         self.assertIn('data-plan-segment="overview"', index)
         self.assertIn('data-plan-segment="library"', index)
@@ -1967,6 +1968,12 @@ class CoachTests(unittest.TestCase):
         self.assertIn("weekKey === currentWeekKey || weekKey === nextWeekKey", app)
         self.assertIn("state.data?.planning_compliance", app)
         self.assertIn("function plannedWeatherLabel(", app)
+        self.assertIn("function calendarActualActivity(", app)
+        self.assertIn("function calendarStatusLabel(", app)
+        self.assertIn('renderPlanned(data.training_calendar || data.planned || [])', app)
+        self.assertIn('"RPE offen"', app)
+        self.assertIn('"Trainingsload"', app)
+        self.assertIn('Plan/Ist:', app)
         self.assertIn("daily_planning_context", app)
         self.assertIn('card.open = false', app)
         self.assertIn('section.open = false', app)
@@ -2799,7 +2806,8 @@ class CoachTests(unittest.TestCase):
         activities = [{
             "id": "activity-1", "paired_event_id": "event-done", "type": "Ride",
             "name": "Tempo gefahren", "start_date_local": f"{today.isoformat()}T07:00:00",
-            "moving_time": 3300, "icu_training_load": 40,
+            "moving_time": 3300, "distance": 25000, "icu_training_load": 40, "icu_rpe": 6,
+            "private_note": "must stay out of calendar",
         }]
 
         with patch.object(server, "local_now", return_value=datetime(2026, 8, 26, 12, 0)):
@@ -2807,6 +2815,9 @@ class CoachTests(unittest.TestCase):
 
         self.assertEqual(enriched[0]["compliance"]["status"], "completed")
         self.assertEqual(enriched[0]["compliance"]["percentage"], 80)
+        self.assertEqual(enriched[0]["compliance"]["actual_activity"]["icu_rpe"], 6)
+        self.assertEqual(enriched[0]["compliance"]["actual_activity"]["icu_training_load"], 40)
+        self.assertNotIn("private_note", enriched[0]["compliance"]["actual_activity"])
         self.assertEqual(enriched[1]["compliance"]["status"], "missed")
         self.assertEqual(enriched[1]["compliance"]["percentage"], 0)
         self.assertNotIn("compliance", enriched[2])
@@ -2829,6 +2840,63 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(current_week["unit_percentage"], 50)
             self.assertEqual(current_week["percentage"], 40)
             self.assertEqual(current_week["basis"], "training_load")
+
+    def test_training_calendar_adds_unplanned_completed_activities_without_duplicating_matches(self):
+        today = date(2026, 8, 26)
+        planned = [{
+            "id": "event-1", "category": "WORKOUT", "type": "Ride", "name": "Plan",
+            "start_date_local": f"{today.isoformat()}T00:00:00", "moving_time": 3600,
+        }]
+        activities = [
+            {
+                "id": "matched", "paired_event_id": "event-1", "type": "Ride", "name": "Plan gefahren",
+                "start_date_local": f"{today.isoformat()}T07:00:00", "moving_time": 3500,
+                "distance": 30000, "icu_training_load": 45, "icu_rpe": 5,
+            },
+            {
+                "id": "extra", "type": "Run", "name": "Zusätzlicher Lauf",
+                "start_date_local": f"{today.isoformat()}T18:00:00", "moving_time": 1800,
+                "distance": 5000, "icu_training_load": 30, "icu_rpe": 7,
+            },
+        ]
+
+        with patch.object(server, "local_now", return_value=datetime(2026, 8, 26, 20, 0)):
+            enriched, _ = server.planning_compliance_state(planned, activities)
+        calendar = server.training_calendar_items(enriched, activities)
+
+        self.assertEqual(len(calendar), 2)
+        self.assertEqual(calendar[0]["compliance"]["actual_activity"]["id"], "matched")
+        self.assertEqual(sum(item.get("id") == "matched" for item in calendar), 0)
+        self.assertEqual(calendar[1]["id"], "extra")
+        self.assertTrue(calendar[1]["is_completed_activity"])
+        self.assertEqual(calendar[1]["calendar_entry_type"], "completed_activity")
+        self.assertEqual(calendar[1]["icu_rpe"], 7)
+
+    def test_plan_state_returns_enriched_training_calendar(self):
+        today = date(2026, 8, 26)
+        planned = [{
+            "id": "event-1", "category": "WORKOUT", "type": "Run", "name": "Tempolauf",
+            "start_date_local": f"{today.isoformat()}T00:00:00", "moving_time": 2400,
+        }]
+        snapshot = {
+            "synced_at": "2026-08-26T10:00:00+00:00",
+            "recent_activities": [{
+                "id": "activity-1", "paired_event_id": "event-1", "type": "Run", "name": "Tempolauf erledigt",
+                "start_date_local": f"{today.isoformat()}T07:00:00", "moving_time": 2280,
+                "distance": 7000, "icu_training_load": 55, "icu_rpe": 8,
+            }],
+        }
+        with (
+            patch.object(server, "latest_snapshot", return_value=snapshot),
+            patch.object(server, "list_dated_local_planned_workouts", return_value=planned),
+            patch.object(server, "weather_state", return_value={"days": []}),
+            patch.object(server, "local_now", return_value=datetime(2026, 8, 26, 12, 0)),
+        ):
+            result = server.public_plan_state(local_only=True)
+
+        self.assertEqual(result["planned"][0]["compliance"]["status"], "completed")
+        self.assertEqual(result["training_calendar"][0]["compliance"]["actual_activity"]["icu_rpe"], 8)
+        self.assertIsInstance(result["planning_compliance"], list)
 
     def test_planned_workout_fallback_matches_unpaired_same_day_sport(self):
         today = server.local_now().date().isoformat()

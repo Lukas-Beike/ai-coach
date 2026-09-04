@@ -30,9 +30,12 @@ It is not intended to be exposed directly to the public internet.
   calendar is grouped into collapsible full weeks with compact volume summaries.
   The More tab controls how many past and future weeks are displayed.
   Intervals.icu planned workouts are matched to completed activities through
-  their pairing (with a conservative same-day/sport fallback) and show
-  workout and weekly compliance percentages. The comparison uses training
-  load when available, otherwise moving/elapsed time.
+  their pairing (with a conservative same-day/sport fallback). The training
+  calendar also shows unmatched completed activities for past days and today.
+  Completed cards expose actual duration, distance, training load, RPE, and
+  available sport metrics without inventing missing values. Matched cards show
+  plan-versus-actual volume; the comparison uses training load when available,
+  otherwise moving/elapsed time.
 - If adaptive planning shortens a local workout or reduces its intensity due
   to a read-only iCalendar appointment, the linked planned workout records
   that reason and the original versus adjusted duration after approval.
@@ -106,8 +109,8 @@ It is not intended to be exposed directly to the public internet.
   a full Intervals.icu resync.
 - Multi-week plans and library templates are managed through the Coach. The
   Geplant view has read-only Übersicht and Bibliothek segments: the overview
-  shows dated local sessions by week, while the library groups active workout
-  templates by sport.
+  shows the combined planned and completed training calendar by week, while the
+  library groups active workout templates by sport.
 - Existing training plans can be renamed, have their goal, status, or date range
   changed, and can be deleted directly through the Coach. Plan deletion removes
   plan metadata only; scheduled local workout units remain untouched.

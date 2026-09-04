@@ -2111,16 +2111,89 @@ function plannedWeekSummary(weekKey, weekEndKey, weekEntries, compliance, todayK
   return `${units} · ${load.join(" · ")}`;
 }
 
-function renderPlanned(planned) {
+function calendarActualActivity(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  if (entry.is_completed_activity) return entry;
+  const actual = entry.compliance?.actual_activity;
+  return actual && typeof actual === "object" ? actual : null;
+}
+
+function calendarEntryStatus(entry, dateKey, todayKey) {
+  if (calendarActualActivity(entry)) return "completed";
+  if (entry?.compliance?.status === "missed") return "missed";
+  return dateKey === todayKey ? "today" : "planned";
+}
+
+function calendarStatusLabel(entry, dateKey, todayKey) {
+  const status = calendarEntryStatus(entry, dateKey, todayKey);
+  if (status === "completed") return entry.is_completed_activity ? "✓ Zusätzlich absolviert" : "✓ Abgeschlossen";
+  if (status === "missed") return "Nicht absolviert";
+  return status === "today" ? "Heute geplant" : "Geplant";
+}
+
+function calendarMetricNumber(value, suffix = "") {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  const digits = Number.isInteger(number) ? 0 : 1;
+  return `${number.toLocaleString("de-DE", { maximumFractionDigits: digits })}${suffix}`;
+}
+
+function calendarRpeLabel(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= 10 ? calendarMetricNumber(number) : null;
+}
+
+function calendarIntensityLabel(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  const percent = number > 0 && number <= 2 ? number * 100 : number;
+  return `${Math.round(percent)} %`;
+}
+
+function calendarStartTime(value) {
+  const match = String(value || "").match(/(?:T|\s)(\d{2}:\d{2})/);
+  return match ? match[1] : null;
+}
+
+function calendarPaceLabel(activity) {
+  if (activitySportLabel(activity) !== "Laufen") return null;
+  const duration = Number(activity?.moving_time);
+  const distance = Number(activity?.distance);
+  return duration > 0 && distance > 0 ? formatPace(duration / (distance / 1000)) : null;
+}
+
+function calendarCountLabel(entries, todayKey) {
+  const counts = { completed: 0, planned: 0, missed: 0 };
+  entries.forEach((entry) => {
+    const status = calendarEntryStatus(entry, plannedEventDate(entry), todayKey);
+    if (status === "completed") counts.completed += 1;
+    else if (status === "missed") counts.missed += 1;
+    else counts.planned += 1;
+  });
+  return [
+    counts.completed ? `${counts.completed} abgeschlossen` : "",
+    counts.planned ? `${counts.planned} geplant` : "",
+    counts.missed ? `${counts.missed} nicht absolviert` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function appendCalendarFact(root, label, value) {
+  if (value == null || value === "") return;
+  const item = document.createElement("span");
+  const title = document.createElement("strong");
+  title.textContent = label;
+  item.append(title, document.createTextNode(` ${value}`));
+  root.append(item);
+}
+
+function renderPlanned(trainingCalendar) {
   const root = $("#plannedCalendar");
   const summary = $("#plannedSummary");
   if (!root) return;
   root.replaceChildren();
-  const entries = (Array.isArray(planned) ? planned : [])
-    .filter((item) => item && !item.archived && !item.local_deleted && plannedEventDate(item))
-    .sort((left, right) => plannedEventDate(left).localeCompare(plannedEventDate(right)));
-  if (summary) summary.textContent = `${entries.length} geplante Einheit${entries.length === 1 ? "" : "en"}`;
-
   const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
   const currentWeekKey = planWeekStart(todayKey);
   const display = state.data?.calendar_display || {};
@@ -2136,6 +2209,12 @@ function renderPlanned(planned) {
       .filter((item) => item && item.week_start)
       .map((item) => [String(item.week_start).slice(0, 10), item]),
   );
+  const lastDateKey = addDateKey(firstWeekKey, ((pastWeeks + futureWeeks + 1) * 7) - 1);
+  const entries = (Array.isArray(trainingCalendar) ? trainingCalendar : [])
+    .filter((item) => item && !item.archived && !item.local_deleted && plannedEventDate(item))
+    .filter((item) => plannedEventDate(item) >= firstWeekKey && plannedEventDate(item) <= lastDateKey)
+    .sort((left, right) => String(left.start_date_local || left.date || "").localeCompare(String(right.start_date_local || right.date || "")));
+  if (summary) summary.textContent = calendarCountLabel(entries, todayKey) || "Keine Einheiten im Zeitraum";
   const planningContextByDate = new Map(
     (Array.isArray(state.data?.daily_planning_context) ? state.data.daily_planning_context : [])
       .filter((item) => item && item.date)
@@ -2165,7 +2244,9 @@ function renderPlanned(planned) {
     title.textContent = planWeekLabel(weekKey);
     const count = document.createElement("span");
     count.className = "planned-week-summary";
-    count.textContent = plannedWeekSummary(weekKey, weekEndKey, weekEntries, weekCompliance, todayKey);
+    const additionalCompleted = weekEntries.filter((entry) => entry.is_completed_activity).length;
+    const weekSummary = plannedWeekSummary(weekKey, weekEndKey, weekEntries, weekCompliance, todayKey);
+    count.textContent = additionalCompleted ? `${weekSummary} · +${additionalCompleted} zusätzlich` : weekSummary;
     heading.append(title, count);
     week.append(heading);
 
@@ -2196,7 +2277,7 @@ function renderPlanned(planned) {
         dayHeadingMain.append(weatherText);
       }
       const dayCount = document.createElement("span");
-      dayCount.textContent = dayEntries.length ? `${dayEntries.length} ${dayEntries.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
+      dayCount.textContent = calendarCountLabel(dayEntries, todayKey) || (dateKey > todayKey ? "frei" : "keine Aktivität");
       dayHeading.append(dayHeadingMain, dayCount);
       day.append(dayHeading);
 
@@ -2225,21 +2306,82 @@ function renderPlanned(planned) {
       if (!dayEntries.length) {
         const empty = document.createElement("p");
         empty.className = "planned-day-empty";
-        empty.textContent = "Keine Einheit geplant";
+        empty.textContent = dateKey < todayKey
+          ? "Keine Aktivität"
+          : dateKey === todayKey ? "Noch keine Einheit geplant oder abgeschlossen" : "Keine Einheit geplant";
         day.append(empty);
       }
       dayEntries.forEach((entry) => {
+        const actual = calendarActualActivity(entry);
+        const status = calendarEntryStatus(entry, dateKey, todayKey);
         const card = document.createElement("details");
-        card.className = "planned-entry";
+        card.className = `planned-entry is-${status}`;
         card.open = false;
         const cardSummary = document.createElement("summary");
         const cardTitle = document.createElement("strong");
-        cardTitle.textContent = entry.name || "Geplante Einheit";
+        cardTitle.textContent = actual?.name || entry.name || "Trainingseinheit";
         const meta = document.createElement("span");
         meta.className = "planned-meta";
-        meta.textContent = [activitySportLabel(entry), entry.duration_minutes ? `${entry.duration_minutes} Min.` : entry.moving_time ? formatDuration(entry.moving_time) : null].filter(Boolean).join(" · ");
+        const displayed = actual || entry;
+        meta.textContent = [
+          calendarStatusLabel(entry, dateKey, todayKey),
+          activitySportLabel(displayed),
+          calendarStartTime(displayed.start_date_local),
+          actual ? formatDuration(actual.moving_time ?? actual.elapsed_time) : entry.duration_minutes ? `${entry.duration_minutes} Min.` : formatDuration(entry.moving_time),
+          actual ? distanceLabel(actual.distance) : null,
+        ].filter(Boolean).join(" · ");
         cardSummary.append(cardTitle, meta);
+        if (actual) {
+          const primaryMetrics = document.createElement("span");
+          primaryMetrics.className = "planned-actual-summary";
+          const load = calendarMetricNumber(actual.icu_training_load);
+          const rpe = calendarRpeLabel(actual.icu_rpe);
+          primaryMetrics.textContent = [load != null ? `Load ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
+          cardSummary.append(primaryMetrics);
+        }
         card.append(cardSummary);
+        if (actual) {
+          const facts = document.createElement("div");
+          facts.className = "planned-actual-facts";
+          const rpe = calendarRpeLabel(actual.icu_rpe);
+          const averageHeartRate = calendarMetricNumber(actual.average_heartrate, " bpm");
+          const averagePower = calendarMetricNumber(actual.weighted_average_watts ?? actual.average_watts, " W");
+          const elevation = calendarMetricNumber(actual.total_elevation_gain, " hm");
+          appendCalendarFact(facts, "Dauer", formatDuration(actual.moving_time ?? actual.elapsed_time));
+          appendCalendarFact(facts, "Distanz", distanceLabel(actual.distance));
+          appendCalendarFact(facts, "Trainingsload", calendarMetricNumber(actual.icu_training_load));
+          appendCalendarFact(facts, "RPE", rpe != null ? `${rpe}/10` : "nicht angegeben");
+          appendCalendarFact(facts, "Intensität", calendarIntensityLabel(actual.icu_intensity));
+          appendCalendarFact(facts, "Ø Puls", averageHeartRate);
+          appendCalendarFact(facts, "Ø Leistung", averagePower);
+          appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
+          appendCalendarFact(facts, "Höhenmeter", elevation);
+          card.append(facts);
+        }
+        if (actual && !entry.is_completed_activity) {
+          const comparison = document.createElement("div");
+          comparison.className = "planned-comparison";
+          const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time;
+          const plannedLoad = entry.icu_training_load;
+          const planLine = document.createElement("p");
+          planLine.textContent = `Plan: ${[
+            entry.name,
+            formatDuration(plannedDuration),
+            plannedLoad != null ? `Load ${calendarMetricNumber(plannedLoad)}` : null,
+          ].filter(Boolean).join(" · ")}`;
+          const actualLine = document.createElement("p");
+          actualLine.textContent = `Ist: ${[
+            formatDuration(actual.moving_time ?? actual.elapsed_time),
+            actual.icu_training_load != null ? `Load ${calendarMetricNumber(actual.icu_training_load)}` : null,
+          ].filter(Boolean).join(" · ")}`;
+          comparison.append(planLine, actualLine);
+          if (entry.compliance?.percentage != null) {
+            const ratio = document.createElement("p");
+            ratio.textContent = `${entry.compliance.basis === "training_load" ? "Load" : "Umfang"} Plan/Ist: ${entry.compliance.percentage} %`;
+            comparison.append(ratio);
+          }
+          card.append(comparison);
+        }
         if (entry.description) {
           const description = document.createElement("p");
           description.className = "planned-description";
@@ -3161,7 +3303,7 @@ function render(data) {
   renderMessages(data.messages, firstRender);
   renderToday(data);
   renderActivities(data.activities || []);
-  renderPlanned(data.planned || []);
+  renderPlanned(data.training_calendar || data.planned || []);
   renderLibrary(data.library || []);
   renderProfile(data.profile);
   renderCheckins(data.checkins || data.local_feedback?.recent || [], data.profile?.timezone);
@@ -3186,7 +3328,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     const bootstrap = await api(path);
     const existing = state.data || {};
     const payload = { ...existing, ...bootstrap };
-    ["messages", "messages_next_cursor", "activities", "activities_next_cursor", "library", "library_next_cursor", "plans", "planned", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", "garmin", "checkins", "local_feedback", "activity_feedback"].forEach((key) => {
+    ["messages", "messages_next_cursor", "activities", "activities_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", "garmin", "checkins", "local_feedback", "activity_feedback"].forEach((key) => {
       if (existing[key] !== undefined) payload[key] = existing[key];
     });
     const areas = new Set(requestedAreas || ["chat", "activities", "plan", "library", "performance", "feedback", "profile"]);
