@@ -763,6 +763,16 @@ workflow validates pull-request titles and commit subjects. Dependabot manages
 Python, Docker, and GitHub Actions dependencies and can automatically squash
 merge successful update pull requests.
 
+### Codex pull-request review
+
+The required `Codex code review` check uses OpenAI's official Codex pull-request
+review workflow for pull requests to `develop` and `main`, then posts Codex's
+final review message on the pull request. Configure an `OPENAI_API_KEY`
+repository Actions secret before enabling the check. It runs only for pull
+requests from branches in this repository, so forks never receive access to
+that secret. Codex receives a read-only workspace and no application, provider,
+or athlete-data credentials.
+
 ### Image supply chain and runtime boundary
 
 The test-and-publish workflow emits an SPDX image SBOM and scans both OS/base
