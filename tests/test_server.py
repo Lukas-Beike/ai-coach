@@ -19,6 +19,7 @@ from unittest.mock import Mock, patch
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
     "OPENAI_API_KEY": "test-openai-key",
+    "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_MODEL": "gpt-5.6-sol",
     "INTERVALS_API_KEY": "test-intervals-key",
     "INTERVALS_ATHLETE_ID": "0",
@@ -4094,14 +4095,14 @@ class CoachTests(unittest.TestCase):
             return {"text": "Wie soll ich morgen trainieren?"}
 
         audio = b"fake-webm-audio"
-        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="test-key")), patch.object(
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_api_key="test-key", openai_base_url="https://foundry.example.invalid/openai/v1/")), patch.object(
             server, "http_json", side_effect=fake_http_json
         ):
             result = server.transcribe_audio(audio, "audio/webm;codecs=opus")
 
         self.assertEqual(result, {"transcript": "Wie soll ich morgen trainieren?"})
         self.assertEqual(captured["method"], "POST")
-        self.assertEqual(captured["url"], "https://api.openai.com/v1/audio/transcriptions")
+        self.assertEqual(captured["url"], "https://foundry.example.invalid/openai/v1/audio/transcriptions")
         self.assertEqual(captured["service"], "openai")
         self.assertEqual(captured["timeout"], 90)
         self.assertIsNone(captured["payload"])
@@ -4110,6 +4111,61 @@ class CoachTests(unittest.TestCase):
         self.assertIn(b"gpt-transcribe", captured["raw_body"])
         self.assertIn(audio, captured["raw_body"])
         self.assertEqual(captured["headers"]["Authorization"], "Bearer test-key")
+
+    def test_openai_endpoint_joins_compatible_provider_base_url_and_rejects_credentials(self):
+        config = replace(server.CONFIG, openai_base_url="https://foundry.example.invalid/openai/v1/")
+        with patch.object(server, "CONFIG", config):
+            self.assertEqual(server.openai_endpoint("/responses"), "https://foundry.example.invalid/openai/v1/responses")
+            self.assertEqual(server.openai_endpoint("conversations/abc"), "https://foundry.example.invalid/openai/v1/conversations/abc")
+        with patch.object(server, "CONFIG", replace(server.CONFIG, openai_base_url="")):
+            self.assertEqual(server.openai_endpoint("responses"), server.DEFAULT_OPENAI_BASE_URL + "/responses")
+
+        for invalid in (
+            "https://user:password@foundry.example.invalid/openai/v1",
+            "https://foundry.example.invalid/openai/v1?api-version=2024-10-21",
+            "ftp://foundry.example.invalid/openai/v1",
+        ):
+            with self.subTest(invalid=invalid), patch.object(server, "CONFIG", replace(server.CONFIG, openai_base_url=invalid)):
+                with self.assertRaises(server.AppError) as raised:
+                    server.openai_endpoint("responses")
+                self.assertEqual(raised.exception.status, 500)
+
+    def test_openai_request_uses_configured_compatible_provider_endpoint(self):
+        captured = {}
+
+        def fake_http_json(method, url, payload=None, headers=None, **kwargs):
+            captured.update({"method": method, "url": url, "payload": payload, "headers": headers, "kwargs": kwargs})
+            return {"id": "resp-test", "status": "completed", "usage": {}}
+
+        config = replace(server.CONFIG, openai_api_key="test-key", openai_base_url="https://foundry.example.invalid/openai/v1")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            result = server.openai_request("/responses", {"model": "foundry-deployment", "input": "Hi"})
+
+        self.assertEqual(result["id"], "resp-test")
+        self.assertEqual(captured["url"], "https://foundry.example.invalid/openai/v1/responses")
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer test-key")
+
+    def test_openai_stream_request_uses_configured_compatible_provider_endpoint(self):
+        class FakeResponse:
+            status = 200
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def __iter__(self):
+                response = {"id": "resp-test", "status": "completed", "output": [], "usage": {}}
+                stream = "event: response.completed\ndata: " + json.dumps({"type": "response.completed", "response": response}) + "\n\n"
+                yield from (line.encode() for line in stream.splitlines(keepends=True))
+
+        config = replace(server.CONFIG, openai_api_key="test-key", openai_base_url="https://foundry.example.invalid/openai/v1/")
+        with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", return_value=FakeResponse()) as urlopen:
+            server.openai_stream_request({"model": "foundry-deployment"}, lambda _: None)
+
+        self.assertEqual(urlopen.call_args.args[0].full_url, "https://foundry.example.invalid/openai/v1/responses")
 
     def test_transcribe_audio_rejects_unknown_format_and_oversized_audio(self):
         config = replace(server.CONFIG, openai_api_key="test-key")

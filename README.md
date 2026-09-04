@@ -428,6 +428,7 @@ settings or bypass explicit library synchronization or planning approvals.
 Other supported operational variables are:
 
 ```text
+OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-5.6-sol
 DATA_RETENTION_DAYS=-1
 PORT=8090
@@ -438,11 +439,20 @@ GITHUB_TOKEN=
 GITHUB_RELEASE_CHECK_SECONDS=900
 ```
 
+`OPENAI_BASE_URL` is optional and defaults to `https://api.openai.com/v1`. It
+must be an HTTP(S) base URL without credentials or query parameters. This lets
+you use an OpenAI-compatible Responses API, for example a Microsoft Foundry
+endpoint such as `https://<resource>.openai.azure.com/openai/v1`. Keep
+`OPENAI_API_KEY` for the provider credential and set `OPENAI_MODEL` to the
+provider's deployment/model name. The configured service must support the
+Responses API, SSE streaming, and Conversations API used by the app; voice
+input additionally requires `/audio/transcriptions`.
+
 `DATA_RETENTION_DAYS=-1` is the default and disables automatic deletion. The
 application does not impose its own OpenAI request or token limits; it displays
-remaining quotas when the API reports them. When OpenAI returns a billing or
-quota error such as `credit_balance_exhausted`, the app shows a clear message
-and points to billing.
+remaining quotas when the API reports them. When the configured provider returns
+a billing or quota error such as `credit_balance_exhausted`, the app shows a
+clear message and points to billing.
 
 The application checks the latest non-draft, non-prerelease GitHub release on
 the server and caches the result for 15 minutes by default. A newer release is
