@@ -5913,7 +5913,7 @@ class CoachTests(unittest.TestCase):
     def test_task9_browser_regression_contract_covers_routes_and_responsive_guards(self):
         e2e_source = (server.PUBLIC_DIR.parent / "e2e" / "coach.spec.js").read_text(encoding="utf-8")
         playwright_config = (server.PUBLIC_DIR.parent / "playwright.config.cjs").read_text(encoding="utf-8")
-        for route in ("#coach", "#today", '"plan"', "analysis/performance", "#more"):
+        for route in ("#coach", "#today", "plan/overview", "analysis/performance", "#more"):
             self.assertIn(route, e2e_source)
         for guard in ("expectNoBrowserErrorsOrOverflow", "reducedMotion", 'fontSize = "200%"', "touch targets below 44"):
             self.assertIn(guard, e2e_source)
