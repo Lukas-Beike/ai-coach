@@ -1809,6 +1809,8 @@ class CoachTests(unittest.TestCase):
         today_view = app[app.index("function renderToday(data)"):app.index("function distanceLabel(")]
         self.assertIn('todayCard("Coach-Einordnung", "today-priority")', today_view)
         self.assertIn('todayCard("Morgen-Check-in", "today-checkin")', today_view)
+        self.assertIn('const automaticMorningReady = morning.status === "ready" && morning.date === todayKey;', today_view)
+        self.assertIn("Automatischer Morgen-Check-in abgeschlossen.", today_view)
         self.assertNotIn("todayAction(", today_view)
         self.assertNotIn('document.createElement("button")', today_view)
 

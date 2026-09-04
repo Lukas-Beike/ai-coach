@@ -1197,6 +1197,9 @@ function renderToday(data) {
   const todayKey = timezoneDateKey(data.profile?.timezone, new Date());
   const context = (data.daily_planning_context || []).find((item) => item.date === todayKey) || {};
   const checkin = data.local_feedback?.today || data.checkins?.find((item) => item.checkin_date === todayKey) || context.checkin;
+  const morning = data.morning_checkin || {};
+  const automaticMorningRunning = morning.running || morning.status === "working";
+  const automaticMorningReady = morning.status === "ready" && morning.date === todayKey;
   const recovery = context.recovery || data.performance?.recovery || {};
   const todayWorkouts = (data.planned || []).filter((event) => plannedEventDate(event) === todayKey);
   const weather = context.weather || (data.weather?.days || []).find((item) => item.date === todayKey);
@@ -1221,6 +1224,10 @@ function renderToday(data) {
     todayCardText(priorityCard, "Für die lokale Planung liegt eine Anpassung vor. Sie wird in der Einordnung für heute berücksichtigt.", "today-card-summary");
   } else if (todayWorkouts.length) {
     todayCardText(priorityCard, `${todayWorkouts.length} geplante Einheit${todayWorkouts.length === 1 ? "" : "en"} für heute. Die verfügbaren Quellen und der Morgen-Check-in bilden die Grundlage der Einordnung.`, "today-card-summary");
+  } else if (automaticMorningRunning) {
+    todayCardText(priorityCard, "Der automatische Morgen-Check-in wird noch erstellt.", "today-card-summary");
+  } else if (automaticMorningReady) {
+    todayCardText(priorityCard, "Der automatische Morgen-Check-in ist abgeschlossen. Die Einordnung basiert auf dem aktualisierten Snapshot.", "today-card-summary");
   } else if (!checkin) {
     todayCardText(priorityCard, "Für heute liegt noch kein Morgen-Check-in vor. Die Einordnung basiert deshalb auf den verfügbaren Quellendaten.", "today-card-summary");
   } else {
@@ -1239,6 +1246,10 @@ function renderToday(data) {
       checkin.illness ? `Krankheit: ${checkin.illness}` : null,
     ].filter(Boolean);
     todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
+  } else if (automaticMorningRunning) {
+    todayCardText(checkinCard, "Der automatische Morgen-Check-in wird noch erstellt.", "today-card-summary");
+  } else if (automaticMorningReady) {
+    todayCardText(checkinCard, "Automatischer Morgen-Check-in abgeschlossen. Die ausführliche Einordnung findest du im Coach-Chat.", "today-card-summary");
   } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
   root.append(checkinCard);
 
