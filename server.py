@@ -7391,6 +7391,49 @@ def _workout_load(record: Any) -> float | int | None:
     return _activity_metric(record, ("icu_training_load", "training_load", "tss"))
 
 
+CALENDAR_ACTIVITY_FIELDS = (
+    "id", "external_id", "start_date_local", "name", "type", "moving_time", "elapsed_time",
+    "distance", "total_elevation_gain", "icu_training_load", "icu_intensity", "average_heartrate",
+    "max_heartrate", "average_watts", "weighted_average_watts", "icu_weighted_avg_speed",
+    "icu_pace", "icu_rpe", "feel", "source",
+)
+
+
+def calendar_activity_payload(activity: Any) -> dict[str, Any]:
+    """Return the bounded completed-activity fields used by the calendar UI."""
+    if not isinstance(activity, dict):
+        return {}
+    payload = selected(activity, CALENDAR_ACTIVITY_FIELDS)
+    activity_date = _record_date(first_present(activity, ("start_date_local", "start_date", "date")))
+    payload.update({
+        "date": activity_date,
+        "start_date_local": first_present(activity, ("start_date_local", "start_date", "date")),
+        "category": "ACTIVITY",
+        "calendar_entry_type": "completed_activity",
+        "is_completed_activity": True,
+    })
+    return payload
+
+
+def calendar_activity_identity(activity: Any) -> tuple[Any, ...] | None:
+    """Build a stable identity for matching calendar activity projections."""
+    if not isinstance(activity, dict):
+        return None
+    activity_id = first_present(activity, ("id", "activityId", "external_id"))
+    if activity_id not in (None, ""):
+        return ("id", str(activity_id))
+    start = first_present(activity, ("start_date_local", "start_date", "date"))
+    if start in (None, ""):
+        return None
+    return (
+        "fallback",
+        str(start),
+        str(activity.get("type") or activity.get("sport") or "").casefold(),
+        _workout_duration(activity),
+        _activity_metric(activity, ("distance",)),
+    )
+
+
 def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[int, dict[str, Any]]:
     """Match completed activities to planned workouts without reusing one activity."""
     activity_rows = [item for item in activities if isinstance(item, dict)]
@@ -7482,6 +7525,7 @@ def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, t
             "activity_id": first_present(activity, ("id", "activityId")),
             "activity_name": str(activity.get("name") or "Absolvierte Einheit")[:200],
             "activity_start": first_present(activity, ("start_date_local", "start_date", "start")),
+            "actual_activity": calendar_activity_payload(activity),
         })
     return result
 
@@ -7539,6 +7583,30 @@ def planning_compliance_state(planned: list[Any], activities: list[Any]) -> tupl
             "actual_value": round(actual_value, 2) if actual_value is not None else None,
         })
     return enriched, weekly
+
+
+def training_calendar_items(planned: list[Any], activities: list[Any]) -> list[dict[str, Any]]:
+    """Combine enriched plan entries with unmatched completed activities."""
+    planned_rows = [dict(item) for item in planned if isinstance(item, dict)]
+    activity_rows = [item for item in activities if isinstance(item, dict)]
+    matched_activity_keys: set[tuple[Any, ...]] = set()
+    for item in planned_rows:
+        compliance = item.get("compliance")
+        identity = calendar_activity_identity(compliance.get("actual_activity")) if isinstance(compliance, dict) else None
+        if identity is not None:
+            matched_activity_keys.add(identity)
+    completed_rows = [
+        calendar_activity_payload(activity)
+        for activity in activity_rows
+        if calendar_activity_identity(activity) not in matched_activity_keys
+    ]
+    combined = planned_rows + [item for item in completed_rows if item.get("date")]
+    combined.sort(key=lambda item: (
+        str(item.get("start_date_local") or item.get("date") or "9999-12-31"),
+        str(item.get("name") or "").casefold(),
+        str(item.get("id") or item.get("local_id") or item.get("external_id") or ""),
+    ))
+    return combined
 
 
 def version_tuple(value: Any) -> tuple[int, int, int] | None:
@@ -14780,6 +14848,7 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
             "library": [],
             "activities": [],
             "planned": local_planned,
+            "training_calendar": local_planned,
             "calendar": local_calendar_events(local_planned, competitions, relevant_external),
             "planning_view": {"source": "local", "local_count": len(local_planned), "remote_count": 0, "items": local_planned, "provider_window": {}},
             "planning_compliance": [],
@@ -14836,16 +14905,18 @@ def public_plan_state(local_only: bool = False) -> dict[str, Any]:
     activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
     activities = activities[:1000] if isinstance(activities, list) else []
     activities = activities_with_feedback(activities)
-    planning_compliance = planning_compliance_state(planned, activities)
+    planned, planning_compliance = planning_compliance_state(planned, activities)
     weather = weather_state(planned, refresh=not local_only)
     if weather.pop("_refreshed", False):
         check_adaptive_replan("weather")
     planned_with_weather = add_weather_to_planned(planned, weather)
+    training_calendar = training_calendar_items(planned_with_weather, activities)
     provider_sync = snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
     calendar_window = provider_sync.get("calendar_window", {}) if isinstance(provider_sync, dict) else {}
     return {
         "plans": list_training_plans(limit=30),
         "planned": planned_with_weather,
+        "training_calendar": training_calendar,
         "calendar": local_calendar_events(planned, list_competitions(), list_external_calendar_events(1000, training_relevant_only=True)),
         "planning_view": {
             "source": "local", "local_count": len(planned),
@@ -14931,6 +15002,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "library": list_workout_library(include_archived=True),
             "activities": activities,
             "planned": planned_with_weather,
+            "training_calendar": training_calendar_items(planned_with_weather, activities),
             "calendar": local_calendar_events(planned, list_competitions(), external_calendar.get("events") if isinstance(external_calendar, dict) else []),
             "planning_view": {
                 "source": "local",
