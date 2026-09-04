@@ -2094,6 +2094,23 @@ function plannedAppointmentLabel(event) {
   return time ? `${name} · ${time[1]}` : name;
 }
 
+function plannedWeekSummary(weekKey, weekEndKey, weekEntries, compliance, todayKey) {
+  const plannedUnits = Number.isFinite(Number(compliance?.planned_units))
+    ? Number(compliance.planned_units)
+    : weekEntries.length;
+  const completedUnits = Number.isFinite(Number(compliance?.completed_units))
+    ? Number(compliance.completed_units)
+    : 0;
+  const isPast = weekEndKey < todayKey;
+  const units = isPast || completedUnits > 0
+    ? `${plannedUnits} geplant · ${completedUnits} absolviert`
+    : `${plannedUnits} geplant`;
+  if (compliance?.basis !== "training_load" || compliance.planned_value == null) return units;
+  const load = [`Load geplant ${formatWhole(compliance.planned_value)}`];
+  if (isPast || completedUnits > 0) load.push(`absolviert ${formatWhole(compliance.actual_value || 0)}`);
+  return `${units} · ${load.join(" · ")}`;
+}
+
 function renderPlanned(planned) {
   const root = $("#plannedCalendar");
   const summary = $("#plannedSummary");
@@ -2110,6 +2127,15 @@ function renderPlanned(planned) {
   const pastWeeks = calendarDisplayValue(display.past_weeks, 1);
   const futureWeeks = calendarDisplayValue(display.future_weeks, 4);
   const firstWeekKey = addDateKey(currentWeekKey, -7 * pastWeeks);
+  const nextWeekKey = addDateKey(currentWeekKey, 7);
+  const previousWeekOpenState = new Map(
+    [...root.querySelectorAll(".planned-week[data-week-key]")].map((week) => [week.dataset.weekKey, week.open]),
+  );
+  const weeklyCompliance = new Map(
+    (Array.isArray(state.data?.planning_compliance) ? state.data.planning_compliance : [])
+      .filter((item) => item && item.week_start)
+      .map((item) => [String(item.week_start).slice(0, 10), item]),
+  );
   const planningContextByDate = new Map(
     (Array.isArray(state.data?.daily_planning_context) ? state.data.daily_planning_context : [])
       .filter((item) => item && item.date)
@@ -2124,15 +2150,22 @@ function renderPlanned(planned) {
 
   for (let weekIndex = 0; weekIndex < pastWeeks + futureWeeks + 1; weekIndex += 1) {
     const weekKey = addDateKey(firstWeekKey, weekIndex * 7);
-    const week = document.createElement("section");
+    const weekEndKey = addDateKey(weekKey, 6);
+    const weekCompliance = weeklyCompliance.get(weekKey);
+    const weekEntries = Array.from({ length: 7 }, (_, offset) => eventsByDate.get(addDateKey(weekKey, offset)) || []).flat();
+    const week = document.createElement("details");
     week.className = "planned-week";
-    const heading = document.createElement("div");
+    week.dataset.weekKey = weekKey;
+    week.open = previousWeekOpenState.has(weekKey)
+      ? previousWeekOpenState.get(weekKey)
+      : weekKey === currentWeekKey || weekKey === nextWeekKey;
+    const heading = document.createElement("summary");
     heading.className = "planned-week-heading";
     const title = document.createElement("h4");
     title.textContent = planWeekLabel(weekKey);
     const count = document.createElement("span");
-    const weekEntries = Array.from({ length: 7 }, (_, offset) => eventsByDate.get(addDateKey(weekKey, offset)) || []).flat();
-    count.textContent = `${weekEntries.length} Einheit${weekEntries.length === 1 ? "" : "en"}`;
+    count.className = "planned-week-summary";
+    count.textContent = plannedWeekSummary(weekKey, weekEndKey, weekEntries, weekCompliance, todayKey);
     heading.append(title, count);
     week.append(heading);
 

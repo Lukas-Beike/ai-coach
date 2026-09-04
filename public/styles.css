@@ -581,9 +581,13 @@ h2 {
 .plan-segment-heading h3 { margin: 2px 0 0; font-size: 1rem; }
 .planned-calendar { display: grid; gap: 12px; }
 .planned-week { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
-.planned-week-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 13px 14px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .025); }
+.planned-week-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 13px 14px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .025); cursor: pointer; list-style: none; }
+.planned-week-heading::-webkit-details-marker { display: none; }
+.planned-week-heading::after { flex: 0 0 auto; color: var(--subtle); content: "▸"; transition: transform .15s ease; }
+.planned-week[open] > .planned-week-heading::after { transform: rotate(90deg); }
+.planned-week-heading:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
 .planned-week-heading h4 { margin: 0; color: var(--ink); font-size: .88rem; }
-.planned-week-heading span { color: var(--subtle); font-size: .68rem; }
+.planned-week-heading span { color: var(--subtle); font-size: .68rem; text-align: right; }
 .planned-week-days { display: grid; gap: 8px; padding: 8px; }
 .planned-day { overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .018); }
 .planned-day.is-today { border-color: rgba(52, 207, 161, .55); box-shadow: inset 3px 0 0 var(--accent-bright); }
