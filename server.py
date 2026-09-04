@@ -126,7 +126,7 @@ STATIC_TARGETS = {
 VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.6.2"
+APP_VERSION = "1.7.0"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -890,8 +890,8 @@ Priorities:
 6. For future planned units and reusable templates, the local app is authoritative after the one-time initial Intervals.icu import. Never replace local planning with later remote calendar changes. Completed activities from Intervals.icu remain authoritative for what was actually performed.
 6a. When the athlete explicitly asks to apply, schedule, or transfer an already saved library plan, apply it locally immediately after checking conflicts. Never include an automatic remote write.
 6b. After a completed activity without existing activity feedback, ask one short, specific question about how it felt. Do not call a feedback tool when merely asking the question. When the athlete answers with actual observations, use save_activity_feedback for that activity; never invent feedback or save a blank note.
-6c. Use list_workout_library or list_planned_workouts when the supplied context is insufficient or the athlete explicitly asks to list them. Use refresh tools only after an explicit request to update that provider; after a refresh, use the returned result and the refreshed context.
-6d. For adaptive planning, use preview_adaptive_replan to explain a proposal. An explicit approval in Coach Chat may apply the latest proposal to future local workouts. Synchronizing illness-pause events to Intervals.icu requires an explicit named synchronization request in Coach Chat.
+6c. Use list_recent_activities, list_workout_library, list_planned_workouts, or list_change_history when the supplied context is insufficient or the athlete explicitly asks to list them. Use start_provider_refresh only after an explicit request to update a provider. Use refresh_current_performance only after an explicit request to update current Intervals.icu performance metrics; it does not reload activities. The local training library remains authoritative and has no remote overwrite refresh.
+6d. For adaptive planning, use preview_adaptive_replan to explain a proposal. An explicit approval in Coach Chat may apply the latest proposal to future local workouts. Synchronizing illness-pause events to Intervals.icu requires an explicit named synchronization request in the same Coach Chat request and must set sync_illness_to_intervals.
 6e. When the athlete asks to add, change, or delete a target competition, perform the matching local action immediately.
 6f. When the athlete provides or explicitly asks to save/edit a daily check-in, use save_checkin. Preserve existing values when the athlete changes only one field, never invent missing scores, and never save a future date. An illness pause is handled through the adaptive preview and explicit approval.
 6g. Use list_training_plans when the athlete asks about existing plans or an ID is needed. Use update_training_plan to rename or delete a plan, or change its goal, status, or metadata dates. Plan deletion removes only plan metadata; its local workout units remain scheduled.
@@ -1419,7 +1419,7 @@ SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
 SYNC_JOB_POLL_SECONDS = 1.0
 SYNC_JOB_LIST_LIMIT = 50
-GARMIN_BODY_BATTERY_RETRY_SECONDS = 2 * 60 * 60
+GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 DIAGNOSTIC_CAPTURE_DURATION_SECONDS = 60 * 60
 DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 1500
 DIAGNOSTIC_CAPTURE_STATE_KEY = "diagnostic_capture_state"
@@ -1612,32 +1612,39 @@ def database():
 
 def initialise_database() -> None:
     with DB_LOCK, database() as db:
-        db.executescript(
-            """
+        existing_tables = database_table_names(db)
+        if existing_tables and not database_schema_is_current(db):
+            raise RuntimeError(
+                "Die vorhandene Datenbank entspricht nicht exakt dem aktuellen Schema. "
+                "Für diesen Release ist ein leerer Datenbestand erforderlich."
+            )
+        if not existing_tables:
+            db.executescript(
+                """
             PRAGMA journal_mode=WAL;
-            CREATE TABLE IF NOT EXISTS kv (
+            CREATE TABLE kv (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS messages (
+            CREATE TABLE messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS chat_tool_calls (
+            CREATE TABLE chat_tool_calls (
                 call_id TEXT PRIMARY KEY,
                 tool_name TEXT NOT NULL,
                 result TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS snapshots (
+            CREATE TABLE snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 payload TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
-             CREATE TABLE IF NOT EXISTS workout_library (
+             CREATE TABLE workout_library (
                  id TEXT PRIMARY KEY,
                  local_id TEXT NOT NULL UNIQUE,
                  external_id TEXT,
@@ -1648,7 +1655,7 @@ def initialise_database() -> None:
                 last_synced_at TEXT,
                  updated_at TEXT NOT NULL
              );
-             CREATE TABLE IF NOT EXISTS planned_units (
+             CREATE TABLE planned_units (
                  id TEXT PRIMARY KEY,
                  local_id TEXT NOT NULL UNIQUE,
                  external_id TEXT,
@@ -1666,12 +1673,12 @@ def initialise_database() -> None:
                  created_at TEXT NOT NULL,
                  updated_at TEXT NOT NULL
              );
-            CREATE TABLE IF NOT EXISTS planning_state (
+            CREATE TABLE planning_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 revision INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS coach_plan_artifacts (
+            CREATE TABLE coach_plan_artifacts (
                 id TEXT PRIMARY KEY,
                 conversation_id TEXT,
                 client_turn_id TEXT,
@@ -1681,9 +1688,9 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_coach_plan_artifacts_conversation
+            CREATE INDEX idx_coach_plan_artifacts_conversation
                 ON coach_plan_artifacts(conversation_id, created_at DESC);
-            CREATE TABLE IF NOT EXISTS coach_commands (
+            CREATE TABLE coach_commands (
                 id TEXT PRIMARY KEY,
                 client_turn_id TEXT NOT NULL UNIQUE,
                 conversation_id TEXT,
@@ -1697,7 +1704,7 @@ def initialise_database() -> None:
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (artifact_id) REFERENCES coach_plan_artifacts(id)
             );
-            CREATE TABLE IF NOT EXISTS sync_jobs (
+            CREATE TABLE sync_jobs (
                 id TEXT PRIMARY KEY,
                 provider TEXT NOT NULL,
                 type TEXT NOT NULL,
@@ -1714,9 +1721,9 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_available
+            CREATE INDEX idx_sync_jobs_status_available
                 ON sync_jobs(status, available_at, created_at);
-            CREATE TABLE IF NOT EXISTS sync_job_items (
+            CREATE TABLE sync_job_items (
                 id TEXT PRIMARY KEY,
                 job_id TEXT NOT NULL,
                 item_key TEXT NOT NULL,
@@ -1732,8 +1739,8 @@ def initialise_database() -> None:
                 UNIQUE(job_id, item_key),
                 FOREIGN KEY (job_id) REFERENCES sync_jobs(id) ON DELETE CASCADE
             );
-            CREATE INDEX IF NOT EXISTS idx_sync_job_items_status ON sync_job_items(job_id, status);
-            CREATE TABLE IF NOT EXISTS provider_sync_cursors (
+            CREATE INDEX idx_sync_job_items_status ON sync_job_items(job_id, status);
+            CREATE TABLE provider_sync_cursors (
                 provider TEXT NOT NULL,
                 stream TEXT NOT NULL,
                 cursor TEXT,
@@ -1741,7 +1748,7 @@ def initialise_database() -> None:
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (provider, stream)
             );
-            CREATE TABLE IF NOT EXISTS competitions (
+            CREATE TABLE competitions (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 event_date TEXT NOT NULL,
@@ -1764,13 +1771,13 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS competition_sync_tombstones (
+            CREATE TABLE competition_sync_tombstones (
                 id TEXT PRIMARY KEY,
                 intervals_event_id TEXT,
                 external_id TEXT,
                 created_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS training_plans (
+            CREATE TABLE training_plans (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 goal TEXT NOT NULL,
@@ -1780,7 +1787,7 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS athlete_checkins (
+            CREATE TABLE athlete_checkins (
                 checkin_date TEXT PRIMARY KEY,
                 soreness INTEGER,
                 stress INTEGER,
@@ -1795,7 +1802,7 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS activity_feedback (
+            CREATE TABLE activity_feedback (
                 activity_id TEXT PRIMARY KEY,
                 activity_name TEXT NOT NULL DEFAULT '',
                 activity_date TEXT NOT NULL DEFAULT '',
@@ -1803,14 +1810,14 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS plan_adjustments (
+            CREATE TABLE plan_adjustments (
                 id TEXT PRIMARY KEY,
                 payload TEXT NOT NULL,
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 applied_at TEXT
             );
-            CREATE TABLE IF NOT EXISTS coach_action_proposals (
+            CREATE TABLE coach_action_proposals (
                 id TEXT PRIMARY KEY,
                 session_csrf_hash TEXT NOT NULL,
                 action_type TEXT NOT NULL,
@@ -1825,7 +1832,7 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 used_at TEXT
             );
-            CREATE TABLE IF NOT EXISTS change_history (
+            CREATE TABLE change_history (
                 id TEXT PRIMARY KEY,
                 entity_type TEXT NOT NULL,
                 entity_id TEXT NOT NULL,
@@ -1836,9 +1843,9 @@ def initialise_database() -> None:
                 after_hash TEXT NOT NULL,
                 diff TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_change_history_created_at ON change_history(created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_change_history_entity ON change_history(entity_type, entity_id, created_at DESC);
-            CREATE TABLE IF NOT EXISTS provider_refresh_history (
+            CREATE INDEX idx_change_history_created_at ON change_history(created_at DESC);
+            CREATE INDEX idx_change_history_entity ON change_history(entity_type, entity_id, created_at DESC);
+            CREATE TABLE provider_refresh_history (
                 id TEXT PRIMARY KEY,
                 provider TEXT NOT NULL,
                 area TEXT NOT NULL,
@@ -1851,9 +1858,9 @@ def initialise_database() -> None:
                 error_code TEXT,
                 next_retry_at TEXT
             );
-            CREATE INDEX IF NOT EXISTS idx_provider_refresh_created_at ON provider_refresh_history(started_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_provider_refresh_area ON provider_refresh_history(provider, area, started_at DESC);
-            CREATE TABLE IF NOT EXISTS public_event_sources (
+            CREATE INDEX idx_provider_refresh_created_at ON provider_refresh_history(started_at DESC);
+            CREATE INDEX idx_provider_refresh_area ON provider_refresh_history(provider, area, started_at DESC);
+            CREATE TABLE public_event_sources (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 url TEXT NOT NULL UNIQUE,
@@ -1862,7 +1869,7 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS public_event_candidates (
+            CREATE TABLE public_event_candidates (
                 id TEXT PRIMARY KEY,
                 source_id TEXT NOT NULL,
                 uid TEXT NOT NULL,
@@ -1879,7 +1886,7 @@ def initialise_database() -> None:
                 UNIQUE(source_id, uid),
                 FOREIGN KEY(source_id) REFERENCES public_event_sources(id) ON DELETE CASCADE
             );
-            CREATE TABLE IF NOT EXISTS external_calendar_events (
+            CREATE TABLE external_calendar_events (
                 id TEXT PRIMARY KEY,
                 uid TEXT NOT NULL,
                 name TEXT NOT NULL,
@@ -1894,23 +1901,25 @@ def initialise_database() -> None:
                 updated_at TEXT NOT NULL,
                 UNIQUE(uid, start_local)
             );
-            CREATE TABLE IF NOT EXISTS sessions (
+            CREATE TABLE sessions (
                 token_hash TEXT PRIMARY KEY,
                 csrf_hash TEXT NOT NULL,
                 expires_at REAL NOT NULL,
                 created_at TEXT NOT NULL,
                 last_seen TEXT NOT NULL
             );
-            """
-        )
+                """
+            )
+            db.execute("CREATE UNIQUE INDEX idx_workout_library_external_id ON workout_library(external_id) WHERE external_id IS NOT NULL")
+            db.execute("CREATE UNIQUE INDEX idx_planned_units_local_id ON planned_units(local_id)")
+            db.execute("CREATE INDEX idx_planned_units_external_id ON planned_units(external_id)")
+            db.execute("CREATE INDEX idx_planned_units_date ON planned_units(json_extract(payload, '$.date'))")
         db.execute(
             "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
             (utc_now(),),
         )
-        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_workout_library_external_id ON workout_library(external_id) WHERE external_id IS NOT NULL")
-        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_planned_units_local_id ON planned_units(local_id)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_planned_units_external_id ON planned_units(external_id)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_planned_units_date ON planned_units(json_extract(payload, '$.date'))")
+        if not database_schema_is_current(db):
+            raise RuntimeError("Die neue Datenbank konnte nicht mit dem aktuellen Schema initialisiert werden.")
         if get_kv("profile", db) is None:
             set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
         # A process cannot continue a reset after a restart. Clear only the
@@ -2049,8 +2058,16 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
     values = envelope["payload"]
     if envelope["type"] == "historical_backfill" and envelope["provider"] not in {"intervals", "garmin"}:
         raise AppError(400, "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig.", reason="invalid_job_request")
-    if envelope["type"] == "body_battery_retry" and envelope["provider"] != "garmin":
-        raise AppError(400, "Der Body-Battery-Retry ist nur bei Garmin erlaubt.", reason="invalid_job_request")
+    if envelope["type"] in {"performance_refresh", "competition_push"}:
+        if envelope["provider"] != "intervals":
+            raise AppError(400, "Dieser Job ist nur für Intervals.icu zulässig.", reason="invalid_job_request")
+        if set(values) - {"reason"}:
+            raise AppError(400, "Der Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
+        return {
+            "provider": "intervals",
+            "type": envelope["type"],
+            "payload": {"reason": str(values.get("reason") or "job").strip()[:80] or "job"},
+        }
     if envelope["type"] == "plan_push":
         if envelope["provider"] != "intervals":
             raise AppError(400, "Plan-Push-Jobs sind nur für Intervals.icu zulässig.", reason="invalid_job_request")
@@ -2374,10 +2391,19 @@ def _sync_job_update_from_result(job_id: str, result: Any, *, fallback_status: s
 
 
 def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
-    payload = _decode_sync_job_payload(job.get("payload"))
-    provider = str(job["provider"])
-    job_type = str(job["type"])
+    envelope = _sync_job_payload(
+        str(job.get("provider") or ""),
+        str(job.get("type") or ""),
+        _decode_sync_job_payload(job.get("payload")),
+    )
+    payload = envelope["payload"]
+    provider = envelope["provider"]
+    job_type = envelope["type"]
     reason = str(payload.get("reason") or "Persistenter Providerjob")
+    if job_type == "performance_refresh" and provider == "intervals":
+        return refresh_current_performance()
+    if job_type == "competition_push" and provider == "intervals":
+        return sync_competitions(reason=reason, push_local=True, operation_id=job["id"])
     if job_type == "plan_push" and provider == "intervals":
         return _sync_selected_workout_library({"entries": payload.get("entries")})
     if job_type == "plan_push":
@@ -2407,12 +2433,6 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
             result["competitions"] = competition_result
         return result
     if provider == "garmin":
-        if job_type == "body_battery_retry":
-            return sync_garmin_body_battery_retry(
-                days=int(payload.get("days") or sync_period("garmin")),
-                operation_id=job["id"],
-                reason=reason,
-            )
         historical_end = None
         if job_type == "historical_backfill":
             days = max(1, min(int(payload.get("days") or SYNC_CHUNK_DAYS), SYNC_CHUNK_DAYS))
@@ -2524,7 +2544,7 @@ def _scheduled_provider_retry_at(db: Any, provider: str) -> str | None:
     now = datetime.now(timezone.utc)
     rows = db.execute(
         "SELECT available_at FROM sync_jobs "
-        "WHERE provider=? AND type IN ('refresh', 'body_battery_retry') "
+        "WHERE provider=? AND type='refresh' "
         "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
         (provider,),
     ).fetchall()
@@ -2551,7 +2571,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
         ("intervals", "activities"): get_kv("last_sync_error"),
         ("intervals", "competitions"): get_kv("last_competition_sync_error"),
         ("intervals", "performance"): get_kv("last_performance_error"),
-        ("garmin", "data"): get_kv("last_garmin_error"),
+        ("garmin", "data"): bool(_garmin_core_error_entries()),
         ("weather", "forecast"): get_kv(WEATHER_FAILURE_KEY),
         ("calendar", "events"): get_kv("last_external_calendar_sync_error"),
     }
@@ -4002,85 +4022,181 @@ def _garmin_error_entries() -> list[dict[str, Any]]:
     return [entry for entry in errors if isinstance(entry, dict)] if isinstance(errors, list) else []
 
 
+def _garmin_core_error_entries() -> list[dict[str, Any]]:
+    """Return Garmin errors unrelated to the separate morning recovery read."""
+    return [entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"]
+
+
 def _set_garmin_error_entries(errors: list[dict[str, Any]]) -> None:
     set_kv("last_garmin_error", json.dumps(errors, ensure_ascii=False, separators=(",", ":")) if errors else "")
 
 
-def _schedule_body_battery_retry(days: int) -> dict[str, Any] | None:
-    """Queue exactly one targeted retry two hours after a partial Garmin sync."""
-    if _sync_job_active("garmin", "body_battery_retry"):
+def _garmin_timestamp(value: Any) -> datetime | None:
+    """Normalize Garmin epoch-milliseconds or ISO timestamps to UTC."""
+    number = as_number(value)
+    if number is not None:
+        try:
+            seconds = float(number) / 1000 if float(number) > 10_000_000_000 else float(number)
+            return datetime.fromtimestamp(seconds, timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+    if not isinstance(value, str):
         return None
-    available_at = (datetime.now(timezone.utc) + timedelta(seconds=GARMIN_BODY_BATTERY_RETRY_SECONDS)).isoformat()
-    return enqueue_sync_job(
-        "garmin",
-        "body_battery_retry",
-        {"days": days, "reason": "Automatischer Body-Battery-Retry"},
-        requested_by="system",
-        available_at=available_at,
-    )
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
 
 
-@observed_sync("garmin", "data")
+def _garmin_sleep_bounds(payload: Any) -> tuple[datetime | None, datetime | None]:
+    """Read the authoritative sleep interval from a detailed Garmin response."""
+    pending = [payload]
+    visited = 0
+    while pending and visited < 100:
+        current = pending.pop(0)
+        visited += 1
+        if isinstance(current, dict):
+            start = _garmin_timestamp(first_present(current, (
+                "sleepStartTimestampGMT", "sleepStartTimestamp", "startTimestampGMT",
+            )))
+            end = _garmin_timestamp(first_present(current, (
+                "sleepEndTimestampGMT", "sleepEndTimestamp", "endTimestampGMT",
+            )))
+            if start is not None and end is not None and start <= end:
+                return start, end
+            nested = current.get("dailySleepDTO")
+            if isinstance(nested, dict):
+                pending.insert(0, nested)
+            pending.extend(value for value in current.values() if isinstance(value, (dict, list)))
+        elif isinstance(current, list):
+            pending.extend(current[:50])
+    return None, None
+
+
+def _garmin_body_battery_samples(records: Any) -> list[dict[str, Any]]:
+    """Return validated timestamp/level samples from Garmin's daily reports."""
+    values = records if isinstance(records, list) else [records]
+    samples: dict[str, dict[str, Any]] = {}
+    for record in values:
+        if not isinstance(record, dict):
+            continue
+        raw_samples = record.get("bodyBatteryValuesArray") or record.get("body_battery_values_array")
+        if not isinstance(raw_samples, list):
+            continue
+        for sample in raw_samples:
+            if not isinstance(sample, (list, tuple)) or len(sample) < 2:
+                continue
+            observed_at = _garmin_timestamp(sample[0])
+            level = as_number(sample[1])
+            if observed_at is None or level is None or not 0 <= float(level) <= 100:
+                continue
+            key = observed_at.isoformat()
+            samples[key] = {"observed_at": key, "value": int(round(float(level)))}
+    return sorted(samples.values(), key=lambda sample: sample["observed_at"])
+
+
+def _morning_body_battery_record(
+    checkin_date: date,
+    sleep_payload: Any,
+    body_battery_payload: Any,
+    *,
+    attempted_at: str | None = None,
+) -> dict[str, Any]:
+    """Derive the evening and current-morning level for one completed sleep."""
+    attempted_at = attempted_at or utc_now()
+    sleep_start, sleep_end = _garmin_sleep_bounds(sleep_payload)
+    record: dict[str, Any] = {
+        "sleep_date": checkin_date.isoformat(),
+        "attempted_at": attempted_at,
+        "status": "not_available_today",
+        "before_sleep": None,
+        "morning": None,
+        "source": "Garmin Connect",
+    }
+    if sleep_start is None or sleep_end is None:
+        return record
+    record["sleep_start_at"] = sleep_start.isoformat()
+    record["sleep_end_at"] = sleep_end.isoformat()
+    attempted = _garmin_timestamp(attempted_at) or datetime.now(timezone.utc)
+    samples = _garmin_body_battery_samples(body_battery_payload)
+    before_lower_bound = sleep_start - timedelta(hours=4)
+    before = [sample for sample in samples if before_lower_bound <= _garmin_timestamp(sample["observed_at"]) <= sleep_start]
+    morning = [sample for sample in samples if sleep_end <= _garmin_timestamp(sample["observed_at"]) <= attempted]
+    if before:
+        record["before_sleep"] = before[-1]
+    if morning:
+        record["morning"] = morning[-1]
+    if record["before_sleep"] is not None and record["morning"] is not None:
+        record["status"] = "ready"
+    return record
+
+
+def _garmin_morning_body_battery(snapshot: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    value = (snapshot or garmin_snapshot()).get("morning_body_battery")
+    return value if isinstance(value, dict) else None
+
+
 @maintenance_operation
 @garmin_operation
-def sync_garmin_body_battery_retry(days: int = 30, operation_id: str | None = None, reason: str = "body-battery-retry") -> dict[str, Any]:
-    """Refresh only Body Battery while preserving the last complete Garmin snapshot."""
-    fixture = garmin_fixture_path()
-    if fixture is not None:
-        payload = load_garmin_fixture(days)
-        records = payload.get("body_battery")
-        if not isinstance(records, list):
-            return {"status": "partial", "errors": 1, "source": "fixture"}
-        previous = garmin_snapshot()
-        previous["body_battery"] = _merge_garmin_records(records, previous.get("body_battery"))
-        previous["synced_at"] = payload["synced_at"]
-        set_kv("garmin_snapshot", json.dumps(previous, ensure_ascii=False, separators=(",", ":")))
-        _set_garmin_error_entries([entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"])
-        return {"status": "ok", "errors": 0, "source": "fixture", "records": len(records)}
-    if Garmin is None:
-        raise AppError(503, "Die optionale Garmin-Bibliothek ist nicht installiert.")
-    if not CONFIG.garmin_email and not Path(CONFIG.garmin_tokenstore).exists():
-        raise AppError(503, "Garmin ist nicht konfiguriert.")
-    if not GARMIN_LOCK.acquire(blocking=False):
-        return {"status": "already_running"}
+def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
+    """Load Body Battery once with the completed night's exact sleep bounds."""
+    previous = garmin_snapshot()
+    existing = _garmin_morning_body_battery(previous)
+    if existing and existing.get("sleep_date") == checkin_date.isoformat():
+        return {"status": "already_loaded", "sleep_date": checkin_date.isoformat()}
+
+    def persist(record: dict[str, Any], records: Any = None) -> dict[str, Any]:
+        current = garmin_snapshot()
+        if isinstance(records, list):
+            current["body_battery"] = _merge_garmin_records(records, current.get("body_battery"))
+        current["morning_body_battery"] = record
+        set_kv("garmin_snapshot", json.dumps(current, ensure_ascii=False, separators=(",", ":")))
+        _set_garmin_error_entries(_garmin_core_error_entries())
+        return {"status": record["status"], "sleep_date": record["sleep_date"], "records": len(records) if isinstance(records, list) else 0}
+
+    if garmin_fixture_path() is not None:
+        payload = load_garmin_fixture(2)
+        sleep_payload = {"dailySleepDTO": latest_garmin_record(payload.get("sleep"))}
+        return persist(_morning_body_battery_record(checkin_date, sleep_payload, payload.get("body_battery")), payload.get("body_battery"))
+    if Garmin is None or not (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()):
+        return persist(_morning_body_battery_record(checkin_date, {}, []))
+    if not GARMIN_LOCK.acquire(timeout=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS):
+        return persist(_morning_body_battery_record(checkin_date, {}, []))
     try:
-        today = local_now().date()
-        windows = sync_date_windows(days, today)
-        previous = garmin_snapshot()
+        existing = _garmin_morning_body_battery(garmin_snapshot())
+        if existing and existing.get("sleep_date") == checkin_date.isoformat():
+            return {"status": "already_loaded", "sleep_date": checkin_date.isoformat()}
         client = Garmin(CONFIG.garmin_email or None, CONFIG.garmin_password or None)
-        mfa_status, _ = external_call(
-            "garmin", "login", lambda: client.login(CONFIG.garmin_tokenstore),
-            {"email_configured": bool(CONFIG.garmin_email), "tokenstore_exists": Path(CONFIG.garmin_tokenstore).exists()},
-        )
-        if mfa_status:
-            raise AppError(401, "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb des Servers eingerichtet werden.")
-        records: list[Any] = []
         try:
-            for window_start, window_end in windows:
-                value = external_call(
-                    "garmin", "body_battery",
-                    lambda window_start=window_start, window_end=window_end: client.get_body_battery(window_start.isoformat(), window_end.isoformat()),
-                    {"window_start": window_start.isoformat(), "window_end": window_end.isoformat()},
-                )
-                if isinstance(value, list):
-                    records.extend(value)
-                elif value is not None:
-                    records.append(value)
-        except Exception as exc:
-            _garmin_capability_failure("body_battery", exc)
-            errors = [entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"]
-            errors.append({"source": "body_battery", "message": redact_text(str(exc))[:500]})
-            _set_garmin_error_entries(errors)
-            return {"status": "partial", "errors": 1, "records": 0}
-        previous["body_battery"] = _merge_garmin_records(records, previous.get("body_battery"))
-        previous["synced_at"] = utc_now()
-        previous.setdefault("provider_sync", {}).setdefault("pagination", {})["body_battery"] = {
-            "windows": len(windows), "records": len(records), "complete": True,
-        }
-        set_kv("garmin_snapshot", json.dumps(previous, ensure_ascii=False, separators=(",", ":")))
-        _garmin_capability_success("body_battery")
-        _set_garmin_error_entries([entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"])
-        return {"status": "ok", "errors": 0, "records": len(records)}
+            mfa_status, _ = external_call(
+                "garmin", "login", lambda: client.login(CONFIG.garmin_tokenstore),
+                {"email_configured": bool(CONFIG.garmin_email), "tokenstore_exists": Path(CONFIG.garmin_tokenstore).exists()},
+            )
+            if mfa_status:
+                return persist(_morning_body_battery_record(checkin_date, {}, []))
+            sleep_payload = external_call(
+                "garmin", "morning_sleep", lambda: client.get_sleep_data(checkin_date.isoformat()),
+                {"date": checkin_date.isoformat()},
+            )
+            sleep_start, _sleep_end = _garmin_sleep_bounds(sleep_payload)
+            if sleep_start is None:
+                return persist(_morning_body_battery_record(checkin_date, sleep_payload, []))
+            try:
+                from zoneinfo import ZoneInfo
+                local_zone = ZoneInfo(timezone_name(get_profile().get("timezone")))
+            except Exception:
+                local_zone = local_now().tzinfo or timezone.utc
+            range_start = sleep_start.astimezone(local_zone).date()
+            records = external_call(
+                "garmin", "body_battery",
+                lambda: client.get_body_battery(range_start.isoformat(), checkin_date.isoformat()),
+                {"window_start": range_start.isoformat(), "window_end": checkin_date.isoformat(), "purpose": "morning_recovery"},
+            )
+            records = records if isinstance(records, list) else []
+            return persist(_morning_body_battery_record(checkin_date, sleep_payload, records), records)
+        except Exception:
+            return persist(_morning_body_battery_record(checkin_date, {}, []))
     finally:
         GARMIN_LOCK.release()
 
@@ -4088,7 +4204,13 @@ def sync_garmin_body_battery_retry(days: int = 30, operation_id: str | None = No
 @observed_sync("garmin", "data")
 @maintenance_operation
 @garmin_operation
-def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "background", end_date: date | None = None) -> dict[str, Any]:
+def sync_garmin(
+    days: int = 30,
+    operation_id: str | None = None,
+    reason: str = "background",
+    end_date: date | None = None,
+    wait_for_existing: bool = False,
+) -> dict[str, Any]:
     fixture = garmin_fixture_path()
     if Garmin is None and fixture is None:
         LOGGER.warning(
@@ -4110,6 +4232,8 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
             )
             payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
             payload.setdefault("provider_sync", {"pagination": {"fixture": {"windows": 1, "records": len(payload.get("activities") or []), "complete": True}}})
+            if isinstance(previous.get("morning_body_battery"), dict):
+                payload["morning_body_battery"] = previous["morning_body_battery"]
             append_garmin_performance_history(payload, previous)
             set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             set_kv("last_garmin_sync_at", payload["synced_at"])
@@ -4137,7 +4261,25 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
         persist_garmin_error("GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist nicht konfiguriert.", "configuration")
         raise AppError(503, "GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist nicht konfiguriert.")
     if not GARMIN_LOCK.acquire(blocking=False):
-        return {"status": "already_running"}
+        if not wait_for_existing:
+            return {"status": "already_running"}
+        previous_sync_at = get_kv("last_garmin_sync_at")
+        deadline = time.monotonic() + GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            remaining = max(0.05, min(1.0, deadline - time.monotonic()))
+            if GARMIN_LOCK.acquire(timeout=remaining):
+                try:
+                    current_sync_at = get_kv("last_garmin_sync_at")
+                    if current_sync_at and current_sync_at != previous_sync_at:
+                        return {"status": "ok", "waited_for_existing": True, "synced_at": current_sync_at}
+                finally:
+                    GARMIN_LOCK.release()
+                break
+        raise AppError(
+            503,
+            "Die laufende Garmin-Synchronisierung konnte nicht abgeschlossen werden.",
+            reason="provider_busy",
+        )
     try:
         today = end_date or local_now().date()
         windows = sync_date_windows(days, today)
@@ -4178,10 +4320,14 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
             capability_allowed=_garmin_capability_allowed,
             capability_failure=_garmin_capability_failure,
             capability_success=_garmin_capability_success,
+            include_recovery=end_date is None and days != ALL_SYNC_DAYS,
+            include_current_metrics=end_date is None and days != ALL_SYNC_DAYS,
         )
         for collection in ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr"):
             if collection in previous or collection in payload:
                 payload[collection] = _merge_garmin_records(payload.get(collection), previous.get(collection))
+        if isinstance(previous.get("morning_body_battery"), dict):
+            payload["morning_body_battery"] = previous["morning_body_battery"]
         if previous.get("start") and payload.get("start"):
             payload["start"] = min(str(previous["start"]), str(payload["start"]))
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
@@ -4198,19 +4344,12 @@ def sync_garmin(days: int = 30, operation_id: str | None = None, reason: str = "
         update_provider_sync_cursor("garmin", "data", windows[-1][1].isoformat(), payload["synced_at"])
         if end_date is not None:
             update_provider_sync_cursor("garmin", "historical", windows[0][0].isoformat(), payload["synced_at"])
-        current_errors = [error for error in payload.get("errors", []) if error]
-        body_battery_failed = bool(current_errors) and all(
-            isinstance(error, dict) and error.get("source") == "body_battery"
-            for error in current_errors
-        )
-        retry_job = _schedule_body_battery_retry(days) if body_battery_failed and end_date is None else None
         return {
             "status": "partial" if payload["errors"] else "ok",
             "synced_at": payload["synced_at"],
             "errors": len(payload["errors"]),
             "activities": len(payload.get("activities") or []),
             "pagination": payload["provider_sync"]["pagination"],
-            "body_battery_retry_at": retry_job.get("available_at") if retry_job else None,
         }
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
@@ -4226,11 +4365,7 @@ def garmin_public_state() -> dict[str, Any]:
     performance_metrics = garmin_performance_metrics(snapshot)
     canonical = latest_snapshot()
     filtered_activities, skipped = filter_garmin_activities(snapshot.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
-    raw_error = get_kv("last_garmin_error") or ""
-    try:
-        parsed_error = json.loads(raw_error) if raw_error else None
-    except json.JSONDecodeError:
-        parsed_error = raw_error
+    parsed_error = _garmin_core_error_entries() or None
     parsed_error = sanitize_log_value(parsed_error)
     return {
         "available": Garmin is not None or garmin_fixture_path() is not None,
@@ -4260,6 +4395,7 @@ def garmin_public_state() -> dict[str, Any]:
         "has_max_hr": any(performance_metrics[key]["value"] is not None for key in ("cycling_max_hr_bpm", "running_max_hr_bpm")),
         "has_vo2max": any(performance_metrics[key]["value"] is not None for key in ("cycling_vo2max_ml_kg_min", "running_vo2max_ml_kg_min")),
         "has_estimated_run_times": any(performance_metrics[key]["value"] is not None for key in ("run_5k_seconds", "run_10k_seconds", "run_half_marathon_seconds", "run_marathon_seconds")),
+        "morning_body_battery": _garmin_morning_body_battery(snapshot),
     }
 
 
@@ -4274,7 +4410,7 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
             "hrv": compact_garmin_recovery(snapshot.get("hrv")),
             "resting_hr": compact_garmin_recovery(snapshot.get("resting_hr")),
             "readiness": compact_garmin_recovery(snapshot.get("readiness")),
-            "body_battery": compact_garmin_recovery(snapshot.get("body_battery")),
+            "body_battery": _garmin_morning_body_battery(snapshot) or {},
         },
         "scope": "Nur der aktuellste Garmin-Recovery-Datensatz. Leistungswerte und Aktivitäten stehen in den deduplizierten bzw. abgeleiteten Abschnitten.",
         "errors": [redact_text(str(error))[:300] for error in snapshot.get("errors", []) if error][:20],
@@ -5496,7 +5632,6 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         ("hrv", "Garmin Connect"),
         ("resting_hr", "Garmin Connect"),
         ("readiness", "Garmin Connect"),
-        ("body_battery", "Garmin Connect"),
     ):
         for record_date, record in _dated_garmin_recovery_records(garmin.get(section)):
             recovery = recovery_by_date.setdefault(record_date, {})
@@ -5522,8 +5657,13 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                 )
             elif section == "readiness":
                 _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(record, ("trainingReadinessScore", "overallReadinessScore", "readinessScore", "score", "trainingReadiness"))), source_name)
-            else:
-                _add_planning_recovery_value(recovery, "body_battery", first_present(record, ("bodyBattery", "charged")), source_name)
+    morning_body_battery = _garmin_morning_body_battery(garmin)
+    if morning_body_battery and morning_body_battery.get("status") == "ready":
+        record_date = _planning_context_date(morning_body_battery.get("sleep_date"))
+        morning = morning_body_battery.get("morning")
+        if record_date and isinstance(morning, dict):
+            recovery = recovery_by_date.setdefault(record_date, {})
+            _add_planning_recovery_value(recovery, "body_battery", morning.get("value"), "Garmin Connect")
     return recovery_by_date
 
 
@@ -13036,6 +13176,10 @@ COACH_TOOL_MAX_ROUNDS = 6
 COACH_COMMAND_STALE_SECONDS = 15 * 60
 COACH_CANONICAL_TOOL_NAMES = (
     "read_training_state",
+    "list_recent_activities",
+    "list_workout_library",
+    "list_planned_workouts",
+    "list_change_history",
     "list_competitions",
     "list_training_plans",
     "stage_training_plan",
@@ -13044,9 +13188,11 @@ COACH_CANONICAL_TOOL_NAMES = (
     "manage_training_templates",
     "save_checkin",
     "save_activity_feedback",
+    "delete_activity_feedback",
     "save_competition",
     "delete_competition",
     "start_provider_refresh",
+    "refresh_current_performance",
     "start_intervals_plan_sync",
     "sync_competitions",
     "get_sync_job",
@@ -13055,76 +13201,29 @@ COACH_CANONICAL_TOOL_NAMES = (
     "apply_adaptive_replan",
     "update_training_plan",
     "undo_training_change",
+    "apply_workout_library_plan",
 )
 
 
-def _canonical_coach_tool(name: str, description: str) -> dict[str, Any]:
+def _canonical_coach_tool(
+    name: str,
+    description: str,
+    properties: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Declare a focused schema for one structured Coach operation.
+
+    Read-only tools with no arguments are strict. Mutable tools retain
+    optional fields where the operation supports partial updates, but no
+    longer receive every unrelated Coach parameter.
+    """
     return {
         "type": "function",
         "name": name,
         "description": description,
-        "strict": False,
+        "strict": not bool(properties),
         "parameters": {
             "type": "object",
-            "properties": {
-                "payload": {"type": "object"},
-                "template": {"type": "object"},
-                "templates": {"type": "array", "items": {"type": "object"}},
-                "changes": {"type": "array", "items": {"type": "object"}},
-                "entries": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "library_workout_id": {"type": "string"},
-                            "expected_payload_hash": {"type": "string"},
-                        },
-                        "required": ["library_workout_id", "expected_payload_hash"],
-                        "additionalProperties": False,
-                    },
-                },
-                "artifact_id": {"type": "string"},
-                "local_id": {"type": "string"},
-                "competition_id": {"type": "string"},
-                "plan_id": {"type": "string"},
-                "job_id": {"type": "string"},
-                "change_id": {"type": "string"},
-                "adjustment_id": {"type": "string"},
-                "strategy": {"type": "string", "enum": ["keep_local", "adopt_remote"]},
-                "action": {"type": "string"},
-                "name": {"type": "string"},
-                "event_date": {"type": "string"},
-                "sport": {"type": "string"},
-                "priority": {"type": "string"},
-                "distance": {"type": "string"},
-                "target": {"type": "string"},
-                "goal": {"type": "string"},
-                "start_date": {"type": "string"},
-                "end_date": {"type": "string"},
-                "status": {"type": "string"},
-                "sync_illness_to_intervals": {"type": "boolean"},
-                "course_profile": {"type": "string"},
-                "notes": {"type": "string"},
-                "description": {"type": "string"},
-                "moving_time_seconds": {"type": "integer"},
-                "activity_id": {"type": "string"},
-                "activity_name": {"type": "string"},
-                "activity_date": {"type": "string"},
-                "checkin_date": {"type": "string"},
-                "day_form": {"type": "string"},
-                "soreness": {"type": ["integer", "null"]},
-                "stress": {"type": ["integer", "null"]},
-                "motivation": {"type": ["integer", "null"]},
-                "session_rpe": {"type": ["integer", "null"]},
-                "available_minutes": {"type": ["integer", "null"]},
-                "illness": {"type": "string"},
-                "pain": {"type": "string"},
-                "availability_notes": {"type": "string"},
-                "reason": {"type": "string"},
-                "expected_payload_hash": {"type": "string"},
-                "expected_revision": {"type": "integer"},
-                "days": {"type": "integer"},
-            },
+            "properties": properties or {},
             "additionalProperties": False,
         },
     }
@@ -13132,29 +13231,39 @@ def _canonical_coach_tool(name: str, description: str) -> dict[str, Any]:
 
 COACH_STRUCTURED_TOOLS = [
     _canonical_coach_tool("read_training_state", "Read the current local training state and references."),
+    _canonical_coach_tool("list_recent_activities", "Read completed activities from the latest local snapshot without refreshing a provider.", {"days": {"type": "integer"}, "limit": {"type": "integer"}}),
+    _canonical_coach_tool("list_workout_library", "Read saved local training templates; local library data is authoritative.", {"limit": {"type": "integer"}, "include_archived": {"type": "boolean"}}),
+    _canonical_coach_tool("list_planned_workouts", "Read future locally scheduled workouts.", {"limit": {"type": "integer"}}),
+    _canonical_coach_tool("list_change_history", "Read local change-history references that can be used to request an undo preview.", {"limit": {"type": "integer"}}),
     _canonical_coach_tool("list_competitions", "Read locally stored target competitions."),
     _canonical_coach_tool("list_training_plans", "Read locally stored training-plan metadata."),
-    _canonical_coach_tool("stage_training_plan", "Store a local, referenceable training-plan artifact."),
-    _canonical_coach_tool("commit_training_plan", "Commit a referenced local training-plan artifact atomically."),
-    _canonical_coach_tool("apply_training_changes", "Apply explicitly authorized local training changes."),
-    _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template."),
-    _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in."),
-    _canonical_coach_tool("save_activity_feedback", "Save the athlete's explicitly stated observations about one completed activity; activity_id, activity_name, activity_date, and notes are required."),
-    _canonical_coach_tool("save_competition", "Create or update one locally stored target competition."),
-    _canonical_coach_tool("delete_competition", "Delete one locally stored target competition."),
-    _canonical_coach_tool("start_provider_refresh", "Queue an explicitly requested read-only provider refresh."),
-    _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu push for all pending local planning, or for the supplied entries."),
-    _canonical_coach_tool("sync_competitions", "Execute an explicitly requested push of local target competitions to Intervals.icu."),
-    _canonical_coach_tool("get_sync_job", "Read one local synchronization job."),
-    _canonical_coach_tool("resolve_training_sync_conflict", "Explicitly keep the local planning version or retry a failed synchronization job."),
+    _canonical_coach_tool("stage_training_plan", "Store a local, referenceable training-plan artifact.", {"payload": {"type": "object"}}),
+    _canonical_coach_tool("commit_training_plan", "Commit a referenced local training-plan artifact atomically.", {"artifact_id": {"type": "string"}}),
+    _canonical_coach_tool("apply_training_changes", "Apply explicitly authorized local training changes.", {"changes": {"type": "array", "items": {"type": "object"}}, "expected_revision": {"type": "integer"}}),
+    _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template.", {"template": {"type": "object"}, "templates": {"type": "array", "items": {"type": "object"}}}),
+    _canonical_coach_tool("apply_workout_library_plan", "Schedule selected saved library templates locally after conflict checks; never writes remotely.", {"entries": {"type": "array", "items": {"type": "object"}}}),
+    _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in.", {"payload": {"type": "object"}}),
+    _canonical_coach_tool("save_activity_feedback", "Save the athlete's explicitly stated observations about one completed activity.", {"payload": {"type": "object"}, "activity_id": {"type": "string"}, "activity_name": {"type": "string"}, "activity_date": {"type": "string"}, "notes": {"type": "string"}}),
+    _canonical_coach_tool("delete_activity_feedback", "Delete the local feedback record for one completed activity.", {"activity_id": {"type": "string"}}),
+    _canonical_coach_tool("save_competition", "Create or update one locally stored target competition.", {"payload": {"type": "object"}}),
+    _canonical_coach_tool("delete_competition", "Delete one locally stored target competition.", {"competition_id": {"type": "string"}}),
+    _canonical_coach_tool("start_provider_refresh", "Queue an explicitly requested read-only provider refresh.", {"days": {"type": "integer"}, "reason": {"type": "string"}}),
+    _canonical_coach_tool("refresh_current_performance", "Queue an explicit Intervals.icu performance-metrics refresh without reloading activities.", {"reason": {"type": "string"}}),
+    _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu push for all pending local planning, or selected entries.", {"entries": {"type": "array", "items": {"type": "object"}}, "reason": {"type": "string"}}),
+    _canonical_coach_tool("sync_competitions", "Queue an explicitly requested push of local target competitions to Intervals.icu.", {"reason": {"type": "string"}}),
+    _canonical_coach_tool("get_sync_job", "Read one local synchronization job.", {"job_id": {"type": "string"}}),
+    _canonical_coach_tool("resolve_training_sync_conflict", "Explicitly keep the local planning version or retry a failed synchronization job.", {"local_id": {"type": "string"}, "job_id": {"type": "string"}, "strategy": {"type": "string", "enum": ["keep_local", "adopt_remote"]}}),
     _canonical_coach_tool("preview_adaptive_replan", "Calculate a local adaptive planning preview without changing workouts."),
-    _canonical_coach_tool("apply_adaptive_replan", "Apply the latest adaptive planning preview after explicit Coach approval."),
-    _canonical_coach_tool("update_training_plan", "Update or delete local training-plan metadata."),
-    _canonical_coach_tool("undo_training_change", "Return an undo preview for a local change; do not apply it silently."),
+    _canonical_coach_tool("apply_adaptive_replan", "Apply the latest adaptive planning preview after explicit Coach approval.", {"adjustment_id": {"type": "string"}, "sync_illness_to_intervals": {"type": "boolean"}}),
+    _canonical_coach_tool("update_training_plan", "Update or delete local training-plan metadata.", {"payload": {"type": "object"}, "plan_id": {"type": "string"}}),
+    _canonical_coach_tool("undo_training_change", "Return an undo preview for a local change; do not apply it silently.", {"change_id": {"type": "string"}}),
 ]
 
 
-STRUCTURED_READ_ONLY_TOOLS = {"read_training_state", "list_competitions", "list_training_plans", "get_sync_job"}
+STRUCTURED_READ_ONLY_TOOLS = {
+    "read_training_state", "list_recent_activities", "list_workout_library", "list_planned_workouts",
+    "list_change_history", "list_competitions", "list_training_plans", "get_sync_job",
+}
 
 
 def _coach_scope_values(intent: dict[str, Any]) -> set[str]:
@@ -13393,6 +13502,31 @@ def _structured_coach_tool_result(
     operation = intent.get("operation")
     if name == "read_training_state":
         return {"ok": True, **_structured_training_state()}
+    if name == "list_recent_activities":
+        try:
+            days = max(1, min(int(arguments.get("days", 30)), 3660))
+            limit = max(1, min(int(arguments.get("limit", 100)), 500))
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Aktivitätszeitraum oder Limit ist ungültig.", reason="invalid_list_request") from exc
+        return {"ok": True, **list_recent_activities(days=days, limit=limit)}
+    if name == "list_workout_library":
+        try:
+            limit = max(1, min(int(arguments.get("limit", 100)), 500))
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Bibliothekslimit ist ungültig.", reason="invalid_list_request") from exc
+        return {"ok": True, "templates": list_workout_library(limit, include_archived=bool(arguments.get("include_archived")))}
+    if name == "list_planned_workouts":
+        try:
+            limit = max(1, min(int(arguments.get("limit", 100)), 250))
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Planungslimit ist ungültig.", reason="invalid_list_request") from exc
+        return {"ok": True, **list_coach_planned_workouts(limit)}
+    if name == "list_change_history":
+        try:
+            limit = max(1, min(int(arguments.get("limit", 100)), 500))
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Historienlimit ist ungültig.", reason="invalid_list_request") from exc
+        return {"ok": True, "changes": list_change_history(limit)}
     if name == "list_competitions":
         return {"ok": True, "competitions": list_competitions(include_sync=True)}
     if name == "list_training_plans":
@@ -13472,6 +13606,18 @@ def _structured_coach_tool_result(
             _require_coach_scope(intent, "local_template")
             results.append(create_local_library_template(template))
         return {"ok": True, "stored_locally": True, "templates": results, "template": results[0] if len(results) == 1 else None}
+    if name == "apply_workout_library_plan":
+        if "apply_workout_library_plan" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+        entries = arguments.get("entries")
+        if not isinstance(entries, list):
+            raise AppError(400, "Bibliothekseinheiten müssen als Liste gesendet werden.", reason="invalid_library_plan")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise AppError(400, "Jede Bibliothekseinheit muss ein Objekt sein.", reason="invalid_library_plan")
+            local_id = str(entry.get("library_workout_id") or "").strip()
+            _require_coach_scope(intent, f"library_workout:{local_id}", "local_plan")
+        return {"ok": True, "stored_locally": True, **apply_workout_library_plan(entries)}
     if name == "save_checkin":
         if "save_checkin" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Check-in nicht.", reason="intent_scope_denied")
@@ -13494,6 +13640,12 @@ def _structured_coach_tool_result(
                 },
             ),
         }
+    if name == "delete_activity_feedback":
+        if "delete_activity_feedback" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Feedbackänderung nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "activity_feedback")
+        activity_id = str(arguments.get("activity_id") or "").strip()
+        return {"ok": True, "stored_locally": True, **save_activity_feedback(activity_id, {"notes": ""})}
     if name == "save_competition":
         if "save_competition" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
@@ -13514,6 +13666,17 @@ def _structured_coach_tool_result(
         provider = str(intent.get("target_system") or "")
         _require_coach_scope(intent, f"{provider}_refresh")
         job = enqueue_sync_job(provider, "refresh", arguments, requested_by="coach")
+        sync_job_ids.append(job["id"])
+        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
+    if name == "refresh_current_performance":
+        if "refresh_current_performance" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Refresh nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "intervals_refresh")
+        job = enqueue_sync_job(
+            "intervals", "performance_refresh",
+            {"reason": str(arguments.get("reason") or "Coach-Anfrage")},
+            requested_by="coach",
+        )
         sync_job_ids.append(job["id"])
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
     if name == "start_intervals_plan_sync":
@@ -13545,7 +13708,13 @@ def _structured_coach_tool_result(
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.", reason="intent_scope_denied")
         _require_coach_scope(intent, "local_competitions")
         _mark_local_competitions_authoritative()
-        return {"ok": True, **sync_competitions("Bestätigter Coach-Auftrag", push_local=True)}
+        job = enqueue_sync_job(
+            "intervals", "competition_push",
+            {"reason": str(arguments.get("reason") or "Bestätigter Coach-Auftrag")},
+            requested_by="coach",
+        )
+        sync_job_ids.append(job["id"])
+        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
     if name == "resolve_training_sync_conflict":
         if "resolve_training_sync_conflict" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
@@ -14369,9 +14538,13 @@ def run_morning_checkin(checkin_date: str) -> None:
         add_message("event", "Morgen-Check-in: Aktuelle Garmin-/Intervals.icu-Daten werden geladen…")
         if garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())):
             try:
-                sync_garmin(days=sync_period("garmin"))
+                sync_garmin(days=sync_period("garmin"), reason="Morgen-Check-in", wait_for_existing=True)
             except Exception:
                 LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
+            try:
+                sync_garmin_morning_body_battery(date.fromisoformat(checkin_date))
+            except Exception:
+                LOGGER.warning("Morning Body Battery synchronization failed", extra={"event": "morning_body_battery_sync_failed"}, exc_info=True)
         sync_result = sync_intervals("Morgen-Check-in", activity_days=sync_period("intervals"))
         if sync_result.get("status") == "already_running":
             deadline = time.monotonic() + 120
@@ -15103,14 +15276,54 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "short_only", "updated_at"},
     "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
 }
+CURRENT_DATABASE_INDEXES = {
+    "idx_change_history_created_at",
+    "idx_change_history_entity",
+    "idx_coach_plan_artifacts_conversation",
+    "idx_planned_units_date",
+    "idx_planned_units_external_id",
+    "idx_planned_units_local_id",
+    "idx_provider_refresh_area",
+    "idx_provider_refresh_created_at",
+    "idx_sync_job_items_status",
+    "idx_sync_jobs_status_available",
+    "idx_workout_library_external_id",
+}
+
+
+def _database_row_value(row: Any, name: str, index: int) -> Any:
+    try:
+        return row[name]
+    except (IndexError, KeyError, TypeError):
+        return row[index]
+
+
+def database_table_names(db: Any) -> set[str]:
+    return {
+        str(_database_row_value(row, "name", 0))
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        if not str(_database_row_value(row, "name", 0)).startswith("sqlite_")
+    }
+
+
+def database_index_names(db: Any) -> set[str]:
+    return {
+        str(_database_row_value(row, "name", 0))
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+        if not str(_database_row_value(row, "name", 0)).startswith("sqlite_")
+}
 
 
 def database_schema_is_current(db: Any) -> bool:
-    tables = {row["name"] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    if set(CURRENT_DATABASE_SCHEMA) - tables:
+    if database_table_names(db) != set(CURRENT_DATABASE_SCHEMA):
+        return False
+    if database_index_names(db) != CURRENT_DATABASE_INDEXES:
         return False
     return all(
-        not columns - {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        columns == {
+            _database_row_value(row, "name", 1)
+            for row in db.execute(f"PRAGMA table_info({table})").fetchall()
+        }
         for table, columns in CURRENT_DATABASE_SCHEMA.items()
     )
 
@@ -15190,16 +15403,8 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
             if CONFIG.app_password:
                 _configure_cipher(connection, CONFIG.app_password)
             connection.execute("PRAGMA foreign_keys = ON")
-            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-            if set(CURRENT_DATABASE_SCHEMA) - tables:
-                raise AppError(400, "Das Backup verwendet kein vollständiges aktuelles Datenbankschema.")
-            missing_columns = {
-                table: sorted(columns - {row[1] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()})
-                for table, columns in CURRENT_DATABASE_SCHEMA.items()
-            }
-            missing_columns = {table: columns for table, columns in missing_columns.items() if columns}
-            if missing_columns:
-                raise AppError(400, "Das Backup verwendet unvollständige Datenbanktabellen.")
+            if not database_schema_is_current(connection):
+                raise AppError(400, "Das Backup entspricht nicht exakt dem aktuellen Datenbankschema.")
             integrity = connection.execute("PRAGMA integrity_check").fetchone()
             if connection.execute("PRAGMA foreign_key_check").fetchall():
                 raise AppError(400, "Das Backup enthält ungültige Fremdschlüssel.")

@@ -136,10 +136,18 @@ It is not intended to be exposed directly to the public internet.
   shown clearly.
 - After a completed activity, the coach can ask for a short subjective follow-up
   and store the athlete's answer as activity feedback.
-- The coach can explicitly read the local workout library and planned units and
-  refresh Intervals.icu, current performance, Garmin, weather, the external
-  calendar, and the workout-library synchronization. Adaptive planning can be
-  previewed and, after explicit approval, applied to future local workouts.
+- The coach can explicitly read completed activities, the local workout library,
+  planned units, competitions, training plans, and local change-history
+  references. It can schedule selected saved library templates locally after
+  conflict checks, and remove activity feedback on request. Explicit provider
+  refreshes for Intervals.icu, current performance, Garmin, weather, and the
+  external calendar run as trackable background jobs; local plans and
+  competitions are pushed to Intervals.icu only through an explicitly named,
+  trackable synchronization. The local workout library remains authoritative
+  after its initial import and is never overwritten by a Coach refresh.
+  Adaptive planning can be previewed and, after explicit approval, applied to
+  future local workouts; an illness-pause event is sent to Intervals.icu only
+  when that synchronization is explicitly named in the same request.
 - Read-only shared iCalendar integration for the next 8 weeks. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local library entries on busy days can be proposed as short easy sessions.
@@ -193,11 +201,15 @@ locally and can be changed in that tab.
 The browser refreshes the local/remote view every minute while the PWA is
 visible and polls more frequently while a manual synchronization is running.
 Large Intervals.icu responses are fetched in bounded pages and the latest
-sync reports the fetched page/window counts; incomplete Garmin ranges remain
-visible as partial provider status instead of being presented as complete.
-If only Garmin Body Battery is unavailable, the last known value remains
-available and the app queues one targeted retry after two hours; it does not
-repeat the complete Garmin synchronization for that capability alone.
+sync reports the fetched page/window counts; incomplete required Garmin ranges
+remain visible as partial provider status instead of being presented as complete.
+Garmin Body Battery is deliberately separate from the regular and historical
+Garmin synchronization. It is fetched once during the morning check-in, only
+for the completed sleep window (at most the previous and current calendar
+day). The app stores the last level before sleep and the newest available level
+after waking. A missing optional morning value neither retries in the background
+nor marks the complete Garmin connection as incomplete; the last valid dated
+pair remains available.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
@@ -291,8 +303,8 @@ While a provider synchronization is running, the connections view shows its
 current phase and, where the provider reports one, a progress indicator. A
 site-wide notice headed **“Anbindung benötigt Aufmerksamkeit”** is displayed
 only for errors that require manual intervention (for example, renewed login
-or invalid configuration). Partial data with a scheduled automatic retry,
-including the two-hour Garmin Body Battery retry, does not raise that notice.
+or invalid configuration). An unavailable optional morning Body Battery value
+is rendered neutrally and does not raise that notice or schedule a retry.
 
 The library has no multi-selection, local marking, manual planning, conflict
 resolution, or synchronization controls. The Coach receives bounded local IDs
@@ -347,9 +359,13 @@ and cannot be recovered if lost. The password must be at least 12 characters
 long.
 
 The database is created with the current SQLCipher schema on first startup.
-Restore accepts only a complete database with that current schema and checks
-its integrity before replacing the active file. The public-calendar candidate
-relation explicitly cascades when its source is deleted.
+Startup never changes an existing database schema: if its application tables,
+columns, or named indexes differ from the current schema, startup stops. This
+release therefore expects a newly created database instead of an older
+database being reused. Restore accepts only a database with that exact current
+schema and checks its integrity before replacing the active file. The
+public-calendar candidate relation explicitly cascades when its source is
+deleted.
 
 `/api/health` is a liveness probe: it only confirms that the HTTP process can
 answer. `/api/readiness` is a separate infrastructure probe and returns HTTP
@@ -417,8 +433,7 @@ exports, and logs.
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
 in the More tab. Daily synchronization uses the athlete's validated
 IANA timezone and stores a separate local execution date for each provider.
-Existing UTC timestamps are converted lazily when the local marker is missing;
-a successful manual sync counts for that provider's current local day. Events
+Successful manual synchronization counts for the provider's current local day. Events
 are supplied to the Coach as read-only scheduling context.
 A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and
@@ -750,6 +765,16 @@ Pull requests run the unit tests, syntax checks, and image security report. The 
 workflow validates pull-request titles and commit subjects. Dependabot manages
 Python, Docker, and GitHub Actions dependencies and can automatically squash
 merge successful update pull requests.
+
+### Codex pull-request review
+
+The required `Codex code review` check uses OpenAI's official Codex pull-request
+review workflow for pull requests to `develop` and `main`, then posts Codex's
+final review message on the pull request. Configure an `OPENAI_API_KEY`
+repository Actions secret before enabling the check. It runs only for pull
+requests from branches in this repository, so forks never receive access to
+that secret. Codex receives a read-only workspace and no application, provider,
+or athlete-data credentials.
 
 ### Image supply chain and runtime boundary
 
