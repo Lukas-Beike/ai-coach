@@ -81,6 +81,24 @@ class CoachIntentContractTests(unittest.TestCase):
             })})
             self.assertEqual(result["operation"], operation)
 
+    def test_contract_supports_structured_detail_reads_and_named_illness_sync(self):
+        payload = intent_request_payload("Liste meine Bibliothek", [], ["local", "intervals"])
+        for operation in (
+            "list_recent_activities", "list_workout_library", "list_planned_workouts", "list_change_history",
+            "apply_workout_library_plan", "delete_activity_feedback", "refresh_current_performance",
+        ):
+            self.assertIn(operation, payload["instructions"] if operation != "list_change_history" else str(payload))
+        result = parse_intent_response({"output_text": json.dumps({
+            "intent": "remote_sync",
+            "operation": "apply_adaptive_replan",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["adaptive_replan:preview-1", "intervals_sync"],
+            "follow_up_operations": [],
+        })})
+        self.assertEqual(result["target_system"], "intervals")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -443,6 +443,8 @@ class CoachTests(unittest.TestCase):
         self.assertTrue({
             "list_competitions", "save_competition", "delete_competition", "sync_competitions",
             "list_training_plans", "update_training_plan", "preview_adaptive_replan", "apply_adaptive_replan",
+            "list_recent_activities", "list_workout_library", "list_planned_workouts", "list_change_history",
+            "apply_workout_library_plan", "delete_activity_feedback", "refresh_current_performance",
         } <= names)
 
         competition = server.save_coach_competition({
@@ -458,15 +460,83 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual(listed["competitions"][0]["id"], competition["id"])
 
-        with patch.object(server, "sync_competitions", return_value={"status": "ok", "pushed": 1}) as sync:
+        with patch.object(server, "enqueue_sync_job", return_value={"id": "job-competition"}) as enqueue:
             synced = server._structured_coach_tool_result(
                 "sync_competitions", {},
                 intent={**intent, "operation": "sync_competitions", "intent": "remote_sync", "target_system": "intervals"},
                 conversation_id="conversation-competition", client_turn_id="turn-competition-sync",
                 session_csrf_hash="", sync_job_ids=[],
             )
-        self.assertEqual(synced["pushed"], 1)
-        sync.assert_called_once_with("Bestätigter Coach-Auftrag", push_local=True)
+        self.assertEqual(synced["sync_job_id"], "job-competition")
+        enqueue.assert_called_once_with(
+            "intervals", "competition_push", {"reason": "Bestätigter Coach-Auftrag"}, requested_by="coach",
+        )
+
+    def test_structured_coach_reads_local_detail_and_schedules_library_templates(self):
+        template = server.create_local_library_template({
+            "sport": "Ride", "name": "Local tempo", "description": "20m tempo", "moving_time": 3600,
+        })
+        tomorrow = (server.local_now().date() + server.timedelta(days=1)).isoformat()
+        intent = {
+            "intent": "local_action", "operation": "apply_workout_library_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": [f"library_workout:{template['id']}"],
+        }
+        scheduled = server._structured_coach_tool_result(
+            "apply_workout_library_plan", {"entries": [{"library_workout_id": template["id"], "date": tomorrow}]},
+            intent=intent, conversation_id="conversation-library", client_turn_id="turn-library",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(scheduled["local_planned"], 1)
+        library = server._structured_coach_tool_result(
+            "list_workout_library", {"limit": 10}, intent=intent, conversation_id="conversation-library",
+            client_turn_id="turn-library-read", session_csrf_hash="", sync_job_ids=[],
+        )
+        planned = server._structured_coach_tool_result(
+            "list_planned_workouts", {"limit": 10}, intent=intent, conversation_id="conversation-library",
+            client_turn_id="turn-library-read", session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(library["templates"][0]["id"], template["id"])
+        self.assertEqual(planned["local"][0]["date"], tomorrow)
+
+    def test_structured_performance_refresh_and_competition_push_are_queued_jobs(self):
+        refresh_intent = {
+            "intent": "remote_sync", "operation": "refresh_current_performance", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["intervals_refresh"],
+        }
+        competition_intent = {
+            "intent": "remote_sync", "operation": "sync_competitions", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_competitions"],
+        }
+        with patch.object(server, "enqueue_sync_job", side_effect=[{"id": "job-performance"}, {"id": "job-competition"}]) as enqueue:
+            performance = server._structured_coach_tool_result(
+                "refresh_current_performance", {}, intent=refresh_intent, conversation_id="conversation-jobs",
+                client_turn_id="turn-performance", session_csrf_hash="", sync_job_ids=[],
+            )
+            competition = server._structured_coach_tool_result(
+                "sync_competitions", {}, intent=competition_intent, conversation_id="conversation-jobs",
+                client_turn_id="turn-competition", session_csrf_hash="", sync_job_ids=[],
+            )
+        self.assertEqual(performance["sync_job_id"], "job-performance")
+        self.assertEqual(competition["sync_job_id"], "job-competition")
+        self.assertEqual(enqueue.call_args_list[0].args[:2], ("intervals", "performance_refresh"))
+        self.assertEqual(enqueue.call_args_list[1].args[:2], ("intervals", "competition_push"))
+
+    def test_new_intervals_job_types_execute_only_their_targeted_operation(self):
+        performance_job = {
+            "id": "job-performance", "provider": "intervals", "type": "performance_refresh",
+            "payload": json.dumps({"reason": "Coach request"}),
+        }
+        competition_job = {
+            "id": "job-competition", "provider": "intervals", "type": "competition_push",
+            "payload": json.dumps({"reason": "Coach request"}),
+        }
+        with patch.object(server, "refresh_current_performance", return_value={"status": "ok"}) as performance, patch.object(
+            server, "sync_competitions", return_value={"status": "ok", "pushed": 1}
+        ) as competitions:
+            self.assertEqual(server._execute_sync_job(performance_job)["status"], "ok")
+            self.assertEqual(server._execute_sync_job(competition_job)["pushed"], 1)
+        performance.assert_called_once_with()
+        competitions.assert_called_once_with(reason="Coach request", push_local=True, operation_id="job-competition")
 
     def test_explicit_competition_push_preserves_provider_id_for_ordinary_edits(self):
         competition = server.save_coach_competition({
