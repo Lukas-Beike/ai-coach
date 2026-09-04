@@ -2391,9 +2391,14 @@ def _sync_job_update_from_result(job_id: str, result: Any, *, fallback_status: s
 
 
 def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
-    payload = _decode_sync_job_payload(job.get("payload"))
-    provider = str(job["provider"])
-    job_type = str(job["type"])
+    envelope = _sync_job_payload(
+        str(job.get("provider") or ""),
+        str(job.get("type") or ""),
+        _decode_sync_job_payload(job.get("payload")),
+    )
+    payload = envelope["payload"]
+    provider = envelope["provider"]
+    job_type = envelope["type"]
     reason = str(payload.get("reason") or "Persistenter Providerjob")
     if job_type == "performance_refresh" and provider == "intervals":
         return refresh_current_performance()
