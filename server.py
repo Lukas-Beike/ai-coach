@@ -1918,6 +1918,11 @@ def initialise_database() -> None:
         for provider_keys in PROVIDER_RESYNC_KEYS.values():
             set_kv(provider_keys["running"], "0", db)
             set_kv(provider_keys["status"], "", db)
+        # A process cannot continue a morning check-in after a restart. Clear
+        # its transient marker so an interrupted run is not shown as active.
+        set_kv("morning_checkin_running", "0", db)
+        if get_kv("morning_checkin_status", db) == "working":
+            set_kv("morning_checkin_status", "waiting", db)
         retention_setting = int(getattr(CONFIG, "data_retention_days", -1))
         if retention_setting != ALL_SYNC_DAYS:
             retention_days = max(30, min(retention_setting, 3650))

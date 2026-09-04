@@ -243,6 +243,13 @@ class CoachTests(unittest.TestCase):
             planned_columns = {row["name"] for row in db.execute("PRAGMA table_info(planned_units)").fetchall()}
             self.assertTrue({"plan_id", "revision", "tombstone", "command_id"} <= planned_columns)
 
+    def test_initialise_database_clears_interrupted_morning_checkin_marker(self):
+        server.set_kv("morning_checkin_running", "1")
+        server.set_kv("morning_checkin_status", "working")
+        server.initialise_database()
+        self.assertEqual(server.get_kv("morning_checkin_running"), "0")
+        self.assertEqual(server.get_kv("morning_checkin_status"), "waiting")
+
     def test_persistent_sync_job_claim_resume_retry_and_completion(self):
         job = server.enqueue_sync_job("intervals", "refresh", {"days": 7}, requested_by="user")
         self.assertEqual(job["status"], "queued")
@@ -1810,7 +1817,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('todayCard("Coach-Einordnung", "today-priority")', today_view)
         self.assertIn('todayCard("Morgen-Check-in", "today-checkin")', today_view)
         self.assertIn('const automaticMorningReady = morning.status === "ready" && morning.date === todayKey;', today_view)
-        self.assertIn("Automatischer Morgen-Check-in abgeschlossen.", today_view)
+        self.assertIn("Morgen-Check-in abgeschlossen.", today_view)
         self.assertNotIn("todayAction(", today_view)
         self.assertNotIn('document.createElement("button")', today_view)
 

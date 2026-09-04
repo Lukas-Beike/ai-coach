@@ -1225,9 +1225,9 @@ function renderToday(data) {
   } else if (todayWorkouts.length) {
     todayCardText(priorityCard, `${todayWorkouts.length} geplante Einheit${todayWorkouts.length === 1 ? "" : "en"} für heute. Die verfügbaren Quellen und der Morgen-Check-in bilden die Grundlage der Einordnung.`, "today-card-summary");
   } else if (automaticMorningRunning) {
-    todayCardText(priorityCard, "Der automatische Morgen-Check-in wird noch erstellt.", "today-card-summary");
+    todayCardText(priorityCard, "Der Morgen-Check-in wird noch erstellt.", "today-card-summary");
   } else if (automaticMorningReady) {
-    todayCardText(priorityCard, "Der automatische Morgen-Check-in ist abgeschlossen. Die Einordnung basiert auf dem aktualisierten Snapshot.", "today-card-summary");
+    todayCardText(priorityCard, "Der Morgen-Check-in ist abgeschlossen. Die Einordnung basiert auf dem aktualisierten Snapshot.", "today-card-summary");
   } else if (!checkin) {
     todayCardText(priorityCard, "Für heute liegt noch kein Morgen-Check-in vor. Die Einordnung basiert deshalb auf den verfügbaren Quellendaten.", "today-card-summary");
   } else {
@@ -1247,9 +1247,9 @@ function renderToday(data) {
     ].filter(Boolean);
     todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
   } else if (automaticMorningRunning) {
-    todayCardText(checkinCard, "Der automatische Morgen-Check-in wird noch erstellt.", "today-card-summary");
+    todayCardText(checkinCard, "Der Morgen-Check-in wird noch erstellt.", "today-card-summary");
   } else if (automaticMorningReady) {
-    todayCardText(checkinCard, "Automatischer Morgen-Check-in abgeschlossen. Die ausführliche Einordnung findest du im Coach-Chat.", "today-card-summary");
+    todayCardText(checkinCard, "Morgen-Check-in abgeschlossen. Die ausführliche Einordnung findest du im Coach-Chat.", "today-card-summary");
   } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
   root.append(checkinCard);
 
