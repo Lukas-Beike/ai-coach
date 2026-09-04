@@ -232,16 +232,46 @@ class CoachTests(unittest.TestCase):
             )
         return token
 
-    def test_database_uses_current_schema_without_legacy_tables(self):
+    def test_database_uses_exact_current_schema(self):
         server.initialise_database()
         with server.DB_LOCK, server.database() as db:
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
-            tables = {row["name"] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-            self.assertTrue({"planning_state", "coach_plan_artifacts", "coach_commands", "sync_jobs", "sync_job_items", "provider_sync_cursors"} <= tables)
-            self.assertNotIn("schema_migrations", tables)
-            self.assertNotIn("workout_drafts", tables)
-            planned_columns = {row["name"] for row in db.execute("PRAGMA table_info(planned_units)").fetchall()}
-            self.assertTrue({"plan_id", "revision", "tombstone", "command_id"} <= planned_columns)
+            self.assertTrue(server.database_schema_is_current(db))
+            self.assertEqual(server.database_table_names(db), set(server.CURRENT_DATABASE_SCHEMA))
+            self.assertEqual(server.database_index_names(db), server.CURRENT_DATABASE_INDEXES)
+
+    def test_initialise_database_rejects_a_non_current_schema_without_modifying_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            database_path = Path(temporary) / "partial.db"
+            connection = sqlite3.connect(database_path)
+            try:
+                connection.execute("CREATE TABLE unexpected_records (id TEXT PRIMARY KEY)")
+                connection.commit()
+            finally:
+                connection.close()
+
+            config = replace(server.CONFIG, app_password="")
+            try:
+                with patch.object(server, "CONFIG", config), patch.object(server, "DATA_DIR", Path(temporary)), patch.object(
+                    server, "DB_PATH", database_path
+                ):
+                    with self.assertRaises(RuntimeError):
+                        server.initialise_database()
+                    server.database_manager().close()
+            finally:
+                server.DATABASE_MANAGER = None
+                server.DATABASE_MANAGER_SIGNATURE = None
+
+            connection = sqlite3.connect(database_path)
+            try:
+                tables = {
+                    row[0]
+                    for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+                    if not str(row[0]).startswith("sqlite_")
+                }
+            finally:
+                connection.close()
+            self.assertEqual(tables, {"unexpected_records"})
 
     def test_initialise_database_clears_interrupted_morning_checkin_marker(self):
         server.set_kv("morning_checkin_running", "1")
@@ -1446,7 +1476,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("state.chatStatusPollInFlight", app)
         self.assertIn('request.phase = "reconciling"', app)
         self.assertIn('request.phase = "recovering"', app)
-        self.assertIn('if (state.chatStreamText && !persistedResponse', app)
+        self.assertIn('const streamVisible = state.chatStreamText && !persistedResponse', app)
         self.assertNotIn("restoreInputOnError", app)
         self.assertIn('aria-label="Zum Ende des Chats springen"', index)
         self.assertIn('<svg viewBox="0 0 24 24"', index)
@@ -1787,19 +1817,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=171', index)
-        self.assertIn('/navigation.js?v=171', index)
-        self.assertIn('/state.js?v=171', index)
-        self.assertIn('/views.js?v=171', index)
-        self.assertIn('/forms.js?v=171', index)
-        self.assertIn('/components.js?v=171', index)
-        self.assertIn('/app.js?v=171', index)
-        self.assertIn('intervals-coach-v171', service_worker)
-        self.assertIn('"/navigation.js?v=171"', service_worker)
-        self.assertIn('"/state.js?v=171"', service_worker)
-        self.assertIn('"/views.js?v=171"', service_worker)
-        self.assertIn('"/forms.js?v=171"', service_worker)
-        self.assertIn('"/components.js?v=171"', service_worker)
+        self.assertIn('/api.js?v=172', index)
+        self.assertIn('/navigation.js?v=172', index)
+        self.assertIn('/state.js?v=172', index)
+        self.assertIn('/views.js?v=172', index)
+        self.assertIn('/forms.js?v=172', index)
+        self.assertIn('/components.js?v=172', index)
+        self.assertIn('/app.js?v=172', index)
+        self.assertIn('intervals-coach-v172', service_worker)
+        self.assertIn('"/navigation.js?v=172"', service_worker)
+        self.assertIn('"/state.js?v=172"', service_worker)
+        self.assertIn('"/views.js?v=172"', service_worker)
+        self.assertIn('"/forms.js?v=172"', service_worker)
+        self.assertIn('"/components.js?v=172"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1825,8 +1855,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=171'), index.index('/components.js?v=171'))
-        self.assertLess(index.index('/components.js?v=171'), index.index('/app.js?v=171'))
+        self.assertLess(index.index('/forms.js?v=172'), index.index('/components.js?v=172'))
+        self.assertLess(index.index('/components.js?v=172'), index.index('/app.js?v=172'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -5344,7 +5374,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(json.loads(server.get_kv("garmin_snapshot")), {"old": True})
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfügbar.")
-    def test_restore_rejects_incomplete_schema_and_invalidates_sessions(self):
+    def test_restore_accepts_only_exact_schema_and_invalidates_sessions(self):
         with tempfile.TemporaryDirectory() as temp_root:
             data_dir = Path(temp_root) / "data"
             config = replace(server.CONFIG, app_password="test-password-123")
@@ -5378,6 +5408,19 @@ class CoachTests(unittest.TestCase):
                     connection.close()
                 with self.assertRaises(server.AppError) as error:
                     server.restore_database_backup(incomplete_path.read_bytes())
+                self.assertEqual(error.exception.status, 400)
+
+                unexpected_path = data_dir / "unexpected.db"
+                unexpected_path.write_bytes(valid_backup)
+                connection = server.sqlite_backend.connect(unexpected_path, timeout=20)
+                try:
+                    server._configure_cipher(connection, config.app_password)
+                    connection.execute("CREATE TABLE unexpected_records (id TEXT PRIMARY KEY)")
+                    connection.commit()
+                finally:
+                    connection.close()
+                with self.assertRaises(server.AppError) as error:
+                    server.restore_database_backup(unexpected_path.read_bytes())
                 self.assertEqual(error.exception.status, 400)
 
     def test_full_resync_blocks_intervals_operations(self):
@@ -6091,6 +6134,8 @@ class CoachTests(unittest.TestCase):
     def test_task9_browser_regression_contract_covers_routes_and_responsive_guards(self):
         e2e_source = (server.PUBLIC_DIR.parent / "e2e" / "coach.spec.js").read_text(encoding="utf-8")
         playwright_config = (server.PUBLIC_DIR.parent / "playwright.config.cjs").read_text(encoding="utf-8")
+        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        app_source = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
         for route in ("#coach", "#today", "plan/overview", "analysis/performance", "#more"):
             self.assertIn(route, e2e_source)
         for guard in ("expectNoBrowserErrorsOrOverflow", "reducedMotion", 'fontSize = "200%"', "touch targets below 44"):
@@ -6098,6 +6143,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('name: "desktop"', playwright_config)
         self.assertIn('name: "mobile"', playwright_config)
         self.assertIn("width: 390, height: 844", playwright_config)
+        self.assertIn("interactive-widget=resizes-content", markup)
+        self.assertIn("window.visualViewport", app_source)
 
     def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
         today = server.local_now().date()
@@ -6325,16 +6372,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=171"', source)
-        self.assertIn('"/navigation.js?v=171"', source)
-        self.assertIn('"/state.js?v=171"', source)
-        self.assertIn('"/views.js?v=171"', source)
-        self.assertIn('"/forms.js?v=171"', source)
-        self.assertIn('"/components.js?v=171"', source)
+        self.assertIn('"/api.js?v=172"', source)
+        self.assertIn('"/navigation.js?v=172"', source)
+        self.assertIn('"/state.js?v=172"', source)
+        self.assertIn('"/views.js?v=172"', source)
+        self.assertIn('"/forms.js?v=172"', source)
+        self.assertIn('"/components.js?v=172"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=171"', source)
-        self.assertIn('"/icon.svg?v=171"', source)
-        self.assertIn('"/styles.css?v=171"', source)
+        self.assertIn('"/app.js?v=172"', source)
+        self.assertIn('"/icon.svg?v=172"', source)
+        self.assertIn('"/styles.css?v=172"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6642,21 +6689,6 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(server.diagnostic_capture_status()["active"])
         server.external_call("garmin", "body_battery", lambda: {"new_marker": "not captured"})
         self.assertNotIn("not captured", json.dumps(server.diagnostic_report(), ensure_ascii=False))
-
-    def test_legacy_body_battery_retry_job_is_completed_without_another_request(self):
-        with patch.object(server, "sync_garmin_body_battery_retry", wraps=server.sync_garmin_body_battery_retry) as retry:
-            result = server._execute_sync_job({
-                "id": "legacy-body-battery-job", "provider": "garmin", "type": "body_battery_retry",
-                "payload": json.dumps({"days": 30, "reason": "legacy"}),
-            })
-        self.assertEqual(result["status"], "ok")
-        self.assertTrue(result["skipped"])
-        retry.assert_called_once_with(days=30, operation_id="legacy-body-battery-job", reason="legacy")
-        with server.DB_LOCK, server.database() as db:
-            refreshes = db.execute(
-                "SELECT COUNT(*) AS count FROM provider_refresh_history WHERE provider='garmin' AND area='data'"
-            ).fetchone()["count"]
-        self.assertEqual(refreshes, 0)
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.initialise_logging()
@@ -7271,7 +7303,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=171', index)
+        self.assertIn('v=172', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
@@ -7389,8 +7421,8 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("resolvePlannedConflict", app)
         self.assertNotIn("Lokal behalten", app)
         self.assertNotIn("Remote übernehmen", app)
-        self.assertIn("intervals-coach-v171", worker)
-        self.assertIn("/app.js?v=171", index)
+        self.assertIn("intervals-coach-v172", worker)
+        self.assertIn("/app.js?v=172", index)
 
     def test_obsolete_direct_planning_routes_are_removed(self):
         source = Path(server.__file__).read_text(encoding="utf-8")

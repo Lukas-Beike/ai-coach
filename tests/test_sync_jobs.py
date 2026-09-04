@@ -13,6 +13,8 @@ class SyncJobContractTests(unittest.TestCase):
     def test_request_contract_normalizes_provider_and_type(self):
         result = validate_job_request(" Garmin ", " REFRESH ", {"days": 30})
         self.assertEqual(result, {"provider": "garmin", "type": "refresh", "payload": {"days": 30}})
+        with self.assertRaisesRegex(ValueError, "Unsupported job type"):
+            validate_job_request("garmin", "body_battery_retry", {})
 
     def test_status_aggregation_distinguishes_partial_and_running(self):
         self.assertEqual(aggregate_job_status([]), "completed")

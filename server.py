@@ -1612,32 +1612,39 @@ def database():
 
 def initialise_database() -> None:
     with DB_LOCK, database() as db:
-        db.executescript(
-            """
+        existing_tables = database_table_names(db)
+        if existing_tables and not database_schema_is_current(db):
+            raise RuntimeError(
+                "Die vorhandene Datenbank entspricht nicht exakt dem aktuellen Schema. "
+                "Für diesen Release ist ein leerer Datenbestand erforderlich."
+            )
+        if not existing_tables:
+            db.executescript(
+                """
             PRAGMA journal_mode=WAL;
-            CREATE TABLE IF NOT EXISTS kv (
+            CREATE TABLE kv (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS messages (
+            CREATE TABLE messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS chat_tool_calls (
+            CREATE TABLE chat_tool_calls (
                 call_id TEXT PRIMARY KEY,
                 tool_name TEXT NOT NULL,
                 result TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS snapshots (
+            CREATE TABLE snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 payload TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
-             CREATE TABLE IF NOT EXISTS workout_library (
+             CREATE TABLE workout_library (
                  id TEXT PRIMARY KEY,
                  local_id TEXT NOT NULL UNIQUE,
                  external_id TEXT,
@@ -1648,7 +1655,7 @@ def initialise_database() -> None:
                 last_synced_at TEXT,
                  updated_at TEXT NOT NULL
              );
-             CREATE TABLE IF NOT EXISTS planned_units (
+             CREATE TABLE planned_units (
                  id TEXT PRIMARY KEY,
                  local_id TEXT NOT NULL UNIQUE,
                  external_id TEXT,
@@ -1666,12 +1673,12 @@ def initialise_database() -> None:
                  created_at TEXT NOT NULL,
                  updated_at TEXT NOT NULL
              );
-            CREATE TABLE IF NOT EXISTS planning_state (
+            CREATE TABLE planning_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 revision INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS coach_plan_artifacts (
+            CREATE TABLE coach_plan_artifacts (
                 id TEXT PRIMARY KEY,
                 conversation_id TEXT,
                 client_turn_id TEXT,
@@ -1681,9 +1688,9 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_coach_plan_artifacts_conversation
+            CREATE INDEX idx_coach_plan_artifacts_conversation
                 ON coach_plan_artifacts(conversation_id, created_at DESC);
-            CREATE TABLE IF NOT EXISTS coach_commands (
+            CREATE TABLE coach_commands (
                 id TEXT PRIMARY KEY,
                 client_turn_id TEXT NOT NULL UNIQUE,
                 conversation_id TEXT,
@@ -1697,7 +1704,7 @@ def initialise_database() -> None:
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (artifact_id) REFERENCES coach_plan_artifacts(id)
             );
-            CREATE TABLE IF NOT EXISTS sync_jobs (
+            CREATE TABLE sync_jobs (
                 id TEXT PRIMARY KEY,
                 provider TEXT NOT NULL,
                 type TEXT NOT NULL,
@@ -1714,9 +1721,9 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_available
+            CREATE INDEX idx_sync_jobs_status_available
                 ON sync_jobs(status, available_at, created_at);
-            CREATE TABLE IF NOT EXISTS sync_job_items (
+            CREATE TABLE sync_job_items (
                 id TEXT PRIMARY KEY,
                 job_id TEXT NOT NULL,
                 item_key TEXT NOT NULL,
@@ -1732,8 +1739,8 @@ def initialise_database() -> None:
                 UNIQUE(job_id, item_key),
                 FOREIGN KEY (job_id) REFERENCES sync_jobs(id) ON DELETE CASCADE
             );
-            CREATE INDEX IF NOT EXISTS idx_sync_job_items_status ON sync_job_items(job_id, status);
-            CREATE TABLE IF NOT EXISTS provider_sync_cursors (
+            CREATE INDEX idx_sync_job_items_status ON sync_job_items(job_id, status);
+            CREATE TABLE provider_sync_cursors (
                 provider TEXT NOT NULL,
                 stream TEXT NOT NULL,
                 cursor TEXT,
@@ -1741,7 +1748,7 @@ def initialise_database() -> None:
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (provider, stream)
             );
-            CREATE TABLE IF NOT EXISTS competitions (
+            CREATE TABLE competitions (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 event_date TEXT NOT NULL,
@@ -1764,13 +1771,13 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS competition_sync_tombstones (
+            CREATE TABLE competition_sync_tombstones (
                 id TEXT PRIMARY KEY,
                 intervals_event_id TEXT,
                 external_id TEXT,
                 created_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS training_plans (
+            CREATE TABLE training_plans (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 goal TEXT NOT NULL,
@@ -1780,7 +1787,7 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS athlete_checkins (
+            CREATE TABLE athlete_checkins (
                 checkin_date TEXT PRIMARY KEY,
                 soreness INTEGER,
                 stress INTEGER,
@@ -1795,7 +1802,7 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS activity_feedback (
+            CREATE TABLE activity_feedback (
                 activity_id TEXT PRIMARY KEY,
                 activity_name TEXT NOT NULL DEFAULT '',
                 activity_date TEXT NOT NULL DEFAULT '',
@@ -1803,14 +1810,14 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS plan_adjustments (
+            CREATE TABLE plan_adjustments (
                 id TEXT PRIMARY KEY,
                 payload TEXT NOT NULL,
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 applied_at TEXT
             );
-            CREATE TABLE IF NOT EXISTS coach_action_proposals (
+            CREATE TABLE coach_action_proposals (
                 id TEXT PRIMARY KEY,
                 session_csrf_hash TEXT NOT NULL,
                 action_type TEXT NOT NULL,
@@ -1825,7 +1832,7 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 used_at TEXT
             );
-            CREATE TABLE IF NOT EXISTS change_history (
+            CREATE TABLE change_history (
                 id TEXT PRIMARY KEY,
                 entity_type TEXT NOT NULL,
                 entity_id TEXT NOT NULL,
@@ -1836,9 +1843,9 @@ def initialise_database() -> None:
                 after_hash TEXT NOT NULL,
                 diff TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_change_history_created_at ON change_history(created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_change_history_entity ON change_history(entity_type, entity_id, created_at DESC);
-            CREATE TABLE IF NOT EXISTS provider_refresh_history (
+            CREATE INDEX idx_change_history_created_at ON change_history(created_at DESC);
+            CREATE INDEX idx_change_history_entity ON change_history(entity_type, entity_id, created_at DESC);
+            CREATE TABLE provider_refresh_history (
                 id TEXT PRIMARY KEY,
                 provider TEXT NOT NULL,
                 area TEXT NOT NULL,
@@ -1851,9 +1858,9 @@ def initialise_database() -> None:
                 error_code TEXT,
                 next_retry_at TEXT
             );
-            CREATE INDEX IF NOT EXISTS idx_provider_refresh_created_at ON provider_refresh_history(started_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_provider_refresh_area ON provider_refresh_history(provider, area, started_at DESC);
-            CREATE TABLE IF NOT EXISTS public_event_sources (
+            CREATE INDEX idx_provider_refresh_created_at ON provider_refresh_history(started_at DESC);
+            CREATE INDEX idx_provider_refresh_area ON provider_refresh_history(provider, area, started_at DESC);
+            CREATE TABLE public_event_sources (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 url TEXT NOT NULL UNIQUE,
@@ -1862,7 +1869,7 @@ def initialise_database() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS public_event_candidates (
+            CREATE TABLE public_event_candidates (
                 id TEXT PRIMARY KEY,
                 source_id TEXT NOT NULL,
                 uid TEXT NOT NULL,
@@ -1879,7 +1886,7 @@ def initialise_database() -> None:
                 UNIQUE(source_id, uid),
                 FOREIGN KEY(source_id) REFERENCES public_event_sources(id) ON DELETE CASCADE
             );
-            CREATE TABLE IF NOT EXISTS external_calendar_events (
+            CREATE TABLE external_calendar_events (
                 id TEXT PRIMARY KEY,
                 uid TEXT NOT NULL,
                 name TEXT NOT NULL,
@@ -1894,23 +1901,25 @@ def initialise_database() -> None:
                 updated_at TEXT NOT NULL,
                 UNIQUE(uid, start_local)
             );
-            CREATE TABLE IF NOT EXISTS sessions (
+            CREATE TABLE sessions (
                 token_hash TEXT PRIMARY KEY,
                 csrf_hash TEXT NOT NULL,
                 expires_at REAL NOT NULL,
                 created_at TEXT NOT NULL,
                 last_seen TEXT NOT NULL
             );
-            """
-        )
+                """
+            )
+            db.execute("CREATE UNIQUE INDEX idx_workout_library_external_id ON workout_library(external_id) WHERE external_id IS NOT NULL")
+            db.execute("CREATE UNIQUE INDEX idx_planned_units_local_id ON planned_units(local_id)")
+            db.execute("CREATE INDEX idx_planned_units_external_id ON planned_units(external_id)")
+            db.execute("CREATE INDEX idx_planned_units_date ON planned_units(json_extract(payload, '$.date'))")
         db.execute(
             "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
             (utc_now(),),
         )
-        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_workout_library_external_id ON workout_library(external_id) WHERE external_id IS NOT NULL")
-        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_planned_units_local_id ON planned_units(local_id)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_planned_units_external_id ON planned_units(external_id)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_planned_units_date ON planned_units(json_extract(payload, '$.date'))")
+        if not database_schema_is_current(db):
+            raise RuntimeError("Die neue Datenbank konnte nicht mit dem aktuellen Schema initialisiert werden.")
         if get_kv("profile", db) is None:
             set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
         # A process cannot continue a reset after a restart. Clear only the
@@ -2049,8 +2058,6 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
     values = envelope["payload"]
     if envelope["type"] == "historical_backfill" and envelope["provider"] not in {"intervals", "garmin"}:
         raise AppError(400, "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig.", reason="invalid_job_request")
-    if envelope["type"] == "body_battery_retry" and envelope["provider"] != "garmin":
-        raise AppError(400, "Der Body-Battery-Retry ist nur bei Garmin erlaubt.", reason="invalid_job_request")
     if envelope["type"] in {"performance_refresh", "competition_push"}:
         if envelope["provider"] != "intervals":
             raise AppError(400, "Dieser Job ist nur für Intervals.icu zulässig.", reason="invalid_job_request")
@@ -2421,12 +2428,6 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
             result["competitions"] = competition_result
         return result
     if provider == "garmin":
-        if job_type == "body_battery_retry":
-            return sync_garmin_body_battery_retry(
-                days=int(payload.get("days") or sync_period("garmin")),
-                operation_id=job["id"],
-                reason=reason,
-            )
         historical_end = None
         if job_type == "historical_backfill":
             days = max(1, min(int(payload.get("days") or SYNC_CHUNK_DAYS), SYNC_CHUNK_DAYS))
@@ -4017,7 +4018,7 @@ def _garmin_error_entries() -> list[dict[str, Any]]:
 
 
 def _garmin_core_error_entries() -> list[dict[str, Any]]:
-    """Ignore legacy Body-Battery-only errors for the core Garmin status."""
+    """Return Garmin errors unrelated to the separate morning recovery read."""
     return [entry for entry in _garmin_error_entries() if entry.get("source") != "body_battery"]
 
 
@@ -4193,14 +4194,6 @@ def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
             return persist(_morning_body_battery_record(checkin_date, {}, []))
     finally:
         GARMIN_LOCK.release()
-
-
-@maintenance_operation
-@garmin_operation
-def sync_garmin_body_battery_retry(days: int = 30, operation_id: str | None = None, reason: str = "body-battery-retry") -> dict[str, Any]:
-    """Finish legacy queued retries without repeating Garmin requests."""
-    _set_garmin_error_entries(_garmin_core_error_entries())
-    return {"status": "ok", "skipped": True, "reason": "superseded_by_morning_body_battery"}
 
 
 @observed_sync("garmin", "data")
@@ -15278,14 +15271,54 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "short_only", "updated_at"},
     "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
 }
+CURRENT_DATABASE_INDEXES = {
+    "idx_change_history_created_at",
+    "idx_change_history_entity",
+    "idx_coach_plan_artifacts_conversation",
+    "idx_planned_units_date",
+    "idx_planned_units_external_id",
+    "idx_planned_units_local_id",
+    "idx_provider_refresh_area",
+    "idx_provider_refresh_created_at",
+    "idx_sync_job_items_status",
+    "idx_sync_jobs_status_available",
+    "idx_workout_library_external_id",
+}
+
+
+def _database_row_value(row: Any, name: str, index: int) -> Any:
+    try:
+        return row[name]
+    except (IndexError, KeyError, TypeError):
+        return row[index]
+
+
+def database_table_names(db: Any) -> set[str]:
+    return {
+        str(_database_row_value(row, "name", 0))
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        if not str(_database_row_value(row, "name", 0)).startswith("sqlite_")
+    }
+
+
+def database_index_names(db: Any) -> set[str]:
+    return {
+        str(_database_row_value(row, "name", 0))
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+        if not str(_database_row_value(row, "name", 0)).startswith("sqlite_")
+}
 
 
 def database_schema_is_current(db: Any) -> bool:
-    tables = {row["name"] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    if set(CURRENT_DATABASE_SCHEMA) - tables:
+    if database_table_names(db) != set(CURRENT_DATABASE_SCHEMA):
+        return False
+    if database_index_names(db) != CURRENT_DATABASE_INDEXES:
         return False
     return all(
-        not columns - {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        columns == {
+            _database_row_value(row, "name", 1)
+            for row in db.execute(f"PRAGMA table_info({table})").fetchall()
+        }
         for table, columns in CURRENT_DATABASE_SCHEMA.items()
     )
 
@@ -15365,16 +15398,8 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
             if CONFIG.app_password:
                 _configure_cipher(connection, CONFIG.app_password)
             connection.execute("PRAGMA foreign_keys = ON")
-            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-            if set(CURRENT_DATABASE_SCHEMA) - tables:
-                raise AppError(400, "Das Backup verwendet kein vollständiges aktuelles Datenbankschema.")
-            missing_columns = {
-                table: sorted(columns - {row[1] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()})
-                for table, columns in CURRENT_DATABASE_SCHEMA.items()
-            }
-            missing_columns = {table: columns for table, columns in missing_columns.items() if columns}
-            if missing_columns:
-                raise AppError(400, "Das Backup verwendet unvollständige Datenbanktabellen.")
+            if not database_schema_is_current(connection):
+                raise AppError(400, "Das Backup entspricht nicht exakt dem aktuellen Datenbankschema.")
             integrity = connection.execute("PRAGMA integrity_check").fetchone()
             if connection.execute("PRAGMA foreign_key_check").fetchall():
                 raise AppError(400, "Das Backup enthält ungültige Fremdschlüssel.")
