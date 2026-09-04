@@ -45,16 +45,16 @@ jobs:
           git show "$PR_BASE_SHA:.github/codex/prompts/review.md" > .codex-review-prompt.md
           cat >> .codex-review-prompt.md <<'EOF'
 
-The first non-empty line of your response MUST be exactly one of these two
-machine-readable status lines:
+          The first non-empty line of your response MUST be exactly one of these two
+          machine-readable status lines:
 
-CODEX_REVIEW_STATUS: clean
-CODEX_REVIEW_STATUS: findings
+          CODEX_REVIEW_STATUS: clean
+          CODEX_REVIEW_STATUS: findings
 
-Use `findings` when you report one or more actionable problems. Use `clean`
-only when there are no actionable problems. Put the human-readable review
-after that status line.
-EOF
+          Use `findings` when you report one or more actionable problems. Use `clean`
+          only when there are no actionable problems. Put the human-readable review
+          after that status line.
+          EOF
 
       - name: Run Codex review
         id: run_codex
