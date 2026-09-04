@@ -257,6 +257,10 @@ function finishAppShellLoading() {
   if (!$("#loginDialog")?.open) shell.hidden = false;
   shell.classList.remove("is-loading");
   shell.removeAttribute("aria-busy");
+  // The first local bootstrap deliberately renders the chat while the shell is
+  // still loading. Re-render after removing that state so its placeholder is
+  // replaced even if a deferred domain request has not settled yet.
+  renderMessages(state.data?.messages || [], true);
   applyNavigationRoute(routeFromHash(), { historyMode: hashContainsKnownRoute() ? "none" : "replace" });
 }
 
@@ -1697,11 +1701,13 @@ function createPendingMessage(entry) {
 
 function renderMessages(messages, forceScroll = false) {
   const root = $("#messages");
+  const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
   // Synchronisation and refresh notices belong to their respective tabs,
   // not to the personal conversation history.
   const visibleMessages = (messages || []).filter((message) => message.role !== "event");
   const signature = JSON.stringify([
     visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content]),
+    appShellLoading,
     state.busy,
     state.chatStreamText,
     state.chatServerOperationId,
@@ -1716,7 +1722,7 @@ function renderMessages(messages, forceScroll = false) {
   root.dataset.signature = signature;
   root.replaceChildren();
   if (!visibleMessages.length && !state.chatRequest && !state.chatQueue.length) {
-    if ($("#appShell")?.classList.contains("is-loading")) root.append(createSkeletonStack(4));
+    if (appShellLoading) root.append(createSkeletonStack(4));
     else root.append(createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest oder starte mit einer Schnellaktion."));
   }
   for (const message of visibleMessages) {
