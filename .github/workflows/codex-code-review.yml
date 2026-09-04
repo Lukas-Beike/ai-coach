@@ -30,12 +30,38 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Prepare trusted Codex prompt
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$PR_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The pull request base SHA is invalid; failing closed."
+            exit 1
+          fi
+          git cat-file -e "${PR_BASE_SHA}^{commit}"
+          git show "$PR_BASE_SHA:.github/codex/prompts/review.md" > .codex-review-prompt.md
+          cat >> .codex-review-prompt.md <<'EOF'
+
+The first non-empty line of your response MUST be exactly one of these two
+machine-readable status lines:
+
+CODEX_REVIEW_STATUS: clean
+CODEX_REVIEW_STATUS: findings
+
+Use `findings` when you report one or more actionable problems. Use `clean`
+only when there are no actionable problems. Put the human-readable review
+after that status line.
+EOF
+
       - name: Run Codex review
         id: run_codex
         uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: .github/codex/prompts/review.md
+          prompt-file: .codex-review-prompt.md
           output-file: codex-output.md
           sandbox: read-only
           safety-strategy: drop-sudo
