@@ -1403,6 +1403,14 @@ class CoachTests(unittest.TestCase):
         search = server.paged_chat_history(limit=10, search="searchable 3")
         self.assertEqual([item["content"] for item in search["messages"]], ["searchable 3"])
 
+    def test_chat_history_excludes_legacy_sync_events_before_pagination(self):
+        for index in range(105):
+            server.add_message("event", f"sync notice {index}")
+        server.add_message("user", "Bleibt sichtbar")
+        self.assertEqual([message["content"] for message in server.list_messages()], ["Bleibt sichtbar"])
+        history = server.paged_chat_history(limit=100)
+        self.assertEqual([message["content"] for message in history["messages"]], ["Bleibt sichtbar"])
+
     def test_library_pagination_has_stable_type_name_id_cursor(self):
         server.upsert_workout_library([
             {"id": f"template-{index}", "name": f"Template {index}", "type": "Ride", "description": "- 30m Z2"}
@@ -1829,19 +1837,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=172', index)
-        self.assertIn('/navigation.js?v=172', index)
-        self.assertIn('/state.js?v=172', index)
-        self.assertIn('/views.js?v=172', index)
-        self.assertIn('/forms.js?v=172', index)
-        self.assertIn('/components.js?v=172', index)
-        self.assertIn('/app.js?v=172', index)
-        self.assertIn('intervals-coach-v172', service_worker)
-        self.assertIn('"/navigation.js?v=172"', service_worker)
-        self.assertIn('"/state.js?v=172"', service_worker)
-        self.assertIn('"/views.js?v=172"', service_worker)
-        self.assertIn('"/forms.js?v=172"', service_worker)
-        self.assertIn('"/components.js?v=172"', service_worker)
+        self.assertIn('/api.js?v=173', index)
+        self.assertIn('/navigation.js?v=173', index)
+        self.assertIn('/state.js?v=173', index)
+        self.assertIn('/views.js?v=173', index)
+        self.assertIn('/forms.js?v=173', index)
+        self.assertIn('/components.js?v=173', index)
+        self.assertIn('/app.js?v=173', index)
+        self.assertIn('intervals-coach-v173', service_worker)
+        self.assertIn('"/navigation.js?v=173"', service_worker)
+        self.assertIn('"/state.js?v=173"', service_worker)
+        self.assertIn('"/views.js?v=173"', service_worker)
+        self.assertIn('"/forms.js?v=173"', service_worker)
+        self.assertIn('"/components.js?v=173"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1867,8 +1875,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=172'), index.index('/components.js?v=172'))
-        self.assertLess(index.index('/components.js?v=172'), index.index('/app.js?v=172'))
+        self.assertLess(index.index('/forms.js?v=173'), index.index('/components.js?v=173'))
+        self.assertLess(index.index('/components.js?v=173'), index.index('/app.js?v=173'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -6384,16 +6392,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=172"', source)
-        self.assertIn('"/navigation.js?v=172"', source)
-        self.assertIn('"/state.js?v=172"', source)
-        self.assertIn('"/views.js?v=172"', source)
-        self.assertIn('"/forms.js?v=172"', source)
-        self.assertIn('"/components.js?v=172"', source)
+        self.assertIn('"/api.js?v=173"', source)
+        self.assertIn('"/navigation.js?v=173"', source)
+        self.assertIn('"/state.js?v=173"', source)
+        self.assertIn('"/views.js?v=173"', source)
+        self.assertIn('"/forms.js?v=173"', source)
+        self.assertIn('"/components.js?v=173"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=172"', source)
-        self.assertIn('"/icon.svg?v=172"', source)
-        self.assertIn('"/styles.css?v=172"', source)
+        self.assertIn('"/app.js?v=173"', source)
+        self.assertIn('"/icon.svg?v=173"', source)
+        self.assertIn('"/styles.css?v=173"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6943,6 +6951,69 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(calls, ["/responses", "/responses"])
         sleep.assert_called_once_with(1)
 
+    def test_openai_conversation_state_error_is_classified_without_provider_text(self):
+        raw_error = json.dumps({
+            "error": {
+                "code": "invalid_function_call_output",
+                "type": "invalid_request_error",
+                "param": "input[0]",
+                "message": "secret tool call detail must never be stored",
+            },
+        }).encode("utf-8")
+        details = server.openai_error_details(400, raw_error)
+        self.assertEqual(details["reason"], "conversation_state_invalid")
+        diagnostic = server.openai_error_diagnostic_details(raw_error, {"x-request-id": "req_test_123"})
+        self.assertEqual(diagnostic["error_code"], "invalid_function_call_output")
+        self.assertEqual(diagnostic["parameter"], "input[0]")
+        self.assertNotIn("secret", json.dumps(diagnostic))
+
+    def test_initial_conversation_state_error_rotates_once_before_tools_run(self):
+        intent = {
+            "intent": "advice", "operation": None, "target_system": "none",
+            "artifact_id": None, "authorization_scope": [], "follow_up_operations": [],
+        }
+        completed = {
+            "status": "completed",
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": "Wiederhergestellt."}]}],
+        }
+        with patch.object(
+            server, "responses_request", side_effect=[server.AppError(400, "stale", reason="conversation_state_invalid"), completed]
+        ) as request, patch.object(server, "replace_stale_openai_conversation", return_value="conversation-recovered") as recover:
+            result = server._chat_with_structured_coach_impl(
+                "Bitte analysiere die Einheit.", intent=intent, conversation_id="conversation-stale", client_turn_id="turn-recovery"
+            )
+        self.assertEqual(result["message"]["content"], "Wiederhergestellt.")
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(request.call_args_list[1].args[0]["conversation"], "conversation-recovered")
+        recover.assert_called_once_with("conversation-stale")
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT conversation_id FROM coach_commands WHERE client_turn_id='turn-recovery'").fetchone()
+        self.assertEqual(command["conversation_id"], "conversation-recovered")
+        self.assertEqual([message["role"] for message in server.list_messages()], ["user", "assistant"])
+
+    def test_streaming_openai_400_is_captured_without_error_message_or_payload(self):
+        raw_error = json.dumps({
+            "error": {
+                "code": "invalid_function_call_output",
+                "type": "invalid_request_error",
+                "message": "athlete-private provider failure",
+            },
+        }).encode("utf-8")
+        upstream_error = server.HTTPError(
+            "https://api.openai.com/v1/responses", 400, "Bad Request", {"x-request-id": "req_test_456"}, BytesIO(raw_error)
+        )
+        server.set_diagnostic_capture(True)
+        config = replace(server.CONFIG, openai_api_key="openai-test")
+        with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError) as raised:
+                server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
+        self.assertEqual(raised.exception.reason, "conversation_state_invalid")
+        captured = server.diagnostic_capture_entries()
+        failed = next(entry for entry in reversed(captured) if entry["event"] == "openai_stream_failed")
+        self.assertEqual(failed["details"]["error_code"], "invalid_function_call_output")
+        self.assertEqual(failed["details"]["request_id"], "req_test_456")
+        self.assertNotIn("athlete-private", json.dumps(captured))
+
     def test_openai_stream_request_emits_deltas_and_validates_only_final_response(self):
         response_payload = {
             "id": "resp-test",
@@ -7315,7 +7386,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=172', index)
+        self.assertIn('v=173', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
@@ -7433,8 +7504,8 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("resolvePlannedConflict", app)
         self.assertNotIn("Lokal behalten", app)
         self.assertNotIn("Remote übernehmen", app)
-        self.assertIn("intervals-coach-v172", worker)
-        self.assertIn("/app.js?v=172", index)
+        self.assertIn("intervals-coach-v173", worker)
+        self.assertIn("/app.js?v=173", index)
 
     def test_obsolete_direct_planning_routes_are_removed(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
