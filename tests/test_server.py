@@ -6652,6 +6652,11 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["skipped"])
         retry.assert_called_once_with(days=30, operation_id="legacy-body-battery-job", reason="legacy")
+        with server.DB_LOCK, server.database() as db:
+            refreshes = db.execute(
+                "SELECT COUNT(*) AS count FROM provider_refresh_history WHERE provider='garmin' AND area='data'"
+            ).fetchone()["count"]
+        self.assertEqual(refreshes, 0)
 
     def test_upstream_network_failures_are_structured_in_diagnostics(self):
         server.initialise_logging()

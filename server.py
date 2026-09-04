@@ -4195,7 +4195,6 @@ def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
         GARMIN_LOCK.release()
 
 
-@observed_sync("garmin", "data")
 @maintenance_operation
 @garmin_operation
 def sync_garmin_body_battery_retry(days: int = 30, operation_id: str | None = None, reason: str = "body-battery-retry") -> dict[str, Any]:
