@@ -126,7 +126,7 @@ STATIC_TARGETS = {
 VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.7.1"
+APP_VERSION = "1.7.2"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
 GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -151,6 +151,10 @@ COACH_DEFAULT_MAX_OUTPUT_TOKENS = 6_000
 COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
 COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
+OPENAI_BACKGROUND_POLL_SECONDS = 2
+OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
+COACH_BACKGROUND_HORIZON_DAYS = 7
+COACH_BACKGROUND_UNIT_LIMIT = 7
 INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
@@ -159,13 +163,18 @@ WORKOUT_LIBRARY_SYNC_LOCK = threading.Lock()
 COMPETITION_SYNC_LOCK = threading.Lock()
 COMPETITION_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
 PERFORMANCE_LOCK = threading.Lock()
-OPENAI_CONVERSATION_LOCK = threading.Lock()
+OPENAI_CONVERSATION_LOCK = threading.RLock()
 DIAGNOSTIC_CAPTURE_LOCK = threading.RLock()
 CHAT_STREAM_LOCK = threading.Lock()
 CHAT_STREAMS: dict[str, dict[str, Any]] = {}
 CHAT_QUEUE_LIMIT = 3
 CHAT_QUEUE = threading.BoundedSemaphore(CHAT_QUEUE_LIMIT)
 CHAT_LOCK_TIMEOUT_SECONDS = 30
+COACH_JOB_WORKER_LOCK = threading.Lock()
+COACH_JOB_WAKE = threading.Event()
+COACH_JOB_STOP = threading.Event()
+COACH_JOB_WORKER: threading.Thread | None = None
+COACH_JOB_CANCEL_EVENTS: dict[str, threading.Event] = {}
 OPENAI_USAGE_LOCK = threading.RLock()
 MORNING_CHECKIN_LOCK = threading.Lock()
 GARMIN_LOCK = threading.Lock()
@@ -7391,6 +7400,49 @@ def _workout_load(record: Any) -> float | int | None:
     return _activity_metric(record, ("icu_training_load", "training_load", "tss"))
 
 
+CALENDAR_ACTIVITY_FIELDS = (
+    "id", "external_id", "start_date_local", "name", "type", "moving_time", "elapsed_time",
+    "distance", "total_elevation_gain", "icu_training_load", "icu_intensity", "average_heartrate",
+    "max_heartrate", "average_watts", "weighted_average_watts", "icu_weighted_avg_speed",
+    "icu_pace", "icu_rpe", "feel", "source",
+)
+
+
+def calendar_activity_payload(activity: Any) -> dict[str, Any]:
+    """Return the bounded completed-activity fields used by the calendar UI."""
+    if not isinstance(activity, dict):
+        return {}
+    payload = selected(activity, CALENDAR_ACTIVITY_FIELDS)
+    activity_date = _record_date(first_present(activity, ("start_date_local", "start_date", "date")))
+    payload.update({
+        "date": activity_date,
+        "start_date_local": first_present(activity, ("start_date_local", "start_date", "date")),
+        "category": "ACTIVITY",
+        "calendar_entry_type": "completed_activity",
+        "is_completed_activity": True,
+    })
+    return payload
+
+
+def calendar_activity_identity(activity: Any) -> tuple[Any, ...] | None:
+    """Build a stable identity for matching calendar activity projections."""
+    if not isinstance(activity, dict):
+        return None
+    activity_id = first_present(activity, ("id", "activityId", "external_id"))
+    if activity_id not in (None, ""):
+        return ("id", str(activity_id))
+    start = first_present(activity, ("start_date_local", "start_date", "date"))
+    if start in (None, ""):
+        return None
+    return (
+        "fallback",
+        str(start),
+        str(activity.get("type") or activity.get("sport") or "").casefold(),
+        _workout_duration(activity),
+        _activity_metric(activity, ("distance",)),
+    )
+
+
 def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[int, dict[str, Any]]:
     """Match completed activities to planned workouts without reusing one activity."""
     activity_rows = [item for item in activities if isinstance(item, dict)]
@@ -7482,6 +7534,7 @@ def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, t
             "activity_id": first_present(activity, ("id", "activityId")),
             "activity_name": str(activity.get("name") or "Absolvierte Einheit")[:200],
             "activity_start": first_present(activity, ("start_date_local", "start_date", "start")),
+            "actual_activity": calendar_activity_payload(activity),
         })
     return result
 
@@ -7539,6 +7592,30 @@ def planning_compliance_state(planned: list[Any], activities: list[Any]) -> tupl
             "actual_value": round(actual_value, 2) if actual_value is not None else None,
         })
     return enriched, weekly
+
+
+def training_calendar_items(planned: list[Any], activities: list[Any]) -> list[dict[str, Any]]:
+    """Combine enriched plan entries with unmatched completed activities."""
+    planned_rows = [dict(item) for item in planned if isinstance(item, dict)]
+    activity_rows = [item for item in activities if isinstance(item, dict)]
+    matched_activity_keys: set[tuple[Any, ...]] = set()
+    for item in planned_rows:
+        compliance = item.get("compliance")
+        identity = calendar_activity_identity(compliance.get("actual_activity")) if isinstance(compliance, dict) else None
+        if identity is not None:
+            matched_activity_keys.add(identity)
+    completed_rows = [
+        calendar_activity_payload(activity)
+        for activity in activity_rows
+        if calendar_activity_identity(activity) not in matched_activity_keys
+    ]
+    combined = planned_rows + [item for item in completed_rows if item.get("date")]
+    combined.sort(key=lambda item: (
+        str(item.get("start_date_local") or item.get("date") or "9999-12-31"),
+        str(item.get("name") or "").casefold(),
+        str(item.get("id") or item.get("local_id") or item.get("external_id") or ""),
+    ))
+    return combined
 
 
 def version_tuple(value: Any) -> tuple[int, int, int] | None:
@@ -12042,7 +12119,10 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     result = _validate_openai_response(path, result)
     if not isinstance(result, dict):
         raise AppError(502, "OpenAI hat eine unerwartete Antwort zurückgegeben.")
-    record_openai_usage(result, path.strip("/") or "request")
+    # Background Responses are billed/observed when their final result is
+    # retrieved; counting the queued creation would double-count one turn.
+    if not (path == "/responses" and request_payload.get("background") is True):
+        record_openai_usage(result, path.strip("/") or "request")
     return result
 
 
@@ -12145,6 +12225,77 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
             )
             time.sleep(delay)
     raise AppError(502, "Die OpenAI-Konversationsanfrage konnte nicht abgeschlossen werden.")
+
+
+def _openai_response_id(value: Any) -> str:
+    response_id = str(value or "").strip()
+    if not re.fullmatch(r"resp_[A-Za-z0-9_-]{1,200}", response_id):
+        raise AppError(502, "OpenAI hat keine gültige Response-ID zurückgegeben.", reason="invalid_response")
+    return response_id
+
+
+def retrieve_openai_response(response_id: str) -> dict[str, Any]:
+    """Retrieve one background response without exposing its identifier in logs."""
+    if not CONFIG.openai_api_key:
+        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+    response_id = _openai_response_id(response_id)
+    result = http_json(
+        "GET",
+        openai_endpoint(f"/responses/{quote(response_id, safe='')}"),
+        headers={"Authorization": f"Bearer {CONFIG.openai_api_key}"},
+        timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+        service="openai",
+    )
+    return _validate_openai_response("/responses", result)
+
+
+def cancel_openai_response(response_id: str) -> None:
+    """Best-effort cancellation for an active OpenAI background response."""
+    if not CONFIG.openai_api_key:
+        return
+    response_id = _openai_response_id(response_id)
+    try:
+        http_json(
+            "POST",
+            openai_endpoint(f"/responses/{quote(response_id, safe='')}/cancel"),
+            {},
+            {"Authorization": f"Bearer {CONFIG.openai_api_key}"},
+            timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+            service="openai",
+        )
+    except Exception:
+        LOGGER.warning("OpenAI background response cancellation failed", extra={"event": "openai_background_cancel_failed"})
+
+
+def responses_background_request(
+    payload: dict[str, Any],
+    *,
+    response_id: str | None = None,
+    on_response_id: Callable[[str], None] | None = None,
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Create or resume a bounded OpenAI background response and poll it."""
+    started = time.monotonic()
+    if response_id:
+        current = retrieve_openai_response(response_id)
+        active_response_id = _openai_response_id(current.get("id") or response_id)
+    else:
+        request_payload = {**payload, "background": True, "store": True}
+        current = responses_request(request_payload)
+        active_response_id = _openai_response_id(current.get("id"))
+        if on_response_id is not None:
+            on_response_id(active_response_id)
+    while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
+        if cancel_event is not None and cancel_event.wait(OPENAI_BACKGROUND_POLL_SECONDS):
+            cancel_openai_response(active_response_id)
+            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled")
+        if time.monotonic() - started >= OPENAI_BACKGROUND_MAX_SECONDS:
+            cancel_openai_response(active_response_id)
+            raise AppError(504, "Die Hintergrundplanung hat das Zeitlimit überschritten.", reason="provider_timeout")
+        current = retrieve_openai_response(active_response_id)
+    current = _validate_openai_response("/responses", current)
+    record_openai_usage(current, "responses_background")
+    return current
 
 
 def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
@@ -12513,15 +12664,74 @@ def prompt_requests_workout_creation(message: str) -> bool:
 
 
 def prompt_requests_long_plan(message: str) -> bool:
-    """Recognise a multi-week plan that needs a larger response budget."""
-    text = message.casefold()
-    asks_for_duration = bool(re.search(
-        r"\b(?:[2-9]|[1-9]\d+)\s*(?:wochen?|weeks?|week)\b"
-        r"|\b(?:monat|monate|month|monthly)\b",
+    """Return whether a requested plan exceeds the synchronous work limit."""
+    return coach_plan_scope(message)["background"]
+
+
+_PLAN_NUMBER_WORDS = {
+    "ein": 1, "eine": 1, "einen": 1, "einer": 1, "one": 1,
+    "zwei": 2, "two": 2, "drei": 3, "three": 3, "vier": 4, "four": 4,
+    "fuenf": 5, "fünf": 5, "five": 5, "sechs": 6, "six": 6,
+    "sieben": 7, "seven": 7, "acht": 8, "eight": 8, "neun": 9, "nine": 9,
+    "zehn": 10, "ten": 10, "elf": 11, "eleven": 11, "zwoelf": 12,
+    "zwölf": 12, "twelve": 12,
+}
+
+
+def _plan_number(value: str) -> int | None:
+    candidate = str(value or "").strip().casefold()
+    if candidate.isdigit():
+        return int(candidate)
+    return _PLAN_NUMBER_WORDS.get(candidate)
+
+
+def coach_plan_scope(message: str) -> dict[str, Any]:
+    """Extract the explicit planning horizon and unit count from one prompt.
+
+    The rule is deliberately deterministic and authorization-neutral: more
+    than seven calendar days or more than seven requested units is background
+    work. Unknown scope stays synchronous instead of being guessed.
+    """
+    text = str(message or "").casefold()
+    planning_hint = prompt_requests_workout_creation(message)
+    horizon_days = 0
+    planned_units = 0
+    number = r"(?:\d{1,3}|ein(?:e|en|er)?|one|zwei|two|drei|three|vier|four|f(?:ü|ue)nf|five|sechs|six|sieben|seven|acht|eight|neun|nine|zehn|ten|elf|eleven|zw(?:ö|oe)lf|twelve)"
+    for match in re.finditer(
+        rf"\b(?P<count>{number})\s*[- ]?\s*(?P<unit>tage?|days?|wochen?|weeks?|monate?|months?)\b",
         text,
-    ))
-    asks_for_plan = bool(re.search(r"\b(?:trainingsplan|plan)\b", text))
-    return asks_for_duration and asks_for_plan and prompt_requests_workout_creation(message)
+    ):
+        count = _plan_number(match.group("count")) or 0
+        unit = match.group("unit")
+        factor = 30 if unit.startswith(("monat", "month")) else 7 if unit.startswith(("woch", "week")) else 1
+        horizon_days = max(horizon_days, count * factor)
+    mentions_plan = bool(re.search(r"\b(?:trainingsplan\w*|training plan\w*|plan\w*)\b", text))
+    if mentions_plan and re.search(r"\b(?:monatlich|monthly|kommend\w*\s+monat|nächste[nr]?\s+monat|naechste[nr]?\s+monat)\b", text):
+        horizon_days = max(horizon_days, 30)
+    for match in re.finditer(
+        rf"\b(?P<count>{number})\s*[- ]?\s*(?:einheit(?:en)?|workouts?|sessions?)\b",
+        text,
+    ):
+        planned_units = max(planned_units, _plan_number(match.group("count")) or 0)
+    iso_dates = []
+    for raw in re.findall(r"\b\d{4}-\d{2}-\d{2}\b", text):
+        try:
+            iso_dates.append(date.fromisoformat(raw))
+        except ValueError:
+            continue
+    if len(iso_dates) >= 2:
+        horizon_days = max(horizon_days, abs((iso_dates[-1] - iso_dates[0]).days) + 1)
+    planning = bool(planning_hint or (mentions_plan and (horizon_days or planned_units)))
+    background = bool(
+        planning
+        and (horizon_days > COACH_BACKGROUND_HORIZON_DAYS or planned_units > COACH_BACKGROUND_UNIT_LIMIT)
+    )
+    return {
+        "planning": planning,
+        "horizon_days": horizon_days or None,
+        "planned_units": planned_units or None,
+        "background": background,
+    }
 
 
 def coach_output_token_budget(message: str, *, followup: bool = False) -> int:
@@ -13225,6 +13435,124 @@ def execute_coach_action(token: Any, session_csrf_hash: str, payload_hash: Any =
     return result
 
 
+def _coach_session_key(session_csrf_hash: str) -> str:
+    return hashlib.sha256(str(session_csrf_hash or "").encode("utf-8")).hexdigest()
+
+
+def _restore_coach_session_csrf_hash(session_key: str) -> str:
+    """Resolve a persisted session binding without storing a raw CSRF token."""
+    normalized_key = str(session_key or "").strip()
+    if not normalized_key:
+        return ""
+    now = time.time()
+    with SESSION_LOCK, DB_LOCK, database() as db:
+        rows = db.execute("SELECT csrf_hash, expires_at FROM sessions").fetchall()
+    for row in rows:
+        csrf_hash = str(row.get("csrf_hash") or "")
+        if not csrf_hash or float(row.get("expires_at") or 0) <= now:
+            continue
+        if hmac.compare_digest(_coach_session_key(csrf_hash), normalized_key):
+            return csrf_hash
+    return ""
+
+
+def _coach_command_receipt(value: Any) -> dict[str, Any]:
+    try:
+        receipt = json.loads(value or "{}") if not isinstance(value, dict) else dict(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        receipt = {}
+    return receipt if isinstance(receipt, dict) else {}
+
+
+def _merge_coach_command_receipt(client_turn_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        receipt = _coach_command_receipt((row or {}).get("receipt"))
+        receipt.update(updates)
+        db.execute(
+            "UPDATE coach_commands SET receipt=?, updated_at=? WHERE client_turn_id=? AND status IN ('queued', 'running')",
+            (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+        )
+    return receipt
+
+
+def _active_background_coach_job(session_csrf_hash: str, operation_id: str | None = None) -> dict[str, Any] | None:
+    session_key = _coach_session_key(session_csrf_hash)
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT client_turn_id, status, receipt, updated_at FROM coach_commands "
+            "WHERE status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 50"
+        ).fetchall()
+    for row in rows:
+        receipt = _coach_command_receipt(row.get("receipt"))
+        if receipt.get("mode") != "background" or receipt.get("session_key") != session_key:
+            continue
+        if operation_id and str(receipt.get("operation_id") or "") != str(operation_id):
+            continue
+        return {**dict(row), "receipt": receipt}
+    return None
+
+
+def enqueue_background_coach_job(
+    message: str,
+    client_turn_id: str,
+    session_csrf_hash: str,
+    *,
+    operation_id: str | None = None,
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Persist a long Coach turn before returning control to the browser."""
+    message = str(message or "").strip()
+    client_turn_id = str(client_turn_id or "").strip()
+    scope = coach_plan_scope(message)
+    if not message or len(message) > 12_000:
+        raise AppError(400, "Die Coach-Nachricht ist leer oder zu lang.", reason="invalid_chat_message")
+    if not client_turn_id or len(client_turn_id) > 120:
+        raise AppError(400, "client_turn_id muss eine begrenzte, nicht leere Kennung sein.", reason="invalid_client_turn")
+    if not scope["background"]:
+        raise AppError(400, "Diese Coach-Anfrage benötigt keinen Hintergrundauftrag.", reason="background_not_required")
+    active = _active_background_coach_job(session_csrf_hash)
+    if active and active["client_turn_id"] != client_turn_id:
+        raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
+    operation_id = operation_id or uuid.uuid4().hex
+    now = utc_now()
+    session_key = _coach_session_key(session_csrf_hash)
+    with DB_LOCK, database() as db:
+        existing = db.execute(
+            "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)
+        ).fetchone()
+        if existing:
+            receipt = _coach_command_receipt(existing.get("receipt"))
+            if receipt.get("mode") != "background":
+                raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
+            return {
+                "status": "completed" if existing.get("status") == "completed" else "queued",
+                "mode": "background",
+                "operation_id": receipt.get("operation_id"),
+                "plan_scope": receipt.get("plan_scope") or scope,
+            }
+        user_message = CHAT_REPOSITORY.add(db, "user", message)
+        receipt = {
+            "status": "queued",
+            "mode": "background",
+            "phase": "queued",
+            "operation_id": operation_id,
+            "session_key": session_key,
+            "user_message_id": user_message["id"],
+            "plan_scope": scope,
+        }
+        db.execute(
+            "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) "
+            "VALUES (?, ?, NULL, '{}', 'local', 'queued', ?, ?, ?)",
+            (uuid.uuid4().hex, client_turn_id, json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, now),
+        )
+    publish_state_event("coach", {"message_id": user_message.get("id"), "role": "user"})
+    with CHAT_STREAM_LOCK:
+        COACH_JOB_CANCEL_EVENTS[operation_id] = cancel_event or threading.Event()
+    COACH_JOB_WAKE.set()
+    return {"status": "queued", "mode": "background", "operation_id": operation_id, "plan_scope": scope}
+
+
 def register_chat_stream(session_csrf_hash: str) -> tuple[str, threading.Event]:
     operation_id = uuid.uuid4().hex
     cancel_event = threading.Event()
@@ -13238,13 +13566,26 @@ def register_chat_stream(session_csrf_hash: str) -> tuple[str, threading.Event]:
 def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:
     with CHAT_STREAM_LOCK:
         stream = CHAT_STREAMS.get(session_csrf_hash)
-        if not stream:
+        if stream:
+            if operation_id and str(operation_id) != stream["operation_id"]:
+                raise AppError(409, "Die angegebene Coach-Anfrage ist nicht mehr aktiv.")
+            stream["cancel_event"].set()
+            response = getattr(stream["cancel_event"], "_openai_response", None)
+            result = {"status": "cancelling", "operation_id": stream["operation_id"]}
+        else:
+            response = None
+            result = None
+    if result is None:
+        job = _active_background_coach_job(session_csrf_hash, str(operation_id or "") or None)
+        if not job:
             return {"status": "not_running"}
-        if operation_id and str(operation_id) != stream["operation_id"]:
-            raise AppError(409, "Die angegebene Coach-Anfrage ist nicht mehr aktiv.")
-        stream["cancel_event"].set()
-        response = getattr(stream["cancel_event"], "_openai_response", None)
-        result = {"status": "cancelling", "operation_id": stream["operation_id"]}
+        receipt = job["receipt"]
+        _merge_coach_command_receipt(job["client_turn_id"], {"cancel_requested": True, "phase": "cancelling"})
+        with CHAT_STREAM_LOCK:
+            background_event = COACH_JOB_CANCEL_EVENTS.get(str(receipt.get("operation_id") or ""))
+            if background_event is not None:
+                background_event.set()
+        return {"status": "cancelling", "operation_id": receipt.get("operation_id")}
     if response is not None:
         try:
             response.close()
@@ -13955,12 +14296,16 @@ def _chat_with_structured_coach_impl(
     session_csrf_hash: str = "",
     refresh_error: str | None = None,
     duplicate_activity: dict[str, Any] | None = None,
+    background_job: bool = False,
 ) -> dict[str, Any]:
+    background_receipt: dict[str, Any] = {}
     with DB_LOCK, database() as db:
         existing_command = db.execute("SELECT receipt, status, updated_at FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        background_receipt = _coach_command_receipt((existing_command or {}).get("receipt"))
+        background_owned = bool(background_job and background_receipt.get("mode") == "background")
         if existing_command and existing_command.get("status") == "running":
             age = db.execute("SELECT (julianday('now') - julianday(?)) * 86400 AS age", (existing_command.get("updated_at"),)).fetchone()
-            if float((age or {}).get("age") or 0) > COACH_COMMAND_STALE_SECONDS:
+            if not background_owned and float((age or {}).get("age") or 0) > COACH_COMMAND_STALE_SECONDS:
                 try:
                     recovered = json.loads(existing_command.get("receipt") or "{}")
                 except (TypeError, ValueError, json.JSONDecodeError):
@@ -13972,13 +14317,15 @@ def _chat_with_structured_coach_impl(
                 return recovered
         if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
             return json.loads(existing_command["receipt"])
-        if existing_command:
+        if existing_command and not background_owned:
             raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
-        db.execute(
-            "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)",
-            (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent, ensure_ascii=False, separators=(",", ":")), str(intent.get("target_system") or "none"), intent.get("artifact_id"), utc_now(), utc_now()),
-        )
-    add_message("user", message)
+        if not existing_command:
+            db.execute(
+                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)",
+                (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent, ensure_ascii=False, separators=(",", ":")), str(intent.get("target_system") or "none"), intent.get("artifact_id"), utc_now(), utc_now()),
+            )
+    if not background_owned:
+        add_message("user", message)
     model_instructions = build_training_context()
     if refresh_error:
         model_instructions += (
@@ -14015,11 +14362,29 @@ def _chat_with_structured_coach_impl(
         if on_text_delta is not None:
             on_text_delta(delta)
 
-    try:
-        response = (
-            responses_stream_request(request_payload, on_initial_text_delta, cancel_event)
-            if on_text_delta is not None else responses_request(request_payload)
+    resume_response_id = str(background_receipt.get("openai_response_id") or "") if background_owned else ""
+
+    def checkpoint_response_id(response_id: str) -> None:
+        _merge_coach_command_receipt(
+            client_turn_id,
+            {"status": "running", "phase": "waiting_openai", "openai_response_id": response_id},
         )
+
+    def request_response(payload: dict[str, Any], *, resume_id: str = "") -> dict[str, Any]:
+        if background_owned:
+            return responses_background_request(
+                payload,
+                response_id=resume_id or None,
+                on_response_id=checkpoint_response_id,
+                cancel_event=cancel_event,
+            )
+        return (
+            responses_stream_request(payload, on_initial_text_delta, cancel_event)
+            if on_text_delta is not None else responses_request(payload)
+        )
+
+    try:
+        response = request_response(request_payload, resume_id=resume_response_id)
     except AppError as exc:
         # A stopped container can leave the remote conversation with an
         # unresolved response/tool state. Recover once before any local tool
@@ -14041,15 +14406,14 @@ def _chat_with_structured_coach_impl(
             extra={"event": "openai_conversation_recovered", "context": {"reason": exc.reason}},
         )
         capture_diagnostic_event("openai_conversation_recovered", {"service": "openai", "reason": exc.reason})
-        response = (
-            responses_stream_request(request_payload, on_initial_text_delta, cancel_event)
-            if on_text_delta is not None else responses_request(request_payload)
-        )
-    sync_job_ids: list[str] = []
-    command_receipts: list[dict[str, Any]] = []
+        response = request_response(request_payload)
+    sync_job_ids: list[str] = list(background_receipt.get("sync_job_ids") or []) if background_owned else []
+    command_receipts: list[dict[str, Any]] = list(background_receipt.get("command_receipts") or []) if background_owned else []
     tool_outputs: list[dict[str, Any]] = []
-    executed_tools: set[str] = set()
-    rounds = 0
+    executed_tools: set[str] = {
+        str(item.get("tool") or "") for item in command_receipts if isinstance(item, dict) and item.get("tool")
+    }
+    rounds = int(background_receipt.get("tool_rounds") or 0) if background_owned else 0
     while rounds < COACH_TOOL_MAX_ROUNDS:
         tool_outputs = []
         for item in response.get("output", []):
@@ -14085,15 +14449,20 @@ def _chat_with_structured_coach_impl(
                             db.execute("UPDATE coach_commands SET artifact_id=?, updated_at=? WHERE client_turn_id=? AND status='running'", (result["artifact_id"], utc_now(), client_turn_id))
                 except (AppError, TypeError, ValueError, json.JSONDecodeError) as exc:
                     result = {"ok": False, "error": redact_text(str(exc))[:1000]}
-            command_receipts.append({"call_id": call_id, "tool": name, "result": result})
+            if not any(isinstance(entry, dict) and entry.get("call_id") == call_id for entry in command_receipts):
+                command_receipts.append({"call_id": call_id, "tool": name, "result": result})
             executed_tools.add(name)
             remember_chat_tool_result(call_id, name, result)
             tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
-            with DB_LOCK, database() as db:
-                db.execute(
-                    "UPDATE coach_commands SET receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
-                    (json.dumps({"message": None, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": rounds, "status": "running"}, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
-                )
+            running_receipt = {"message": None, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": rounds, "status": "running"}
+            if background_owned:
+                _merge_coach_command_receipt(client_turn_id, running_receipt)
+            else:
+                with DB_LOCK, database() as db:
+                    db.execute(
+                        "UPDATE coach_commands SET receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+                        (json.dumps(running_receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+                    )
         if not tool_outputs:
             break
         rounds += 1
@@ -14114,7 +14483,7 @@ def _chat_with_structured_coach_impl(
             "max_output_tokens": coach_output_token_budget(message, followup=True),
             "truncation": "auto",
         }
-        response = responses_stream_request(followup_payload, on_text_delta, cancel_event) if on_text_delta is not None else responses_request(followup_payload)
+        response = request_response(followup_payload)
     text = output_text(response)
     if not text:
         text = "Die Coach-Antwort enthält keine Textantwort. Bitte erneut versuchen."
@@ -14123,7 +14492,7 @@ def _chat_with_structured_coach_impl(
         proposal = duplicate_activity_delete_preview(duplicate_activity, session_csrf_hash)
         proposed_actions.append(proposal["proposed_action"])
     receipt = {
-        "message": add_message("assistant", text),
+        "message": None,
         "command_receipts": command_receipts,
         "sync_job_ids": sync_job_ids,
         "intent": intent,
@@ -14131,10 +14500,13 @@ def _chat_with_structured_coach_impl(
         "proposed_actions": proposed_actions,
     }
     with DB_LOCK, database() as db:
+        assistant_message = CHAT_REPOSITORY.add(db, "assistant", text)
+        receipt["message"] = assistant_message
         db.execute(
             "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
             (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
         )
+    publish_state_event("coach", {"message_id": assistant_message.get("id"), "role": "assistant"})
     return receipt
 
 
@@ -14150,8 +14522,14 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         "status": "failed",
         "error": safe_error,
     }
+    assistant_message: dict[str, Any] | None = None
     with DB_LOCK, database() as db:
-        existing = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        existing = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        if existing and existing.get("status") == "completed" and existing.get("receipt"):
+            completed_receipt = _coach_command_receipt(existing.get("receipt"))
+            if completed_receipt.get("status") in {"failed", "cancelled"}:
+                return completed_receipt
+        background_meta: dict[str, Any] = {}
         if existing and existing.get("receipt"):
             try:
                 partial = json.loads(existing["receipt"])
@@ -14161,10 +14539,25 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
                 receipt["command_receipts"] = partial.get("command_receipts") or []
                 receipt["sync_job_ids"] = partial.get("sync_job_ids") or []
                 receipt["tool_rounds"] = partial.get("tool_rounds") or 0
+                if partial.get("mode") == "background":
+                    background_meta = {
+                        key: partial.get(key) for key in (
+                            "mode", "operation_id", "session_key", "user_message_id", "plan_scope"
+                        ) if partial.get(key) is not None
+                    }
+        if background_meta:
+            receipt.update(background_meta)
+            cancelled = isinstance(error, AppError) and error.reason == "chat_cancelled"
+            receipt["status"] = "cancelled" if cancelled else "failed"
+            user_text = "Die Hintergrundplanung wurde abgebrochen." if cancelled else f"Die Hintergrundplanung ist fehlgeschlagen: {safe_error}"
+            assistant_message = CHAT_REPOSITORY.add(db, "assistant", user_text)
+            receipt["message"] = assistant_message
         db.execute(
             "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
             (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
         )
+    if assistant_message is not None:
+        publish_state_event("coach", {"message_id": assistant_message.get("id"), "role": "assistant"})
     return receipt
 
 
@@ -14234,14 +14627,24 @@ def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
     """Return the status of the chat operation belonging to this session."""
     with CHAT_STREAM_LOCK:
         stream = CHAT_STREAMS.get(session_csrf_hash)
-        if not stream:
-            return {"status": "idle", "operation_id": None}
-        return {"status": "running", "operation_id": stream["operation_id"]}
+        if stream:
+            return {"status": "running", "operation_id": stream["operation_id"]}
+    job = _active_background_coach_job(session_csrf_hash)
+    if not job:
+        return {"status": "idle", "operation_id": None}
+    receipt = job["receipt"]
+    return {
+        "status": "running",
+        "operation_id": receipt.get("operation_id"),
+        "mode": "background",
+        "phase": receipt.get("phase") or job.get("status"),
+        "plan_scope": receipt.get("plan_scope") or {},
+    }
 
 
 @maintenance_operation
 @serialise_conversation
-def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str | None = None) -> dict[str, Any]:
+def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str | None = None, background_job: bool = False) -> dict[str, Any]:
     _raise_chat_cancelled(cancel_event)
     message = message.strip()
     if not message:
@@ -14249,15 +14652,19 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     if len(message) > 12_000:
         raise AppError(400, "Die Nachricht ist zu lang.")
     structured_intent: dict[str, Any] | None = None
+    background_receipt: dict[str, Any] = {}
+    existing_conversation_id = ""
     if client_turn_id is not None:
         client_turn_id = str(client_turn_id).strip()
         if not client_turn_id or len(client_turn_id) > 120:
             raise AppError(400, "client_turn_id muss eine begrenzte, nicht leere Kennung sein.", reason="invalid_client_turn")
         with DB_LOCK, database() as db:
-            existing_command = db.execute("SELECT receipt, status, updated_at FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+            existing_command = db.execute("SELECT conversation_id, intent, receipt, status, updated_at FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+            background_receipt = _coach_command_receipt((existing_command or {}).get("receipt"))
+            background_owned = bool(background_job and background_receipt.get("mode") == "background")
             if existing_command and existing_command.get("status") == "running":
                 age = db.execute("SELECT (julianday('now') - julianday(?)) * 86400 AS age", (existing_command.get("updated_at"),)).fetchone()
-                if float((age or {}).get("age") or 0) > COACH_COMMAND_STALE_SECONDS:
+                if not background_owned and float((age or {}).get("age") or 0) > COACH_COMMAND_STALE_SECONDS:
                     try:
                         recovered = json.loads(existing_command.get("receipt") or "{}")
                     except (TypeError, ValueError, json.JSONDecodeError):
@@ -14272,16 +14679,32 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                 return json.loads(existing_command["receipt"])
             except (TypeError, ValueError, json.JSONDecodeError):
                 pass
-        if existing_command:
+        if existing_command and not background_owned:
             raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
-        conversation_id = ensure_conversation()
-        structured_intent = request_coach_intent(message, conversation_id)
+        existing_conversation_id = str((existing_command or {}).get("conversation_id") or "")
+        conversation_id = existing_conversation_id or ensure_conversation()
+        try:
+            candidate_intent = json.loads((existing_command or {}).get("intent") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            candidate_intent = {}
+        if background_owned and isinstance(candidate_intent, dict) and candidate_intent.get("intent"):
+            structured_intent = candidate_intent
+        else:
+            structured_intent = request_coach_intent(message, conversation_id)
+        if background_owned:
+            with DB_LOCK, database() as db:
+                db.execute(
+                    "UPDATE coach_commands SET conversation_id=?, intent=?, target_system=?, status='running', updated_at=? WHERE client_turn_id=?",
+                    (conversation_id, json.dumps(structured_intent, ensure_ascii=False, separators=(",", ":")), str(structured_intent.get("target_system") or "none"), utc_now(), client_turn_id),
+                )
+            _merge_coach_command_receipt(client_turn_id, {"status": "running", "phase": "preparing"})
         refresh_error = None
         latest_activity_analysis = prompt_requests_latest_activity_analysis(message)
-        if latest_activity_analysis or (prompt_requests_fresh_data(message) and not (
+        resuming_background_response = bool(background_owned and background_receipt.get("openai_response_id"))
+        if not resuming_background_response and (latest_activity_analysis or (prompt_requests_fresh_data(message) and not (
             structured_intent.get("operation") == "start_provider_refresh"
             and structured_intent.get("target_system") == "intervals"
-        )):
+        ))):
             try:
                 sync_result = sync_intervals(
                     "Chat-Anfrage",
@@ -14325,6 +14748,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             session_csrf_hash=session_csrf_hash,
             refresh_error=refresh_error,
             duplicate_activity=duplicate_activity,
+            background_job=background_owned,
         )
         if (
             prompt_requests_morning_checkin(message)
@@ -14621,6 +15045,152 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     return receipt
 
 
+def resume_interrupted_coach_jobs() -> int:
+    """Requeue persisted background turns after a process restart."""
+    resumed = 0
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT client_turn_id, status, receipt FROM coach_commands WHERE status IN ('queued', 'running') ORDER BY created_at"
+        ).fetchall()
+        for row in rows:
+            receipt = _coach_command_receipt(row.get("receipt"))
+            if receipt.get("mode") != "background":
+                continue
+            receipt["status"] = "queued"
+            receipt["phase"] = "resuming" if receipt.get("openai_response_id") else "queued"
+            db.execute(
+                "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? WHERE client_turn_id=?",
+                (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, row["client_turn_id"]),
+            )
+            resumed += 1
+    if resumed:
+        COACH_JOB_WAKE.set()
+    return resumed
+
+
+def _claim_background_coach_job() -> dict[str, Any] | None:
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT * FROM coach_commands WHERE status='queued' ORDER BY created_at LIMIT 20"
+        ).fetchall()
+        for row in rows:
+            receipt = _coach_command_receipt(row.get("receipt"))
+            if receipt.get("mode") != "background":
+                continue
+            try:
+                retry_after = float(receipt.get("retry_after") or 0)
+            except (TypeError, ValueError):
+                retry_after = 0
+            if retry_after > time.time():
+                continue
+            claimed = db.execute(
+                "UPDATE coach_commands SET status='running', updated_at=? WHERE client_turn_id=? AND status='queued'",
+                (utc_now(), row["client_turn_id"]),
+            ).rowcount
+            if claimed == 1:
+                return {**dict(row), "status": "running", "receipt": receipt}
+    return None
+
+
+def _requeue_background_coach_job(client_turn_id: str, reason: str) -> None:
+    """Return a job to the durable queue after transient Coach contention."""
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        if not row:
+            return
+        receipt = _coach_command_receipt(row.get("receipt"))
+        try:
+            attempts = max(0, int(receipt.get("contention_attempts") or 0)) + 1
+        except (TypeError, ValueError):
+            attempts = 1
+        delay = min(60, 2 ** min(attempts, 5))
+        receipt.update({
+            "status": "queued",
+            "phase": "waiting_for_coach_slot",
+            "retry_reason": reason,
+            "contention_attempts": attempts,
+            "retry_after": time.time() + delay,
+        })
+        db.execute(
+            "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+            (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+        )
+    COACH_JOB_WAKE.set()
+
+
+def _background_coach_message(job: dict[str, Any]) -> str:
+    receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
+    message_id = receipt.get("user_message_id")
+    with DB_LOCK, database() as db:
+        row = db.execute("SELECT content FROM messages WHERE id=? AND role='user'", (message_id,)).fetchone()
+    if not row or not str(row.get("content") or "").strip():
+        raise AppError(500, "Die gespeicherte Coach-Nachricht fehlt.", reason="background_message_missing")
+    return str(row["content"])
+
+
+def _run_background_coach_job(job: dict[str, Any]) -> None:
+    receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
+    operation_id = str(receipt.get("operation_id") or "")
+    client_turn_id = str(job.get("client_turn_id") or "")
+    session_csrf_hash = _restore_coach_session_csrf_hash(receipt.get("session_key"))
+    with CHAT_STREAM_LOCK:
+        cancel_event = COACH_JOB_CANCEL_EVENTS.setdefault(operation_id, threading.Event())
+    if receipt.get("cancel_requested"):
+        cancel_event.set()
+    try:
+        message = _background_coach_message(job)
+        _merge_coach_command_receipt(client_turn_id, {"status": "running", "phase": "preparing"})
+        chat_with_coach(
+            message,
+            cancel_event=cancel_event,
+            session_csrf_hash=session_csrf_hash,
+            client_turn_id=client_turn_id,
+            background_job=True,
+        )
+    except AppError as exc:
+        if exc.reason in {"chat_queue_full", "chat_request_timeout"}:
+            _requeue_background_coach_job(client_turn_id, exc.reason)
+            LOGGER.warning(
+                "Persistent Coach background job requeued after contention",
+                extra={"event": "coach_background_job_requeued", "context": {"operation_id": operation_id, "reason": exc.reason}},
+            )
+        else:
+            _persist_structured_command_failure(client_turn_id, {}, exc)
+
+    except Exception as exc:
+        _persist_structured_command_failure(client_turn_id, {}, exc)
+        LOGGER.error(
+            "Persistent Coach background job failed",
+            extra={"event": "coach_background_job_failed", "context": {"operation_id": operation_id, "error_code": operation_error_code(exc)}},
+        )
+    finally:
+        with CHAT_STREAM_LOCK:
+            COACH_JOB_CANCEL_EVENTS.pop(operation_id, None)
+
+
+def _coach_job_worker_loop() -> None:
+    while not COACH_JOB_STOP.is_set():
+        job = _claim_background_coach_job()
+        if job:
+            _run_background_coach_job(job)
+            continue
+        COACH_JOB_WAKE.wait(5)
+        COACH_JOB_WAKE.clear()
+
+
+def start_coach_job_worker() -> None:
+    """Start the single durable Coach worker after database initialization."""
+    global COACH_JOB_WORKER
+    with COACH_JOB_WORKER_LOCK:
+        if COACH_JOB_WORKER is not None and COACH_JOB_WORKER.is_alive():
+            return
+        resume_interrupted_coach_jobs()
+        COACH_JOB_STOP.clear()
+        COACH_JOB_WORKER = threading.Thread(target=_coach_job_worker_loop, name="coach-job-worker", daemon=True)
+        COACH_JOB_WORKER.start()
+
+
 def local_now() -> datetime:
     configured_timezone = timezone_name(get_profile().get("timezone"))
     try:
@@ -14780,6 +15350,7 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
             "library": [],
             "activities": [],
             "planned": local_planned,
+            "training_calendar": local_planned,
             "calendar": local_calendar_events(local_planned, competitions, relevant_external),
             "planning_view": {"source": "local", "local_count": len(local_planned), "remote_count": 0, "items": local_planned, "provider_window": {}},
             "planning_compliance": [],
@@ -14836,16 +15407,18 @@ def public_plan_state(local_only: bool = False) -> dict[str, Any]:
     activities = snapshot.get("recent_activities", []) if isinstance(snapshot, dict) else []
     activities = activities[:1000] if isinstance(activities, list) else []
     activities = activities_with_feedback(activities)
-    planning_compliance = planning_compliance_state(planned, activities)
+    planned, planning_compliance = planning_compliance_state(planned, activities)
     weather = weather_state(planned, refresh=not local_only)
     if weather.pop("_refreshed", False):
         check_adaptive_replan("weather")
     planned_with_weather = add_weather_to_planned(planned, weather)
+    training_calendar = training_calendar_items(planned_with_weather, activities)
     provider_sync = snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
     calendar_window = provider_sync.get("calendar_window", {}) if isinstance(provider_sync, dict) else {}
     return {
         "plans": list_training_plans(limit=30),
         "planned": planned_with_weather,
+        "training_calendar": training_calendar,
         "calendar": local_calendar_events(planned, list_competitions(), list_external_calendar_events(1000, training_relevant_only=True)),
         "planning_view": {
             "source": "local", "local_count": len(planned),
@@ -14931,6 +15504,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "library": list_workout_library(include_archived=True),
             "activities": activities,
             "planned": planned_with_weather,
+            "training_calendar": training_calendar_items(planned_with_weather, activities),
             "calendar": local_calendar_events(planned, list_competitions(), external_calendar.get("events") if isinstance(external_calendar, dict) else []),
             "planning_view": {
                 "source": "local",
@@ -16136,6 +16710,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def handle_chat_stream(self, session: dict[str, Any]) -> None:
         payload = self.read_json()
+        message = str(payload.get("message", ""))
         client_turn_id = str(payload.get("client_turn_id") or "").strip()
         if not client_turn_id:
             raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
@@ -16161,8 +16736,18 @@ class RequestHandler(BaseHTTPRequestHandler):
                 send_event("started", {"operation_id": operation_id})
             except ClientDisconnected:
                 client_connected = False
+            if coach_plan_scope(message)["background"]:
+                job = enqueue_background_coach_job(
+                    message,
+                    client_turn_id,
+                    session["csrf_hash"],
+                    operation_id=operation_id,
+                    cancel_event=cancel_event,
+                )
+                send_event("background", job)
+                return
             result = chat_with_coach(
-                str(payload.get("message", "")),
+                message,
                 on_text_delta=lambda delta: send_event("delta", {"text": delta}),
                 cancel_event=cancel_event,
                 session_csrf_hash=session["csrf_hash"],
@@ -16219,7 +16804,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 client_turn_id = str(payload.get("client_turn_id") or "").strip()
                 if not client_turn_id:
                     raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
-                self.send_json(200, chat_with_coach(str(payload.get("message", "")), session_csrf_hash=session["csrf_hash"], client_turn_id=client_turn_id))
+                message = str(payload.get("message", ""))
+                if coach_plan_scope(message)["background"]:
+                    self.send_json(202, enqueue_background_coach_job(message, client_turn_id, session["csrf_hash"]))
+                else:
+                    self.send_json(200, chat_with_coach(message, session_csrf_hash=session["csrf_hash"], client_turn_id=client_turn_id))
             elif path == "/api/sync":
                 payload = self.read_json()
                 days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))
@@ -16603,6 +17192,7 @@ def main() -> None:
     server = CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
     server.allow_reuse_address = True
     start_sync_job_worker()
+    start_coach_job_worker()
     enqueue_startup_sync_jobs()
     threading.Thread(target=daily_sync_loop, daemon=True).start()
     LOGGER.info("Intervals Coach listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})

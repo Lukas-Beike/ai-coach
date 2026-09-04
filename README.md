@@ -30,9 +30,12 @@ It is not intended to be exposed directly to the public internet.
   calendar is grouped into collapsible full weeks with compact volume summaries.
   The More tab controls how many past and future weeks are displayed.
   Intervals.icu planned workouts are matched to completed activities through
-  their pairing (with a conservative same-day/sport fallback) and show
-  workout and weekly compliance percentages. The comparison uses training
-  load when available, otherwise moving/elapsed time.
+  their pairing (with a conservative same-day/sport fallback). The training
+  calendar also shows unmatched completed activities for past days and today.
+  Completed cards expose actual duration, distance, training load, RPE, and
+  available sport metrics without inventing missing values. Matched cards show
+  plan-versus-actual volume; the comparison uses training load when available,
+  otherwise moving/elapsed time.
 - If adaptive planning shortens a local workout or reduces its intensity due
   to a read-only iCalendar appointment, the linked planned workout records
   that reason and the original versus adjusted duration after approval.
@@ -67,7 +70,10 @@ It is not intended to be exposed directly to the public internet.
   Markdown, and **Abbrechen** cancels the active request while **Steuern**
   remains a separate queued follow-up action. Reloading the page or losing the
   streaming connection does not cancel the server-side coach request; its
-  persisted answer appears in the chat after the next load.
+  persisted answer appears in the chat after the next load. Planning requests
+  longer than seven calendar days or containing more than seven requested
+  units are persisted as background jobs and use OpenAI background responses;
+  their response ID and progress survive a page reload or process restart.
 - The Coach start card contains only contextual quick actions, not provider
   connection badges. The morning check-in disappears after it completed for
   the athlete's local day. "Plan anpassen" appears only for an unapplied
@@ -106,8 +112,8 @@ It is not intended to be exposed directly to the public internet.
   a full Intervals.icu resync.
 - Multi-week plans and library templates are managed through the Coach. The
   Geplant view has read-only Übersicht and Bibliothek segments: the overview
-  shows dated local sessions by week, while the library groups active workout
-  templates by sport.
+  shows the combined planned and completed training calendar by week, while the
+  library groups active workout templates by sport.
 - Existing training plans can be renamed, have their goal, status, or date range
   changed, and can be deleted directly through the Coach. Plan deletion removes
   plan metadata only; scheduled local workout units remain untouched.
@@ -186,7 +192,9 @@ It is not intended to be exposed directly to the public internet.
   token budget; requests continue until OpenAI rejects them because the
   account or project quota is exhausted. An explicitly cancelled stream never
   executes a partial tool call; a lost browser connection leaves the request
-  running so its completed answer can be recovered after reload.
+  running so its completed answer can be recovered after reload. One-week
+  plans and requests for at most seven units remain synchronous; larger plans
+  return control to the browser immediately and are polled from durable state.
 
 ## Loading and synchronization
 
@@ -770,7 +778,10 @@ merge successful update pull requests.
 
 The required `Codex code review` check uses OpenAI's official Codex pull-request
 review workflow for pull requests to `develop` and `main`, then posts Codex's
-final review message on the pull request. Configure an `OPENAI_API_KEY`
+final review message on the pull request. The review prompt is loaded from the
+trusted target-branch commit, not from the pull request checkout. The check
+fails when Codex reports one or more actionable findings, and fails closed if
+the required status marker is missing or invalid. Configure an `OPENAI_API_KEY`
 repository Actions secret before enabling the check. It runs only for pull
 requests from branches in this repository, so forks never receive access to
 that secret. Codex receives a read-only workspace and no application, provider,
