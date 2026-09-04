@@ -1,12 +1,15 @@
+const path = require("node:path");
 const { defineConfig, devices } = require("@playwright/test");
+
+const authStatePath = path.join(__dirname, "playwright", ".auth", "user.json");
 
 module.exports = defineConfig({
   testDir: "./e2e",
+  globalSetup: "./e2e/auth.setup.js",
   timeout: 60_000,
   expect: { timeout: 30_000 },
   fullyParallel: true,
-  // The fixture server intentionally rate-limits login attempts by client IP.
-  // Run the shared-fixture browser scenarios serially to avoid cross-test auth state.
+  // Keep one worker because the scenarios share and deliberately manipulate fixture data.
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -15,6 +18,7 @@ module.exports = defineConfig({
     : "list",
   use: {
     baseURL: process.env.E2E_BASE_URL || "http://127.0.0.1:8090",
+    storageState: authStatePath,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",

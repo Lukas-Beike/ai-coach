@@ -359,9 +359,13 @@ and cannot be recovered if lost. The password must be at least 12 characters
 long.
 
 The database is created with the current SQLCipher schema on first startup.
-Restore accepts only a complete database with that current schema and checks
-its integrity before replacing the active file. The public-calendar candidate
-relation explicitly cascades when its source is deleted.
+Startup never changes an existing database schema: if its application tables,
+columns, or named indexes differ from the current schema, startup stops. This
+release therefore expects a newly created database instead of an older
+database being reused. Restore accepts only a database with that exact current
+schema and checks its integrity before replacing the active file. The
+public-calendar candidate relation explicitly cascades when its source is
+deleted.
 
 `/api/health` is a liveness probe: it only confirms that the HTTP process can
 answer. `/api/readiness` is a separate infrastructure probe and returns HTTP
@@ -429,8 +433,7 @@ exports, and logs.
 The feed is read at startup, once per day, or on demand with **Synchronisieren**
 in the More tab. Daily synchronization uses the athlete's validated
 IANA timezone and stores a separate local execution date for each provider.
-Existing UTC timestamps are converted lazily when the local marker is missing;
-a successful manual sync counts for that provider's current local day. Events
+Successful manual synchronization counts for the provider's current local day. Events
 are supplied to the Coach as read-only scheduling context.
 A successful sync keeps events from today through the next
 8 weeks (56 days). A failed refresh leaves the last successful event set in place and

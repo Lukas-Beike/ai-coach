@@ -19,7 +19,6 @@ JOB_TYPES = frozenset({
     "plan_push",
     "competition_push",
     "historical_backfill",
-    "body_battery_retry",
 })
 JOB_STATUSES = frozenset({"queued", "running", "completed", "partial", "failed"})
 ITEM_STATUSES = frozenset({"queued", "running", "completed", "partial", "failed", "skipped"})
