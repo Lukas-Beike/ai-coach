@@ -105,8 +105,9 @@ It is not intended to be exposed directly to the public internet.
   reconciles it before creating it again; local templates are never removed by
   a full Intervals.icu resync.
 - Multi-week plans and library templates are managed through the Coach. The
-  Bibliothek view is intentionally read-only and shows the individual active
-  workout templates grouped by sport.
+  Geplant view has read-only Übersicht and Bibliothek segments: the overview
+  shows dated local sessions by week, while the library groups active workout
+  templates by sport.
 - Existing training plans can be renamed, have their goal, status, or date range
   changed, and can be deleted directly through the Coach. Plan deletion removes
   plan metadata only; scheduled local workout units remain untouched.
@@ -124,9 +125,7 @@ It is not intended to be exposed directly to the public internet.
   coach can propose a conservative sport-pause forecast; after explicit approval
   in Coach Chat, future local sessions are replaced with illness-pause entries and
   the corresponding future check-in days filled.
-  The Plan tab combines each dated check-in with recovery signals, weather,
-  planned sessions, and read-only calendar appointments. Check-ins can be entered
-  or edited through Coach Chat and the daily editor. Check-in dates and daily training
+  Check-ins can be entered or edited through Coach Chat. Check-in dates and daily training
   boundaries use the saved IANA profile timezone, and future check-ins are
   rejected. The Heute tab provides a compact, read-only coach-oriented daily
   synthesis of the local morning check-in, readiness/recovery signals, today's
@@ -258,11 +257,12 @@ search), while plans, performance, profile, feedback, and the workout library
 are loaded separately. The activity view can request the next page without
 reloading the complete application state.
 
-The `#plan` route is a read-only Bibliothek view containing the individual
-active workout templates grouped by sport. It has no conflict resolution,
-multi-selection, local marking, manual scheduling, editing, or synchronization
-controls. Planning, template management, competitions, multi-week plans, and
-explicit remote synchronization are handled through the Coach.
+The `#plan/overview` and `#plan/library` routes form the read-only Geplant view.
+The overview shows dated local units in a weekly calendar and the library shows
+active workout templates grouped by sport. Neither segment contains planning,
+deletion, editing, or synchronization controls. Planning, template management,
+competitions, multi-week plans, and explicit remote synchronization are handled
+through the Coach.
 
 The More view is organized into the deep-linked segments `#more/profile`,
 `#more/connections`, `#more/coach`, `#more/privacy`, and `#more/operations`.
@@ -548,7 +548,8 @@ receives only the structured coaching context required for a request. API keys
 are never sent to the browser or included in the coach context. Text received
 from external services is treated as untrusted data and never as instructions.
 
-Logs record external service, operation, path, duration, and result sizes, but
+Logs record external service, operation, path, duration, result sizes, and safe
+failure classifications, but
 not request/response bodies or credentials. Garmin identity values and private
 calendar URLs are redacted case-insensitively, including URL-encoded forms;
 URL userinfo, known token query parameters, and long credential-like path

@@ -1707,19 +1707,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=165', index)
-        self.assertIn('/navigation.js?v=165', index)
-        self.assertIn('/state.js?v=165', index)
-        self.assertIn('/views.js?v=165', index)
-        self.assertIn('/forms.js?v=165', index)
-        self.assertIn('/components.js?v=165', index)
-        self.assertIn('/app.js?v=165', index)
-        self.assertIn('intervals-coach-v165', service_worker)
-        self.assertIn('"/navigation.js?v=165"', service_worker)
-        self.assertIn('"/state.js?v=165"', service_worker)
-        self.assertIn('"/views.js?v=165"', service_worker)
-        self.assertIn('"/forms.js?v=165"', service_worker)
-        self.assertIn('"/components.js?v=165"', service_worker)
+        self.assertIn('/api.js?v=166', index)
+        self.assertIn('/navigation.js?v=166', index)
+        self.assertIn('/state.js?v=166', index)
+        self.assertIn('/views.js?v=166', index)
+        self.assertIn('/forms.js?v=166', index)
+        self.assertIn('/components.js?v=166', index)
+        self.assertIn('/app.js?v=166', index)
+        self.assertIn('intervals-coach-v166', service_worker)
+        self.assertIn('"/navigation.js?v=166"', service_worker)
+        self.assertIn('"/state.js?v=166"', service_worker)
+        self.assertIn('"/views.js?v=166"', service_worker)
+        self.assertIn('"/forms.js?v=166"', service_worker)
+        self.assertIn('"/components.js?v=166"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1745,8 +1745,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=165'), index.index('/components.js?v=165'))
-        self.assertLess(index.index('/components.js?v=165'), index.index('/app.js?v=165'))
+        self.assertLess(index.index('/forms.js?v=166'), index.index('/components.js?v=166'))
+        self.assertLess(index.index('/components.js?v=166'), index.index('/app.js?v=166'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -1755,7 +1755,7 @@ class CoachTests(unittest.TestCase):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
-        for route in ("coach", "today", "plan", "analysis/performance", "more"):
+        for route in ("coach", "today", "plan/overview", "analysis/performance", "more"):
             self.assertIn(f'href="#{route}"', index)
         self.assertIn('window.addEventListener("hashchange", syncNavigationRoute)', app)
         self.assertIn("window.history.pushState", app)
@@ -1779,12 +1779,11 @@ class CoachTests(unittest.TestCase):
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
         state = (Path(__file__).resolve().parents[1] / "public" / "state.js").read_text(encoding="utf-8")
         styles = (Path(__file__).resolve().parents[1] / "public" / "styles.css").read_text(encoding="utf-8")
-        self.assertIn('id="coachOverview"', index)
-        self.assertIn('id="coachQuickActions"', index)
+        self.assertNotIn('id="coachOverview"', index)
+        self.assertNotIn('Was möchtest du heute klären?', index)
         self.assertNotIn('id="coachProviderStatus"', index)
         self.assertNotIn('id="coachReadyStatus"', index)
-        self.assertIn('id="coachAdjustPlanButton"', index)
-        self.assertIn('>Plan anpassen</button>', index)
+        self.assertNotIn('id="coachAdjustPlanButton"', index)
         self.assertIn('id="coachReceipts"', index)
         self.assertIn('function renderCoachOverview(data)', app)
         self.assertIn('function renderCoachReceipts()', app)
@@ -1810,25 +1809,29 @@ class CoachTests(unittest.TestCase):
         self.assertIn('todayCard("Coach-Einordnung", "today-priority")', today_view)
         self.assertIn('todayCard("Morgen-Check-in", "today-checkin")', today_view)
         self.assertNotIn("todayAction(", today_view)
+        self.assertNotIn('document.createElement("button")', today_view)
 
-    def test_plan_route_is_a_read_only_lazy_paginated_library(self):
+    def test_plan_route_has_read_only_overview_and_library_segments(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
         state = (Path(__file__).resolve().parents[1] / "public" / "state.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
         self.assertIn('plan: "workoutsPanel"', navigation)
-        self.assertNotIn('"plan/calendar": "plan"', navigation)
+        self.assertIn('"plan/overview": "workoutsPanel"', navigation)
+        self.assertIn('"plan/library": "workoutsPanel"', navigation)
         self.assertIn('function ensureRouteData(route = state.route)', app)
         self.assertIn('load("/api/bootstrap?local=1", requested)', app)
         self.assertIn('api("/api/library?limit=100")', app)
-        self.assertIn('function loadMoreLibrary()', app)
-        self.assertIn('aria-label="Trainingsbibliothek"', index)
+        self.assertIn('aria-label="Geplante Einheiten und Trainingsbibliothek"', index)
         self.assertIn('id="library"', index)
-        self.assertNotIn('data-plan-segment', index)
-        self.assertNotIn('id="plannedCalendar"', index)
+        self.assertIn('data-plan-segment="overview"', index)
+        self.assertIn('data-plan-segment="library"', index)
+        self.assertIn('id="plannedCalendar"', index)
         self.assertNotIn('id="trainingPlans"', index)
         self.assertNotIn('id="libraryLoadButton"', index)
-        self.assertNotIn("function renderPlanned(", app)
+        self.assertIn("function renderPlanned(", app)
+        plan_markup = index[index.index('id="workoutsPanel"'):index.index('id="checkinDialog"')]
+        self.assertNotIn("<button", plan_markup)
         self.assertNotIn("planningEditDirty", state)
         self.assertNotIn("plannedWeekOpen", state)
 
@@ -3134,12 +3137,17 @@ class CoachTests(unittest.TestCase):
         server.set_kv("garmin_snapshot", json.dumps({
             "daily_stats": [
                 {
-                    "calendarDate": (today - timedelta(days=offset)).isoformat(),
+                    "calendarDate": today.isoformat(),
+                    "totalSteps": 1,
+                    "floorsAscended": 0,
+                    "totalKilocalories": 10,
+                },
+                *[{
+                    "calendarDate": (today - timedelta(days=offset + 1)).isoformat(),
                     "totalSteps": 1000 + offset * 100,
                     "floorsAscended": 5 + offset,
                     "totalKilocalories": 2000 + offset * 10,
-                }
-                for offset in range(7)
+                } for offset in range(7)],
             ]
         }))
         performance = server.current_performance_context({
@@ -4162,6 +4170,38 @@ class CoachTests(unittest.TestCase):
             command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-structured-1",)).fetchone()
         self.assertEqual(command["status"], "completed")
         self.assertIn("Der Entwurf ist gespeichert.", command["receipt"])
+
+    def test_structured_coach_forces_authorized_plan_commit_in_same_turn(self):
+        intent = {
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan"],
+            "follow_up_operations": ["commit_training_plan"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-stage", "arguments": json.dumps({"payload": {
+                "plan_name": "Direkter Plan", "goal": "Ausdauer", "workouts": [{
+                    "date": "2099-01-01", "sport": "Ride", "name": "Grundlage", "description": "- 30m 60%", "duration_minutes": 30, "target": "POWER", "rationale": "Basis",
+                }],
+            }})}]},
+            {"output": [{"type": "function_call", "name": "commit_training_plan", "call_id": "call-commit", "arguments": "{}"}]},
+            {"output_text": "Der Plan ist lokal gespeichert."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-direct-plan"
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach("Plane mir diese Einheit verbindlich.", client_turn_id="turn-direct-plan")
+        self.assertEqual([item["tool"] for item in result["command_receipts"]], ["stage_training_plan", "commit_training_plan"])
+        self.assertEqual(len(server.list_dated_local_planned_workouts()), 1)
+        self.assertEqual(request.call_args_list[1].args[0]["tool_choice"], {"type": "function", "name": "commit_training_plan"})
+
+    def test_structured_coach_exposes_checkin_and_activity_feedback_tools(self):
+        names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
+        self.assertIn("save_checkin", names)
+        self.assertIn("save_activity_feedback", names)
 
     def test_task9_duplicate_coach_turn_replays_receipt_without_reexecution(self):
         intent = {
@@ -5888,7 +5928,8 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(len(weather["recommendations"]), 1)
         self.assertEqual(weather["recommendations"][0]["event_id"], "ride-1")
         self.assertTrue(weather["recommendations"][0]["suggested_time"].startswith("16:00"))
-        self.assertEqual(weather["recommendations"][0]["availability"], "nach der Arbeit")
+        expected_availability = "Wochenende" if date.fromisoformat(tomorrow).weekday() >= 5 else "nach der Arbeit"
+        self.assertEqual(weather["recommendations"][0]["availability"], expected_availability)
         self.assertEqual(weather["days"][0]["icon"], server.WEATHER_ICONS[1])
         enriched = server.add_weather_to_planned(planned, weather)
         self.assertIn("weather_recommendation", enriched[0])
@@ -6050,16 +6091,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=165"', source)
-        self.assertIn('"/navigation.js?v=165"', source)
-        self.assertIn('"/state.js?v=165"', source)
-        self.assertIn('"/views.js?v=165"', source)
-        self.assertIn('"/forms.js?v=165"', source)
-        self.assertIn('"/components.js?v=165"', source)
+        self.assertIn('"/api.js?v=166"', source)
+        self.assertIn('"/navigation.js?v=166"', source)
+        self.assertIn('"/state.js?v=166"', source)
+        self.assertIn('"/views.js?v=166"', source)
+        self.assertIn('"/forms.js?v=166"', source)
+        self.assertIn('"/components.js?v=166"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=165"', source)
-        self.assertIn('"/icon.svg?v=165"', source)
-        self.assertIn('"/styles.css?v=165"', source)
+        self.assertIn('"/app.js?v=166"', source)
+        self.assertIn('"/icon.svg?v=166"', source)
+        self.assertIn('"/styles.css?v=166"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6241,6 +6282,7 @@ class CoachTests(unittest.TestCase):
         report_text = json.dumps(server.diagnostic_report())
         self.assertNotIn("sk-test-secret-value", report_text)
         self.assertIn("logs", server.diagnostic_report())
+        self.assertIn("openai", server.diagnostic_report())
 
     def test_redaction_covers_garmin_email_encoded_url_and_structural_credentials(self):
         email = "Athlete.Redaction@example.invalid"
@@ -6679,6 +6721,8 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.openai_usage_summary()["last_operation"], "responses_stream_cancelled")
 
     def test_openai_stream_request_timeout_is_safe_and_records_provider_failure(self):
+        server.initialise_logging()
+
         class TimeoutResponse:
             headers = {}
             status = 200
@@ -6696,8 +6740,11 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "urlopen", return_value=TimeoutResponse()):
             with self.assertRaises(server.AppError) as raised:
                 server.openai_stream_request({"model": "gpt-5.6-sol"}, lambda _: None)
-        self.assertEqual(raised.exception.reason, "provider_unavailable")
-        self.assertEqual(server.openai_usage_summary()["status"]["reason"], "provider_unavailable")
+        self.assertEqual(raised.exception.reason, "provider_timeout")
+        self.assertEqual(raised.exception.status, 504)
+        self.assertEqual(server.openai_usage_summary()["status"]["reason"], "provider_timeout")
+        failures = [entry for entry in server.recent_log_entries() if entry.get("event") == "external_request_failed"]
+        self.assertEqual(failures[-1]["context"]["reason"], "provider_timeout")
 
     def test_openai_stream_request_client_disconnect_records_cancelled_usage(self):
         class DisconnectResponse:
@@ -6993,7 +7040,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=165', index)
+        self.assertIn('v=166', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
@@ -7106,8 +7153,8 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("resolvePlannedConflict", app)
         self.assertNotIn("Lokal behalten", app)
         self.assertNotIn("Remote übernehmen", app)
-        self.assertIn("intervals-coach-v165", worker)
-        self.assertIn("/app.js?v=165", index)
+        self.assertIn("intervals-coach-v166", worker)
+        self.assertIn("/app.js?v=166", index)
 
     def test_obsolete_direct_planning_routes_are_removed(self):
         source = Path(server.__file__).read_text(encoding="utf-8")

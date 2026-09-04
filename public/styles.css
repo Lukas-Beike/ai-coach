@@ -212,10 +212,10 @@ h2 {
 .action-receipt-heading strong { color: var(--ink); font-size: .78rem; }
 .action-receipt p { margin: 0; color: var(--muted); font-size: .74rem; line-height: 1.4; }
 .action-receipt ul { display: grid; gap: 3px; margin: 0; padding-left: 17px; color: var(--subtle); font-size: .68rem; }
-.analysis-segment-nav { display: flex; gap: 4px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(255, 255, 255, .025); }
-.analysis-segment-nav a { display: grid; min-height: 44px; flex: 1 1 140px; place-items: center; border-radius: var(--radius-sm); color: var(--muted); font-size: .75rem; font-weight: 750; text-decoration: none; }
-.analysis-segment-nav a:hover, .analysis-segment-nav a.active { color: var(--ink); background: var(--accent-soft); }
-.analysis-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.analysis-segment-nav, .plan-segment-nav { display: flex; gap: 4px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(255, 255, 255, .025); }
+.analysis-segment-nav a, .plan-segment-nav a { display: grid; min-height: 44px; flex: 1 1 140px; place-items: center; border-radius: var(--radius-sm); color: var(--muted); font-size: .75rem; font-weight: 750; text-decoration: none; }
+.analysis-segment-nav a:hover, .analysis-segment-nav a.active, .plan-segment-nav a:hover, .plan-segment-nav a.active { color: var(--ink); background: var(--accent-soft); }
+.analysis-segment-nav a:focus-visible, .plan-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .analysis-segment { min-width: 0; }
 .analysis-segment-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .analysis-segment-heading > div { display: grid; gap: 4px; min-width: 0; }
@@ -564,7 +564,24 @@ h2 {
 .activity-feedback-form button { justify-self: start; }
 .danger-button { border-color: rgba(255, 69, 58, .35); color: #ff9a93; }
 .danger-button:hover { border-color: rgba(255, 69, 58, .65); background: rgba(255, 69, 58, .1); }
-.library-pagination { display: flex; justify-content: center; margin: 14px 0 4px; }
+.plan-segment-heading { margin-bottom: 12px; }
+.plan-segment-heading h3 { margin: 2px 0 0; font-size: 1rem; }
+.planned-calendar { display: grid; gap: 12px; }
+.planned-week { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.planned-week-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 13px 14px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .025); }
+.planned-week-heading h4 { margin: 0; color: var(--ink); font-size: .88rem; }
+.planned-week-heading span { color: var(--subtle); font-size: .68rem; }
+.planned-week-days { display: grid; gap: 8px; padding: 8px; }
+.planned-day { overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .018); }
+.planned-day.is-today { border-color: rgba(52, 207, 161, .55); box-shadow: inset 3px 0 0 var(--accent-bright); }
+.planned-day-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 11px 12px; }
+.planned-day-heading h5 { margin: 0; color: var(--ink); font-size: .8rem; }
+.planned-day-heading span { color: var(--subtle); font-size: .66rem; }
+.planned-day-empty { margin: -2px 12px 11px; color: var(--subtle); font-size: .7rem; }
+.planned-entry { display: grid; gap: 5px; padding: 11px 12px; border-top: 1px solid var(--line); }
+.planned-entry strong { color: var(--ink); font-size: .82rem; }
+.planned-meta { color: var(--subtle); font-size: .68rem; }
+.planned-description { margin: 3px 0 0; color: var(--muted); font-size: .74rem; line-height: 1.45; white-space: pre-wrap; }
 .more-segment-nav { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .025); }
 .more-segment-nav a { display: grid; min-height: 44px; flex: 1 1 145px; place-items: center; padding: 9px 10px; border-radius: 10px; color: var(--muted); font-size: .72rem; font-weight: 700; text-align: center; text-decoration: none; }
 .more-segment-nav a:hover, .more-segment-nav a.active { color: var(--ink); background: var(--accent-soft); }

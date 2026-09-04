@@ -64,6 +64,23 @@ class CoachIntentContractTests(unittest.TestCase):
         })})
         self.assertEqual(result["operation"], "update_training_plan")
 
+    def test_contract_supports_checkins_feedback_and_direct_plan_commit(self):
+        payload = intent_request_payload("Plane meine Woche", [], ["local"])
+        self.assertIn("save_checkin", payload["instructions"])
+        self.assertIn("save_activity_feedback", payload["instructions"])
+        self.assertIn("commit_training_plan in follow_up_operations", payload["instructions"])
+        for operation, scope in (("save_checkin", "local_checkin"), ("save_activity_feedback", "activity_feedback")):
+            result = parse_intent_response({"output_text": json.dumps({
+                "intent": "local_action",
+                "operation": operation,
+                "target_system": "local",
+                "artifact_id": None,
+                "ambiguities": [],
+                "authorization_scope": [scope],
+                "follow_up_operations": [],
+            })})
+            self.assertEqual(result["operation"], operation)
+
 
 if __name__ == "__main__":
     unittest.main()

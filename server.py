@@ -11302,7 +11302,9 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
     actual_atl_current = actual_atl.get(actual_atl_date) if actual_atl_date else None
     actual_atl_values = [value for row_date, value in actual_atl.items() if today - timedelta(days=6) <= row_date <= today]
     actual_atl_average = round(sum(actual_atl_values) / len(actual_atl_values), 2) if actual_atl_values else None
-    metrics.update(garmin_daily_health_metrics(garmin, 7, today))
+    # Today's step, floor and calorie totals are incomplete until the day has
+    # ended. Use the seven most recent completed local days for these averages.
+    metrics.update(garmin_daily_health_metrics(garmin, 7, today - timedelta(days=1)))
     # Garmin recovery metrics are the authoritative values when available;
     # Intervals.icu remains a fallback for accounts without those Garmin data.
     readiness_current = readiness_score_value(first_present(latest_wellness, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness")))
@@ -11976,6 +11978,22 @@ def openai_stream_request(
     event_name = ""
     data_lines: list[str] = []
 
+    def log_failure(reason: str, status: int, *, level: int = logging.WARNING) -> None:
+        LOGGER.log(
+            level,
+            "External HTTP request failed",
+            extra={
+                "event": "external_request_failed",
+                "context": {
+                    **context,
+                    "status": status,
+                    "reason": reason,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "response_bytes": stream_bytes,
+                },
+            },
+        )
+
     def handle_event() -> None:
         nonlocal final_response, event_name, data_lines
         if not data_lines:
@@ -12032,25 +12050,39 @@ def openai_stream_request(
             extra={"event": "external_request_completed", "context": {**context, "status": 200, "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes}},
         )
         return final_response
-    except AppError:
+    except AppError as exc:
         if cancel_event is not None and cancel_event.is_set() and final_response is None:
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        log_failure(exc.reason or "request_failed", exc.status, level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING)
         raise
     except ClientDisconnected:
         if final_response is None:
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        log_failure("client_disconnected", 499, level=logging.INFO)
         raise
     except HTTPError as exc:
         raw_error = _read_http_error_body(exc)
         status = int(getattr(exc, "code", 502) or 502)
         details = openai_error_details(status, raw_error)
         record_openai_status(details)
+        log_failure(details["reason"], status)
         raise AppError(status, details["message"], reason=details["reason"]) from exc
-    except (URLError, TimeoutError, OSError, ValueError) as exc:
+    except TimeoutError as exc:
         if cancel_event is not None and cancel_event.is_set():
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+            log_failure("chat_cancelled", 499, level=logging.INFO)
+            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
+        details = {"state": "error", "reason": "provider_timeout", "message": "OpenAI hat nicht rechtzeitig geantwortet.", "http_status": 504}
+        record_openai_status(details)
+        log_failure("provider_timeout", 504)
+        raise AppError(504, details["message"], reason="provider_timeout") from exc
+    except (URLError, OSError, ValueError) as exc:
+        if cancel_event is not None and cancel_event.is_set():
+            record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+            log_failure("chat_cancelled", 499, level=logging.INFO)
             raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
         record_openai_status({"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503})
+        log_failure("provider_unavailable", 503)
         raise AppError(503, "OpenAI ist vorübergehend nicht verfügbar.", reason="provider_unavailable") from exc
 
 
@@ -12984,6 +13016,8 @@ COACH_CANONICAL_TOOL_NAMES = (
     "commit_training_plan",
     "apply_training_changes",
     "manage_training_templates",
+    "save_checkin",
+    "save_activity_feedback",
     "save_competition",
     "delete_competition",
     "start_provider_refresh",
@@ -13047,6 +13081,19 @@ def _canonical_coach_tool(name: str, description: str) -> dict[str, Any]:
                 "notes": {"type": "string"},
                 "description": {"type": "string"},
                 "moving_time_seconds": {"type": "integer"},
+                "activity_id": {"type": "string"},
+                "activity_name": {"type": "string"},
+                "activity_date": {"type": "string"},
+                "checkin_date": {"type": "string"},
+                "day_form": {"type": "string"},
+                "soreness": {"type": ["integer", "null"]},
+                "stress": {"type": ["integer", "null"]},
+                "motivation": {"type": ["integer", "null"]},
+                "session_rpe": {"type": ["integer", "null"]},
+                "available_minutes": {"type": ["integer", "null"]},
+                "illness": {"type": "string"},
+                "pain": {"type": "string"},
+                "availability_notes": {"type": "string"},
                 "reason": {"type": "string"},
                 "expected_payload_hash": {"type": "string"},
                 "expected_revision": {"type": "integer"},
@@ -13065,6 +13112,8 @@ COACH_STRUCTURED_TOOLS = [
     _canonical_coach_tool("commit_training_plan", "Commit a referenced local training-plan artifact atomically."),
     _canonical_coach_tool("apply_training_changes", "Apply explicitly authorized local training changes."),
     _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template."),
+    _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in."),
+    _canonical_coach_tool("save_activity_feedback", "Save the athlete's explicitly stated observations about one completed activity; activity_id, activity_name, activity_date, and notes are required."),
     _canonical_coach_tool("save_competition", "Create or update one locally stored target competition."),
     _canonical_coach_tool("delete_competition", "Delete one locally stored target competition."),
     _canonical_coach_tool("start_provider_refresh", "Queue an explicitly requested read-only provider refresh."),
@@ -13397,6 +13446,28 @@ def _structured_coach_tool_result(
             _require_coach_scope(intent, "local_template")
             results.append(create_local_library_template(template))
         return {"ok": True, "stored_locally": True, "templates": results, "template": results[0] if len(results) == 1 else None}
+    if name == "save_checkin":
+        if "save_checkin" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Check-in nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "local_checkin")
+        return {"ok": True, **save_coach_checkin(_structured_action_payload(arguments))}
+    if name == "save_activity_feedback":
+        if "save_activity_feedback" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt dieses Aktivitätsfeedback nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "activity_feedback")
+        payload = _structured_action_payload(arguments)
+        return {
+            "ok": True,
+            "stored_locally": True,
+            **save_coach_activity_feedback(
+                payload.get("activity_id"),
+                {
+                    "activity_name": payload.get("activity_name"),
+                    "activity_date": payload.get("activity_date"),
+                    "notes": payload.get("notes"),
+                },
+            ),
+        }
     if name == "save_competition":
         if "save_competition" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
@@ -13695,13 +13766,17 @@ def _chat_with_structured_coach_impl(
         rounds += 1
         if rounds >= COACH_TOOL_MAX_ROUNDS:
             break
+        pending_follow_ups = [
+            operation for operation in (intent.get("follow_up_operations") or [])
+            if operation not in executed_tools
+        ]
         followup_payload = {
             "model": selected_model(),
             "conversation": conversation_id,
             "instructions": model_instructions,
             "input": tool_outputs,
             "tools": COACH_STRUCTURED_TOOLS,
-            "tool_choice": "auto",
+            "tool_choice": {"type": "function", "name": pending_follow_ups[0]} if pending_follow_ups else "auto",
             "parallel_tool_calls": False,
             "max_output_tokens": coach_output_token_budget(message, followup=True),
             "truncation": "auto",
@@ -14682,6 +14757,7 @@ def diagnostic_report() -> dict[str, Any]:
             "thinking_level": selected_thinking_level(),
             "available_models": [option["id"] for option in available_model_options()],
         },
+        "openai": openai_usage_summary(),
         "sync": {
             "last_success": get_kv("last_sync_at"),
             "last_error": redact_text(get_kv("last_sync_error") or "") or None,
