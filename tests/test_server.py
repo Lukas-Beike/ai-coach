@@ -200,6 +200,8 @@ class CoachTests(unittest.TestCase):
         with server.DB_LOCK, server.database() as db:
             db.execute("DELETE FROM messages")
             db.execute("DELETE FROM chat_tool_calls")
+            db.execute("DELETE FROM coach_commands")
+            db.execute("DELETE FROM coach_plan_artifacts")
             db.execute("DELETE FROM snapshots")
             db.execute("DELETE FROM training_plans")
             db.execute("DELETE FROM workout_library")
@@ -221,6 +223,9 @@ class CoachTests(unittest.TestCase):
             db.execute("DELETE FROM sessions")
             db.execute("DELETE FROM kv")
         server.save_profile({})
+        with server.CHAT_STREAM_LOCK:
+            server.CHAT_STREAMS.clear()
+            server.COACH_JOB_CANCEL_EVENTS.clear()
 
     def create_test_session(self):
         token = f"session-{uuid.uuid4().hex}"
@@ -1496,6 +1501,9 @@ class CoachTests(unittest.TestCase):
         self.assertIn("state.chatStatusPollInFlight", app)
         self.assertIn('request.phase = "reconciling"', app)
         self.assertIn('request.phase = "recovering"', app)
+        self.assertIn('event === "background"', app)
+        self.assertIn('status.mode === "background"', app)
+        self.assertIn('Längerer Plan läuft im Hintergrund', app)
         self.assertIn('const streamVisible = state.chatStreamText && !persistedResponse', app)
         self.assertNotIn("restoreInputOnError", app)
         self.assertIn('aria-label="Zum Ende des Chats springen"', index)
@@ -4876,6 +4884,137 @@ class CoachTests(unittest.TestCase):
             server.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
         )
 
+    def test_plan_scope_uses_seven_day_and_seven_unit_boundary(self):
+        self.assertFalse(server.coach_plan_scope("Erstelle einen Trainingsplan für 7 Tage.")["background"])
+        self.assertTrue(server.coach_plan_scope("Erstelle einen Trainingsplan für 8 Tage.")["background"])
+        self.assertFalse(server.coach_plan_scope("Plane 7 Einheiten für die kommende Woche.")["background"])
+        self.assertTrue(server.coach_plan_scope("Plane 8 Einheiten für die kommende Woche.")["background"])
+        scope = server.coach_plan_scope("Lege einen Trainingsplan für die nächsten zwei Wochen an.")
+        self.assertEqual(scope["horizon_days"], 14)
+        self.assertTrue(scope["background"])
+        self.assertTrue(server.coach_plan_scope("Ich brauche einen Plan für die nächsten 2 Wochen.")["background"])
+
+    def test_openai_background_response_is_created_checkpointed_and_polled(self):
+        captured = {}
+        checkpoints = []
+
+        def create(payload):
+            captured.update(payload)
+            return {"id": "resp_background_1", "status": "queued", "usage": {}}
+
+        with patch.object(server, "responses_request", side_effect=create), patch.object(
+            server, "retrieve_openai_response", side_effect=[
+                {"id": "resp_background_1", "status": "in_progress"},
+                {"id": "resp_background_1", "status": "completed", "output_text": "fertig", "usage": {}},
+            ],
+        ) as retrieve, patch.object(server, "OPENAI_BACKGROUND_POLL_SECONDS", 0), patch.object(server, "record_openai_usage"):
+            result = server.responses_background_request(
+                {"model": "gpt-5.6-sol", "input": "fake"}, on_response_id=checkpoints.append
+            )
+
+        self.assertTrue(captured["background"])
+        self.assertTrue(captured["store"])
+        self.assertEqual(checkpoints, ["resp_background_1"])
+        self.assertEqual(retrieve.call_count, 2)
+        self.assertEqual(result["status"], "completed")
+
+    def test_background_coach_job_is_persisted_and_session_scoped(self):
+        job = server.enqueue_background_coach_job(
+            "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
+            "turn-background-persisted",
+            "csrf-background-owner",
+            operation_id="operation-background-persisted",
+        )
+        self.assertEqual(job["status"], "queued")
+        status = server.chat_stream_status("csrf-background-owner")
+        self.assertEqual(status["mode"], "background")
+        self.assertEqual(status["operation_id"], "operation-background-persisted")
+        self.assertEqual(server.chat_stream_status("csrf-other"), {"status": "idle", "operation_id": None})
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute(
+                "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-background-persisted'"
+            ).fetchone()
+            user_message = db.execute("SELECT role, content FROM messages ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(command["status"], "queued")
+        self.assertNotIn("csrf-background-owner", command["receipt"])
+        self.assertEqual(user_message["role"], "user")
+        self.assertIn("2 Wochen", user_message["content"])
+
+    def test_background_coach_worker_completes_durable_turn(self):
+        server.enqueue_background_coach_job(
+            "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
+            "turn-background-complete",
+            "csrf-background-complete",
+            operation_id="operation-background-complete",
+        )
+        job = server._claim_background_coach_job()
+        self.assertIsNotNone(job)
+        intent = {
+            "intent": "advice", "operation": None, "target_system": "none", "artifact_id": None,
+            "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
+        }
+
+        def background_response(payload, **kwargs):
+            kwargs["on_response_id"]("resp_background_complete")
+            return {"id": "resp_background_complete", "status": "completed", "output_text": "Plan fertig", "output": []}
+
+        with patch.object(server, "ensure_conversation", return_value="conversation-background"), patch.object(
+            server, "request_coach_intent", return_value=intent
+        ), patch.object(server, "responses_background_request", side_effect=background_response), patch.object(
+            server, "build_training_context", return_value="context"
+        ):
+            server._run_background_coach_job(job)
+
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute(
+                "SELECT status, receipt FROM coach_commands WHERE client_turn_id='turn-background-complete'"
+            ).fetchone()
+        receipt = json.loads(command["receipt"])
+        self.assertEqual(command["status"], "completed")
+        self.assertEqual(receipt["message"]["content"], "Plan fertig")
+        self.assertNotIn("openai_response_id", receipt)
+
+    def test_interrupted_background_coach_job_resumes_openai_response_id(self):
+        server.enqueue_background_coach_job(
+            "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
+            "turn-background-resume",
+            "csrf-background-resume",
+            operation_id="operation-background-resume",
+        )
+        job = server._claim_background_coach_job()
+        server._merge_coach_command_receipt(
+            "turn-background-resume", {"openai_response_id": "resp_background_resume", "phase": "waiting_openai"}
+        )
+        self.assertEqual(server.resume_interrupted_coach_jobs(), 1)
+        resumed = server._claim_background_coach_job()
+        seen = {}
+        intent = {
+            "intent": "advice", "operation": None, "target_system": "none", "artifact_id": None,
+            "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
+        }
+
+        def background_response(payload, **kwargs):
+            seen.update(kwargs)
+            return {"id": "resp_background_resume", "status": "completed", "output_text": "Wieder aufgenommen", "output": []}
+
+        with patch.object(server, "ensure_conversation", return_value="conversation-background"), patch.object(
+            server, "request_coach_intent", return_value=intent
+        ), patch.object(server, "responses_background_request", side_effect=background_response), patch.object(
+            server, "build_training_context", return_value="context"
+        ):
+            server._run_background_coach_job(resumed)
+        self.assertEqual(seen["response_id"], "resp_background_resume")
+
+    def test_conversation_recovery_lock_is_reentrant(self):
+        with patch.object(server, "get_kv", return_value="conversation-stale"), patch.object(
+            server, "openai_request", return_value={"id": "conversation-recovered"}
+        ), patch.object(server, "set_kv"):
+            with server.OPENAI_CONVERSATION_LOCK:
+                self.assertEqual(
+                    server.replace_stale_openai_conversation("conversation-stale"),
+                    "conversation-recovered",
+                )
+
     def test_chat_passes_long_plan_budget_to_responses_api(self):
         calls = []
 
@@ -7259,6 +7398,29 @@ class CoachTests(unittest.TestCase):
 
         chat.assert_called_once()
         self.assertFalse(cancel_event.is_set())
+        unregister.assert_called_once_with(session_key, operation_id)
+
+    def test_long_plan_stream_is_queued_without_holding_sse_open(self):
+        session_key = "session-background-stream-test"
+        operation_id = "operation-background-stream-test"
+        cancel_event = threading.Event()
+        handler = server.RequestHandler.__new__(server.RequestHandler)
+        handler.read_json = Mock(return_value={
+            "message": "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
+            "client_turn_id": "turn-background-stream-test",
+        })
+        handler.connection = Mock()
+        handler.send_sse_headers = Mock()
+        handler.send_sse_event = Mock()
+
+        with patch.object(server, "register_chat_stream", return_value=(operation_id, cancel_event)), patch.object(
+            server, "unregister_chat_stream"
+        ) as unregister, patch.object(server, "chat_with_coach") as chat:
+            handler.handle_chat_stream({"csrf_hash": session_key})
+
+        events = [call.args[0] for call in handler.send_sse_event.call_args_list]
+        self.assertEqual(events, ["started", "background"])
+        chat.assert_not_called()
         unregister.assert_called_once_with(session_key, operation_id)
 
     def test_chat_stream_cancel_closes_the_active_provider_response(self):
