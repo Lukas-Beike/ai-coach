@@ -1915,6 +1915,27 @@ function planWeekLabel(weekStartKey) {
   return `${startLabel} – ${endLabel}`;
 }
 
+function plannedWeatherLabel(weather) {
+  if (!weather || typeof weather !== "object") return "";
+  const hasForecast = weather.condition || weather.weather_code != null
+    || weather.temperature_min != null || weather.temperature_max != null;
+  if (!hasForecast) return "";
+  return [
+    weatherIconFor(weather),
+    weather.condition,
+    weatherNumber(weather.temperature_min, " °C"),
+    weatherNumber(weather.temperature_max, " °C"),
+  ].filter((value) => value && value !== "–").join(" · ");
+}
+
+function plannedAppointmentLabel(event) {
+  if (!event || typeof event !== "object") return "";
+  const name = String(event.name || "Trainingstermin").trim() || "Trainingstermin";
+  if (event.all_day) return `${name} · ganztägig`;
+  const time = String(event.start_local || "").match(/(?:T|\s)(\d{2}:\d{2})/);
+  return time ? `${name} · ${time[1]}` : name;
+}
+
 function renderPlanned(planned) {
   const root = $("#plannedCalendar");
   const summary = $("#plannedSummary");
@@ -1931,6 +1952,11 @@ function renderPlanned(planned) {
   const pastWeeks = calendarDisplayValue(display.past_weeks, 1);
   const futureWeeks = calendarDisplayValue(display.future_weeks, 4);
   const firstWeekKey = addDateKey(currentWeekKey, -7 * pastWeeks);
+  const planningContextByDate = new Map(
+    (Array.isArray(state.data?.daily_planning_context) ? state.data.daily_planning_context : [])
+      .filter((item) => item && item.date)
+      .map((item) => [String(item.date).slice(0, 10), item]),
+  );
   const eventsByDate = new Map();
   entries.forEach((entry) => {
     const key = plannedEventDate(entry);
@@ -1957,16 +1983,54 @@ function renderPlanned(planned) {
     for (let offset = 0; offset < 7; offset += 1) {
       const dateKey = addDateKey(weekKey, offset);
       const dayEntries = eventsByDate.get(dateKey) || [];
+      const dayContext = planningContextByDate.get(dateKey) || {};
+      const weather = dayContext.weather || (Array.isArray(state.data?.weather?.days)
+        ? state.data.weather.days.find((item) => item && item.date === dateKey)
+        : null);
       const day = document.createElement("section");
       day.className = `planned-day${dateKey === todayKey ? " is-today" : ""}`;
       const dayHeading = document.createElement("div");
       dayHeading.className = "planned-day-heading";
+      const dayHeadingMain = document.createElement("div");
+      dayHeadingMain.className = "planned-day-heading-main";
       const dayTitle = document.createElement("h5");
       dayTitle.textContent = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(dateFromKey(dateKey));
+      dayHeadingMain.append(dayTitle);
+      const weatherLabel = plannedWeatherLabel(weather);
+      if (weatherLabel) {
+        const weatherText = document.createElement("span");
+        weatherText.className = "planned-day-weather";
+        weatherText.textContent = weatherLabel;
+        weatherText.title = "Wettervorhersage";
+        dayHeadingMain.append(weatherText);
+      }
       const dayCount = document.createElement("span");
       dayCount.textContent = dayEntries.length ? `${dayEntries.length} ${dayEntries.length === 1 ? "Einheit" : "Einheiten"}` : "frei";
-      dayHeading.append(dayTitle, dayCount);
+      dayHeading.append(dayHeadingMain, dayCount);
       day.append(dayHeading);
+
+      const appointments = (Array.isArray(dayContext.appointments) ? dayContext.appointments : [])
+        .filter((event) => event && event.training_relevant !== false)
+        .map(plannedAppointmentLabel)
+        .filter(Boolean);
+      if (appointments.length) {
+        const calendarNotice = document.createElement("p");
+        calendarNotice.className = "planned-day-context planned-day-calendar";
+        calendarNotice.textContent = `Kalender: ${appointments.join(", ")}`;
+        day.append(calendarNotice);
+      }
+      const checkin = dayContext.checkin && typeof dayContext.checkin === "object" ? dayContext.checkin : {};
+      const illness = String(checkin.illness || "").trim();
+      const pain = String(checkin.pain || "").trim();
+      if (illness || pain) {
+        const healthNotice = document.createElement("p");
+        healthNotice.className = "planned-day-context planned-day-health";
+        healthNotice.textContent = [
+          illness ? `Krankheit: ${illness}` : "",
+          pain ? `Verletzung/Beschwerden: ${pain}` : "",
+        ].filter(Boolean).join(" · ");
+        day.append(healthNotice);
+      }
       if (!dayEntries.length) {
         const empty = document.createElement("p");
         empty.className = "planned-day-empty";
@@ -1974,14 +2038,17 @@ function renderPlanned(planned) {
         day.append(empty);
       }
       dayEntries.forEach((entry) => {
-        const card = document.createElement("article");
+        const card = document.createElement("details");
         card.className = "planned-entry";
+        card.open = false;
+        const cardSummary = document.createElement("summary");
         const cardTitle = document.createElement("strong");
         cardTitle.textContent = entry.name || "Geplante Einheit";
         const meta = document.createElement("span");
         meta.className = "planned-meta";
         meta.textContent = [activitySportLabel(entry), entry.duration_minutes ? `${entry.duration_minutes} Min.` : entry.moving_time ? formatDuration(entry.moving_time) : null].filter(Boolean).join(" · ");
-        card.append(cardTitle, meta);
+        cardSummary.append(cardTitle, meta);
+        card.append(cardSummary);
         if (entry.description) {
           const description = document.createElement("p");
           description.className = "planned-description";
@@ -2023,7 +2090,7 @@ function renderLibrary(workouts) {
     .forEach(([sport, sportWorkouts]) => {
       const section = document.createElement("details");
       section.className = "library-sport";
-      section.open = true;
+      section.open = false;
       const summary = document.createElement("summary");
       const title = document.createElement("strong");
       title.textContent = sport;
