@@ -1845,19 +1845,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request });", api_client)
         self.assertIn("return window.AppApi.request(path, options, showLogin);", app)
         self.assertIn("return window.AppApi.audio(path, blob, showLogin);", app)
-        self.assertIn('/api.js?v=174', index)
-        self.assertIn('/navigation.js?v=174', index)
-        self.assertIn('/state.js?v=174', index)
-        self.assertIn('/views.js?v=174', index)
-        self.assertIn('/forms.js?v=174', index)
-        self.assertIn('/components.js?v=174', index)
-        self.assertIn('/app.js?v=174', index)
-        self.assertIn('intervals-coach-v174', service_worker)
-        self.assertIn('"/navigation.js?v=174"', service_worker)
-        self.assertIn('"/state.js?v=174"', service_worker)
-        self.assertIn('"/views.js?v=174"', service_worker)
-        self.assertIn('"/forms.js?v=174"', service_worker)
-        self.assertIn('"/components.js?v=174"', service_worker)
+        self.assertIn('/api.js?v=175', index)
+        self.assertIn('/navigation.js?v=175', index)
+        self.assertIn('/state.js?v=175', index)
+        self.assertIn('/views.js?v=175', index)
+        self.assertIn('/forms.js?v=175', index)
+        self.assertIn('/components.js?v=175', index)
+        self.assertIn('/app.js?v=175', index)
+        self.assertIn('intervals-coach-v175', service_worker)
+        self.assertIn('"/navigation.js?v=175"', service_worker)
+        self.assertIn('"/state.js?v=175"', service_worker)
+        self.assertIn('"/views.js?v=175"', service_worker)
+        self.assertIn('"/forms.js?v=175"', service_worker)
+        self.assertIn('"/components.js?v=175"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1883,8 +1883,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=174'), index.index('/components.js?v=174'))
-        self.assertLess(index.index('/components.js?v=174'), index.index('/app.js?v=174'))
+        self.assertLess(index.index('/forms.js?v=175'), index.index('/components.js?v=175'))
+        self.assertLess(index.index('/components.js?v=175'), index.index('/app.js?v=175'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -4940,6 +4940,25 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(user_message["role"], "user")
         self.assertIn("2 Wochen", user_message["content"])
 
+    def test_background_worker_restores_session_binding_from_persisted_key(self):
+        csrf_hash = server.session_token_hash("csrf-background-bound")
+        with server.SESSION_LOCK, server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+                (server.session_token_hash("session-background-bound"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
+            )
+        server.enqueue_background_coach_job(
+            "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
+            "turn-background-bound",
+            csrf_hash,
+            operation_id="operation-background-bound",
+        )
+        job = server._claim_background_coach_job()
+        seen = {}
+        with patch.object(server, "chat_with_coach", side_effect=lambda *args, **kwargs: seen.update(kwargs) or {}):
+            server._run_background_coach_job(job)
+        self.assertEqual(seen["session_csrf_hash"], csrf_hash)
+
     def test_background_coach_worker_completes_durable_turn(self):
         server.enqueue_background_coach_job(
             "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
@@ -6603,16 +6622,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=174"', source)
-        self.assertIn('"/navigation.js?v=174"', source)
-        self.assertIn('"/state.js?v=174"', source)
-        self.assertIn('"/views.js?v=174"', source)
-        self.assertIn('"/forms.js?v=174"', source)
-        self.assertIn('"/components.js?v=174"', source)
+        self.assertIn('"/api.js?v=175"', source)
+        self.assertIn('"/navigation.js?v=175"', source)
+        self.assertIn('"/state.js?v=175"', source)
+        self.assertIn('"/views.js?v=175"', source)
+        self.assertIn('"/forms.js?v=175"', source)
+        self.assertIn('"/components.js?v=175"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=174"', source)
-        self.assertIn('"/icon.svg?v=174"', source)
-        self.assertIn('"/styles.css?v=174"', source)
+        self.assertIn('"/app.js?v=175"', source)
+        self.assertIn('"/icon.svg?v=175"', source)
+        self.assertIn('"/styles.css?v=175"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -7620,7 +7639,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=174', index)
+        self.assertIn('v=175', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
@@ -7738,8 +7757,8 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("resolvePlannedConflict", app)
         self.assertNotIn("Lokal behalten", app)
         self.assertNotIn("Remote übernehmen", app)
-        self.assertIn("intervals-coach-v174", worker)
-        self.assertIn("/app.js?v=174", index)
+        self.assertIn("intervals-coach-v175", worker)
+        self.assertIn("/app.js?v=175", index)
         self.assertIn("weekEntries.filter((entry) => !entry.is_completed_activity).length", app)
 
     def test_obsolete_direct_planning_routes_are_removed(self):

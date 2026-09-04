@@ -13436,6 +13436,23 @@ def _coach_session_key(session_csrf_hash: str) -> str:
     return hashlib.sha256(str(session_csrf_hash or "").encode("utf-8")).hexdigest()
 
 
+def _restore_coach_session_csrf_hash(session_key: str) -> str:
+    """Resolve a persisted session binding without storing a raw CSRF token."""
+    normalized_key = str(session_key or "").strip()
+    if not normalized_key:
+        return ""
+    now = time.time()
+    with SESSION_LOCK, DB_LOCK, database() as db:
+        rows = db.execute("SELECT csrf_hash, expires_at FROM sessions").fetchall()
+    for row in rows:
+        csrf_hash = str(row.get("csrf_hash") or "")
+        if not csrf_hash or float(row.get("expires_at") or 0) <= now:
+            continue
+        if hmac.compare_digest(_coach_session_key(csrf_hash), normalized_key):
+            return csrf_hash
+    return ""
+
+
 def _coach_command_receipt(value: Any) -> dict[str, Any]:
     try:
         receipt = json.loads(value or "{}") if not isinstance(value, dict) else dict(value)
@@ -15081,6 +15098,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
     receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
     operation_id = str(receipt.get("operation_id") or "")
     client_turn_id = str(job.get("client_turn_id") or "")
+    session_csrf_hash = _restore_coach_session_csrf_hash(receipt.get("session_key"))
     with CHAT_STREAM_LOCK:
         cancel_event = COACH_JOB_CANCEL_EVENTS.setdefault(operation_id, threading.Event())
     if receipt.get("cancel_requested"):
@@ -15091,7 +15109,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
         chat_with_coach(
             message,
             cancel_event=cancel_event,
-            session_csrf_hash="",
+            session_csrf_hash=session_csrf_hash,
             client_turn_id=client_turn_id,
             background_job=True,
         )
