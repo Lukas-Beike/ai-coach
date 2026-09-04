@@ -2090,7 +2090,7 @@ function renderLibrary(workouts) {
     .forEach(([sport, sportWorkouts]) => {
       const section = document.createElement("details");
       section.className = "library-sport";
-      section.open = true;
+      section.open = false;
       const summary = document.createElement("summary");
       const title = document.createElement("strong");
       title.textContent = sport;
