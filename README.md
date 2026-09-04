@@ -136,10 +136,18 @@ It is not intended to be exposed directly to the public internet.
   shown clearly.
 - After a completed activity, the coach can ask for a short subjective follow-up
   and store the athlete's answer as activity feedback.
-- The coach can explicitly read the local workout library and planned units and
-  refresh Intervals.icu, current performance, Garmin, weather, the external
-  calendar, and the workout-library synchronization. Adaptive planning can be
-  previewed and, after explicit approval, applied to future local workouts.
+- The coach can explicitly read completed activities, the local workout library,
+  planned units, competitions, training plans, and local change-history
+  references. It can schedule selected saved library templates locally after
+  conflict checks, and remove activity feedback on request. Explicit provider
+  refreshes for Intervals.icu, current performance, Garmin, weather, and the
+  external calendar run as trackable background jobs; local plans and
+  competitions are pushed to Intervals.icu only through an explicitly named,
+  trackable synchronization. The local workout library remains authoritative
+  after its initial import and is never overwritten by a Coach refresh.
+  Adaptive planning can be previewed and, after explicit approval, applied to
+  future local workouts; an illness-pause event is sent to Intervals.icu only
+  when that synchronization is explicitly named in the same request.
 - Read-only shared iCalendar integration for the next 8 weeks. Event
   timing and duration are used as schedule/recovery signals; high-intensity or
   long local library entries on busy days can be proposed as short easy sessions.

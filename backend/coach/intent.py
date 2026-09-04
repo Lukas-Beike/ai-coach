@@ -16,6 +16,10 @@ INTENT_VALUES = frozenset({"advice", "local_action", "remote_sync", "needs_clari
 TARGET_VALUES = frozenset({"none", "local", "intervals", "garmin", "calendar", "weather"})
 OPERATION_VALUES = frozenset({
     "read_training_state",
+    "list_recent_activities",
+    "list_workout_library",
+    "list_planned_workouts",
+    "list_change_history",
     "list_competitions",
     "list_training_plans",
     "update_training_plan",
@@ -25,9 +29,11 @@ OPERATION_VALUES = frozenset({
     "manage_training_templates",
     "save_checkin",
     "save_activity_feedback",
+    "delete_activity_feedback",
     "save_competition",
     "delete_competition",
     "start_provider_refresh",
+    "refresh_current_performance",
     "start_intervals_plan_sync",
     "sync_competitions",
     "get_sync_job",
@@ -35,6 +41,7 @@ OPERATION_VALUES = frozenset({
     "preview_adaptive_replan",
     "apply_adaptive_replan",
     "undo_training_change",
+    "apply_workout_library_plan",
 })
 
 INTENT_SCHEMA: dict[str, Any] = {
@@ -74,14 +81,24 @@ def intent_request_payload(
             "commit step when the user explicitly asks for a draft, preview, proposal, or hypothetical plan. "
             "An explicit request to save the athlete's stated daily condition or availability is a local_action "
             "using save_checkin. An explicit message containing the athlete's actual observations about a completed "
-            "activity is a local_action using save_activity_feedback; never invent feedback. "
-            "An explicit request to list competitions or training plans is a local_action using the matching read operation. "
+            "activity is a local_action using save_activity_feedback; an explicit request to remove such feedback "
+            "uses delete_activity_feedback; never invent feedback. "
+            "An explicit request to list completed activities, the training library, planned workouts, competitions, "
+            "training plans, or change history is a local_action using the matching read operation: "
+            "list_recent_activities, list_workout_library, list_planned_workouts, list_competitions, "
+            "list_training_plans, or list_change_history. "
+            "An explicit request to schedule saved library templates locally is a local_action using "
+            "apply_workout_library_plan. "
             "An explicit request to rename, edit, or delete training-plan metadata is a local_action using update_training_plan. "
             "An explicit request to add, edit, or delete a competition is a local_action using the matching competition operation. "
             "An explicit request to synchronize the local plan or library to Intervals.icu is a remote_sync using "
             "start_intervals_plan_sync; use local_plan scope when the athlete requests all pending entries. "
             "An explicit request to synchronize competitions to Intervals.icu is a remote_sync using sync_competitions. "
-            "An explicit request to preview or apply adaptive planning is a local_action using the matching operation. "
+            "An explicit request to refresh current Intervals.icu performance metrics without a full activity sync is a "
+            "remote_sync using refresh_current_performance. An explicit request to preview adaptive planning is a "
+            "local_action using preview_adaptive_replan. Applying an adaptive preview is a local_action unless the "
+            "same current request explicitly names synchronization of the illness-pause event to Intervals.icu; in that "
+            "case use remote_sync, target intervals, apply_adaptive_replan, and intervals_sync scope. "
             "Only use targets explicitly listed in allowed_targets. "
             "authorization_scope must contain exact operation or object tokens: "
             "local_plan, local_template, local_competitions, artifact:<id>, planned_unit:<id>, "
