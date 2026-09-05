@@ -1219,7 +1219,7 @@ function renderStatus(data) {
   const configured = data.configured;
   const morning = data.morning_checkin || {};
   const missing = [];
-  if (!configured.openai) missing.push("OpenAI-API-Schlüssel");
+  if (!configured.openai && !configured.gemini) missing.push("OpenAI- oder Gemini-API-Schlüssel");
   if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
   const performanceRefresh = data.performance_refresh || {};
   const openaiStatus = data.usage?.status || {};
@@ -3046,6 +3046,26 @@ function updateHeaderAction() {
   }
 }
 
+function renderAiProvider(provider) {
+  if (!provider) return;
+  const select = $("#aiProviderSelect");
+  const currentIds = [...select.options].map((option) => option.value).join(",");
+  const nextIds = (provider.options || []).map((option) => option.id).join(",");
+  if (currentIds !== nextIds) {
+    select.replaceChildren();
+    for (const option of provider.options || []) {
+      const element = document.createElement("option");
+      element.value = option.id;
+      element.textContent = option.label;
+      element.title = option.description || "";
+      select.append(element);
+    }
+  }
+  select.value = provider.selected;
+  const selected = (provider.options || []).find((option) => option.id === provider.selected);
+  $("#aiProviderDescription").textContent = selected?.description || "Der ausgewählte Anbieter erhält den Coach-Kontext.";
+}
+
 function renderModel(model) {
   if (!model) return;
   const select = $("#modelSelect");
@@ -3099,28 +3119,46 @@ function renderSettings(data) {
   const garmin = data.garmin || {};
   const weather = data.weather || {};
   const openaiStatus = data.usage?.status || {};
+  const activeProvider = data.ai_provider?.selected || "openai";
   const setStatus = (selector, ok, text) => {
     const node = $(selector);
     if (!node) return;
     node.textContent = text;
     node.className = ok ? "configured" : "not-configured";
   };
-  const openaiHealthy = configured.openai && openaiStatus.state !== "error";
+  const openaiHealthy = configured.openai && (activeProvider !== "openai" || openaiStatus.state !== "error");
   setStatus(
     "#openaiConnectionStatus",
     openaiHealthy,
-    !configured.openai ? "Nicht konfiguriert" : openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
+    !configured.openai ? "Nicht konfiguriert" : activeProvider === "openai" && openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
   );
   const openaiDetail = $("#openaiConnectionDetail");
   if (openaiDetail) {
-    openaiDetail.classList.toggle("error", Boolean(configured.openai && openaiStatus.state === "error"));
+    openaiDetail.classList.toggle("error", Boolean(configured.openai && activeProvider === "openai" && openaiStatus.state === "error"));
     openaiDetail.textContent = !configured.openai
       ? "API-Schlüssel nicht konfiguriert"
-      : openaiStatus.state === "error"
+      : activeProvider === "openai" && openaiStatus.state === "error"
         ? `${openaiStatus.message || "OpenAI-Anfrage fehlgeschlagen."}${openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : ""}`
-        : openaiStatus.state === "ok"
+        : activeProvider === "openai" && openaiStatus.state === "ok"
           ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
-          : "Noch kein API-Aufruf geprüft";
+          : "Als alternativer Anbieter konfiguriert";
+  }
+  const geminiHealthy = configured.gemini && (activeProvider !== "gemini" || openaiStatus.state !== "error");
+  setStatus(
+    "#geminiConnectionStatus",
+    geminiHealthy,
+    !configured.gemini ? "Nicht konfiguriert" : activeProvider === "gemini" && openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
+  );
+  const geminiDetail = $("#geminiConnectionDetail");
+  if (geminiDetail) {
+    geminiDetail.classList.toggle("error", Boolean(configured.gemini && activeProvider === "gemini" && openaiStatus.state === "error"));
+    geminiDetail.textContent = !configured.gemini
+      ? "GEMINI_API_KEY nicht konfiguriert"
+      : activeProvider === "gemini" && openaiStatus.state === "error"
+        ? `${openaiStatus.message || "Gemini-Anfrage fehlgeschlagen."}${openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : ""}`
+        : activeProvider === "gemini" && openaiStatus.state === "ok"
+          ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
+          : "Als alternativer Anbieter konfiguriert";
   }
   const intervals = data.intervals || {
     configured: Boolean(configured.intervals),
@@ -3182,7 +3220,7 @@ function renderSettings(data) {
   }
   const connectionsSummary = $("#connectionsSummary");
   if (connectionsSummary) {
-    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
+    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Gemini", geminiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
       .map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
   }
   const intervalsDays = $("#intervalsSyncDays");
@@ -3237,14 +3275,15 @@ function renderSettings(data) {
   const usageNode = $("#usageSummary");
   if (usageNode) {
     const rateLimits = usage.rate_limits || {};
+    const providerLabel = activeProvider === "gemini" ? "Gemini" : "OpenAI";
     const remaining = rateLimits.remaining_requests != null || rateLimits.remaining_tokens != null
-      ? ` · Restkontingent im aktuellen OpenAI-Fenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
+      ? ` · Restkontingent im aktuellen Anbieterfenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
       : " · Restkontingent wird nach einem API-Aufruf angezeigt";
     const openaiError = usage.status?.state === "error" ? ` · Status: ${usage.status.message || "Fehler bei letzter Anfrage"}` : "";
-    usageNode.textContent = `OpenAI heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}${openaiError}`;
+    usageNode.textContent = `${providerLabel} heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}${openaiError}`;
   }
   const privacySummary = $("#privacySummary");
-  if (privacySummary) privacySummary.textContent = `${usage.requests || 0} OpenAI-Anfragen heute`;
+  if (privacySummary) privacySummary.textContent = `${usage.requests || 0} ${activeProvider === "gemini" ? "Gemini" : "OpenAI"}-Anfragen heute`;
   renderNotificationStatus();
   renderProviderAttention(data);
   renderConnectionsSyncProgress(data);
@@ -3366,6 +3405,7 @@ function render(data) {
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
   renderPerformance(data.performance);
+  renderAiProvider(data.ai_provider);
   renderModel(data.model);
   renderThinkingLevel(data.thinking_level);
   renderDiagnosticCapture(data.diagnostic_capture);
@@ -4158,6 +4198,19 @@ async function saveModel(event) {
   } finally { select.disabled = false; }
 }
 
+async function saveAiProvider(event) {
+  const select = event.currentTarget;
+  select.disabled = true;
+  try {
+    await api("/api/settings/ai-provider", { method: "PUT", body: JSON.stringify({ provider: select.value }) });
+    toast(`Aktiv: ${select.options[select.selectedIndex].text}`);
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    await load();
+  } finally { select.disabled = false; }
+}
+
 async function saveThinkingLevel(event) {
   const select = event.currentTarget;
   select.disabled = true;
@@ -4386,6 +4439,7 @@ $("#coachAdaptivePlanningButton").addEventListener("click", () => askCoach("Prü
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
 $("#modelSelect").addEventListener("change", saveModel);
+$("#aiProviderSelect").addEventListener("change", saveAiProvider);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);

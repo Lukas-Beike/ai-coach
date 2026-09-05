@@ -20,7 +20,7 @@ os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
     "OPENAI_API_KEY": "test-openai-key",
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
-    "OPENAI_MODEL": "gpt-5.6-sol",
+    "OPENAI_MODEL": "gpt-5.6-luna",
     "INTERVALS_API_KEY": "test-intervals-key",
     "INTERVALS_ATHLETE_ID": "0",
     "GARMIN_EMAIL": "test-garmin@example.invalid",
@@ -1773,19 +1773,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request, responseError });", api_client)
         self.assertIn("window.AppApi.request(path, options, () =>", app)
         self.assertIn("window.AppApi.audio(path, blob, () =>", app)
-        self.assertIn('/api.js?v=178', index)
-        self.assertIn('/navigation.js?v=178', index)
-        self.assertIn('/state.js?v=178', index)
-        self.assertIn('/views.js?v=178', index)
-        self.assertIn('/forms.js?v=178', index)
-        self.assertIn('/components.js?v=178', index)
-        self.assertIn('/app.js?v=178', index)
-        self.assertIn('intervals-coach-v178', service_worker)
-        self.assertIn('"/navigation.js?v=178"', service_worker)
-        self.assertIn('"/state.js?v=178"', service_worker)
-        self.assertIn('"/views.js?v=178"', service_worker)
-        self.assertIn('"/forms.js?v=178"', service_worker)
-        self.assertIn('"/components.js?v=178"', service_worker)
+        self.assertIn('/api.js?v=179', index)
+        self.assertIn('/navigation.js?v=179', index)
+        self.assertIn('/state.js?v=179', index)
+        self.assertIn('/views.js?v=179', index)
+        self.assertIn('/forms.js?v=179', index)
+        self.assertIn('/components.js?v=179', index)
+        self.assertIn('/app.js?v=179', index)
+        self.assertIn('intervals-coach-v179', service_worker)
+        self.assertIn('"/navigation.js?v=179"', service_worker)
+        self.assertIn('"/state.js?v=179"', service_worker)
+        self.assertIn('"/views.js?v=179"', service_worker)
+        self.assertIn('"/forms.js?v=179"', service_worker)
+        self.assertIn('"/components.js?v=179"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1811,8 +1811,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=178'), index.index('/components.js?v=178'))
-        self.assertLess(index.index('/components.js?v=178'), index.index('/app.js?v=178'))
+        self.assertLess(index.index('/forms.js?v=179'), index.index('/components.js?v=179'))
+        self.assertLess(index.index('/components.js?v=179'), index.index('/app.js?v=179'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -2471,6 +2471,14 @@ class CoachTests(unittest.TestCase):
         with server.DB_LOCK, server.database() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM messages WHERE content = 'old chat'").fetchone()["count"], 1)
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM snapshots WHERE created_at LIKE '2000-%'").fetchone()["count"], 1)
+
+    def test_finite_retention_clears_unstamped_gemini_history(self):
+        server.set_kv("gemini_conversation_history", json.dumps([{"role": "user", "parts": [{"text": "old coach context"}]}]))
+        server.set_kv("gemini_call_names", json.dumps({"gemini_old": "save_checkin"}))
+        with patch.object(server, "CONFIG", replace(server.CONFIG, data_retention_days=30)):
+            server.initialise_database()
+        self.assertEqual(server.get_kv("gemini_conversation_history"), "[]")
+        self.assertEqual(server.get_kv("gemini_call_names"), "{}")
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfügbar.")
     def test_sqlcipher_database_returns_mapping_rows(self):
@@ -3706,6 +3714,289 @@ class CoachTests(unittest.TestCase):
         response = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Hello"}]}]}
         self.assertEqual(server.output_text(response), "Hello")
 
+    def test_gemini_normalizes_tool_calls_and_preserves_function_history(self):
+        captured = []
+        responses = [
+            {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {"payload": {"energy": 7}}}}]}}], "usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 3, "totalTokenCount": 14}},
+            {"candidates": [{"content": {"role": "model", "parts": [{"text": "Check-in gespeichert."}]}}], "usageMetadata": {"promptTokenCount": 14, "candidatesTokenCount": 4, "totalTokenCount": 18}},
+        ]
+
+        def fake_http_json(method, url, payload=None, headers=None, **kwargs):
+            captured.append({"method": method, "url": url, "payload": payload, "headers": headers})
+            return responses.pop(0)
+
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        tool = {"type": "function", "name": "save_checkin", "description": "Save check-in", "parameters": {"type": "object", "properties": {"payload": {"type": "object"}}}}
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            initial = server.gemini_responses_request({"model": "gemini-3.8-flash", "conversation": "gemini_test", "instructions": "Coach rules", "input": "Speichere meine Tagesform.", "tools": [tool], "tool_choice": "auto", "max_output_tokens": 321})
+            call = next(item for item in initial["output"] if item["type"] == "function_call")
+            followup = server.gemini_responses_request({"conversation": "gemini_test", "instructions": "Coach rules", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "tools": [tool], "tool_choice": "auto"})
+
+        self.assertEqual(captured[0]["url"], "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")
+        self.assertEqual(captured[0]["headers"]["x-goog-api-key"], "test-gemini-key")
+        self.assertEqual(captured[0]["payload"]["systemInstruction"]["parts"][0]["text"], "Coach rules")
+        self.assertEqual(captured[0]["payload"]["tools"][0]["functionDeclarations"][0]["name"], "save_checkin")
+        self.assertEqual(captured[0]["payload"]["tools"][0]["functionDeclarations"][0]["parametersJsonSchema"], tool["parameters"])
+        function_response = next(
+            part["functionResponse"]
+            for content in captured[1]["payload"]["contents"]
+            for part in content.get("parts", [])
+            if "functionResponse" in part
+        )
+        self.assertEqual(function_response["name"], "save_checkin")
+        self.assertEqual(server.output_text(followup), "Check-in gespeichert.")
+
+    def test_gemini_persists_tool_response_before_a_failed_followup(self):
+        responses = [
+            {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {}}}]}}]},
+            server.AppError(429, "Gemini ist ausgelastet.", reason="rate_limit_exceeded"),
+        ]
+
+        def fake_http_json(*args, **kwargs):
+            response = responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            initial = server.gemini_responses_request({"conversation": "gemini-persist-response", "input": "Speichere meine Tagesform.", "parallel_tool_calls": False})
+            call = next(item for item in initial["output"] if item["type"] == "function_call")
+            with self.assertRaises(server.AppError):
+                server.gemini_responses_request({"conversation": "gemini-persist-response", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "parallel_tool_calls": False})
+
+        history = json.loads(server.get_kv("gemini_conversation_history") or "[]")
+        self.assertEqual(history[-2]["parts"][0]["functionCall"]["name"], "save_checkin")
+        self.assertEqual(history[-1]["parts"][0]["functionResponse"]["name"], "save_checkin")
+
+    def test_gemini_history_trimming_keeps_complete_tool_exchanges(self):
+        history = [
+            {"role": "user", "parts": [{"text": "Starte die Planung."}]},
+            {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {}}}]},
+            {"role": "user", "parts": [{"functionResponse": {"name": "save_checkin", "response": {"ok": True}}}]},
+            {"role": "model", "parts": [{"text": "Gespeichert."}]},
+        ]
+        for index in range(29):
+            history.extend([
+                {"role": "user", "parts": [{"text": f"Frage {index}"}]},
+                {"role": "model", "parts": [{"text": f"Antwort {index}"}]},
+            ])
+
+        # Reproduce a legacy raw slice that starts with a tool response.
+        server.set_kv("gemini_conversation_history", json.dumps(history[-60:]))
+        trimmed = server._gemini_history()
+
+        self.assertEqual(len(trimmed), 58)
+        self.assertEqual(trimmed[0]["parts"][0]["text"], "Frage 0")
+        self.assertFalse(any("functionResponse" in part for content in trimmed for part in content["parts"]))
+
+    def test_gemini_rebuilds_history_from_the_shared_local_dialogue(self):
+        server.add_message("user", "Was war mein letzter Schwerpunkt?")
+        server.add_message("assistant", "Der Schwerpunkt war die Schwelle.")
+        server.add_message("user", "Und wie geht es weiter?")
+        server.set_kv("gemini_conversation_history", json.dumps([
+            {"role": "user", "parts": [{"text": "Veraltete Gemini-Frage"}]},
+            {"role": "model", "parts": [{"text": "Veraltete Gemini-Antwort"}]},
+        ]))
+
+        request, history, _ = server._gemini_request_payload({"conversation": "gemini-shared-dialogue", "input": "Und wie geht es weiter?"}, "gemini-3.8-flash")
+
+        self.assertEqual(history, request["contents"])
+        self.assertEqual([content["parts"][0]["text"] for content in history], [
+            "Was war mein letzter Schwerpunkt?", "Der Schwerpunkt war die Schwelle.", "Und wie geht es weiter?",
+        ])
+
+    def test_gemini_keeps_repeated_text_after_a_model_turn(self):
+        server.set_kv("gemini_conversation_history", json.dumps([
+            {"role": "user", "parts": [{"text": "Ja"}]},
+            {"role": "model", "parts": [{"text": "Ja"}]},
+        ]))
+
+        request, _, _ = server._gemini_request_payload({"conversation": "gemini-repeated-text", "input": "Ja"}, "gemini-3.8-flash")
+
+        self.assertEqual(request["contents"][-1], {"role": "user", "parts": [{"text": "Ja"}]})
+
+    def test_openai_provider_switch_includes_recent_gemini_dialogue(self):
+        server.add_message("user", "Wie lief die Tempoeinheit?")
+        server.add_message("assistant", "Sie war kontrolliert und gleichmäßig.")
+        server.add_message("user", "Was folgt morgen?")
+        server.set_kv("last_coach_ai_provider", "gemini")
+
+        handoff = server.provider_switch_input("Was folgt morgen?", "openai")
+
+        self.assertIn("Wie lief die Tempoeinheit?", handoff)
+        self.assertIn("Sie war kontrolliert und gleichmäßig.", handoff)
+        self.assertTrue(handoff.endswith("Aktuelle Nachricht des Athleten:\nWas folgt morgen?"))
+
+    def test_outstanding_plan_drafts_remain_visible_across_provider_conversations(self):
+        draft = server._stage_coach_artifact("gemini-conversation", "gemini-draft", {"plan_name": "Basis", "goal": "Ausdauer", "workouts": []})
+
+        refs = server.coach_intent_artifact_refs("openai-conversation")
+
+        self.assertIn(draft["artifact_id"], [item["id"] for item in refs])
+
+    def test_gemini_rejects_parallel_tool_calls_when_coach_disables_them(self):
+        response = {"candidates": [{"content": {"role": "model", "parts": [
+            {"functionCall": {"name": "save_checkin", "args": {}}},
+            {"functionCall": {"name": "save_profile", "args": {}}},
+        ]}}]}
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", return_value=response):
+            with self.assertRaises(server.AppError) as raised:
+                server.gemini_responses_request({"conversation": "gemini-single-tool", "input": "Aktualisiere meine Daten.", "parallel_tool_calls": False})
+
+        self.assertEqual(raised.exception.reason, "parallel_tool_calls_unsupported")
+        self.assertEqual(json.loads(server.get_kv("gemini_conversation_history") or "[]"), [])
+
+    def test_gemini_transcription_keeps_audio_server_side_and_returns_text(self):
+        captured = {}
+
+        def fake_http_json(method, url, payload=None, headers=None, **kwargs):
+            captured.update({"method": method, "url": url, "payload": payload, "headers": headers})
+            return {"candidates": [{"content": {"role": "model", "parts": [{"text": "Wie soll ich morgen trainieren?"}]}}]}
+
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            result = server.transcribe_audio(b"fake-webm-audio", "audio/webm;codecs=opus")
+
+        self.assertEqual(result, {"transcript": "Wie soll ich morgen trainieren?"})
+        self.assertEqual(captured["headers"]["x-goog-api-key"], "test-gemini-key")
+        audio_part = captured["payload"]["contents"][0]["parts"][0]["inlineData"]
+        self.assertEqual(audio_part["mimeType"], "audio/webm")
+        self.assertNotIn("fake-webm-audio", str(captured["payload"]))
+
+    def test_ai_provider_selection_keeps_models_separate(self):
+        config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
+        with patch.object(server, "CONFIG", config):
+            self.assertEqual(server.selected_ai_provider(), "openai")
+            server.save_model("gpt-5.6-luna")
+            self.assertEqual(server.save_ai_provider("gemini")["provider"], "gemini")
+            self.assertEqual(server.selected_model(), "gemini-3.8-flash")
+            server.save_model("gemini-2.5-pro")
+            server.save_ai_provider("openai")
+            self.assertEqual(server.selected_model(), "gpt-5.6-luna")
+
+    def test_gemini_key_is_redacted_from_diagnostics_text(self):
+        key = "AIza" + "a" * 35
+        with patch.object(server, "CONFIG", replace(server.CONFIG, gemini_api_key=key)):
+            self.assertNotIn(key, server.redact_text(f"Gemini request failed: {key}"))
+
+    def test_gemini_turn_uses_its_captured_provider_and_reasoning_level(self):
+        config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
+        payload = {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "Prüfe die Form.", "reasoning": {"effort": "low"}}
+        with patch.object(server, "CONFIG", config), patch.object(server, "gemini_responses_request", return_value={"output_text": "ok"}) as gemini, patch.object(server, "openai_request") as openai:
+            self.assertEqual(server.responses_request(payload)["output_text"], "ok")
+        gemini.assert_called_once_with(payload)
+        openai.assert_not_called()
+        request, _, _ = server._gemini_request_payload(payload, "gemini-3.8-flash")
+        self.assertEqual(request["generationConfig"]["thinkingConfig"], {"thinkingLevel": "low"})
+
+    def test_gemini_background_job_is_not_replayed_after_restart(self):
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        server.set_kv("gemini_conversation_history", json.dumps([
+            {"role": "user", "parts": [{"text": "Erstelle einen Plan."}]},
+            {"role": "model", "parts": [{"functionCall": {"name": "stage_training_plan", "args": {}}}]},
+        ]))
+        with patch.object(server, "CONFIG", config):
+            server.enqueue_background_coach_job(
+                "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
+                "turn-gemini-background-restart",
+                "csrf-gemini-background-restart",
+            )
+            self.assertIsNotNone(server._claim_background_coach_job())
+            self.assertEqual(server.resume_interrupted_coach_jobs(), 0)
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-gemini-background-restart",)).fetchone()
+        self.assertEqual(command["status"], "completed")
+        self.assertEqual(json.loads(command["receipt"])["status"], "failed")
+        self.assertEqual(server._gemini_history(), [{"role": "user", "parts": [{"text": "Erstelle einen Plan."}]}])
+
+    def test_gemini_reset_deletes_an_existing_openai_conversation(self):
+        server.set_kv("openai_conversation_id", "conv-test")
+        config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "delete_remote_conversation", return_value=True) as delete:
+            result = server.reset_coach_chat()
+        delete.assert_called_once_with("conv-test")
+        self.assertTrue(result["remote_conversation_deleted"])
+
+    def test_gemini_error_classes_preserve_authentication_quota_and_rate_limits(self):
+        self.assertEqual(server.gemini_error_details(401, b"{}")["reason"], "authentication_or_permission")
+        quota = json.dumps({"error": {"status": "RESOURCE_EXHAUSTED", "details": [{"reason": "quotaExceeded"}]}}).encode()
+        self.assertEqual(server.gemini_error_details(429, quota)["reason"], "insufficient_quota")
+        self.assertEqual(server.gemini_error_details(429, b"{}")["reason"], "rate_limit_exceeded")
+
+    def test_provider_authentication_errors_do_not_use_the_session_status(self):
+        provider_error = server.AppError(401, "Gemini-SchlÃ¼ssel ungÃ¼ltig.", reason="authentication_or_permission")
+        self.assertEqual(server.public_app_error_status(provider_error), 502)
+        self.assertEqual(server.public_app_error_status(server.AppError(401, "Anmeldung erforderlich.")), 401)
+
+    def test_gemini_http_errors_keep_the_provider_status(self):
+        upstream_error = server.HTTPError(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+            401,
+            "Unauthorized",
+            {},
+            BytesIO(b'{"error":{"status":"UNAUTHENTICATED"}}'),
+        )
+        with patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError) as raised:
+                server.http_json("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {}, service="gemini")
+        self.assertEqual(raised.exception.status, 401)
+        self.assertEqual(raised.exception.reason, "authentication_or_permission")
+
+    def test_gemini_function_schemas_keep_openai_nullable_fields_as_json_schema(self):
+        schema = {"type": "object", "properties": {"notes": {"type": ["string", "null"]}}}
+        declaration = server._gemini_tools([{"type": "function", "name": "save_feedback", "parameters": schema}])[0]["functionDeclarations"][0]
+        self.assertEqual(declaration["parametersJsonSchema"], schema)
+        self.assertNotIn("parameters", declaration)
+
+    def test_http_json_cancels_while_waiting_for_provider_headers(self):
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        cancelled = threading.Event()
+        outcome = {}
+
+        class Response:
+            status = 200
+            headers = {}
+
+            def read(self, *args):
+                return b"{}"
+
+            def close(self):
+                return None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+
+        def blocked_urlopen(*args, **kwargs):
+            started.set()
+            release.wait(2)
+            finished.set()
+            return Response()
+
+        def send_request():
+            try:
+                server.http_json("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {}, service="gemini", cancel_event=cancelled)
+            except server.AppError as exc:
+                outcome["error"] = exc
+
+        with patch.object(server, "urlopen", side_effect=blocked_urlopen):
+            caller = threading.Thread(target=send_request)
+            caller.start()
+            self.assertTrue(started.wait(1))
+            cancelled.set()
+            caller.join(1)
+            release.set()
+            self.assertTrue(finished.wait(1))
+
+        self.assertFalse(caller.is_alive())
+        self.assertEqual(outcome["error"].status, 499)
+
     def test_transcribe_audio_sends_bounded_multipart_request(self):
         captured = {}
 
@@ -4149,7 +4440,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("vendor_payload", context)
 
     def test_model_selection_is_persisted_and_validated(self):
-        self.assertEqual(server.selected_model(), "gpt-5.6-sol")
+        self.assertEqual(server.selected_model(), "gpt-5.6-luna")
         self.assertEqual(server.save_model("gpt-5.6-terra"), {"model": "gpt-5.6-terra"})
         self.assertEqual(server.selected_model(), "gpt-5.6-terra")
         with self.assertRaises(server.AppError):
@@ -5736,16 +6027,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=178"', source)
-        self.assertIn('"/navigation.js?v=178"', source)
-        self.assertIn('"/state.js?v=178"', source)
-        self.assertIn('"/views.js?v=178"', source)
-        self.assertIn('"/forms.js?v=178"', source)
-        self.assertIn('"/components.js?v=178"', source)
+        self.assertIn('"/api.js?v=179"', source)
+        self.assertIn('"/navigation.js?v=179"', source)
+        self.assertIn('"/state.js?v=179"', source)
+        self.assertIn('"/views.js?v=179"', source)
+        self.assertIn('"/forms.js?v=179"', source)
+        self.assertIn('"/components.js?v=179"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=178"', source)
-        self.assertIn('"/icon.svg?v=178"', source)
-        self.assertIn('"/styles.css?v=178"', source)
+        self.assertIn('"/app.js?v=179"', source)
+        self.assertIn('"/icon.svg?v=179"', source)
+        self.assertIn('"/styles.css?v=179"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6806,7 +7097,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=178', index)
+        self.assertIn('v=179', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
