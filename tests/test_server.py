@@ -1773,19 +1773,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request, responseError });", api_client)
         self.assertIn("window.AppApi.request(path, options, () =>", app)
         self.assertIn("window.AppApi.audio(path, blob, () =>", app)
-        self.assertIn('/api.js?v=178', index)
-        self.assertIn('/navigation.js?v=178', index)
-        self.assertIn('/state.js?v=178', index)
-        self.assertIn('/views.js?v=178', index)
-        self.assertIn('/forms.js?v=178', index)
-        self.assertIn('/components.js?v=178', index)
-        self.assertIn('/app.js?v=178', index)
-        self.assertIn('intervals-coach-v178', service_worker)
-        self.assertIn('"/navigation.js?v=178"', service_worker)
-        self.assertIn('"/state.js?v=178"', service_worker)
-        self.assertIn('"/views.js?v=178"', service_worker)
-        self.assertIn('"/forms.js?v=178"', service_worker)
-        self.assertIn('"/components.js?v=178"', service_worker)
+        self.assertIn('/api.js?v=179', index)
+        self.assertIn('/navigation.js?v=179', index)
+        self.assertIn('/state.js?v=179', index)
+        self.assertIn('/views.js?v=179', index)
+        self.assertIn('/forms.js?v=179', index)
+        self.assertIn('/components.js?v=179', index)
+        self.assertIn('/app.js?v=179', index)
+        self.assertIn('intervals-coach-v179', service_worker)
+        self.assertIn('"/navigation.js?v=179"', service_worker)
+        self.assertIn('"/state.js?v=179"', service_worker)
+        self.assertIn('"/views.js?v=179"', service_worker)
+        self.assertIn('"/forms.js?v=179"', service_worker)
+        self.assertIn('"/components.js?v=179"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1811,8 +1811,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=178'), index.index('/components.js?v=178'))
-        self.assertLess(index.index('/components.js?v=178'), index.index('/app.js?v=178'))
+        self.assertLess(index.index('/forms.js?v=179'), index.index('/components.js?v=179'))
+        self.assertLess(index.index('/components.js?v=179'), index.index('/app.js?v=179'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -3788,6 +3788,44 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(len(trimmed), 58)
         self.assertEqual(trimmed[0]["parts"][0]["text"], "Frage 0")
         self.assertFalse(any("functionResponse" in part for content in trimmed for part in content["parts"]))
+
+    def test_gemini_rebuilds_history_from_the_shared_local_dialogue(self):
+        server.add_message("user", "Was war mein letzter Schwerpunkt?")
+        server.add_message("assistant", "Der Schwerpunkt war die Schwelle.")
+        server.add_message("user", "Und wie geht es weiter?")
+        server.set_kv("gemini_conversation_history", json.dumps([
+            {"role": "user", "parts": [{"text": "Veraltete Gemini-Frage"}]},
+            {"role": "model", "parts": [{"text": "Veraltete Gemini-Antwort"}]},
+        ]))
+
+        request, history, _ = server._gemini_request_payload({"conversation": "gemini-shared-dialogue", "input": "Und wie geht es weiter?"}, "gemini-3.8-flash")
+
+        self.assertEqual(history, request["contents"])
+        self.assertEqual([content["parts"][0]["text"] for content in history], [
+            "Was war mein letzter Schwerpunkt?", "Der Schwerpunkt war die Schwelle.", "Und wie geht es weiter?",
+        ])
+
+    def test_gemini_keeps_repeated_text_after_a_model_turn(self):
+        server.set_kv("gemini_conversation_history", json.dumps([
+            {"role": "user", "parts": [{"text": "Ja"}]},
+            {"role": "model", "parts": [{"text": "Ja"}]},
+        ]))
+
+        request, _, _ = server._gemini_request_payload({"conversation": "gemini-repeated-text", "input": "Ja"}, "gemini-3.8-flash")
+
+        self.assertEqual(request["contents"][-1], {"role": "user", "parts": [{"text": "Ja"}]})
+
+    def test_openai_provider_switch_includes_recent_gemini_dialogue(self):
+        server.add_message("user", "Wie lief die Tempoeinheit?")
+        server.add_message("assistant", "Sie war kontrolliert und gleichmäßig.")
+        server.add_message("user", "Was folgt morgen?")
+        server.set_kv("last_coach_ai_provider", "gemini")
+
+        handoff = server.provider_switch_input("Was folgt morgen?", "openai")
+
+        self.assertIn("Wie lief die Tempoeinheit?", handoff)
+        self.assertIn("Sie war kontrolliert und gleichmäßig.", handoff)
+        self.assertTrue(handoff.endswith("Aktuelle Nachricht des Athleten:\nWas folgt morgen?"))
 
     def test_gemini_rejects_parallel_tool_calls_when_coach_disables_them(self):
         response = {"candidates": [{"content": {"role": "model", "parts": [
@@ -5923,16 +5961,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=178"', source)
-        self.assertIn('"/navigation.js?v=178"', source)
-        self.assertIn('"/state.js?v=178"', source)
-        self.assertIn('"/views.js?v=178"', source)
-        self.assertIn('"/forms.js?v=178"', source)
-        self.assertIn('"/components.js?v=178"', source)
+        self.assertIn('"/api.js?v=179"', source)
+        self.assertIn('"/navigation.js?v=179"', source)
+        self.assertIn('"/state.js?v=179"', source)
+        self.assertIn('"/views.js?v=179"', source)
+        self.assertIn('"/forms.js?v=179"', source)
+        self.assertIn('"/components.js?v=179"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=178"', source)
-        self.assertIn('"/icon.svg?v=178"', source)
-        self.assertIn('"/styles.css?v=178"', source)
+        self.assertIn('"/app.js?v=179"', source)
+        self.assertIn('"/icon.svg?v=179"', source)
+        self.assertIn('"/styles.css?v=179"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6993,7 +7031,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=178', index)
+        self.assertIn('v=179', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
