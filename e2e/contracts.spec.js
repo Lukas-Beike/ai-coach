@@ -74,11 +74,12 @@ test("history barriers preserve optimistic and completed messages through naviga
 test("every definite HTTP rejection retains the draft and concrete error", async ({ page }) => {
   await ready(page);
   for (const status of [400, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504]) {
-    await page.route("**/api/chat/stream", (route) => route.fulfill({ status, json: { error: `Fixture rejection ${status}`, reason: "fixture_rejection" } }));
+    await page.route("**/api/chat/stream", (route) => route.fulfill({ status, headers: status === 429 ? { "Retry-After": "19" } : {}, json: { error: `Fixture rejection ${status}`, reason: "fixture_rejection" } }));
     await page.locator("#messageInput").fill(`Fixture draft ${status}`);
     await page.locator("#sendButton").click();
     await expect(page.locator("#messageInput")).toHaveValue(`Fixture draft ${status}`);
     await expect(page.locator("#toast")).toContainText(`Fixture rejection ${status}`);
+    if (status === 429) await expect(page.locator("#toast")).toContainText("19 Sekunden");
     await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
     await page.unroute("**/api/chat/stream");
   }
@@ -164,11 +165,11 @@ test("reload recovers a partial write receipt and executable undo proposal", asy
     client_turn_id: "fixture-persisted-turn", status: "partial",
     message: { id: 501, client_turn_id: "fixture-persisted-turn", content: "Check-in saved; summary unavailable." },
     command_receipts: [{ tool: "save_checkin", result: { ok: true, status: "saved" } }],
-    proposed_actions: [{ id: "fixture-undo", action_type: "undo_change", target_system: "local", diff: [] }],
+    proposed_actions: [{ id: "fixture-undo", action_type: "undo_change", status: "preview", target_system: "local", diff: [] }],
   } }));
   await page.reload();
   await expect(page.locator(".message.assistant")).toContainText("Check-in saved; summary unavailable.");
-  await expect(page.locator("#coachReceipts")).toContainText("save_checkin");
+  await expect(page.locator("#coachReceipts")).toContainText("Tages-Check-in gespeichert");
   await expect(page.getByRole("button", { name: "Änderung zurücknehmen", exact: true })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem("coachPendingTurn"))).toBe(null);
 });
@@ -308,4 +309,20 @@ test("another tab takes over an expired polling lease after the leader closes", 
   expect(await follower.evaluate(() => syncPollLeaseAvailable())).toBe(true);
   await follower.evaluate(() => releaseSyncPollLease());
   expect(await follower.evaluate(() => localStorage.getItem(SYNC_POLL_LEASE_KEY))).toBe(null);
+});
+
+test("only current pending proposals expose an explicit confirmation action", async ({ page }) => {
+  await ready(page);
+  for (const status of ["preview", "ready", "used", "expired"]) {
+    await page.evaluate((proposalStatus) => {
+      state.coachActionProposals = [{ id: "fixture-status", action_type: "undo_change", status: proposalStatus, diff: [] }];
+      renderCoachActionReview();
+    }, status);
+    const button = page.getByRole("button", { name: "Änderung zurücknehmen", exact: true });
+    if (["preview", "ready"].includes(status)) await expect(button).toBeVisible();
+    else {
+      await expect(button).toHaveCount(0);
+      await expect(page.locator("#coachActionReview")).toContainText(status === "used" ? "Freigabe bereits verwendet" : "abgelaufen");
+    }
+  }
 });

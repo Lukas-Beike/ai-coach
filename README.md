@@ -819,9 +819,11 @@ npm ci
 npx playwright install --with-deps chromium
 docker build -t ai-coach:e2e .
 docker run -d --name ai-coach-e2e -p 127.0.0.1:8090:8090 --read-only `
-  --tmpfs /data:uid=100,gid=101,mode=0700 `
+  --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp `
   --security-opt no-new-privileges:true `
-  -e APP_PASSWORD=$env:E2E_APP_PASSWORD -e COOKIE_SECURE=false ai-coach:e2e
+  -v "${PWD}/e2e:/app/e2e:ro" `
+  -e APP_PASSWORD=$env:E2E_APP_PASSWORD -e COOKIE_SECURE=false `
+  ai-coach:e2e python /app/e2e/fixture_runtime.py
 npm run test:e2e
 docker rm -f ai-coach-e2e
 ```

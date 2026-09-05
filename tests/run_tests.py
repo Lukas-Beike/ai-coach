@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def iter_tests(suite: unittest.TestSuite):
@@ -39,6 +40,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shard", type=int, default=1, help="1-based shard number")
     parser.add_argument("--total", type=int, default=1, help="number of total shards")
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="list selected test IDs without executing them",
+    )
     args = parser.parse_args()
     if args.total < 1 or not 1 <= args.shard <= args.total:
         parser.error(
@@ -51,6 +57,9 @@ def main() -> int:
     args = parse_args()
     tests = discover_tests()
     selected = select_shard(tests, args.shard, args.total)
+    if args.list:
+        print("\n".join(test.id() for test in selected))
+        return 0
     if not selected:
         raise SystemExit(f"shard {args.shard}/{args.total} contains no tests")
 

@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 import subprocess
 import shutil
+import sys
 import tempfile
 import unittest
 
@@ -14,6 +15,15 @@ SPEC.loader.exec_module(release_source)
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_direct_cli_discovers_backend_modules_from_any_working_directory(self):
+        runner = Path(run_tests.__file__).resolve()
+        with tempfile.TemporaryDirectory() as directory:
+            output = subprocess.check_output([sys.executable, str(runner), "--list"], cwd=directory, text=True, stderr=subprocess.PIPE)
+        ids = output.splitlines()
+        self.assertTrue(any(test_id.startswith("test_coach_intent.") for test_id in ids))
+        self.assertTrue(any(test_id.startswith("test_db_manager.") for test_id in ids))
+        self.assertEqual(ids, sorted(set(ids)))
+
     def test_every_discovered_module_runs_once_across_shards(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

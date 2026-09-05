@@ -416,3 +416,23 @@ test.describe("critical browser states", () => {
   });
 
 });
+
+test("authorized HTTP plan commit preserves sport through SQLCipher and calendar rendering", async ({ page }) => {
+  await openAuthenticatedApp(page);
+  const result = await page.evaluate(async () => {
+    const staged = await api("/api/fixture/plan");
+    const body = { client_turn_id: "fixture-http-commit", operation: "commit_training_plan", artifact_id: staged.artifact_id, arguments: {} };
+    const first = await api("/api/planning/commands", { method: "POST", body: JSON.stringify(body) });
+    const repeated = await api("/api/planning/commands", { method: "POST", body: JSON.stringify(body) });
+    const plan = await api("/api/plan?local=1");
+    return { first: first.status, repeated: repeated.status, entries: plan.training_calendar.filter((entry) => entry.name?.startsWith("HTTP fixture ")).map(({ name, type }) => ({ name, type })) };
+  });
+  expect(result.first).toBe("completed");
+  expect(result.repeated).toBe("completed");
+  expect(result.entries).toHaveLength(4);
+  for (const sport of ["Run", "WeightTraining", "VirtualRide", "Swim"]) expect(result.entries).toContainEqual({ name: `HTTP fixture ${sport}`, type: sport });
+  await page.goto("/#plan/overview");
+  for (const [sport, label] of [["Run", "Laufen"], ["WeightTraining", "Kraft"], ["VirtualRide", "Rad indoor"], ["Swim", "Schwimmen"]]) {
+    await expect(page.locator(".planned-entry").filter({ hasText: `HTTP fixture ${sport}` }).locator(".planned-meta")).toContainText(label);
+  }
+});
