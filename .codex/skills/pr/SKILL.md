@@ -9,10 +9,11 @@ Use this skill only when the user's message consists of the standalone command `
 
 ## Preconditions
 
-1. Work in the repository and current worktree from which the command was issued. Read the applicable `AGENTS.md` files before changing anything and follow their test, branch, commit, and security rules.
-2. Verify that Git and an authenticated GitHub CLI (`gh`) or an equivalent configured GitHub integration are available. Do not print credentials, tokens, environment files, database contents, or provider payloads.
-3. Identify the current branch, its upstream remote, and the `develop` branch. The current branch must be a feature/topic branch; never rebase or push `develop`, `main`, or another protected branch.
-4. Require a clean working tree, including untracked files. Do not stash, reset, discard, or overwrite unrelated user work. Stop and report the exact blocker if the tree is dirty, the branch is ambiguous, authentication is missing, or `develop` cannot be found.
+1. Work in the repository and current worktree from which the command was issued. Read the applicable `AGENTS.md` files before changing anything and follow their test, branch, and security rules.
+2. If the task was implemented in a dedicated worktree, the complete PR workflow must be started and completed from that same worktree. Confirm the path with `git rev-parse --show-toplevel`; never fall back to the primary checkout or infer the feature branch from another worktree. If `pr` was issued from a different checkout, stop and report that it must be rerun from the implementation worktree.
+3. Verify that Git and an authenticated GitHub CLI (`gh`) or an equivalent configured GitHub integration are available. Do not print credentials, tokens, environment files, database contents, or provider payloads.
+4. Identify the current branch, its upstream remote, and the `develop` branch. The current branch must be a feature/topic branch; never rebase or push `develop`, `main`, or another protected branch.
+5. Require a clean working tree, including untracked files. Do not stash, reset, discard, or overwrite unrelated user work. Stop and report the exact blocker if the tree is dirty, the branch is ambiguous, authentication is missing, or `develop` cannot be found.
 
 ## Rebase and commit validation
 
