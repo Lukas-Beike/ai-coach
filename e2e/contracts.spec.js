@@ -333,18 +333,20 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(day.locator(".planned-day-health")).toBeVisible();
   await expect(day.locator(".planned-day-calendar")).toBeVisible();
   await expect(day.locator(".planned-entry")).toHaveCount(2);
+  await expect(day.locator(".planned-day-content .planned-day-insights")).toHaveCount(0);
+  await expect(day.locator(".planned-day-insights summary, .planned-day-insights details")).toHaveCount(0);
+  await expect(day.locator(".planned-day-metrics")).toBeVisible();
   await expect(day.locator(".planned-day-metrics")).toContainText("Schlaf8 h");
   await expect(day.locator(".planned-day-metrics")).toContainText("Muskelkater0/10");
   await expect(day.locator(".planned-day-metrics")).toContainText("Body Battery85/100");
-  await day.locator(".planned-day-observations > summary").click();
   await expect(day.locator(".planned-day-observations")).toContainText("0 % Regenwahrscheinlichkeit");
-  await expect(day.locator(".planned-insights-sources")).toContainText("HRV: Intervals.icu Wellness");
+  await expect(day.locator(".planned-day-metrics > div", { hasText: "HRV54 ms" })).toHaveAttribute("title", "HRV: Intervals.icu Wellness");
+  await expect(day.locator(".planned-insights-sources")).toContainText("Intervals.icu Wellness");
   await expect(day.locator(".planned-day-observations img")).toHaveCount(0);
-  await day.locator(".planned-day-observations > summary").click();
   const previous = page.locator(".planned-day").filter({ has: page.locator(".planned-day-metrics", { hasText: "Schlaf6,5 h" }) });
   await expect(previous).toHaveCount(1);
   await expect(previous.locator(".planned-day-metrics")).not.toContainText("85/100");
-  await previous.locator(".planned-day-observations > summary").click();
+  await expect(previous.locator(".planned-day-metrics")).toBeVisible();
   await expect(previous.locator(".planned-weather-detail")).toContainText("Gespeicherte Wettervorhersage");
   const workout = day.locator(".planned-entry").first();
   await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 45 Min.");
@@ -363,7 +365,9 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   expect(await day.evaluate((element) => {
     const heading = element.querySelector(".planned-day-heading").getBoundingClientRect();
     const content = element.querySelector(".planned-day-content").getBoundingClientRect();
-    return heading.right <= content.left && element.scrollWidth <= element.clientWidth;
+    const insights = element.querySelector(".planned-day-insights").getBoundingClientRect();
+    return heading.right <= content.left && element.scrollWidth <= element.clientWidth
+      && insights.top >= content.bottom && insights.left < content.left;
   })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await day.screenshot({ path: testInfo.outputPath("planned-agenda.png") });

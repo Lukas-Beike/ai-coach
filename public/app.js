@@ -2146,21 +2146,20 @@ function plannedDayInsights(context, weather, dateKey, todayKey) {
 
   const section = document.createElement("div");
   section.className = "planned-day-insights";
+  const content = document.createElement("div");
+  content.className = "planned-insights-content";
   if (metrics.length || Object.keys(checkin).length) {
-    const title = document.createElement("p");
-    title.className = "planned-insights-title";
-    title.textContent = "Morgen-Check-in & Erholung";
-    section.append(title);
     if (checkin.day_form) {
       const form = document.createElement("p");
       form.className = "planned-day-form";
       form.textContent = checkin.day_form;
-      section.append(form);
+      content.append(form);
     }
     const grid = document.createElement("dl");
     grid.className = "planned-day-metrics";
-    metrics.forEach(({ label, value }) => {
+    metrics.forEach(({ label, value, source }) => {
       const item = document.createElement("div");
+      if (source) item.title = `${label}: ${source}`;
       const term = document.createElement("dt");
       term.textContent = label;
       const measurement = document.createElement("dd");
@@ -2168,18 +2167,15 @@ function plannedDayInsights(context, weather, dateKey, todayKey) {
       item.append(term, measurement);
       grid.append(item);
     });
-    if (metrics.length) section.append(grid);
+    if (metrics.length) content.append(grid);
   } else if (dateKey <= todayKey) {
     const empty = document.createElement("p");
     empty.className = "planned-insights-empty";
     empty.textContent = "Keine Check-in- oder Erholungswerte gespeichert";
-    section.append(empty);
+    content.append(empty);
   }
-  const details = document.createElement("details");
+  const details = document.createElement("div");
   details.className = "planned-day-observations";
-  const summary = document.createElement("summary");
-  summary.textContent = "Tagesdetails";
-  details.append(summary);
   const body = document.createElement("div");
   const text = (value, className = "") => {
     const p = document.createElement("p");
@@ -2207,13 +2203,19 @@ function plannedDayInsights(context, weather, dateKey, todayKey) {
   }
   const rpe = calendarRpeLabel(checkin.session_rpe);
   if (rpe != null) text(`Belastung nach dem Training: RPE ${rpe}/10 · Eigene Angabe`);
-  const sources = metrics.filter((item) => item.source).map((item) => `${item.label}: ${item.source}`);
-  if (sources.length) text(sources.join(" · "), "planned-insights-sources");
+  const sources = [...new Set(metrics.map((item) => item.source).filter(Boolean))];
+  if (sources.length) text(`Quellen: ${sources.join(" · ")}`, "planned-insights-sources");
   if (body.childElementCount) {
     details.append(body);
-    section.append(details);
+    content.append(details);
   }
-  return section.childElementCount ? section : null;
+  if (!content.childElementCount) return null;
+  const title = document.createElement("p");
+  title.className = "planned-insights-title";
+  title.textContent = metrics.length || Object.keys(checkin).length
+    ? "Check-in & Erholung" : "Tagesdetails";
+  section.append(title, content);
+  return section;
 }
 
 function plannedWeekSummary(weekKey, weekEndKey, weekEntries, compliance, todayKey) {
@@ -2548,8 +2550,8 @@ function renderPlanned(trainingCalendar) {
       });
       if (dayNotes.childElementCount) dayContent.append(dayNotes);
       const insights = plannedDayInsights(dayContext, weather, dateKey, todayKey);
-      if (insights) dayContent.append(insights);
       day.append(dayContent);
+      if (insights) day.append(insights);
       days.append(day);
     }
     week.append(days);

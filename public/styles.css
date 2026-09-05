@@ -574,7 +574,7 @@ h2 {
 .planned-week-heading h4 { margin: 0; color: var(--ink); font-size: .9rem; }
 .planned-week-summary { color: var(--muted); font-size: .75rem; line-height: 1.4; }
 .planned-week-days { display: grid; }
-.planned-day { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 20px; padding: 20px 16px; border-top: 1px solid var(--line); }
+.planned-day { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 10px 20px; padding: 20px 16px; border-top: 1px solid var(--line); }
 .planned-day.is-today { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-bright); }
 .planned-day-heading { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 5px; padding-top: 2px; }
 .planned-day-heading h5 { margin: 0; color: var(--ink); font-size: .92rem; font-weight: 750; }
@@ -583,18 +583,17 @@ h2 {
 .planned-day-weather { margin-top: 5px; color: var(--muted); font-size: .68rem; line-height: 1.5; }
 .planned-day-content { min-width: 0; }
 .planned-day-weather.is-missing { color: var(--subtle); font-size: .65rem; }
-.planned-day-insights { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
-.planned-insights-title { margin: 0 0 10px; color: var(--muted); font-size: .72rem; font-weight: 600; }
-.planned-day-form { margin: 0 0 10px; color: var(--ink); font-size: .8rem; line-height: 1.5; overflow-wrap: anywhere; }
-.planned-day-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(82px, 1fr)); gap: 12px 16px; margin: 0; }
+.planned-day-insights { grid-column: 1 / -1; min-width: 0; padding-top: 8px; border-top: 1px solid var(--line); }
+.planned-insights-title { margin: 0 0 4px; color: var(--subtle); font-size: .65rem; line-height: 1.5; font-weight: 400; }
+.planned-day-form { margin: 0 0 4px; color: var(--muted); font-size: .68rem; line-height: 1.5; overflow-wrap: anywhere; }
+.planned-day-metrics { display: flex; flex-wrap: wrap; gap: 3px 14px; margin: 0; }
+.planned-day-metrics > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 6px; }
 .planned-day-metrics dt { color: var(--muted); font-size: .68rem; line-height: 1.4; }
-.planned-day-metrics dd { margin: 3px 0 0; color: var(--ink); font-size: .85rem; font-variant-numeric: tabular-nums; }
+.planned-day-metrics dd { margin: 0; color: var(--muted); font-size: .68rem; font-variant-numeric: tabular-nums; }
 .planned-insights-empty { margin: 0; color: var(--subtle); font-size: .7rem; line-height: 1.5; }
-.planned-day-observations { color: var(--muted); font-size: .74rem; line-height: 1.5; overflow-wrap: anywhere; }
-.planned-day-observations > summary { min-height: 44px; padding: 13px 0 8px; cursor: pointer; }
-.planned-day-observations > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
-.planned-day-observations p { margin: 0 0 8px; }
-.planned-insights-sources { color: var(--subtle); font-size: .68rem; }
+.planned-day-observations { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 5px; color: var(--subtle); font-size: .65rem; line-height: 1.5; overflow-wrap: anywhere; }
+.planned-day-observations p { margin: 0; }
+.planned-insights-sources { color: var(--subtle); font-size: .63rem; }
 .planned-day-notes { display: grid; gap: 6px; margin-top: 12px; }
 .planned-day-context { margin: 0; font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
 .planned-day-calendar { color: #b9d9ff; }
@@ -619,12 +618,11 @@ h2 {
 .planned-description { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.6; white-space: pre-wrap; }
 .planned-week-totals { margin: 0; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--subtle); font-size: .7rem; line-height: 1.5; }
 @media (max-width: 480px) {
-  .planned-day { grid-template-columns: 88px minmax(0, 1fr); gap: 12px; padding: 16px 12px; }
+  .planned-day { grid-template-columns: 88px minmax(0, 1fr); gap: 8px 12px; padding: 16px 12px; }
   .planned-day-heading h5 { font-size: .8rem; }
   .planned-day-heading time { font-size: .75rem; }
   .planned-entry > summary > strong { font-size: .92rem; }
   .planned-meta { font-size: .73rem; }
-  .planned-day-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 8px; }
   .planned-week-heading { padding: 14px 12px; }
 }
 
