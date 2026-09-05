@@ -28,9 +28,6 @@ os.environ.update({
     "GARMINTOKENS": os.path.join(os.environ["DATA_DIR"], "garmin_tokens"),
     "GARMIN_FIXTURE_PATH": os.path.join(os.environ["DATA_DIR"], "missing-garmin-fixture.json"),
     "CALENDAR_ICAL_URL": "https://calendar.example.invalid/feed.ics",
-    "GITHUB_TOKEN": "test-github-token",
-    "GITHUB_REPOSITORY": "test/example",
-    "GITHUB_RELEASE_CHECK_SECONDS": "900",
     "APP_PASSWORD": "test-password-123",
     "DATA_RETENTION_DAYS": "-1",
     "PORT": "8090",
@@ -49,8 +46,6 @@ server.CONFIG = replace(
     garmin_password="",
     garmin_fixture_path="",
     calendar_ical_url="",
-    github_token="",
-    github_repository="test/example",
     secure_cookies=False,
 )
 
@@ -892,15 +887,12 @@ class CoachTests(unittest.TestCase):
         server.save_profile({"weather_location": "Köln"})
         self.assertEqual(server.get_kv(server.WEATHER_CACHE_KEY), "")
 
-    def test_local_public_state_does_not_fetch_weather_or_github(self):
+    def test_local_public_state_does_not_fetch_weather(self):
         server.save_profile({"weather_location": "Berlin"})
-        with patch.object(server, "_fetch_weather_forecast", side_effect=AssertionError("weather must stay local")), patch.object(
-            server, "fetch_github_latest_release", side_effect=AssertionError("github must stay local")
-        ):
+        with patch.object(server, "_fetch_weather_forecast", side_effect=AssertionError("weather must stay local")):
             state = server.public_state(local_only=True)
         self.assertTrue(state["configured"]["weather"])
         self.assertTrue(state["weather"]["loading"])
-        self.assertEqual(state["app"]["github_release"]["status"], "loading")
 
     def test_local_public_state_reuses_request_database_connections(self):
         backend = server.sqlite_backend if server.CONFIG.app_password else server.sqlite3
@@ -1441,8 +1433,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("garmin", bootstrap["state_versions"])
         self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 20_000)
 
-    def test_bootstrap_never_refreshes_github_or_provider_network(self):
-        with patch.object(server, "fetch_github_latest_release", side_effect=AssertionError("network")):
+    def test_bootstrap_never_refreshes_provider_network(self):
+        with patch.object(server, "http_json", side_effect=AssertionError("network")), patch.object(server, "external_call", side_effect=AssertionError("network")):
             bootstrap = server.public_bootstrap(local_only=False)
         self.assertEqual(bootstrap["schema_version"], 3)
         self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
@@ -5471,8 +5463,7 @@ class CoachTests(unittest.TestCase):
         server.create_local_planned_unit({"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Intervalle", "description": "- 30m Z2", "duration_minutes": 30})
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [{"name": "Morgenlauf"}], "recent_wellness": [], "upcoming_calendar": []}
         server.save_snapshot(snapshot)
-        with patch.object(server, "github_release_status", return_value={"status": "unavailable"}):
-            state = server.public_state()
+        state = server.public_state()
         self.assertEqual(state["app"]["name"], "Intervals Coach")
         self.assertEqual(state["app"]["version"], server.APP_VERSION)
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
@@ -5646,32 +5637,6 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual(friday_result["suggested_time"], "14:00–15:00 Uhr")
         self.assertEqual(friday_result["availability"], "nach der Arbeit")
-    def test_github_latest_release_is_normalized_and_compared_without_exposing_token(self):
-        captured = {}
-        current_major, current_minor, current_patch = server.version_tuple(server.APP_VERSION)
-        future_version = f"{current_major}.{current_minor}.{current_patch + 1}"
-
-        def fake_http_json(method, url, payload=None, headers=None, timeout=45, service=None, raw_body=None, content_type=None):
-            captured.update({"method": method, "url": url, "headers": headers, "timeout": timeout, "service": service})
-            return {
-                "tag_name": f"v{future_version}", "name": future_version, "body": "## Änderungen\n- Neue Anzeige",
-                "published_at": "2026-08-30T08:00:00Z", "draft": False, "prerelease": False,
-            }
-
-        config = replace(server.CONFIG, github_repository="Lukas-Beike/ai-coach", github_token="gh-secret-value")
-        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
-            result = server.fetch_github_latest_release("Lukas-Beike/ai-coach")
-            redacted = server.redact_text("Authorization: Bearer gh-secret-value")
-
-        self.assertEqual(result["version"], future_version)
-        self.assertTrue(result["is_newer"])
-        self.assertEqual(result["changelog"], "## Änderungen\n- Neue Anzeige")
-        self.assertEqual(captured["method"], "GET")
-        self.assertEqual(captured["service"], "github")
-        self.assertEqual(captured["timeout"], 10)
-        self.assertEqual(captured["headers"]["Authorization"], "Bearer gh-secret-value")
-        self.assertNotIn("gh-secret-value", redacted)
-        self.assertNotIn("gh-secret-value", json.dumps(result))
 
     def test_json_response_ignores_client_disconnect(self):
         handler = object.__new__(server.RequestHandler)

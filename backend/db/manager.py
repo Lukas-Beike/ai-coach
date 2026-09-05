@@ -12,44 +12,7 @@ from contextvars import ContextVar
 from pathlib import Path
 import queue
 import threading
-import time
 from typing import Any, Callable, Iterator
-
-
-class SessionCache:
-    """Bounded in-process cache for already validated session records."""
-
-    def __init__(self, max_entries: int = 512, ttl_seconds: float = 300.0):
-        self.max_entries = max(1, int(max_entries))
-        self.ttl_seconds = max(1.0, float(ttl_seconds))
-        self._lock = threading.RLock()
-        self._values: dict[str, tuple[float, Any]] = {}
-
-    def get(self, key: str, now: float | None = None) -> Any | None:
-        current = time.monotonic() if now is None else now
-        with self._lock:
-            entry = self._values.get(key)
-            if entry is None:
-                return None
-            if current - entry[0] >= self.ttl_seconds:
-                self._values.pop(key, None)
-                return None
-            return entry[1]
-
-    def put(self, key: str, value: Any, now: float | None = None) -> None:
-        current = time.monotonic() if now is None else now
-        with self._lock:
-            self._values[key] = (current, value)
-            if len(self._values) > self.max_entries:
-                oldest = min(self._values, key=lambda item: self._values[item][0])
-                self._values.pop(oldest, None)
-
-    def invalidate(self, key: str | None = None) -> None:
-        with self._lock:
-            if key is None:
-                self._values.clear()
-            else:
-                self._values.pop(key, None)
 
 
 class DatabaseManager:
@@ -75,7 +38,6 @@ class DatabaseManager:
         self.reader_count = max(1, int(reader_count))
         self.timeout = timeout
         self.persist_connections = bool(persist_connections)
-        self.session_cache = SessionCache()
         self._writer_lock = threading.RLock()
         self._state = threading.Condition(threading.RLock())
         self._readers: queue.LifoQueue[Any] = queue.LifoQueue(maxsize=self.reader_count)
@@ -139,8 +101,6 @@ class DatabaseManager:
                 if not self.persist_connections:
                     connection.close()
 
-    writer = unit_of_work
-
     @contextmanager
     def reader(self) -> Iterator[Any]:
         """Lease a reader, returning it to the pool after the read."""
@@ -182,7 +142,6 @@ class DatabaseManager:
             while self._active:
                 self._state.wait()
             self._close_connections()
-            self.session_cache.invalidate()
         try:
             yield
         finally:
@@ -197,25 +156,4 @@ class DatabaseManager:
                 self._state.wait()
             self._closed = True
             self._close_connections()
-            self.session_cache.invalidate()
             self._state.notify_all()
-
-    shutdown = close
-
-
-SQLCipherConnectionManager = DatabaseManager
-
-
-class UnitOfWork:
-    """Explicit wrapper useful to callers that want a named UoW object."""
-
-    def __init__(self, manager: DatabaseManager):
-        self.manager = manager
-        self._context: Any = None
-
-    def __enter__(self) -> Any:
-        self._context = self.manager.unit_of_work()
-        return self._context.__enter__()
-
-    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> Any:
-        return self._context.__exit__(exc_type, exc, traceback)

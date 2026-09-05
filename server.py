@@ -129,11 +129,6 @@ STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmani
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 APP_VERSION = "1.7.3"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
-GITHUB_RELEASE_CACHE_SECONDS = 15 * 60
-GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-GITHUB_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
-GITHUB_RELEASE_CACHE_LOCK = threading.Lock()
-GITHUB_RELEASE_CACHE: dict[str, Any] = {"repository": "", "checked_at": 0.0, "status": None}
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -453,9 +448,6 @@ class Config:
     # Read-only access via a shared calendar's private iCal address.
     # The address is a credential and must remain server-side.
     calendar_ical_url: str = os.environ.get("CALENDAR_ICAL_URL", "")
-    github_repository: str = os.environ.get("GITHUB_REPOSITORY", "Lukas-Beike/ai-coach")
-    github_token: str = os.environ.get("GITHUB_TOKEN", "")
-    github_release_check_seconds: int = env_int("GITHUB_RELEASE_CHECK_SECONDS", GITHUB_RELEASE_CACHE_SECONDS)
     app_password: str = os.environ.get("APP_PASSWORD", "")
     # Set COOKIE_SECURE=true when TLS is terminated before this application.
     # It stays opt-in so the documented local HTTP development flow works.
@@ -665,7 +657,6 @@ def redact_text(value: str) -> str:
         getattr(CONFIG, "garmin_password", ""),
         getattr(CONFIG, "garmin_tokenstore", ""),
         getattr(CONFIG, "garmin_fixture_path", ""),
-        getattr(CONFIG, "github_token", ""),
         getattr(CONFIG, "app_password", ""),
     )
     for secret_value in secret_values:
@@ -3183,7 +3174,6 @@ def _garmin_record_date(value: Any) -> str | None:
 
 def garmin_weight_records(snapshot: dict[str, Any]) -> list[tuple[str | None, float]]:
     records: list[tuple[str | None, float]] = []
-    roots = [snapshot.get(key) for key in ("weight", "weigh_ins", "body_composition", "bodyComposition")]
 
     def visit(value: Any, inherited_date: str | None = None) -> None:
         if isinstance(value, dict):
@@ -3201,8 +3191,7 @@ def garmin_weight_records(snapshot: dict[str, Any]) -> list[tuple[str | None, fl
             for item in value[:500]:
                 visit(item, inherited_date)
 
-    for root in roots:
-        visit(root)
+    visit(snapshot.get("weight"))
     return list(dict.fromkeys(records))
 
 
@@ -7296,79 +7285,6 @@ def training_calendar_items(planned: list[Any], activities: list[Any]) -> list[d
         str(item.get("id") or item.get("local_id") or item.get("external_id") or ""),
     ))
     return combined
-
-
-def version_tuple(value: Any) -> tuple[int, int, int] | None:
-    match = GITHUB_VERSION_RE.fullmatch(str(value or "").strip())
-    if not match:
-        return None
-    return tuple(int(part) for part in match.groups())
-
-
-def fetch_github_latest_release(repository: str) -> dict[str, Any]:
-    owner, name = repository.split("/", 1)
-    url = f"https://api.github.com/repos/{quote(owner, safe='')}/{quote(name, safe='')}/releases/latest"
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if CONFIG.github_token:
-        headers["Authorization"] = f"Bearer {CONFIG.github_token}"
-    payload = http_json("GET", url, headers=headers, timeout=10, service="github")
-    if not isinstance(payload, dict):
-        raise ValueError("GitHub returned an invalid release response")
-    tag = str(payload.get("tag_name") or "").strip()
-    release_version = version_tuple(tag)
-    current_version = version_tuple(APP_VERSION)
-    if release_version is None or current_version is None:
-        raise ValueError("GitHub release does not use a supported semantic version")
-    changelog = str(payload.get("body") or "")
-    return {
-        "status": "ok",
-        "repository": repository,
-        "tag": tag,
-        "version": ".".join(str(part) for part in release_version),
-        "name": str(payload.get("name") or tag)[:200],
-        "changelog": changelog[:50_000],
-        "published_at": str(payload.get("published_at") or ""),
-        "url": f"https://github.com/{repository}/releases/tag/{quote(tag, safe='')}",
-        "is_newer": release_version > current_version,
-    }
-
-
-def github_release_status(refresh: bool = True) -> dict[str, Any]:
-    repository = CONFIG.github_repository.strip()
-    if not GITHUB_REPOSITORY_RE.fullmatch(repository):
-        return {"status": "disabled", "message": "GitHub-Repository ist nicht konfiguriert."}
-    now = time.monotonic()
-    cache_seconds = max(60, CONFIG.github_release_check_seconds)
-    with GITHUB_RELEASE_CACHE_LOCK:
-        cached_status = GITHUB_RELEASE_CACHE.get("status")
-        if (
-            GITHUB_RELEASE_CACHE.get("repository") == repository
-            and cached_status is not None
-            and now - float(GITHUB_RELEASE_CACHE.get("checked_at") or 0) < cache_seconds
-        ):
-            return dict(cached_status)
-        if not refresh:
-            return {"status": "loading", "repository": repository, "message": "GitHub-Release wird nachgeladen."}
-        try:
-            status = fetch_github_latest_release(repository)
-        except Exception as exc:
-            LOGGER.warning(
-                "GitHub release check failed",
-                extra={
-                    "event": "github_release_check_failed",
-                    "context": {"repository": repository, "error_type": type(exc).__name__},
-                },
-            )
-            status = {
-                "status": "unavailable",
-                "repository": repository,
-                "message": "GitHub-Release konnte nicht geladen werden.",
-            }
-        GITHUB_RELEASE_CACHE.update({"repository": repository, "checked_at": now, "status": status})
-        return dict(status)
 
 
 class IntervalsClient:
@@ -14034,7 +13950,7 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
             "schema_version": 3,
             "state_versions": state_version_values,
             "plan_revision": state_version_values.get("plan"),
-            "app": {"name": "Intervals Coach", "version": APP_VERSION, "github_release": github_release_status(refresh=False)},
+            "app": {"name": "Intervals Coach", "version": APP_VERSION},
             "skeleton": {key: True for key in ("chat", "activities", "plan", "library", "performance", "feedback", "profile")},
             "messages": list_messages(limit=100),
             "messages_next_cursor": None,
@@ -14171,7 +14087,6 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
     if weather.pop("_refreshed", False):
         check_adaptive_replan("weather")
     planned_with_weather = add_weather_to_planned(planned, weather)
-    github_release = github_release_status(refresh=not local_only)
 
     with DB_LOCK, database() as db:
         checkins = list_checkins(30)
@@ -14183,7 +14098,6 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
             "app": {
                 "name": "Intervals Coach",
                 "version": APP_VERSION,
-                "github_release": github_release,
             },
             "messages": list_messages(),
             "plans": list_training_plans(),
@@ -14677,26 +14591,19 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-def _database_row_value(row: Any, name: str, index: int) -> Any:
-    try:
-        return row[name]
-    except (IndexError, KeyError, TypeError):
-        return row[index]
-
-
 def database_table_names(db: Any) -> set[str]:
     return {
-        str(_database_row_value(row, "name", 0))
+        str(row["name"])
         for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        if not str(_database_row_value(row, "name", 0)).startswith("sqlite_")
+        if not str(row["name"]).startswith("sqlite_")
     }
 
 
 def database_index_names(db: Any) -> set[str]:
     return {
-        str(_database_row_value(row, "name", 0))
+        str(row["name"])
         for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
-        if not str(_database_row_value(row, "name", 0)).startswith("sqlite_")
+        if not str(row["name"]).startswith("sqlite_")
 }
 
 
@@ -14707,7 +14614,7 @@ def database_schema_is_current(db: Any) -> bool:
         return False
     return all(
         columns == {
-            _database_row_value(row, "name", 1)
+            row["name"]
             for row in db.execute(f"PRAGMA table_info({table})").fetchall()
         }
         for table, columns in CURRENT_DATABASE_SCHEMA.items()
@@ -14785,6 +14692,7 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
         if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
             raise AppError(503, "SQLCipher ist für die Wiederherstellung nicht verfügbar.")
         connection = backend.connect(temporary_path, timeout=20)
+        connection.row_factory = database_row_factory
         try:
             if CONFIG.app_password:
                 _configure_cipher(connection, CONFIG.app_password)
@@ -14794,7 +14702,7 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
             integrity = connection.execute("PRAGMA integrity_check").fetchone()
             if connection.execute("PRAGMA foreign_key_check").fetchall():
                 raise AppError(400, "Das Backup enthält ungültige Fremdschlüssel.")
-            if not integrity or str(integrity[0]).casefold() != "ok":
+            if not integrity or str(integrity["integrity_check"]).casefold() != "ok":
                 raise AppError(400, "Die Integritätsprüfung des Backups ist fehlgeschlagen.")
             # Never restore sessions captured in a backup. The current browser
             # is forced to authenticate again after the replacement.
