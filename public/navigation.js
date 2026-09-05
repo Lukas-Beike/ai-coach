@@ -50,5 +50,5 @@ function baseRoute(route = state.route) {
 function moreSegmentFromRoute(route = state.route) {
   const segment = String(route || "").split("/")[1];
   if (["profile", "connections", "coach", "privacy", "operations"].includes(segment)) return segment;
-  return route === "profile" ? "profile" : "connections";
+  return "connections";
 }

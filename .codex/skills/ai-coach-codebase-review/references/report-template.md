@@ -27,7 +27,7 @@ Use this shape for each finding:
 Evidence: What the code does and the end-to-end path that reaches it.
 Trigger: Minimal realistic condition or reproduction.
 Impact: Concrete effect and affected invariant/data/boundary.
-Remediation: Smallest sound fix, including compatibility or migration concerns.
+Remediation: Smallest sound fix for the current fresh-installation contract; remove obsolete paths and their tests.
 Regression test: Observable test that fails before and passes after.
 Confidence: high | medium | low
 ```

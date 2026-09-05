@@ -136,7 +136,6 @@ jobs:
               --repo "$REPOSITORY" \
               --ref "$source_ref" \
               --field "release_tag=$release_tag" \
-              --field "source_ref=$source_ref" \
               --field "publish_container=false"
           }
 
