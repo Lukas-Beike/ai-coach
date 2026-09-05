@@ -52,6 +52,10 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("pullRequest.draft !== true", workflow)
         self.assertIn("uses: ./.github/actions/codex-review-gate", workflow)
         self.assertIn("github.rest.issues.createComment", workflow)
+        self.assertRegex(
+            workflow,
+            r"(?ms)  gate:.*?    permissions:\n      contents: read\n      issues: write\n      pull-requests: write\n      checks: write",
+        )
         self.assertIn("github.event.action != 'edited'", workflow)
         self.assertIn("pull_requests: ${{ steps.resolve_base.outputs.pull_requests }}", workflow)
         self.assertIn("has_pull_requests: ${{ steps.resolve_base.outputs.has_pull_requests }}", workflow)

@@ -104,7 +104,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-      pull-requests: read
+      pull-requests: write
       checks: write
     timeout-minutes: 45
     concurrency:
