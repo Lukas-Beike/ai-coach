@@ -80,6 +80,13 @@ jobs:
                 }];
               }
             }
+            if (affectedPullRequests.length === 0) {
+              affectedPullRequests = [{
+                pullRequestNumber: 0,
+                baseRef: 'none',
+                skip: true,
+              }];
+            }
             core.setOutput('pull_requests', JSON.stringify({
               include: affectedPullRequests,
             }));
@@ -87,6 +94,7 @@ jobs:
   gate:
     name: Coordinate Codex review (${{ matrix.pullRequestNumber }})
     needs: discover
+    if: matrix.skip != true
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.pull_requests) }}
