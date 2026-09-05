@@ -69,6 +69,70 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(server.list_training_plans(),[])
         with server.database() as db:self.assertEqual(db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?",(artifact["artifact_id"],)).fetchone()["status"],"draft")
 
+    def test_plan_draft_rejects_an_occupied_date_before_storing_artifact(self):
+        workout = self.workout()
+        server.create_local_planned_unit(workout)
+        intent = self.intent("stage_training_plan", ["local_plan"], ("commit_training_plan",))
+        with self.assertRaises(server.AppError) as error:
+            server._structured_coach_tool_result(
+                "stage_training_plan", {"payload": {"plan_name": "Conflict", "goal": "Base", "workouts": [workout]}},
+                intent=intent, conversation_id="review-conversation", client_turn_id="conflict",
+                session_csrf_hash="review-session", sync_job_ids=[],
+            )
+        self.assertEqual(error.exception.reason, "plan_date_conflict")
+        with server.database() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM coach_plan_artifacts").fetchone()["n"], 0)
+
+    def test_failed_plan_draft_can_be_corrected_and_committed_in_same_turn(self):
+        bad = self.call("stage_training_plan", {"payload": {"plan_name": "Retry", "goal": "Base", "workouts": []}}, "bad-stage")
+        good_workout = self.workout()
+        good = self.call("stage_training_plan", {"payload": {"plan_name": "Retry", "goal": "Base", "workouts": [good_workout]}}, "good-stage")
+        commit = self.call("commit_training_plan", {}, "commit")
+        receipt = self.run_turn(
+            self.intent("stage_training_plan", ["local_plan"], ("commit_training_plan",)),
+            [{"output": [bad]}, {"output": [good]}, {"output": [commit]}, {"output_text": "Der Plan ist gespeichert."}],
+            turn="retry-plan",
+        )
+        self.assertEqual(receipt["status"], "completed")
+        self.assertEqual([item["result"]["ok"] for item in receipt["command_receipts"]], [False, True, True])
+        self.assertEqual(len(server.list_planned_units()), 1)
+
+    def test_tool_round_limit_submits_last_outputs_for_final_summary(self):
+        read = self.call("read_training_state", {}, "read")
+        with patch.object(server, "COACH_TOOL_MAX_ROUNDS", 1):
+            receipt = self.run_turn(
+                self.intent("stage_training_plan", ["local_plan"]),
+                [{"output": [read]}, {"output_text": "Der Auftrag ist noch nicht abgeschlossen."}],
+                turn="round-limit",
+            )
+        self.assertIn("noch nicht abgeschlossen", receipt["message"]["content"])
+
+    def test_empty_final_summary_reports_only_unresolved_plan_step(self):
+        bad = self.call("stage_training_plan", {"payload": {"plan_name": "Retry", "goal": "Base", "workouts": []}}, "bad-stage")
+        good_workout = self.workout()
+        good = self.call("stage_training_plan", {"payload": {"plan_name": "Retry", "goal": "Base", "workouts": [good_workout]}}, "good-stage")
+        failed_commit = self.call("commit_training_plan", {}, "failed-commit")
+        responses = [{"output": [bad]}, {"output": [good]}, {"output": [failed_commit]}, {"output": []}]
+        conflict = server.AppError(409, "Final commit conflict", reason="planning_revision_conflict")
+        original = server._structured_coach_tool_result
+
+        def execute(name, arguments, **kwargs):
+            if name == "commit_training_plan":
+                raise conflict
+            return original(name, arguments, **kwargs)
+
+        with patch.object(server, "_structured_coach_tool_result", side_effect=execute):
+            receipt = self.run_turn(
+                self.intent("stage_training_plan", ["local_plan"], ("commit_training_plan",)),
+                responses,
+                turn="empty-final-summary",
+            )
+        content = receipt["message"]["content"]
+        self.assertIn("nicht vollstaendig abgeschlossen", content)
+        self.assertIn("Trainingsplan speichern: Final commit conflict", content)
+        self.assertNotIn("Planentwurf erstellen", content)
+        self.assertNotIn("Ergebnis: Planentwurf gespeichert", content)
+
     def test_template_batch_invalid_second_or_last_has_no_partial_writes(self):
         for position in (1,2):
             with self.subTest(position=position):

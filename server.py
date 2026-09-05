@@ -70,7 +70,7 @@ from backend.coach.context import (
     compact_coach_planned_event as compact_coach_planned_event_value,
 )
 from backend.coach.objects import resolve_intent_objects
-from backend.coach.outcomes import COACH_OPERATION_LABELS, coach_effect_label
+from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines
 from backend.coach.intent import intent_request_payload, parse_intent_response
 from backend.http_api.responses import (
     header_items as response_header_items,
@@ -7818,11 +7818,8 @@ def save_workout_library_entries(
                 "id": plan_id, "name": plan_name.strip()[:200], "goal": goal.strip()[:2000],
                 "start_date": dates[0], "end_date": dates[-1], "status": "planned",
             })
-        requested_dates: set[str] = set()
+        _validate_plan_calendar(normalized_workouts)
         for workout in normalized_workouts:
-            if workout["date"] in requested_dates or calendar_conflicts({"date": workout["date"]}):
-                raise AppError(409, f"Für den {workout['date']} existiert bereits eine lokale Kalendereinheit.")
-            requested_dates.add(workout["date"])
             match = find_similar_library_workout(workout, templates)
             if match is not None:
                 match_duration = library_workout_duration_minutes(match)
@@ -12427,6 +12424,8 @@ def _canonical_coach_tool(
     name: str,
     description: str,
     properties: dict[str, Any] | None = None,
+    *,
+    strict: bool = False,
 ) -> dict[str, Any]:
     """Declare a focused schema for one structured Coach operation.
 
@@ -12438,10 +12437,11 @@ def _canonical_coach_tool(
         "type": "function",
         "name": name,
         "description": description,
-        "strict": not bool(properties),
+        "strict": strict or not bool(properties),
         "parameters": {
             "type": "object",
             "properties": properties or {},
+            "required": list(properties or {}) if strict else [],
             "additionalProperties": False,
         },
     }
@@ -12455,13 +12455,45 @@ COACH_STRUCTURED_TOOLS = [
     _canonical_coach_tool("list_change_history", "Read local change-history references that can be used to request an undo preview.", {"limit": {"type": "integer"}}),
     _canonical_coach_tool("list_competitions", "Read locally stored target competitions."),
     _canonical_coach_tool("list_training_plans", "Read locally stored training-plan metadata."),
-    _canonical_coach_tool("stage_training_plan", "Store a local, referenceable training-plan artifact.", {"payload": {"type": "object"}}),
+    _canonical_coach_tool("stage_training_plan", "Store a complete local training-plan draft. Include only future workouts, no rest-day placeholders or already completed activities. At most one workout per date; respect existing calendar conflicts. Correct rejected arguments before committing. Never writes remotely.", {"payload": {
+        "type": "object", "additionalProperties": False,
+        "required": ["plan_name", "goal", "workouts"],
+        "properties": {
+            "plan_name": {"type": "string"},
+            "goal": {"type": "string"},
+            "workouts": {
+                "type": "array", "minItems": 1, "maxItems": 366,
+                "items": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["date", "sport", "name", "description", "duration_minutes", "target", "rationale"],
+                    "properties": {
+                        "date": {"type": "string", "description": "Local workout date in YYYY-MM-DD format; plan span at most 730 days."},
+                        "sport": {"type": "string", "description": "Sport, e.g. Ride, VirtualRide, Run, Swim or WeightTraining."},
+                        "name": {"type": "string"},
+                        "description": {"type": "string", "minLength": 1, "description": "Workout instructions, including intervals or strength exercises as appropriate."},
+                        "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 600},
+                        "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]},
+                        "rationale": {"type": "string", "minLength": 1},
+                    },
+                },
+            },
+        },
+    }}, strict=True),
     _canonical_coach_tool("commit_training_plan", "Commit a referenced local training-plan artifact atomically.", {"artifact_id": {"type": "string"}}),
     _canonical_coach_tool("apply_training_changes", "Apply explicitly authorized local training changes.", {"changes": {"type": "array", "items": {"type": "object"}}, "expected_revision": {"type": "integer"}}),
     _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {"type": "object"}}}),
     _canonical_coach_tool("apply_workout_library_plan", "Schedule selected saved library templates locally after conflict checks; never writes remotely.", {"entries": {"type": "array", "items": {"type": "object"}}}),
     _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in.", {"payload": {"type": "object"}}),
-    _canonical_coach_tool("save_activity_feedback", "Save the athlete's explicitly stated observations about one completed activity.", {"payload": {"type": "object"}}),
+    _canonical_coach_tool("save_activity_feedback", "Save the athlete's explicitly stated observations about an existing completed activity. Resolve its exact ID from the local snapshot or list_recent_activities first. Never invent an activity ID or observations. This tool cannot create completed activities.", {"payload": {
+        "type": "object", "additionalProperties": False,
+        "required": ["activity_id", "activity_name", "activity_date", "notes"],
+        "properties": {
+            "activity_id": {"type": "string", "minLength": 1, "description": "Exact existing activity ID from the current local snapshot."},
+            "activity_name": {"type": ["string", "null"]},
+            "activity_date": {"type": ["string", "null"]},
+            "notes": {"type": "string", "minLength": 1, "description": "Only observations explicitly stated by the athlete."},
+        },
+    }}, strict=True),
     _canonical_coach_tool("delete_activity_feedback", "Delete the local feedback record for one completed activity.", {"activity_id": {"type": "string"}}),
     _canonical_coach_tool("save_competition", "Create or update one locally stored target competition.", {"payload": {"type": "object"}}),
     _canonical_coach_tool("delete_competition", "Delete one locally stored target competition.", {"competition_id": {"type": "string"}}),
@@ -12567,6 +12599,16 @@ def _validate_structured_plan_limits(payload: dict[str, Any]) -> None:
             raise AppError(400, "Jede Planeinheit benötigt ein gültiges Datum.", reason="invalid_plan") from exc
     if dates and (max(dates) - min(dates)).days > 730:
         raise AppError(400, "Ein Planartefakt darf höchstens 730 Tage umfassen.", reason="plan_limit")
+
+
+def _validate_plan_calendar(workouts: list[dict[str, Any]]) -> None:
+    requested_dates: set[str] = set()
+    for workout in workouts:
+        if workout["date"] in requested_dates:
+            raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {workout['date']}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
+        if calendar_conflicts({"date": workout["date"]}):
+            raise AppError(409, f"Für den {workout['date']} existiert bereits eine lokale Kalendereinheit. Berücksichtige diesen Termin und plane zusätzliche Einheiten an freien Tagen.", reason="plan_date_conflict")
+        requested_dates.add(workout["date"])
 
 
 def _stage_coach_artifact(conversation_id: str, client_turn_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -12755,6 +12797,8 @@ def _structured_coach_tool_result(
         _require_coach_scope(intent, "local_plan")
         payload = _structured_artifact_payload(arguments)
         _validate_structured_plan_limits(payload)
+        payload = {**payload, "workouts": [normalize_workout(workout) for workout in payload["workouts"]]}
+        _validate_plan_calendar(payload["workouts"])
         return _stage_coach_artifact(conversation_id, client_turn_id, payload)
     if name == "commit_training_plan":
         if "commit_training_plan" not in _structured_authorized_operations(intent):
@@ -13208,8 +13252,8 @@ def _chat_with_structured_coach_impl(
     sync_job_ids: list[str] = list(background_receipt.get("sync_job_ids") or [])
     command_receipts: list[dict[str, Any]] = list(background_receipt.get("command_receipts") or [])
     tool_outputs: list[dict[str, Any]] = []
-    executed_tools: set[str] = {
-        str(item.get("tool") or "") for item in command_receipts if isinstance(item, dict) and item.get("tool")
+    successful_tools: set[str] = {
+        str(item.get("tool") or "") for item in command_receipts if isinstance(item, dict) and item.get("result", {}).get("ok")
     }
     rounds = int(background_receipt.get("tool_rounds") or 0) if background_owned else 0
     while rounds < COACH_TOOL_MAX_ROUNDS:
@@ -13238,7 +13282,7 @@ def _chat_with_structured_coach_impl(
             prior_call = next((entry for entry in command_receipts if entry.get("call_id") == call_id), None)
             if prior_call and prior_call.get("effect_key") != effect_key:
                 raise AppError(409, "Ein Werkzeugaufruf wurde mit anderen Argumenten wiederholt.", reason="tool_call_conflict")
-            cached = prior_call or next((entry for entry in command_receipts if entry.get("effect_key") == effect_key), None)
+            cached = prior_call or next((entry for entry in command_receipts if entry.get("effect_key") == effect_key and entry.get("result", {}).get("ok")), None)
             if cached is not None:
                 result = cached["result"]
             else:
@@ -13261,7 +13305,9 @@ def _chat_with_structured_coach_impl(
                     command_receipts[:] = [entry for entry in command_receipts if entry.get("call_id") != call_id]
                     result = {"ok": False, "error": redact_text(str(exc))[:1000], "reason": getattr(exc, "reason", None)}
                     command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "result": result})
-            executed_tools.add(name)
+                    LOGGER.warning("Coach tool failed", extra={"event": "coach_tool_failed", "context": {"tool": name, **_safe_diagnostic_error(exc)}})
+            if result.get("ok"):
+                successful_tools.add(name)
             tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
             running_receipt = {"message": None, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": rounds, "status": "running"}
             _merge_coach_command_receipt(client_turn_id, running_receipt)
@@ -13269,31 +13315,51 @@ def _chat_with_structured_coach_impl(
             break
         rounds += 1
         if rounds >= COACH_TOOL_MAX_ROUNDS:
+            # Resolve every function call in the conversation even at the round
+            # limit, and request an actual final answer with no further actions.
+            response = request_response({
+                "model": selected_model(), "conversation": conversation_id,
+                "instructions": model_instructions + "\nThe tool round limit has been reached. Summarize the actual results and unresolved errors honestly; do not claim failed actions succeeded.",
+                "input": tool_outputs, "tools": COACH_STRUCTURED_TOOLS,
+                "tool_choice": "none", "parallel_tool_calls": False,
+                "max_output_tokens": coach_output_token_budget(message, followup=True),
+                "truncation": "auto",
+            })
             break
         pending_follow_ups = [
             operation for operation in (intent.get("follow_up_operations") or [])
-            if operation not in executed_tools
+            if operation not in successful_tools
+            and (operation != "commit_training_plan" or intent.get("artifact_id"))
         ]
+        # A failed call needs room for corrected arguments or prerequisite reads.
+        # Do not force a dependent write before its draft exists.
+        round_failed = any(not json.loads(item["output"]).get("ok") for item in tool_outputs)
         followup_payload = {
             "model": selected_model(),
             "conversation": conversation_id,
             "instructions": model_instructions,
             "input": tool_outputs,
             "tools": COACH_STRUCTURED_TOOLS,
-            "tool_choice": {"type": "function", "name": pending_follow_ups[0]} if pending_follow_ups else "auto",
+            "tool_choice": {"type": "function", "name": pending_follow_ups[0]} if pending_follow_ups and not round_failed else "auto",
             "parallel_tool_calls": False,
             "max_output_tokens": coach_output_token_budget(message, followup=True),
             "truncation": "auto",
         }
         response = request_response(followup_payload)
     text = output_text(response)
-    if not text:
-        effects = [entry for entry in command_receipts if entry.get("result", {}).get("ok")]
-        text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Coach-Antwort enthaelt keine Textantwort; es wurde keine Aktion bestaetigt."
     successful_operations = {entry["tool"] for entry in command_receipts if entry.get("result", {}).get("ok")}
     pending_operations = sorted(_structured_authorized_operations(intent) - successful_operations - {""})
+    if not text:
+        effects = [entry for entry in command_receipts if entry.get("result", {}).get("ok")]
+        if pending_operations:
+            text = "Der Coach-Auftrag konnte nicht vollstaendig abgeschlossen werden."
+        else:
+            text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Coach-Antwort enthaelt keine Textantwort; es wurde keine Aktion bestaetigt."
     if pending_operations:
-        text += "\nNoch nicht erfolgreich abgeschlossen: " + ", ".join(COACH_OPERATION_LABELS.get(operation, "Angeforderter Schritt") for operation in pending_operations) + "."
+        text += "\nNoch nicht erfolgreich abgeschlossen: " + ", ".join(COACH_ACTION_LABELS.get(operation, "Angeforderter Schritt") for operation in pending_operations) + "."
+        failures = coach_failure_lines(command_receipts, set(pending_operations))
+        if failures:
+            text += "\nFehlgeschlagene Schritte:\n" + failures
     proposed_actions = [entry["result"]["proposed_action"] for entry in command_receipts if isinstance(entry.get("result"), dict) and entry["result"].get("proposed_action")]
     if duplicate_activity:
         proposal = duplicate_activity_delete_preview(duplicate_activity, session_csrf_hash)
@@ -13386,13 +13452,13 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         pending = sorted(_structured_authorized_operations(intent) - completed_tools - {""})
         cancelled = isinstance(error, AppError) and error.reason == "chat_cancelled"
         status = "partial" if successes else "cancelled" if cancelled else "failed"
-        text = "Die Coach-Verarbeitung wurde abgebrochen." if cancelled else "Die Coach-Zusammenfassung ist fehlgeschlagen."
+        text = "Die Coach-Verarbeitung wurde abgebrochen." if cancelled else "Die Coach-Zusammenfassung ist fehlgeschlagen." if successes else "Der Coach-Auftrag konnte nicht abgeschlossen werden."
         if successes:
             text += "\nBereits erfolgreich ausgefuehrt: " + ", ".join(coach_effect_label(item) for item in successes) + ". Diese Aktionen bleiben gespeichert und werden nicht erneut ausgefuehrt."
         if failures:
-            text += "\nFehlgeschlagene Schritte: " + ", ".join(coach_effect_label(item) for item in failures) + "."
+            text += "\nFehlgeschlagene Schritte:\n" + coach_failure_lines(commands, set(pending))
         if pending:
-            text += "\nNicht erfolgreich abgeschlossen: " + ", ".join(COACH_OPERATION_LABELS.get(operation, "Angeforderter Schritt") for operation in pending) + "."
+            text += "\nNicht erfolgreich abgeschlossen: " + ", ".join(COACH_ACTION_LABELS.get(operation, "Angeforderter Schritt") for operation in pending) + "."
         receipt.update({
             "status": status, "error": safe_error, "client_turn_id": client_turn_id,
             "command_receipts": commands, "sync_job_ids": receipt.get("sync_job_ids") or [],
@@ -13413,6 +13479,7 @@ def _chat_with_structured_coach(*args: Any, **kwargs: Any) -> dict[str, Any]:
     except Exception as exc:
         if isinstance(exc, AppError) and exc.reason in {"command_scope_denied", "client_turn_in_progress"}:
             raise
+        LOGGER.warning("Coach command failed", extra={"event": "coach_command_failed", "context": _safe_diagnostic_error(exc)})
         receipt = _persist_structured_command_failure(client_turn_id, intent, exc)
         if not receipt:
             raise

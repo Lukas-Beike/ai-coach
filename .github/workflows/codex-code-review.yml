@@ -23,6 +23,7 @@ jobs:
     name: Find PRs requiring a Codex review
     outputs:
       pull_requests: ${{ steps.resolve_base.outputs.pull_requests }}
+      has_pull_requests: ${{ steps.resolve_base.outputs.has_pull_requests }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -80,6 +81,7 @@ jobs:
                 }];
               }
             }
+            core.setOutput('has_pull_requests', affectedPullRequests.length > 0 ? 'true' : 'false');
             if (affectedPullRequests.length === 0) {
               affectedPullRequests = [{
                 pullRequestNumber: 0,
@@ -94,7 +96,7 @@ jobs:
   gate:
     name: Coordinate Codex review (${{ matrix.pullRequestNumber }})
     needs: discover
-    if: matrix.skip != true
+    if: needs.discover.outputs.has_pull_requests == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.pull_requests) }}
