@@ -519,8 +519,8 @@ def available_model_options(provider: str | None = None) -> list[dict[str, str]]
     return options
 
 
-def selected_model() -> str:
-    provider = selected_ai_provider()
+def selected_model(provider: str | None = None) -> str:
+    provider = provider or selected_ai_provider()
     configured = {option["id"] for option in available_model_options(provider)}
     stored = get_kv(f"selected_model_{provider}") if provider else None
     default = CONFIG.gemini_model if provider == "gemini" else CONFIG.openai_model
@@ -1593,6 +1593,10 @@ def initialise_database() -> None:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
             db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
             db.execute("DELETE FROM snapshots WHERE created_at < ?", (cutoff,))
+            # Gemini history has no per-entry timestamp. Rebuild it from the
+            # retained messages after startup instead of keeping stale content.
+            set_kv("gemini_conversation_history", "[]", db)
+            set_kv("gemini_call_names", "{}", db)
     resume_interrupted_sync_jobs()
 
 
@@ -6337,6 +6341,34 @@ def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     }
 
 
+def gemini_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
+    """Classify Gemini failures without retaining the provider response body."""
+    try:
+        payload = json.loads(raw_body) if raw_body else None
+    except (TypeError, json.JSONDecodeError):
+        payload = None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    error = error if isinstance(error, dict) else {}
+    tokens = [str(error.get("status") or "").casefold()]
+    for detail in error.get("details") if isinstance(error.get("details"), list) else []:
+        if isinstance(detail, dict):
+            tokens.extend(str(detail.get(key) or "").casefold() for key in ("reason", "@type"))
+    searchable = " ".join(tokens)
+    if status in {401, 403} or "permission" in searchable or "unauthenticated" in searchable:
+        reason, message = "authentication_or_permission", "Der Gemini-Zugang wurde abgelehnt. Bitte API-Schlüssel und Berechtigungen prüfen."
+    elif status == 429 and "quota" in searchable:
+        reason, message = "insufficient_quota", "Das Gemini-Kontingent ist aufgebraucht. Bitte Nutzung und Abrechnung im Google-Konto prüfen."
+    elif status == 429:
+        reason, message = "rate_limit_exceeded", "Gemini hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
+    elif status == 404:
+        reason, message = "not_found", "Das konfigurierte Gemini-Modell oder der angeforderte Dienst wurde nicht gefunden."
+    elif status >= 500:
+        reason, message = "provider_unavailable", "Gemini ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
+    else:
+        reason, message = "http_error", f"Gemini konnte die Anfrage nicht verarbeiten (HTTP {status})."
+    return {"state": "error", "reason": reason, "message": message, "http_status": status, "updated_at": utc_now()}
+
+
 def record_openai_status(status: dict[str, Any]) -> None:
     """Persist only a safe, user-facing OpenAI connection status."""
     safe_status = {
@@ -6422,6 +6454,7 @@ def http_json(
     service: str | None = None,
     raw_body: bytes | None = None,
     content_type: str | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> Any:
     initialise_logging()
     if raw_body is not None and payload is not None:
@@ -6458,7 +6491,10 @@ def http_json(
         "content_type": request_headers.get("Content-Type"),
     })
     try:
+        _raise_chat_cancelled(cancel_event)
         with urlopen(request, timeout=timeout) as response:
+            if cancel_event is not None:
+                cancel_event._provider_response = response
             try:
                 raw = response.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
             except TypeError:  # Small fake responses in unit tests may not accept a size.
@@ -6500,6 +6536,8 @@ def http_json(
             record_openai_rate_limits(getattr(exc, "headers", None))
             error_details = openai_error_details(exc.code, raw_error)
             record_openai_status(error_details)
+        elif service == "gemini":
+            error_details = gemini_error_details(exc.code, raw_error)
         else:
             error_details = None
         LOGGER.error(
@@ -6527,9 +6565,14 @@ def http_json(
             "error_bytes": len(raw_error),
         })
         if error_details:
-            raise AppError(exc.code if exc.code == 429 else 502, error_details["message"], reason=error_details["reason"]) from exc
+            if service == "gemini":
+                _record_gemini_status("error", error_details["message"], reason=error_details["reason"], status=exc.code)
+            status = exc.code if service == "gemini" or exc.code == 429 else 502
+            raise AppError(status, error_details["message"], reason=error_details["reason"]) from exc
         raise AppError(502, upstream_http_error_message(exc.code, raw_error, service), reason="provider_http_error") from exc
-    except (URLError, TimeoutError) as exc:
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        if cancel_event is not None and cancel_event.is_set():
+            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
         if service == "openai":
             record_openai_status({
                 "state": "error",
@@ -11655,7 +11698,7 @@ def _gemini_tools(tools: Any) -> list[dict[str, Any]]:
     return [{"functionDeclarations": declarations}] if declarations else []
 
 
-def _gemini_request_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
+def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
     persistent = bool(payload.get("conversation"))
     history = _gemini_history() if persistent else []
     input_value = payload.get("input")
@@ -11709,8 +11752,11 @@ def _gemini_request_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], li
     format_config = text_format.get("format") if isinstance(text_format.get("format"), dict) else {}
     if format_config.get("type") == "json_schema" and isinstance(format_config.get("schema"), dict):
         request["generationConfig"].update({"responseMimeType": "application/json", "responseJsonSchema": format_config["schema"]})
-    thinking_level = selected_thinking_level()
-    if selected_model().startswith("gemini-3."):
+    explicit_reasoning = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else {}
+    thinking_level = str(explicit_reasoning.get("effort") or selected_thinking_level()).casefold()
+    if thinking_level not in {"low", "medium", "high"}:
+        thinking_level = selected_thinking_level()
+    if model.startswith("gemini-3."):
         request["generationConfig"]["thinkingConfig"] = {"thinkingLevel": thinking_level}
     else:
         thinking = {"low": 1024, "medium": 8192, "high": 24576}.get(thinking_level)
@@ -11719,16 +11765,16 @@ def _gemini_request_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], li
     return request, history, persistent
 
 
-def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str) -> dict[str, Any]:
+def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str, cancel_event: threading.Event | None = None) -> dict[str, Any]:
     if not CONFIG.gemini_api_key:
         raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", str(model or "")):
         raise AppError(400, "Ungültiges Gemini-Modell.")
     try:
         result = http_json("POST", f"{GEMINI_API_BASE_URL}/models/{model}:generateContent", payload,
-                           {"x-goog-api-key": CONFIG.gemini_api_key}, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS, service="gemini")
+                           {"x-goog-api-key": CONFIG.gemini_api_key}, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS, service="gemini", cancel_event=cancel_event)
     except AppError as exc:
-        _record_gemini_status("error", "Gemini-Anfrage fehlgeschlagen.", reason=exc.reason or "request_failed", status=exc.status)
+        _record_gemini_status("error", exc.message, reason=exc.reason or "request_failed", status=exc.status)
         raise
     if not isinstance(result, dict):
         _record_gemini_status("error", "Gemini hat keine JSON-Antwort geliefert.", reason="invalid_response", status=502)
@@ -11738,9 +11784,10 @@ def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str) -
     return result
 
 
-def gemini_responses_request(payload: dict[str, Any]) -> dict[str, Any]:
-    request, history, persistent = _gemini_request_payload(payload)
-    result = gemini_raw_request(selected_model(), request, operation="generate_content")
+def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading.Event | None = None) -> dict[str, Any]:
+    model = str(payload.get("model") or selected_model("gemini"))
+    request, history, persistent = _gemini_request_payload(payload, model)
+    result = gemini_raw_request(model, request, operation="generate_content", cancel_event=cancel_event)
     candidates = result.get("candidates") if isinstance(result.get("candidates"), list) else []
     candidate = candidates[0] if candidates and isinstance(candidates[0], dict) else None
     content = candidate.get("content") if isinstance(candidate, dict) and isinstance(candidate.get("content"), dict) else None
@@ -11772,11 +11819,17 @@ def gemini_responses_request(payload: dict[str, Any]) -> dict[str, Any]:
             "usage": {"input_tokens": usage.get("promptTokenCount", 0), "output_tokens": usage.get("candidatesTokenCount", 0), "total_tokens": usage.get("totalTokenCount", 0)}}
 
 
+def request_ai_provider(payload: dict[str, Any]) -> str:
+    provider = str(payload.get("_ai_provider") or "").casefold()
+    return provider if provider in {"openai", "gemini"} else selected_ai_provider()
+
+
 def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     """Call Responses API and retry transient locks on the persistent conversation."""
-    if selected_ai_provider() == "gemini":
+    if request_ai_provider(payload) == "gemini":
         return gemini_responses_request(payload)
     request_payload = dict(payload)
+    request_payload.pop("_ai_provider", None)
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     for attempt in range(3):
         try:
@@ -11844,12 +11897,10 @@ def responses_background_request(
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Create or resume a bounded OpenAI background response and poll it."""
-    if selected_ai_provider() == "gemini":
+    if request_ai_provider(payload) == "gemini":
         _raise_chat_cancelled(cancel_event)
-        result = gemini_responses_request(payload)
+        result = gemini_responses_request(payload, cancel_event=cancel_event)
         _raise_chat_cancelled(cancel_event)
-        if on_response_id is not None:
-            on_response_id(str(result.get("id") or "gemini"))
         return result
     started = time.monotonic()
     if response_id:
@@ -11857,6 +11908,7 @@ def responses_background_request(
         active_response_id = _openai_response_id(current.get("id") or response_id)
     else:
         request_payload = {**payload, "background": True, "store": True}
+        request_payload.pop("_ai_provider", None)
         current = responses_request(request_payload)
         active_response_id = _openai_response_id(current.get("id"))
         if on_response_id is not None:
@@ -11887,6 +11939,7 @@ def openai_stream_request(
     if not CONFIG.openai_api_key:
         raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
     request_payload = {**payload, "stream": True}
+    request_payload.pop("_ai_provider", None)
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     body = json.dumps(request_payload).encode("utf-8")
     endpoint = openai_endpoint("/responses")
@@ -12063,9 +12116,9 @@ def responses_stream_request(
     on_text_delta: Any,
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
-    if selected_ai_provider() == "gemini":
+    if request_ai_provider(payload) == "gemini":
         _raise_chat_cancelled(cancel_event)
-        result = gemini_responses_request(payload)
+        result = gemini_responses_request(payload, cancel_event=cancel_event)
         _raise_chat_cancelled(cancel_event)
         text = output_text(result)
         if text:
@@ -12086,8 +12139,8 @@ def responses_stream_request(
     raise AppError(502, "Die OpenAI-Konversationsanfrage konnte nicht abgeschlossen werden.")
 
 
-def ensure_conversation() -> str:
-    if selected_ai_provider() == "gemini":
+def ensure_conversation(provider: str | None = None) -> str:
+    if (provider or selected_ai_provider()) == "gemini":
         existing = str(get_kv("gemini_conversation_id") or "")
         if existing:
             return existing
@@ -12132,7 +12185,7 @@ def reset_coach_chat() -> dict[str, Any]:
     with OPENAI_CONVERSATION_LOCK:
         conversation_id = get_kv("openai_conversation_id") or ""
         remote_deleted = False
-        if selected_ai_provider() == "openai" and conversation_id:
+        if conversation_id:
             try:
                 remote_deleted = delete_remote_conversation(conversation_id)
             except Exception:
@@ -12581,6 +12634,9 @@ def enqueue_background_coach_job(
     operation_id = operation_id or uuid.uuid4().hex
     now = utc_now()
     session_key = _coach_session_key(session_csrf_hash)
+    ai_provider = selected_ai_provider()
+    model = selected_model(ai_provider)
+    thinking_level = selected_thinking_level()
     with DB_LOCK, database() as db:
         existing = db.execute(
             "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)
@@ -12606,6 +12662,9 @@ def enqueue_background_coach_job(
             "user_message_id": user_message["id"],
             "client_turn_id": client_turn_id,
             "plan_scope": scope,
+            "ai_provider": ai_provider,
+            "model": model,
+            "thinking_level": thinking_level,
         }
         db.execute(
             "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) "
@@ -12636,7 +12695,7 @@ def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict
             if operation_id and str(operation_id) != stream["operation_id"]:
                 raise AppError(409, "Die angegebene Coach-Anfrage ist nicht mehr aktiv.")
             stream["cancel_event"].set()
-            response = getattr(stream["cancel_event"], "_openai_response", None)
+            response = getattr(stream["cancel_event"], "_provider_response", None) or getattr(stream["cancel_event"], "_openai_response", None)
             result = {"status": "cancelling", "operation_id": stream["operation_id"]}
         else:
             response = None
@@ -12651,6 +12710,14 @@ def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict
             background_event = COACH_JOB_CANCEL_EVENTS.get(str(receipt.get("operation_id") or ""))
             if background_event is not None:
                 background_event.set()
+                response = getattr(background_event, "_provider_response", None) or getattr(background_event, "_openai_response", None)
+            else:
+                response = None
+        if response is not None:
+            try:
+                response.close()
+            except (OSError, ValueError):
+                pass
         return {"status": "cancelling", "operation_id": receipt.get("operation_id")}
     if response is not None:
         try:
@@ -13408,6 +13475,9 @@ def _chat_with_structured_coach_impl(
     refresh_error: str | None = None,
     duplicate_activity: dict[str, Any] | None = None,
     background_job: bool = False,
+    ai_provider: str | None = None,
+    model: str | None = None,
+    thinking_level: str | None = None,
 ) -> dict[str, Any]:
     background_receipt: dict[str, Any] = {}
     with DB_LOCK, database() as db:
@@ -13437,6 +13507,9 @@ def _chat_with_structured_coach_impl(
             background_receipt = {
                 "client_turn_id": client_turn_id, "session_key": _coach_session_key(session_csrf_hash),
                 "user_message_id": user_message["id"], "status": "running", "command_receipts": [],
+                "ai_provider": ai_provider or selected_ai_provider(),
+                "model": model or selected_model(ai_provider),
+                "thinking_level": thinking_level or selected_thinking_level(),
             }
             db.execute(
                 "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)",
@@ -13467,7 +13540,9 @@ def _chat_with_structured_coach_impl(
     requested_operation = intent.get("operation")
     forced_tool = requested_operation if requested_operation in COACH_CANONICAL_TOOL_NAMES else "none"
     request_payload = {
-        "model": selected_model(),
+        "_ai_provider": ai_provider or str(background_receipt.get("ai_provider") or selected_ai_provider()),
+        "model": model or str(background_receipt.get("model") or selected_model(ai_provider)),
+        "reasoning": {"effort": thinking_level or str(background_receipt.get("thinking_level") or selected_thinking_level())},
         "conversation": conversation_id,
         "instructions": model_instructions,
         "input": message,
@@ -13485,9 +13560,11 @@ def _chat_with_structured_coach_impl(
         if on_text_delta is not None:
             on_text_delta(delta)
 
-    resume_response_id = str(background_receipt.get("openai_response_id") or "") if background_owned else ""
+    resume_response_id = str(background_receipt.get("openai_response_id") or "") if background_owned and request_ai_provider(request_payload) == "openai" else ""
 
     def checkpoint_response_id(response_id: str) -> None:
+        if request_ai_provider(request_payload) != "openai":
+            return
         _merge_coach_command_receipt(
             client_turn_id,
             {"status": "running", "phase": "waiting_openai", "openai_response_id": response_id},
@@ -13512,7 +13589,7 @@ def _chat_with_structured_coach_impl(
         # A stopped container can leave the remote conversation with an
         # unresolved response/tool state. Recover once before any local tool
         # can have run; never retry a follow-up request with side effects.
-        if exc.reason != "conversation_state_invalid" or initial_delta_emitted:
+        if request_ai_provider(request_payload) != "openai" or exc.reason != "conversation_state_invalid" or initial_delta_emitted:
             raise
         recovered_conversation_id = replace_stale_openai_conversation(conversation_id)
         if recovered_conversation_id == conversation_id:
@@ -13669,7 +13746,9 @@ def _chat_with_structured_coach_impl(
         # Do not force a dependent write before its draft exists.
         round_failed = any(not json.loads(item["output"]).get("ok") for item in tool_outputs)
         followup_payload = {
-            "model": selected_model(),
+            "_ai_provider": request_ai_provider(request_payload),
+            "model": request_payload["model"],
+            "reasoning": request_payload["reasoning"],
             "conversation": conversation_id,
             "instructions": model_instructions,
             "input": tool_outputs,
@@ -13869,7 +13948,13 @@ def coach_intent_object_refs() -> list[dict[str, Any]]:
 
 
 
-def request_coach_intent(message: str, conversation_id: str | None = None) -> dict[str, Any]:
+def request_coach_intent(
+    message: str,
+    conversation_id: str | None = None,
+    *,
+    ai_provider: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
     """Classify one turn in an isolated low-reasoning structured request."""
     allowed_targets = ["local"]
     if CONFIG.intervals_api_key:
@@ -13882,7 +13967,9 @@ def request_coach_intent(message: str, conversation_id: str | None = None) -> di
         allowed_targets.append("weather")
     object_refs = coach_intent_object_refs()
     payload = intent_request_payload(message, coach_intent_artifact_refs(conversation_id), allowed_targets, object_refs)
-    payload["model"] = selected_model()
+    provider = ai_provider or selected_ai_provider()
+    payload["_ai_provider"] = provider
+    payload["model"] = model or selected_model(provider)
     for attempt in range(COACH_INTENT_MAX_ATTEMPTS):
         try:
             return resolve_intent_objects(parse_intent_response(responses_request(payload)), message, object_refs)
@@ -13964,8 +14051,15 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             pass
     if existing_command and not background_owned:
         raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
+    ai_provider = str(background_receipt.get("ai_provider") or selected_ai_provider()).casefold()
+    if ai_provider not in {"openai", "gemini"}:
+        ai_provider = selected_ai_provider()
+    model = str(background_receipt.get("model") or selected_model(ai_provider))
+    thinking_level = str(background_receipt.get("thinking_level") or selected_thinking_level()).casefold()
+    if thinking_level not in {"low", "medium", "high"}:
+        thinking_level = selected_thinking_level()
     existing_conversation_id = str((existing_command or {}).get("conversation_id") or "")
-    conversation_id = existing_conversation_id or ensure_conversation()
+    conversation_id = existing_conversation_id or ensure_conversation(ai_provider)
     try:
         candidate_intent = json.loads((existing_command or {}).get("intent") or "{}")
     except (TypeError, ValueError, json.JSONDecodeError):
@@ -13973,7 +14067,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     if background_owned and isinstance(candidate_intent, dict) and candidate_intent.get("intent"):
         structured_intent = candidate_intent
     else:
-        structured_intent = request_coach_intent(message, conversation_id) if allow_mutations else {
+        structured_intent = request_coach_intent(message, conversation_id, ai_provider=ai_provider, model=model) if allow_mutations else {
             "intent": "advice", "operation": None, "target_system": "none",
             "artifact_id": None, "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
         }
@@ -13986,7 +14080,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         _merge_coach_command_receipt(client_turn_id, {"status": "running", "phase": "preparing"})
     refresh_error = None
     latest_activity_analysis = prompt_requests_latest_activity_analysis(message)
-    resuming_background_response = bool(background_owned and background_receipt.get("openai_response_id"))
+    resuming_background_response = bool(background_owned and ai_provider == "openai" and background_receipt.get("openai_response_id"))
     if not resuming_background_response and (latest_activity_analysis or (prompt_requests_fresh_data(message) and not (
         structured_intent.get("operation") == "start_provider_refresh"
         and structured_intent.get("target_system") == "intervals"
@@ -14035,6 +14129,9 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         refresh_error=refresh_error,
         duplicate_activity=duplicate_activity,
         background_job=background_owned,
+        ai_provider=ai_provider,
+        model=model,
+        thinking_level=thinking_level,
     )
     if (
         prompt_requests_morning_checkin(message)
@@ -14055,6 +14152,7 @@ def resume_interrupted_coach_jobs() -> int:
     for command in interrupted:
         _persist_structured_command_failure(command["client_turn_id"], json.loads(command["intent"] or "{}"), AppError(503, "Die vorherige Verarbeitung wurde durch einen Prozessneustart unterbrochen.", reason="process_interrupted"))
     resumed = 0
+    interrupted_gemini: list[tuple[str, dict[str, Any]]] = []
     now = utc_now()
     with DB_LOCK, database() as db:
         rows = db.execute(
@@ -14064,6 +14162,11 @@ def resume_interrupted_coach_jobs() -> int:
             receipt = _coach_command_receipt(row.get("receipt"))
             if receipt.get("mode") != "background":
                 continue
+            if row.get("status") == "running" and receipt.get("ai_provider") == "gemini":
+                # GenerateContent has no resumable response ID. Replaying a
+                # completed model/tool turn after restart could repeat effects.
+                interrupted_gemini.append((row["client_turn_id"], json.loads(row.get("intent") or "{}")))
+                continue
             receipt["status"] = "queued"
             receipt["phase"] = "resuming" if receipt.get("openai_response_id") else "queued"
             db.execute(
@@ -14071,6 +14174,12 @@ def resume_interrupted_coach_jobs() -> int:
                 (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, row["client_turn_id"]),
             )
             resumed += 1
+    for client_turn_id, intent in interrupted_gemini:
+        _persist_structured_command_failure(
+            client_turn_id,
+            intent,
+            AppError(503, "Die Gemini-Hintergrundverarbeitung wurde durch einen Prozessneustart unterbrochen und nicht erneut ausgeführt.", reason="process_interrupted"),
+        )
     if resumed:
         COACH_JOB_WAKE.set()
     return resumed

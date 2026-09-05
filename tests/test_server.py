@@ -2472,6 +2472,14 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM messages WHERE content = 'old chat'").fetchone()["count"], 1)
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM snapshots WHERE created_at LIKE '2000-%'").fetchone()["count"], 1)
 
+    def test_finite_retention_clears_unstamped_gemini_history(self):
+        server.set_kv("gemini_conversation_history", json.dumps([{"role": "user", "parts": [{"text": "old coach context"}]}]))
+        server.set_kv("gemini_call_names", json.dumps({"gemini_old": "save_checkin"}))
+        with patch.object(server, "CONFIG", replace(server.CONFIG, data_retention_days=30)):
+            server.initialise_database()
+        self.assertEqual(server.get_kv("gemini_conversation_history"), "[]")
+        self.assertEqual(server.get_kv("gemini_call_names"), "{}")
+
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfügbar.")
     def test_sqlcipher_database_returns_mapping_rows(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -3720,7 +3728,7 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
         tool = {"type": "function", "name": "save_checkin", "description": "Save check-in", "parameters": {"type": "object", "properties": {"payload": {"type": "object"}}}}
         with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
-            initial = server.gemini_responses_request({"model": "ignored", "conversation": "gemini_test", "instructions": "Coach rules", "input": "Speichere meine Tagesform.", "tools": [tool], "tool_choice": "auto", "max_output_tokens": 321})
+            initial = server.gemini_responses_request({"model": "gemini-3.8-flash", "conversation": "gemini_test", "instructions": "Coach rules", "input": "Speichere meine Tagesform.", "tools": [tool], "tool_choice": "auto", "max_output_tokens": 321})
             call = next(item for item in initial["output"] if item["type"] == "function_call")
             followup = server.gemini_responses_request({"conversation": "gemini_test", "instructions": "Coach rules", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "tools": [tool], "tool_choice": "auto"})
 
@@ -3769,6 +3777,59 @@ class CoachTests(unittest.TestCase):
         key = "AIza" + "a" * 35
         with patch.object(server, "CONFIG", replace(server.CONFIG, gemini_api_key=key)):
             self.assertNotIn(key, server.redact_text(f"Gemini request failed: {key}"))
+
+    def test_gemini_turn_uses_its_captured_provider_and_reasoning_level(self):
+        config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
+        payload = {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "Prüfe die Form.", "reasoning": {"effort": "low"}}
+        with patch.object(server, "CONFIG", config), patch.object(server, "gemini_responses_request", return_value={"output_text": "ok"}) as gemini, patch.object(server, "openai_request") as openai:
+            self.assertEqual(server.responses_request(payload)["output_text"], "ok")
+        gemini.assert_called_once_with(payload)
+        openai.assert_not_called()
+        request, _, _ = server._gemini_request_payload(payload, "gemini-3.8-flash")
+        self.assertEqual(request["generationConfig"]["thinkingConfig"], {"thinkingLevel": "low"})
+
+    def test_gemini_background_job_is_not_replayed_after_restart(self):
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config):
+            server.enqueue_background_coach_job(
+                "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
+                "turn-gemini-background-restart",
+                "csrf-gemini-background-restart",
+            )
+            self.assertIsNotNone(server._claim_background_coach_job())
+            self.assertEqual(server.resume_interrupted_coach_jobs(), 0)
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-gemini-background-restart",)).fetchone()
+        self.assertEqual(command["status"], "completed")
+        self.assertEqual(json.loads(command["receipt"])["status"], "failed")
+
+    def test_gemini_reset_deletes_an_existing_openai_conversation(self):
+        server.set_kv("openai_conversation_id", "conv-test")
+        config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "delete_remote_conversation", return_value=True) as delete:
+            result = server.reset_coach_chat()
+        delete.assert_called_once_with("conv-test")
+        self.assertTrue(result["remote_conversation_deleted"])
+
+    def test_gemini_error_classes_preserve_authentication_quota_and_rate_limits(self):
+        self.assertEqual(server.gemini_error_details(401, b"{}")["reason"], "authentication_or_permission")
+        quota = json.dumps({"error": {"status": "RESOURCE_EXHAUSTED", "details": [{"reason": "quotaExceeded"}]}}).encode()
+        self.assertEqual(server.gemini_error_details(429, quota)["reason"], "insufficient_quota")
+        self.assertEqual(server.gemini_error_details(429, b"{}")["reason"], "rate_limit_exceeded")
+
+    def test_gemini_http_errors_keep_the_provider_status(self):
+        upstream_error = server.HTTPError(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+            401,
+            "Unauthorized",
+            {},
+            BytesIO(b'{"error":{"status":"UNAUTHENTICATED"}}'),
+        )
+        with patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError) as raised:
+                server.http_json("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {}, service="gemini")
+        self.assertEqual(raised.exception.status, 401)
+        self.assertEqual(raised.exception.reason, "authentication_or_permission")
 
     def test_transcribe_audio_sends_bounded_multipart_request(self):
         captured = {}
