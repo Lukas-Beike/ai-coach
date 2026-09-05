@@ -391,6 +391,11 @@ answer. `/api/readiness` is a separate infrastructure probe and returns HTTP
 `/data`, and the maintenance gate are all usable. Its response contains only
 safe booleans and status values, never paths, secrets, or athlete data.
 
+Local state reads and Coach usage accounting share the database transaction
+lock. Completing a Coach response while the UI reloads its state therefore
+cannot deadlock through a separate usage-statistics lock. Usage counters remain
+atomic when multiple responses finish concurrently.
+
 Backend modularization starts with dependency-light database primitives in the
 `backend.db` package. Its repositories provide explicit
 `KeyValueRepository`, `ProfileRepository`, `CompetitionRepository`,
