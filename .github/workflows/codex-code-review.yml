@@ -32,7 +32,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
-            let pullRequestNumbers = [];
+            let affectedPullRequests = [];
             if (context.eventName === 'push') {
               const base = context.ref.replace(/^refs\/heads\//, '');
               const pullRequests = await github.paginate(github.rest.pulls.list, {
@@ -42,12 +42,22 @@ jobs:
                 base,
                 per_page: 100,
               });
-              pullRequestNumbers = pullRequests.map((pullRequest) => pullRequest.number);
+              affectedPullRequests = pullRequests.map((pullRequest) => ({
+                pullRequestNumber: pullRequest.number,
+                baseRef: base,
+              }));
             } else if (context.eventName === 'pull_request_target') {
               const pullRequest = context.payload.pull_request;
               const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
-              if (pullRequest.draft !== true && (context.payload.action !== 'edited' || baseChanged)) {
-                pullRequestNumbers = [pullRequest.number];
+              if (
+                pullRequest.draft !== true &&
+                ['develop', 'main'].includes(pullRequest.base.ref) &&
+                (context.payload.action !== 'edited' || baseChanged)
+              ) {
+                affectedPullRequests = [{
+                  pullRequestNumber: pullRequest.number,
+                  baseRef: pullRequest.base.ref,
+                }];
               }
             } else if (
               context.eventName === 'issue_comment' &&
@@ -56,10 +66,20 @@ jobs:
               ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(context.payload.comment.author_association) &&
               (context.payload.comment.body || '').includes('@codex review')
             ) {
-              pullRequestNumbers = [context.payload.issue.number];
+              const response = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.issue.number,
+              });
+              if (['develop', 'main'].includes(response.data.base.ref) && response.data.draft !== true) {
+                affectedPullRequests = [{
+                  pullRequestNumber: response.data.number,
+                  baseRef: response.data.base.ref,
+                }];
+              }
             }
             core.setOutput('pull_requests', JSON.stringify({
-              include: pullRequestNumbers.map((pullRequestNumber) => ({ pullRequestNumber })),
+              include: affectedPullRequests,
             }));
 
   gate:
@@ -89,6 +109,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
+          EXPECTED_BASE_REF: ${{ matrix.baseRef }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -113,16 +134,27 @@ jobs:
               repo: context.repo.repo,
               pull_number: Number(process.env.PR_NUMBER),
             });
-            if (!['develop', 'main'].includes(response.data.base.ref)) {
+            if (
+              !['develop', 'main'].includes(response.data.base.ref) ||
+              response.data.base.ref !== process.env.EXPECTED_BASE_REF
+            ) {
               core.setFailed(`Unsupported pull-request base: ${response.data.base.ref}`);
               return;
             }
-            core.setOutput('base_sha', response.data.base.sha);
 
-      - name: Check out trusted workflow sources
+      - name: Check out trusted develop workflow sources
+        if: matrix.baseRef == 'develop'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.resolve_base.outputs.base_sha }}
+          ref: develop
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check out trusted main workflow sources
+        if: matrix.baseRef == 'main'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
           fetch-depth: 1
           persist-credentials: false
 
