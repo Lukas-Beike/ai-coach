@@ -1,6 +1,8 @@
 name: Codex review gate
 
 on:
+  push:
+    branches: [develop, main]
   # pull_request_target runs the workflow and local action from the trusted
   # target branch. This workflow never checks out or executes pull-request code.
   pull_request_target:
@@ -16,45 +18,100 @@ permissions:
   pull-requests: read
   checks: write
 
-concurrency:
-  group: >-
-    codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number }}-${{
-    (github.event_name == 'pull_request_target' &&
-    (github.event.action != 'edited' || github.event.changes.base) ||
-    (github.event_name == 'issue_comment' &&
-    github.event.issue.pull_request &&
-    github.event.comment.user.type != 'Bot' &&
-    contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
-    contains(github.event.comment.body, '@codex review'))) && 'active' || github.run_id
-    }}
-  cancel-in-progress: true
-
 jobs:
-  gate:
-    name: Coordinate Codex review
-    if: >-
-      (github.event_name == 'pull_request_target' &&
-      github.event.pull_request.draft != true &&
-      (github.event.action != 'edited' || github.event.changes.base)) ||
-      (github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request &&
-      github.event.comment.user.type != 'Bot' &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
-      contains(github.event.comment.body, '@codex review'))
+  discover:
+    name: Find PRs requiring a Codex review
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
-      - name: Resolve trusted pull-request base
+      - name: Resolve affected pull requests
         id: resolve_base
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ github.token }}
           script: |
-            const pullRequestNumber = context.payload.pull_request?.number || context.payload.issue?.number;
+            let pullRequestNumbers = [];
+            if (context.eventName === 'push') {
+              const base = context.ref.replace(/^refs\/heads\//, '');
+              const pullRequests = await github.paginate(github.rest.pulls.list, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                base,
+                per_page: 100,
+              });
+              pullRequestNumbers = pullRequests.map((pullRequest) => pullRequest.number);
+            } else if (context.eventName === 'pull_request_target') {
+              const pullRequest = context.payload.pull_request;
+              const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
+              if (pullRequest.draft !== true && (context.payload.action !== 'edited' || baseChanged)) {
+                pullRequestNumbers = [pullRequest.number];
+              }
+            } else if (
+              context.eventName === 'issue_comment' &&
+              context.payload.issue?.pull_request &&
+              context.payload.comment?.user?.type !== 'Bot' &&
+              ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(context.payload.comment.author_association) &&
+              (context.payload.comment.body || '').includes('@codex review')
+            ) {
+              pullRequestNumbers = [context.payload.issue.number];
+            }
+            core.setOutput('pull_requests', JSON.stringify({
+              include: pullRequestNumbers.map((pullRequestNumber) => ({ pullRequestNumber })),
+            }));
+
+  gate:
+    name: Coordinate Codex review (${{ matrix.pullRequestNumber }})
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.pull_requests) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      checks: write
+    timeout-minutes: 45
+    concurrency:
+      group: codex-review-gate-${{ matrix.pullRequestNumber }}-active
+      cancel-in-progress: true
+    steps:
+      - name: Request a fresh Codex review after target-branch changes
+        id: request_review
+        if: >-
+          github.event_name == 'push' ||
+          (github.event_name == 'pull_request_target' &&
+          github.event.action == 'edited' &&
+          github.event.changes.base)
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ matrix.pullRequestNumber }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const response = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body: '@codex review',
+            });
+            core.setOutput('requested_at', response.data.created_at);
+
+      - name: Resolve trusted pull-request base
+        id: resolve_base
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ matrix.pullRequestNumber }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
             const response = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: pullRequestNumber,
+              pull_number: Number(process.env.PR_NUMBER),
             });
             if (!['develop', 'main'].includes(response.data.base.ref)) {
               core.setFailed(`Unsupported pull-request base: ${response.data.base.ref}`);
@@ -73,7 +130,8 @@ jobs:
         uses: ./.github/actions/codex-review-gate
         with:
           github-token: ${{ github.token }}
-          pull-request-number: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.number || github.event.issue.number }}
+          pull-request-number: ${{ matrix.pullRequestNumber }}
+          review-requested-at: ${{ steps.request_review.outputs.requested_at }}
           check-name: Codex code review
           codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
           timeout-seconds: 2400

@@ -24,6 +24,10 @@ inputs:
     description: Seconds between review status polls
     required: true
     default: '30'
+  review-requested-at:
+    description: ISO timestamp after which this invocation must observe review artifacts
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -36,6 +40,7 @@ runs:
         CODEX_BOT_LOGINS: ${{ inputs.codex-bot-logins }}
         TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
         POLL_SECONDS: ${{ inputs.poll-seconds }}
+        REVIEW_REQUESTED_AT: ${{ inputs.review-requested-at }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
@@ -66,12 +71,11 @@ runs:
             core.setFailed('The Codex review poll interval is invalid.');
             return;
           }
-          const minimumArtifactTime = context.eventName === 'issue_comment'
-            ? Date.parse(context.payload.comment?.created_at || '')
-            : context.eventName === 'pull_request_target' &&
-              context.payload.action === 'edited' &&
-              context.payload.changes?.base
-              ? Date.now()
+          const requestedAtInput = process.env.REVIEW_REQUESTED_AT;
+          const minimumArtifactTime = requestedAtInput
+            ? Date.parse(requestedAtInput)
+            : context.eventName === 'issue_comment'
+              ? Date.parse(context.payload.comment?.created_at || '')
               : 0;
           if (!Number.isFinite(minimumArtifactTime)) {
             core.setFailed('The Codex review request timestamp is invalid.');
