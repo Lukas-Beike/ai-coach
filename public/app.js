@@ -1139,7 +1139,17 @@ function addStructuredCoachReceipts(payload) {
     resolve_training_sync_conflict: "Synchronisierungsentscheidung gespeichert",
     start_intervals_plan_sync: "Intervals-Synchronisierung beauftragt",
   };
-  for (const entry of Array.isArray(payload?.command_receipts) ? payload.command_receipts : []) {
+  const commands = Array.isArray(payload?.command_receipts) ? payload.command_receipts : [];
+  const planCommitRequested = payload?.intent?.operation === "commit_training_plan"
+    || payload?.intent?.follow_up_operations?.includes("commit_training_plan")
+    || commands.some((entry) => entry.tool === "commit_training_plan");
+  const finalCommit = commands.filter((entry) => entry.tool === "commit_training_plan").at(-1);
+  // Receipts describe this turn's outcome, not its internal draft/retry history.
+  state.coachReceipts = [];
+  renderCoachReceipts();
+  for (const entry of commands) {
+    if (planCommitRequested && entry.tool === "stage_training_plan") continue;
+    if (entry.tool === "commit_training_plan" && entry !== finalCommit) continue;
     const result = entry?.result || {};
     if (entry.tool === "get_sync_job" && result.job) {
       const job = result.job;

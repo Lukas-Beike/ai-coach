@@ -85,6 +85,11 @@ instructions do not delete or convert its data.
   longer than seven calendar days or containing more than seven requested
   units are persisted as background jobs and use OpenAI background responses;
   their response ID and progress survive a page reload or process restart.
+  Failed planning steps report their cause in chat. A draft is checked for
+  valid workout fields and occupied dates before it is stored; committing
+  checks the calendar again. Internal draft/retry receipts are not displayed
+  as completed plans. At the tool-round limit, the Coach submits the remaining
+  tool results and requests a final summary without further actions.
 - The Coach start card contains only contextual quick actions, not provider
   connection badges. The morning check-in disappears after it completed for
   the athlete's local day. "Plan anpassen" appears only for an unapplied
