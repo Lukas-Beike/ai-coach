@@ -500,8 +500,6 @@ h2 {
 .today-item span { color: var(--muted); font-size: .7rem; }
 .today-card .secondary-button { justify-self: start; min-height: 44px; }
 .today-adjustment { border-color: rgba(255, 69, 58, .45); }
-.today-priority { grid-column: 1 / -1; border-color: rgba(52, 207, 161, .42); background: linear-gradient(145deg, rgba(52, 207, 161, .12), var(--surface-raised)); }
-.today-priority h3 { color: var(--accent-bright); }
 @media (max-width: 559px) {
   .today-grid { grid-template-columns: 1fr; }
   .today-card { padding: 14px; }
@@ -941,7 +939,6 @@ dialog p { margin-bottom: 0; color: var(--muted); }
   .connection-card { align-items: stretch; flex-direction: column; }
   .connection-card .secondary-button { margin-top: auto; }
   .activity-stats-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .today-priority { grid-column: 1 / -1; }
 }
 
 button:focus-visible, a:focus-visible, summary:focus-visible {

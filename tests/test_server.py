@@ -1856,7 +1856,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function createActionReceipt(', components)
         self.assertIn('createSkeletonStack(4)', app)
         self.assertIn('id="todaySummary"', index)
-        self.assertIn('today-priority', app)
+        self.assertNotIn('today-priority', app)
         self.assertIn('id="analysisHistorySegment"', index)
         self.assertIn('id="analysisPerformanceSegment"', index)
         self.assertIn('function analysisSegmentFromRoute(', (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8"))
@@ -1872,10 +1872,10 @@ class CoachTests(unittest.TestCase):
     def test_today_view_is_a_read_only_coach_oriented_summary(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         today_view = app[app.index("function renderToday(data)"):app.index("function distanceLabel(")]
-        self.assertIn('todayCard("Coach-Einordnung", "today-priority")', today_view)
-        self.assertIn('todayCard("Morgen-Check-in", "today-checkin")', today_view)
-        self.assertIn('const automaticMorningReady = morning.status === "ready" && morning.date === todayKey;', today_view)
-        self.assertIn("Morgen-Check-in abgeschlossen.", today_view)
+        self.assertNotIn('todayCard("Coach-Einordnung", "today-priority")', today_view)
+        self.assertNotIn('todayCard("Morgen-Check-in", "today-checkin")', today_view)
+        self.assertNotIn('todayCard("Offene Rückmeldung", "today-feedback")', today_view)
+        self.assertNotIn("Morgen-Check-in abgeschlossen.", today_view)
         self.assertNotIn("todayAction(", today_view)
         self.assertNotIn('document.createElement("button")', today_view)
 

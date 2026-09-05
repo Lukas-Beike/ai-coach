@@ -160,8 +160,9 @@ test.describe("critical browser states", () => {
     await expect(page).toHaveURL(/#plan$/);
 
     await page.getByRole("link", { name: "Heute", exact: true }).click();
-    await expect(page.locator("#todayPanel .today-priority")).toContainText("Coach-Einordnung");
-    await expect(page.locator("#todayPanel .today-checkin")).toContainText("Morgen-Check-in");
+    await expect(page.locator("#todayPanel .today-priority")).toHaveCount(0);
+    await expect(page.locator("#todayPanel .today-checkin")).toHaveCount(0);
+    await expect(page.locator("#todayPanel .today-feedback")).toHaveCount(0);
     await expect(page.locator("#checkinDialog")).toBeHidden();
     await expect(page.locator("#chatPanel")).toContainText("Morgen-Check-in");
 
