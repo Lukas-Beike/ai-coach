@@ -881,6 +881,32 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(profile["name"], "Ada")
         self.assertNotIn("admin", profile)
 
+    def test_calendar_weather_history_survives_refresh_location_change_and_restart(self):
+        today = server.local_now().date()
+        yesterday = (today - timedelta(days=1)).isoformat()
+        tomorrow = (today + timedelta(days=1)).isoformat()
+        server.save_profile({"weather_location": "Berlin"})
+        old = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": server.utc_now(),
+               "forecast": {"daily": {"time": [yesterday, tomorrow], "temperature_2m_max": [12, 18]}}}
+        new = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": server.utc_now(),
+               "forecast": {"daily": {"time": [today.isoformat(), tomorrow], "temperature_2m_max": [15, 19]}}}
+        with patch.object(server, "_fetch_weather_forecast", side_effect=[old, new]) as fetch:
+            server.weather_state([], force=True)
+            server.weather_state([], force=True)
+            server.save_profile({"weather_location": "Emsdetten"})
+            server.initialise_database()
+            calendar = server.public_plan_state(local_only=True)
+        self.assertEqual(fetch.call_count, 2)
+        history = calendar["weather"]["days"]
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["date"], yesterday)
+        self.assertEqual(history[0]["temperature_max"], 12)
+        self.assertEqual(history[0]["forecast_location"], "Berlin")
+        self.assertTrue(history[0]["archived_forecast"])
+        context = next(day for day in calendar["daily_planning_context"] if day["date"] == yesterday)
+        self.assertTrue(context["weather"]["archived_forecast"])
+        self.assertEqual(context["weather"]["forecast_saved_at"], old["fetched_at"])
+
     def test_changing_weather_location_invalidates_previous_forecast(self):
         server.save_profile({"weather_location": "Münster"})
         server.set_kv(server.WEATHER_CACHE_KEY, json.dumps({"query": "Münster", "forecast": {}}))
@@ -1478,7 +1504,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('new EventSource(`/api/state/events?since=', app)
         self.assertIn('function connectStateEvents()', app)
         self.assertIn('event.type === "reset"', app)
-        self.assertIn('garmin: ["performance"]', app)
+        self.assertIn('garmin: ["performance", "plan"]', app)
+        self.assertIn('checkins: ["feedback", "plan"]', app)
         self.assertIn("function scrollChatToResponseStart()", app)
         self.assertIn("async function loadChatHistoryFresh()", app)
         self.assertIn("state.chatStatusPollInFlight", app)
@@ -3565,6 +3592,11 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(FakeGarmin.sleep_calls, ["2026-09-04"])
         self.assertEqual(FakeGarmin.body_battery_calls, [("2026-09-03", "2026-09-04")])
         self.assertEqual(server.garmin_public_state()["morning_body_battery"]["morning"]["value"], 78)
+        self.assertEqual(server._saved_daily_history(server.MORNING_BATTERY_HISTORY_KEY)["2026-09-04"], 78)
+        server.set_kv("garmin_snapshot", "{}")
+        recovery = server._planning_recovery_by_date({})
+        self.assertEqual(recovery["2026-09-04"]["body_battery"], 78)
+        self.assertEqual(recovery["2026-09-04"]["sources"]["body_battery"], "Garmin Connect")
 
     def test_body_battery_only_error_does_not_degrade_garmin_public_state(self):
         server.set_kv("last_garmin_error", json.dumps([
