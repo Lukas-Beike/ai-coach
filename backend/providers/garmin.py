@@ -22,6 +22,15 @@ CapabilityFailure = Callable[[str, BaseException], None]
 CapabilitySuccess = Callable[[str], None]
 
 
+def normalize_range_records(source: str, value: Any) -> list[dict[str, Any]]:
+    """Normalize the current SDK range contracts, rejecting unknown response shapes."""
+    if source == "hrv" and isinstance(value, dict) and "hrvSummaries" in value:
+        value = value["hrvSummaries"]
+    if not isinstance(value, list) or any(not isinstance(record, dict) for record in value):
+        raise ValueError(f"Invalid Garmin {source} range response")
+    return value
+
+
 def collect_garmin_data(
     client: Any,
     windows: Iterable[tuple[date, date]],
@@ -74,11 +83,10 @@ def collect_garmin_data(
                 lambda: fetch(window_start.isoformat(), window_end.isoformat()),
                 {"window_start": window_start.isoformat(), "window_end": window_end.isoformat()},
             )
-            if isinstance(value, list):
-                payload.setdefault(key, []).extend(value)
-                stats["records"] = int(stats["records"]) + len(value)
-            elif value is not None and key not in payload:
-                payload[key] = value
+            records = normalize_range_records(key, value)
+            payload.setdefault(key, []).extend(records)
+            stats["records"] = int(stats["records"]) + len(records)
+            stats.setdefault("completed_windows", []).append({"start": window_start.isoformat(), "end": window_end.isoformat()})
             if capability_success:
                 capability_success(key)
         except Exception as exc:
@@ -109,7 +117,7 @@ def collect_garmin_data(
                 future.result()
 
     daily_stats_fetch = (
-        getattr(client, "get_user_summary", None) or getattr(client, "get_stats", None)
+        getattr(client, "get_user_summary", None)
         if include_recovery else None
     )
     if callable(daily_stats_fetch):
@@ -125,6 +133,8 @@ def collect_garmin_data(
                         {"date": current.isoformat()},
                     )
                     records = value if isinstance(value, list) else [value]
+                    if any(not isinstance(record, dict) for record in records):
+                        raise ValueError("Invalid Garmin daily_stats response")
                     for record in records:
                         if isinstance(record, dict):
                             if not any(key in record for key in ("calendarDate", "summaryDate", "date")):
@@ -150,6 +160,8 @@ def collect_garmin_data(
                         lambda current=current: heart_rate_fetch(current.isoformat()),
                         {"date": current.isoformat()},
                     )
+                    if not isinstance(value, dict):
+                        raise ValueError("Invalid Garmin resting_hr response")
                     if value is not None:
                         if isinstance(value, dict) and not any(key in value for key in ("calendarDate", "date", "summaryDate")):
                             value = {"calendarDate": current.isoformat(), **value}
@@ -173,17 +185,12 @@ def collect_garmin_data(
     if include_current_metrics:
         max_metrics_start = today - timedelta(days=89)
         max_metrics_range = getattr(client, "get_max_metrics_range", None)
-        max_metrics_fetch = (
-            (lambda: max_metrics_range(max_metrics_start.isoformat(), today.isoformat()))
-            if callable(max_metrics_range)
-            else (lambda: client.get_max_metrics(today.isoformat()))
-        )
         for key, fetch, details in (
             ("readiness", lambda: client.get_training_readiness(today.isoformat()), {"date": today.isoformat()}),
             ("race_predictions", client.get_race_predictions, None),
             (
                 "max_metrics",
-                max_metrics_fetch,
+                lambda: client.get_max_metrics_range(max_metrics_start.isoformat(), today.isoformat()),
                 {
                     "window_start": max_metrics_start.isoformat(),
                     "window_end": today.isoformat(),
@@ -197,12 +204,6 @@ def collect_garmin_data(
                 add_error(key, exc)
 
     cycling_ftp_fetch = getattr(client, "get_cycling_ftp", None) if include_current_metrics else None
-    if include_current_metrics and not callable(cycling_ftp_fetch):
-        connectapi = getattr(client, "connectapi", None)
-        if callable(connectapi):
-            cycling_ftp_fetch = lambda: connectapi(
-                "/biometric-service/biometric/latestFunctionalThresholdPower/CYCLING"
-            )
     if callable(cycling_ftp_fetch):
         try:
             payload["cycling_ftp"] = external_call("garmin", "cycling_ftp", cycling_ftp_fetch, None)
@@ -215,29 +216,8 @@ def collect_garmin_data(
             payload["running_threshold"] = external_call(
                 "garmin", "running_threshold", lambda: running_threshold_fetch(latest=True), {"latest": True}
             )
-        except TypeError:
-            try:
-                payload["running_threshold"] = external_call("garmin", "running_threshold", running_threshold_fetch, None)
-            except Exception as exc:
-                add_error("running_threshold", exc)
         except Exception as exc:
             add_error("running_threshold", exc)
-    elif include_current_metrics and callable(getattr(client, "connectapi", None)):
-        connectapi = client.connectapi
-        try:
-            payload["running_threshold"] = {
-                "speed_and_heart_rate": external_call(
-                    "garmin", "running_threshold_speed_hr", lambda: connectapi("/biometric-service/biometric/latestLactateThreshold"), None
-                ),
-                "power": external_call(
-                    "garmin", "running_threshold_power", lambda: connectapi(
-                        f"/biometric-service/biometric/powerToWeight/latest/{today.isoformat()}?sport=Running"
-                    ), {"date": today.isoformat(), "sport": "Running"}
-                ),
-            }
-        except Exception as exc:
-            add_error("running_threshold", exc)
-
     # get_lactate_threshold() already contains the cycling heart-rate field
     # when Garmin provides it (heartRateCycling). The separate range endpoint
     # is undocumented and has started returning an unprocessable response for
@@ -246,7 +226,7 @@ def collect_garmin_data(
     # running_threshold payload and falls back to the other source sections.
 
     weight_fetch = (
-        getattr(client, "get_weigh_ins", None) or getattr(client, "get_body_composition", None)
+        getattr(client, "get_weigh_ins", None)
         if include_current_metrics else None
     )
     if callable(weight_fetch):
@@ -262,4 +242,8 @@ def collect_garmin_data(
             add_error("weight", exc)
 
     payload["provider_sync"] = {"pagination": pagination}
+    for key in ("heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp", "running_threshold", "weight"):
+        if key in payload and not isinstance(payload[key], (dict, list)):
+            payload.pop(key)
+            add_error(key, ValueError(f"Invalid Garmin {key} response"))
     return payload

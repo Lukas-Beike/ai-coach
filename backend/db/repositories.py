@@ -156,20 +156,22 @@ class ChatRepository:
     def __init__(self, now: Callable[[], str]):
         self._now = now
 
-    def add(self, db: Any, role: str, content: str) -> dict[str, Any]:
+    def add(self, db: Any, role: str, content: str, *, client_turn_id: str | None = None) -> dict[str, Any]:
+        if role not in {"user", "assistant"}:
+            raise ValueError("Chat role must be user or assistant")
         created_at = self._now()
         clean_content = content.strip()
         cursor = db.execute(
-            "INSERT INTO messages(role, content, created_at) VALUES (?, ?, ?)",
-            (role, clean_content, created_at),
+            "INSERT INTO messages(role, content, client_turn_id, created_at) VALUES (?, ?, ?, ?)",
+            (role, clean_content, client_turn_id, created_at),
         )
-        return {"id": cursor.lastrowid, "role": role, "content": clean_content, "created_at": created_at}
+        return {"id": cursor.lastrowid, "role": role, "content": clean_content, "client_turn_id": client_turn_id, "created_at": created_at}
 
     def list(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT id, role, content, created_at FROM messages WHERE role != 'event' ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT id, role, content, client_turn_id, created_at FROM messages ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [dict(row) for row in reversed(rows)]
+        return [{key: value for key, value in row.items() if key != "client_turn_id" or value is not None} for row in reversed(rows)]
 
 
 class CheckinRepository:

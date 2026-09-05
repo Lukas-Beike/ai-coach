@@ -6,13 +6,14 @@ from backend.coach.intent import intent_request_payload, parse_intent_response
 
 class CoachIntentContractTests(unittest.TestCase):
     def test_schema_request_contains_only_local_refs_and_allowed_targets(self):
-        payload = intent_request_payload("Jetzt speichern", [{"id": "artifact-1"}], ["local"])
+        payload = intent_request_payload("Jetzt speichern", [{"id": "artifact-1"}], ["local"], [])
         self.assertEqual(payload["tools"], [])
         self.assertEqual(payload["tool_choice"], "none")
         self.assertEqual(json.loads(payload["input"]), {
             "message": "Jetzt speichern",
             "artifact_refs": [{"id": "artifact-1"}],
             "allowed_targets": ["local"],
+            "object_refs": [],
         })
         self.assertNotIn("provider", payload["instructions"])
 
@@ -65,7 +66,7 @@ class CoachIntentContractTests(unittest.TestCase):
         self.assertEqual(result["operation"], "update_training_plan")
 
     def test_contract_supports_checkins_feedback_and_direct_plan_commit(self):
-        payload = intent_request_payload("Plane meine Woche", [], ["local"])
+        payload = intent_request_payload("Plane meine Woche", [], ["local"], [])
         self.assertIn("save_checkin", payload["instructions"])
         self.assertIn("save_activity_feedback", payload["instructions"])
         self.assertIn("commit_training_plan in follow_up_operations", payload["instructions"])
@@ -82,7 +83,7 @@ class CoachIntentContractTests(unittest.TestCase):
             self.assertEqual(result["operation"], operation)
 
     def test_contract_supports_structured_detail_reads_and_named_illness_sync(self):
-        payload = intent_request_payload("Liste meine Bibliothek", [], ["local", "intervals"])
+        payload = intent_request_payload("Liste meine Bibliothek", [], ["local", "intervals"], [])
         for operation in (
             "list_recent_activities", "list_workout_library", "list_planned_workouts", "list_change_history",
             "apply_workout_library_plan", "delete_activity_feedback", "refresh_current_performance",

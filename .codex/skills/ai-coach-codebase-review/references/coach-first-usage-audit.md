@@ -171,7 +171,7 @@ Do not review screens in isolation. Exercise full journeys on `mobile-small`, `m
 - queue, steer, cancel, retry, recover, and reset Coach conversations;
 - view/edit profile, check-in, activities/feedback, performance, plans, library, competitions, connections/operations, privacy, and diagnostics;
 - empty, first-use, long-list, long-text, loading, slow, stale, partial, conflict, validation-error, provider-error, offline, session-expired, and maintenance states;
-- installation/update/offline/service-worker flow and old-client/new-server compatibility;
+- fresh installation, current offline/service-worker flow, and same-build recovery;
 - microphone unsupported/denied/granted/timeout/oversized/aborted transcription and editable result;
 - notifications unsupported/denied/granted/duplicate/click navigation.
 

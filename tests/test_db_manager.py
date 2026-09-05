@@ -61,14 +61,10 @@ class DatabaseManagerTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 4)
             manager.close()
 
-    def test_session_cache_invalidation_and_restore_drain(self):
+    def test_restore_drain_closes_connections_and_resumes_current_database(self):
         with tempfile.TemporaryDirectory() as root:
             manager = self.make_manager(root)
             self.addCleanup(manager.close)
-            manager.session_cache.put("session", {"csrf": "test"}, now=10)
-            self.assertEqual(manager.session_cache.get("session", now=11)["csrf"], "test")
-            manager.session_cache.invalidate("session")
-            self.assertIsNone(manager.session_cache.get("session", now=11))
             with manager.unit_of_work() as db:
                 db.execute("CREATE TABLE records (value TEXT NOT NULL)")
             with manager.restore_drain():
