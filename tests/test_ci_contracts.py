@@ -37,6 +37,32 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertNotIn('--field "source_ref=', dispatch)
 
 
+class CodexReviewWorkflowTests(unittest.TestCase):
+    def test_codex_gate_uses_subscription_review_and_required_check_context(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/codex-code-review.yml").read_text(encoding="utf-8")
+        action = (root / ".github/actions/codex-review-gate/action.yml").read_text(encoding="utf-8")
+
+        self.assertIn("pull_request_target:", workflow)
+        self.assertIn("issue_comment:", workflow)
+        self.assertIn("uses: ./.github/actions/codex-review-gate", workflow)
+        self.assertIn("check-name: Codex code review", workflow)
+        self.assertNotIn("openai/codex-action", workflow)
+        self.assertNotIn("openai-api-key", workflow)
+
+        self.assertIn("checks.create", action)
+        self.assertIn("issues.listComments", action)
+        self.assertIn("pulls.listReviews", action)
+        self.assertIn("codex-pull-request-review-summary", action)
+        self.assertIn("codex-security-review:v1", action)
+        self.assertIn("summaryStatus === 'completed'", action)
+        self.assertIn("pull_request_review_id", action)
+        self.assertIn("review.commit_id === headSha", action)
+        self.assertNotIn("comment.commit_id === headSha", action)
+        self.assertIn("core.setFailed", action)
+        self.assertFalse((root / ".github/codex/prompts/review.md").exists())
+
+
 class DiscoveryTests(unittest.TestCase):
     def test_direct_cli_discovers_backend_modules_from_any_working_directory(self):
         runner = Path(run_tests.__file__).resolve()

@@ -785,16 +785,22 @@ merge successful update pull requests.
 
 ### Codex pull-request review
 
-The required `Codex code review` check uses OpenAI's official Codex pull-request
-review workflow for pull requests to `develop` and `main`, then posts Codex's
-final review message on the pull request. The review prompt is loaded from the
-trusted target-branch commit, not from the pull request checkout. The check
-fails when Codex reports one or more actionable findings, and fails closed if
-the required status marker is missing or invalid. Configure an `OPENAI_API_KEY`
-repository Actions secret before enabling the check. It runs only for pull
-requests from branches in this repository, so forks never receive access to
-that secret. Codex receives a read-only workspace and no application, provider,
-or athlete-data credentials.
+The required `Codex code review` check is a merge gate for the native,
+subscription-backed Codex GitHub review. Enable automatic Code Review for this
+repository in Codex Cloud, or request one with `@codex review` in the pull
+request. The gate follows the Codex summary comment that is posted as soon as a
+review starts and edited as its status changes. It passes only after that
+comment reports completion for the current pull-request commit and Codex has
+published the matching submitted review. Inline findings are associated with
+that review by review ID, because their individual commit IDs can refer to
+different revisions of the changed lines. Any finding fails the gate. A new
+push invalidates the old review and starts the gate again.
+
+The workflow runs from the trusted target branch and never checks out or
+executes pull-request code. It uses only the GitHub token to read reviews and
+update the required check; no `OPENAI_API_KEY` repository secret is needed.
+Keep the exact required status-check name `Codex code review` in the GitHub
+rulesets for `develop` and `main`.
 
 ### Image supply chain and runtime boundary
 
