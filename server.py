@@ -12379,8 +12379,31 @@ def prompt_requests_workout_creation(message: str) -> bool:
     return (asks_for_workout or asks_for_schedule_window) and asks_to_create
 
 
+def prompt_requests_bulk_training_change(message: str) -> bool:
+    """Recognise an explicit request to change the complete local plan."""
+    text = str(message or "").casefold()
+    if re.search(r"\b(?:kein\w*|nicht|nie)\b", text):
+        return False
+    complete_scope = bool(
+        re.search(
+            r"\b(?:alle[nrs]?|saemtliche[nrs]?|gesamte[nmrs]?|komplette[nmrs]?|ganze[nmrs]?|every|entire|whole|all)\s+"
+            r"(?:geplant\w*\s+)?(?:einheit\w*|workout\w*|session\w*|trainingsplan\w*|planung\w*|plan\w*|kalender\w*)\b",
+            text,
+        )
+        or re.search(r"\b(?:gesamt|komplett|ganz)\w*plan\w*\b", text)
+    )
+    mutation = bool(
+        re.search(
+            r"\b(?:aender\w*|änd\w*|bearbeit\w*|verschieb\w*|aktualisier\w*|umstell\w*|optimier\w*|mach\w*|"
+            r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*)\b",
+            text,
+        )
+    )
+    return complete_scope and mutation
+
+
 def prompt_requests_long_plan(message: str) -> bool:
-    """Return whether a requested plan exceeds the synchronous work limit."""
+    """Return whether a requested plan or complete-plan edit needs long output."""
     return coach_plan_scope(message)["background"]
 
 
@@ -12409,7 +12432,8 @@ def coach_plan_scope(message: str) -> dict[str, Any]:
     work. Unknown scope stays synchronous instead of being guessed.
     """
     text = str(message or "").casefold()
-    planning_hint = prompt_requests_workout_creation(message)
+    bulk_change = prompt_requests_bulk_training_change(message)
+    planning_hint = prompt_requests_workout_creation(message) or bulk_change
     horizon_days = 0
     planned_units = 0
     number = r"(?:\d{1,3}|ein(?:e|en|er)?|one|zwei|two|drei|three|vier|four|f(?:ü|ue)nf|five|sechs|six|sieben|seven|acht|eight|neun|nine|zehn|ten|elf|eleven|zw(?:ö|oe)lf|twelve)"
@@ -12437,6 +12461,9 @@ def coach_plan_scope(message: str) -> dict[str, Any]:
             continue
     if len(iso_dates) >= 2:
         horizon_days = max(horizon_days, abs((iso_dates[-1] - iso_dates[0]).days) + 1)
+    if bulk_change:
+        horizon_days = max(horizon_days, COACH_BACKGROUND_HORIZON_DAYS + 1)
+        planned_units = max(planned_units, COACH_TRAINING_CHANGE_LIMIT)
     planning = bool(planning_hint or (mentions_plan and (horizon_days or planned_units)))
     background = bool(
         planning
@@ -12444,6 +12471,7 @@ def coach_plan_scope(message: str) -> dict[str, Any]:
     )
     return {
         "planning": planning,
+        "bulk_change": bulk_change,
         "horizon_days": horizon_days or None,
         "planned_units": planned_units or None,
         "background": background,
@@ -12999,7 +13027,8 @@ def _structured_training_state() -> dict[str, Any]:
     with DB_LOCK, database() as db:
         revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
         planned_rows = db.execute(
-            "SELECT local_id, sync_state, payload FROM planned_units ORDER BY updated_at DESC LIMIT 100"
+            "SELECT local_id, sync_state, payload FROM planned_units ORDER BY updated_at DESC LIMIT ?",
+            (COACH_TRAINING_CHANGE_LIMIT,),
         ).fetchall()
         template_rows = db.execute(
             "SELECT local_id, sync_state, payload FROM workout_library "
@@ -13247,7 +13276,7 @@ def _structured_coach_tool_result(
         return {"ok": True, "templates": list_workout_library(limit, include_archived=bool(arguments.get("include_archived")))}
     if name == "list_planned_workouts":
         try:
-            limit = max(1, min(int(arguments.get("limit", 100)), 250))
+            limit = max(1, min(int(arguments.get("limit", 100)), COACH_TRAINING_CHANGE_LIMIT))
         except (TypeError, ValueError) as exc:
             raise AppError(400, "Planungslimit ist ungültig.", reason="invalid_list_request") from exc
         return {"ok": True, **list_coach_planned_workouts(limit)}
@@ -13661,6 +13690,11 @@ def _chat_with_structured_coach_impl(
         )
     requested_operation = intent.get("operation")
     forced_tool = requested_operation if requested_operation in COACH_CANONICAL_TOOL_NAMES else "none"
+    # A complete-plan edit needs the current opaque IDs before the mutating
+    # call. Read the full bounded local state first, then let the next round
+    # submit the authorized changes with the long-plan output budget.
+    if requested_operation == "apply_training_changes" and prompt_requests_bulk_training_change(message):
+        forced_tool = "read_training_state"
     request_payload = {
         "_ai_provider": ai_provider or str(background_receipt.get("ai_provider") or selected_ai_provider()),
         "model": model or str(background_receipt.get("model") or selected_model(ai_provider)),

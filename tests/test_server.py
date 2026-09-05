@@ -4560,6 +4560,55 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(scope["background"])
         self.assertTrue(server.coach_plan_scope("Ich brauche einen Plan für die nächsten 2 Wochen.")["background"])
 
+    def test_complete_plan_edits_use_long_plan_scope_and_budget(self):
+        prompt = "Ändere meinen gesamten Trainingsplan nach diesen Vorgaben."
+        scope = server.coach_plan_scope(prompt)
+        self.assertTrue(scope["planning"])
+        self.assertTrue(scope["bulk_change"])
+        self.assertEqual(scope["planned_units"], server.COACH_TRAINING_CHANGE_LIMIT)
+        self.assertTrue(scope["background"])
+        self.assertEqual(server.coach_output_token_budget(prompt), server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+        self.assertEqual(server.coach_output_token_budget(prompt, followup=True), server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+
+    def test_complete_plan_edit_reads_full_state_before_mutating(self):
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "read_training_state", "call_id": "read", "arguments": "{}"}]},
+            {"output_text": "Die Planänderungen sind vorbereitet."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-bulk-read"
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach(
+                "Ändere meinen gesamten Trainingsplan nach diesen Vorgaben.",
+                client_turn_id="turn-bulk-read",
+            )
+        self.assertEqual(result["command_receipts"][0]["tool"], "read_training_state")
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "read_training_state"})
+        self.assertEqual(request.call_args_list[1].args[0]["max_output_tokens"], server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+
+    def test_structured_training_reads_expose_complete_bounded_plan(self):
+        for index in range(server.COACH_TRAINING_CHANGE_LIMIT):
+            server.create_local_planned_unit({
+                "date": (date(2098, 1, 1) + timedelta(days=index)).isoformat(),
+                "sport": "Ride", "name": f"Session {index}", "description": "- 30m easy",
+            })
+        intent = {"intent": "local_action", "operation": "read_training_state", "target_system": "local", "authorization_scope": []}
+        state = server._structured_coach_tool_result(
+            "read_training_state", {}, intent=intent, conversation_id="read-plan", client_turn_id="read-plan",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(len(state["planned_units"]), server.COACH_TRAINING_CHANGE_LIMIT)
+        listed = server._structured_coach_tool_result(
+            "list_planned_workouts", {"limit": server.COACH_TRAINING_CHANGE_LIMIT}, intent=intent,
+            conversation_id="read-plan", client_turn_id="read-plan", session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(len(listed["local"]), server.COACH_TRAINING_CHANGE_LIMIT)
+
     def test_openai_background_response_is_created_checkpointed_and_polled(self):
         captured = {}
         checkpoints = []
