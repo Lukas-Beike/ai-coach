@@ -310,3 +310,44 @@ class CoachReviewTests(unittest.TestCase):
             self.assertEqual(confirmation.result(), "rejected")
         self.assertEqual([item["id"] for item in server.current_coach_proposals("review-session")], [active["id"]])
         self.assertTrue(any(item["id"] == draft["artifact_id"] for item in server.coach_intent_artifact_refs("review-conversation")))
+
+    def test_garmin_refresh_turn_resolves_its_own_job_and_reports_queue_state(self):
+        intent = {**self.intent("start_provider_refresh", ["garmin_refresh"], ["get_sync_job"]), "intent": "remote_sync", "target_system": "garmin"}
+        stages = []
+
+        def respond(payload):
+            if payload.get("text", {}).get("format", {}).get("name") == "coach_intent":
+                stages.append("classified")
+                self.assertIn("garmin", json.loads(payload["input"])["allowed_targets"])
+                return {"output_text": json.dumps(intent)}
+            if isinstance(payload["input"], str):
+                stages.append("enqueue")
+                return {"output": [self.call("start_provider_refresh", {}, "refresh")]}
+            result = json.loads(payload["input"][0]["output"])
+            if "sync_job_id" in result:
+                stages.append("status")
+                return {"output": [self.call("get_sync_job", {"job_id": result["sync_job_id"]}, "status")]}
+            stages.append("answer")
+            self.assertEqual(result["job"]["status"], "queued")
+            return {"output_text": "Garmin-Aktualisierung ist beauftragt und wartet auf die Verarbeitung."}
+
+        with patch.object(server, "CONFIG", replace(server.CONFIG, garmin_email="synthetic@example.invalid")), patch.object(server, "ensure_conversation", return_value="review-conversation"), patch.object(server, "build_training_context", return_value="Synthetic context"), patch.object(server, "responses_request", side_effect=respond), patch.object(server, "sync_garmin") as provider:
+            receipt = server.chat_with_coach("Aktualisiere Garmin und melde das Ergebnis", client_turn_id="garmin-refresh", session_csrf_hash="review-session")
+        provider.assert_not_called()
+        self.assertEqual(stages, ["classified", "enqueue", "status", "answer"])
+        self.assertEqual(receipt["status"], "completed")
+        self.assertEqual(receipt["command_receipts"][1]["result"]["job"]["id"], receipt["sync_job_ids"][0])
+
+    def test_explicit_reconfirmation_after_reload_rotates_only_unused_token(self):
+        template = server.create_local_library_template({"name": "Token recovery", "sport": "Run"})
+        change = next(row for row in server.list_change_history() if row["entity_id"] == template["id"])
+        proposal = server._history_preview(change["id"], "review-session")["proposed_action"]
+        first = server.confirm_coach_action_preview(proposal["id"], "review-session")
+        self.assertEqual(server.current_coach_proposals("review-session")[0]["status"], "ready")
+        second = server.confirm_coach_action_preview(proposal["id"], "review-session")
+        with self.assertRaises(server.AppError):
+            server.execute_coach_action(first["action_token"], "review-session", proposal["payload_hash"])
+        server.execute_coach_action(second["action_token"], "review-session", proposal["payload_hash"])
+        with self.assertRaises(server.AppError):
+            server.confirm_coach_action_preview(proposal["id"], "review-session")
+        self.assertEqual(server.list_workout_library(), [])

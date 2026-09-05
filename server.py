@@ -12165,10 +12165,12 @@ def confirm_coach_action_preview(proposal_id: Any, session_csrf_hash: str) -> di
         row = db.execute("SELECT * FROM coach_action_proposals WHERE id=? AND session_csrf_hash=?", (normalized_id, str(session_csrf_hash))).fetchone()
         if not row:
             raise AppError(404, "Aktionsvorschau nicht gefunden.")
-        if row["status"] != "preview" or float(row["expires_at"]) <= now:
+        if row["status"] not in {"preview", "ready"} or float(row["expires_at"]) <= now:
             raise AppError(409, "Die Aktionsvorschau ist abgelaufen oder wurde bereits bestätigt.")
+        # An explicit confirmation after reload can replace a lost, unused
+        # token. The old token stops working atomically; consumed tokens stay used.
         confirmed = db.execute(
-            "UPDATE coach_action_proposals SET action_token_hash=?, status='ready' WHERE id=? AND status='preview'",
+            "UPDATE coach_action_proposals SET action_token_hash=?, status='ready' WHERE id=? AND status IN ('preview', 'ready')",
             (session_token_hash(token), normalized_id),
         ).rowcount
         if confirmed != 1:
@@ -15377,8 +15379,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(202, job)
             elif match := SYNC_JOB_RESOLVE_RE.match(path):
                 self.send_json(200, resolve_sync_job(match.group(1), self.read_json()))
-            elif path == "/api/coach/actions/preview":
-                self.send_json(200, create_coach_action_preview(self.read_json(), session["csrf_hash"]))
             elif path == "/api/change-history/undo/preview":
                 self.send_json(200, _history_preview(self.read_json().get("change_id"), session["csrf_hash"]))
             elif path == "/api/coach/actions/confirm":
