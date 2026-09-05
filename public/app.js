@@ -1293,10 +1293,6 @@ async function askCoach(message) {
   $("#chatForm")?.requestSubmit();
 }
 
-function todayActivityDate(activity) {
-  return String(activity?.start_date_local || activity?.date || activity?.activity_date || "").slice(0, 10);
-}
-
 function renderToday(data) {
   const root = $("#todaySummary");
   const status = $("#todayStatus");
@@ -1311,10 +1307,6 @@ function renderToday(data) {
   }
   const todayKey = timezoneDateKey(data.profile?.timezone, new Date());
   const context = (data.daily_planning_context || []).find((item) => item.date === todayKey) || {};
-  const checkin = data.local_feedback?.today || data.checkins?.find((item) => item.checkin_date === todayKey) || context.checkin;
-  const morning = data.morning_checkin || {};
-  const automaticMorningRunning = morning.running || morning.status === "working";
-  const automaticMorningReady = morning.status === "ready" && morning.date === todayKey;
   const recovery = context.recovery || data.performance?.recovery || {};
   const todayWorkouts = (data.planned || []).filter((event) => plannedEventDate(event) === todayKey);
   const weather = context.weather || (data.weather?.days || []).find((item) => item.date === todayKey);
@@ -1330,43 +1322,6 @@ function renderToday(data) {
   } else if (syncMessages.length) status.classList.add("working");
   status.textContent = syncMessages.join(" · ");
   if (detail) detail.textContent = syncMessages.length ? syncMessages.join(" · ") : `Stand: ${dateLabel(todayKey)}`;
-
-  const adjustment = data.planning?.latest_replan;
-  const priorityCard = todayCard("Coach-Einordnung", "today-priority");
-  if (checkin?.illness) {
-    todayCardText(priorityCard, `Im Morgen-Check-in ist Krankheit vermerkt: ${checkin.illness}. Die Belastung für heute wird vorsichtig eingeordnet.`, "today-card-summary");
-  } else if (adjustment?.changes?.length || adjustment?.illness_pause) {
-    todayCardText(priorityCard, "Für die lokale Planung liegt eine Anpassung vor. Sie wird in der Einordnung für heute berücksichtigt.", "today-card-summary");
-  } else if (todayWorkouts.length) {
-    todayCardText(priorityCard, `${todayWorkouts.length} geplante Einheit${todayWorkouts.length === 1 ? "" : "en"} für heute. Die verfügbaren Quellen und der Morgen-Check-in bilden die Grundlage der Einordnung.`, "today-card-summary");
-  } else if (automaticMorningRunning) {
-    todayCardText(priorityCard, "Der Morgen-Check-in wird noch erstellt.", "today-card-summary");
-  } else if (automaticMorningReady) {
-    todayCardText(priorityCard, "Der Morgen-Check-in ist abgeschlossen. Die Einordnung basiert auf dem aktualisierten Snapshot.", "today-card-summary");
-  } else if (!checkin) {
-    todayCardText(priorityCard, "Für heute liegt noch kein Morgen-Check-in vor. Die Einordnung basiert deshalb auf den verfügbaren Quellendaten.", "today-card-summary");
-  } else {
-    todayCardText(priorityCard, "Die verfügbaren Quellen und der Morgen-Check-in zeigen keine dringende Anpassung für heute.", "today-card-summary");
-  }
-  root.append(priorityCard);
-
-  const checkinCard = todayCard("Morgen-Check-in", "today-checkin");
-  if (checkin) {
-    const values = [
-      checkin.day_form,
-      checkin.soreness != null ? `Muskelkater ${checkin.soreness}/10` : null,
-      checkin.stress != null ? `Stress ${checkin.stress}/10` : null,
-      checkin.motivation != null ? `Motivation ${checkin.motivation}/10` : null,
-      checkin.available_minutes != null ? `${checkin.available_minutes} Min. verfügbar` : null,
-      checkin.illness ? `Krankheit: ${checkin.illness}` : null,
-    ].filter(Boolean);
-    todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
-  } else if (automaticMorningRunning) {
-    todayCardText(checkinCard, "Der Morgen-Check-in wird noch erstellt.", "today-card-summary");
-  } else if (automaticMorningReady) {
-    todayCardText(checkinCard, "Morgen-Check-in abgeschlossen. Die ausführliche Einordnung findest du im Coach-Chat.", "today-card-summary");
-  } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
-  root.append(checkinCard);
 
   const readinessCard = todayCard("Readiness & Erholung", "today-readiness");
   const recoveryValues = [
@@ -1400,13 +1355,7 @@ function renderToday(data) {
   else todayCardText(weatherCard, [weatherIconFor(weather), weather.condition || "Vorhersage", weatherNumber(weather.temperature_min, " °C"), weatherNumber(weather.temperature_max, " °C"), weatherNumber(weather.precipitation_probability_max, " % Regen")].join(" · "), "today-card-summary");
   root.append(weatherCard);
 
-  const feedbackCard = todayCard("Offene Rückmeldung", "today-feedback");
-  const openFeedback = (data.activities || []).find((activity) => todayActivityDate(activity) && !activity.activity_feedback);
-  if (openFeedback) {
-    todayCardText(feedbackCard, `Noch keine Rückmeldung zu „${openFeedback.name || "letzter Aktivität"}“ gespeichert.`, "today-card-summary");
-  } else todayCardText(feedbackCard, "Keine offene Rückmeldung zu den geladenen Aktivitäten.");
-  root.append(feedbackCard);
-
+  const adjustment = data.planning?.latest_replan;
   if (adjustment && (adjustment.changes?.length || adjustment.illness_pause)) {
     const adjustmentCard = todayCard("Aktuelle Plananpassung", "today-adjustment");
     todayCardText(adjustmentCard, "Eine lokale Planänderung liegt vor.", "today-card-summary");
