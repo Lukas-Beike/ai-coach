@@ -799,7 +799,10 @@ also starts a fresh gate for the new base branch. A manual `@codex review`
 request requires a summary and submitted review created or updated after that
 request, so an older result cannot be reused. When the target branch advances,
 the gate requests a fresh review for each affected open PR and replaces the
-older polling run.
+older polling run. For normal pull-request events it also posts `@codex review`
+to start the subscription review explicitly. If the PR is closed or merged
+while the gate is waiting, the gate cancels its check instead of polling until
+the timeout.
 
 The workflow runs from the trusted target branch and never checks out or
 executes pull-request code. It uses only the GitHub token to read reviews and
