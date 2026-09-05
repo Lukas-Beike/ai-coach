@@ -789,9 +789,10 @@ comment reports completion for the current pull-request commit and Codex has
 published the matching submitted review. Inline findings are associated with
 that review by review ID, because their individual commit IDs can refer to
 different revisions of the changed lines. Any finding fails the gate. A new
-push invalidates the old review and starts the gate again. A manual `@codex
-review` request also requires a summary and submitted review created or updated
-after that request, so an older result cannot be reused.
+push invalidates the old review and starts the gate again. Retargeting the PR
+also starts a fresh gate for the new base branch. A manual `@codex review`
+request requires a summary and submitted review created or updated after that
+request, so an older result cannot be reused.
 
 The workflow runs from the trusted target branch and never checks out or
 executes pull-request code. It uses only the GitHub token to read reviews and
