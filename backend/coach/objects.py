@@ -54,4 +54,3 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
             scope.difference_update(requested)
             scope.update(resolved)
     return {**intent, "authorization_scope": sorted(scope)}
-

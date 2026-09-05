@@ -21,4 +21,3 @@ def coach_effect_label(item: dict[str, Any]) -> str:
     result = item.get("result") or {}
     count = len(result.get("library_entry_ids") or result.get("templates") or result.get("changes") or [])
     return f"{label} ({count})" if count else label
-
