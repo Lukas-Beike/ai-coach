@@ -70,6 +70,7 @@ class CoachIntentContractTests(unittest.TestCase):
         self.assertIn("save_checkin", payload["instructions"])
         self.assertIn("save_activity_feedback", payload["instructions"])
         self.assertIn("commit_training_plan in follow_up_operations", payload["instructions"])
+        self.assertIn("does not request a separate feedback write", payload["instructions"])
         for operation, scope in (("save_checkin", "local_checkin"), ("save_activity_feedback", "activity_feedback")):
             result = parse_intent_response({"output_text": json.dumps({
                 "intent": "local_action",

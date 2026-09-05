@@ -237,6 +237,17 @@ runs:
             core.info(`Waiting for Codex to publish a review for ${headSha} against base ${baseSha}.`);
             while (Date.now() < deadline) {
               const currentPullRequest = await getPullRequest();
+              if (currentPullRequest.state !== 'open') {
+                await updateCheck(
+                  checkRunId,
+                  'completed',
+                  'cancelled',
+                  'Codex review cancelled',
+                  `The pull request is ${currentPullRequest.merged ? 'merged' : 'closed'}; no review gate is required.`,
+                );
+                core.info('The pull request is no longer open; stopping the review gate.');
+                return;
+              }
               if (currentPullRequest.head.sha !== headSha || currentPullRequest.base.sha !== baseSha) {
                 throw new Error(
                   `The pull request revision changed while waiting; the gate run for ${headSha} against ` +

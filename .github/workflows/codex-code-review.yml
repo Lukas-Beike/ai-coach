@@ -23,6 +23,7 @@ jobs:
     name: Find PRs requiring a Codex review
     outputs:
       pull_requests: ${{ steps.resolve_base.outputs.pull_requests }}
+      has_pull_requests: ${{ steps.resolve_base.outputs.has_pull_requests }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -80,6 +81,14 @@ jobs:
                 }];
               }
             }
+            core.setOutput('has_pull_requests', affectedPullRequests.length > 0 ? 'true' : 'false');
+            if (affectedPullRequests.length === 0) {
+              affectedPullRequests = [{
+                pullRequestNumber: 0,
+                baseRef: 'none',
+                skip: true,
+              }];
+            }
             core.setOutput('pull_requests', JSON.stringify({
               include: affectedPullRequests,
             }));
@@ -87,6 +96,7 @@ jobs:
   gate:
     name: Coordinate Codex review (${{ matrix.pullRequestNumber }})
     needs: discover
+    if: needs.discover.outputs.has_pull_requests == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.pull_requests) }}
@@ -106,8 +116,7 @@ jobs:
         if: >-
           github.event_name == 'push' ||
           (github.event_name == 'pull_request_target' &&
-          github.event.action == 'edited' &&
-          github.event.changes.base)
+          (github.event.action != 'edited' || github.event.changes.base))
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}

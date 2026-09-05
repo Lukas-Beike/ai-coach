@@ -371,7 +371,7 @@ class CoachTests(unittest.TestCase):
             "authorization_scope": ["local_plan"],
         }
         responses = [
-            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-fresh", "arguments": json.dumps({"payload": {"plan_name": "Fresh", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}})}]},
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-fresh", "arguments": json.dumps({"payload": {"plan_name": "Fresh", "workouts": [{"date": "2099-01-01", "sport": "Ride", "description": "Easy session", "duration_minutes": 30}]}})}]},
             {"output_text": "Der Entwurf ist gespeichert."},
         ]
         order = []
@@ -430,7 +430,7 @@ class CoachTests(unittest.TestCase):
 
     def test_structured_commit_rejects_model_artifact_outside_classified_scope(self):
         artifact = server._stage_coach_artifact(
-            "conversation-scope", "turn-scope", {"plan_name": "Scoped", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}
+            "conversation-scope", "turn-scope", {"plan_name": "Scoped", "workouts": [{"date": "2099-01-01", "sport": "Ride", "description": "Easy session", "duration_minutes": 30}]}
         )
         intent = {
             "intent": "local_action",
@@ -1773,19 +1773,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request, responseError });", api_client)
         self.assertIn("window.AppApi.request(path, options, () =>", app)
         self.assertIn("window.AppApi.audio(path, blob, () =>", app)
-        self.assertIn('/api.js?v=177', index)
-        self.assertIn('/navigation.js?v=177', index)
-        self.assertIn('/state.js?v=177', index)
-        self.assertIn('/views.js?v=177', index)
-        self.assertIn('/forms.js?v=177', index)
-        self.assertIn('/components.js?v=177', index)
-        self.assertIn('/app.js?v=177', index)
-        self.assertIn('intervals-coach-v177', service_worker)
-        self.assertIn('"/navigation.js?v=177"', service_worker)
-        self.assertIn('"/state.js?v=177"', service_worker)
-        self.assertIn('"/views.js?v=177"', service_worker)
-        self.assertIn('"/forms.js?v=177"', service_worker)
-        self.assertIn('"/components.js?v=177"', service_worker)
+        self.assertIn('/api.js?v=178', index)
+        self.assertIn('/navigation.js?v=178', index)
+        self.assertIn('/state.js?v=178', index)
+        self.assertIn('/views.js?v=178', index)
+        self.assertIn('/forms.js?v=178', index)
+        self.assertIn('/components.js?v=178', index)
+        self.assertIn('/app.js?v=178', index)
+        self.assertIn('intervals-coach-v178', service_worker)
+        self.assertIn('"/navigation.js?v=178"', service_worker)
+        self.assertIn('"/state.js?v=178"', service_worker)
+        self.assertIn('"/views.js?v=178"', service_worker)
+        self.assertIn('"/forms.js?v=178"', service_worker)
+        self.assertIn('"/components.js?v=178"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1811,8 +1811,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=177'), index.index('/components.js?v=177'))
-        self.assertLess(index.index('/components.js?v=177'), index.index('/app.js?v=177'))
+        self.assertLess(index.index('/forms.js?v=178'), index.index('/components.js?v=178'))
+        self.assertLess(index.index('/components.js?v=178'), index.index('/app.js?v=178'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -3832,7 +3832,7 @@ class CoachTests(unittest.TestCase):
             "authorization_scope": ["local_plan"],
         }
         responses = [
-            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-1", "arguments": json.dumps({"payload": {"plan_name": "Test", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}})}]},
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-1", "arguments": json.dumps({"payload": {"plan_name": "Test", "workouts": [{"date": "2099-01-01", "sport": "Ride", "description": "Easy session", "duration_minutes": 30}]}})}]},
             {"output_text": "Der Entwurf ist gespeichert."},
         ]
         with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
@@ -3880,6 +3880,12 @@ class CoachTests(unittest.TestCase):
         names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
         self.assertIn("save_checkin", names)
         self.assertIn("save_activity_feedback", names)
+        stage = next(tool for tool in server.COACH_STRUCTURED_TOOLS if tool["name"] == "stage_training_plan")
+        self.assertTrue(stage["strict"])
+        payload = stage["parameters"]["properties"]["payload"]
+        workout = payload["properties"]["workouts"]["items"]
+        self.assertEqual(set(workout["required"]), set(workout["properties"]))
+        self.assertEqual(workout["properties"]["duration_minutes"]["minimum"], 5)
 
     def test_task9_duplicate_coach_turn_replays_receipt_without_reexecution(self):
         intent = {
@@ -3891,7 +3897,7 @@ class CoachTests(unittest.TestCase):
             "authorization_scope": ["local_plan"],
         }
         responses = [
-            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-replay", "arguments": json.dumps({"payload": {"plan_name": "Replay", "workouts": [{"date": "2099-01-01", "sport": "Ride"}]}})}]},
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "call-replay", "arguments": json.dumps({"payload": {"plan_name": "Replay", "workouts": [{"date": "2099-01-01", "sport": "Ride", "description": "Easy session", "duration_minutes": 30}]}})}]},
             {"output_text": "Der Entwurf ist gespeichert."},
         ]
         with patch.object(server, "request_coach_intent", return_value=intent) as classify, patch.object(
@@ -5730,16 +5736,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=177"', source)
-        self.assertIn('"/navigation.js?v=177"', source)
-        self.assertIn('"/state.js?v=177"', source)
-        self.assertIn('"/views.js?v=177"', source)
-        self.assertIn('"/forms.js?v=177"', source)
-        self.assertIn('"/components.js?v=177"', source)
+        self.assertIn('"/api.js?v=178"', source)
+        self.assertIn('"/navigation.js?v=178"', source)
+        self.assertIn('"/state.js?v=178"', source)
+        self.assertIn('"/views.js?v=178"', source)
+        self.assertIn('"/forms.js?v=178"', source)
+        self.assertIn('"/components.js?v=178"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=177"', source)
-        self.assertIn('"/icon.svg?v=177"', source)
-        self.assertIn('"/styles.css?v=177"', source)
+        self.assertIn('"/app.js?v=178"', source)
+        self.assertIn('"/icon.svg?v=178"', source)
+        self.assertIn('"/styles.css?v=178"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6800,7 +6806,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=177', index)
+        self.assertIn('v=178', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
