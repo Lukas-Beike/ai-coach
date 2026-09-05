@@ -3885,6 +3885,10 @@ class CoachTests(unittest.TestCase):
 
     def test_gemini_background_job_is_not_replayed_after_restart(self):
         config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        server.set_kv("gemini_conversation_history", json.dumps([
+            {"role": "user", "parts": [{"text": "Erstelle einen Plan."}]},
+            {"role": "model", "parts": [{"functionCall": {"name": "stage_training_plan", "args": {}}}]},
+        ]))
         with patch.object(server, "CONFIG", config):
             server.enqueue_background_coach_job(
                 "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
@@ -3897,6 +3901,7 @@ class CoachTests(unittest.TestCase):
             command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-gemini-background-restart",)).fetchone()
         self.assertEqual(command["status"], "completed")
         self.assertEqual(json.loads(command["receipt"])["status"], "failed")
+        self.assertEqual(server._gemini_history(), [{"role": "user", "parts": [{"text": "Erstelle einen Plan."}]}])
 
     def test_gemini_reset_deletes_an_existing_openai_conversation(self):
         server.set_kv("openai_conversation_id", "conv-test")

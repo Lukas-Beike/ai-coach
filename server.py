@@ -11735,6 +11735,22 @@ def _save_gemini_history(history: list[dict[str, Any]]) -> None:
     set_kv("gemini_conversation_history", json.dumps(_trim_gemini_history(history), ensure_ascii=False, separators=(",", ":")))
 
 
+def repair_incomplete_gemini_tool_history(db: sqlite3.Connection) -> None:
+    """Discard an unexecuted model tool call left by an interrupted turn."""
+    try:
+        raw_history = json.loads(get_kv("gemini_conversation_history", db) or "[]")
+    except (TypeError, json.JSONDecodeError):
+        raw_history = []
+    history = _trim_gemini_history(raw_history) if isinstance(raw_history, list) else []
+    if not history or history[-1].get("role") != "model":
+        return
+    parts = history[-1].get("parts") if isinstance(history[-1].get("parts"), list) else []
+    if not any(isinstance(part, dict) and isinstance(part.get("functionCall"), dict) for part in parts):
+        return
+    set_kv("gemini_conversation_history", json.dumps(_trim_gemini_history(history[:-1]), ensure_ascii=False, separators=(",", ":")), db)
+    set_kv("gemini_call_names", "{}", db)
+
+
 def _gemini_local_chat_history() -> list[dict[str, Any]]:
     history: list[dict[str, Any]] = []
     for message in list_messages(limit=20):
@@ -13803,7 +13819,10 @@ def _chat_with_structured_coach_impl(
             # Resolve every function call in the conversation even at the round
             # limit, and request an actual final answer with no further actions.
             response = request_response({
-                "model": selected_model(), "conversation": conversation_id,
+                "_ai_provider": request_ai_provider(request_payload),
+                "model": request_payload["model"],
+                "reasoning": request_payload["reasoning"],
+                "conversation": conversation_id,
                 "instructions": model_instructions + "\nThe tool round limit has been reached. Summarize the actual results and unresolved errors honestly; do not claim failed actions succeeded.",
                 "input": tool_outputs, "tools": COACH_STRUCTURED_TOOLS,
                 "tool_choice": "none", "parallel_tool_calls": False,
@@ -13935,6 +13954,8 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         receipt = _coach_command_receipt(existing["receipt"])
         if existing["status"] == "completed":
             return receipt
+        if receipt.get("ai_provider") == "gemini":
+            repair_incomplete_gemini_tool_history(db)
         commands = receipt.get("command_receipts") or []
         successes = [item for item in commands if item.get("result", {}).get("ok") and item.get("tool") not in STRUCTURED_READ_ONLY_TOOLS]
         failures = [item for item in commands if not item.get("result", {}).get("ok")]
