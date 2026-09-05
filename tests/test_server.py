@@ -4264,20 +4264,64 @@ class CoachTests(unittest.TestCase):
             server.enqueue_sync_job("intervals", "plan_push", {"entries": [entry] * 29}, requested_by="coach")
         self.assertEqual(too_many.exception.reason, "invalid_job_request")
 
-    def test_structured_training_change_batch_rolls_back_on_late_failure(self):
-        planned = server.create_local_planned_unit({
-            "date": "2099-01-02", "sport": "Ride", "name": "Original",
+    def test_structured_training_changes_accept_complete_bounded_plan_without_remote_write(self):
+        for count in (29, server.COACH_TRAINING_CHANGE_LIMIT):
+            with self.subTest(count=count):
+                self.setUp()
+                planned = [server.create_local_planned_unit({
+                    "date": (date(2098, 1, 1) + timedelta(days=index)).isoformat(),
+                    "sport": "Ride", "name": f"Original {index}",
+                    "description": "- 30m 60%", "duration_minutes": 30, "target": "AUTO",
+                }) for index in range(count)]
+                result = server._apply_structured_training_changes({
+                    "changes": [
+                        {"local_id": item["id"], "action": "update", "name": f"Changed {index}"}
+                        for index, item in enumerate(planned)
+                    ],
+                })
+                self.assertEqual(len(result["changes"]), count)
+                self.assertEqual(
+                    [item["name"] for item in server.list_planned_units(1000, include_archived=True)],
+                    [f"Changed {index}" for index in range(count)],
+                )
+                with server.DB_LOCK, server.database() as db:
+                    self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM sync_jobs").fetchone()["count"], 0)
+
+    def test_structured_training_change_batch_rolls_back_after_old_boundary(self):
+        planned = [server.create_local_planned_unit({
+            "date": (date(2099, 1, 1) + timedelta(days=index)).isoformat(),
+            "sport": "Ride", "name": f"Original {index}",
             "description": "- 30m 60%", "duration_minutes": 30, "target": "AUTO",
-        })
-        with self.assertRaises(server.AppError):
+        }) for index in range(28)]
+        with self.assertRaises(server.AppError) as raised:
             server._apply_structured_training_changes({
                 "changes": [
-                    {"local_id": planned["id"], "action": "update", "date": "2099-01-02", "name": "Changed"},
+                    *[
+                        {"local_id": item["id"], "action": "update", "name": f"Changed {index}"}
+                        for index, item in enumerate(planned)
+                    ],
                     {"local_id": str(uuid.uuid4()), "action": "update", "date": "2099-01-02", "name": "Missing"},
                 ],
             })
-        saved = next(item for item in server.list_planned_units(100, include_archived=True) if item["id"] == planned["id"])
-        self.assertEqual(saved["name"], "Original")
+        self.assertEqual(raised.exception.status, 404)
+        self.assertEqual(
+            [item["name"] for item in server.list_planned_units(100, include_archived=True)],
+            [f"Original {index}" for index in range(28)],
+        )
+
+    def test_structured_training_changes_reject_more_than_complete_plan_limit(self):
+        with self.assertRaises(server.AppError) as raised:
+            server._apply_structured_training_changes({
+                "changes": [{"local_id": str(uuid.uuid4()), "action": "delete"}]
+                * (server.COACH_TRAINING_CHANGE_LIMIT + 1),
+            })
+        self.assertEqual(raised.exception.reason, "change_limit")
+
+    def test_training_change_tool_schema_exposes_complete_plan_limit(self):
+        tool = next(tool for tool in server.COACH_STRUCTURED_TOOLS if tool["name"] == "apply_training_changes")
+        changes = tool["parameters"]["properties"]["changes"]
+        self.assertEqual(changes["minItems"], 1)
+        self.assertEqual(changes["maxItems"], server.COACH_TRAINING_CHANGE_LIMIT)
 
     def test_context_preview_exposes_context_and_last_chat_input(self):
         server.add_message("user", "Wie soll ich morgen trainieren?")

@@ -152,6 +152,7 @@ OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
 COACH_BACKGROUND_HORIZON_DAYS = 7
 COACH_BACKGROUND_UNIT_LIMIT = 7
+COACH_TRAINING_CHANGE_LIMIT = 366
 INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
@@ -12945,7 +12946,7 @@ COACH_STRUCTURED_TOOLS = [
         },
     }}, strict=True),
     _canonical_coach_tool("commit_training_plan", "Commit a referenced local training-plan artifact atomically.", {"artifact_id": {"type": "string"}}),
-    _canonical_coach_tool("apply_training_changes", "Apply explicitly authorized local training changes.", {"changes": {"type": "array", "items": {"type": "object"}}, "expected_revision": {"type": "integer"}}),
+    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. A complete bounded plan may be changed in one call.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "items": {"type": "object"}}, "expected_revision": {"type": "integer"}}),
     _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {"type": "object"}}}),
     _canonical_coach_tool("apply_workout_library_plan", "Schedule selected saved library templates locally after conflict checks; never writes remotely.", {"entries": {"type": "array", "items": {"type": "object"}}}),
     _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in.", {"payload": {"type": "object"}}),
@@ -13091,8 +13092,12 @@ def _stage_coach_artifact(conversation_id: str, client_turn_id: str, payload: di
 
 def _apply_structured_training_changes(arguments: dict[str, Any]) -> dict[str, Any]:
     changes = arguments.get("changes") or []
-    if not isinstance(changes, list) or not changes or len(changes) > 28:
-        raise AppError(400, "Ein Coach-Kommando darf höchstens 28 Änderungen enthalten.", reason="change_limit")
+    if not isinstance(changes, list) or not changes or len(changes) > COACH_TRAINING_CHANGE_LIMIT:
+        raise AppError(
+            400,
+            f"Ein Coach-Kommando darf höchstens {COACH_TRAINING_CHANGE_LIMIT} Änderungen enthalten.",
+            reason="change_limit",
+        )
     with DB_LOCK, database() as db:
         revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
