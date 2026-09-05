@@ -68,7 +68,11 @@ runs:
           }
           const minimumArtifactTime = context.eventName === 'issue_comment'
             ? Date.parse(context.payload.comment?.created_at || '')
-            : 0;
+            : context.eventName === 'pull_request_target' &&
+              context.payload.action === 'edited' &&
+              context.payload.changes?.base
+              ? Date.now()
+              : 0;
           if (!Number.isFinite(minimumArtifactTime)) {
             core.setFailed('The Codex review request timestamp is invalid.');
             return;
@@ -220,17 +224,19 @@ runs:
           try {
             const initialPullRequest = await getPullRequest();
             const headSha = initialPullRequest.head.sha;
+            const baseSha = initialPullRequest.base.sha;
             checkRunId = await createOrResumeCheck(headSha);
             const deadline = Date.now() + timeoutSeconds * 1000;
             let currentPollSeconds = pollSeconds;
             let previousObservation;
 
-            core.info(`Waiting for Codex to publish a review for ${headSha}.`);
+            core.info(`Waiting for Codex to publish a review for ${headSha} against base ${baseSha}.`);
             while (Date.now() < deadline) {
               const currentPullRequest = await getPullRequest();
-              if (currentPullRequest.head.sha !== headSha) {
+              if (currentPullRequest.head.sha !== headSha || currentPullRequest.base.sha !== baseSha) {
                 throw new Error(
-                  `The pull request changed from ${headSha} to ${currentPullRequest.head.sha}; waiting run is stale.`,
+                  `The pull request revision changed while waiting; the gate run for ${headSha} against ` +
+                  `base ${baseSha} is stale.`,
                 );
               }
 

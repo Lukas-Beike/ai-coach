@@ -45,6 +45,8 @@ class CodexReviewWorkflowTests(unittest.TestCase):
 
         self.assertIn("pull_request_target:", workflow)
         self.assertIn("ready_for_review", workflow)
+        self.assertIn("edited", workflow)
+        self.assertIn("github.event.changes.base", workflow)
         self.assertIn("issue_comment:", workflow)
         self.assertIn("github.run_id", workflow)
         self.assertIn("github.event.pull_request.draft != true", workflow)
@@ -60,6 +62,9 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("codex-security-review:v1", action)
         self.assertIn("summaryStatus === 'completed'", action)
         self.assertIn("context.payload.comment?.created_at", action)
+        self.assertIn("context.payload.changes?.base", action)
+        self.assertIn("const baseSha = initialPullRequest.base.sha", action)
+        self.assertIn("currentPullRequest.base.sha !== baseSha", action)
         self.assertIn("Date.parse(review.submitted_at) >= minimumSubmittedAt", action)
         self.assertIn("/\\[P[0-3]\\]/gi", action)
         self.assertIn("Math.min(currentPollSeconds * 2, 120)", action)
