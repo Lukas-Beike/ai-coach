@@ -257,12 +257,9 @@ function showLogin() {
   state.profileDirty = false;
   state.checkinDirty = false;
   state.chatDraftDirty = false;
-  state.activityFeedbackDirty.clear();
-  state.activityFeedbackDrafts.clear();
   state.activityFromDate = "";
   state.activityToDate = "";
   state.activityVisibleCount = 250;
-  setDirtyIndicator("activityDirtyIndicator", false);
   $("#appShell").hidden = true;
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
@@ -434,7 +431,7 @@ function changedSyncAreas(nextVersions) {
     chat: ["chat"],
     library: ["library", "plan"],
     checkins: ["feedback"],
-    activity_feedback: ["feedback"],
+    activity_feedback: ["feedback", "activities"],
     profile: ["profile"],
     plan: ["plan"],
   };
@@ -1193,8 +1190,7 @@ function formatTime(value) {
 function hasUnsavedChanges({ includeChatDraft = true } = {}) {
   return state.profileDirty
     || state.checkinDirty
-    || (includeChatDraft && (state.chatDraftDirty || Boolean($("#messageInput")?.value.trim())))
-    || state.activityFeedbackDirty.size > 0;
+    || (includeChatDraft && (state.chatDraftDirty || Boolean($("#messageInput")?.value.trim())));
 }
 
 function setDirtyIndicator(id, dirty) {
@@ -1209,9 +1205,6 @@ async function confirmDiscardChanges() {
 function discardUnsavedChanges() {
   state.profileDirty = false;
   state.checkinDirty = false;
-  state.activityFeedbackDirty.clear();
-  state.activityFeedbackDrafts.clear();
-  setDirtyIndicator("activityDirtyIndicator", false);
   if (state.data) render(state.data);
 }
 
@@ -1449,7 +1442,6 @@ function renderActivityStats(activities, filtered = false) {
 }
 
 function renderActivities(activities) {
-  setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
   const list = Array.isArray(activities) ? activities : [];
   const syncDetail = $("#activitySyncDetail");
   const syncNotices = [];
@@ -1505,19 +1497,6 @@ function renderActivities(activities) {
     date.className = "eyebrow";
     date.textContent = dateLabel(activity.start_date_local);
     top.append(title, date);
-    const meta = document.createElement("button");
-    meta.type = "button";
-    meta.className = "activity-meta";
-    meta.classList.add("activity-type-button");
-    const type = activityTypeKey(activity);
-    meta.textContent = type;
-    meta.setAttribute("aria-pressed", state.activityTypes.has(type) ? "true" : "false");
-    meta.addEventListener("click", () => {
-      if (state.activityTypes.has(type)) state.activityTypes.delete(type);
-      else state.activityTypes.add(type);
-      state.activityVisibleCount = 250;
-      renderActivities(state.data?.activities || []);
-    });
     const stats = document.createElement("div");
     stats.className = "activity-stats";
     const addStat = (label, value) => {
@@ -1531,48 +1510,20 @@ function renderActivities(activities) {
     addStat("Belastung", activity.icu_training_load);
     addStat("Ø Puls", activity.average_heartrate ? `${Math.round(activity.average_heartrate)} bpm` : null);
     addStat("Ø Leistung", activity.average_watts ? `${Math.round(activity.average_watts)} W` : null);
-    card.append(top, meta, stats);
+    card.append(top, stats);
 
-    const activityId = activity.id ?? activity.activityId ?? activity.external_id;
-    if (activityId != null && String(activityId).trim()) {
-      const feedback = activity.activity_feedback || {};
-      const feedbackDetails = document.createElement("details");
-      feedbackDetails.className = "activity-feedback";
-      feedbackDetails.open = Boolean(feedback.notes);
-      const feedbackSummary = document.createElement("summary");
-      feedbackSummary.className = "activity-feedback-summary";
-      const feedbackTitle = document.createElement("span");
+    const feedbackNotes = String(activity.activity_feedback?.notes || "").trim();
+    if (feedbackNotes) {
+      const feedback = document.createElement("section");
+      feedback.className = "activity-feedback";
+      const feedbackTitle = document.createElement("h4");
+      feedbackTitle.className = "activity-feedback-title";
       feedbackTitle.textContent = "Besonderheiten";
-      const feedbackHint = document.createElement("span");
-      feedbackHint.className = "activity-feedback-hint";
-      feedbackHint.textContent = feedback.notes ? "Eintrag vorhanden" : "Nach Abschluss notieren";
-      feedbackSummary.append(feedbackTitle, feedbackHint);
-      const feedbackForm = document.createElement("form");
-      feedbackForm.className = "activity-feedback-form";
-      const feedbackLabel = document.createElement("label");
-      feedbackLabel.textContent = "Gab es bei dieser Einheit Besonderheiten?";
-      const feedbackInput = document.createElement("textarea");
-      feedbackInput.name = "notes";
-      feedbackInput.rows = 3;
-      feedbackInput.maxLength = 4000;
-      feedbackInput.placeholder = "Zum Beispiel Schmerzen, ungewohnte Müdigkeit oder etwas, das besonders gut lief …";
-      feedbackInput.value = state.activityFeedbackDrafts.has(String(activityId))
-        ? state.activityFeedbackDrafts.get(String(activityId))
-        : feedback.notes || "";
-      feedbackLabel.append(feedbackInput);
-      const feedbackButton = document.createElement("button");
-      feedbackButton.type = "submit";
-      feedbackButton.textContent = "Besonderheiten speichern";
-      feedbackForm.append(feedbackLabel, feedbackButton);
-      feedbackInput.addEventListener("input", () => {
-        const key = String(activityId);
-        state.activityFeedbackDrafts.set(key, feedbackInput.value);
-        state.activityFeedbackDirty.add(key);
-        setDirtyIndicator("activityDirtyIndicator", true);
-      });
-      feedbackForm.addEventListener("submit", (event) => saveActivityFeedback(event, activity, feedbackButton));
-      feedbackDetails.append(feedbackSummary, feedbackForm);
-      card.append(feedbackDetails);
+      const feedbackText = document.createElement("p");
+      feedbackText.className = "activity-feedback-notes";
+      feedbackText.textContent = feedbackNotes;
+      feedback.append(feedbackTitle, feedbackText);
+      card.append(feedback);
     }
     root.append(card);
   });
@@ -4070,34 +4021,6 @@ async function saveCheckin(event) {
   }
   finally {
     if (button) { button.disabled = false; button.textContent = "Tages-Check-in speichern"; }
-  }
-}
-
-async function saveActivityFeedback(event, activity, button) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const activityId = activity.id ?? activity.activityId ?? activity.external_id;
-  const payload = {
-    activity_name: activity.name || activity.type || "",
-    activity_date: activity.start_date_local || "",
-    notes: String(new FormData(form).get("notes") || ""),
-  };
-  button.disabled = true;
-  button.setAttribute("aria-busy", "true");
-  button.textContent = "Wird gespeichert…";
-  try {
-    const result = await api(`/api/activities/${encodeURIComponent(String(activityId))}/feedback`, { method: "POST", body: JSON.stringify(payload) });
-    if (result.status !== "ok" || (payload.notes.trim() ? String(result.activity_feedback?.activity_id) !== String(activityId) : result.activity_feedback !== null)) throw new Error("Die Feedback-Bestätigung fehlt. Der Entwurf bleibt erhalten.");
-    state.activityFeedbackDirty.delete(String(activityId));
-    state.activityFeedbackDrafts.delete(String(activityId));
-    setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
-    toast(payload.notes.trim() ? "Besonderheiten gespeichert" : "Besonderheiten entfernt");
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    button.disabled = false;
-    button.removeAttribute("aria-busy");
-    button.textContent = "Besonderheiten speichern";
   }
 }
 
