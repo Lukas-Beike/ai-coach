@@ -56,6 +56,8 @@ class ReleaseSourceTests(unittest.TestCase):
         self.commit("1.7.2")
         self.sha = self.git("rev-parse", "HEAD")
         self.git("tag", "1.7.2")
+        self.git("branch", "main")
+        self.git("update-ref", "refs/remotes/origin/main", self.sha)
 
     def git(self, *args):
         return subprocess.check_output(["git", "-C", str(self.root), *args], text=True, stderr=subprocess.PIPE).strip()
@@ -65,14 +67,28 @@ class ReleaseSourceTests(unittest.TestCase):
         self.git("add", "server.py")
         self.git("commit", "-m", "test: fixture")
 
-    def test_branch_and_tag_must_identify_same_commit(self):
-        self.assertEqual(release_source.resolve(self.root, "develop", "1.7.2"), self.sha)
+    def test_source_and_tag_must_identify_same_commit(self):
+        self.assertEqual(release_source.resolve(self.root, self.sha, "1.7.2"), self.sha)
         self.commit("1.7.3")
         with self.assertRaisesRegex(ValueError, "different commits"):
+            release_source.resolve(self.root, self.git("rev-parse", "HEAD"), "1.7.2")
+
+    def test_release_rejects_mutable_branch_source(self):
+        with self.assertRaisesRegex(ValueError, "immutable commit SHA"):
             release_source.resolve(self.root, "develop", "1.7.2")
 
+    def test_read_only_release_pr_can_resolve_before_its_tag_exists(self):
+        self.commit("1.7.3")
+        self.assertEqual(release_source.resolve(self.root, "develop"), self.git("rev-parse", "HEAD"))
+
+    def test_release_rejects_commit_outside_main(self):
+        self.commit("1.7.3")
+        self.git("tag", "1.7.3")
+        with self.assertRaisesRegex(ValueError, "protected main history"):
+            release_source.resolve(self.root, "1.7.3", "1.7.3")
+
     def test_moving_branch_cannot_change_resolved_checkout(self):
-        source = release_source.resolve(self.root, "develop", "1.7.2")
+        source = release_source.resolve(self.root, "1.7.2", "1.7.2")
         self.commit("1.7.3")
         with self.assertRaisesRegex(ValueError, "differs"):
             release_source.verify(self.root, source, "1.7.2")
@@ -82,7 +98,7 @@ class ReleaseSourceTests(unittest.TestCase):
     def test_tag_version_must_match_application(self):
         self.git("tag", "9.0.0")
         with self.assertRaisesRegex(ValueError, "APP_VERSION"):
-            release_source.resolve(self.root, "develop", "9.0.0")
+            release_source.resolve(self.root, "9.0.0", "9.0.0")
 
     def test_build_verification_requires_fetching_the_release_tag(self):
         clone = self.root / "checkout"
@@ -90,4 +106,5 @@ class ReleaseSourceTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             release_source.verify(clone, self.sha, "1.7.2")
         release_source.git(clone, "fetch", "--unshallow", "--tags", "origin")
+        release_source.git(clone, "fetch", "origin", "main:refs/remotes/origin/main")
         release_source.verify(clone, self.sha, "1.7.2")

@@ -870,6 +870,11 @@ protection so that `develop` requires the normal CI checks and `main` disallows
 force pushes and direct human pushes while allowing the required pull request
 checks.
 
+Manual container publishing must run from `main`. Its source must be the release
+tag or that tag's full commit SHA, and the commit must belong to `main` history.
+Non-publishing release PR checks can run before the tag exists. The workflow
+does not share dependency, Buildx binary, or image-layer caches between runs.
+
 The release workflow uses a repository-installed GitHub App so that automated
 branch, pull-request, release, and workflow-dispatch events can start the next
 workflow stage. Configure the App with Actions read/write, Contents read/write,

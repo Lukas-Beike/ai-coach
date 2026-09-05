@@ -14,7 +14,7 @@ const state = {
   chatRequest: null,
   chatServerOperationId: null,
   chatStatusTimer: null,
-  chatStatusPollInFlight: false,
+  chatStatusPollInFlight: null,
   chatResponseStarted: false,
   chatResponseScrollPending: false,
   stateEventSource: null,

@@ -41,6 +41,37 @@ async function controlled(page) {
   });
 }
 
+test("chat reset detaches a delayed status poll without releasing its successor", async ({ page }) => {
+  await ready(page);
+  await page.evaluate(() => {
+    const original = fetch.bind(window);
+    window.__statusCalls = [];
+    window.fetch = (path, options) => {
+      if (path === "/api/chat/status") return new Promise((resolve) => __statusCalls.push((status) => resolve(new Response(JSON.stringify(status), { headers: { "Content-Type": "application/json" } }))));
+      if (path === "/api/chat/reset") return Promise.resolve(new Response('{"status":"ok"}', { headers: { "Content-Type": "application/json" } }));
+      return original(path, options);
+    };
+    requestConfirmation = async () => true;
+    window.__oldPoll = pollChatStatus();
+  });
+  await expect.poll(() => page.evaluate(() => __statusCalls.length)).toBe(1);
+  await page.evaluate(() => resetCoachChat());
+  await expect.poll(() => page.evaluate(() => __statusCalls.length)).toBe(2);
+  await page.evaluate(async () => {
+    window.__newPoll = state.chatStatusPollInFlight;
+    __statusCalls[0]({ status: "running", operation_id: "obsolete-operation" });
+    await __oldPoll;
+  });
+  expect(await page.evaluate(() => state.chatStatusPollInFlight === __newPoll)).toBe(true);
+  expect(await page.evaluate(() => state.chatServerOperationId)).toBe(null);
+  await page.evaluate(() => __statusCalls[1]({ status: "idle" }));
+  await expect.poll(() => page.evaluate(() => state.chatStatusPollInFlight)).toBe(null);
+  await page.evaluate(() => { clearTimeout(state.chatStatusTimer); void pollChatStatus(); });
+  await expect.poll(() => page.evaluate(() => __statusCalls.length)).toBe(3);
+  await page.evaluate(() => __statusCalls[2]({ status: "running", operation_id: "current-operation" }));
+  await expect.poll(() => page.evaluate(() => state.chatServerOperationId)).toBe("current-operation");
+});
+
 test("history barriers preserve optimistic and completed messages through navigation", async ({ page }) => {
   await ready(page);
   await controlled(page);

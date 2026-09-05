@@ -15,6 +15,11 @@ def git(repository: Path, *arguments: str) -> str:
 def resolve(repository: Path, source_ref: str, release_tag: str = "") -> str:
     if not source_ref or source_ref.startswith("-") or release_tag.startswith("-"):
         raise ValueError("A valid source reference is required")
+    if release_tag:
+        if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", release_tag):
+            raise ValueError("Release tag must be an application version")
+        if source_ref != release_tag and not re.fullmatch(r"[0-9a-f]{40}", source_ref):
+            raise ValueError("Release source must be its tag or an immutable commit SHA")
     try:
         source = git(repository, "rev-parse", "--verify", f"{source_ref}^{{commit}}")
     except subprocess.CalledProcessError:
@@ -23,6 +28,10 @@ def resolve(repository: Path, source_ref: str, release_tag: str = "") -> str:
         tagged = git(repository, "rev-parse", "--verify", f"refs/tags/{release_tag}^{{commit}}")
         if source != tagged:
             raise ValueError("source_ref and release_tag identify different commits")
+        try:
+            git(repository, "merge-base", "--is-ancestor", source, "refs/remotes/origin/main")
+        except subprocess.CalledProcessError as error:
+            raise ValueError("Release source must belong to protected main history") from error
         content = git(repository, "show", f"{source}:server.py")
         version = re.search(r'^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$', content, re.M)
         if not version or version.group(1) != release_tag:

@@ -223,7 +223,7 @@ function showLogin() {
   state.loadSequence += 1;
   state.pendingLoads.clear();
   state.loadPromise = null;
-  state.chatStatusPollInFlight = false;
+  state.chatStatusPollInFlight = null;
   state.chatStream?.controller.abort();
   state.chatStream = null;
   state.chatQueue = [];
@@ -3509,7 +3509,8 @@ async function pollChatStatus() {
     return;
   }
   if (state.chatStatusPollInFlight) return;
-  state.chatStatusPollInFlight = true;
+  const pollRequest = {};
+  state.chatStatusPollInFlight = pollRequest;
   let running = false;
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
@@ -3571,10 +3572,10 @@ async function pollChatStatus() {
       }
     }
   } catch (error) {
-    if (!/Authentication/.test(error.message)) scheduleChatStatusPoll(5_000);
+    if (state.chatStatusPollInFlight === pollRequest && !/Authentication/.test(error.message)) scheduleChatStatusPoll(5_000);
   } finally {
-    if (sessionGeneration === state.sessionGeneration && chatGeneration === state.chatGeneration) {
-      state.chatStatusPollInFlight = false;
+    if (state.chatStatusPollInFlight === pollRequest) {
+      state.chatStatusPollInFlight = null;
       scheduleChatStatusPoll(running ? 1_500 : 5_000);
     }
   }
@@ -3976,6 +3977,8 @@ async function resetCoachChat() {
   try {
     await api("/api/chat/reset", { method: "POST", body: "{}" });
     state.chatGeneration += 1;
+    state.chatStatusPollInFlight = null;
+    scheduleChatStatusPoll(0);
     state.rejectedMessages = [];
     state.chatStream?.controller.abort();
     state.chatStream = null;
