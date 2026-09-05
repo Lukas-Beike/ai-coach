@@ -13282,7 +13282,15 @@ def _chat_with_structured_coach_impl(
             prior_call = next((entry for entry in command_receipts if entry.get("call_id") == call_id), None)
             if prior_call and prior_call.get("effect_key") != effect_key:
                 raise AppError(409, "Ein Werkzeugaufruf wurde mit anderen Argumenten wiederholt.", reason="tool_call_conflict")
-            cached = prior_call or next((entry for entry in command_receipts if entry.get("effect_key") == effect_key and entry.get("result", {}).get("ok")), None)
+            cached = prior_call or next(
+                (
+                    entry for entry in command_receipts
+                    if name != "stage_training_plan"
+                    and entry.get("effect_key") == effect_key
+                    and entry.get("result", {}).get("ok")
+                ),
+                None,
+            )
             if cached is not None:
                 result = cached["result"]
             else:
@@ -13451,9 +13459,19 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         completed_tools = {item.get("tool") for item in successes}
         pending = sorted(_structured_authorized_operations(intent) - completed_tools - {""})
         cancelled = isinstance(error, AppError) and error.reason == "chat_cancelled"
-        status = "partial" if successes else "cancelled" if cancelled else "failed"
-        text = "Die Coach-Verarbeitung wurde abgebrochen." if cancelled else "Die Coach-Zusammenfassung ist fehlgeschlagen." if successes else "Der Coach-Auftrag konnte nicht abgeschlossen werden."
-        if successes:
+        if cancelled:
+            status = "cancelled"
+            text = "Die Coach-Verarbeitung wurde abgebrochen."
+        elif pending:
+            status = "partial" if successes else "failed"
+            text = "Die Coach-Zusammenfassung ist fehlgeschlagen." if successes else "Der Coach-Auftrag konnte nicht abgeschlossen werden."
+        elif successes:
+            status = "completed"
+            text = "Ergebnis: " + "; ".join(coach_effect_label(item) for item in successes)
+        else:
+            status = "failed"
+            text = "Der Coach-Auftrag konnte nicht abgeschlossen werden."
+        if successes and pending:
             text += "\nBereits erfolgreich ausgefuehrt: " + ", ".join(coach_effect_label(item) for item in successes) + ". Diese Aktionen bleiben gespeichert und werden nicht erneut ausgefuehrt."
         if failures:
             text += "\nFehlgeschlagene Schritte:\n" + coach_failure_lines(commands, set(pending))
