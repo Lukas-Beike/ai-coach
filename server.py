@@ -988,6 +988,13 @@ class AppError(Exception):
         self.reason = reason
 
 
+def public_app_error_status(error: AppError) -> int:
+    """Keep upstream authentication failures separate from local sessions."""
+    if error.status == 401 and error.reason == "authentication_or_permission":
+        return 502
+    return error.status
+
+
 class ClientDisconnected(Exception):
     pass
 
@@ -11668,16 +11675,39 @@ def _record_gemini_usage(response: dict[str, Any], operation: str) -> None:
         set_kv("gemini_usage", json.dumps(usage, ensure_ascii=False))
 
 
+def _gemini_content_has_function_response(content: dict[str, Any]) -> bool:
+    parts = content.get("parts") if isinstance(content.get("parts"), list) else []
+    return any(isinstance(part, dict) and isinstance(part.get("functionResponse"), dict) for part in parts)
+
+
+def _gemini_history_exchange_boundary(content: dict[str, Any]) -> bool:
+    if content.get("role") != "user" or _gemini_content_has_function_response(content):
+        return False
+    parts = content.get("parts") if isinstance(content.get("parts"), list) else []
+    return any(isinstance(part, dict) and str(part.get("text") or "").strip() for part in parts)
+
+
+def _trim_gemini_history(history: list[dict[str, Any]], limit: int = 60) -> list[dict[str, Any]]:
+    """Keep a bounded suffix that starts at a user exchange, never a tool response."""
+    valid = [content for content in history if isinstance(content, dict) and content.get("role") in {"user", "model"}]
+    for start in range(max(0, len(valid) - limit), len(valid)):
+        if _gemini_history_exchange_boundary(valid[start]):
+            return valid[start:]
+    # A tool loop is bounded well below the retention limit. If corrupted
+    # persisted state has no complete suffix, start a new Gemini conversation.
+    return []
+
+
 def _gemini_history() -> list[dict[str, Any]]:
     try:
         value = json.loads(get_kv("gemini_conversation_history") or "[]")
     except (TypeError, json.JSONDecodeError):
         value = []
-    return value[-60:] if isinstance(value, list) else []
+    return _trim_gemini_history(value) if isinstance(value, list) else []
 
 
 def _save_gemini_history(history: list[dict[str, Any]]) -> None:
-    set_kv("gemini_conversation_history", json.dumps(history[-60:], ensure_ascii=False, separators=(",", ":")))
+    set_kv("gemini_conversation_history", json.dumps(_trim_gemini_history(history), ensure_ascii=False, separators=(",", ":")))
 
 
 def _gemini_text(result: Any) -> str:
@@ -11734,6 +11764,12 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
             parts.append({"functionResponse": {"name": call_names.get(call_id, "coach_tool"), "response": output if isinstance(output, dict) else {"result": output}}})
         if parts:
             history.append({"role": "user", "parts": parts})
+    history = _trim_gemini_history(history)
+    # Function responses resolve a model call already saved during the
+    # previous tool round. Save them before the follow-up request so a
+    # provider failure cannot leave the stored history malformed.
+    if persistent and isinstance(input_value, list) and parts:
+        _save_gemini_history(history)
     request: dict[str, Any] = {"contents": history, "generationConfig": {"maxOutputTokens": int(payload.get("max_output_tokens") or COACH_DEFAULT_MAX_OUTPUT_TOKENS)}}
     instructions = str(payload.get("instructions") or "")
     if instructions:
@@ -11793,6 +11829,14 @@ def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading
     content = candidate.get("content") if isinstance(candidate, dict) and isinstance(candidate.get("content"), dict) else None
     if not content:
         raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
+    content_parts = content.get("parts") if isinstance(content.get("parts"), list) else []
+    function_calls = [
+        part["functionCall"]
+        for part in content_parts
+        if isinstance(part, dict) and isinstance(part.get("functionCall"), dict)
+    ]
+    if payload.get("parallel_tool_calls") is False and len(function_calls) > 1:
+        raise AppError(502, "Gemini hat mehrere Tool-Aufrufe für eine einzelne Coach-Aktion zurückgegeben.", reason="parallel_tool_calls_unsupported")
     if persistent:
         history.append(content)
         _save_gemini_history(history)
@@ -11801,10 +11845,7 @@ def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading
     if text:
         output.append({"type": "message", "content": [{"type": "output_text", "text": text}]})
     call_names: dict[str, str] = {}
-    for part in content.get("parts", []) if isinstance(content.get("parts"), list) else []:
-        function_call = part.get("functionCall") if isinstance(part, dict) and isinstance(part.get("functionCall"), dict) else None
-        if not function_call:
-            continue
+    for function_call in function_calls:
         name = str(function_call.get("name") or "").strip()
         if not name:
             continue
@@ -15713,7 +15754,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extra={"event": "http_app_error", "context": {"method": "GET", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
-            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]})
+            self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
         except Exception as exc:
             LOGGER.error(
                 "Unhandled GET error",
@@ -15767,8 +15808,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extra={"event": "http_app_error", "context": {"method": "POST", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
-            headers = {"WWW-Authenticate": "Session"} if exc.status == 401 else None
-            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]}, headers)
+            status = public_app_error_status(exc)
+            headers = {"WWW-Authenticate": "Session"} if status == 401 else None
+            self.send_json(status, {"error": redact_text(exc.message)[:1000]}, headers)
         except Exception as exc:
             LOGGER.error(
                 "Unhandled POST error",
@@ -15983,7 +16025,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             with MAINTENANCE_GATE.operation():
                 self._do_PUT()
         except AppError as exc:
-            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]})
+            self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
 
     def _do_PUT(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
@@ -16017,7 +16059,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     extra={"event": "http_app_error", "context": {"method": "PUT", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
-            self.send_json(exc.status, {"error": redact_text(exc.message)[:1000]})
+            self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
         except Exception as exc:
             LOGGER.error(
                 "Unhandled PUT error",

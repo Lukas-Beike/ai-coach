@@ -3745,6 +3745,63 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(function_response["name"], "save_checkin")
         self.assertEqual(server.output_text(followup), "Check-in gespeichert.")
 
+    def test_gemini_persists_tool_response_before_a_failed_followup(self):
+        responses = [
+            {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {}}}]}}]},
+            server.AppError(429, "Gemini ist ausgelastet.", reason="rate_limit_exceeded"),
+        ]
+
+        def fake_http_json(*args, **kwargs):
+            response = responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            initial = server.gemini_responses_request({"conversation": "gemini-persist-response", "input": "Speichere meine Tagesform.", "parallel_tool_calls": False})
+            call = next(item for item in initial["output"] if item["type"] == "function_call")
+            with self.assertRaises(server.AppError):
+                server.gemini_responses_request({"conversation": "gemini-persist-response", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "parallel_tool_calls": False})
+
+        history = json.loads(server.get_kv("gemini_conversation_history") or "[]")
+        self.assertEqual(history[-2]["parts"][0]["functionCall"]["name"], "save_checkin")
+        self.assertEqual(history[-1]["parts"][0]["functionResponse"]["name"], "save_checkin")
+
+    def test_gemini_history_trimming_keeps_complete_tool_exchanges(self):
+        history = [
+            {"role": "user", "parts": [{"text": "Starte die Planung."}]},
+            {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {}}}]},
+            {"role": "user", "parts": [{"functionResponse": {"name": "save_checkin", "response": {"ok": True}}}]},
+            {"role": "model", "parts": [{"text": "Gespeichert."}]},
+        ]
+        for index in range(29):
+            history.extend([
+                {"role": "user", "parts": [{"text": f"Frage {index}"}]},
+                {"role": "model", "parts": [{"text": f"Antwort {index}"}]},
+            ])
+
+        # Reproduce a legacy raw slice that starts with a tool response.
+        server.set_kv("gemini_conversation_history", json.dumps(history[-60:]))
+        trimmed = server._gemini_history()
+
+        self.assertEqual(len(trimmed), 58)
+        self.assertEqual(trimmed[0]["parts"][0]["text"], "Frage 0")
+        self.assertFalse(any("functionResponse" in part for content in trimmed for part in content["parts"]))
+
+    def test_gemini_rejects_parallel_tool_calls_when_coach_disables_them(self):
+        response = {"candidates": [{"content": {"role": "model", "parts": [
+            {"functionCall": {"name": "save_checkin", "args": {}}},
+            {"functionCall": {"name": "save_profile", "args": {}}},
+        ]}}]}
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", return_value=response):
+            with self.assertRaises(server.AppError) as raised:
+                server.gemini_responses_request({"conversation": "gemini-single-tool", "input": "Aktualisiere meine Daten.", "parallel_tool_calls": False})
+
+        self.assertEqual(raised.exception.reason, "parallel_tool_calls_unsupported")
+        self.assertEqual(json.loads(server.get_kv("gemini_conversation_history") or "[]"), [])
+
     def test_gemini_transcription_keeps_audio_server_side_and_returns_text(self):
         captured = {}
 
@@ -3816,6 +3873,11 @@ class CoachTests(unittest.TestCase):
         quota = json.dumps({"error": {"status": "RESOURCE_EXHAUSTED", "details": [{"reason": "quotaExceeded"}]}}).encode()
         self.assertEqual(server.gemini_error_details(429, quota)["reason"], "insufficient_quota")
         self.assertEqual(server.gemini_error_details(429, b"{}")["reason"], "rate_limit_exceeded")
+
+    def test_provider_authentication_errors_do_not_use_the_session_status(self):
+        provider_error = server.AppError(401, "Gemini-SchlÃ¼ssel ungÃ¼ltig.", reason="authentication_or_permission")
+        self.assertEqual(server.public_app_error_status(provider_error), 502)
+        self.assertEqual(server.public_app_error_status(server.AppError(401, "Anmeldung erforderlich.")), 401)
 
     def test_gemini_http_errors_keep_the_provider_status(self):
         upstream_error = server.HTTPError(
