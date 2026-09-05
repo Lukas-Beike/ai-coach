@@ -3706,6 +3706,70 @@ class CoachTests(unittest.TestCase):
         response = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Hello"}]}]}
         self.assertEqual(server.output_text(response), "Hello")
 
+    def test_gemini_normalizes_tool_calls_and_preserves_function_history(self):
+        captured = []
+        responses = [
+            {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {"payload": {"energy": 7}}}}]}}], "usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 3, "totalTokenCount": 14}},
+            {"candidates": [{"content": {"role": "model", "parts": [{"text": "Check-in gespeichert."}]}}], "usageMetadata": {"promptTokenCount": 14, "candidatesTokenCount": 4, "totalTokenCount": 18}},
+        ]
+
+        def fake_http_json(method, url, payload=None, headers=None, **kwargs):
+            captured.append({"method": method, "url": url, "payload": payload, "headers": headers})
+            return responses.pop(0)
+
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        tool = {"type": "function", "name": "save_checkin", "description": "Save check-in", "parameters": {"type": "object", "properties": {"payload": {"type": "object"}}}}
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            initial = server.gemini_responses_request({"model": "ignored", "conversation": "gemini_test", "instructions": "Coach rules", "input": "Speichere meine Tagesform.", "tools": [tool], "tool_choice": "auto", "max_output_tokens": 321})
+            call = next(item for item in initial["output"] if item["type"] == "function_call")
+            followup = server.gemini_responses_request({"conversation": "gemini_test", "instructions": "Coach rules", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "tools": [tool], "tool_choice": "auto"})
+
+        self.assertEqual(captured[0]["url"], "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+        self.assertEqual(captured[0]["headers"]["x-goog-api-key"], "test-gemini-key")
+        self.assertEqual(captured[0]["payload"]["systemInstruction"]["parts"][0]["text"], "Coach rules")
+        self.assertEqual(captured[0]["payload"]["tools"][0]["functionDeclarations"][0]["name"], "save_checkin")
+        function_response = next(
+            part["functionResponse"]
+            for content in captured[1]["payload"]["contents"]
+            for part in content.get("parts", [])
+            if "functionResponse" in part
+        )
+        self.assertEqual(function_response["name"], "save_checkin")
+        self.assertEqual(server.output_text(followup), "Check-in gespeichert.")
+
+    def test_gemini_transcription_keeps_audio_server_side_and_returns_text(self):
+        captured = {}
+
+        def fake_http_json(method, url, payload=None, headers=None, **kwargs):
+            captured.update({"method": method, "url": url, "payload": payload, "headers": headers})
+            return {"candidates": [{"content": {"role": "model", "parts": [{"text": "Wie soll ich morgen trainieren?"}]}}]}
+
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            result = server.transcribe_audio(b"fake-webm-audio", "audio/webm;codecs=opus")
+
+        self.assertEqual(result, {"transcript": "Wie soll ich morgen trainieren?"})
+        self.assertEqual(captured["headers"]["x-goog-api-key"], "test-gemini-key")
+        audio_part = captured["payload"]["contents"][0]["parts"][0]["inlineData"]
+        self.assertEqual(audio_part["mimeType"], "audio/webm")
+        self.assertNotIn("fake-webm-audio", str(captured["payload"]))
+
+    def test_ai_provider_selection_keeps_models_separate(self):
+        config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
+        with patch.object(server, "CONFIG", config):
+            self.assertEqual(server.selected_ai_provider(), "openai")
+            server.save_model("gpt-5.6-luna")
+            self.assertEqual(server.save_ai_provider("gemini")["provider"], "gemini")
+            self.assertEqual(server.selected_model(), "gemini-2.5-flash")
+            server.save_model("gemini-2.5-pro")
+            server.save_ai_provider("openai")
+            self.assertEqual(server.selected_model(), "gpt-5.6-luna")
+
+    def test_gemini_key_is_redacted_from_diagnostics_text(self):
+        key = "AIza" + "a" * 35
+        with patch.object(server, "CONFIG", replace(server.CONFIG, gemini_api_key=key)):
+            self.assertNotIn(key, server.redact_text(f"Gemini request failed: {key}"))
+
     def test_transcribe_audio_sends_bounded_multipart_request(self):
         captured = {}
 

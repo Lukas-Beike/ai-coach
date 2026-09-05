@@ -147,6 +147,7 @@ COACH_DEFAULT_MAX_OUTPUT_TOKENS = 6_000
 COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
 COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
+GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
 COACH_BACKGROUND_HORIZON_DAYS = 7
@@ -436,6 +437,9 @@ class Config:
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
     openai_base_url: str = os.environ.get("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)
     openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.6-sol")
+    gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
+    gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    ai_provider: str = os.environ.get("AI_PROVIDER", "").strip().casefold()
     intervals_api_key: str = os.environ.get("INTERVALS_API_KEY", "")
     intervals_athlete_id: str = os.environ.get("INTERVALS_ATHLETE_ID", "0")
     garmin_email: str = os.environ.get("GARMIN_EMAIL", "")
@@ -462,6 +466,10 @@ MODEL_OPTIONS = (
     {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "description": "Ausgewogen bei Qualität, Tempo und Kosten"},
     {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
 )
+GEMINI_MODEL_OPTIONS = (
+    {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "description": "Schnelle, ausgewogene Gemini-Antworten"},
+    {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "description": "Gründlichere Gemini-Analyse für komplexe Trainingsfragen"},
+)
 THINKING_LEVEL_OPTIONS = (
     {"id": "low", "label": "Niedrig", "description": "Schnellere Antworten mit weniger zusätzlicher Überlegung"},
     {"id": "medium", "label": "Mittel", "description": "Ausgewogene Qualität, Geschwindigkeit und Kosten"},
@@ -471,24 +479,59 @@ CALENDAR_DISPLAY_DEFAULTS = {"past_weeks": 1, "future_weeks": 4}
 CALENDAR_DISPLAY_MAX_WEEKS = 52
 
 
-def available_model_options() -> list[dict[str, str]]:
-    options = list(MODEL_OPTIONS)
-    if CONFIG.openai_model not in {option["id"] for option in options}:
-        options.insert(0, {"id": CONFIG.openai_model, "label": f"{CONFIG.openai_model} (konfiguriert)", "description": "In .env konfiguriert"})
+def available_ai_providers() -> list[dict[str, str]]:
+    providers: list[dict[str, str]] = []
+    if CONFIG.openai_api_key:
+        providers.append({"id": "openai", "label": "OpenAI", "description": "GPT-5.6 über die OpenAI Responses API"})
+    if CONFIG.gemini_api_key:
+        providers.append({"id": "gemini", "label": "Gemini", "description": "Google Gemini API"})
+    return providers
+
+
+def selected_ai_provider() -> str:
+    configured = {item["id"] for item in available_ai_providers()}
+    stored = str(get_kv("selected_ai_provider") or "").casefold()
+    if stored in configured:
+        return stored
+    if CONFIG.ai_provider in configured:
+        return CONFIG.ai_provider
+    if "openai" in configured:
+        return "openai"
+    if "gemini" in configured:
+        return "gemini"
+    return ""
+
+
+def save_ai_provider(provider: Any) -> dict[str, str]:
+    provider_id = str(provider or "").strip().casefold()
+    if provider_id not in {item["id"] for item in available_ai_providers()}:
+        raise AppError(400, "Der ausgewählte KI-Anbieter ist nicht konfiguriert.")
+    set_kv("selected_ai_provider", provider_id)
+    return {"provider": provider_id, "model": selected_model()}
+
+
+def available_model_options(provider: str | None = None) -> list[dict[str, str]]:
+    active_provider = provider or selected_ai_provider()
+    options = list(GEMINI_MODEL_OPTIONS if active_provider == "gemini" else MODEL_OPTIONS)
+    configured_model = CONFIG.gemini_model if active_provider == "gemini" else CONFIG.openai_model
+    if configured_model not in {option["id"] for option in options}:
+        options.insert(0, {"id": configured_model, "label": f"{configured_model} (konfiguriert)", "description": "In .env konfiguriert"})
     return options
 
 
 def selected_model() -> str:
-    configured = {option["id"] for option in available_model_options()}
-    stored = get_kv("selected_model")
-    return stored if stored in configured else CONFIG.openai_model
+    provider = selected_ai_provider()
+    configured = {option["id"] for option in available_model_options(provider)}
+    stored = get_kv(f"selected_model_{provider}") if provider else None
+    default = CONFIG.gemini_model if provider == "gemini" else CONFIG.openai_model
+    return stored if stored in configured else default
 
 
 def save_model(model: Any) -> dict[str, str]:
     model_id = str(model or "").strip()
     if model_id not in {option["id"] for option in available_model_options()}:
         raise AppError(400, "Nicht unterstützte Modellauswahl.")
-    set_kv("selected_model", model_id)
+    set_kv(f"selected_model_{selected_ai_provider()}", model_id)
     return {"model": model_id}
 
 
@@ -651,6 +694,7 @@ def redact_text(value: str) -> str:
     redacted = URL_VALUE_RE.sub(_redact_url, redacted)
     secret_values = (
         CONFIG.openai_api_key,
+        CONFIG.gemini_api_key,
         CONFIG.intervals_api_key,
         getattr(CONFIG, "garmin_email", ""),
         getattr(CONFIG, "garmin_password", ""),
@@ -662,6 +706,7 @@ def redact_text(value: str) -> str:
         for variant in sorted(_secret_variants(secret_value), key=len, reverse=True):
             redacted = re.sub(re.escape(variant), "[REDACTED]", redacted, flags=re.IGNORECASE)
     redacted = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted)
+    redacted = re.sub(r"\bAIza[A-Za-z0-9_-]{20,}\b", "[REDACTED_GEMINI_KEY]", redacted)
     redacted = re.sub(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+", r"\1[REDACTED]", redacted)
     return redacted
 
@@ -6187,6 +6232,7 @@ OPENAI_RATE_LIMIT_HEADERS = {
     "x-ratelimit-reset-tokens": "reset_tokens",
 }
 OPENAI_STATUS_KEY = "openai_status"
+GEMINI_STATUS_KEY = "gemini_status"
 
 
 def _safe_openai_error_token(value: Any) -> str | None:
@@ -11251,10 +11297,10 @@ def context_preview() -> dict[str, Any]:
             "COMPACT INTERVALS.ICU CONTEXT: letzte 5 Aktivitäten je Sportart, Summen und zukünftige geplante Einheiten",
             "LOCAL TRAINING LIBRARY: ausgewählte lokal zwischengespeicherte und mit Intervals.icu synchronisierte Workout-Vorlagen",
             "LOCAL PLANNED WORKOUTS: datierte lokale Bibliothekseinheiten, die der Coach auf ausdrückliche Bitte anwenden kann",
-            "OpenAI Conversation: Dialogkontinuität; nicht autoritativ für dauerhafte Athletenfakten",
+            "KI-Anbieter-Konversation: Dialogkontinuität; nicht autoritativ für dauerhafte Athletenfakten",
         ],
         "conversation": {
-            "mode": "OpenAI Responses Conversation",
+            "mode": "Gemini local conversation history" if selected_ai_provider() == "gemini" else "OpenAI Responses Conversation",
             "included_separately": True,
             "note": "Der bisherige Dialog wird für Kontinuität mitgeführt. Dauerhafte Athletenfakten stammen ausschließlich aus Profil, Wettkämpfen und aktuellem Datensnapshot.",
         },
@@ -11262,7 +11308,7 @@ def context_preview() -> dict[str, Any]:
             "field": "input",
             "role": "user",
             "content": last_user_message or "Noch keine Chat-Nachricht gesendet.",
-            "note": "Diese Eingabe wird als input getrennt vom Kontext/instructions an die Responses API übergeben.",
+            "note": "Diese Eingabe wird getrennt vom Coach-Kontext/instructions an den ausgewählten KI-Anbieter übergeben.",
         },
         "structured_athlete_context": preview_structured_context,
         "latest_intervals_snapshot": coach_intervals_context(snapshot),
@@ -11482,8 +11528,6 @@ def normalized_audio_type(content_type: str) -> str:
 
 def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     """Transcribe one short voice note; audio is intentionally never persisted."""
-    if not CONFIG.openai_api_key:
-        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
     if not isinstance(audio, bytes) or not audio:
         raise AppError(400, "Die Audioaufnahme ist leer.")
     if len(audio) > MAX_AUDIO_BODY_BYTES:
@@ -11492,6 +11536,22 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     suffix = VOICE_AUDIO_TYPES.get(audio_type)
     if not suffix:
         raise AppError(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
+    if selected_ai_provider() == "gemini":
+        if not CONFIG.gemini_api_key:
+            raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
+        result = gemini_raw_request("gemini-2.5-flash", {
+            "contents": [{"role": "user", "parts": [
+                {"inlineData": {"mimeType": audio_type, "data": base64.b64encode(audio).decode("ascii")}},
+                {"text": "Transkribiere diese deutsche Trainingsfrage wortgetreu. Gib ausschließlich das Transkript zurück."},
+            ]}],
+            "generationConfig": {"temperature": 0},
+        }, operation="transcription")
+        transcript = _gemini_text(result)
+        if not transcript:
+            raise AppError(502, "Gemini hat kein Transkript zurückgegeben.")
+        return {"transcript": transcript}
+    if not CONFIG.openai_api_key:
+        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
     body, multipart_type = multipart_form_data(
         [
             ("model", "gpt-transcribe"),
@@ -11518,8 +11578,200 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     return {"transcript": text.strip()}
 
 
+def _provider_usage_summary(provider: str) -> dict[str, Any]:
+    key = f"{provider}_usage"
+    status_key = GEMINI_STATUS_KEY if provider == "gemini" else OPENAI_STATUS_KEY
+    today = local_now().date().isoformat()
+    try:
+        usage = json.loads(get_kv(key) or "{}")
+    except (TypeError, json.JSONDecodeError):
+        usage = {}
+    if not isinstance(usage, dict) or usage.get("date") != today:
+        usage = {"date": today, "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    try:
+        status = json.loads(get_kv(status_key) or "{}")
+    except (TypeError, json.JSONDecodeError):
+        status = {}
+    return {**usage, "rate_limits": {}, "status": status if isinstance(status, dict) else {}}
+
+
+def gemini_usage_summary() -> dict[str, Any]:
+    with DB_LOCK, database():
+        return _provider_usage_summary("gemini")
+
+
+def _record_gemini_status(state: str, message: str, *, reason: str = "ok", status: int | None = None) -> None:
+    set_kv(GEMINI_STATUS_KEY, json.dumps({
+        "state": state, "reason": reason, "message": message[:300], "http_status": status, "updated_at": utc_now(),
+    }, ensure_ascii=False))
+
+
+def _record_gemini_usage(response: dict[str, Any], operation: str) -> None:
+    raw = response.get("usageMetadata") if isinstance(response, dict) else None
+    raw = raw if isinstance(raw, dict) else {}
+    def count(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError, OverflowError):
+            return 0
+    with DB_LOCK, database():
+        usage = _provider_usage_summary("gemini")
+        input_tokens = count(raw.get("promptTokenCount"))
+        output_tokens = count(raw.get("candidatesTokenCount"))
+        total_tokens = count(raw.get("totalTokenCount")) or input_tokens + output_tokens
+        usage.update({"requests": count(usage.get("requests")) + 1, "input_tokens": count(usage.get("input_tokens")) + input_tokens,
+                      "output_tokens": count(usage.get("output_tokens")) + output_tokens, "total_tokens": count(usage.get("total_tokens")) + total_tokens,
+                      "last_operation": operation, "last_request_at": utc_now()})
+        set_kv("gemini_usage", json.dumps(usage, ensure_ascii=False))
+
+
+def _gemini_history() -> list[dict[str, Any]]:
+    try:
+        value = json.loads(get_kv("gemini_conversation_history") or "[]")
+    except (TypeError, json.JSONDecodeError):
+        value = []
+    return value[-60:] if isinstance(value, list) else []
+
+
+def _save_gemini_history(history: list[dict[str, Any]]) -> None:
+    set_kv("gemini_conversation_history", json.dumps(history[-60:], ensure_ascii=False, separators=(",", ":")))
+
+
+def _gemini_text(result: Any) -> str:
+    candidates = result.get("candidates") if isinstance(result, dict) else []
+    candidate = candidates[0] if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict) else {}
+    content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
+    parts = content.get("parts") if isinstance(content.get("parts"), list) else []
+    return "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict) and part.get("text")).strip()
+
+
+def _gemini_tools(tools: Any) -> list[dict[str, Any]]:
+    declarations = []
+    for tool in tools if isinstance(tools, list) else []:
+        if not isinstance(tool, dict) or tool.get("type") != "function" or not tool.get("name"):
+            continue
+        declarations.append({"name": str(tool["name"]), "description": str(tool.get("description") or ""),
+                             "parameters": tool.get("parameters") if isinstance(tool.get("parameters"), dict) else {"type": "object", "properties": {}}})
+    return [{"functionDeclarations": declarations}] if declarations else []
+
+
+def _gemini_request_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
+    persistent = bool(payload.get("conversation"))
+    history = _gemini_history() if persistent else []
+    input_value = payload.get("input")
+    if persistent and not history:
+        for message in list_messages(limit=20):
+            role = "model" if message.get("role") == "assistant" else "user"
+            content = str(message.get("content") or "").strip()[:6000]
+            if content:
+                history.append({"role": role, "parts": [{"text": content}]})
+    if isinstance(input_value, str):
+        last_text = ""
+        if history and isinstance(history[-1], dict):
+            parts = history[-1].get("parts") if isinstance(history[-1].get("parts"), list) else []
+            last_text = str(parts[0].get("text") or "") if parts and isinstance(parts[0], dict) else ""
+        if input_value != last_text:
+            history.append({"role": "user", "parts": [{"text": input_value}]})
+    elif isinstance(input_value, list):
+        call_names: dict[str, str] = {}
+        try:
+            saved = json.loads(get_kv("gemini_call_names") or "{}")
+            call_names = saved if isinstance(saved, dict) else {}
+        except (TypeError, json.JSONDecodeError):
+            pass
+        parts = []
+        for item in input_value:
+            if not isinstance(item, dict) or item.get("type") != "function_call_output":
+                continue
+            call_id = str(item.get("call_id") or "")
+            try:
+                output = json.loads(item.get("output") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                output = {"error": "Tool output was not JSON."}
+            parts.append({"functionResponse": {"name": call_names.get(call_id, "coach_tool"), "response": output if isinstance(output, dict) else {"result": output}}})
+        if parts:
+            history.append({"role": "user", "parts": parts})
+    request: dict[str, Any] = {"contents": history, "generationConfig": {"maxOutputTokens": int(payload.get("max_output_tokens") or COACH_DEFAULT_MAX_OUTPUT_TOKENS)}}
+    instructions = str(payload.get("instructions") or "")
+    if instructions:
+        request["systemInstruction"] = {"parts": [{"text": instructions}]}
+    tools = _gemini_tools(payload.get("tools"))
+    if tools:
+        request["tools"] = tools
+        choice = payload.get("tool_choice", "auto")
+        config: dict[str, Any] = {"mode": "AUTO"}
+        if choice == "none":
+            config["mode"] = "NONE"
+        elif isinstance(choice, dict) and choice.get("type") == "function":
+            config = {"mode": "ANY", "allowedFunctionNames": [str(choice.get("name"))]}
+        request["toolConfig"] = {"functionCallingConfig": config}
+    text_format = payload.get("text") if isinstance(payload.get("text"), dict) else {}
+    format_config = text_format.get("format") if isinstance(text_format.get("format"), dict) else {}
+    if format_config.get("type") == "json_schema" and isinstance(format_config.get("schema"), dict):
+        request["generationConfig"].update({"responseMimeType": "application/json", "responseJsonSchema": format_config["schema"]})
+    thinking = {"low": 1024, "medium": 8192, "high": 24576}.get(selected_thinking_level())
+    if thinking:
+        request["generationConfig"]["thinkingConfig"] = {"thinkingBudget": thinking}
+    return request, history, persistent
+
+
+def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str) -> dict[str, Any]:
+    if not CONFIG.gemini_api_key:
+        raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", str(model or "")):
+        raise AppError(400, "Ungültiges Gemini-Modell.")
+    try:
+        result = http_json("POST", f"{GEMINI_API_BASE_URL}/models/{model}:generateContent", payload,
+                           {"x-goog-api-key": CONFIG.gemini_api_key}, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS, service="gemini")
+    except AppError as exc:
+        _record_gemini_status("error", "Gemini-Anfrage fehlgeschlagen.", reason=exc.reason or "request_failed", status=exc.status)
+        raise
+    if not isinstance(result, dict):
+        _record_gemini_status("error", "Gemini hat keine JSON-Antwort geliefert.", reason="invalid_response", status=502)
+        raise AppError(502, "Gemini hat keine gültige Antwort geliefert.", reason="invalid_response")
+    _record_gemini_status("ok", "Gemini ist verfügbar.")
+    _record_gemini_usage(result, operation)
+    return result
+
+
+def gemini_responses_request(payload: dict[str, Any]) -> dict[str, Any]:
+    request, history, persistent = _gemini_request_payload(payload)
+    result = gemini_raw_request(selected_model(), request, operation="generate_content")
+    candidates = result.get("candidates") if isinstance(result.get("candidates"), list) else []
+    candidate = candidates[0] if candidates and isinstance(candidates[0], dict) else None
+    content = candidate.get("content") if isinstance(candidate, dict) and isinstance(candidate.get("content"), dict) else None
+    if not content:
+        raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
+    if persistent:
+        history.append(content)
+        _save_gemini_history(history)
+    text = _gemini_text(result)
+    output: list[dict[str, Any]] = []
+    if text:
+        output.append({"type": "message", "content": [{"type": "output_text", "text": text}]})
+    call_names: dict[str, str] = {}
+    for part in content.get("parts", []) if isinstance(content.get("parts"), list) else []:
+        function_call = part.get("functionCall") if isinstance(part, dict) and isinstance(part.get("functionCall"), dict) else None
+        if not function_call:
+            continue
+        name = str(function_call.get("name") or "").strip()
+        if not name:
+            continue
+        call_id = "gemini_" + uuid.uuid4().hex
+        call_names[call_id] = name
+        output.append({"type": "function_call", "call_id": call_id, "name": name,
+                       "arguments": json.dumps(function_call.get("args") if isinstance(function_call.get("args"), dict) else {}, ensure_ascii=False)})
+    if call_names:
+        set_kv("gemini_call_names", json.dumps(call_names, ensure_ascii=False))
+    usage = result.get("usageMetadata") if isinstance(result.get("usageMetadata"), dict) else {}
+    return {"id": "gemini_" + uuid.uuid4().hex, "status": "completed", "output": output, "output_text": text,
+            "usage": {"input_tokens": usage.get("promptTokenCount", 0), "output_tokens": usage.get("candidatesTokenCount", 0), "total_tokens": usage.get("totalTokenCount", 0)}}
+
+
 def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     """Call Responses API and retry transient locks on the persistent conversation."""
+    if selected_ai_provider() == "gemini":
+        return gemini_responses_request(payload)
     request_payload = dict(payload)
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     for attempt in range(3):
@@ -11588,6 +11840,13 @@ def responses_background_request(
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Create or resume a bounded OpenAI background response and poll it."""
+    if selected_ai_provider() == "gemini":
+        _raise_chat_cancelled(cancel_event)
+        result = gemini_responses_request(payload)
+        _raise_chat_cancelled(cancel_event)
+        if on_response_id is not None:
+            on_response_id(str(result.get("id") or "gemini"))
+        return result
     started = time.monotonic()
     if response_id:
         current = retrieve_openai_response(response_id)
@@ -11800,6 +12059,14 @@ def responses_stream_request(
     on_text_delta: Any,
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
+    if selected_ai_provider() == "gemini":
+        _raise_chat_cancelled(cancel_event)
+        result = gemini_responses_request(payload)
+        _raise_chat_cancelled(cancel_event)
+        text = output_text(result)
+        if text:
+            on_text_delta(text)
+        return result
     request_payload = dict(payload)
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     for attempt in range(3):
@@ -11816,6 +12083,13 @@ def responses_stream_request(
 
 
 def ensure_conversation() -> str:
+    if selected_ai_provider() == "gemini":
+        existing = str(get_kv("gemini_conversation_id") or "")
+        if existing:
+            return existing
+        conversation_id = "gemini_" + uuid.uuid4().hex
+        set_kv("gemini_conversation_id", conversation_id)
+        return conversation_id
     existing = get_kv("openai_conversation_id")
     if existing:
         return existing
@@ -11854,7 +12128,7 @@ def reset_coach_chat() -> dict[str, Any]:
     with OPENAI_CONVERSATION_LOCK:
         conversation_id = get_kv("openai_conversation_id") or ""
         remote_deleted = False
-        if conversation_id:
+        if selected_ai_provider() == "openai" and conversation_id:
             try:
                 remote_deleted = delete_remote_conversation(conversation_id)
             except Exception:
@@ -11862,6 +12136,9 @@ def reset_coach_chat() -> dict[str, Any]:
         with DB_LOCK, database() as db:
             db.execute("DELETE FROM messages")
         set_kv("openai_conversation_id", "")
+        set_kv("gemini_conversation_id", "")
+        set_kv("gemini_conversation_history", "[]")
+        set_kv("gemini_call_names", "{}")
         set_kv("last_chat_reset_at", utc_now())
     return {"status": "ok", "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
 
@@ -14017,7 +14294,7 @@ def run_morning_checkin(checkin_date: str) -> None:
 @maintenance_operation
 def schedule_morning_checkin() -> None:
     checkin_date = morning_checkin_date()
-    if not checkin_date or not CONFIG.openai_api_key or not CONFIG.intervals_api_key:
+    if not checkin_date or not selected_ai_provider() or not CONFIG.intervals_api_key:
         return
     if get_kv("morning_checkin_date") == checkin_date or get_kv("morning_checkin_attempted") == checkin_date:
         return
@@ -14142,13 +14419,14 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
                 "date": get_kv("morning_checkin_date"), "last_error": get_kv("morning_checkin_error") or None,
             },
             "coach_quick_actions": coach_quick_actions_state(),
+            "ai_provider": {"selected": selected_ai_provider(), "options": available_ai_providers()},
             "model": {"selected": selected_model(), "options": available_model_options()},
             "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
             "configured": {
-                "openai": bool(CONFIG.openai_api_key), "intervals": bool(CONFIG.intervals_api_key),
+                "openai": bool(CONFIG.openai_api_key), "gemini": bool(CONFIG.gemini_api_key), "intervals": bool(CONFIG.intervals_api_key),
                 "weather": bool(get_profile().get("weather_location")), "external_calendar": bool(CONFIG.calendar_ical_url),
             },
-            "usage": openai_usage_summary(),
+            "usage": openai_usage_summary() if selected_ai_provider() != "gemini" else gemini_usage_summary(),
         }
 
 
@@ -14306,15 +14584,17 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "last_error": get_kv("morning_checkin_error") or None,
             },
             "coach_quick_actions": coach_quick_actions_state(),
+            "ai_provider": {"selected": selected_ai_provider(), "options": available_ai_providers()},
             "model": {"selected": selected_model(), "options": available_model_options()},
             "thinking_level": {"selected": selected_thinking_level(), "options": available_thinking_level_options()},
             "configured": {
                 "openai": bool(CONFIG.openai_api_key),
+                "gemini": bool(CONFIG.gemini_api_key),
                 "intervals": bool(CONFIG.intervals_api_key),
                 "weather": bool(weather.get("configured")),
                 "external_calendar": bool(CONFIG.calendar_ical_url),
             },
-            "usage": openai_usage_summary(),
+            "usage": openai_usage_summary() if selected_ai_provider() != "gemini" else gemini_usage_summary(),
         }
 
 
@@ -14335,7 +14615,7 @@ def recent_log_entries(limit: int = 200) -> list[dict[str, Any]]:
     return entries
 
 
-SETTINGS_SECRET_KEYS = ("OPENAI_API_KEY", "INTERVALS_API_KEY", "GARMIN_PASSWORD")
+SETTINGS_SECRET_KEYS = ("OPENAI_API_KEY", "GEMINI_API_KEY", "INTERVALS_API_KEY", "GARMIN_PASSWORD")
 SETTINGS_VALUE_KEYS = ("GARMIN_EMAIL", "GARMINTOKENS", "GARMIN_FIXTURE_PATH")
 SETTINGS_KEYS = SETTINGS_SECRET_KEYS + SETTINGS_VALUE_KEYS
 
@@ -14402,6 +14682,8 @@ def diagnostic_report() -> dict[str, Any]:
         },
         "configuration": {
             "openai_configured": bool(CONFIG.openai_api_key),
+            "gemini_configured": bool(CONFIG.gemini_api_key),
+            "ai_provider": selected_ai_provider(),
             "intervals_configured": bool(CONFIG.intervals_api_key),
             "garmin_library_available": Garmin is not None,
             "garmin_configured": garmin_status["configured"],
@@ -14411,6 +14693,7 @@ def diagnostic_report() -> dict[str, Any]:
             "available_models": [option["id"] for option in available_model_options()],
         },
         "openai": openai_usage_summary(),
+        "gemini": gemini_usage_summary(),
         "sync": {
             "last_success": get_kv("last_sync_at"),
             "last_error": redact_text(get_kv("last_sync_error") or "") or None,
@@ -15597,6 +15880,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             require_csrf(self, session)
             if path == "/api/settings/model":
                 self.send_json(200, save_model(self.read_json().get("model")))
+                return
+            if path == "/api/settings/ai-provider":
+                self.send_json(200, save_ai_provider(self.read_json().get("provider")))
                 return
             if path == "/api/settings/thinking-level":
                 self.send_json(200, save_thinking_level(self.read_json().get("thinking_level")))
