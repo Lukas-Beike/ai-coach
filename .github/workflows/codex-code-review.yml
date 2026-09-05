@@ -21,6 +21,8 @@ permissions:
 jobs:
   discover:
     name: Find PRs requiring a Codex review
+    outputs:
+      pull_requests: ${{ steps.resolve_base.outputs.pull_requests }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -109,7 +111,6 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
-          EXPECTED_BASE_REF: ${{ matrix.baseRef }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -126,6 +127,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
+          EXPECTED_BASE_REF: ${{ matrix.baseRef }}
         with:
           github-token: ${{ github.token }}
           script: |
