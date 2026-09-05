@@ -582,6 +582,19 @@ h2 {
 .planned-today-label { color: var(--accent-bright); font-size: .7rem; font-weight: 750; }
 .planned-day-weather { margin-top: 5px; color: var(--muted); font-size: .68rem; line-height: 1.5; }
 .planned-day-content { min-width: 0; }
+.planned-day-weather.is-missing { color: var(--subtle); font-size: .65rem; }
+.planned-day-insights { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.planned-insights-title { margin: 0 0 10px; color: var(--muted); font-size: .72rem; font-weight: 600; }
+.planned-day-form { margin: 0 0 10px; color: var(--ink); font-size: .8rem; line-height: 1.5; overflow-wrap: anywhere; }
+.planned-day-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(82px, 1fr)); gap: 12px 16px; margin: 0; }
+.planned-day-metrics dt { color: var(--muted); font-size: .68rem; line-height: 1.4; }
+.planned-day-metrics dd { margin: 3px 0 0; color: var(--ink); font-size: .85rem; font-variant-numeric: tabular-nums; }
+.planned-insights-empty { margin: 0; color: var(--subtle); font-size: .7rem; line-height: 1.5; }
+.planned-day-observations { color: var(--muted); font-size: .74rem; line-height: 1.5; overflow-wrap: anywhere; }
+.planned-day-observations > summary { min-height: 44px; padding: 13px 0 8px; cursor: pointer; }
+.planned-day-observations > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.planned-day-observations p { margin: 0 0 8px; }
+.planned-insights-sources { color: var(--subtle); font-size: .68rem; }
 .planned-day-notes { display: grid; gap: 6px; margin-top: 12px; }
 .planned-day-context { margin: 0; font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
 .planned-day-calendar { color: #b9d9ff; }
@@ -611,6 +624,7 @@ h2 {
   .planned-day-heading time { font-size: .75rem; }
   .planned-entry > summary > strong { font-size: .92rem; }
   .planned-meta { font-size: .73rem; }
+  .planned-day-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 8px; }
   .planned-week-heading { padding: 14px 12px; }
 }
 

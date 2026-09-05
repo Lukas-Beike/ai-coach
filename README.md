@@ -134,6 +134,15 @@ instructions do not delete or convert its data.
   duration; today is highlighted and weather stays compact below the date.
   Expand a workout for its description, metrics and plan/actual comparison.
   Relevant calendar and health notes remain visible below the day's sessions.
+  Daily recovery values (sleep, HRV, resting heart rate, readiness and morning
+  Body Battery) and saved check-in scores appear below each day's workouts.
+  Day details include notes, metric sources and rain/wind forecasts. Missing
+  values remain explicit; today's readings are never reused for another date.
+  Successful weather refreshes retain daily forecasts with their location and
+  retrieval time for the calendar history. Past forecasts are labelled as saved
+  predictions, not measured weather. History starts with collected data; older
+  missing forecasts and check-ins cannot be reconstructed. Set the weather
+  location under Mehr > Profil. The calendar reads up to 365 saved check-ins.
   The library groups active workout templates by sport.
 - Existing training plans can be renamed, have their goal, status, or date range
   changed, and can be deleted directly through the Coach. Plan deletion removes

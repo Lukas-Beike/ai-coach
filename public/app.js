@@ -429,11 +429,11 @@ function changedSyncAreas(nextVersions) {
   const previous = state.data?.state_versions || {};
   const areaMap = {
     activities: ["activities"],
-    performance: ["performance"],
-    garmin: ["performance"],
+    performance: ["performance", "plan"],
+    garmin: ["performance", "plan"],
     chat: ["chat"],
     library: ["library", "plan"],
-    checkins: ["feedback"],
+    checkins: ["feedback", "plan"],
     activity_feedback: ["feedback"],
     profile: ["profile"],
     plan: ["plan"],
@@ -2126,6 +2126,96 @@ function plannedAppointmentLabel(event) {
   return time ? `${name} · ${time[1]}` : name;
 }
 
+function plannedDayInsights(context, weather, dateKey, todayKey) {
+  const checkin = context.checkin || {};
+  const recovery = dateKey <= todayKey ? context.recovery || {} : {};
+  const metrics = [];
+  const addMetric = (label, value, suffix, source) => {
+    const formatted = calendarMetricNumber(value, suffix);
+    if (formatted != null) metrics.push({ label, value: formatted, source });
+  };
+  for (const [key, label, suffix] of [
+    ["sleep_hours", "Schlaf", " h"], ["sleep_score", "Schlafscore", "/100"],
+    ["hrv", "HRV", " ms"], ["resting_hr", "Ruhepuls", " bpm"],
+    ["readiness", "Readiness", "/100"], ["body_battery", "Body Battery", "/100"],
+  ]) addMetric(label, recovery[key], suffix, recovery.sources?.[key]);
+  for (const [key, label, suffix] of [
+    ["soreness", "Muskelkater", "/10"], ["stress", "Stress", "/10"],
+    ["motivation", "Motivation", "/10"], ["available_minutes", "Zeit verfügbar", " Min."],
+  ]) addMetric(label, checkin[key], suffix, "Eigene Angabe");
+
+  const section = document.createElement("div");
+  section.className = "planned-day-insights";
+  if (metrics.length || Object.keys(checkin).length) {
+    const title = document.createElement("p");
+    title.className = "planned-insights-title";
+    title.textContent = "Morgen-Check-in & Erholung";
+    section.append(title);
+    if (checkin.day_form) {
+      const form = document.createElement("p");
+      form.className = "planned-day-form";
+      form.textContent = checkin.day_form;
+      section.append(form);
+    }
+    const grid = document.createElement("dl");
+    grid.className = "planned-day-metrics";
+    metrics.forEach(({ label, value }) => {
+      const item = document.createElement("div");
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const measurement = document.createElement("dd");
+      measurement.textContent = value;
+      item.append(term, measurement);
+      grid.append(item);
+    });
+    if (metrics.length) section.append(grid);
+  } else if (dateKey <= todayKey) {
+    const empty = document.createElement("p");
+    empty.className = "planned-insights-empty";
+    empty.textContent = "Keine Check-in- oder Erholungswerte gespeichert";
+    section.append(empty);
+  }
+  const details = document.createElement("details");
+  details.className = "planned-day-observations";
+  const summary = document.createElement("summary");
+  summary.textContent = "Tagesdetails";
+  details.append(summary);
+  const body = document.createElement("div");
+  const text = (value, className = "") => {
+    const p = document.createElement("p");
+    p.className = className;
+    p.textContent = value;
+    body.append(p);
+  };
+  if (weather && plannedWeatherLabel(weather)) {
+    text([
+      weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage",
+      weather.forecast_location || state.data?.weather?.location?.name,
+      weather.condition, plannedWeatherLabel(weather),
+    ].filter(Boolean).join(" · "), "planned-weather-detail");
+    const values = [
+      calendarMetricNumber(weather.precipitation_probability_max, " % Regenwahrscheinlichkeit"),
+      calendarMetricNumber(weather.rain_sum, " mm Regen"),
+      calendarMetricNumber(weather.wind_speed_max, " km/h Wind"),
+      calendarMetricNumber(weather.wind_gusts_max, " km/h Böen"),
+    ].filter(Boolean);
+    if (values.length) text(values.join(" · "));
+    text(`Open-Meteo${weather.forecast_saved_at ? ` · Stand: ${formatTime(weather.forecast_saved_at)}` : ""}`);
+  }
+  for (const [field, label] of [["availability_notes", "Zeitplanung"], ["notes", "Notizen"]]) {
+    if (checkin[field]) text(`${label}: ${checkin[field]}`);
+  }
+  const rpe = calendarRpeLabel(checkin.session_rpe);
+  if (rpe != null) text(`Belastung nach dem Training: RPE ${rpe}/10 · Eigene Angabe`);
+  const sources = metrics.filter((item) => item.source).map((item) => `${item.label}: ${item.source}`);
+  if (sources.length) text(sources.join(" · "), "planned-insights-sources");
+  if (body.childElementCount) {
+    details.append(body);
+    section.append(details);
+  }
+  return section.childElementCount ? section : null;
+}
+
 function plannedWeekSummary(weekKey, weekEndKey, weekEntries, compliance, todayKey) {
   const plannedEntryCount = weekEntries.filter((entry) => !entry.is_completed_activity).length;
   const plannedUnits = Number.isFinite(Number(compliance?.planned_units))
@@ -2316,9 +2406,17 @@ function renderPlanned(trainingCalendar) {
         const weatherText = document.createElement("span");
         weatherText.className = "planned-day-weather";
         weatherText.textContent = weatherLabel;
-        weatherText.title = ["Wettervorhersage", weather.condition, weatherLabel].filter(Boolean).join(": ");
+        weatherText.title = [weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage", weather.condition, weatherLabel].filter(Boolean).join(": ");
         weatherText.setAttribute("aria-label", weatherText.title);
         dayHeading.append(weatherText);
+      } else {
+        const weatherMissing = document.createElement("span");
+        weatherMissing.className = "planned-day-weather is-missing";
+        weatherMissing.textContent = "Wetter fehlt";
+        weatherMissing.title = !state.data?.weather?.configured
+          ? "Kein Wetterort im Profil hinterlegt"
+          : dateKey < todayKey ? "Für diesen Tag wurde keine Vorhersage gespeichert" : "Für diesen Tag ist keine Vorhersage verfügbar";
+        dayHeading.append(weatherMissing);
       }
       day.append(dayHeading);
       const dayContent = document.createElement("div");
@@ -2449,6 +2547,8 @@ function renderPlanned(trainingCalendar) {
         dayContent.append(card);
       });
       if (dayNotes.childElementCount) dayContent.append(dayNotes);
+      const insights = plannedDayInsights(dayContext, weather, dateKey, todayKey);
+      if (insights) dayContent.append(insights);
       day.append(dayContent);
       days.append(day);
     }

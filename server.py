@@ -883,6 +883,8 @@ WEATHER_ADAPTIVE_LONG_RIDE_MINUTES = 180
 WEATHER_ADAPTIVE_MAX_MINUTES = 90
 WEATHER_CACHE_SECONDS = 3 * 60 * 60
 WEATHER_CACHE_KEY = "weather_cache"
+WEATHER_HISTORY_KEY = "calendar_weather_history"
+MORNING_BATTERY_HISTORY_KEY = "morning_body_battery_history"
 WEATHER_FAILURE_KEY = "weather_failure"
 WEATHER_RETRY_BASE_SECONDS = 15 * 60
 WEATHER_RETRY_MAX_SECONDS = 6 * 60 * 60
@@ -3889,6 +3891,14 @@ def _garmin_morning_body_battery(snapshot: dict[str, Any] | None = None) -> dict
     return value if isinstance(value, dict) else None
 
 
+def _saved_daily_history(key: str, db: Any | None = None) -> dict[str, Any]:
+    try:
+        value = json.loads(get_kv(key, db) or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 @maintenance_operation
 @garmin_operation
 def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
@@ -3904,6 +3914,12 @@ def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
             current["body_battery"] = _merge_garmin_records(records, current.get("body_battery"))
         current["morning_body_battery"] = record
         set_kv("garmin_snapshot", json.dumps(current, ensure_ascii=False, separators=(",", ":")))
+        with DB_LOCK, database() as db:
+            history = _saved_daily_history(MORNING_BATTERY_HISTORY_KEY, db)
+            for saved in (existing, record):
+                if isinstance(saved, dict) and saved.get("status") == "ready" and saved.get("sleep_date"):
+                    history[saved["sleep_date"]] = saved.get("morning", {}).get("value")
+            set_kv(MORNING_BATTERY_HISTORY_KEY, json.dumps(history), db)
         _set_garmin_error_entries(_garmin_core_error_entries())
         return {"status": record["status"], "sleep_date": record["sleep_date"], "records": len(records) if isinstance(records, list) else 0}
 
@@ -5257,6 +5273,7 @@ PLANNING_CONTEXT_WEATHER_FIELDS = (
     "date", "weather_code", "condition", "temperature_min", "temperature_max", "apparent_temperature_min",
     "apparent_temperature_max", "precipitation_probability_max", "rain_sum", "showers_sum", "snowfall_sum",
     "wind_speed_max", "wind_gusts_max", "wind_direction_dominant", "sunrise", "sunset",
+    "forecast_saved_at", "forecast_location", "archived_forecast",
 )
 PLANNING_CONTEXT_APPOINTMENT_FIELDS = (
     "id", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day",
@@ -5449,13 +5466,17 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                 )
             elif section == "readiness":
                 _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(record, ("trainingReadinessScore", "overallReadinessScore", "readinessScore", "score", "trainingReadiness"))), source_name)
+    for day, value in _saved_daily_history(MORNING_BATTERY_HISTORY_KEY).items():
+        record_date = _planning_context_date(day)
+        if record_date and as_number(value) is not None:
+            _add_planning_recovery_value(recovery_by_date.setdefault(record_date, {}), "body_battery", value, "Garmin Connect")
     morning_body_battery = _garmin_morning_body_battery(garmin)
     if morning_body_battery and morning_body_battery.get("status") == "ready":
         record_date = _planning_context_date(morning_body_battery.get("sleep_date"))
         morning = morning_body_battery.get("morning")
         if record_date and isinstance(morning, dict):
             recovery = recovery_by_date.setdefault(record_date, {})
-            _add_planning_recovery_value(recovery, "body_battery", morning.get("value"), "Garmin Connect")
+            _add_planning_recovery_value(recovery, "body_battery", morning.get("value"), "Garmin Connect", overwrite=True)
     return recovery_by_date
 
 
@@ -7029,7 +7050,9 @@ def weather_state(
                 )
             try:
                 with WEATHER_LOCK:
-                    cached = _fetch_weather_forecast(query)
+                    refreshed_cache = _fetch_weather_forecast(query)
+                    _remember_calendar_weather(cached if cache_matches else {}, refreshed_cache)
+                    cached = refreshed_cache
                     set_kv(WEATHER_CACHE_KEY, json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
                     set_kv(WEATHER_FAILURE_KEY, "")
                     cache_matches = True
@@ -7096,6 +7119,39 @@ def weather_state(
     if refreshed:
         result["_refreshed"] = True
     return result
+
+
+def _remember_calendar_weather(*caches: dict[str, Any]) -> None:
+    """Keep the last known daily forecast, including its location and timestamp."""
+    with DB_LOCK, database() as db:
+        history = _saved_daily_history(WEATHER_HISTORY_KEY, db)
+        for cached in caches:
+            forecast = cached.get("forecast")
+            if not isinstance(forecast, dict):
+                continue
+            location = cached.get("location") or {}
+            location_name = location.get("name") if isinstance(location, dict) else None
+            for row in _weather_daily_summary(forecast):
+                history[row["date"]] = {
+                    **row, "forecast_saved_at": cached.get("fetched_at"),
+                    "forecast_location": location_name or cached.get("query"),
+                }
+        set_kv(WEATHER_HISTORY_KEY, json.dumps(history, ensure_ascii=False, separators=(",", ":")), db)
+
+
+def _calendar_weather_state(weather: dict[str, Any]) -> dict[str, Any]:
+    today = local_now().date().isoformat()
+    history = _saved_daily_history(WEATHER_HISTORY_KEY)
+    days = {day: {**row, "archived_forecast": True}
+            for day, row in history.items() if day < today and isinstance(row, dict)}
+    for row in weather.get("days", []):
+        if isinstance(row, dict) and row.get("date"):
+            days[row["date"]] = {
+                **row, "archived_forecast": row["date"] < today,
+                "forecast_saved_at": weather.get("fetched_at"),
+                "forecast_location": (weather.get("location") or {}).get("name"),
+            }
+    return {**weather, "days": [days[day] for day in sorted(days)]}
 
 
 def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict[str, Any]], today: date) -> str | None:
@@ -14673,6 +14729,7 @@ def public_plan_state(local_only: bool = False) -> dict[str, Any]:
     weather = weather_state(planned, refresh=not local_only)
     if weather.pop("_refreshed", False):
         check_adaptive_replan("weather")
+    weather = _calendar_weather_state(weather)
     planned_with_weather = add_weather_to_planned(planned, weather)
     training_calendar = training_calendar_items(planned_with_weather, activities)
     provider_sync = snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
@@ -14691,7 +14748,7 @@ def public_plan_state(local_only: bool = False) -> dict[str, Any]:
         "weather": weather,
         "parallel_cycling": parallel_cycling_event_groups(planned),
         "external_calendar": external_calendar_state(),
-        "daily_planning_context": daily_planning_context(snapshot, planned, weather, list_checkins(30), list_external_calendar_events(50, training_relevant_only=True)),
+        "daily_planning_context": daily_planning_context(snapshot, planned, weather, list_checkins(365), list_external_calendar_events(50, training_relevant_only=True)),
         "planning": planning_state(),
         "coach_quick_actions": coach_quick_actions_state(),
     }
