@@ -51,18 +51,18 @@ Alle Anwendungs- und Teständerungen stammen von drei Subagents in eigenen Workt
 | Coach und Planung | `4584f58`, `6f2ef46`, `e8dd640`: ein kanonischer Coach-Pfad; Sport bleibt bis zum Provider-Payload erhalten; bis zu 366 lokale Einheiten atomar; unterschiedliche autorisierte Wirkungen desselben Tools; sessiongebundene dauerhafte Ergebnisse; eindeutige Namensauflösung; eigene Syncjobs lesbar; Undo mit Hash-, Sitzungs-, Ablauf- und Einmalprüfung. |
 | Provider, Datenschutz und Login | `6fcab73`, `6ef5c5b`: vollständige Quellen bleiben erhalten; Performance-Merge verwendet den neuesten Snapshot; HRV-Fenster werden korrekt normalisiert; Garmin-Teilquellen behalten letzte gute Werte samt Messdatum; alte Worker und Callbacks können die Löschgrenze nicht überschreiten; UTF-8-Passwortvergleich ohne Schlüsselkonvertierung. |
 | Frischer Datenvertrag | `69e2b4a` sowie Coach-/UI-Bereinigung: direkte Anlage genau eines aktuellen SQLCipher-Schemas; keine Migration oder Altbestandsübernahme; tote DB-Aliase, ungenutzter SessionCache, alte Coach-/API-/UI-Pfade und zugehörige Tests entfernt. App-Releaseprüfung und eigene PWA-Updateabläufe entfernt. Aktuelle Registrierung, Offline-Shell und Restore derselben Version bleiben erhalten. |
-| Oberfläche und CI | `de12a04`, `2164b2f`, `d2bebaf`, `4851449`: Nachrichten-Merge und Generationen, nachgeladene Bereiche, erhaltene Entwürfe, gemeinsame HTTP-/Retry-Fehler, wiederaufnehmbare Belege, verständliche Statusanzeigen und mobile Abbruchbedienung. Der Chat-Reset trennt laufende Polls über eine Request-Identität. Alle CI-Jobs verwenden denselben aufgelösten Quell-SHA; gemeinsame Pip-/npm-/Buildx-Caches sind entfernt und veröffentlichende Dispatches auf geprüfte Main-/Tag-/SHA-Verträge begrenzt. |
+| Oberfläche und CI | `de12a04`, `2164b2f`, `d2bebaf`, `4851449`, `82a79e3`: Nachrichten-Merge und Generationen, nachgeladene Bereiche, erhaltene Entwürfe, gemeinsame HTTP-/Retry-Fehler, wiederaufnehmbare Belege, verständliche Statusanzeigen und mobile Abbruchbedienung. Der Chat-Reset trennt laufende Polls über eine Request-Identität. Alle CI-Jobs verwenden ausschließlich den Event-SHA; `source_ref`-Dispatch-Overrides und implizite Cache-Poisoning-Pfade sind entfernt. Release-Tag, APP_VERSION, Main-Historie und getesteter SHA bleiben gebunden. |
 
-Der unabhängig geprüfte Anwendungsstand ist `4851449` auf `fix/coach-first-review-2026-09-05`; `APP_VERSION` bleibt `1.7.2`, die zusammengehörigen PWA-Assets verwenden Version `177`. Das daraus gebaute Image heißt `ai-coach:pr-20260905`, SHA `51887bf121f839eb2ce5bbb6033806299e8aad28492d9d2003d9e1f4ef4aa6d76`. Die bestehende Installation und ihre Daten wurden nicht verwendet. Für den späteren Betrieb ist entsprechend der Nutzervorgabe ein neuer Datenbestand erforderlich.
+Der unabhängig geprüfte Anwendungsstand ist `82a79e3` auf `fix/coach-first-review-2026-09-05`; `APP_VERSION` bleibt `1.7.2`, die zusammengehörigen PWA-Assets verwenden Version `177`. Das daraus gebaute Image heißt `ai-coach:pr-20260905`, SHA `51887bf121f839eb2ce5bbb6033806299e8aad28492d9d2003d9e1f4ef4aa6d76`. Die bestehende Installation und ihre Daten wurden nicht verwendet. Für den späteren Betrieb ist entsprechend der Nutzervorgabe ein neuer Datenbestand erforderlich.
 
 ### Unabhängige Abschlussprüfungen
 
 | Prüfung | Ergebnis und Aussagegrenze |
 |---|---|
-| Native vollständige Discovery, Python 3.13 | 421 Tests erfasst, 417 bestanden, vier SQLCipher-spezifische Tests übersprungen; 39,371 Sekunden. |
-| CI-Teststart im SQLCipher-Image, Python 3.14 | 421 Tests erfasst, 414 bestanden, sieben Git-spezifische Ref-Tests mangels Git im Laufzeitimage übersprungen; alle SQLCipher-Tests ausgeführt. Die Git-Tests bestehen nativ. Netzwerk gesperrt, schreibgeschützter Container, temporäre Daten. |
-| Echter Coverage-/CI-Runner-Aufruf | Erster Shard: 105 Tests bestanden, keine Skips; 22,461 Sekunden. Der zuvor entdeckte fehlende Repository-Importpfad ist korrigiert und durch einen separaten CLI-Prozess aus fremdem Arbeitsverzeichnis abgesichert. |
-| Vollständigkeit der Shards | 418 Test-IDs; Verteilung 105/105/104/104; Vereinigung exakt gleich Discovery, keine Duplikate. Importfehler führen zum Fehlerstatus. |
+| Native vollständige Discovery, Python 3.13 | 423 Tests erfasst, 419 bestanden, vier SQLCipher-spezifische Tests übersprungen; 37,928 Sekunden. |
+| CI-Teststart im SQLCipher-Image, Python 3.14 | 423 Tests erfasst, 416 bestanden, sieben Git-spezifische Ref-Tests mangels Git im Laufzeitimage übersprungen; alle SQLCipher-Tests ausgeführt. Die Git-Tests bestehen nativ. Netzwerk gesperrt, schreibgeschützter Container, temporäre Daten. |
+| Echter Coverage-/CI-Runner-Aufruf | Erster Shard: 106 Tests bestanden, keine Skips; die CI-Qualit?tsmessung bleibt auf diesen Shard begrenzt. Der zuvor entdeckte fehlende Repository-Importpfad ist korrigiert und durch einen separaten CLI-Prozess aus fremdem Arbeitsverzeichnis abgesichert. |
+| Vollständigkeit der Shards | 423 Test-IDs; Verteilung 106/106/106/105; Vereinigung exakt gleich Discovery, keine Duplikate. Importfehler führen zum Fehlerstatus. |
 | Syntax und Quality-Baseline | `py_compile` erfolgreich; Ruff, Formatprüfung und Mypy für `tests/run_tests.py` erfolgreich. Die Coverage-Messung betrifft den ersten Shard und ist keine vollständige Coverage-Aussage. |
 | Docker-Build | Finales Image erfolgreich gebaut; unveränderte gepinnte Abhängigkeiten und Docker-Basis. |
 | Browser, kleinmobil 320×568 | 20/20 bestanden, 24,6 Sekunden. |
@@ -85,7 +85,7 @@ Die Abnahme erforderte Nachbesserungen: Ein offenes Test-Loghandle, der direkte 
 - **F16.3:** Lokale Ref-/Tag-/Versions-, Branchverschiebungs- und fehlende-Tag-Verträge sind geprüft. Ein tatsächlicher nicht veröffentlichender GitHub-Dispatch des neuen Workflow-Stands wurde nicht ausgeführt. Der Task bleibt deshalb offen.
 - **Q07:** Reale Provider-/Responses-Testkonten, physische HTTPS-/PWA-/Voice-/Notification-Geräteabläufe und der GitHub-Dispatch bleiben ausstehend. Der vorhandene HTTPS-Health-Endpunkt antwortete vor Integration mit HTTP 502; die getestete lokale Anwendung war vollständig isoliert. Ein vollständiger binärer Browser-Backup/Restore-Roundtrip wurde ebenfalls nicht zusätzlich ausgeführt; aktuelle SQLCipher-Backup-/Restorefunktionen sind isoliert getestet. Der Dependency-Teil ist abgeschlossen.
 
-Die lokalen Nachweisdateien liegen unter `C:/Users/Work/AppData/Local/Temp/coach-implementation-validation-20260905/`: Build-, Native-, Container-, Quality- und fünf Browserlogs sowie `final-mobile.png` und `final-desktop.png`. Sie enthalten ausschließlich synthetische Testzustände. Die temporäre Testinstanz und ihr internes Docker-Netz wurden nach der Abnahme entfernt. Der Bericht und die Anwendungskorrekturen sind lokal auf dem Task-Branch versioniert; kein Push oder PR wurde ausgeführt.
+Die lokalen Nachweisdateien liegen unter `C:/Users/Work/AppData/Local/Temp/coach-implementation-validation-20260905/`: Build-, Native-, Container-, Quality- und fünf Browserlogs sowie `final-mobile.png` und `final-desktop.png`. Sie enthalten ausschließlich synthetische Testzustände. Die temporäre Testinstanz und ihr internes Docker-Netz wurden nach der Abnahme entfernt. Der Bericht und die Anwendungskorrekturen sind auf dem Task-Branch versioniert; PR #383 wurde erstellt und wartet auf die externen GitHub-Checks.
 
 ## Findings und Fix-Tasks
 
@@ -312,7 +312,7 @@ Die Konfiguration akzeptiert Passwörter ab zwölf Zeichen ohne ASCII-Beschränk
 Bei `workflow_dispatch` verwendet der Test-Shard-Checkout bevorzugt `source_ref`. Die Versionsprüfung findet dort statt. Andere Prüfjobs verwenden den Default-Checkout, der Publish-Job dagegen `release_tag`. Wenn diese Referenzen auf verschiedene Commits zeigen, kann ein grüner Teststand einen anderen Build freigeben. Die erfolgreiche Versionsprüfung beweist dann nicht, dass `APP_VERSION` des tatsächlich gebauten Tags passt.
 
 - [x] **F16.1:** Zu Beginn genau einen unveränderlichen Quell-SHA auflösen; denselben SHA an Syntax-, Unit-, SQLCipher-, Quality-, Browser- und Build-Jobs weitergeben.
-- [x] **F16.2:** Vor Veröffentlichung nochmals am Build-Checkout `APP_VERSION` gegen den Release-Tag und den SHA gegen den geprüften SHA prüfen. Widersprüchliche `source_ref`/`release_tag`-Angaben vor Seiteneffekten ablehnen.
+- [x] **F16.2:** Vor Veröffentlichung nochmals am Build-Checkout `APP_VERSION` gegen den Release-Tag und den Event-SHA gegen den geprüften SHA prüfen. Ein frei wählbarer `source_ref`-Override ist entfernt; der Workflow führt ausschließlich den eigenen unveränderlichen Event-SHA aus.
 - [ ] **F16.3:** Den Ref-Auflösungsvertrag mit unterschiedlichen Branch-/Tag-SHAs, verschobenem Branch und falscher Tag-Version testen; anschließend einen nicht veröffentlichenden Dispatch prüfen.
 
 **Abnahme:** Image, Versionsprüfung und alle erforderlichen Checks beziehen sich nachweislich auf denselben Commit.
@@ -685,7 +685,7 @@ Die lokal erzeugten Prüfdateien liegen unter `%TEMP%/coach-review-20260905/`: `
 | `undo-action-delivery` | Lokale Änderung, dann strukturiertes Undo | Vorschlag verschachtelt ja, UI-Aktionsliste leer | F13 |
 | Browser: andere Bereiche während Load | Chat-History halten, Plan/Bibliothek anfordern | Kein Plan-GET | F14 |
 | `unicode-login` | Zulässiges synthetisches Unicode-Passwort | TypeError | F15 |
-| Workflow-Ref-Vergleich | Dispatch mit abweichendem `source_ref`/Tag | Tests/Version und Build verwenden unterschiedliche Ref-Ausdrücke | F16 |
+| Workflow-Ref-Vergleich | Dispatch mit abweichendem Event-SHA/Tag | Tests, Version und Build sind an den Event-SHA gebunden; ein `source_ref`-Override ist entfernt | F16 |
 | Browser: kaputte 200-Antwort | Ungültiges JSON beim PUT | API-Helper liefert `{}` als Erfolg | F18 |
 | Test-Loader-Inventar | Discovery-Menge versus Shard-Loader | 13 Modul-Tests nicht im Runner | F17 |
 
