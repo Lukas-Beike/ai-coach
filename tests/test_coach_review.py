@@ -266,3 +266,47 @@ class CoachReviewTests(unittest.TestCase):
         with self.assertRaises(server.AppError):
             server.execute_coach_action(confirmed["action_token"], "review-session", proposal["payload_hash"])
         self.assertEqual(server.list_workout_library()[0]["name"], "Synthetic changed")
+
+    def test_adaptive_apply_after_day_change_preserves_now_past_unit(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        planned = server.save_workout_library_entries([{**self.workout(), "date": tomorrow, "duration_minutes": 60}])[0]
+        server.save_checkin({"soreness": 8})
+        preview = server.adaptive_replan_preview()
+        self.assertTrue(preview["changes"])
+        advanced = server.local_now() + timedelta(days=2)
+        with patch.object(server, "local_now", return_value=advanced):
+            applied = server.apply_adaptive_replan(preview["id"])
+        self.assertEqual(applied["status"], "stale")
+        self.assertEqual(applied["updated"], 0)
+        self.assertEqual(applied["stale"][0]["reason"], "past")
+        self.assertEqual(server.list_planned_units()[0]["duration_minutes"], planned["duration_minutes"])
+
+    def test_expired_proposal_gc_and_confirmation_serialize_without_losing_drafts(self):
+        template = server.create_local_library_template({"name": "GC synthetic", "sport": "Run"})
+        change = next(row for row in server.list_change_history() if row["entity_id"] == template["id"])
+        expired = server._history_preview(change["id"], "review-session")["proposed_action"]
+        active = server._history_preview(change["id"], "review-session")["proposed_action"]
+        draft = server._stage_coach_artifact("review-conversation", "draft", {"workouts": [self.workout()]})
+        with server.database() as db:
+            db.execute("UPDATE coach_action_proposals SET expires_at=? WHERE id=?", (time.time() - 1, expired["id"]))
+        barrier = threading.Barrier(2)
+
+        def collect():
+            barrier.wait(timeout=5)
+            with server.DB_LOCK, server.database() as db:
+                return server.prune_expired_coach_proposals(db, time.time())
+
+        def confirm():
+            barrier.wait(timeout=5)
+            try:
+                server.confirm_coach_action_preview(expired["id"], "review-session")
+                return "accepted"
+            except server.AppError:
+                return "rejected"
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            gc_result, confirmation = executor.submit(collect), executor.submit(confirm)
+            self.assertEqual(gc_result.result(), 1)
+            self.assertEqual(confirmation.result(), "rejected")
+        self.assertEqual([item["id"] for item in server.current_coach_proposals("review-session")], [active["id"]])
+        self.assertTrue(any(item["id"] == draft["artifact_id"] for item in server.coach_intent_artifact_refs("review-conversation")))

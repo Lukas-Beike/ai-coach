@@ -8438,6 +8438,9 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
                 stale.append({"library_workout_id": draft_id, "reason": "changed"})
                 continue
             before = {**current, "sync_status": draft.get("sync_state") or current.get("sync_status")}
+            if str(current.get("date") or "")[:10] < local_now().date().isoformat():
+                stale.append({"library_workout_id": draft_id, "reason": "past"})
+                continue
             replacement = {
                 **replacement,
                 "id": draft_id,
@@ -13128,7 +13131,7 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
         if existing and existing.get("status") == "completed" and existing.get("receipt"):
             if str(existing.get("conversation_id") or "") != str(conversation_id):
                 raise AppError(403, "Dieses Planungskommando gehört zu einer anderen Conversation.", reason="command_scope_denied")
-            return json.loads(existing["receipt"])
+            return coach_command_receipt(client_turn_id, session_csrf_hash)
         if existing:
             raise AppError(409, "Dieses Planungskommando wird bereits verarbeitet.", reason="client_turn_in_progress")
         db.execute(
@@ -13136,14 +13139,14 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
             (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent, separators=(",", ":")), payload.get("artifact_id"), json.dumps(command_identity), utc_now(), utc_now()),
         )
     try:
-        sync_job_ids: list[str] = []
-        result = _structured_coach_tool_result(operation, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids)
-        receipt = {**command_identity, "message": None, "command_receipts": [{"tool": operation, "result": result}], "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": 1, "status": "completed"}
+        with DB_LOCK, database() as db:
+            sync_job_ids: list[str] = []
+            result = _structured_coach_tool_result(operation, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids)
+            receipt = {**command_identity, "message": None, "command_receipts": [{"tool": operation, "result": result}], "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": 1, "status": "completed"}
+            db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'", (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id))
     except Exception as exc:
-        return _persist_structured_command_failure(client_turn_id, intent, exc)
-    with DB_LOCK, database() as db:
-        db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'", (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id))
-    return receipt
+        _persist_structured_command_failure(client_turn_id, intent, exc)
+    return coach_command_receipt(client_turn_id, session_csrf_hash)
 
 
 def _chat_with_structured_coach_impl(
@@ -13365,13 +13368,18 @@ def _chat_with_structured_coach_impl(
     if not text:
         effects = [entry for entry in command_receipts if entry.get("result", {}).get("ok")]
         text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Coach-Antwort enthaelt keine Textantwort; es wurde keine Aktion bestaetigt."
+    successful_operations = {entry["tool"] for entry in command_receipts if entry.get("result", {}).get("ok")}
+    pending_operations = sorted(_structured_authorized_operations(intent) - successful_operations - {""})
+    if pending_operations:
+        text += "\nNoch nicht erfolgreich abgeschlossen: " + ", ".join(COACH_OPERATION_LABELS.get(operation, "Angeforderter Schritt") for operation in pending_operations) + "."
     proposed_actions = [entry["result"]["proposed_action"] for entry in command_receipts if isinstance(entry.get("result"), dict) and entry["result"].get("proposed_action")]
     if duplicate_activity:
         proposal = duplicate_activity_delete_preview(duplicate_activity, session_csrf_hash)
         proposed_actions.append(proposal["proposed_action"])
     receipt = {
         **background_receipt,
-        "status": "completed",
+        "status": ("partial" if successful_operations else "failed") if pending_operations else "completed",
+        "pending_operations": pending_operations,
         "client_turn_id": client_turn_id,
         "message": None,
         "command_receipts": command_receipts,
@@ -13401,8 +13409,14 @@ def current_coach_proposals(session_csrf_hash: str) -> list[dict[str, Any]]:
     if not session_csrf_hash:
         return []
     with DB_LOCK, database() as db:
+        prune_expired_coach_proposals(db, time.time())
         rows = db.execute("SELECT * FROM coach_action_proposals WHERE session_csrf_hash=? AND status IN ('preview', 'ready') AND expires_at>? ORDER BY created_at DESC LIMIT 30", (session_csrf_hash, time.time())).fetchall()
     return [_coach_action_view(row) for row in rows]
+
+
+def prune_expired_coach_proposals(db: Any, now: float) -> int:
+    """Collect expired authorization artifacts; durable plan drafts never expire."""
+    return db.execute("DELETE FROM coach_action_proposals WHERE expires_at<=?", (now,)).rowcount
 
 
 def coach_command_receipt(client_turn_id: Any, session_csrf_hash: str) -> dict[str, Any]:
