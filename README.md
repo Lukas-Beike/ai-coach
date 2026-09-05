@@ -475,7 +475,7 @@ Other supported operational variables are:
 
 ```text
 OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-5.6-sol
+OPENAI_MODEL=gpt-5.6-luna
 GEMINI_MODEL=gemini-3.8-flash
 # If both API keys are set, OpenAI remains the default. Use gemini to select it on startup.
 AI_PROVIDER=gemini

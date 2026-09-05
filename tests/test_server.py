@@ -20,7 +20,7 @@ os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
     "OPENAI_API_KEY": "test-openai-key",
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
-    "OPENAI_MODEL": "gpt-5.6-sol",
+    "OPENAI_MODEL": "gpt-5.6-luna",
     "INTERVALS_API_KEY": "test-intervals-key",
     "INTERVALS_ATHLETE_ID": "0",
     "GARMIN_EMAIL": "test-garmin@example.invalid",
@@ -4213,7 +4213,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("vendor_payload", context)
 
     def test_model_selection_is_persisted_and_validated(self):
-        self.assertEqual(server.selected_model(), "gpt-5.6-sol")
+        self.assertEqual(server.selected_model(), "gpt-5.6-luna")
         self.assertEqual(server.save_model("gpt-5.6-terra"), {"model": "gpt-5.6-terra"})
         self.assertEqual(server.selected_model(), "gpt-5.6-terra")
         with self.assertRaises(server.AppError):

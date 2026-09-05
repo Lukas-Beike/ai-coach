@@ -436,7 +436,7 @@ class Config:
     port: int = int(os.environ.get("PORT", "8090"))
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
     openai_base_url: str = os.environ.get("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)
-    openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.6-sol")
+    openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna")
     gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
     gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
     ai_provider: str = os.environ.get("AI_PROVIDER", "").strip().casefold()
@@ -462,9 +462,9 @@ class Config:
 CONFIG = Config()
 LOGGER = logging.getLogger("intervals_coach")
 MODEL_OPTIONS = (
+    {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
     {"id": "gpt-5.6-sol", "label": "GPT-5.6 Sol", "description": "Maximale Qualität für komplexes Coaching"},
     {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "description": "Ausgewogen bei Qualität, Tempo und Kosten"},
-    {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
 )
 GEMINI_MODEL_OPTIONS = (
     {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash", "description": "Schnelle, leistungsstarke Gemini-Antworten"},
