@@ -6628,6 +6628,57 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(summary["input_tokens"], 0)
         self.assertEqual(summary["output_tokens"], 16)
 
+    def test_public_state_and_usage_workers_do_not_deadlock(self):
+        # Reproduce the AB/BA ordering: a state request owns DB_LOCK while a
+        # worker starts reading/updating usage, then the request reads usage.
+        # Bound the worker's lock wait so a regression fails without leaving
+        # either thread or the test database permanently locked.
+        request_thread = threading.get_ident()
+
+        class ObservedDatabaseLock:
+            def __init__(self):
+                self.lock = threading.RLock()
+                self.worker_waiting = threading.Event()
+
+            def __enter__(self):
+                if threading.get_ident() != request_thread:
+                    self.worker_waiting.set()
+                if not self.lock.acquire(timeout=3):
+                    raise TimeoutError("State request and usage worker deadlocked")
+                return self
+
+            def __exit__(self, *args):
+                self.lock.release()
+
+        for state_reader in (server.public_bootstrap, server.public_state):
+            for update in (False, True):
+                with self.subTest(state=state_reader.__name__, update=update):
+                    database_lock = ObservedDatabaseLock()
+                    errors = []
+
+                    def worker():
+                        try:
+                            if update:
+                                server.record_openai_usage({"usage": {"output_tokens": 2}}, "test")
+                            else:
+                                server.openai_usage_summary()
+                        except Exception as exc:
+                            errors.append(exc)
+
+                    with patch.object(server, "DB_LOCK", database_lock), patch.object(
+                        server, "urlopen", side_effect=AssertionError("State must stay local")
+                    ):
+                        thread = threading.Thread(target=worker)
+                        try:
+                            with server.DB_LOCK, server.database():
+                                thread.start()
+                                self.assertTrue(database_lock.worker_waiting.wait(timeout=3))
+                                state = state_reader(local_only=True)
+                                self.assertIn("usage", state)
+                        finally:
+                            thread.join(timeout=5)
+                        self.assertFalse(thread.is_alive())
+                        self.assertEqual(errors, [])
 
     def test_garmin_sync_persists_fatal_error_status(self):
         config = replace(server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json")
