@@ -5273,7 +5273,7 @@ PLANNING_CONTEXT_WEATHER_FIELDS = (
     "date", "weather_code", "condition", "temperature_min", "temperature_max", "apparent_temperature_min",
     "apparent_temperature_max", "precipitation_probability_max", "rain_sum", "showers_sum", "snowfall_sum",
     "wind_speed_max", "wind_gusts_max", "wind_direction_dominant", "sunrise", "sunset",
-    "forecast_saved_at", "forecast_location", "archived_forecast",
+    "forecast_saved_at", "forecast_location", "archived_forecast", "rain_peak_time",
 )
 PLANNING_CONTEXT_APPOINTMENT_FIELDS = (
     "id", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day",
@@ -6773,6 +6773,17 @@ def _weather_daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(raw_date)):
             continue
         code = _weather_array_value(daily.get("weather_code"), index)
+        hours = sorted((row for row in _weather_hourly_rows(forecast, str(raw_date))
+                        if row.get("precipitation_probability") is not None
+                        and 0 <= row["precipitation_probability"] <= 100
+                        and re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", str(row["time"])[11:16])),
+                       key=lambda row: row["time"])
+        peak = max(hours, key=lambda row: row["precipitation_probability"], default=None)
+        # A flat (including dry) or incomplete single-hour forecast has no
+        # distinct most-likely time. Equal maxima use the earliest local hour.
+        peak_time = (str(peak["time"])[11:16] if peak and any(
+            row["precipitation_probability"] < peak["precipitation_probability"] for row in hours
+        ) else None)
         result.append({
             "date": str(raw_date),
             "weather_code": int(code) if code is not None else None,
@@ -6783,6 +6794,7 @@ def _weather_daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:
             "apparent_temperature_min": _weather_array_value(daily.get("apparent_temperature_min"), index),
             "apparent_temperature_max": _weather_array_value(daily.get("apparent_temperature_max"), index),
             "precipitation_probability_max": _weather_array_value(daily.get("precipitation_probability_max"), index),
+            "rain_peak_time": peak_time,
             "rain_sum": _weather_array_value(daily.get("rain_sum"), index),
             "showers_sum": _weather_array_value(daily.get("showers_sum"), index),
             "snowfall_sum": _weather_array_value(daily.get("snowfall_sum"), index),

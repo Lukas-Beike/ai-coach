@@ -881,13 +881,29 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(profile["name"], "Ada")
         self.assertNotIn("admin", profile)
 
+    def test_daily_weather_rain_peak_uses_local_hours_and_stays_date_specific(self):
+        forecast = {"daily": {"time": ["2026-09-05", "2026-09-06", "2026-09-07", "2026-09-08"]},
+                    "hourly": {
+                        "time": ["2026-09-05T19:00", "2026-09-05T06:00", "2026-09-05T15:00",
+                                 "2026-09-06T09:00", "2026-09-06T18:00", "2026-09-07T09:00", "2026-09-07T10:00"],
+                        "precipitation_probability": [80, 5, 80, 0, 0, 30, 30],
+                    }}
+        days = server._weather_daily_summary(forecast)
+        self.assertEqual(days[0]["rain_peak_time"], "15:00")
+        self.assertIsNone(days[1]["rain_peak_time"])
+        self.assertIsNone(days[2]["rain_peak_time"])
+        self.assertIsNone(days[3]["rain_peak_time"])
+        forecast["hourly"]["precipitation_probability"] = [None, 5, None]
+        self.assertIsNone(server._weather_daily_summary(forecast)[0]["rain_peak_time"])
+
     def test_calendar_weather_history_survives_refresh_location_change_and_restart(self):
         today = server.local_now().date()
         yesterday = (today - timedelta(days=1)).isoformat()
         tomorrow = (today + timedelta(days=1)).isoformat()
         server.save_profile({"weather_location": "Berlin"})
         old = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": server.utc_now(),
-               "forecast": {"daily": {"time": [yesterday, tomorrow], "temperature_2m_max": [12, 18]}}}
+               "forecast": {"daily": {"time": [yesterday, tomorrow], "temperature_2m_max": [12, 18]},
+                            "hourly": {"time": [f"{yesterday}T09:00", f"{yesterday}T15:00"], "precipitation_probability": [5, 80]}}}
         new = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": server.utc_now(),
                "forecast": {"daily": {"time": [today.isoformat(), tomorrow], "temperature_2m_max": [15, 19]}}}
         with patch.object(server, "_fetch_weather_forecast", side_effect=[old, new]) as fetch:
@@ -906,6 +922,7 @@ class CoachTests(unittest.TestCase):
         context = next(day for day in calendar["daily_planning_context"] if day["date"] == yesterday)
         self.assertTrue(context["weather"]["archived_forecast"])
         self.assertEqual(context["weather"]["forecast_saved_at"], old["fetched_at"])
+        self.assertEqual(context["weather"]["rain_peak_time"], "15:00")
 
     def test_changing_weather_location_invalidates_previous_forecast(self):
         server.save_profile({"weather_location": "Münster"})
@@ -1800,19 +1817,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request, responseError });", api_client)
         self.assertIn("window.AppApi.request(path, options, () =>", app)
         self.assertIn("window.AppApi.audio(path, blob, () =>", app)
-        self.assertIn('/api.js?v=181', index)
-        self.assertIn('/navigation.js?v=181', index)
-        self.assertIn('/state.js?v=181', index)
-        self.assertIn('/views.js?v=181', index)
-        self.assertIn('/forms.js?v=181', index)
-        self.assertIn('/components.js?v=181', index)
-        self.assertIn('/app.js?v=181', index)
-        self.assertIn('intervals-coach-v181', service_worker)
-        self.assertIn('"/navigation.js?v=181"', service_worker)
-        self.assertIn('"/state.js?v=181"', service_worker)
-        self.assertIn('"/views.js?v=181"', service_worker)
-        self.assertIn('"/forms.js?v=181"', service_worker)
-        self.assertIn('"/components.js?v=181"', service_worker)
+        self.assertIn('/api.js?v=182', index)
+        self.assertIn('/navigation.js?v=182', index)
+        self.assertIn('/state.js?v=182', index)
+        self.assertIn('/views.js?v=182', index)
+        self.assertIn('/forms.js?v=182', index)
+        self.assertIn('/components.js?v=182', index)
+        self.assertIn('/app.js?v=182', index)
+        self.assertIn('intervals-coach-v182', service_worker)
+        self.assertIn('"/navigation.js?v=182"', service_worker)
+        self.assertIn('"/state.js?v=182"', service_worker)
+        self.assertIn('"/views.js?v=182"', service_worker)
+        self.assertIn('"/forms.js?v=182"', service_worker)
+        self.assertIn('"/components.js?v=182"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1838,8 +1855,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=181'), index.index('/components.js?v=181'))
-        self.assertLess(index.index('/components.js?v=181'), index.index('/app.js?v=181'))
+        self.assertLess(index.index('/forms.js?v=182'), index.index('/components.js?v=182'))
+        self.assertLess(index.index('/components.js?v=182'), index.index('/app.js?v=182'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -6059,16 +6076,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=181"', source)
-        self.assertIn('"/navigation.js?v=181"', source)
-        self.assertIn('"/state.js?v=181"', source)
-        self.assertIn('"/views.js?v=181"', source)
-        self.assertIn('"/forms.js?v=181"', source)
-        self.assertIn('"/components.js?v=181"', source)
+        self.assertIn('"/api.js?v=182"', source)
+        self.assertIn('"/navigation.js?v=182"', source)
+        self.assertIn('"/state.js?v=182"', source)
+        self.assertIn('"/views.js?v=182"', source)
+        self.assertIn('"/forms.js?v=182"', source)
+        self.assertIn('"/components.js?v=182"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=181"', source)
-        self.assertIn('"/icon.svg?v=181"', source)
-        self.assertIn('"/styles.css?v=181"', source)
+        self.assertIn('"/app.js?v=182"', source)
+        self.assertIn('"/icon.svg?v=182"', source)
+        self.assertIn('"/styles.css?v=182"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -7129,7 +7146,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=181', index)
+        self.assertIn('v=182', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)

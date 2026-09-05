@@ -2182,29 +2182,34 @@ function plannedDayInsights(context, weather, dateKey, todayKey) {
     p.className = className;
     p.textContent = value;
     body.append(p);
+    return p;
   };
   if (weather && plannedWeatherLabel(weather)) {
-    text([
-      weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage",
-      weather.forecast_location || state.data?.weather?.location?.name,
+    const condition = text([
       weather.condition, plannedWeatherLabel(weather),
     ].filter(Boolean).join(" · "), "planned-weather-detail");
+    condition.title = [
+      weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage",
+      "Open-Meteo", weather.forecast_location || state.data?.weather?.location?.name,
+      weather.forecast_saved_at ? `Stand: ${formatTime(weather.forecast_saved_at)}` : null,
+    ].filter(Boolean).join(" · ");
+    const directionValue = calendarMetricNumber(weather.wind_direction_dominant);
+    const direction = directionValue != null && Number(weather.wind_direction_dominant) >= 0
+      && Number(weather.wind_direction_dominant) <= 360 ? weatherDirection(weather.wind_direction_dominant) : "";
+    const peakTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(weather.rain_peak_time || "") ? weather.rain_peak_time : "";
     const values = [
-      calendarMetricNumber(weather.precipitation_probability_max, " % Regenwahrscheinlichkeit"),
-      calendarMetricNumber(weather.rain_sum, " mm Regen"),
-      calendarMetricNumber(weather.wind_speed_max, " km/h Wind"),
+      calendarMetricNumber(weather.precipitation_probability_max, ` % Regen${peakTime ? ` (max. ${peakTime} Uhr)` : ""}`),
+      calendarMetricNumber(weather.wind_speed_max, ` km/h Wind${direction ? ` ${direction}` : ""}`),
       calendarMetricNumber(weather.wind_gusts_max, " km/h Böen"),
     ].filter(Boolean);
-    if (values.length) text(values.join(" · "));
-    text(`Open-Meteo${weather.forecast_saved_at ? ` · Stand: ${formatTime(weather.forecast_saved_at)}` : ""}`);
+    if (peakTime && weather.precipitation_probability_max == null) values.unshift(`Regen am ehesten ${peakTime} Uhr`);
+    if (values.length) text(values.join(" · "), "planned-weather-metrics");
   }
   for (const [field, label] of [["availability_notes", "Zeitplanung"], ["notes", "Notizen"]]) {
     if (checkin[field]) text(`${label}: ${checkin[field]}`);
   }
   const rpe = calendarRpeLabel(checkin.session_rpe);
   if (rpe != null) text(`Belastung nach dem Training: RPE ${rpe}/10 · Eigene Angabe`);
-  const sources = [...new Set(metrics.map((item) => item.source).filter(Boolean))];
-  if (sources.length) text(`Quellen: ${sources.join(" · ")}`, "planned-insights-sources");
   if (body.childElementCount) {
     details.append(body);
     content.append(details);

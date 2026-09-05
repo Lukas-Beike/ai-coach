@@ -593,7 +593,6 @@ h2 {
 .planned-insights-empty { margin: 0; color: var(--subtle); font-size: .7rem; line-height: 1.5; }
 .planned-day-observations { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 5px; color: var(--subtle); font-size: .65rem; line-height: 1.5; overflow-wrap: anywhere; }
 .planned-day-observations p { margin: 0; }
-.planned-insights-sources { color: var(--subtle); font-size: .63rem; }
 .planned-day-notes { display: grid; gap: 6px; margin-top: 12px; }
 .planned-day-context { margin: 0; font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
 .planned-day-calendar { color: #b9d9ff; }
