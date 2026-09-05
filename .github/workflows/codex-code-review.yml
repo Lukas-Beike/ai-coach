@@ -1,127 +1,172 @@
-name: Codex code review
+name: Codex review gate
 
 on:
-  pull_request:
+  push:
     branches: [develop, main]
-    types: [opened, synchronize, reopened]
+  # pull_request_target runs the workflow and local action from the trusted
+  # target branch. This workflow never checks out or executes pull-request code.
+  pull_request_target:
+    branches: [develop, main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  # Allow a manually requested @codex review to start or restart the gate.
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
-
-concurrency:
-  group: codex-code-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  issues: read
+  pull-requests: read
+  checks: write
 
 jobs:
-  run_codex:
-    name: Run Codex review
-    # The API key is intentionally unavailable to pull requests from forks and Dependabot.
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+  discover:
+    name: Find PRs requiring a Codex review
     outputs:
-      final_message: ${{ steps.run_codex.outputs.final-message }}
-    steps:
-      - name: Check out the pull request merge result
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.0
-        with:
-          ref: refs/pull/${{ github.event.pull_request.number }}/merge
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Prepare trusted Codex prompt
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ ! "$PR_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::The pull request base SHA is invalid; failing closed."
-            exit 1
-          fi
-          git cat-file -e "${PR_BASE_SHA}^{commit}"
-          git show "$PR_BASE_SHA:.github/codex/prompts/review.md" > .codex-review-prompt.md
-          cat >> .codex-review-prompt.md <<'EOF'
-
-          The first non-empty line of your response MUST be exactly one of these two
-          machine-readable status lines:
-
-          CODEX_REVIEW_STATUS: clean
-          CODEX_REVIEW_STATUS: findings
-
-          Use `findings` when you report one or more actionable problems. Use `clean`
-          only when there are no actionable problems. Put the human-readable review
-          after that status line.
-          EOF
-
-      - name: Run Codex review
-        id: run_codex
-        uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: .codex-review-prompt.md
-          output-file: codex-output.md
-          sandbox: read-only
-          safety-strategy: drop-sudo
-          codex-args: --ephemeral
-          allow-bot-users: ai-coach-release-bot[bot]
-
-  codex:
-    name: Codex code review
-    needs: run_codex
-    if: always() && needs.run_codex.result != 'skipped'
+      pull_requests: ${{ steps.resolve_base.outputs.pull_requests }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     steps:
-      - name: Enforce Codex review result
-        env:
-          CODEX_RUN_RESULT: ${{ needs.run_codex.result }}
-          CODEX_FINAL_MESSAGE: ${{ needs.run_codex.outputs.final_message }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "$CODEX_RUN_RESULT" != "success" ]]; then
-            echo "::error::Codex review did not complete successfully; failing closed."
-            exit 1
-          fi
-
-          first_line="$(printf '%s\n' "$CODEX_FINAL_MESSAGE" | sed -n '/[^[:space:]]/ { p; q; }' | tr -d '\r')"
-          case "$first_line" in
-            "CODEX_REVIEW_STATUS: clean")
-              echo "Codex reported no actionable findings."
-              ;;
-            "CODEX_REVIEW_STATUS: findings")
-              echo "::error::Codex reported actionable findings; see the posted review comment."
-              exit 1
-              ;;
-            *)
-              echo "::error::Codex review did not start with a valid status marker; failing closed."
-              exit 1
-              ;;
-          esac
-
-  post_feedback:
-    needs: [run_codex, codex]
-    if: always() && needs.run_codex.outputs.final_message != ''
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      pull-requests: write
-    steps:
-      - name: Post Codex review
+      - name: Resolve affected pull requests
+        id: resolve_base
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          CODEX_FINAL_MESSAGE: ${{ needs.run_codex.outputs.final_message }}
         with:
           github-token: ${{ github.token }}
           script: |
-            await github.rest.issues.createComment({
+            let affectedPullRequests = [];
+            if (context.eventName === 'push') {
+              const base = context.ref.replace(/^refs\/heads\//, '');
+              const pullRequests = await github.paginate(github.rest.pulls.list, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                base,
+                per_page: 100,
+              });
+              affectedPullRequests = pullRequests.map((pullRequest) => ({
+                pullRequestNumber: pullRequest.number,
+                baseRef: base,
+              }));
+            } else if (context.eventName === 'pull_request_target') {
+              const pullRequest = context.payload.pull_request;
+              const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
+              if (
+                pullRequest.draft !== true &&
+                ['develop', 'main'].includes(pullRequest.base.ref) &&
+                (context.payload.action !== 'edited' || baseChanged)
+              ) {
+                affectedPullRequests = [{
+                  pullRequestNumber: pullRequest.number,
+                  baseRef: pullRequest.base.ref,
+                }];
+              }
+            } else if (
+              context.eventName === 'issue_comment' &&
+              context.payload.issue?.pull_request &&
+              context.payload.comment?.user?.type !== 'Bot' &&
+              ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(context.payload.comment.author_association) &&
+              (context.payload.comment.body || '').includes('@codex review')
+            ) {
+              const response = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.issue.number,
+              });
+              if (['develop', 'main'].includes(response.data.base.ref) && response.data.draft !== true) {
+                affectedPullRequests = [{
+                  pullRequestNumber: response.data.number,
+                  baseRef: response.data.base.ref,
+                }];
+              }
+            }
+            core.setOutput('pull_requests', JSON.stringify({
+              include: affectedPullRequests,
+            }));
+
+  gate:
+    name: Coordinate Codex review (${{ matrix.pullRequestNumber }})
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.pull_requests) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      checks: write
+    timeout-minutes: 45
+    concurrency:
+      group: codex-review-gate-${{ matrix.pullRequestNumber }}-active
+      cancel-in-progress: true
+    steps:
+      - name: Request a fresh Codex review after target-branch changes
+        id: request_review
+        if: >-
+          github.event_name == 'push' ||
+          (github.event_name == 'pull_request_target' &&
+          github.event.action == 'edited' &&
+          github.event.changes.base)
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ matrix.pullRequestNumber }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const response = await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              body: process.env.CODEX_FINAL_MESSAGE,
+              issue_number: Number(process.env.PR_NUMBER),
+              body: '@codex review',
             });
+            core.setOutput('requested_at', response.data.created_at);
+
+      - name: Resolve trusted pull-request base
+        id: resolve_base
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ matrix.pullRequestNumber }}
+          EXPECTED_BASE_REF: ${{ matrix.baseRef }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const response = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (
+              !['develop', 'main'].includes(response.data.base.ref) ||
+              response.data.base.ref !== process.env.EXPECTED_BASE_REF
+            ) {
+              core.setFailed(`Unsupported pull-request base: ${response.data.base.ref}`);
+              return;
+            }
+
+      - name: Check out trusted develop workflow sources
+        if: matrix.baseRef == 'develop'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: develop
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check out trusted main workflow sources
+        if: matrix.baseRef == 'main'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Wait for the subscription-backed Codex review
+        uses: ./.github/actions/codex-review-gate
+        with:
+          github-token: ${{ github.token }}
+          pull-request-number: ${{ matrix.pullRequestNumber }}
+          review-requested-at: ${{ steps.request_review.outputs.requested_at }}
+          check-name: Codex code review
+          codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
+          timeout-seconds: 2400
+          poll-seconds: 30
