@@ -23,6 +23,7 @@ concurrency:
     (github.event_name == 'issue_comment' &&
     github.event.issue.pull_request &&
     github.event.comment.user.type != 'Bot' &&
+    contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
     contains(github.event.comment.body, '@codex review'))) && 'active' || github.run_id
     }}
   cancel-in-progress: true
@@ -36,14 +37,33 @@ jobs:
       (github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
       github.event.comment.user.type != 'Bot' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
       contains(github.event.comment.body, '@codex review'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Resolve trusted pull-request base
+        id: resolve_base
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const pullRequestNumber = context.payload.pull_request?.number || context.payload.issue?.number;
+            const response = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullRequestNumber,
+            });
+            if (!['develop', 'main'].includes(response.data.base.ref)) {
+              core.setFailed(`Unsupported pull-request base: ${response.data.base.ref}`);
+              return;
+            }
+            core.setOutput('base_sha', response.data.base.sha);
+
       - name: Check out trusted workflow sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.event.repository.default_branch }}
+          ref: ${{ steps.resolve_base.outputs.base_sha }}
           fetch-depth: 1
           persist-credentials: false
 
@@ -55,4 +75,4 @@ jobs:
           check-name: Codex code review
           codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
           timeout-seconds: 2400
-          poll-seconds: 15
+          poll-seconds: 30
