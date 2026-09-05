@@ -66,6 +66,13 @@ runs:
             core.setFailed('The Codex review poll interval is invalid.');
             return;
           }
+          const minimumArtifactTime = context.eventName === 'issue_comment'
+            ? Date.parse(context.payload.comment?.created_at || '')
+            : 0;
+          if (!Number.isFinite(minimumArtifactTime)) {
+            core.setFailed('The Codex review request timestamp is invalid.');
+            return;
+          }
 
           const owner = context.repo.owner;
           const repo = context.repo.repo;
@@ -81,7 +88,7 @@ runs:
             return response.data;
           };
 
-          const getCodexReviews = async (headSha) => {
+          const getCodexReviews = async (headSha, minimumSubmittedAt) => {
             const reviews = await github.paginate(github.rest.pulls.listReviews, {
               owner,
               repo,
@@ -91,7 +98,11 @@ runs:
 
             return reviews.filter((review) => (
               botLogins.has(review.user?.login) &&
-              review.commit_id === headSha
+              review.commit_id === headSha &&
+              (minimumSubmittedAt === 0 || (
+                review.submitted_at &&
+                Date.parse(review.submitted_at) >= minimumSubmittedAt
+              ))
             ));
           };
 
@@ -107,7 +118,7 @@ runs:
             return undefined;
           };
 
-          const getCodexSummary = async (headSha) => {
+          const getCodexSummary = async (headSha, minimumUpdatedAt) => {
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner,
               repo,
@@ -122,6 +133,7 @@ runs:
               .map((comment) => ({
                 comment,
                 metadata: parseCodexSummaryMetadata(comment.body),
+                updatedAt: Date.parse(comment.updated_at || comment.created_at || ''),
               }))
               .sort((left, right) => (
                 new Date(right.comment.updated_at).getTime() -
@@ -129,7 +141,10 @@ runs:
               ));
 
             return {
-              current: summaries.find((summary) => summary.metadata?.headSha === headSha),
+              current: summaries.find((summary) => (
+                summary.metadata?.headSha === headSha &&
+                summary.updatedAt >= minimumUpdatedAt
+              )),
               latest: summaries[0],
             };
           };
@@ -217,9 +232,9 @@ runs:
                 );
               }
 
-              const summary = await getCodexSummary(headSha);
+              const summary = await getCodexSummary(headSha, minimumArtifactTime);
               const summaryStatus = String(summary.current?.metadata?.status || '').toLowerCase();
-              const reviews = await getCodexReviews(headSha);
+              const reviews = await getCodexReviews(headSha, minimumArtifactTime);
               const pendingReviews = reviews.filter((review) => (
                 review.state === 'PENDING' || !review.submitted_at
               ));
@@ -235,8 +250,8 @@ runs:
               if (summaryStatus === 'completed' && completedReviews.length > 0) {
                 const review = completedReviews[0];
                 const comments = await getReviewComments(review.id);
-                const bodyHasPriorityFinding = /\[(?:P0|P1)\]/i.test(review.body || '');
-                const findingCount = comments.length + (bodyHasPriorityFinding && comments.length === 0 ? 1 : 0);
+                const bodyPriorityFindings = (review.body || '').match(/\[P[0-3]\]/gi) || [];
+                const findingCount = comments.length + (comments.length === 0 ? bodyPriorityFindings.length : 0);
 
                 if (review.state === 'CHANGES_REQUESTED' || findingCount > 0) {
                   const summary = findingCount > 0

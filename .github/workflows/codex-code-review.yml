@@ -5,7 +5,7 @@ on:
   # target branch. This workflow never checks out or executes pull-request code.
   pull_request_target:
     branches: [develop, main]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
   # Allow a manually requested @codex review to start or restart the gate.
   issue_comment:
     types: [created]
@@ -17,14 +17,22 @@ permissions:
   checks: write
 
 concurrency:
-  group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: >-
+    codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number }}-${{
+    (github.event_name == 'pull_request_target' ||
+    (github.event_name == 'issue_comment' &&
+    github.event.issue.pull_request &&
+    github.event.comment.user.type != 'Bot' &&
+    contains(github.event.comment.body, '@codex review'))) && 'active' || github.run_id
+    }}
   cancel-in-progress: true
 
 jobs:
   gate:
     name: Coordinate Codex review
     if: >-
-      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'pull_request_target' &&
+      github.event.pull_request.draft != true) ||
       (github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
       github.event.comment.user.type != 'Bot' &&
