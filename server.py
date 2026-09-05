@@ -13258,6 +13258,16 @@ def _chat_with_structured_coach_impl(
     rounds = int(background_receipt.get("tool_rounds") or 0) if background_owned else 0
     while rounds < COACH_TOOL_MAX_ROUNDS:
         tool_outputs = []
+        active_tool_calls = [
+            {"call_id": str(item.get("call_id") or "").strip(), "tool": str(item.get("name") or "").strip()}
+            for item in response.get("output", [])
+            if isinstance(item, dict) and item.get("type") == "function_call"
+        ]
+        if active_tool_calls:
+            _merge_coach_command_receipt(
+                client_turn_id,
+                {"phase": "executing_tools", "pending_tool_calls": active_tool_calls},
+            )
         for item in response.get("output", []):
             _raise_chat_cancelled(cancel_event)
             if not isinstance(item, dict) or item.get("type") != "function_call":
@@ -13282,7 +13292,40 @@ def _chat_with_structured_coach_impl(
             prior_call = next((entry for entry in command_receipts if entry.get("call_id") == call_id), None)
             if prior_call and prior_call.get("effect_key") != effect_key:
                 raise AppError(409, "Ein Werkzeugaufruf wurde mit anderen Argumenten wiederholt.", reason="tool_call_conflict")
-            cached = prior_call or next((entry for entry in command_receipts if entry.get("effect_key") == effect_key and entry.get("result", {}).get("ok")), None)
+            cached = prior_call
+            if cached is None and name == "stage_training_plan":
+                candidate = next(
+                    (
+                        entry for entry in command_receipts
+                        if entry.get("effect_key") == effect_key
+                        and entry.get("result", {}).get("ok")
+                    ),
+                    None,
+                )
+                if candidate is not None:
+                    artifact_id = str(candidate.get("result", {}).get("artifact_id") or "").strip()
+                    try:
+                        candidate_revision = int(candidate.get("result", {}).get("base_revision"))
+                    except (TypeError, ValueError):
+                        candidate_revision = -1
+                    with DB_LOCK, database() as db:
+                        current_revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+                        artifact_row = db.execute(
+                            "SELECT status FROM coach_plan_artifacts WHERE id=?",
+                            (artifact_id,),
+                        ).fetchone() if artifact_id else None
+                    current_revision = int((current_revision_row or {}).get("revision") or 0)
+                    if artifact_row and artifact_row.get("status") == "draft" and candidate_revision == current_revision:
+                        cached = candidate
+            elif cached is None:
+                cached = next(
+                    (
+                        entry for entry in command_receipts
+                        if entry.get("effect_key") == effect_key
+                        and entry.get("result", {}).get("ok")
+                    ),
+                    None,
+                )
             if cached is not None:
                 result = cached["result"]
             else:
@@ -13306,14 +13349,24 @@ def _chat_with_structured_coach_impl(
                     result = {"ok": False, "error": redact_text(str(exc))[:1000], "reason": getattr(exc, "reason", None)}
                     command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "result": result})
                     LOGGER.warning("Coach tool failed", extra={"event": "coach_tool_failed", "context": {"tool": name, **_safe_diagnostic_error(exc)}})
+            active_tool_calls = [entry for entry in active_tool_calls if entry.get("call_id") != call_id]
             if result.get("ok"):
                 successful_tools.add(name)
             tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
-            running_receipt = {"message": None, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids, "intent": intent, "tool_rounds": rounds, "status": "running"}
+            running_receipt = {
+                "message": None, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids,
+                "intent": intent, "tool_rounds": rounds, "status": "running",
+                "phase": "executing_tools" if active_tool_calls else "waiting_final_response",
+                "pending_tool_calls": active_tool_calls,
+            }
             _merge_coach_command_receipt(client_turn_id, running_receipt)
         if not tool_outputs:
             break
         rounds += 1
+        _merge_coach_command_receipt(
+            client_turn_id,
+            {"phase": "waiting_final_response", "pending_tool_calls": [], "tool_rounds": rounds},
+        )
         if rounds >= COACH_TOOL_MAX_ROUNDS:
             # Resolve every function call in the conversation even at the round
             # limit, and request an actual final answer with no further actions.
@@ -13450,10 +13503,28 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         failures = [item for item in commands if not item.get("result", {}).get("ok")]
         completed_tools = {item.get("tool") for item in successes}
         pending = sorted(_structured_authorized_operations(intent) - completed_tools - {""})
+        active_tool_calls = receipt.get("pending_tool_calls")
+        if isinstance(active_tool_calls, list):
+            pending = sorted(set(pending) | {
+                str(item.get("tool") or "").strip()
+                for item in active_tool_calls
+                if isinstance(item, dict) and str(item.get("tool") or "").strip()
+            })
+        final_response_failure = receipt.get("phase") == "waiting_final_response"
         cancelled = isinstance(error, AppError) and error.reason == "chat_cancelled"
-        status = "partial" if successes else "cancelled" if cancelled else "failed"
-        text = "Die Coach-Verarbeitung wurde abgebrochen." if cancelled else "Die Coach-Zusammenfassung ist fehlgeschlagen." if successes else "Der Coach-Auftrag konnte nicht abgeschlossen werden."
-        if successes:
+        if cancelled:
+            status = "completed" if successes and not pending and final_response_failure else "partial" if successes else "cancelled"
+            text = "Ergebnis: " + "; ".join(coach_effect_label(item) for item in successes) if status == "completed" else "Die Coach-Verarbeitung wurde abgebrochen."
+        elif pending:
+            status = "partial" if successes else "failed"
+            text = "Die Coach-Zusammenfassung ist fehlgeschlagen." if successes else "Der Coach-Auftrag konnte nicht abgeschlossen werden."
+        elif successes:
+            status = "completed" if final_response_failure else "partial"
+            text = "Ergebnis: " + "; ".join(coach_effect_label(item) for item in successes) if status == "completed" else "Die Coach-Zusammenfassung ist fehlgeschlagen."
+        else:
+            status = "failed"
+            text = "Der Coach-Auftrag konnte nicht abgeschlossen werden."
+        if successes and pending:
             text += "\nBereits erfolgreich ausgefuehrt: " + ", ".join(coach_effect_label(item) for item in successes) + ". Diese Aktionen bleiben gespeichert und werden nicht erneut ausgefuehrt."
         if failures:
             text += "\nFehlgeschlagene Schritte:\n" + coach_failure_lines(commands, set(pending))

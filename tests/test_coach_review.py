@@ -97,6 +97,49 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual([item["result"]["ok"] for item in receipt["command_receipts"]], [False, True, True])
         self.assertEqual(len(server.list_planned_units()), 1)
 
+    def test_same_plan_payload_with_new_call_id_stages_fresh_artifact_after_revision_change(self):
+        intent = self.intent("stage_training_plan", ["local_plan"], ("commit_training_plan",))
+        payload = {"payload": {"plan_name": "Retry", "goal": "Base", "workouts": [self.workout()]}}
+        stage_one = self.call("stage_training_plan", payload, "stage-one")
+        stage_two = self.call("stage_training_plan", payload, "stage-two")
+        commit = self.call("commit_training_plan", {}, "commit")
+        responses = [{"output": [stage_one]}, {"output": [stage_two]}, {"output": [commit]}, {"output_text": "Der Plan ist gespeichert."}]
+        original = server._structured_coach_tool_result
+        staged = []
+
+        def execute(name, arguments, **kwargs):
+            result = original(name, arguments, **kwargs)
+            if name == "stage_training_plan":
+                staged.append(result["artifact_id"])
+                if len(staged) == 1:
+                    with server.DB_LOCK, server.database() as db:
+                        db.execute("UPDATE planning_state SET revision=revision+1 WHERE id=1")
+            return result
+
+        with patch.object(server, "_structured_coach_tool_result", side_effect=execute):
+            receipt = self.run_turn(intent, responses, turn="fresh-stage-after-revision")
+        self.assertEqual(receipt["status"], "completed")
+        self.assertEqual(len(staged), 2)
+        self.assertNotEqual(*staged)
+        self.assertEqual(len(server.list_planned_units()), 1)
+
+    def test_same_plan_payload_with_new_call_id_reuses_current_draft(self):
+        intent = self.intent("stage_training_plan", ["local_plan"], ("commit_training_plan",))
+        payload = {"payload": {"plan_name": "Retry", "goal": "Base", "workouts": [self.workout()]}}
+        stage_one = self.call("stage_training_plan", payload, "stage-one")
+        stage_two = self.call("stage_training_plan", payload, "stage-two")
+        commit = self.call("commit_training_plan", {}, "commit")
+        receipt = self.run_turn(
+            intent,
+            [{"output": [stage_one]}, {"output": [stage_two]}, {"output": [commit]}, {"output_text": "Der Plan ist gespeichert."}],
+            turn="reuse-current-stage",
+        )
+        self.assertEqual(receipt["status"], "completed")
+        self.assertEqual([item["tool"] for item in receipt["command_receipts"]], ["stage_training_plan", "commit_training_plan"])
+        with server.database() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM coach_plan_artifacts").fetchone()["n"], 1)
+        self.assertEqual(len(server.list_planned_units()), 1)
+
     def test_tool_round_limit_submits_last_outputs_for_final_summary(self):
         read = self.call("read_training_state", {}, "read")
         with patch.object(server, "COACH_TOOL_MAX_ROUNDS", 1):
@@ -133,6 +176,53 @@ class CoachReviewTests(unittest.TestCase):
         self.assertNotIn("Planentwurf erstellen", content)
         self.assertNotIn("Ergebnis: Planentwurf gespeichert", content)
 
+    def test_final_summary_failure_with_no_pending_operations_uses_completed_receipt(self):
+        operation = self.call("manage_training_templates", {"templates": [{"name": "Saved template", "sport": "Run"}]})
+        receipt = self.run_turn(
+            self.intent("manage_training_templates", ["local_template"]),
+            [{"output": [operation]}, server.AppError(503, "Model unavailable")],
+            turn="completed-effect-final-summary-failure",
+        )
+        self.assertEqual(receipt["status"], "completed")
+        self.assertEqual(receipt["pending_operations"], [])
+        self.assertIn("Ergebnis: Trainingsvorlagen bearbeitet", receipt["message"]["content"])
+        self.assertNotIn("Zusammenfassung ist fehlgeschlagen", receipt["message"]["content"])
+
+    def test_interrupted_multi_effect_turn_keeps_partial_status(self):
+        today = date.today()
+        first = self.call("save_checkin", {"payload": {"checkin_date": today.isoformat(), "notes": "First"}}, "first")
+        second = self.call("save_checkin", {"payload": {"checkin_date": (today - timedelta(days=1)).isoformat(), "notes": "Second"}}, "second")
+        original = server._structured_coach_tool_result
+        calls = []
+
+        def execute(name, arguments, **kwargs):
+            calls.append(name)
+            if len(calls) > 1:
+                raise RuntimeError("process interrupted")
+            return original(name, arguments, **kwargs)
+
+        with patch.object(server, "_structured_coach_tool_result", side_effect=execute):
+            receipt = self.run_turn(
+                self.intent("save_checkin", ["local_checkin"]),
+                [{"output": [first, second]}],
+                turn="interrupted-multi-effect",
+            )
+        self.assertEqual(receipt["status"], "partial")
+        self.assertIn("Tages-Check-in gespeichert", receipt["message"]["content"])
+        self.assertIn("Nicht erfolgreich abgeschlossen", receipt["message"]["content"])
+        self.assertEqual(len(server.list_checkins()), 1)
+
+    def test_late_cancellation_reports_committed_effect(self):
+        operation = self.call("manage_training_templates", {"templates": [{"name": "Cancelled late", "sport": "Run"}]})
+        receipt = self.run_turn(
+            self.intent("manage_training_templates", ["local_template"]),
+            [{"output": [operation]}, server.AppError(499, "Cancelled", reason="chat_cancelled")],
+            turn="late-cancelled-effect",
+        )
+        self.assertEqual(receipt["status"], "completed")
+        self.assertIn("Ergebnis: Trainingsvorlagen bearbeitet", receipt["message"]["content"])
+        self.assertNotIn("abgebrochen", receipt["message"]["content"])
+
     def test_template_batch_invalid_second_or_last_has_no_partial_writes(self):
         for position in (1,2):
             with self.subTest(position=position):
@@ -145,7 +235,7 @@ class CoachReviewTests(unittest.TestCase):
     def test_successful_write_followup_failure_is_recoverable_with_one_message_pair(self):
         operation=self.call("manage_training_templates",{"templates":[{"name":"One saved template","sport":"Run","duration_minutes":30}]})
         receipt=self.run_turn(self.intent("manage_training_templates",["local_template"]),[{"output":[operation]},server.AppError(503,"Model unavailable")])
-        self.assertEqual(receipt["status"],"partial")
+        self.assertEqual(receipt["status"],"completed")
         self.assertTrue(receipt["command_receipts"][0]["result"]["ok"])
         self.assertEqual(len(server.list_workout_library()),1)
         recovered=server.coach_command_receipt("review-turn","review-session")
@@ -171,7 +261,7 @@ class CoachReviewTests(unittest.TestCase):
         one=self.call("manage_training_templates",{"templates":[{"name":"One","sport":"Run"}]})
         two=self.call("manage_training_templates",{"templates":[{"name":"Two","sport":"Run"}]})
         receipt=self.run_turn(self.intent("manage_training_templates",["local_template"]),[{"output":[one,two]}])
-        self.assertEqual(receipt["status"],"partial");self.assertEqual(len(server.list_workout_library()),1)
+        self.assertEqual(receipt["status"],"completed");self.assertEqual(len(server.list_workout_library()),1)
         with self.assertRaises(server.AppError):server.chat_with_coach("Speichere",client_turn_id="review-turn",session_csrf_hash="other-session")
         self.assertEqual(server.coach_command_receipt("review-turn","review-session")["message"]["id"],receipt["message"]["id"])
 
@@ -254,7 +344,7 @@ class CoachReviewTests(unittest.TestCase):
             db.execute("UPDATE coach_commands SET status='running', receipt=? WHERE client_turn_id='review-turn'", (json.dumps(stored),))
         server.resume_interrupted_coach_jobs()
         recovered = server.coach_command_receipt("review-turn", "review-session")
-        self.assertEqual(recovered["status"], "partial")
+        self.assertEqual(recovered["status"], "completed")
         self.assertEqual(len(server.list_workout_library()), 1)
         self.assertEqual(len(server.paged_chat_history()["messages"]), 2)
 
