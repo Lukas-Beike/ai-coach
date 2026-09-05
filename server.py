@@ -169,7 +169,6 @@ COACH_JOB_WAKE = threading.Event()
 COACH_JOB_STOP = threading.Event()
 COACH_JOB_WORKER: threading.Thread | None = None
 COACH_JOB_CANCEL_EVENTS: dict[str, threading.Event] = {}
-OPENAI_USAGE_LOCK = threading.RLock()
 MORNING_CHECKIN_LOCK = threading.Lock()
 GARMIN_LOCK = threading.Lock()
 EXTERNAL_CALENDAR_LOCK = threading.Lock()
@@ -11342,7 +11341,10 @@ def _openai_usage_summary_unlocked() -> dict[str, Any]:
 
 
 def openai_usage_summary() -> dict[str, Any]:
-    with OPENAI_USAGE_LOCK:
+    # Composite state readers already hold DB_LOCK. Use that same lock and
+    # connection here; a separate usage lock would invert the acquisition
+    # order between those readers and a completing Coach request.
+    with DB_LOCK, database():
         return _openai_usage_summary_unlocked()
 
 
@@ -11376,7 +11378,9 @@ def _record_openai_usage_unlocked(response: dict[str, Any], operation: str) -> N
 
 
 def record_openai_usage(response: dict[str, Any], operation: str) -> None:
-    with OPENAI_USAGE_LOCK:
+    # Keep the complete read-modify-write in one transaction, including when
+    # several provider responses finish at the same time.
+    with DB_LOCK, database():
         _record_openai_usage_unlocked(response, operation)
 
 
