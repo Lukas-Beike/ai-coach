@@ -129,8 +129,26 @@ instructions do not delete or convert its data.
   a full Intervals.icu resync.
 - Multi-week plans and library templates are managed through the Coach. The
   Geplant view has read-only Übersicht and Bibliothek segments: the overview
-  shows the combined planned and completed training calendar by week, while the
-  library groups active workout templates by sport.
+  shows the combined planned and completed training calendar as a daily agenda
+  grouped by week. Weekday and date sit beside the workout title, sport and
+  duration; today is highlighted and weather stays compact below the date.
+  Expand a workout for its description, metrics and plan/actual comparison.
+  Relevant calendar and health notes remain visible below the day's sessions.
+  Daily recovery values (sleep, HRV, resting heart rate, readiness and morning
+  Body Battery) and saved check-in scores sit in small, muted text lines
+  spanning the day below the date and workout columns. Values, notes and compact
+  rain/wind forecasts stay visible without expanding anything. Weather uses two
+  text lines: conditions and temperatures, then rain probability, wind direction
+  and speed, and gusts. The earliest hour with the highest rain probability is
+  included when hourly data indicates a distinct peak (local forecast time).
+  Metric sources and forecast location/retrieval time remain in hover text. Missing
+  values remain explicit; today's readings are never reused for another date.
+  Successful weather refreshes retain daily forecasts with their location and
+  retrieval time for the calendar history. Past forecasts are identified as saved
+  predictions in hover text, not measured weather. History starts with collected data; older
+  missing forecasts and check-ins cannot be reconstructed. Set the weather
+  location under Mehr > Profil. The calendar reads up to 365 saved check-ins.
+  The library groups active workout templates by sport.
 - Existing training plans can be renamed, have their goal, status, or date range
   changed, and can be deleted directly through the Coach. Plan deletion removes
   plan metadata only; scheduled local workout units remain untouched.

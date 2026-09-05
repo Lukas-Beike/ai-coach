@@ -300,6 +300,87 @@ test("current plan payload displays each requested sport exactly", async ({ page
   }
 });
 
+test("planned agenda prioritizes dates and sessions with compact weather and expandable details", async ({ page }, testInfo) => {
+  await ready(page);
+  await page.getByRole("link", { name: "Geplant", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => state.loadPromise === null)).toBe(true);
+  const today = await page.evaluate(() => {
+    const date = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    state.data.calendar_display = { past_weeks: 1, future_weeks: 1 };
+    state.data.daily_planning_context = [{ date,
+      weather: { weather_code: 2, condition: "Leicht bewölkt", temperature_min: 12, temperature_max: 21, precipitation_probability_max: 0, wind_speed_max: 14, wind_gusts_max: 25, wind_direction_dominant: 225, forecast_location: "Emsdetten" },
+      appointments: [{ name: "Zeit für Training ab 18 Uhr", all_day: true }],
+      checkin: { pain: "Leichte Beschwerden im Knie", day_form: "Gut erholt", soreness: 0, stress: 2, motivation: 8, available_minutes: 60, notes: "<img src=x onerror=alert(1)>" },
+      recovery: { sleep_hours: 8, hrv: 54, resting_hr: 48, readiness: 80, body_battery: 85, sources: { sleep_hours: "Garmin Connect", hrv: "Intervals.icu Wellness" } },
+    }, { date: addDateKey(date, -1),
+      weather: { weather_code: 63, temperature_min: 10, temperature_max: 17, archived_forecast: true, forecast_location: "Emsdetten", precipitation_probability_max: 75, rain_peak_time: "14:00", wind_speed_max: 21.1 },
+      recovery: { sleep_hours: 6.5, hrv: 42, resting_hr: 53 },
+      checkin: { stress: 5 },
+    }];
+    state.data.training_calendar = [
+      { id: "agenda-run", date, name: "Lockerer Dauerlauf mit Steigerungen", type: "Run", duration_minutes: 45, description: "Locker laufen. <img src=x onerror=alert(1)>" },
+      { id: "agenda-strength", date, name: "Mobilität und Rumpfstabilität", type: "WeightTraining", duration_minutes: 20 },
+      { id: "agenda-completed", date: addDateKey(date, 1), name: "Grundlagenausfahrt", type: "Ride", is_completed_activity: true, moving_time: 3600, distance: 28000, icu_training_load: 42, icu_rpe: 3 },
+    ];
+    renderPlanned(state.data.training_calendar);
+    document.querySelectorAll(".planned-week").forEach((week) => { week.open = true; });
+    return date;
+  });
+  const day = page.locator(`.planned-day[data-date="${today}"]`);
+  await expect(day.locator("time")).toHaveAttribute("datetime", today);
+  await expect(day.locator(".planned-today-label")).toHaveText("Heute");
+  await expect(day.locator(".planned-day-weather")).toContainText("12° / 21°");
+  await expect(day.locator(".planned-day-health")).toBeVisible();
+  await expect(day.locator(".planned-day-calendar")).toBeVisible();
+  await expect(day.locator(".planned-entry")).toHaveCount(2);
+  await expect(day.locator(".planned-day-content .planned-day-insights")).toHaveCount(0);
+  await expect(day.locator(".planned-day-insights summary, .planned-day-insights details")).toHaveCount(0);
+  await expect(day.locator(".planned-day-metrics")).toBeVisible();
+  await expect(day.locator(".planned-day-metrics")).toContainText("Schlaf8 h");
+  await expect(day.locator(".planned-day-metrics")).toContainText("Muskelkater0/10");
+  await expect(day.locator(".planned-day-metrics")).toContainText("Body Battery85/100");
+  await expect(day.locator(".planned-weather-detail")).toHaveText("Leicht bewölkt · ⛅ 12° / 21°");
+  await expect(day.locator(".planned-weather-metrics")).toHaveText("0 % Regen · 14 km/h Wind SW · 25 km/h Böen");
+  await expect(day.locator(".planned-day-observations")).not.toContainText("Emsdetten");
+  await expect(day.locator(".planned-day-observations")).not.toContainText("Open-Meteo");
+  await expect(day.locator(".planned-day-insights")).not.toContainText("Quellen:");
+  await expect(day.locator(".planned-day-metrics > div", { hasText: "HRV54 ms" })).toHaveAttribute("title", "HRV: Intervals.icu Wellness");
+  await expect(day.locator(".planned-day-observations img")).toHaveCount(0);
+  const previous = page.locator(".planned-day").filter({ has: page.locator(".planned-day-metrics", { hasText: "Schlaf6,5 h" }) });
+  await expect(previous).toHaveCount(1);
+  await expect(previous.locator(".planned-day-metrics")).not.toContainText("85/100");
+  await expect(previous.locator(".planned-day-metrics")).toBeVisible();
+  await expect(previous.locator(".planned-weather-detail")).toHaveAttribute("title", /Gespeicherte Wettervorhersage/);
+  await expect(previous.locator(".planned-weather-metrics")).toHaveText("75 % Regen (max. 14:00 Uhr) · 21,1 km/h Wind");
+  const workout = day.locator(".planned-entry").first();
+  await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 45 Min.");
+  await expect(workout.locator(".planned-description")).toBeHidden();
+  await workout.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(workout.locator(".planned-description")).toBeVisible();
+  await expect(workout.locator("img")).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  const completed = page.locator(".planned-entry.is-completed");
+  await expect(completed.locator(".planned-entry-status")).toBeVisible();
+  await expect(completed.locator(".planned-actual-facts")).toBeHidden();
+  await completed.locator("summary").click();
+  await expect(completed.locator(".planned-actual-facts")).toContainText("Trainingsload 42");
+  await completed.locator("summary").click();
+  expect(await day.evaluate((element) => {
+    const heading = element.querySelector(".planned-day-heading").getBoundingClientRect();
+    const content = element.querySelector(".planned-day-content").getBoundingClientRect();
+    const insights = element.querySelector(".planned-day-insights").getBoundingClientRect();
+    return heading.right <= content.left && element.scrollWidth <= element.clientWidth
+      && insights.top >= content.bottom && insights.left < content.left;
+  })).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await day.screenshot({ path: testInfo.outputPath("planned-agenda.png") });
+  const week = page.locator(".planned-week").first();
+  await week.locator(":scope > summary").click();
+  await page.evaluate(() => renderPlanned(state.data.training_calendar));
+  await expect(week).not.toHaveAttribute("open", "");
+});
+
 test("JSON and audio errors retain status, reason and retry delay", async ({ page }) => {
   await ready(page);
   await page.route("**/api/fixture-error", (route) => route.fulfill({ status: 429, headers: { "Retry-After": "7" }, json: { error: "Synthetic rate limit", reason: "rate_limited" } }));
