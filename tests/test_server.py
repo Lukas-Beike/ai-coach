@@ -3736,6 +3736,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(captured[0]["headers"]["x-goog-api-key"], "test-gemini-key")
         self.assertEqual(captured[0]["payload"]["systemInstruction"]["parts"][0]["text"], "Coach rules")
         self.assertEqual(captured[0]["payload"]["tools"][0]["functionDeclarations"][0]["name"], "save_checkin")
+        self.assertEqual(captured[0]["payload"]["tools"][0]["functionDeclarations"][0]["parametersJsonSchema"], tool["parameters"])
         function_response = next(
             part["functionResponse"]
             for content in captured[1]["payload"]["contents"]
@@ -3826,6 +3827,13 @@ class CoachTests(unittest.TestCase):
         self.assertIn("Wie lief die Tempoeinheit?", handoff)
         self.assertIn("Sie war kontrolliert und gleichmäßig.", handoff)
         self.assertTrue(handoff.endswith("Aktuelle Nachricht des Athleten:\nWas folgt morgen?"))
+
+    def test_outstanding_plan_drafts_remain_visible_across_provider_conversations(self):
+        draft = server._stage_coach_artifact("gemini-conversation", "gemini-draft", {"plan_name": "Basis", "goal": "Ausdauer", "workouts": []})
+
+        refs = server.coach_intent_artifact_refs("openai-conversation")
+
+        self.assertIn(draft["artifact_id"], [item["id"] for item in refs])
 
     def test_gemini_rejects_parallel_tool_calls_when_coach_disables_them(self):
         response = {"candidates": [{"content": {"role": "model", "parts": [
@@ -3935,6 +3943,59 @@ class CoachTests(unittest.TestCase):
                 server.http_json("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {}, service="gemini")
         self.assertEqual(raised.exception.status, 401)
         self.assertEqual(raised.exception.reason, "authentication_or_permission")
+
+    def test_gemini_function_schemas_keep_openai_nullable_fields_as_json_schema(self):
+        schema = {"type": "object", "properties": {"notes": {"type": ["string", "null"]}}}
+        declaration = server._gemini_tools([{"type": "function", "name": "save_feedback", "parameters": schema}])[0]["functionDeclarations"][0]
+        self.assertEqual(declaration["parametersJsonSchema"], schema)
+        self.assertNotIn("parameters", declaration)
+
+    def test_http_json_cancels_while_waiting_for_provider_headers(self):
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        cancelled = threading.Event()
+        outcome = {}
+
+        class Response:
+            status = 200
+            headers = {}
+
+            def read(self, *args):
+                return b"{}"
+
+            def close(self):
+                return None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+
+        def blocked_urlopen(*args, **kwargs):
+            started.set()
+            release.wait(2)
+            finished.set()
+            return Response()
+
+        def send_request():
+            try:
+                server.http_json("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {}, service="gemini", cancel_event=cancelled)
+            except server.AppError as exc:
+                outcome["error"] = exc
+
+        with patch.object(server, "urlopen", side_effect=blocked_urlopen):
+            caller = threading.Thread(target=send_request)
+            caller.start()
+            self.assertTrue(started.wait(1))
+            cancelled.set()
+            caller.join(1)
+            release.set()
+            self.assertTrue(finished.wait(1))
+
+        self.assertFalse(caller.is_alive())
+        self.assertEqual(outcome["error"].status, 499)
 
     def test_transcribe_audio_sends_bounded_multipart_request(self):
         captured = {}

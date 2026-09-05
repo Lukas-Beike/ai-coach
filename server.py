@@ -6477,6 +6477,33 @@ def _read_http_error_body(error: HTTPError) -> bytes:
         error.close()
 
 
+def _urlopen_interruptibly(request: Request, timeout: int, cancel_event: threading.Event | None) -> Any:
+    if cancel_event is None:
+        return urlopen(request, timeout=timeout)
+    completed = threading.Event()
+    result: dict[str, Any] = {}
+
+    def open_request() -> None:
+        try:
+            response = urlopen(request, timeout=timeout)
+            if cancel_event.is_set():
+                response.close()
+            else:
+                result["response"] = response
+        except BaseException as exc:
+            result["error"] = exc
+        finally:
+            completed.set()
+
+    threading.Thread(target=open_request, name="provider-header-wait", daemon=True).start()
+    while not completed.wait(0.1):
+        _raise_chat_cancelled(cancel_event)
+    _raise_chat_cancelled(cancel_event)
+    if "error" in result:
+        raise result["error"]
+    return result["response"]
+
+
 def http_json(
     method: str,
     url: str,
@@ -6524,7 +6551,7 @@ def http_json(
     })
     try:
         _raise_chat_cancelled(cancel_event)
-        with urlopen(request, timeout=timeout) as response:
+        with _urlopen_interruptibly(request, timeout, cancel_event) as response:
             if cancel_event is not None:
                 cancel_event._provider_response = response
             try:
@@ -11775,7 +11802,7 @@ def _gemini_tools(tools: Any) -> list[dict[str, Any]]:
         if not isinstance(tool, dict) or tool.get("type") != "function" or not tool.get("name"):
             continue
         declarations.append({"name": str(tool["name"]), "description": str(tool.get("description") or ""),
-                             "parameters": tool.get("parameters") if isinstance(tool.get("parameters"), dict) else {"type": "object", "properties": {}}})
+                             "parametersJsonSchema": tool.get("parameters") if isinstance(tool.get("parameters"), dict) else {"type": "object", "properties": {}}})
     return [{"functionDeclarations": declarations}] if declarations else []
 
 
@@ -14016,18 +14043,12 @@ def _chat_with_structured_coach(*args: Any, **kwargs: Any) -> dict[str, Any]:
 
 
 def coach_intent_artifact_refs(conversation_id: str | None = None) -> list[dict[str, Any]]:
-    """Return only local artifact identifiers for the active conversation."""
+    """Return outstanding local plan drafts for the single athlete."""
     with DB_LOCK, database() as db:
-        if conversation_id:
-            rows = db.execute(
-                "SELECT id, conversation_id, status, base_revision, created_at FROM coach_plan_artifacts "
-                "WHERE conversation_id=? ORDER BY created_at DESC LIMIT 20", (conversation_id,)
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT id, conversation_id, status, base_revision, created_at FROM coach_plan_artifacts "
-                "ORDER BY created_at DESC LIMIT 20"
-            ).fetchall()
+        rows = db.execute(
+            "SELECT id, conversation_id, status, base_revision, created_at FROM coach_plan_artifacts "
+            "WHERE status='draft' ORDER BY created_at DESC LIMIT 20"
+        ).fetchall()
     return [dict(row) for row in rows]
 
 
