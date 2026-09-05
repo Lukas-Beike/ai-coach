@@ -1,0 +1,301 @@
+name: Codex review gate
+description: Wait for the native Codex summary and review for the current pull-request commit
+
+inputs:
+  github-token:
+    description: GitHub token used to read reviews and update the check run
+    required: true
+  pull-request-number:
+    description: Pull request number to monitor
+    required: true
+  check-name:
+    description: Required GitHub check name
+    required: true
+    default: Codex code review
+  codex-bot-logins:
+    description: Comma-separated GitHub login names accepted as the Codex reviewer
+    required: true
+    default: chatgpt-codex-connector[bot],chatgpt-codex-connector
+  timeout-seconds:
+    description: Maximum time to wait for a completed summary and final review
+    required: true
+    default: '2400'
+  poll-seconds:
+    description: Seconds between review status polls
+    required: true
+    default: '15'
+
+runs:
+  using: composite
+  steps:
+    - name: Poll Codex review and enforce findings
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        PR_NUMBER: ${{ inputs.pull-request-number }}
+        CHECK_NAME: ${{ inputs.check-name }}
+        CODEX_BOT_LOGINS: ${{ inputs.codex-bot-logins }}
+        TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        POLL_SECONDS: ${{ inputs.poll-seconds }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const prNumber = Number(process.env.PR_NUMBER);
+          const checkName = process.env.CHECK_NAME;
+          const botLogins = new Set(
+            process.env.CODEX_BOT_LOGINS
+              .split(',')
+              .map((login) => login.trim())
+              .filter(Boolean),
+          );
+          const timeoutSeconds = Number(process.env.TIMEOUT_SECONDS);
+          const pollSeconds = Number(process.env.POLL_SECONDS);
+
+          if (!Number.isSafeInteger(prNumber) || prNumber < 1) {
+            core.setFailed('The pull request number is invalid.');
+            return;
+          }
+          if (!checkName || botLogins.size === 0) {
+            core.setFailed('The Codex review gate is missing its configuration.');
+            return;
+          }
+          if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 1) {
+            core.setFailed('The Codex review timeout is invalid.');
+            return;
+          }
+          if (!Number.isFinite(pollSeconds) || pollSeconds < 1) {
+            core.setFailed('The Codex review poll interval is invalid.');
+            return;
+          }
+
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          const codexSummaryMarker = '<!-- codex-pull-request-review-summary -->';
+          const sleep = (seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+
+          const getPullRequest = async () => {
+            const response = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+            return response.data;
+          };
+
+          const getCodexReviews = async (headSha) => {
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            return reviews.filter((review) => (
+              botLogins.has(review.user?.login) &&
+              review.commit_id === headSha
+            ));
+          };
+
+          const parseCodexSummaryMetadata = (body) => {
+            const metadataPattern = /<!--\s*codex-security-review:v1\s+(\{[\s\S]*?\})\s*-->/g;
+            for (const match of (body || '').matchAll(metadataPattern)) {
+              try {
+                return JSON.parse(match[1]);
+              } catch (error) {
+                core.debug(`Ignoring malformed Codex review metadata: ${error}`);
+              }
+            }
+            return undefined;
+          };
+
+          const getCodexSummary = async (headSha) => {
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const summaries = comments
+              .filter((comment) => (
+                botLogins.has(comment.user?.login) &&
+                (comment.body || '').includes(codexSummaryMarker)
+              ))
+              .map((comment) => ({
+                comment,
+                metadata: parseCodexSummaryMetadata(comment.body),
+              }))
+              .sort((left, right) => (
+                new Date(right.comment.updated_at).getTime() -
+                new Date(left.comment.updated_at).getTime()
+              ));
+
+            return {
+              current: summaries.find((summary) => summary.metadata?.headSha === headSha),
+              latest: summaries[0],
+            };
+          };
+
+          const getReviewComments = async (reviewId) => {
+            const comments = await github.paginate(github.rest.pulls.listReviewComments, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            return comments.filter((comment) => (
+              comment.pull_request_review_id === reviewId &&
+              botLogins.has(comment.user?.login)
+            ));
+          };
+
+          const updateCheck = async (checkRunId, status, conclusion, title, summary) => {
+            const params = {
+              owner,
+              repo,
+              check_run_id: checkRunId,
+              status,
+              output: { title, summary },
+            };
+            if (status === 'completed') {
+              params.conclusion = conclusion;
+              params.completed_at = new Date().toISOString();
+            }
+            await github.rest.checks.update(params);
+          };
+
+          const createOrResumeCheck = async (headSha) => {
+            const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+              owner,
+              repo,
+              ref: headSha,
+              per_page: 100,
+            });
+            const matchingRuns = checkRuns
+              .filter((run) => run.name === checkName)
+              .sort((left, right) => right.id - left.id);
+            const resumableRun = matchingRuns.find((run) => run.status !== 'completed');
+
+            if (resumableRun) {
+              await updateCheck(
+                resumableRun.id,
+                'in_progress',
+                undefined,
+                'Waiting for Codex review',
+                `Waiting for the subscription-backed Codex review for commit ${headSha}.`,
+              );
+              return resumableRun.id;
+            }
+
+            const response = await github.rest.checks.create({
+              owner,
+              repo,
+              name: checkName,
+              head_sha: headSha,
+              status: 'in_progress',
+              started_at: new Date().toISOString(),
+              output: {
+                title: 'Waiting for Codex review',
+                summary: `Waiting for the subscription-backed Codex review for commit ${headSha}.`,
+              },
+            });
+            return response.data.id;
+          };
+
+          let checkRunId;
+          try {
+            const initialPullRequest = await getPullRequest();
+            const headSha = initialPullRequest.head.sha;
+            checkRunId = await createOrResumeCheck(headSha);
+            const deadline = Date.now() + timeoutSeconds * 1000;
+
+            core.info(`Waiting for Codex to publish a review for ${headSha}.`);
+            while (Date.now() < deadline) {
+              const currentPullRequest = await getPullRequest();
+              if (currentPullRequest.head.sha !== headSha) {
+                throw new Error(
+                  `The pull request changed from ${headSha} to ${currentPullRequest.head.sha}; waiting run is stale.`,
+                );
+              }
+
+              const summary = await getCodexSummary(headSha);
+              const summaryStatus = String(summary.current?.metadata?.status || '').toLowerCase();
+              const reviews = await getCodexReviews(headSha);
+              const pendingReviews = reviews.filter((review) => (
+                review.state === 'PENDING' || !review.submitted_at
+              ));
+              const completedReviews = reviews
+                .filter((review) => (
+                  review.submitted_at &&
+                  ['COMMENTED', 'APPROVED', 'CHANGES_REQUESTED'].includes(review.state)
+                ))
+                .sort((left, right) => (
+                  new Date(right.submitted_at).getTime() - new Date(left.submitted_at).getTime()
+                ));
+
+              if (summaryStatus === 'completed' && completedReviews.length > 0) {
+                const review = completedReviews[0];
+                const comments = await getReviewComments(review.id);
+                const bodyHasPriorityFinding = /\[(?:P0|P1)\]/i.test(review.body || '');
+                const findingCount = comments.length + (bodyHasPriorityFinding && comments.length === 0 ? 1 : 0);
+
+                if (review.state === 'CHANGES_REQUESTED' || findingCount > 0) {
+                  const summary = findingCount > 0
+                    ? `Codex published ${findingCount} actionable finding(s) for commit ${headSha}.`
+                    : `Codex requested changes for commit ${headSha}.`;
+                  await updateCheck(
+                    checkRunId,
+                    'completed',
+                    'failure',
+                    'Codex found actionable findings',
+                    `${summary} See the Codex review comments on the pull request.`,
+                  );
+                  core.setFailed(summary);
+                  return;
+                }
+
+                await updateCheck(
+                  checkRunId,
+                  'completed',
+                  'success',
+                  'Codex review completed cleanly',
+                  `Codex completed its review for commit ${headSha} without actionable findings.`,
+                );
+                core.info(`Codex review ${review.id} completed without actionable findings.`);
+                return;
+              }
+
+              if (summary.current && summaryStatus !== 'completed') {
+                core.info(
+                  `Codex summary comment ${summary.current.comment.id} reports status ` +
+                  `${summaryStatus || 'in progress'}; continuing to wait.`,
+                );
+              } else if (summaryStatus === 'completed') {
+                core.info('Codex marked its summary complete; waiting for the submitted review.');
+              } else if (completedReviews.length > 0 || pendingReviews.length > 0) {
+                core.info('Codex review activity exists, but its current-head summary is not complete yet.');
+              } else if (summary.latest) {
+                core.info('The Codex summary belongs to an older commit; waiting for the current head.');
+              } else {
+                core.info('Codex has not posted its review summary yet; continuing to wait.');
+              }
+              await sleep(pollSeconds);
+            }
+
+            throw new Error(`Timed out after ${timeoutSeconds} seconds waiting for Codex to publish its review.`);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (checkRunId) {
+              try {
+                await updateCheck(
+                  checkRunId,
+                  'completed',
+                  'failure',
+                  'Codex review gate failed',
+                  `${message} The gate fails closed; wait for a fresh run for the current commit.`,
+                );
+              } catch (updateError) {
+                core.warning(`Could not update the Codex check run: ${updateError}`);
+              }
+            }
+            core.setFailed(message);
+          }
