@@ -62,6 +62,7 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("context.payload.comment?.created_at", action)
         self.assertIn("Date.parse(review.submitted_at) >= minimumSubmittedAt", action)
         self.assertIn("/\\[P[0-3]\\]/gi", action)
+        self.assertIn("Math.min(currentPollSeconds * 2, 120)", action)
         self.assertIn("pull_request_review_id", action)
         self.assertIn("review.commit_id === headSha", action)
         self.assertNotIn("comment.commit_id === headSha", action)

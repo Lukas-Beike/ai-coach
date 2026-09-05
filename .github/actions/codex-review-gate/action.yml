@@ -23,7 +23,7 @@ inputs:
   poll-seconds:
     description: Seconds between review status polls
     required: true
-    default: '15'
+    default: '30'
 
 runs:
   using: composite
@@ -222,6 +222,8 @@ runs:
             const headSha = initialPullRequest.head.sha;
             checkRunId = await createOrResumeCheck(headSha);
             const deadline = Date.now() + timeoutSeconds * 1000;
+            let currentPollSeconds = pollSeconds;
+            let previousObservation;
 
             core.info(`Waiting for Codex to publish a review for ${headSha}.`);
             while (Date.now() < deadline) {
@@ -246,6 +248,26 @@ runs:
                 .sort((left, right) => (
                   new Date(right.submitted_at).getTime() - new Date(left.submitted_at).getTime()
                 ));
+              const observation = JSON.stringify({
+                summary: summary.current
+                  ? {
+                    id: summary.current.comment.id,
+                    updatedAt: summary.current.updatedAt,
+                    status: summaryStatus,
+                  }
+                  : summary.latest?.comment.updated_at || null,
+                reviews: reviews
+                  .map((review) => ({
+                    id: review.id,
+                    state: review.state,
+                    submittedAt: review.submitted_at,
+                  }))
+                  .sort((left, right) => left.id - right.id),
+              });
+              currentPollSeconds = observation === previousObservation
+                ? Math.min(currentPollSeconds * 2, 120)
+                : pollSeconds;
+              previousObservation = observation;
 
               if (summaryStatus === 'completed' && completedReviews.length > 0) {
                 const review = completedReviews[0];
@@ -293,7 +315,8 @@ runs:
               } else {
                 core.info('Codex has not posted its review summary yet; continuing to wait.');
               }
-              await sleep(pollSeconds);
+              core.debug(`No completed Codex result yet; polling again in ${currentPollSeconds} seconds.`);
+              await sleep(currentPollSeconds);
             }
 
             throw new Error(`Timed out after ${timeoutSeconds} seconds waiting for Codex to publish its review.`);
