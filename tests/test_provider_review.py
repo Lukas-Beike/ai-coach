@@ -199,7 +199,7 @@ class ProviderReviewTests(unittest.TestCase):
         sources = ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr",
                    "heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp", "running_threshold", "weight")
         previous = {source: [{"calendarDate": "2026-09-01", "synthetic_metric": 51}] for source in sources}
-        previous["source_freshness"] = {source: "2026-09-01T00:00:00+00:00" for source in sources}
+        previous["source_freshness"] = {source: {"fetched_at": "2026-09-01T00:00:00+00:00", "observed_at": "2026-09-01", "freshness": "current"} for source in sources}
         client = Mock()
         client.login.return_value = (False, None)
         for source in sources:
@@ -215,7 +215,8 @@ class ProviderReviewTests(unittest.TestCase):
                         result = server.sync_garmin(days=2, end_date=date(2026, 8, 30) if historical else None)
                     saved = server.garmin_snapshot()
                     self.assertEqual(saved[source], previous[source])
-                    self.assertEqual(saved["source_freshness"][source], previous["source_freshness"][source])
+                    self.assertEqual(saved["source_freshness"][source]["fetched_at"], previous["source_freshness"][source]["fetched_at"])
+                    self.assertEqual(saved["source_freshness"][source]["freshness"], "stale")
                     self.assertEqual(result["status"], "partial")
                     self.assertEqual(server.provider_sync_cursor("garmin", "data")["cursor"], "2026-09-01")
                     self.assertEqual(server.provider_sync_cursor("garmin", "historical")["cursor"], "2026-08-01")
@@ -243,6 +244,69 @@ class ProviderReviewTests(unittest.TestCase):
                 self.assertEqual(server.garmin_public_state()["activities"], 0)
                 self.assertEqual(server.garmin_snapshot()["activity_matches"], [{"garmin_activity_id": 123, "intervals_activity_id": "canonical"}])
                 self.assertEqual(server.provider_sync_cursor("garmin", "data")["cursor"], payload["end"])
+                context = server.build_training_context()
+                self.assertNotIn("garmin_specific", context)
+                self.assertEqual(context.count('"id":"canonical"'), 1)
+
+    def test_retained_metric_freshness_reaches_coach_and_public_without_new_history(self):
+        first = {"synced_at": "2026-09-01T09:00:00+00:00", "errors": [],
+                 "cycling_ftp": {"calendarDate": "2026-08-30", "functionalThresholdPower": 302},
+                 "readiness": {"calendarDate": "2026-09-01", "score": 73},
+                 "weight": {"calendarDate": "2026-08-31", "weight": 72}}
+        server.merge_garmin_sources(first, {})
+        server.append_garmin_performance_history(first, {})
+        history = first["performance_history"]
+        self.assertEqual([row["date"] for row in history], ["2026-08-30", "2026-08-31", "2026-09-01"])
+        for failed in (True, False):
+            second = {"synced_at": "2026-09-05T09:00:00+00:00", "errors": [
+                {"source": source, "message": "synthetic outage"} for source in ("cycling_ftp", "readiness", "weight")
+            ] if failed else [], "activities": [{"activityId": 8, "startTimeLocal": "2025-02-01T12:00:00"}]}
+            server.merge_garmin_sources(second, first)
+            server.append_garmin_performance_history(second, first)
+            server.set_kv("garmin_snapshot", json.dumps(second))
+            server.save_snapshot({"synced_at": second["synced_at"], "athlete": {}, "recent_wellness": [], "recent_activities": []})
+            public = server.current_performance_context()
+            for key in ("cycling_ftp_watts", "weight_kg"):
+                data = public["metrics"][key]
+                self.assertEqual(data["freshness"], "stale")
+                self.assertEqual(data["fetched_at"], first["synced_at"])
+                self.assertIn("Letzter guter Wert", data["note"])
+            self.assertEqual(public["metrics"]["cycling_ftp_watts"]["observed_at"], "2026-08-30")
+            readiness = public["recovery"]["source_freshness"]["readiness"]
+            self.assertEqual(readiness["freshness"], "stale")
+            self.assertEqual(readiness["observed_at"], "2026-09-01")
+            self.assertEqual(server.garmin_public_state()["source_freshness"]["readiness"]["fetched_at"], first["synced_at"])
+            coach = server.garmin_coach_context(include_performance=True)
+            self.assertEqual(coach["performance"]["thresholds"]["cycling_ftp_watts"]["freshness"], "stale")
+            context = server.build_training_context()
+            self.assertIn('"freshness":"stale"', context)
+            self.assertIn('"observed_at":"2026-08-30"', context)
+            self.assertEqual(second["performance_history"], history)
+
+    def test_undated_successful_metrics_do_not_fabricate_observation_history(self):
+        payload = {"synced_at": "2026-09-05T09:00:00+00:00", "errors": [],
+                   "cycling_ftp": {"functionalThresholdPower": 300}}
+        server.merge_garmin_sources(payload, {})
+        server.append_garmin_performance_history(payload, {})
+        metric = server.garmin_performance_metrics(payload)["cycling_ftp_watts"]
+        self.assertEqual(metric["freshness"], "current")
+        self.assertIsNone(metric["observed_at"])
+        self.assertEqual(metric["fetched_at"], payload["synced_at"])
+        self.assertEqual(payload["performance_history"], [])
+
+    def test_backfill_does_not_redate_retained_activity_maximum(self):
+        first = {"synced_at": "2026-09-01T09:00:00+00:00", "errors": [],
+                 "activities": [{"activityId": 1, "startTimeLocal": "2026-08-31T12:00:00", "activityType": "cycling", "maxHR": 180}]}
+        server.merge_garmin_sources(first, {})
+        server.append_garmin_performance_history(first, {})
+        second = {"synced_at": "2026-09-05T09:00:00+00:00", "errors": [],
+                  "activities": [{"activityId": 2, "startTimeLocal": "2025-02-01T12:00:00", "activityType": "cycling", "maxHR": 150}]}
+        server.merge_garmin_sources(second, first)
+        server.append_garmin_performance_history(second, first)
+        metric = server.garmin_performance_metrics(second)["cycling_max_hr_bpm"]
+        self.assertEqual(metric["value"], 180)
+        self.assertEqual(metric["observed_at"], "2026-08-31")
+        self.assertEqual(second["performance_history"], first["performance_history"])
 
     def test_fresh_password_length_boundary_counts_unicode_characters(self):
         for length in (11, 12):

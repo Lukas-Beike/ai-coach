@@ -3132,6 +3132,7 @@ class CoachTests(unittest.TestCase):
         })
         self.assertEqual(result["running_vo2max_ml_kg_min"], {
             "value": 57.4, "unit": "ml/kg/min", "source": "Garmin Connect", "note": "Garmin Connect max metrics",
+            "freshness": "unknown", "fetched_at": None, "observed_at": None,
         })
         self.assertEqual(result["cycling_vo2max_ml_kg_min"]["value"], 61)
         self.assertEqual(result["run_5k_seconds"]["value"], 1310)
@@ -3254,7 +3255,6 @@ class CoachTests(unittest.TestCase):
                 "speed_and_heart_rate": {"speed": 3.8, "heartRate": 176, "heartRateCycling": 169},
                 "power": {"functionalThresholdPower": 328},
             },
-            "cycling_threshold_hr": [{"calendarDate": today, "value": 171}],
         }))
         snapshot = {
             "athlete": {"icu_ftp": 250, "sport_settings": [
@@ -3264,12 +3264,13 @@ class CoachTests(unittest.TestCase):
             "recent_activities": [], "recent_wellness": [],
         }
         metrics = server.api_performance_metrics(snapshot)
-        self.assertEqual(metrics["cycling_ftp_watts"], {"value": 302, "unit": "W", "source": "Garmin Connect", "note": "Garmin Connect FTP"})
+        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
+        self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Garmin Connect")
         self.assertEqual(metrics["cycling_eftp_watts"]["value"], 260)
         self.assertEqual(metrics["cycling_eftp_watts"]["source"], "Intervals.icu")
         self.assertEqual(metrics["run_threshold_watts"]["value"], 328)
         self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 263)
-        self.assertEqual(metrics["bike_threshold_hr_bpm"]["value"], 171)
+        self.assertEqual(metrics["bike_threshold_hr_bpm"]["value"], 169)
         self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 176)
 
     def test_garmin_threshold_pace_accepts_speed_alias_and_clock_format(self):
@@ -3321,6 +3322,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(performance["metrics"]["steps_7d"], {
             "value": 1300, "unit": "Schritte/Tag", "source": "Garmin Connect",
             "note": "Durchschnitt der letzten 7 Tage",
+            "freshness": "unknown", "fetched_at": None, "observed_at": None,
         })
         self.assertIsInstance(performance["metrics"]["steps_7d"]["value"], int)
         self.assertEqual(performance["metrics"]["floors_7d"]["value"], 8)
@@ -3829,7 +3831,6 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(result["provider_sync"]["pagination"]["hrv"]["complete"])
         self.assertEqual(statuses, ["Garmin: Zeitraum 1/1 wird synchronisiert…"])
         self.assertTrue(any(source == "weight" for _service, source, _details in calls))
-        self.assertNotIn("cycling_threshold_hr", [source for _service, source, _details in calls])
         self.assertEqual(result["cycling_ftp"]["functionalThresholdPower"], 301)
         self.assertEqual(result["running_threshold"]["power"]["functionalThresholdPower"], 320)
         self.assertEqual(result["resting_hr"][0]["restingHeartRate"], 51)

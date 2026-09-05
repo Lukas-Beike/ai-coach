@@ -3810,9 +3810,8 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         80,
         230,
     )
-    cycling_hr_source = snapshot.get("cycling_threshold_hr") or running_threshold
     cycling_hr = _garmin_bounded_metric(
-        _garmin_last_numeric(cycling_hr_source, {"heartrate", "heartratecycling", "hearrate", "lthr", "value"}),
+        _garmin_last_numeric(running_threshold, {"heartratecycling"}),
         80,
         230,
     )
@@ -3851,25 +3850,54 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         "bike_threshold_hr_bpm": (cycling_hr, "bpm", "Garmin Connect Rad-Schwellenpuls"),
         "run_threshold_hr_bpm": (running_hr, "bpm", "Garmin Connect Lauf-Schwellenpuls"),
     }
-    return {key: metric(value, unit, GARMIN_PERFORMANCE_SOURCE, note) for key, (value, unit, note) in units.items()}
+    source_keys = {
+        "weight_kg": "weight", "cycling_ftp_watts": "cycling_ftp",
+        "cycling_max_hr_bpm": "heart_rate_zones" if profile_max_hr.get("cycling") or profile_max_hr.get("generic") else "activities",
+        "running_max_hr_bpm": "heart_rate_zones" if profile_max_hr.get("running") or profile_max_hr.get("generic") else "activities",
+    }
+    result = {
+        key: garmin_metric_freshness(snapshot, source_keys.get(key) or (
+            "max_metrics" if "vo2max" in key else "race_predictions" if key in race_values else "running_threshold"
+        ), metric(value, unit, GARMIN_PERFORMANCE_SOURCE, note))
+        for key, (value, unit, note) in units.items()
+    }
+    for kind in ("cycling", "running"):
+        key = f"{kind}_max_hr_bpm"
+        if source_keys[key] == "activities":
+            observed_dates = [garmin_source_observed_at(activity) for activity in activities
+                              if isinstance(activity, dict) and activity_kind(activity) == kind
+                              and as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate"))) == result[key]["value"]]
+            result[key]["observed_at"] = max((value for value in observed_dates if value), default=None)
+    return result
+
+
+def garmin_metric_freshness(snapshot: dict[str, Any], source: str, value: dict[str, Any]) -> dict[str, Any]:
+    """Expose observation and retrieval dates without treating a retained value as a new reading."""
+    freshness = (snapshot.get("source_freshness") or {}).get(source) or {}
+    status = freshness.get("freshness", "unknown")
+    result = {**value, "freshness": status, "fetched_at": freshness.get("fetched_at"),
+              "observed_at": freshness.get("observed_at")}
+    if status in {"stale", "partial"} and value.get("value") is not None:
+        label = "Letzter guter Wert; Quelle nicht aktualisiert" if status == "stale" else "Quelle nur teilweise aktualisiert"
+        result["note"] = "; ".join(part for part in (str(value.get("note") or ""), label) if part)
+    return result
 
 
 def append_garmin_performance_history(payload: dict[str, Any], previous: dict[str, Any] | None) -> None:
-    history = payload.get("performance_history") if isinstance(payload.get("performance_history"), list) else []
-    if previous and previous.get("synced_at"):
-        previous_metrics = garmin_performance_metrics(previous)
-        values = {
-            key: data.get("value") for key, data in previous_metrics.items()
-            if isinstance(data, dict) and data.get("value") is not None
-        }
-        readiness = readiness_score_value(previous.get("readiness"))
-        if readiness is not None:
-            values["readiness"] = readiness
-        history.append({"date": str(previous.get("synced_at"))[:10], "metrics": values})
+    history = list((previous or {}).get("performance_history") or []) + list(payload.get("performance_history") or [])
     unique: dict[str, dict[str, Any]] = {}
     for item in history:
         if isinstance(item, dict) and item.get("date") and isinstance(item.get("metrics"), dict):
-            unique[str(item["date"])] = item
+            entry = unique.setdefault(str(item["date"]), {"date": str(item["date"]), "metrics": {}})
+            entry["metrics"].update(item["metrics"])
+    current = garmin_performance_metrics(payload)
+    current["readiness"] = garmin_metric_freshness(payload, "readiness", {"value": readiness_score_value(payload.get("readiness"))})
+    for key, data in current.items():
+        if data.get("value") is None or data.get("freshness") != "current" or not data.get("observed_at"):
+            continue
+        observed = str(data["observed_at"])[:10]
+        entry = unique.setdefault(observed, {"date": observed, "metrics": {}})
+        entry["metrics"][key] = data["value"]
     payload["performance_history"] = [unique[key] for key in sorted(unique)[-90:]]
 
 
@@ -4070,17 +4098,44 @@ def _merge_garmin_records(incoming: Any, previous: Any) -> list[Any]:
     return merged
 
 
+def garmin_source_observed_at(value: Any) -> str | None:
+    dates: list[str] = []
+    pending = [value]
+    while pending:
+        record = pending.pop()
+        if isinstance(record, dict):
+            raw_date = first_present(record, ("calendarDate", "summaryDate", "date", "measurementDate", "timestampGMT", "timestamp", "startTimeLocal", "startTimeGMT"))
+            try:
+                dates.append(date.fromisoformat(str(_garmin_record_date(raw_date))).isoformat())
+            except (TypeError, ValueError):
+                pass
+            pending.extend(item for item in record.values() if isinstance(item, (dict, list)))
+        elif isinstance(record, list):
+            pending.extend(record)
+    return max(dates, default=None)
+
+
 def merge_garmin_sources(payload: dict[str, Any], previous: dict[str, Any]) -> None:
-    """Keep successfully collected source data through partial reads and backfill jobs."""
-    for collection in ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr"):
-        if collection in previous or collection in payload:
-            payload[collection] = _merge_garmin_records(payload.get(collection), previous.get(collection))
-    freshness = dict(previous.get("source_freshness") or {})
+    """Keep source-owned fetch/observation dates through partial reads and backfills."""
+    collections = ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr")
+    metrics = ("heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp", "running_threshold", "weight")
+    freshness = {source: dict(details) for source, details in (previous.get("source_freshness") or {}).items()}
     failed = {error.get("source") for error in payload.get("errors") or [] if isinstance(error, dict)}
-    for source in ("heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp", "running_threshold", "weight"):
-        if payload.get(source) and source not in failed:
-            freshness[source] = payload["synced_at"]
+    pagination = (payload.get("provider_sync") or {}).get("pagination") or {}
+    for source in (*collections, *metrics):
+        incoming = payload.get(source)
+        complete = source not in failed and pagination.get(source, {}).get("complete", True)
+        if incoming:
+            freshness[source] = {
+                "freshness": "current" if complete else "partial",
+                "fetched_at": payload["synced_at"],
+                "observed_at": garmin_source_observed_at(incoming),
+            }
         elif source in previous:
+            freshness[source] = {**freshness.get(source, {}), "freshness": "stale"}
+        if source in collections and (source in previous or source in payload):
+            payload[source] = _merge_garmin_records(incoming, previous.get(source))
+        elif not incoming and source in previous:
             payload[source] = previous[source]
     payload["source_freshness"] = freshness
     if isinstance(previous.get("morning_body_battery"), dict):
@@ -4462,6 +4517,7 @@ def garmin_public_state() -> dict[str, Any]:
         "last_sync_at": get_kv("last_garmin_sync_at"),
         "last_error": parsed_error,
         "pagination": snapshot.get("provider_sync", {}).get("pagination", {}),
+        "source_freshness": snapshot.get("source_freshness", {}),
         "activities": len(filtered_activities),
         "duplicate_activities_skipped": skipped,
         "has_sleep": bool(snapshot.get("sleep")),
@@ -4493,6 +4549,7 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
         "synced_at": snapshot.get("synced_at"),
         "start": snapshot.get("start"),
         "end": snapshot.get("end"),
+        "source_freshness": snapshot.get("source_freshness", {}),
         "recovery": {
             "sleep": compact_garmin_recovery(snapshot.get("sleep")),
             "hrv": compact_garmin_recovery(snapshot.get("hrv")),
@@ -5668,12 +5725,12 @@ def garmin_daily_health_metrics(snapshot: dict[str, Any], days: int, end_date: d
                 values[metric_name].append(float(number))
     units = {"steps": "Schritte/Tag", "floors": "Stockwerke/Tag", "calories": "kcal/Tag"}
     return {
-        f"{metric_name}_7d": metric(
+        f"{metric_name}_7d": garmin_metric_freshness(snapshot, "daily_stats", metric(
             int(round(sum(numbers) / len(numbers))) if numbers and metric_name in {"steps", "floors"} else round(sum(numbers) / len(numbers), 2) if numbers else None,
             units[metric_name],
             GARMIN_PERFORMANCE_SOURCE,
             "Durchschnitt der letzten 7 Tage",
-        )
+        ))
         for metric_name, numbers in values.items()
     }
 
@@ -11560,7 +11617,7 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         ),
     }
     return {
-        "weight_kg": metric(weight_value, "kg", weight_source),
+        "weight_kg": garmin_metrics["weight_kg"] if weight_source == GARMIN_PERFORMANCE_SOURCE else metric(weight_value, "kg", weight_source),
         "body_fat_pct": metric(body_fat_value, "%", body_fat_source),
         "height_cm": metric(height_in_cm(height_value), "cm", height_source),
         # Garmin is authoritative when available. In particular, FTP must
@@ -11746,6 +11803,16 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
             "stress": first_present(latest_wellness, ("stress",)), "mood": first_present(latest_wellness, ("mood",)),
             "readiness": readiness_current, "readiness_source": readiness_source, "sleep_hours": sleep_hours,
             "sleep_source": sleep_source,
+            "source_freshness": {
+                key: garmin_metric_freshness(garmin, section, {"value": value})
+                for key, section, value, source in (
+                    ("readiness", "readiness", readiness_current, readiness_source),
+                    ("sleep_hours", "sleep", sleep_hours, sleep_source),
+                    ("sleepScore", "sleep", sleep_score, sleep_score_source),
+                    ("restingHR", "resting_hr", resting_hr, resting_hr_source),
+                    ("hrv", "hrv", hrv, hrv_source),
+                ) if source == GARMIN_PERFORMANCE_SOURCE
+            },
         },
         "rolling_training": {"last_7_days": last_7, "previous_7_days": previous_7, "last_30_days": last_30, "previous_30_days": previous_30, "last_28_days": activity_rollup(activities, 28, today)},
         "comparisons": comparisons,
