@@ -6573,8 +6573,17 @@ def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     error = error if isinstance(error, dict) else {}
     code = str(error.get("code") or "").strip().casefold()
     error_type = str(error.get("type") or "").strip().casefold()
+    parameter = str(error.get("param") or "").strip().casefold()
     provider_message = str(error.get("message") or "").strip().casefold()
     searchable = " ".join((code, error_type, provider_message))
+    invalid_input_state = (
+        error_type == "invalid_request_error"
+        and parameter.startswith("input")
+        and (
+            "no tool output found for function call" in provider_message
+            or ("reasoning" in provider_message and "required following item" in provider_message)
+        )
+    )
 
     if code in {"conversation_locked", "conversation_lock_timeout", "concurrent_request"} or (
         "conversation" in searchable and "lock" in searchable
@@ -6584,6 +6593,7 @@ def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     elif status == 400 and (
         code in {"conversation_not_found", "invalid_conversation", "conversation_state_invalid", "invalid_function_call_output"}
         or "function_call_output" in searchable
+        or invalid_input_state
         or ("conversation" in searchable and any(marker in searchable for marker in ("state", "previous", "invalid", "not found")))
     ):
         reason = "conversation_state_invalid"

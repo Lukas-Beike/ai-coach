@@ -7231,6 +7231,42 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(diagnostic["parameter"], "input[0]")
         self.assertNotIn("secret", json.dumps(diagnostic))
 
+    def test_openai_code_null_input_state_errors_are_classified_for_recovery(self):
+        messages = (
+            "No tool output found for function call call_private_example.",
+            "Item 'rs_private_example' of type 'reasoning' was provided without its required following item.",
+        )
+        for provider_message in messages:
+            with self.subTest(provider_message=provider_message):
+                raw_error = json.dumps({
+                    "error": {
+                        "code": None,
+                        "type": "invalid_request_error",
+                        "param": "input",
+                        "message": provider_message,
+                    },
+                }).encode("utf-8")
+
+                details = server.openai_error_details(400, raw_error)
+                self.assertEqual(details["reason"], "conversation_state_invalid")
+                diagnostic = server.openai_error_diagnostic_details(raw_error)
+                self.assertEqual(diagnostic["error_type"], "invalid_request_error")
+                self.assertEqual(diagnostic["parameter"], "input")
+                self.assertNotIn("private_example", json.dumps(diagnostic))
+
+    def test_openai_code_null_unrelated_input_error_does_not_rotate_conversation(self):
+        raw_error = json.dumps({
+            "error": {
+                "code": None,
+                "type": "invalid_request_error",
+                "param": "input",
+                "message": "Input contains an unsupported content type.",
+            },
+        }).encode("utf-8")
+
+        details = server.openai_error_details(400, raw_error)
+        self.assertEqual(details["reason"], "http_error")
+
     def test_initial_conversation_state_error_rotates_once_before_tools_run(self):
         intent = {
             "intent": "advice", "operation": None, "target_system": "none",
