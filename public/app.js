@@ -1129,15 +1129,24 @@ function addStructuredCoachReceipts(payload) {
   const labels = {
     stage_training_plan: "Planvorlage vorbereitet", commit_training_plan: "Trainingsplan gespeichert",
     apply_training_changes: "Lokale Planung geändert", manage_training_templates: "Trainingsvorlagen bearbeitet",
+    apply_workout_library_plan: "Einheiten lokal geplant",
     save_checkin: "Tages-Check-in gespeichert", save_activity_feedback: "Aktivitätsfeedback gespeichert",
-    save_athlete_profile: "Athletenprofil gespeichert", save_competition: "Wettkampf gespeichert",
+    delete_activity_feedback: "Aktivitätsfeedback gelöscht", save_competition: "Wettkampf gespeichert",
     delete_competition: "Wettkampf gelöscht", update_training_plan: "Trainingsplan geändert",
     undo_training_change: "Rücknahme zur Prüfung bereit", preview_adaptive_replan: "Plananpassung zur Prüfung bereit",
-    apply_adaptive_replan: "Plananpassung gespeichert", enqueue_provider_refresh: "Datenabruf beauftragt",
+    apply_adaptive_replan: "Plananpassung gespeichert", start_provider_refresh: "Datenabruf beauftragt",
+    refresh_current_performance: "Leistungsdatenabruf beauftragt", sync_competitions: "Wettkampfsynchronisierung beauftragt",
+    resolve_training_sync_conflict: "Synchronisierungsentscheidung gespeichert",
     start_intervals_plan_sync: "Intervals-Synchronisierung beauftragt",
   };
   for (const entry of Array.isArray(payload?.command_receipts) ? payload.command_receipts : []) {
     const result = entry?.result || {};
+    if (entry.tool === "get_sync_job" && result.job) {
+      const job = result.job;
+      const status = { queued: "Synchronisierung beauftragt", running: "Synchronisierung läuft", completed: "Synchronisierung abgeschlossen", partial: "Synchronisierung teilweise abgeschlossen", failed: "Synchronisierung fehlgeschlagen" }[job.status] || "Synchronisierungsstatus unklar";
+      addCoachReceipt({ title: status, message: job.error_detail || status, status: ["partial", "failed"].includes(job.status) ? "error" : "success" });
+      continue;
+    }
     const failed = result.ok === false;
     const queued = Boolean(result.sync_job_id || result.job_id || result.job?.id || result.status === "queued");
     const title = failed ? "Coach-Aktion fehlgeschlagen" : labels[entry.tool] || (queued ? "Synchronisierung beauftragt" : "Informationen geladen");
