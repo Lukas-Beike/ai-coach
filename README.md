@@ -476,7 +476,7 @@ Other supported operational variables are:
 ```text
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-5.6-sol
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 # If both API keys are set, OpenAI remains the default. Use gemini to select it on startup.
 AI_PROVIDER=gemini
 DATA_RETENTION_DAYS=-1
@@ -496,7 +496,7 @@ input additionally requires `/audio/transcriptions`.
 
 Gemini can be configured as an alternative with `GEMINI_API_KEY`. When both
 providers are configured, select the active provider in **More → Coach & Model**
-or set `AI_PROVIDER=gemini`. `GEMINI_MODEL` defaults to `gemini-2.5-flash`.
+or set `AI_PROVIDER=gemini`. `GEMINI_MODEL` defaults to `gemini-3.8-flash`.
 The app sends the same sanitised Coach context only to the selected provider.
 Gemini conversations and tool-call history are stored locally so that Coach
 actions continue to use the same local authorization and validation checks.

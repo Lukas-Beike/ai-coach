@@ -438,7 +438,7 @@ class Config:
     openai_base_url: str = os.environ.get("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)
     openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.6-sol")
     gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
-    gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
     ai_provider: str = os.environ.get("AI_PROVIDER", "").strip().casefold()
     intervals_api_key: str = os.environ.get("INTERVALS_API_KEY", "")
     intervals_athlete_id: str = os.environ.get("INTERVALS_ATHLETE_ID", "0")
@@ -467,7 +467,7 @@ MODEL_OPTIONS = (
     {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
 )
 GEMINI_MODEL_OPTIONS = (
-    {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "description": "Schnelle, ausgewogene Gemini-Antworten"},
+    {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash", "description": "Schnelle, leistungsstarke Gemini-Antworten"},
     {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "description": "Gründlichere Gemini-Analyse für komplexe Trainingsfragen"},
 )
 THINKING_LEVEL_OPTIONS = (
@@ -11539,7 +11539,7 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
     if selected_ai_provider() == "gemini":
         if not CONFIG.gemini_api_key:
             raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
-        result = gemini_raw_request("gemini-2.5-flash", {
+        result = gemini_raw_request(selected_model(), {
             "contents": [{"role": "user", "parts": [
                 {"inlineData": {"mimeType": audio_type, "data": base64.b64encode(audio).decode("ascii")}},
                 {"text": "Transkribiere diese deutsche Trainingsfrage wortgetreu. Gib ausschließlich das Transkript zurück."},
@@ -11709,9 +11709,13 @@ def _gemini_request_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], li
     format_config = text_format.get("format") if isinstance(text_format.get("format"), dict) else {}
     if format_config.get("type") == "json_schema" and isinstance(format_config.get("schema"), dict):
         request["generationConfig"].update({"responseMimeType": "application/json", "responseJsonSchema": format_config["schema"]})
-    thinking = {"low": 1024, "medium": 8192, "high": 24576}.get(selected_thinking_level())
-    if thinking:
-        request["generationConfig"]["thinkingConfig"] = {"thinkingBudget": thinking}
+    thinking_level = selected_thinking_level()
+    if selected_model().startswith("gemini-3."):
+        request["generationConfig"]["thinkingConfig"] = {"thinkingLevel": thinking_level}
+    else:
+        thinking = {"low": 1024, "medium": 8192, "high": 24576}.get(thinking_level)
+        if thinking:
+            request["generationConfig"]["thinkingConfig"] = {"thinkingBudget": thinking}
     return request, history, persistent
 
 

@@ -3724,7 +3724,7 @@ class CoachTests(unittest.TestCase):
             call = next(item for item in initial["output"] if item["type"] == "function_call")
             followup = server.gemini_responses_request({"conversation": "gemini_test", "instructions": "Coach rules", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "tools": [tool], "tool_choice": "auto"})
 
-        self.assertEqual(captured[0]["url"], "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+        self.assertEqual(captured[0]["url"], "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")
         self.assertEqual(captured[0]["headers"]["x-goog-api-key"], "test-gemini-key")
         self.assertEqual(captured[0]["payload"]["systemInstruction"]["parts"][0]["text"], "Coach rules")
         self.assertEqual(captured[0]["payload"]["tools"][0]["functionDeclarations"][0]["name"], "save_checkin")
@@ -3760,7 +3760,7 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(server.selected_ai_provider(), "openai")
             server.save_model("gpt-5.6-luna")
             self.assertEqual(server.save_ai_provider("gemini")["provider"], "gemini")
-            self.assertEqual(server.selected_model(), "gemini-2.5-flash")
+            self.assertEqual(server.selected_model(), "gemini-3.8-flash")
             server.save_model("gemini-2.5-pro")
             server.save_ai_provider("openai")
             self.assertEqual(server.selected_model(), "gpt-5.6-luna")
