@@ -564,45 +564,56 @@ h2 {
 .danger-button:hover { border-color: rgba(255, 69, 58, .65); background: rgba(255, 69, 58, .1); }
 .plan-segment-heading { margin-bottom: 12px; }
 .plan-segment-heading h3 { margin: 2px 0 0; font-size: 1rem; }
-.planned-calendar { display: grid; gap: 12px; }
+.planned-calendar { display: grid; gap: 20px; }
 .planned-week { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
-.planned-week-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 13px 14px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .025); cursor: pointer; list-style: none; }
+.planned-week-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 12px; padding: 16px; cursor: pointer; list-style: none; }
 .planned-week-heading::-webkit-details-marker { display: none; }
-.planned-week-heading::after { flex: 0 0 auto; color: var(--subtle); content: "▸"; transition: transform .15s ease; }
+.planned-week-heading::after { grid-column: 2; grid-row: 1 / 3; color: var(--subtle); content: "\203a"; transition: transform .15s ease; }
 .planned-week[open] > .planned-week-heading::after { transform: rotate(90deg); }
-.planned-week-heading:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
-.planned-week-heading h4 { margin: 0; color: var(--ink); font-size: .88rem; }
-.planned-week-heading span { color: var(--subtle); font-size: .68rem; text-align: right; }
-.planned-week-days { display: grid; gap: 8px; padding: 8px; }
-.planned-day { overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .018); }
-.planned-day.is-today { border-color: rgba(52, 207, 161, .55); box-shadow: inset 3px 0 0 var(--accent-bright); }
-.planned-day-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 11px 12px; }
-.planned-day-heading-main { display: flex; min-width: 0; align-items: baseline; flex-wrap: wrap; gap: 5px 9px; }
-.planned-day-heading h5 { margin: 0; color: var(--ink); font-size: .8rem; }
-.planned-day-heading span { color: var(--subtle); font-size: .66rem; }
-.planned-day-weather { white-space: nowrap; }
-.planned-day-context { margin: -2px 12px 10px; color: var(--muted); font-size: .7rem; line-height: 1.4; }
+.planned-week-heading:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -3px; }
+.planned-week-heading h4 { margin: 0; color: var(--ink); font-size: .9rem; }
+.planned-week-summary { color: var(--muted); font-size: .75rem; line-height: 1.4; }
+.planned-week-days { display: grid; }
+.planned-day { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 20px; padding: 20px 16px; border-top: 1px solid var(--line); }
+.planned-day.is-today { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-bright); }
+.planned-day-heading { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 5px; padding-top: 2px; }
+.planned-day-heading h5 { margin: 0; color: var(--ink); font-size: .92rem; font-weight: 750; }
+.planned-day-heading time { color: var(--muted); font-size: .8rem; }
+.planned-today-label { color: var(--accent-bright); font-size: .7rem; font-weight: 750; }
+.planned-day-weather { margin-top: 5px; color: var(--muted); font-size: .68rem; line-height: 1.5; }
+.planned-day-content { min-width: 0; }
+.planned-day-notes { display: grid; gap: 6px; margin-top: 12px; }
+.planned-day-context { margin: 0; font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
 .planned-day-calendar { color: #b9d9ff; }
 .planned-day-health { color: #ffb1aa; }
-.planned-day-empty { margin: -2px 12px 11px; color: var(--subtle); font-size: .7rem; }
-.planned-entry { position: relative; display: grid; gap: 5px; padding: 11px 12px; border-top: 1px solid var(--line); }
-.planned-entry.is-completed { box-shadow: inset 3px 0 0 rgba(52, 207, 161, .8); }
-.planned-entry.is-missed { box-shadow: inset 3px 0 0 rgba(255, 159, 10, .75); }
-.planned-entry.is-today { box-shadow: inset 3px 0 0 rgba(90, 200, 250, .75); }
-.planned-entry strong { color: var(--ink); font-size: .82rem; }
-.planned-meta { color: var(--subtle); font-size: .68rem; }
-.planned-actual-summary { color: var(--accent-bright); font-size: .7rem; font-weight: 700; }
-.planned-actual-facts { display: flex; flex-wrap: wrap; gap: 7px 13px; margin-top: 4px; padding: 10px 0 2px; border-top: 1px solid var(--line); color: var(--muted); font-size: .7rem; }
-.planned-actual-facts strong { color: var(--subtle); font-size: inherit; font-weight: 500; }
-.planned-comparison { display: grid; gap: 3px; margin-top: 5px; padding: 9px 10px; border-radius: 10px; color: var(--muted); background: rgba(255, 255, 255, .025); font-size: .7rem; }
-.planned-comparison p { margin: 0; }
-.planned-description { margin: 3px 0 0; color: var(--muted); font-size: .74rem; line-height: 1.45; white-space: pre-wrap; }
-.planned-entry > summary { display: grid; gap: 5px; padding-right: 18px; cursor: pointer; list-style: none; }
+.planned-day-empty { margin: 2px 0; color: var(--subtle); font-size: .85rem; line-height: 1.5; }
+.planned-entry + .planned-entry { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.planned-entry > summary { position: relative; display: grid; gap: 6px; min-height: 48px; padding: 2px 20px 2px 0; cursor: pointer; list-style: none; }
 .planned-entry > summary::-webkit-details-marker { display: none; }
-.planned-entry > summary::after { position: absolute; right: 12px; color: var(--subtle); content: "▸"; transition: transform .15s ease; }
+.planned-entry > summary::after { position: absolute; top: 4px; right: 0; color: var(--subtle); content: "\203a"; transition: transform .15s ease; }
 .planned-entry[open] > summary::after { transform: rotate(90deg); }
-.planned-entry > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
-.planned-entry[open] .planned-description { padding-right: 18px; }
+.planned-entry > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 4px; border-radius: 4px; }
+.planned-entry > summary > strong { color: var(--ink); font-size: 1rem; line-height: 1.4; font-weight: 700; overflow-wrap: anywhere; }
+.planned-meta { color: var(--muted); font-size: .78rem; line-height: 1.5; overflow-wrap: anywhere; }
+.planned-entry-status { color: var(--accent-bright); font-size: .7rem; line-height: 1.4; }
+.planned-entry.is-missed .planned-entry-status { color: var(--orange); }
+.planned-entry-details { display: grid; gap: 10px; padding-top: 12px; overflow-wrap: anywhere; }
+.planned-actual-summary { color: var(--accent-bright); font-size: .75rem; }
+.planned-actual-facts { display: flex; flex-wrap: wrap; gap: 7px 13px; color: var(--muted); font-size: .75rem; }
+.planned-actual-facts strong { color: var(--subtle); font-size: inherit; font-weight: 500; }
+.planned-comparison { display: grid; gap: 4px; padding: 10px; border-radius: 10px; color: var(--muted); background: rgba(255, 255, 255, .025); font-size: .75rem; line-height: 1.5; }
+.planned-comparison p { margin: 0; }
+.planned-description { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.6; white-space: pre-wrap; }
+.planned-week-totals { margin: 0; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--subtle); font-size: .7rem; line-height: 1.5; }
+@media (max-width: 480px) {
+  .planned-day { grid-template-columns: 88px minmax(0, 1fr); gap: 12px; padding: 16px 12px; }
+  .planned-day-heading h5 { font-size: .8rem; }
+  .planned-day-heading time { font-size: .75rem; }
+  .planned-entry > summary > strong { font-size: .92rem; }
+  .planned-meta { font-size: .73rem; }
+  .planned-week-heading { padding: 14px 12px; }
+}
+
 .more-segment-nav { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .025); }
 .more-segment-nav a { display: grid; min-height: 44px; flex: 1 1 145px; place-items: center; padding: 9px 10px; border-radius: 10px; color: var(--muted); font-size: .72rem; font-weight: 700; text-align: center; text-decoration: none; }
 .more-segment-nav a:hover, .more-segment-nav a.active { color: var(--ink); background: var(--accent-soft); }

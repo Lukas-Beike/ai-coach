@@ -129,8 +129,12 @@ instructions do not delete or convert its data.
   a full Intervals.icu resync.
 - Multi-week plans and library templates are managed through the Coach. The
   Geplant view has read-only Übersicht and Bibliothek segments: the overview
-  shows the combined planned and completed training calendar by week, while the
-  library groups active workout templates by sport.
+  shows the combined planned and completed training calendar as a daily agenda
+  grouped by week. Weekday and date sit beside the workout title, sport and
+  duration; today is highlighted and weather stays compact below the date.
+  Expand a workout for its description, metrics and plan/actual comparison.
+  Relevant calendar and health notes remain visible below the day's sessions.
+  The library groups active workout templates by sport.
 - Existing training plans can be renamed, have their goal, status, or date range
   changed, and can be deleted directly through the Coach. Plan deletion removes
   plan metadata only; scheduled local workout units remain untouched.

@@ -300,6 +300,60 @@ test("current plan payload displays each requested sport exactly", async ({ page
   }
 });
 
+test("planned agenda prioritizes dates and sessions with compact weather and expandable details", async ({ page }, testInfo) => {
+  await ready(page);
+  await page.getByRole("link", { name: "Geplant", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => state.loadPromise === null)).toBe(true);
+  const today = await page.evaluate(() => {
+    const date = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    state.data.calendar_display = { past_weeks: 0, future_weeks: 1 };
+    state.data.daily_planning_context = [{ date,
+      weather: { weather_code: 2, condition: "Leicht bewölkt", temperature_min: 12, temperature_max: 21 },
+      appointments: [{ name: "Zeit für Training ab 18 Uhr", all_day: true }],
+      checkin: { pain: "Leichte Beschwerden im Knie" },
+    }];
+    state.data.training_calendar = [
+      { id: "agenda-run", date, name: "Lockerer Dauerlauf mit Steigerungen", type: "Run", duration_minutes: 45, description: "Locker laufen. <img src=x onerror=alert(1)>" },
+      { id: "agenda-strength", date, name: "Mobilität und Rumpfstabilität", type: "WeightTraining", duration_minutes: 20 },
+      { id: "agenda-completed", date: addDateKey(date, 1), name: "Grundlagenausfahrt", type: "Ride", is_completed_activity: true, moving_time: 3600, distance: 28000, icu_training_load: 42, icu_rpe: 3 },
+    ];
+    renderPlanned(state.data.training_calendar);
+    return date;
+  });
+  const day = page.locator(`.planned-day[data-date="${today}"]`);
+  await expect(day.locator("time")).toHaveAttribute("datetime", today);
+  await expect(day.locator(".planned-today-label")).toHaveText("Heute");
+  await expect(day.locator(".planned-day-weather")).toContainText("12° / 21°");
+  await expect(day.locator(".planned-day-health")).toBeVisible();
+  await expect(day.locator(".planned-day-calendar")).toBeVisible();
+  await expect(day.locator(".planned-entry")).toHaveCount(2);
+  const workout = day.locator(".planned-entry").first();
+  await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 45 Min.");
+  await expect(workout.locator(".planned-description")).toBeHidden();
+  await workout.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(workout.locator(".planned-description")).toBeVisible();
+  await expect(workout.locator("img")).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  const completed = page.locator(".planned-entry.is-completed");
+  await expect(completed.locator(".planned-entry-status")).toBeVisible();
+  await expect(completed.locator(".planned-actual-facts")).toBeHidden();
+  await completed.locator("summary").click();
+  await expect(completed.locator(".planned-actual-facts")).toContainText("Trainingsload 42");
+  await completed.locator("summary").click();
+  expect(await day.evaluate((element) => {
+    const heading = element.querySelector(".planned-day-heading").getBoundingClientRect();
+    const content = element.querySelector(".planned-day-content").getBoundingClientRect();
+    return heading.right <= content.left && element.scrollWidth <= element.clientWidth;
+  })).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.locator("#plannedCalendar").screenshot({ path: testInfo.outputPath("planned-agenda.png") });
+  const week = page.locator(".planned-week").first();
+  await week.locator(":scope > summary").click();
+  await page.evaluate(() => renderPlanned(state.data.training_calendar));
+  await expect(week).not.toHaveAttribute("open", "");
+});
+
 test("JSON and audio errors retain status, reason and retry delay", async ({ page }) => {
   await ready(page);
   await page.route("**/api/fixture-error", (route) => route.fulfill({ status: 429, headers: { "Retry-After": "7" }, json: { error: "Synthetic rate limit", reason: "rate_limited" } }));

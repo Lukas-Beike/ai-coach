@@ -2112,12 +2112,10 @@ function plannedWeatherLabel(weather) {
   const hasForecast = weather.condition || weather.weather_code != null
     || weather.temperature_min != null || weather.temperature_max != null;
   if (!hasForecast) return "";
-  return [
-    weatherIconFor(weather),
-    weather.condition,
-    weatherNumber(weather.temperature_min, " °C"),
-    weatherNumber(weather.temperature_max, " °C"),
-  ].filter((value) => value && value !== "–").join(" · ");
+  const temperatures = [weather.temperature_min, weather.temperature_max]
+    .filter((value) => value != null && value !== "" && Number.isFinite(Number(value)))
+    .map((value) => weatherNumber(value, "°"));
+  return [weatherIconFor(weather), temperatures.join(" / ")].filter(Boolean).join(" ");
 }
 
 function plannedAppointmentLabel(event) {
@@ -2228,7 +2226,6 @@ function renderPlanned(trainingCalendar) {
   const root = $("#plannedCalendar");
   const summary = $("#plannedSummary");
   if (!root) return;
-  root.replaceChildren();
   const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
   const currentWeekKey = planWeekStart(todayKey);
   const display = state.data?.calendar_display || {};
@@ -2239,6 +2236,7 @@ function renderPlanned(trainingCalendar) {
   const previousWeekOpenState = new Map(
     [...root.querySelectorAll(".planned-week[data-week-key]")].map((week) => [week.dataset.weekKey, week.open]),
   );
+  root.replaceChildren();
   const weeklyCompliance = new Map(
     (Array.isArray(state.data?.planning_compliance) ? state.data.planning_compliance : [])
       .filter((item) => item && item.week_start)
@@ -2281,7 +2279,7 @@ function renderPlanned(trainingCalendar) {
     count.className = "planned-week-summary";
     const additionalCompleted = weekEntries.filter((entry) => entry.is_completed_activity).length;
     const weekSummary = plannedWeekSummary(weekKey, weekEndKey, weekEntries, weekCompliance, todayKey);
-    count.textContent = additionalCompleted ? `${weekSummary} · +${additionalCompleted} zusätzlich` : weekSummary;
+    count.textContent = calendarCountLabel(weekEntries, todayKey) || "Keine Einheiten";
     heading.append(title, count);
     week.append(heading);
 
@@ -2296,25 +2294,37 @@ function renderPlanned(trainingCalendar) {
         : null);
       const day = document.createElement("section");
       day.className = `planned-day${dateKey === todayKey ? " is-today" : ""}`;
+      day.dataset.date = dateKey;
       const dayHeading = document.createElement("div");
       dayHeading.className = "planned-day-heading";
-      const dayHeadingMain = document.createElement("div");
-      dayHeadingMain.className = "planned-day-heading-main";
       const dayTitle = document.createElement("h5");
-      dayTitle.textContent = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(dateFromKey(dateKey));
-      dayHeadingMain.append(dayTitle);
+      dayTitle.id = `planned-day-${dateKey}`;
+      dayTitle.textContent = new Intl.DateTimeFormat("de-DE", { weekday: "long" }).format(dateFromKey(dateKey));
+      day.setAttribute("aria-labelledby", dayTitle.id);
+      const dayDate = document.createElement("time");
+      dayDate.dateTime = dateKey;
+      dayDate.textContent = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short" }).format(dateFromKey(dateKey));
+      dayHeading.append(dayTitle, dayDate);
+      if (dateKey === todayKey) {
+        const today = document.createElement("span");
+        today.className = "planned-today-label";
+        today.textContent = "Heute";
+        dayHeading.append(today);
+      }
       const weatherLabel = plannedWeatherLabel(weather);
       if (weatherLabel) {
         const weatherText = document.createElement("span");
         weatherText.className = "planned-day-weather";
         weatherText.textContent = weatherLabel;
-        weatherText.title = "Wettervorhersage";
-        dayHeadingMain.append(weatherText);
+        weatherText.title = ["Wettervorhersage", weather.condition, weatherLabel].filter(Boolean).join(": ");
+        weatherText.setAttribute("aria-label", weatherText.title);
+        dayHeading.append(weatherText);
       }
-      const dayCount = document.createElement("span");
-      dayCount.textContent = calendarCountLabel(dayEntries, todayKey) || (dateKey > todayKey ? "frei" : "keine Aktivität");
-      dayHeading.append(dayHeadingMain, dayCount);
       day.append(dayHeading);
+      const dayContent = document.createElement("div");
+      dayContent.className = "planned-day-content";
+      const dayNotes = document.createElement("div");
+      dayNotes.className = "planned-day-notes";
 
       const appointments = (Array.isArray(dayContext.appointments) ? dayContext.appointments : [])
         .filter((event) => event && event.training_relevant !== false)
@@ -2324,7 +2334,7 @@ function renderPlanned(trainingCalendar) {
         const calendarNotice = document.createElement("p");
         calendarNotice.className = "planned-day-context planned-day-calendar";
         calendarNotice.textContent = `Kalender: ${appointments.join(", ")}`;
-        day.append(calendarNotice);
+        dayNotes.append(calendarNotice);
       }
       const checkin = dayContext.checkin && typeof dayContext.checkin === "object" ? dayContext.checkin : {};
       const illness = String(checkin.illness || "").trim();
@@ -2336,15 +2346,15 @@ function renderPlanned(trainingCalendar) {
           illness ? `Krankheit: ${illness}` : "",
           pain ? `Verletzung/Beschwerden: ${pain}` : "",
         ].filter(Boolean).join(" · ");
-        day.append(healthNotice);
+        dayNotes.append(healthNotice);
       }
       if (!dayEntries.length) {
         const empty = document.createElement("p");
         empty.className = "planned-day-empty";
         empty.textContent = dateKey < todayKey
           ? "Keine Aktivität"
-          : dateKey === todayKey ? "Noch keine Einheit geplant oder abgeschlossen" : "Keine Einheit geplant";
-        day.append(empty);
+          : "Keine Einheit geplant";
+        dayContent.append(empty);
       }
       dayEntries.forEach((entry) => {
         const actual = calendarActualActivity(entry);
@@ -2359,22 +2369,28 @@ function renderPlanned(trainingCalendar) {
         meta.className = "planned-meta";
         const displayed = actual || entry;
         meta.textContent = [
-          calendarStatusLabel(entry, dateKey, todayKey),
           activitySportLabel(displayed),
           calendarStartTime(displayed.start_date_local),
           actual ? formatDuration(actual.moving_time ?? actual.elapsed_time) : entry.duration_minutes ? `${entry.duration_minutes} Min.` : formatDuration(entry.moving_time),
-          actual ? distanceLabel(actual.distance) : null,
         ].filter(Boolean).join(" · ");
         cardSummary.append(cardTitle, meta);
+        if (status === "completed" || status === "missed") {
+          const statusText = document.createElement("span");
+          statusText.className = "planned-entry-status";
+          statusText.textContent = calendarStatusLabel(entry, dateKey, todayKey);
+          cardSummary.append(statusText);
+        }
+        card.append(cardSummary);
+        const details = document.createElement("div");
+        details.className = "planned-entry-details";
         if (actual) {
           const primaryMetrics = document.createElement("span");
           primaryMetrics.className = "planned-actual-summary";
           const load = calendarMetricNumber(actual.icu_training_load);
           const rpe = calendarRpeLabel(actual.icu_rpe);
           primaryMetrics.textContent = [load != null ? `Load ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
-          cardSummary.append(primaryMetrics);
+          details.append(primaryMetrics);
         }
-        card.append(cardSummary);
         if (actual) {
           const facts = document.createElement("div");
           facts.className = "planned-actual-facts";
@@ -2391,7 +2407,7 @@ function renderPlanned(trainingCalendar) {
           appendCalendarFact(facts, "Ø Leistung", averagePower);
           appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
           appendCalendarFact(facts, "Höhenmeter", elevation);
-          card.append(facts);
+          details.append(facts);
         }
         if (actual && !entry.is_completed_activity) {
           const comparison = document.createElement("div");
@@ -2415,19 +2431,34 @@ function renderPlanned(trainingCalendar) {
             ratio.textContent = `${entry.compliance.basis === "training_load" ? "Load" : "Umfang"} Plan/Ist: ${entry.compliance.percentage} %`;
             comparison.append(ratio);
           }
-          card.append(comparison);
+          details.append(comparison);
         }
         if (entry.description) {
           const description = document.createElement("p");
           description.className = "planned-description";
           description.textContent = entry.description;
-          card.append(description);
+          details.append(description);
         }
-        day.append(card);
+        if (!details.childElementCount) {
+          const description = document.createElement("p");
+          description.className = "planned-description";
+          description.textContent = "Keine weiteren Details hinterlegt.";
+          details.append(description);
+        }
+        card.append(details);
+        dayContent.append(card);
       });
+      if (dayNotes.childElementCount) dayContent.append(dayNotes);
+      day.append(dayContent);
       days.append(day);
     }
     week.append(days);
+    if (weekEntries.length) {
+      const weekDetails = document.createElement("p");
+      weekDetails.className = "planned-week-totals";
+      weekDetails.textContent = additionalCompleted ? `${weekSummary} · +${additionalCompleted} zusätzlich` : weekSummary;
+      week.append(weekDetails);
+    }
     root.append(week);
   }
 }
