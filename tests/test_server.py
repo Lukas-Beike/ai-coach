@@ -1971,7 +1971,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn('id="weatherNotice"', index)
         self.assertNotIn("function renderWeatherNotice", app)
 
-    def test_activity_feedback_is_persisted_and_attached_to_activity(self):
+    def test_coach_activity_feedback_is_persisted_and_attached_to_activity(self):
         server.save_snapshot({
             "synced_at": "2026-08-30T08:00:00+00:00",
             "athlete": {},
@@ -1979,7 +1979,7 @@ class CoachTests(unittest.TestCase):
             "recent_wellness": [],
             "upcoming_calendar": [],
         })
-        result = server.save_activity_feedback("activity-1", {
+        result = server.save_coach_activity_feedback("activity-1", {
             "activity_name": "Morgenlauf", "activity_date": "2026-08-30T07:00:00", "notes": "Linkes Knie ungewohnt empfindlich",
         })
         self.assertEqual(result["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
@@ -2021,12 +2021,21 @@ class CoachTests(unittest.TestCase):
         server.save_activity_feedback("activity-2", {"notes": "   "})
         self.assertEqual(server.list_activity_feedback(), [])
 
-    def test_feedback_form_is_not_rendered_in_profile_markup(self):
+    def test_activity_history_feedback_is_read_only_and_coach_managed(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        app = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+        backend = Path(server.__file__).read_text(encoding="utf-8")
         self.assertNotIn('id="feedbackForm"', markup)
         self.assertNotIn("Lokales Athleten-Feedback", markup)
         self.assertIn('id="analysisHistorySegment"', markup)
         self.assertIn('data-analysis-segment="history"', markup)
+        self.assertNotIn('id="activityDirtyIndicator"', markup)
+        self.assertNotIn("function saveActivityFeedback", app)
+        self.assertNotIn("Besonderheiten speichern", app)
+        self.assertNotIn("activity-type-button", app)
+        self.assertIn("if (feedbackNotes) {", app)
+        self.assertIn("feedbackText.textContent = feedbackNotes;", app)
+        self.assertNotIn('"^/api/activities/([^/]+)/feedback$"', backend)
 
     def test_settings_do_not_render_calendar_events_or_public_competition_import(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
