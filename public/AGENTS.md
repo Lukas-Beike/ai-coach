@@ -17,7 +17,8 @@
 - The service worker is part of the release cache contract. Whenever
   `index.html`, `app.js`, `styles.css`, or service-worker assets change, bump
   the asset query version in `index.html` and the cache name/asset URLs in
-  `service-worker.js` so installed PWAs receive the new files.
+  `service-worker.js` so a fresh installation receives a consistent current asset set. Do not add
+  application update dialogs, cache conversion or earlier-client support.
 - Keep microphone and notification features opt-in, bounded, and functional in
   browsers that do not support them. Audio must not be persisted by the client.
 - Keep UI text and feature documentation in `README.md` accurate when adding

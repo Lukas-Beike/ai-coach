@@ -59,6 +59,7 @@ async function installControlledChatStream(page) {
     window.fetch = (input, options) => {
       const url = typeof input === "string" ? input : input.url;
       if (url === "/api/chat/stream") {
+        chatTest.clientTurnId = JSON.parse(options.body).client_turn_id;
         return Promise.resolve(new Response(new ReadableStream({
           start(controller) {
             chatTest.controller = controller;
@@ -68,6 +69,9 @@ async function installControlledChatStream(page) {
       }
       if (url.startsWith("/api/chat/history")) {
         return new Promise((resolve) => chatTest.historyResolvers.push(resolve));
+      }
+      if (url.startsWith("/api/chat/receipt")) {
+        return Promise.resolve(new Response(JSON.stringify({ status: "completed", proposed_actions: [], command_receipts: [] }), { status: 200 }));
       }
       return originalFetch(input, options);
     };
@@ -95,7 +99,6 @@ test.describe("critical browser states", () => {
     await expect(page.locator(".dirty-indicator")).toHaveCount(3);
     const hiddenIndicators = await page.locator(".dirty-indicator").evaluateAll((nodes) => nodes.every((node) => node.hidden));
     expect(hiddenIndicators).toBe(true);
-    await expect(page.locator("#remoteDeleteNotice")).toHaveCount(0);
     for (const [label, panelId, route] of navigation) {
       await page.getByRole("link", { name: label, exact: true }).click();
       await expect(page.locator(`#${panelId}`)).toHaveClass(/active/);
@@ -152,7 +155,6 @@ test.describe("critical browser states", () => {
     await page.locator(".plan-segment-nav").getByRole("link", { name: "Bibliothek", exact: true }).click();
     await expect(page).toHaveURL(/#plan\/library$/);
     await expect(page.getByRole("heading", { name: "Bibliothek", exact: true })).toBeVisible();
-    await expect(page.locator("#libraryLoadButton, #libraryFilter, #librarySelectVisibleButton, #librarySyncSelectedButton")).toHaveCount(0);
     await page.goto("/#plan");
     await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#plan$/);
@@ -214,12 +216,16 @@ test.describe("critical browser states", () => {
 
   test("core views satisfy WCAG AA checks", async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);
+    const authenticatedState = await page.context().storageState();
+    await page.context().clearCookies();
     await page.goto("/");
+    await expect(page.locator("#loginDialog")).toBeVisible();
     const loginResults = await new AxeBuilder({ page })
       .include("#loginDialog")
       .withTags(["wcag2a", "wcag2aa"])
       .analyze();
     expect(loginResults.violations, "Login accessibility violations").toEqual([]);
+    await page.context().addCookies(authenticatedState.cookies);
     await openAuthenticatedApp(page);
     const manifest = await page.request.get("/manifest.webmanifest");
     expect(manifest.ok()).toBe(true);
@@ -341,7 +347,7 @@ test.describe("critical browser states", () => {
     await page.evaluate((content) => {
       const message = { id: 2, role: "assistant", content, created_at: "2026-09-04T10:00:00Z" };
       window.__chatTest.historyMessages = [
-        { id: 1, role: "user", content: "Analysiere meine letzte Einheit gründlich.", created_at: "2026-09-04T09:59:00Z" },
+        { id: 1, role: "user", client_turn_id: window.__chatTest.clientTurnId, content: "Analysiere meine letzte Einheit gründlich.", created_at: "2026-09-04T09:59:00Z" },
         message,
       ];
       window.__chatTest.push("delta", { text: `\n\n${content}` });
@@ -387,7 +393,7 @@ test.describe("critical browser states", () => {
     await page.evaluate(() => {
       window.__chatTest.historyMessages = [
         ...window.__chatTest.historyMessages,
-        { id: 3, role: "user", content: "Teste eine unterbrochene Antwort.", created_at: "2026-09-04T10:01:00Z" },
+        { id: 3, role: "user", client_turn_id: window.__chatTest.clientTurnId, content: "Teste eine unterbrochene Antwort.", created_at: "2026-09-04T10:01:00Z" },
         { id: 4, role: "assistant", content: "Kurze Antwort nach erfolgreicher Wiederherstellung.", created_at: "2026-09-04T10:01:01Z" },
       ];
       window.__chatTest.finish();

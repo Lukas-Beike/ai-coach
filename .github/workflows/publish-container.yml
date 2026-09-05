@@ -14,7 +14,7 @@ on:
         required: true
         type: string
       source_ref:
-        description: Optional branch or commit to check out instead of release_tag
+        description: Optional source reference; must identify the release tag commit
         required: false
         type: string
       publish_container:
@@ -31,7 +31,25 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  source:
+    name: Resolve immutable source
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - name: Check out workflow source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Resolve source and release contract
+        id: source
+        env:
+          SOURCE_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && (inputs.source_ref || inputs.release_tag) || github.sha }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && inputs.release_tag || '' }}
+        run: python .github/scripts/release_source.py
+
   test_shards:
+    needs: source
     name: Test shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
     strategy:
@@ -42,38 +60,25 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && github.event.inputs.source_ref || github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref }}
+          ref: ${{ needs.source.outputs.source_sha }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
           cache: pip
-      - name: Verify release and application versions match
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-        env:
-          EXPECTED_RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          app_version="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
-          if [[ -z "$app_version" ]]; then
-            echo "Could not read APP_VERSION from server.py."
-            exit 1
-          fi
-          if [[ "$app_version" != "$EXPECTED_RELEASE_TAG" ]]; then
-            echo "Release tag $EXPECTED_RELEASE_TAG does not match APP_VERSION $app_version."
-            exit 1
-          fi
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Run unit tests
         run: python tests/run_tests.py --shard "${{ matrix.shard }}" --total 4
 
   syntax:
+    needs: source
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.source_sha }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -82,11 +87,14 @@ jobs:
         run: python -m py_compile server.py tests/test_server.py tests/run_tests.py
 
   container_tests:
+    needs: source
     name: Container unit tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.source_sha }}
       - name: Build isolated SQLCipher test image
         run: docker build --tag ai-coach:test .
       - name: Run unit tests in the container
@@ -125,12 +133,14 @@ jobs:
 
   quality:
     name: Quality baseline
-    needs: test
+    needs: [source, test]
     if: needs.test.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.source_sha }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -153,6 +163,7 @@ jobs:
         run: mypy --ignore-missing-imports --follow-imports=skip tests/run_tests.py
 
   image_sbom:
+    needs: source
     name: Image SBOM
     runs-on: ubuntu-latest
     permissions:
@@ -161,6 +172,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.source_sha }}
       - name: Build isolated image for scanning
         run: docker build --tag ai-coach:security .
       - name: Generate SPDX SBOM
@@ -179,7 +192,7 @@ jobs:
           retention-days: 30
   e2e:
     if: needs.test.result == 'success'
-    needs: [test]
+    needs: [source, test]
     name: Browser smoke and accessibility checks
     runs-on: ubuntu-latest
     env:
@@ -188,6 +201,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.source_sha }}
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6.0.0
         with:
@@ -208,9 +223,9 @@ jobs:
           trap cleanup EXIT
           for project in "${projects[@]}"; do
             cleanup
-            docker run --detach --name ai-coach-e2e --publish 8090:8090 \
+            docker run --detach --name ai-coach-e2e --publish 127.0.0.1:8090:8090 \
               --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
-              --pids-limit=256 --memory=512m --cpus=1 \
+              --pids-limit=256 --memory=512m --cpus=1 --tmpfs /data:uid=100,gid=101,mode=0700 \
               --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
               ai-coach:e2e >/dev/null
             for attempt in {1..30}; do
@@ -241,7 +256,7 @@ jobs:
 
   build-and-push:
     if: (github.event_name == 'release' && github.event.action == 'published') || (github.event_name == 'workflow_dispatch' && inputs.publish_container == true)
-    needs: [test, e2e, quality]
+    needs: [source, test, e2e, quality]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -251,7 +266,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag || github.ref }}
+          ref: ${{ needs.source.outputs.source_sha }}
+          fetch-depth: 0
+      - name: Verify build uses tested source and release version
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
+          TESTED_SHA: ${{ needs.source.outputs.source_sha }}
+        run: python .github/scripts/release_source.py --verify "$TESTED_SHA"
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:

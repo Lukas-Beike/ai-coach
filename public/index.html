@@ -9,8 +9,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg?v=175" type="image/svg+xml">
-    <link rel="stylesheet" href="/styles.css?v=175">
+    <link rel="icon" href="/icon.svg?v=176" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css?v=176">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -35,7 +35,6 @@
     <header class="topbar">
       <div class="topbar-actions">
         <button id="headerActionButton" class="secondary-button top-action" type="button" hidden></button>
-        <button id="pwaUpdateButton" class="app-update-indicator pwa-update-button" type="button" hidden aria-label="Neue App-Version laden" title="Neue App-Version laden"><svg class="nav-icon" aria-hidden="true"><use href="#icon-refresh"></use></svg></button>
       </div>
     </header>
 
@@ -55,6 +54,7 @@
           <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
         </div>
+        <div id="chatOperationStatus" class="chat-operation-status" role="status" hidden><span id="chatOperationLabel"></span><button type="button" id="cancelChatButton" class="secondary-button" hidden>Abbrechen</button></div>
         <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
         <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
           <div class="coach-action-review-heading">
@@ -76,7 +76,6 @@
           <div class="composer-actions">
             <button type="button" id="voiceButton" class="voice-button" aria-label="Spracheingabe starten" title="Spracheingabe starten"><svg class="nav-icon" aria-hidden="true"><use href="#icon-microphone"></use></svg></button>
             <button type="button" id="steerButton" class="secondary-button steer-button" hidden>Steuern</button>
-            <button type="button" id="cancelChatButton" class="secondary-button steer-button" hidden>Abbrechen</button>
             <button type="submit" id="sendButton">Senden</button>
           </div>
         </form>
@@ -265,14 +264,6 @@
             </div>
           </div>
         </details>
-        <details class="settings-section release-section collapsible-section" data-more-segment-panel="operations" aria-labelledby="releaseTitle">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">GitHub-Versionen</span><span id="releaseSummary" class="collapsible-summary-meta">Release wird geprüft…</span></summary>
-          <div class="settings-section-heading">
-            <div><span class="eyebrow">RELEASE</span><h3 id="releaseTitle">GitHub-Versionen</h3><p id="releaseStatus">GitHub-Release wird geprüft…</p></div>
-            <a id="releaseLink" class="secondary-button" href="#" target="_blank" rel="noopener noreferrer" hidden>Release öffnen</a>
-          </div>
-          <pre id="releaseChangelog" class="release-changelog">Changelog wird geladen…</pre>
-        </details>
         <details class="settings-section context-preview collapsible-section" data-more-segment-panel="coach" aria-label="Chat-Kontext und Prompt">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Chat-Kontext und Prompt</span><span class="collapsible-summary-meta">Transparenz</span></summary>
           <div class="context-preview-heading">
@@ -372,12 +363,12 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=175" defer></script>
-  <script src="/navigation.js?v=175" defer></script>
-  <script src="/state.js?v=175" defer></script>
-  <script src="/views.js?v=175" defer></script>
-  <script src="/forms.js?v=175" defer></script>
-  <script src="/components.js?v=175" defer></script>
-  <script src="/app.js?v=175" defer></script>
+  <script src="/api.js?v=176" defer></script>
+  <script src="/navigation.js?v=176" defer></script>
+  <script src="/state.js?v=176" defer></script>
+  <script src="/views.js?v=176" defer></script>
+  <script src="/forms.js?v=176" defer></script>
+  <script src="/components.js?v=176" defer></script>
+  <script src="/app.js?v=176" defer></script>
 </body>
 </html>

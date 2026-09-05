@@ -10,8 +10,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import test_server
-
 
 def iter_tests(suite: unittest.TestSuite):
     for test in suite:
@@ -19,6 +17,22 @@ def iter_tests(suite: unittest.TestSuite):
             yield from iter_tests(test)
         else:
             yield test
+
+
+def discover_tests(directory: Path | None = None):
+    loader = unittest.TestLoader()
+    loaded = loader.discover(
+        str(directory or Path(__file__).resolve().parent), pattern="test_*.py"
+    )
+    if loader.errors:
+        raise RuntimeError(
+            "Test discovery failed:\n" + "\n".join(map(str, loader.errors))
+        )
+    return sorted(iter_tests(loaded), key=lambda test: test.id())
+
+
+def select_shard(tests, shard: int, total: int):
+    return [test for index, test in enumerate(tests) if index % total == shard - 1]
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,18 +49,18 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    loaded = unittest.defaultTestLoader.loadTestsFromModule(test_server)
-    tests = sorted(iter_tests(loaded), key=lambda test: test.id())
-    selected = [
-        test for index, test in enumerate(tests) if index % args.total == args.shard - 1
-    ]
+    tests = discover_tests()
+    selected = select_shard(tests, args.shard, args.total)
     if not selected:
         raise SystemExit(f"shard {args.shard}/{args.total} contains no tests")
 
     started = time.perf_counter()
     result = unittest.TextTestRunner(verbosity=1).run(unittest.TestSuite(selected))
     elapsed = time.perf_counter() - started
-    print(f"Shard {args.shard}/{args.total}: {result.testsRun} tests in {elapsed:.2f}s")
+    print(
+        f"Discovery: {len(tests)} tests; shard {args.shard}/{args.total}: "
+        f"{result.testsRun} run, {len(result.skipped)} skipped in {elapsed:.2f}s"
+    )
     return 0 if result.wasSuccessful() else 1
 
 

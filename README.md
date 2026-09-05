@@ -9,6 +9,17 @@ an encrypted SQLite database.
 The application is designed for use on a trusted home network or private VPN.
 It is not intended to be exposed directly to the public internet.
 
+## Fresh installation
+
+Use a new empty data directory and a fresh browser profile for this application.
+The application creates its current SQLCipher schema directly. It does not
+convert previous databases, backups, API payloads, or browser storage. Restore
+accepts backups created with the current schema. The service worker supports
+first installation and offline assets; there is no application update dialog
+or upgrade workflow. Normal edits, provider syncs, and same-build restart
+recovery remain supported. Keep the previous installation separate; these
+instructions do not delete or convert its data.
+
 ## Features
 
 - Athlete profile, target competitions, performance metrics, training history,
@@ -222,8 +233,7 @@ Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
 can be forced manually from the Open-Meteo card in the More tab.
-GitHub release information is checked at most every 15 minutes. The morning
-check-in is generated at most once per local calendar day when its required
+The morning check-in is generated at most once per local calendar day when its required
 integrations are configured.
 
 The five main views use stable hash links: `#coach`, `#today`, `#plan`,
@@ -457,9 +467,6 @@ DATA_RETENTION_DAYS=-1
 PORT=8090
 DATA_DIR=/data
 TZ=Europe/Berlin
-GITHUB_REPOSITORY=Lukas-Beike/ai-coach
-GITHUB_TOKEN=
-GITHUB_RELEASE_CHECK_SECONDS=900
 ```
 
 `OPENAI_BASE_URL` is optional and defaults to `https://api.openai.com/v1`. It
@@ -476,12 +483,6 @@ application does not impose its own OpenAI request or token limits; it displays
 remaining quotas when the API reports them. When the configured provider returns
 a billing or quota error such as `credit_balance_exhausted`, the app shows a
 clear message and points to billing.
-
-The application checks the latest non-draft, non-prerelease GitHub release on
-the server and caches the result for 15 minutes by default. A newer release is
-shown next to the application version and its release notes are available in
-the **More** tab. Set `GITHUB_TOKEN` only when the configured repository is
-private; the token remains server-side and is never returned to the browser.
 
 ## Garmin authentication
 
@@ -765,9 +766,11 @@ cannot enter the test container:
 Native Python syntax checks, container unit tests, and image security are
 separate CI jobs aggregated by the required `test` check. The container job
 uses the same bounded test runner as the four fast native shards.
-An advisory quality job records a coverage baseline and runs pinned Ruff
-formatter/linter and MyPy checks; it is intentionally non-blocking while the
-existing large module is brought under those tools incrementally.
+The quality job records coverage and runs pinned Ruff formatter/linter and
+MyPy checks. Every test module is discovered before deterministic sharding;
+import failures are fatal and the runner reports executed and skipped counts.
+All checks and container builds use one resolved immutable source SHA. Manual
+release inputs must identify the same commit and its APP_VERSION.
 
 Pull requests run the unit tests, syntax checks, and image security report. The conventional-commit
 workflow validates pull-request titles and commit subjects. Dependabot manages
@@ -789,15 +792,10 @@ or athlete-data credentials.
 
 ### Image supply chain and runtime boundary
 
-The test-and-publish workflow emits an SPDX image SBOM and scans both OS/base
-image packages and Python libraries. The complete HIGH/CRITICAL report,
-including unfixed findings, remains visible on every run; no vulnerability is
-silently ignored. Release and manual publish runs fail on those findings, while
-pull requests remain report-only when the pinned vendor image has no available
-fix, so normal development can still receive the complete result. A finding
-exception must be proposed in a separate reviewed change with the identifier,
-affected image, rationale, owner, mitigation, and expiry date. Until that
-change is explicitly accepted, the release scan remains blocking.
+The test-and-publish workflow emits an SPDX image SBOM. An SBOM is a package
+inventory, not a vulnerability scan; assess the current OS and language-package
+inventory with a vulnerability scanner before deployment. Local fixture tests
+do not establish the status of remote CI or a published image.
 
 Published image digests receive a keyless Sigstore/Cosign signature through
 GitHub OIDC. The local runtime remains private: use a trusted LAN or private
@@ -810,7 +808,7 @@ host is recommended.
 ### Browser smoke and accessibility checks
 
 The Playwright harness runs against a disposable Docker fixture. It receives
-only a fake `APP_PASSWORD`, uses an anonymous container `/data` volume, and
+only a fake `APP_PASSWORD`, uses an empty temporary container `/data` filesystem, and
 does not read `.env`, the host `data/` directory, or provider accounts. Install
 the JavaScript dependencies and run the desktop/mobile smoke and WCAG-AA
 checks with:
@@ -820,7 +818,8 @@ $env:E2E_APP_PASSWORD = "e2e-fixture-password-1234"
 npm ci
 npx playwright install --with-deps chromium
 docker build -t ai-coach:e2e .
-docker run -d --name ai-coach-e2e -p 8090:8090 --read-only `
+docker run -d --name ai-coach-e2e -p 127.0.0.1:8090:8090 --read-only `
+  --tmpfs /data:uid=100,gid=101,mode=0700 `
   --security-opt no-new-privileges:true `
   -e APP_PASSWORD=$env:E2E_APP_PASSWORD -e COOKIE_SECURE=false ai-coach:e2e
 npm run test:e2e

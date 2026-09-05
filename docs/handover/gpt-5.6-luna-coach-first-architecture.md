@@ -1,5 +1,6 @@
 # GPT-5.6 Luna Handover: Coach-first Architektur, Workflow und UI/UX
 
+> Historical handover: superseded by the fresh-installation contract in README.md and AGENTS.md. Completed work and test counts below describe their original source snapshot; migration, upgrade and obsolete-contract tasks are not active requirements.
 **Status:** Arbeitsplan, alle Tasks absichtlich offen  
 **Stand:** 2026-09-03  
 **Ausgangsversion:** 1.4.9  

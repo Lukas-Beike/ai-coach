@@ -5,7 +5,7 @@ Use this as a coverage map, not as a request to manufacture one finding per sect
 ## 1. Product invariants and architecture
 
 - Confirm the standalone, single-athlete, trusted-LAN/private-VPN threat model is consistent across code, Docker, README, and deployment examples; port 8090 must not be presented as a public edge.
-- Map responsibilities across `server.py`, `backend/`, `public/`, persistence, background workers, providers, OpenAI, and CI. Look for split or duplicated business rules and obsolete compatibility paths.
+- Map responsibilities across `server.py`, `backend/`, `public/`, persistence, background workers, providers, OpenAI, and CI. Look for split or duplicated business rules and obsolete internal paths.
 - Verify that confirmed local profile and competition records are authoritative and OpenAI conversation state provides dialogue continuity only.
 - Check that external provider/calendar text is always treated as data, never executable instructions.
 
@@ -38,7 +38,7 @@ Use this as a coverage map, not as a request to manufacture one finding per sect
 ## 5. Backup, restore, and recovery
 
 - Verify backups are transactionally consistent, encrypted/sensitive, bounded, and never logged or placed in images.
-- Trace restore validation: format, size, SQLCipher integrity, complete current schema, migration compatibility, path safety, atomic replacement, rollback/recovery backup, maintenance gate, worker quiescence, and session invalidation.
+- Trace restore validation: format, size, SQLCipher integrity, complete current schema, path safety, atomic replacement, rollback/recovery backup, maintenance gate, worker quiescence, and session invalidation.
 - Exercise or inspect failure points before, during, and after replacement. A failed restore must retain a recoverable valid database and must not let background writers use stale handles.
 - Check recovery documentation matches the actual workflow and does not suggest deleting `/data` or bypassing encryption.
 
@@ -104,7 +104,7 @@ Use this as a coverage map, not as a request to manufacture one finding per sect
 ## 13. PWA, service worker, and offline behavior
 
 - Compare every referenced frontend asset, query version, cache name, and precache entry. Installed clients must receive changed assets without a mixed-version shell.
-- Verify API/auth/private responses are not cached; inspect cache keys, scope, update activation, offline fallback, failed fetches, navigation, and old-cache cleanup.
+- Verify API/auth/private responses are not cached; inspect cache keys, scope, first activation, offline fallback, failed fetches, and navigation.
 - Check manifest metadata, icons, start URL, display mode, install/update UX, notification click handling, and HTTPS expectations.
 - Review failure modes when an old tab, new service worker, and changed API contract coexist.
 
@@ -122,7 +122,7 @@ Use this as a coverage map, not as a request to manufacture one finding per sect
 - Ensure all tests use temporary databases/data directories and fake provider/OpenAI inputs and cannot load the root `.env` or real tokens.
 - Review security regression coverage for password/session/CSRF, SQLCipher fail-closed, body/path bounds, calendar SSRF, log redaction, backup/restore, prompt injection/tool authorization, and explicit remote writes.
 - Review state-machine and concurrency tests for sync, background Coach jobs, streaming/cancel, retries, partial failures, idempotency, adaptive apply, and restore maintenance.
-- Compare backend API and frontend behavior coverage. Inspect Playwright login, PWA update, viewports, accessibility, input behavior, notifications/microphone fallbacks, and meaningful failure artifacts.
+- Compare backend API and frontend behavior coverage. Inspect Playwright login, fresh PWA installation, viewports, accessibility, input behavior, notifications/microphone fallbacks, and meaningful failure artifacts.
 - Run syntax/unit checks and, where feasible, isolated Docker and Playwright suites. Record unexecuted suites; do not infer they pass.
 
 ## 16. Dependencies, container, and runtime hardening

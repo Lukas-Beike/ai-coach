@@ -12,6 +12,16 @@ synchronization to Intervals.icu.
 The application is intentionally standalone. Keep it on a trusted LAN or
 private VPN; it must not be exposed directly to the public internet.
 
+## Fresh installation contract
+
+- Run the remediated application with a new, empty data directory and a fresh
+  browser profile. Initialise only the current SQLCipher schema.
+- Keep one current Coach, API and persistence contract. Remove obsolete code
+  and its tests instead of adding migration, upgrade or compatibility paths.
+- Same-build restarts, current-schema backup/restore, provider synchronisation
+  and editing newly created data remain supported operations.
+- Do not convert or delete the previous installation as part of development.
+
 ## Important boundaries
 
 - Do not replace the app with a Custom GPT, webhook flow, hosted service, or
@@ -121,7 +131,7 @@ Python 3.14. Keep code compatible with both unless intentionally changing the
 toolchain and CI together.
 
 There is no frontend test runner in this repository. For browser-facing
-changes, manually verify login, PWA asset refresh, safe Markdown rendering,
+changes, manually verify login, fresh PWA installation/offline assets, safe Markdown rendering,
 Enter-to-send versus Shift+Enter, microphone permissions, notifications, and
 the affected UI flow when a browser is available.
 

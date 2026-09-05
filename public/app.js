@@ -108,7 +108,7 @@ function currentPlanLoadAreas() {
 }
 
 function ensureRouteData(route = state.route) {
-  if (!state.data || state.loadPromise) return;
+  if (!state.data) return;
   const requested = [];
   const panelRoute = baseRoute(route);
   if (panelRoute === "today" && !state.loadedAreas.has("plan")) requested.push("plan");
@@ -218,6 +218,20 @@ function cookie(name) {
 }
 
 function showLogin() {
+  state.sessionGeneration += 1;
+  state.chatGeneration += 1;
+  state.loadSequence += 1;
+  state.pendingLoads.clear();
+  state.loadPromise = null;
+  state.chatStatusPollInFlight = false;
+  state.chatStream?.controller.abort();
+  state.chatStream = null;
+  state.chatQueue = [];
+  state.rejectedMessages = [];
+  state.coachActionProposals = [];
+  state.coachReceipts = [];
+  state.voiceTranscribing = false;
+  rememberChatTurn(null);
   if (state.chatStatusTimer) clearTimeout(state.chatStatusTimer);
   state.chatStatusTimer = null;
   state.stateEventSource?.close();
@@ -316,7 +330,12 @@ function finishAppShellLoading() {
 }
 
 async function api(path, options = {}) {
-  return window.AppApi.request(path, options, showLogin);
+  const generation = state.sessionGeneration;
+  const result = await window.AppApi.request(path, options, () => {
+    if (generation === state.sessionGeneration) showLogin();
+  });
+  if (generation !== state.sessionGeneration) throw new DOMException("Session ended", "AbortError");
+  return result;
 }
 
 function scheduleStateEventRefresh(areas) {
@@ -477,8 +496,6 @@ function handleSyncStatus(status, broadcast = false) {
   if (!status.running && status.operation_id && status.operation_id === state.syncPoll.operationId) {
     state.localSync.intervals = false;
     state.syncPoll.operationId = null;
-    const waiters = state.syncPoll.waiters.splice(0);
-    waiters.forEach((resolve) => resolve(status));
   }
 }
 
@@ -511,25 +528,12 @@ async function pollSyncStatus() {
   }
 }
 
-function waitForSync(operationId) {
-  if (!operationId) return Promise.resolve({ status: "unknown" });
-  state.syncPoll.operationId = operationId;
-  state.localSync.intervals = true;
-  broadcastSyncMessage({ type: "started", operation_id: operationId });
-  scheduleSyncPoll(0);
-  return new Promise((resolve) => state.syncPoll.waiters.push(resolve));
-}
-
 function setupSyncStatusMonitoring() {
   if ("BroadcastChannel" in window) {
     state.syncPoll.channel = new BroadcastChannel(SYNC_POLL_CHANNEL);
     state.syncPoll.channel.addEventListener("message", (event) => {
       const message = event.data || {};
-      if (message.type === "started" && message.operation_id) {
-        state.syncPoll.operationId = message.operation_id;
-        state.localSync.intervals = true;
-        scheduleSyncPoll(0);
-      } else if (message.type === "status") handleSyncStatus(message.status);
+      if (message.type === "status") handleSyncStatus(message.status);
     });
   }
   scheduleSyncPoll(0);
@@ -545,7 +549,12 @@ function handleSyncVisibility() {
 }
 
 async function apiAudio(path, blob) {
-  return window.AppApi.audio(path, blob, showLogin);
+  const generation = state.sessionGeneration;
+  const result = await window.AppApi.audio(path, blob, () => {
+    if (generation === state.sessionGeneration) showLogin();
+  });
+  if (generation !== state.sessionGeneration) throw new DOMException("Session ended", "AbortError");
+  return result;
 }
 
 async function bootstrapAuth() {
@@ -709,6 +718,11 @@ function updateChatControls() {
     cancelButton.disabled = (!state.chatStream && !state.chatServerOperationId) || cancelRequested;
     cancelButton.textContent = cancelRequested ? "Wird abgebrochen…" : "Abbrechen";
   }
+  const progress = $("#chatOperationStatus");
+  if (progress) {
+    progress.hidden = !state.busy;
+    $("#chatOperationLabel").textContent = chatIsReconciling ? "Antwort wird übernommen" : chatIsResuming ? "Coach-Auftrag wird fortgesetzt" : "Coach arbeitet";
+  }
   updateChatQueueStatus();
 }
 
@@ -729,6 +743,7 @@ function stopVoiceRecording() {
 }
 
 async function transcribeVoice(blob) {
+  const generation = state.sessionGeneration;
   state.voiceTranscribing = true;
   setVoiceStatus("Aufnahme wird transkribiert …");
   updateVoiceButton();
@@ -744,11 +759,14 @@ async function transcribeVoice(blob) {
     if ($("#chatPanel")?.classList.contains("active") && document.visibilityState === "visible") input.focus({ preventScroll: true });
     setVoiceStatus("Transkript eingefügt. Bitte prüfen und anschließend senden.");
   } catch (error) {
+    if (generation !== state.sessionGeneration) return;
     setVoiceStatus(error.message, true);
     toast(error.message, true);
   } finally {
-    state.voiceTranscribing = false;
-    updateVoiceButton();
+    if (generation === state.sessionGeneration) {
+      state.voiceTranscribing = false;
+      updateVoiceButton();
+    }
   }
 }
 
@@ -1382,7 +1400,8 @@ function distanceLabel(value) {
 }
 
 function activitySportLabel(activity) {
-  const value = String(activity?.type || activity?.sport || activity?.sport_type || activity?.name || "").toLowerCase();
+  const value = String(activity?.type || "").toLowerCase();
+  if (value === "virtualride") return "Rad indoor";
   if (/ride|bike|cycling|rad|velo|bicycle/.test(value)) return "Radfahren";
   if (/run|lauf|jog/.test(value)) return "Laufen";
   if (/swim|schwimm/.test(value)) return "Schwimmen";
@@ -1391,7 +1410,7 @@ function activitySportLabel(activity) {
 }
 
 function activityTypeKey(activity) {
-  return String(activity?.type || activity?.sport || activity?.sport_type || "Sportart unbekannt").trim() || "Sportart unbekannt";
+  return String(activity?.type || "Sportart unbekannt").trim() || "Sportart unbekannt";
 }
 
 function renderActivityFilters(activities) {
@@ -1713,13 +1732,14 @@ function renderCoachActionReview() {
     : "Lokale Planung";
   proposals.forEach((proposal) => {
     const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
+    const undo = proposal.action_type === "undo_change";
     const card = document.createElement("div");
     card.className = "coach-action-card";
     const description = document.createElement("p");
     const target = proposal.target_system === "local+intervals"
       ? "lokal und optional in Intervals.icu"
       : proposal.target_system === "intervals" ? "in Intervals.icu" : "nur lokal";
-    description.textContent = duplicateDelete
+    description.textContent = undo ? "Diese lokale Änderung zurücknehmen? Der aktuelle Stand wird vor der Ausführung erneut geprüft." : duplicateDelete
       ? "Diese Garmin-Radaufzeichnung ist nahezu identisch mit der Wahoo-Einheit. Soll nur das Garmin-Duplikat aus Intervals.icu gelöscht werden?"
       : `Der Coach schlägt ${target} ${proposal.diff?.length || 0} Einheiten vor. Noch nicht gespeichert.`;
     const entries = document.createElement("ul");
@@ -1743,7 +1763,7 @@ function renderCoachActionReview() {
     const confirm = document.createElement("button");
     confirm.type = "button";
     confirm.className = "adaptive-planning-button";
-    confirm.textContent = duplicateDelete
+    confirm.textContent = undo ? "Änderung zurücknehmen" : duplicateDelete
       ? "Garmin-Duplikat löschen"
       : proposal.target_system === "local+intervals" ? "Planung freigeben" : "Lokal speichern";
     confirm.addEventListener("click", () => executeCoachActionProposal(proposal, confirm));
@@ -1765,22 +1785,24 @@ async function executeCoachActionProposal(proposal, button) {
       method: "POST",
       body: JSON.stringify({ action_token: confirmed.action_token, payload_hash: confirmed.proposed_action.payload_hash }),
     });
+    if (proposal.action_type === "undo_change" && result.status !== "undone") throw new Error("Die Undo-Bestätigung fehlt; bitte den aktuellen Stand prüfen.");
     state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
     renderCoachActionReview();
     const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
-    const receiptMessage = duplicateDelete
+    const undo = proposal.action_type === "undo_change";
+    const receiptMessage = undo ? "Die lokale Änderung wurde zurückgenommen." : duplicateDelete
       ? "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten."
       : result.local_planned
       ? `${result.local_planned} Einheit(en) lokal geplant.`
       : "Planung lokal gespeichert.";
     addCoachReceipt({
-      title: duplicateDelete ? "Duplikat gelöscht" : "Planung gespeichert",
+      title: undo ? "Änderung zurückgenommen" : duplicateDelete ? "Duplikat gelöscht" : "Planung gespeichert",
       message: receiptMessage,
       details: duplicateDelete ? ["Wahoo bleibt die kanonische Radaufzeichnung"] : [result.sync_job_ids?.length ? `${result.sync_job_ids.length} Syncjobs eingereiht` : result.sync_job_id ? `Syncjob ${result.sync_job_id} eingereiht` : "Keine implizite Remote-Änderung"],
     });
-    toast(duplicateDelete ? "Garmin-Duplikat gelöscht" : result.local_planned ? `${result.local_planned} Einheit(en) lokal geplant` : "Planung lokal gespeichert");
-    await load("/api/bootstrap?local=1", duplicateDelete ? ["activities"] : ["plan", "library"]);
-    if (!duplicateDelete) applyNavigationRoute("plan", { historyMode: "push" });
+    toast(receiptMessage);
+    await load("/api/bootstrap?local=1", duplicateDelete ? ["activities"] : ["plan", "library", "profile", "feedback"]);
+    if (!duplicateDelete && !undo) applyNavigationRoute("plan", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Planung nicht gespeichert", message: error.message, status: "error" });
     toast(error.message, true);
@@ -1799,18 +1821,42 @@ function createPendingMessage(entry) {
   return node;
 }
 
+function mergeChatMessages(incoming, existing = state.data?.messages || []) {
+  const messages = [];
+  for (const message of [...existing, ...state.rejectedMessages, ...incoming]) {
+    const index = messages.findIndex((entry) =>
+      (message.id != null && entry.id != null && String(message.id) === String(entry.id))
+      || (message.client_turn_id && entry.client_turn_id === message.client_turn_id && entry.role === message.role));
+    if (index < 0) messages.push(message);
+    else if (messages[index].id == null || message.id != null) messages[index] = { ...messages[index], ...message, optimistic: message.id == null };
+  }
+  return messages.sort((a, b) => {
+    if (a.id != null && b.id != null) return Number(a.id) - Number(b.id);
+    if (a.client_turn_id && a.client_turn_id === b.client_turn_id) return a.role === "user" ? -1 : 1;
+    return (a.created_at || "").localeCompare(b.created_at || "");
+  });
+}
+
 function reconcileCompletedChatMessage(message) {
   if (!state.data || !message || typeof message.content !== "string") return false;
-  const completed = { ...message, role: "assistant" };
-  const messages = Array.isArray(state.data.messages) ? state.data.messages : [];
-  const messageId = completed.id == null ? "" : String(completed.id);
-  const existingIndex = messageId
-    ? messages.findIndex((entry) => entry?.id != null && String(entry.id) === messageId)
-    : -1;
-  if (existingIndex >= 0) messages[existingIndex] = completed;
-  else messages.push(completed);
-  state.data.messages = messages;
+  state.data.messages = mergeChatMessages([{ ...message, role: "assistant" }]);
   return true;
+}
+
+function rememberChatTurn(clientTurnId) {
+  // Only an opaque operation identity survives a reload. No athlete text or credentials.
+  try {
+    if (clientTurnId) sessionStorage.setItem("coachPendingTurn", clientTurnId);
+    else sessionStorage.removeItem("coachPendingTurn");
+  } catch (_) {}
+}
+
+function applyChatReceipt(receipt) {
+  state.chatContentVersion += 1;
+  if (receipt.message) reconcileCompletedChatMessage(receipt.message);
+  state.coachActionProposals = Array.isArray(receipt.proposed_actions) ? receipt.proposed_actions : [];
+  addStructuredCoachReceipts(receipt);
+  renderMessages(state.data?.messages || [], false);
 }
 
 function renderMessages(messages, forceScroll = false, preserveScroll = false) {
@@ -1818,9 +1864,9 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
   // Synchronisation and refresh notices belong to their respective tabs,
   // not to the personal conversation history.
-  const visibleMessages = (messages || []).filter((message) => message.role !== "event");
+  const visibleMessages = messages || [];
   const signature = JSON.stringify([
-    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content]),
+    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.error]),
     appShellLoading,
     state.chatStreamText,
     state.chatServerOperationId,
@@ -1849,6 +1895,26 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
     if (message.id != null) node.dataset.messageId = String(message.id);
     if (message.role === "assistant") node.innerHTML = markdownToHtml(message.content);
     else node.textContent = message.content;
+    if (message.error) {
+      const error = document.createElement("p");
+      error.className = "message-error";
+      error.textContent = message.error;
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "Als Entwurf übernehmen";
+      retry.addEventListener("click", () => {
+        const input = $("#messageInput");
+        if (input.value.trim()) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
+        input.value = message.content;
+        state.chatDraftDirty = true;
+        state.data.messages = state.data.messages.filter((entry) => entry !== message);
+        state.rejectedMessages = state.rejectedMessages.filter((entry) => entry.client_turn_id !== message.client_turn_id);
+        renderMessages(state.data.messages);
+        jumpToChatComposer();
+        updateChatControls();
+      });
+      node.append(error, retry);
+    }
     root.append(node);
   }
   for (const entry of state.chatQueue) root.append(createPendingMessage(entry));
@@ -2773,6 +2839,10 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   metric.textContent = value == null ? "—" : (formatter ? formatter(value) : `${value}${unit ? ` ${unit}` : ""}`);
   caption.textContent = label;
   source.textContent = metricData?.source || "Nicht verfügbar";
+  const freshnessLabel = { stale: "Veraltet", partial: "Teilweise aktualisiert", unknown: "Aktualität unbekannt" }[metricData?.freshness];
+  if (freshnessLabel) source.textContent += ` · ${freshnessLabel}`;
+  if (metricData?.observed_at) source.textContent += ` · Messung ${dateLabel(String(metricData.observed_at).slice(0, 10))}`;
+  else if (freshnessLabel && metricData?.fetched_at) source.textContent += ` · Stand ${formatTime(metricData.fetched_at)}`;
   source.title = metricData?.note || metricData?.source || "";
   for (const className of [metricSourceClass(metricData?.source), metricToneClass(label, value)]) {
     if (className) item.classList.add(className);
@@ -2826,7 +2896,10 @@ async function saveInlineMetric(key, value, button) {
   const profile = { ...(state.data?.profile || {}), [key]: String(value || "").trim() };
   button.disabled = true;
   try {
-    await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
+    const saved = await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
+    if (!Object.keys(profile).every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string")) {
+      throw new Error("Die Profilbestätigung ist unvollständig. Der Entwurf bleibt erhalten.");
+    }
     toast("Wert gespeichert und für den Coach aktiviert");
     await load();
   } catch (error) {
@@ -2893,10 +2966,10 @@ function renderPerformance(performance) {
     ["Gewicht", compared(values.weight_kg, "weight_kg_30d"), null, { key: "weight_kg", step: "0.1" }],
     ["Körperfett", values.body_fat_pct, null, { key: "body_fat_pct", step: "0.1" }],
     ["Größe", values.height_cm, null, { key: "height_cm", step: "0.1" }],
-    ["Schlaf", compared({ value: recovery.sleep_hours, unit: "h", source: recovery.sleep_source || "Intervals.icu Wellness" }, "sleep_hours")],
-    ["Readiness", compared({ value: recovery.readiness, unit: "", source: recovery.readiness_source || "Intervals.icu Wellness" }, "readiness_30d")],
-    ["Ruhepuls", compared({ value: recovery.restingHR, unit: "bpm", source: recovery.restingHR_source || "Intervals.icu Wellness" }, "restingHR")],
-    ["HRV", compared({ value: recovery.hrv, unit: "ms", source: recovery.hrv_source || "Intervals.icu Wellness" }, "hrv")],
+    ["Schlaf", compared({ ...recovery.source_freshness?.sleep_hours, value: recovery.sleep_hours, unit: "h", source: recovery.sleep_source || "Intervals.icu Wellness" }, "sleep_hours")],
+    ["Readiness", compared({ ...recovery.source_freshness?.readiness, value: recovery.readiness, unit: "", source: recovery.readiness_source || "Intervals.icu Wellness" }, "readiness_30d")],
+    ["Ruhepuls", compared({ ...recovery.source_freshness?.restingHR, value: recovery.restingHR, unit: "bpm", source: recovery.restingHR_source || "Intervals.icu Wellness" }, "restingHR")],
+    ["HRV", compared({ ...recovery.source_freshness?.hrv, value: recovery.hrv, unit: "ms", source: recovery.hrv_source || "Intervals.icu Wellness" }, "hrv")],
     ["Schritte (Ø letzte 7 Tage)", values.steps_7d],
     ["Stockwerke (Ø letzte 7 Tage)", values.floors_7d],
     ["Kalorien (Ø letzte 7 Tage)", values.calories_7d],
@@ -3001,43 +3074,6 @@ function renderThinkingLevel(thinkingLevel) {
 function renderAppVersion(app = {}) {
   const settingsVersionNode = $("#settingsAppVersion");
   if (settingsVersionNode) settingsVersionNode.textContent = app.version ? `v${app.version}` : "unbekannt";
-}
-
-function renderGithubRelease(app = {}) {
-  const statusNode = $("#releaseStatus");
-  const summaryNode = $("#releaseSummary");
-  const changelogNode = $("#releaseChangelog");
-  const linkNode = $("#releaseLink");
-  if (!statusNode || !changelogNode || !linkNode) return;
-  const release = app.github_release || {};
-  const available = release.status === "ok";
-  statusNode.classList.toggle("error", !available && release.status === "unavailable");
-  if (!available) {
-    if (release.status === "loading") {
-      statusNode.classList.remove("error");
-      statusNode.textContent = release.message || "GitHub-Release wird nachgeladen.";
-      if (summaryNode) summaryNode.textContent = "Wird geladen";
-      changelogNode.textContent = "Release-Informationen werden nachgeladen.";
-      linkNode.hidden = true;
-      linkNode.removeAttribute("href");
-      return;
-    }
-    statusNode.textContent = release.status === "disabled"
-      ? "GitHub-Release-Prüfung ist nicht konfiguriert."
-      : (release.message || "GitHub-Release konnte nicht geladen werden.");
-    if (summaryNode) summaryNode.textContent = release.status === "disabled" ? "Nicht konfiguriert" : "Nicht verfügbar";
-    changelogNode.textContent = "Kein Changelog verfügbar.";
-    linkNode.hidden = true;
-    linkNode.removeAttribute("href");
-    return;
-  }
-  const publication = release.published_at ? ` · veröffentlicht ${formatTime(release.published_at)}` : "";
-  statusNode.classList.remove("error");
-  statusNode.textContent = `Neuestes Release: v${release.version}${publication}${release.is_newer ? " · Neuere Version verfügbar" : " · Aktuelle Version"}`;
-  if (summaryNode) summaryNode.textContent = release.is_newer ? `v${release.version} verfügbar` : `v${release.version} · aktuell`;
-  changelogNode.textContent = release.changelog || "Für dieses Release ist kein Changelog hinterlegt.";
-  linkNode.hidden = false;
-  linkNode.href = release.url;
 }
 
 function renderSettings(data) {
@@ -3191,7 +3227,6 @@ function renderSettings(data) {
   }
   const privacySummary = $("#privacySummary");
   if (privacySummary) privacySummary.textContent = `${usage.requests || 0} OpenAI-Anfragen heute`;
-  renderGithubRelease(data.app);
   renderNotificationStatus();
   renderProviderAttention(data);
   renderConnectionsSyncProgress(data);
@@ -3323,11 +3358,15 @@ function render(data) {
 
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
+  const sessionGeneration = state.sessionGeneration;
+  const chatGeneration = state.chatGeneration;
+  const chatContentVersion = state.chatContentVersion;
   const initialLoad = $("#appShell").classList.contains("is-loading");
   try {
     const localOnly = path.includes("local=1");
     const query = localOnly ? "?local=1" : "";
     const bootstrap = await api(path);
+    if (sessionGeneration !== state.sessionGeneration) return;
     const existing = state.data || {};
     const payload = { ...existing, ...bootstrap };
     ["messages", "messages_next_cursor", "activities", "activities_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", "garmin", "checkins", "local_feedback", "activity_feedback"].forEach((key) => {
@@ -3343,15 +3382,28 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     if (areas.has("performance")) requests.push(["performance", api("/api/performance")]);
     if (areas.has("feedback")) requests.push(["feedback", api("/api/feedback")]);
     if (areas.has("profile")) requests.push(["profile", api("/api/profile")]);
-    const domainData = Promise.all(requests.map(async ([area, request]) => [area, await request]));
+    const domainData = Promise.all(requests.map(async ([area, request]) => {
+      try { return [area, await request, null]; }
+      catch (error) { return [area, null, error]; }
+    }));
     if (initialLoad && requestSequence === state.loadSequence) {
       render(payload);
       finishAppShellLoading();
     }
     const results = await domainData;
-    results.forEach(([area, result]) => {
-      state.loadedAreas.add(area);
-      if (area === "chat") Object.assign(payload, { messages: result.messages || [], messages_next_cursor: result.next_cursor });
+    if (sessionGeneration !== state.sessionGeneration || requestSequence !== state.loadSequence) return;
+    // Incorporate changes that arrived while these requests were in flight.
+    payload.messages = state.data?.messages || [];
+    const failures = [];
+    const appliedAreas = [];
+    results.forEach(([area, result, error]) => {
+      if (area === "chat" && chatGeneration !== state.chatGeneration) return;
+      if (error) { failures.push(`${area}: ${error.message}`); return; }
+      if (area === "chat") {
+        if (!Array.isArray(result.messages)) throw new Error("Die Nachrichtenbestätigung fehlt.");
+        Object.assign(payload, { messages: mergeChatMessages(result.messages), messages_next_cursor: result.next_cursor });
+        if (chatContentVersion === state.chatContentVersion && Array.isArray(result.proposed_actions)) state.coachActionProposals = result.proposed_actions;
+      }
       if (area === "activities") Object.assign(payload, { activities: result.activities || [], activities_next_cursor: result.next_cursor });
       if (area === "plan") Object.assign(payload, result);
       if (area === "weather") Object.assign(payload, { weather: result });
@@ -3359,11 +3411,21 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       if (area === "performance") Object.assign(payload, result);
       if (area === "feedback") Object.assign(payload, result);
       if (area === "profile") Object.assign(payload, { profile: result.profile || bootstrap.profile, competitions: result.competitions || bootstrap.competitions });
+      state.loadedAreas.add(area);
+      appliedAreas.push(area);
     });
-    payload.state_versions = bootstrap.state_versions || payload.state_versions;
+    payload.state_versions = { ...(state.data?.state_versions || {}) };
+    for (const area of appliedAreas) {
+      if (area === "chat" && chatGeneration !== state.chatGeneration) continue;
+      const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", "garmin"] }[area] || [area];
+      for (const key of versionKeys) {
+        if (bootstrap.state_versions?.[key] !== undefined) payload.state_versions[key] = bootstrap.state_versions[key];
+      }
+    }
     if (requestSequence === state.loadSequence) render(payload);
+    if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
-    if (/Authentication/.test(error.message)) return;
+    if (sessionGeneration !== state.sessionGeneration || /Authentication/.test(error.message)) return;
     const statusCard = $("#statusCard");
     statusCard.hidden = false;
     statusCard.classList.add("warning");
@@ -3371,14 +3433,23 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     $("#statusDetail").textContent = error.message;
     toast(error.message, true);
   } finally {
-    if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
+    if (sessionGeneration === state.sessionGeneration && $("#appShell").classList.contains("is-loading")) finishAppShellLoading();
   }
 }
 
 function load(path = "/api/bootstrap", requestedAreas = null) {
+  const areas = state.pendingLoads.get(path) || new Set();
+  (requestedAreas || currentPlanLoadAreas()).forEach((area) => areas.add(area));
+  state.pendingLoads.set(path, areas);
   if (state.loadPromise) return state.loadPromise;
-  const areas = requestedAreas || currentPlanLoadAreas();
-  const promise = loadState(path, areas);
+  const generation = state.sessionGeneration;
+  const promise = (async () => {
+    while (state.pendingLoads.size && generation === state.sessionGeneration) {
+      const [nextPath, nextAreas] = state.pendingLoads.entries().next().value;
+      state.pendingLoads.delete(nextPath);
+      await loadState(nextPath, [...nextAreas]);
+    }
+  })();
   const tracked = promise.finally(() => {
     if (state.loadPromise === tracked) state.loadPromise = null;
   });
@@ -3432,9 +3503,31 @@ async function pollChatStatus() {
   if (state.chatStatusPollInFlight) return;
   state.chatStatusPollInFlight = true;
   let running = false;
+  const sessionGeneration = state.sessionGeneration;
+  const chatGeneration = state.chatGeneration;
   try {
+    let pendingTurn = state.chatRequest?.clientTurnId;
+    if (!pendingTurn) { try { pendingTurn = sessionStorage.getItem("coachPendingTurn"); } catch (_) {} }
+    if (pendingTurn && !state.chatStream) {
+      try {
+        const receipt = await api(`/api/chat/receipt?client_turn_id=${encodeURIComponent(pendingTurn)}`);
+        if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
+        if (receipt.status !== "running" && receipt.status !== "queued") {
+          applyChatReceipt(receipt);
+          rememberChatTurn(null);
+        } else {
+          running = true;
+          if (!state.chatRequest) state.chatRequest = { phase: "recovering", clientTurnId: pendingTurn, message: null };
+        }
+      } catch (error) {
+        if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
+        if ([403, 404].includes(error.status)) rememberChatTurn(null);
+        else throw error;
+      }
+    }
     const status = await api("/api/chat/status");
-    running = status.status === "running";
+    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
+    running = running || status.status === "running";
     if (running) {
       state.chatServerOperationId = status.operation_id || null;
       if (!state.chatRequest) state.chatRequest = { phase: "recovering", operationId: state.chatServerOperationId, message: null, background: status.mode === "background" };
@@ -3472,8 +3565,10 @@ async function pollChatStatus() {
   } catch (error) {
     if (!/Authentication/.test(error.message)) scheduleChatStatusPoll(5_000);
   } finally {
-    state.chatStatusPollInFlight = false;
-    scheduleChatStatusPoll(running ? 1_500 : 5_000);
+    if (sessionGeneration === state.sessionGeneration && chatGeneration === state.chatGeneration) {
+      state.chatStatusPollInFlight = false;
+      scheduleChatStatusPoll(running ? 1_500 : 5_000);
+    }
   }
 }
 
@@ -3508,12 +3603,15 @@ function queueChatMessage(message, mode) {
 }
 
 async function requestCoachResponse(message) {
+  const sessionGeneration = state.sessionGeneration;
+  const chatGeneration = state.chatGeneration;
+  const clientTurnId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `turn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   if (state.data) {
-    state.data.messages.push({ role: "user", content: message });
+    state.data.messages = mergeChatMessages([{ role: "user", content: message, client_turn_id: clientTurnId, created_at: new Date().toISOString(), optimistic: true }]);
     renderMessages(state.data.messages, true);
   }
   state.chatStreamText = "";
-  const clientTurnId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `turn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  rememberChatTurn(clientTurnId);
   const request = { phase: "running", message, clientTurnId, operationId: null, responseMessageId: null, responseMessageReceived: false, cancelRequested: false };
   state.chatRequest = request;
   const stream = { controller: new AbortController(), operationId: null, cancelRequested: false, request, serverError: false };
@@ -3530,18 +3628,33 @@ async function requestCoachResponse(message) {
       headers: { "Content-Type": "application/json", "X-CSRF-Token": cookie("ic_csrf") },
       body: JSON.stringify({ message, client_turn_id: clientTurnId }),
     });
+    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
     if (!response.ok) {
-      if (response.status === 401) stream.serverError = true;
+      stream.serverError = true;
+      stream.rejected = true;
       let payload = {};
       try { payload = await response.json(); } catch (_) {}
-      if (response.status === 401) showLogin();
-      throw new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
+      if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
+      if (response.status === 401) {
+        showLogin();
+        const input = $("#messageInput");
+        if (input.value.trim()) state.rejectedMessages.push({ role: "user", content: message, client_turn_id: clientTurnId, error: payload.error || "Bitte erneut anmelden." });
+        else input.value = message;
+        state.chatDraftDirty = true;
+        toast(payload.error || "Bitte erneut anmelden; der Entwurf bleibt erhalten.", true);
+      }
+      const error = new Error(payload.error || `Anfrage fehlgeschlagen (${response.status})`);
+      error.status = response.status;
+      error.reason = payload.reason;
+      throw error;
     }
+    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
     if (!response.body) throw new Error("Der Browser unterstützt keinen Antwort-Stream.");
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     const consume = (block) => {
+      if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
       let event = "message";
       const data = [];
       for (const line of block.replace(/\r/g, "").split("\n")) {
@@ -3578,9 +3691,11 @@ async function requestCoachResponse(message) {
       } else if (event === "completed") {
         cancelScheduledChatStreamRender();
         completed = true;
+        state.chatContentVersion += 1;
+        rememberChatTurn(null);
         request.phase = "reconciling";
         request.responseMessageId = payload.message?.id || null;
-        request.responseMessageReceived = reconcileCompletedChatMessage(payload.message);
+        request.responseMessageReceived = reconcileCompletedChatMessage(payload.message ? { ...payload.message, client_turn_id: clientTurnId } : null);
         if (request.responseMessageReceived) state.chatStreamText = "";
         state.coachActionProposals = Array.isArray(payload?.proposed_actions) ? payload.proposed_actions : [];
         if (payload?.coach_quick_actions && state.data) {
@@ -3612,7 +3727,22 @@ async function requestCoachResponse(message) {
     invalidateContextPreview();
     return completed ? "completed" : "failed";
   } catch (error) {
+    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
     cancelScheduledChatStreamRender();
+    if (stream.rejected) {
+      rememberChatTurn(null);
+      const input = $("#messageInput");
+      if (input.value.trim()) {
+        const failed = state.data.messages.find((entry) => entry.optimistic && entry.client_turn_id === clientTurnId);
+        if (failed) failed.error = error.message;
+      } else {
+        state.data.messages = (state.data.messages || []).filter((entry) => !(entry.optimistic && entry.client_turn_id === clientTurnId));
+        input.value = message;
+      }
+      state.chatDraftDirty = true;
+      toast(error.message, true);
+      return false;
+    }
     const cancelled = stream.cancelRequested || error?.name === "AbortError" || error?.reason === "chat_cancelled";
     if (!completed && !stream.serverError) {
       request.phase = "recovering";
@@ -3624,10 +3754,12 @@ async function requestCoachResponse(message) {
       return "recovering";
     }
     if (!cancelled) toast(error.message, true);
+    scheduleChatStatusPoll(0);
     await loadChatHistoryFresh();
     invalidateContextPreview();
     return false;
   } finally {
+    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
     if (state.chatStream === stream) state.chatStream = null;
     if (request.phase !== "recovering") {
       cancelScheduledChatStreamRender();
@@ -3720,12 +3852,12 @@ async function syncNow(event) {
   button.disabled = true; button.classList.add("busy"); button.textContent = compactButton ? "Synchronisierung läuft…" : "Aktivitäten werden aktualisiert…";
   try {
     const result = await api("/api/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
-    if (result.operation_id) {
-      const completed = await waitForSync(result.operation_id);
-      if (completed.status === "error") throw new Error(completed.last_error || "Synchronisierung fehlgeschlagen.");
-      toast(result.status === "already_running" ? "Aktualisierung läuft bereits" : "Aktualisierung abgeschlossen");
-      invalidateContextPreview();
-    } else toast("Aktualisierung läuft bereits");
+    if (!result.id) throw new Error("Die Jobbestätigung fehlt.");
+    const completed = await waitForSyncJob(result.id);
+    if (completed.status !== "completed") throw new Error(completed.error_detail || "Synchronisierung nicht vollständig abgeschlossen.");
+    toast("Aktualisierung abgeschlossen");
+    invalidateContextPreview();
+    await load();
   } catch (error) { toast(error.message, true); await load(); }
   finally { state.localSync.intervals = false; button.disabled = false; button.classList.remove("busy"); button.textContent = defaultCaption; updateHeaderAction(); }
 }
@@ -3838,6 +3970,11 @@ async function resetCoachChat() {
   button.textContent = "Wird zurückgesetzt…";
   try {
     await api("/api/chat/reset", { method: "POST", body: "{}" });
+    state.chatGeneration += 1;
+    state.rejectedMessages = [];
+    state.chatStream?.controller.abort();
+    state.chatStream = null;
+    rememberChatTurn(null);
     if (state.data) {
       state.data.messages = [];
       state.chatQueue = [];
@@ -3870,7 +4007,10 @@ async function saveProfile(event) {
     sports: formData.getAll("sports").map((value) => String(value).trim()).filter(Boolean).join(", "),
   };
   try {
-    await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
+    const saved = await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
+    if (!Object.keys(profile).every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string")) {
+      throw new Error("Die Profilbestätigung ist unvollständig. Der Entwurf bleibt erhalten.");
+    }
     state.profileDirty = false;
     setDirtyIndicator("profileDirtyIndicator", false);
     invalidateContextPreview();
@@ -3893,46 +4033,8 @@ async function saveProfile(event) {
   }
 }
 
-let pwaReloadPending = false;
-
-function showPwaUpdate() {
-  const button = $("#pwaUpdateButton");
-  if (!button) return;
-  button.hidden = false;
-  button.title = "Neue App-Version laden";
-  button.setAttribute("aria-label", "Neue App-Version laden");
-}
-
-function setupPwaUpdates() {
-  if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (pwaReloadPending) window.location.reload();
-  });
-  navigator.serviceWorker.register("/service-worker.js").then((registration) => {
-    if (registration.waiting) showPwaUpdate();
-    registration.addEventListener("updatefound", () => {
-      const worker = registration.installing;
-      if (!worker) return;
-      worker.addEventListener("statechange", () => {
-        if (worker.state === "installed" && navigator.serviceWorker.controller) showPwaUpdate();
-      });
-    });
-  }).catch(() => {});
-}
-
-async function applyPwaUpdate() {
-  if (!await confirmDiscardChanges()) return;
-  try {
-    const registration = await navigator.serviceWorker.getRegistration();
-    if (!registration?.waiting) {
-      await registration?.update();
-      if (!registration?.waiting) return window.location.reload();
-    }
-    pwaReloadPending = true;
-    registration.waiting.postMessage({ type: "SKIP_WAITING" });
-  } catch (_) {
-    toast("App-Update konnte nicht geladen werden.", true);
-  }
+function registerServiceWorker() {
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js").catch(() => {});
 }
 
 async function saveCheckin(event) {
@@ -3948,6 +4050,7 @@ async function saveCheckin(event) {
   if (button) { button.disabled = true; button.textContent = "Check-in wird gespeichert…"; }
   try {
     const result = await api("/api/feedback", { method: "POST", body: JSON.stringify(values) });
+    if (!result.checkin || result.checkin.checkin_date !== values.checkin_date) throw new Error("Die Check-in-Bestätigung fehlt. Der Entwurf bleibt erhalten.");
     state.checkinDirty = false;
     setDirtyIndicator("checkinDirtyIndicator", false);
     state.checkinSelectedDate = result.checkin?.checkin_date || values.checkin_date;
@@ -3976,7 +4079,8 @@ async function saveActivityFeedback(event, activity, button) {
   button.setAttribute("aria-busy", "true");
   button.textContent = "Wird gespeichert…";
   try {
-    await api(`/api/activities/${encodeURIComponent(String(activityId))}/feedback`, { method: "POST", body: JSON.stringify(payload) });
+    const result = await api(`/api/activities/${encodeURIComponent(String(activityId))}/feedback`, { method: "POST", body: JSON.stringify(payload) });
+    if (result.status !== "ok" || (payload.notes.trim() ? String(result.activity_feedback?.activity_id) !== String(activityId) : result.activity_feedback !== null)) throw new Error("Die Feedback-Bestätigung fehlt. Der Entwurf bleibt erhalten.");
     state.activityFeedbackDirty.delete(String(activityId));
     state.activityFeedbackDrafts.delete(String(activityId));
     setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
@@ -4244,7 +4348,6 @@ $("#quickMessageTemplates").addEventListener("click", (event) => {
   $("#chatForm").requestSubmit();
 });
 $("#voiceButton").addEventListener("click", toggleVoiceInput);
-$("#pwaUpdateButton").addEventListener("click", applyPwaUpdate);
 $("#chatJumpToComposer").addEventListener("click", () => {
   jumpToChatComposer();
 });
@@ -4344,7 +4447,7 @@ window.addEventListener("beforeunload", (event) => {
   event.preventDefault();
   event.returnValue = "";
 });
-setupPwaUpdates();
+registerServiceWorker();
 setupConnectivityStatus();
 renderNotificationStatus();
 setupSyncStatusMonitoring();
