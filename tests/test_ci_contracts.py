@@ -1,5 +1,6 @@
 """Exercise source selection and shard discovery without remote CI side effects."""
 import importlib.util
+import re
 from pathlib import Path
 import subprocess
 import shutil
@@ -12,6 +13,28 @@ import run_tests
 SPEC = importlib.util.spec_from_file_location("release_source", Path(__file__).resolve().parents[1] / ".github/scripts/release_source.py")
 release_source = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release_source)
+
+
+class WorkflowSourceTests(unittest.TestCase):
+    def test_executed_source_is_bound_to_the_workflow_event(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/publish-container.yml").read_text(encoding="utf-8")
+        checkout_refs = re.findall(r"^          ref: (.+)$", workflow, re.M)
+        self.assertEqual(len(checkout_refs), 8)
+        self.assertTrue(all(ref == "${{ github.sha }}" for ref in checkout_refs[1:]))
+        self.assertIn("'refs/heads/main' || github.sha", checkout_refs[0])
+        self.assertNotIn("source_ref", workflow)
+        self.assertIn("SOURCE_REF: ${{ github.sha }}", workflow)
+        self.assertIn("TESTED_SHA: ${{ needs.source.outputs.source_sha }}", workflow)
+        self.assertIn('release_source.py --verify "$TESTED_SHA"', workflow)
+        self.assertIn("github.ref == 'refs/heads/main' && inputs.publish_container == true", workflow)
+
+    def test_release_pr_dispatch_selects_its_own_branch_without_source_override(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/weekly-release.yml").read_text(encoding="utf-8")
+        dispatch = workflow.split("trigger_release_test() {", 1)[1].split("ensure_release_test() {", 1)[0]
+        self.assertIn('--ref "$source_ref"', dispatch)
+        self.assertIn('--field "publish_container=false"', dispatch)
+        self.assertNotIn('--field "source_ref=', dispatch)
 
 
 class DiscoveryTests(unittest.TestCase):

@@ -13,10 +13,6 @@ on:
         description: Release tag to build and publish
         required: true
         type: string
-      source_ref:
-        description: Test source reference; publishing accepts only the release tag or its immutable SHA on main
-        required: false
-        type: string
       publish_container:
         description: Publish the container after tests pass
         required: false
@@ -47,7 +43,8 @@ jobs:
       - name: Resolve source and release contract
         id: source
         env:
-          SOURCE_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && (inputs.source_ref || inputs.release_tag) || github.sha }}
+          # Execute only this workflow event's commit, never a dispatched source override.
+          SOURCE_REF: ${{ github.sha }}
           # Release PRs are tested before their tag exists, with read-only permissions.
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || (github.event_name == 'workflow_dispatch' && inputs.publish_container == true) && inputs.release_tag || '' }}
         run: python .github/scripts/release_source.py
@@ -64,7 +61,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.source.outputs.source_sha }}
+          ref: ${{ github.sha }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -81,7 +78,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.source.outputs.source_sha }}
+          ref: ${{ github.sha }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -97,7 +94,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.source.outputs.source_sha }}
+          ref: ${{ github.sha }}
       - name: Build isolated SQLCipher test image
         run: docker build --tag ai-coach:test .
       - name: Run unit tests in the container
@@ -143,7 +140,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.source.outputs.source_sha }}
+          ref: ${{ github.sha }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -172,7 +169,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.source.outputs.source_sha }}
+          ref: ${{ github.sha }}
       - name: Build isolated image for scanning
         run: docker build --tag ai-coach:security .
       - name: Generate SPDX SBOM
@@ -201,7 +198,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.source.outputs.source_sha }}
+          ref: ${{ github.sha }}
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6.0.0
         with:
@@ -266,7 +263,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.source.outputs.source_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Verify build uses tested source and release version
         env:

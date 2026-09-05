@@ -769,8 +769,9 @@ uses the same bounded test runner as the four fast native shards.
 The quality job records coverage and runs pinned Ruff formatter/linter and
 MyPy checks. Every test module is discovered before deterministic sharding;
 import failures are fatal and the runner reports executed and skipped counts.
-All checks and container builds use one resolved immutable source SHA. Manual
-release inputs must identify the same commit and its APP_VERSION.
+All checks and container builds use the workflow event's immutable `github.sha`.
+The release tag must identify that same commit and its APP_VERSION; dispatch
+inputs cannot replace the source that is executed.
 
 Pull requests run the unit tests, syntax checks, and image security report. The conventional-commit
 workflow validates pull-request titles and commit subjects. Dependabot manages
@@ -870,8 +871,8 @@ protection so that `develop` requires the normal CI checks and `main` disallows
 force pushes and direct human pushes while allowing the required pull request
 checks.
 
-Manual container publishing must run from `main`. Its source must be the release
-tag or that tag's full commit SHA, and the commit must belong to `main` history.
+Manual container publishing must run from `main`. The selected event commit
+must match the release tag, and the commit must belong to `main` history.
 Non-publishing release PR checks can run before the tag exists. The workflow
 does not share dependency, Buildx binary, or image-layer caches between runs.
 
