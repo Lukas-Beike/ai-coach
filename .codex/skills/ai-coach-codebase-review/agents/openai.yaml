@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Coach Full Codebase Review"
+  short_description: "Coach-first Vollreview mit UI-Runtime-Tests"
+  default_prompt: "Nutze $ai-coach-codebase-review fuer ein vollstaendiges Coach-first Review der Codebasis und der lokalen Anwendung, inklusive Nachrichten-Races, Tools, API-Fehlern, Integrationen und UI/UX."
