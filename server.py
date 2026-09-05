@@ -48,7 +48,6 @@ from backend.providers.garmin import collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 from backend.sync.windows import split_date_windows
 from backend.sync.status import persist_sync_operation_state, project_sync_status
-from backend.sync.orchestration import run_read_sync_pipeline
 from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
 from backend.sync.jobs import (
     JOB_STATUSES,
@@ -158,7 +157,6 @@ COACH_BACKGROUND_UNIT_LIMIT = 7
 INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
-SYNC_START_LOCK = threading.Lock()
 WORKOUT_LIBRARY_SYNC_LOCK = threading.Lock()
 COMPETITION_SYNC_LOCK = threading.Lock()
 COMPETITION_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
@@ -239,24 +237,33 @@ def state_events_since(since: int = 0) -> dict[str, Any]:
 
 
 class MaintenanceGate:
-    """Block new application mutations while a database restore is active."""
+    """Drain complete operations and invalidate work across destructive maintenance."""
 
     def __init__(self):
         self.condition = threading.Condition()
         self.active = 0
         self.restoring = False
+        self.generation = 0
+        self.local = threading.local()
 
     @contextmanager
-    def operation(self):
+    def operation(self, expected_generation: int | None = None):
         with self.condition:
-            if self.restoring:
-                raise AppError(503, "Die Anwendung befindet sich gerade im Wartungsmodus. Bitte später erneut versuchen.")
-            self.active += 1
+            depth = getattr(self.local, "depth", 0)
+            if expected_generation is not None and expected_generation != self.generation:
+                raise AppError(409, "Der Auftrag wurde durch eine Datenlöschung verworfen.", reason="operation_invalidated")
+            if not depth:
+                if self.restoring:
+                    raise AppError(503, "Die Anwendung befindet sich gerade im Wartungsmodus. Bitte später erneut versuchen.", reason="maintenance")
+                self.active += 1
+            self.local.depth = depth + 1
         try:
             yield
         finally:
             with self.condition:
-                self.active -= 1
+                self.local.depth -= 1
+                if not self.local.depth:
+                    self.active -= 1
                 self.condition.notify_all()
 
     @contextmanager
@@ -265,14 +272,24 @@ class MaintenanceGate:
             if self.restoring:
                 raise AppError(409, "Eine Datenbankwiederherstellung läuft bereits.")
             self.restoring = True
+            nested = bool(getattr(self.local, "depth", 0))
+            if nested:
+                self.active -= 1
             while self.active:
                 self.condition.wait()
+            self.generation += 1
         try:
             yield
         finally:
             with self.condition:
                 self.restoring = False
+                if nested:
+                    self.active += 1
                 self.condition.notify_all()
+
+    def current_generation(self) -> int:
+        with self.condition:
+            return self.generation
 
     def state(self) -> dict[str, Any]:
         with self.condition:
@@ -287,6 +304,19 @@ def maintenance_operation(function: Any) -> Any:
     def guarded(*args: Any, **kwargs: Any) -> Any:
         with MAINTENANCE_GATE.operation():
             return function(*args, **kwargs)
+    return guarded
+
+
+def claimed_maintenance_operation(function: Any) -> Any:
+    """Keep claimed payloads and their success/failure writes in one generation."""
+    @wraps(function)
+    def guarded(job: dict[str, Any]) -> Any:
+        try:
+            with MAINTENANCE_GATE.operation(job["_maintenance_generation"]):
+                return function(job)
+        except AppError as exc:
+            if exc.reason not in {"operation_invalidated", "maintenance"}:
+                raise
     return guarded
 
 
@@ -1554,6 +1584,7 @@ def observed_sync(provider: str, area: str = "default"):
     """Correlate a sync function and its provider calls with one operation."""
     def decorator(function: Any) -> Any:
         @wraps(function)
+        @maintenance_operation
         def wrapped(*args: Any, **kwargs: Any) -> Any:
             reason = kwargs.get("reason")
             if reason is None and args:
@@ -1641,6 +1672,7 @@ def initialise_database() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
+                client_turn_id TEXT,
                 created_at TEXT NOT NULL
             );
             CREATE TABLE chat_tool_calls (
@@ -2201,6 +2233,7 @@ def _sync_job_active(provider: str, job_type: str = "refresh") -> bool:
     return bool(row)
 
 
+@maintenance_operation
 def enqueue_sync_job(
     provider: str,
     job_type: str = "refresh",
@@ -2281,6 +2314,7 @@ def resume_interrupted_sync_jobs() -> int:
     return len(jobs)
 
 
+@maintenance_operation
 def _claim_sync_job() -> dict[str, Any] | None:
     now = utc_now()
     with DB_LOCK, database() as db:
@@ -2298,7 +2332,8 @@ def _claim_sync_job() -> dict[str, Any] | None:
             "UPDATE sync_job_items SET status='running', attempts=attempts+1, error_class=NULL, error_detail=NULL, updated_at=? WHERE job_id=? AND status='queued'",
             (now, job["id"]),
         )
-        return {**dict(job), "attempts": int(job.get("attempts") or 0) + 1}
+        return {**dict(job), "attempts": int(job.get("attempts") or 0) + 1,
+                "_maintenance_generation": MAINTENANCE_GATE.current_generation()}
 
 
 def _sync_job_update(job_id: str, item_status: str, *, error_class: str | None = None, error_detail: str | None = None) -> None:
@@ -2464,6 +2499,7 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
     raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
 
 
+@claimed_maintenance_operation
 def _run_claimed_sync_job(job: dict[str, Any]) -> None:
     job_id = job["id"]
     try:
@@ -2506,10 +2542,15 @@ def _run_claimed_sync_job(job: dict[str, Any]) -> None:
 
 def _sync_job_worker_loop() -> None:
     while not SYNC_JOB_STOP.is_set():
-        job = _claim_sync_job()
-        if job:
-            _run_claimed_sync_job(job)
-            continue
+        try:
+            with MAINTENANCE_GATE.operation():
+                job = _claim_sync_job()
+                if job:
+                    _run_claimed_sync_job(job)
+                    continue
+        except AppError as exc:
+            if exc.reason != "maintenance":
+                raise
         SYNC_JOB_WAKE.wait(SYNC_JOB_POLL_SECONDS)
         SYNC_JOB_WAKE.clear()
 
@@ -4029,6 +4070,25 @@ def _merge_garmin_records(incoming: Any, previous: Any) -> list[Any]:
     return merged
 
 
+def merge_garmin_sources(payload: dict[str, Any], previous: dict[str, Any]) -> None:
+    """Keep successfully collected source data through partial reads and backfill jobs."""
+    for collection in ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr"):
+        if collection in previous or collection in payload:
+            payload[collection] = _merge_garmin_records(payload.get(collection), previous.get(collection))
+    freshness = dict(previous.get("source_freshness") or {})
+    failed = {error.get("source") for error in payload.get("errors") or [] if isinstance(error, dict)}
+    for source in ("heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp", "running_threshold", "weight"):
+        if payload.get(source) and source not in failed:
+            freshness[source] = payload["synced_at"]
+        elif source in previous:
+            payload[source] = previous[source]
+    payload["source_freshness"] = freshness
+    if isinstance(previous.get("morning_body_battery"), dict):
+        payload["morning_body_battery"] = previous["morning_body_battery"]
+    if previous.get("start") and payload.get("start"):
+        payload["start"] = min(str(previous["start"]), str(payload["start"]))
+
+
 def _garmin_error_entries() -> list[dict[str, Any]]:
     try:
         errors = json.loads(get_kv("last_garmin_error") or "[]")
@@ -4241,11 +4301,11 @@ def sync_garmin(
             set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
             previous = garmin_snapshot()
             payload = load_garmin_fixture(days)
-            canonical = latest_snapshot()
+            merge_garmin_sources(payload, previous)
             payload["sport_max_hr"] = merge_garmin_max_hr(
                 garmin_activity_max_hr(payload.get("activities")), previous.get("sport_max_hr")
             )
-            payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
+            annotate_garmin_activity_matches(payload)
             payload.setdefault("provider_sync", {"pagination": {"fixture": {"windows": 1, "records": len(payload.get("activities") or []), "complete": True}}})
             if isinstance(previous.get("morning_body_battery"), dict):
                 payload["morning_body_battery"] = previous["morning_body_battery"]
@@ -4254,10 +4314,11 @@ def sync_garmin(
             set_kv("last_garmin_sync_at", payload["synced_at"])
             mark_daily_sync("garmin")
             set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
-            update_provider_sync_cursor("garmin", "data", payload.get("end", ""), payload["synced_at"])
-            if end_date is not None:
+            if garmin_collection_complete(payload):
+                update_provider_sync_cursor("garmin", "data", payload.get("end", ""), payload["synced_at"])
+            if end_date is not None and garmin_collection_complete(payload):
                 update_provider_sync_cursor("garmin", "historical", SYNC_EARLIEST_DATE.isoformat(), payload["synced_at"])
-            return {"status": "partial" if payload.get("errors") else "ok", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
+            return {"status": "ok" if garmin_collection_complete(payload) else "partial", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
         except Exception as exc:
             error = redact_text(str(exc))[:1000]
             set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
@@ -4338,29 +4399,23 @@ def sync_garmin(
             include_recovery=end_date is None and days != ALL_SYNC_DAYS,
             include_current_metrics=end_date is None and days != ALL_SYNC_DAYS,
         )
-        for collection in ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr"):
-            if collection in previous or collection in payload:
-                payload[collection] = _merge_garmin_records(payload.get(collection), previous.get(collection))
-        if isinstance(previous.get("morning_body_battery"), dict):
-            payload["morning_body_battery"] = previous["morning_body_battery"]
-        if previous.get("start") and payload.get("start"):
-            payload["start"] = min(str(previous["start"]), str(payload["start"]))
+        merge_garmin_sources(payload, previous)
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
         payload["sport_max_hr"] = merge_garmin_max_hr(
             garmin_activity_max_hr(payload.get("activities")), previous.get("sport_max_hr")
         )
-        canonical = latest_snapshot()
-        payload["activities"], payload["duplicate_activities_skipped"] = filter_garmin_activities(payload.get("activities"), canonical.get("recent_activities", []) if isinstance(canonical, dict) else [])
+        annotate_garmin_activity_matches(payload)
         append_garmin_performance_history(payload, previous)
         set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         set_kv("last_garmin_sync_at", payload["synced_at"])
         mark_daily_sync("garmin")
         set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
-        update_provider_sync_cursor("garmin", "data", windows[-1][1].isoformat(), payload["synced_at"])
-        if end_date is not None:
+        if garmin_collection_complete(payload):
+            update_provider_sync_cursor("garmin", "data", windows[-1][1].isoformat(), payload["synced_at"])
+        if end_date is not None and garmin_collection_complete(payload):
             update_provider_sync_cursor("garmin", "historical", windows[0][0].isoformat(), payload["synced_at"])
         return {
-            "status": "partial" if payload["errors"] else "ok",
+            "status": "ok" if garmin_collection_complete(payload) else "partial",
             "synced_at": payload["synced_at"],
             "errors": len(payload["errors"]),
             "activities": len(payload.get("activities") or []),
@@ -4373,6 +4428,24 @@ def sync_garmin(
     finally:
         set_kv("garmin_sync_status", "")
         GARMIN_LOCK.release()
+
+
+def garmin_collection_complete(payload: dict[str, Any]) -> bool:
+    pagination = payload.get("provider_sync", {}).get("pagination", {})
+    return not payload.get("errors") and bool(pagination) and all(
+        details.get("complete") is True for details in pagination.values()
+    )
+
+
+def annotate_garmin_activity_matches(payload: dict[str, Any]) -> None:
+    """Persist canonical references separately; the complete Garmin records stay intact."""
+    canonical = latest_snapshot() or {}
+    intervals = canonical.get("recent_activities") or []
+    payload["activity_matches"] = [
+        {"garmin_activity_id": first_present(activity, ("activityId", "id")), "intervals_activity_id": match.get("id")}
+        for activity in payload.get("activities") or [] if isinstance(activity, dict)
+        for match in intervals if isinstance(match, dict) and garmin_activity_duplicates_intervals(activity, [match])
+    ]
 
 
 def garmin_public_state() -> dict[str, Any]:
@@ -7971,6 +8044,7 @@ class IntervalsClient:
             history_days=90,
         )
         snapshot["provider_sync"] = {"pagination": self.pagination}
+        snapshot["raw_provider_data"] = {"athlete": athlete_data, "wellness": wellness}
         return snapshot
 
     def delete_event(self, event_id: str) -> Any:
@@ -10123,24 +10197,6 @@ def sync_browser_state(
     return result
 
 
-def start_sync_operation(activity_days: int, reason: str = "manual") -> dict[str, Any]:
-    if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
-    with SYNC_START_LOCK:
-        if SYNC_LOCK.locked() or get_kv("sync_running") == "1":
-            return {"status": "already_running", "operation_id": get_kv("sync_operation_id")}
-        operation_id = uuid.uuid4().hex
-        now = utc_now()
-        set_kv("sync_running", "1")
-        set_kv("sync_operation_started_at", now)
-        set_kv("sync_operation_finished_at", "")
-        set_sync_operation_state(operation_id, "running", "queued", 0, "Intervals.icu-Synchronisierung wird gestartet…")
-        threading.Thread(
-            target=safe_sync,
-            args=(reason, activity_days, operation_id),
-            daemon=True,
-        ).start()
-        return {"status": "started", "operation_id": operation_id, "activity_days": activity_days}
 
 
 def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
@@ -10702,6 +10758,32 @@ def save_snapshot(snapshot: dict[str, Any], update_full_sync: bool = True) -> No
             set_kv("last_performance_refresh_at", snapshot["synced_at"], db)
 
 
+def merge_performance_snapshot(current: dict[str, Any] | None, performance: dict[str, Any]) -> dict[str, Any]:
+    """Apply only performance-owned fields to the latest complete provider source."""
+    merged = dict(current or {})
+    merged["synced_at"] = performance["synced_at"]
+    merged["athlete"] = performance.get("athlete", {})
+    merged["recent_wellness"] = deduplicate_api_records(
+        list(performance.get("recent_wellness") or []) + list(merged.get("recent_wellness") or [])
+    )
+    raw = dict(merged.get("raw_provider_data") or {})
+    incoming_raw = performance.get("raw_provider_data") or {}
+    if "athlete" in incoming_raw:
+        raw["athlete"] = incoming_raw["athlete"]
+    raw["wellness"] = deduplicate_api_records(
+        list(incoming_raw.get("wellness") or []) + list(raw.get("wellness") or [])
+    )
+    merged["raw_provider_data"] = raw
+    provider_sync = dict(merged.get("provider_sync") or {})
+    pagination = dict(provider_sync.get("pagination") or {})
+    incoming_pagination = (performance.get("provider_sync") or {}).get("pagination") or {}
+    if "performance_wellness" in incoming_pagination:
+        pagination["performance_wellness"] = incoming_pagination["performance_wellness"]
+    provider_sync["pagination"] = pagination
+    merged["provider_sync"] = provider_sync
+    return merged
+
+
 def merge_historical_snapshot(current: dict[str, Any] | None, historical: dict[str, Any]) -> dict[str, Any]:
     """Merge historical provider collections without replacing the current read model."""
     if not isinstance(current, dict):
@@ -11102,7 +11184,9 @@ def refresh_current_performance() -> dict[str, Any]:
     try:
         set_kv("performance_refresh_running", "1")
         snapshot = IntervalsClient().fetch_performance_snapshot(latest_snapshot())
-        save_snapshot(snapshot, update_full_sync=False)
+        with DB_LOCK, database():
+            snapshot = merge_performance_snapshot(latest_snapshot(), snapshot)
+            save_snapshot(snapshot, update_full_sync=False)
         set_kv("last_performance_error", "")
         publish_state_event("provider", {"provider": "intervals", "area": "performance", "status": "ready"})
         return {"status": "ok", "refreshed_at": snapshot["synced_at"]}
@@ -15079,6 +15163,7 @@ def resume_interrupted_coach_jobs() -> int:
     return resumed
 
 
+@maintenance_operation
 def _claim_background_coach_job() -> dict[str, Any] | None:
     with DB_LOCK, database() as db:
         rows = db.execute(
@@ -15099,7 +15184,8 @@ def _claim_background_coach_job() -> dict[str, Any] | None:
                 (utc_now(), row["client_turn_id"]),
             ).rowcount
             if claimed == 1:
-                return {**dict(row), "status": "running", "receipt": receipt}
+                return {**dict(row), "status": "running", "receipt": receipt,
+                        "_maintenance_generation": MAINTENANCE_GATE.current_generation()}
     return None
 
 
@@ -15139,6 +15225,7 @@ def _background_coach_message(job: dict[str, Any]) -> str:
     return str(row["content"])
 
 
+@claimed_maintenance_operation
 def _run_background_coach_job(job: dict[str, Any]) -> None:
     receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
     operation_id = str(receipt.get("operation_id") or "")
@@ -15181,10 +15268,15 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
 
 def _coach_job_worker_loop() -> None:
     while not COACH_JOB_STOP.is_set():
-        job = _claim_background_coach_job()
-        if job:
-            _run_background_coach_job(job)
-            continue
+        try:
+            with MAINTENANCE_GATE.operation():
+                job = _claim_background_coach_job()
+                if job:
+                    _run_background_coach_job(job)
+                    continue
+        except AppError as exc:
+            if exc.reason != "maintenance":
+                raise
         COACH_JOB_WAKE.wait(5)
         COACH_JOB_WAKE.clear()
 
@@ -15287,6 +15379,7 @@ def run_morning_checkin(checkin_date: str) -> None:
         MORNING_CHECKIN_LOCK.release()
 
 
+@maintenance_operation
 def schedule_morning_checkin() -> None:
     checkin_date = morning_checkin_date()
     if not checkin_date or not CONFIG.openai_api_key or not CONFIG.intervals_api_key:
@@ -15296,7 +15389,22 @@ def schedule_morning_checkin() -> None:
     if not MORNING_CHECKIN_LOCK.acquire(blocking=False):
         return
     set_kv("morning_checkin_attempted", checkin_date)
-    threading.Thread(target=run_morning_checkin, args=(checkin_date,), daemon=True).start()
+    generation = MAINTENANCE_GATE.current_generation()
+
+    def run_scheduled() -> None:
+        admitted = False
+        try:
+            with MAINTENANCE_GATE.operation(generation):
+                admitted = True
+                run_morning_checkin(checkin_date)
+        except AppError as exc:
+            if exc.reason not in {"maintenance", "operation_invalidated"}:
+                raise
+        finally:
+            if not admitted:
+                MORNING_CHECKIN_LOCK.release()
+
+    threading.Thread(target=run_scheduled, daemon=True).start()
 
 
 
@@ -15971,7 +16079,7 @@ def _privacy_export_file() -> Path:
 
 CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
     "kv": {"key", "value", "updated_at"},
-    "messages": {"id", "role", "content", "created_at"},
+    "messages": {"id", "role", "content", "client_turn_id", "created_at"},
     "chat_tool_calls": {"call_id", "tool_name", "result", "created_at"},
     "snapshots": {"id", "payload", "created_at"},
     "workout_library": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "last_synced_at", "updated_at"},
@@ -16219,29 +16327,30 @@ def privacy_delete_preview() -> dict[str, Any]:
 
 
 def delete_local_data() -> dict[str, Any]:
-    conversation_id = get_kv("openai_conversation_id") or ""
-    remote_delete_attempted = bool(conversation_id)
-    remote_deleted = False
-    if conversation_id:
-        try:
-            remote_deleted = delete_remote_conversation(conversation_id)
-        except Exception:
-            LOGGER.warning("Remote OpenAI conversation could not be deleted", extra={"event": "privacy_remote_delete_failed"}, exc_info=True)
-    with DB_LOCK, database() as db:
-        deleted_counts = _privacy_delete_counts(db)
-        deleted_tables = list(dict.fromkeys(table for _category, _label, tables in PRIVACY_DELETE_SCOPE for table in tables))
-        for table in deleted_tables:
-            db.execute(f"DELETE FROM {table}")
-        db.execute("DELETE FROM kv")
-        set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
-    return {
-        "status": "ok",
-        "local_data_deleted": True,
-        "deleted_categories": deleted_counts,
-        "remote_delete_attempted": remote_delete_attempted,
-        "remote_conversation_deleted": remote_deleted,
-        "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
-    }
+    with MAINTENANCE_GATE.restore():
+        conversation_id = get_kv("openai_conversation_id") or ""
+        remote_delete_attempted = bool(conversation_id)
+        remote_deleted = False
+        if conversation_id:
+            try:
+                remote_deleted = delete_remote_conversation(conversation_id)
+            except Exception:
+                LOGGER.warning("Remote OpenAI conversation could not be deleted", extra={"event": "privacy_remote_delete_failed"}, exc_info=True)
+        with DB_LOCK, database() as db:
+            deleted_counts = _privacy_delete_counts(db)
+            deleted_tables = list(dict.fromkeys(table for _category, _label, tables in PRIVACY_DELETE_SCOPE for table in tables))
+            for table in deleted_tables:
+                db.execute(f"DELETE FROM {table}")
+            db.execute("DELETE FROM kv")
+            set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
+        return {
+            "status": "ok",
+            "local_data_deleted": True,
+            "deleted_categories": deleted_counts,
+            "remote_delete_attempted": remote_delete_attempted,
+            "remote_conversation_deleted": remote_deleted,
+            "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
+        }
 
 
 SESSION_COOKIE = "ic_session"
@@ -16398,7 +16507,7 @@ def login_user(handler: BaseHTTPRequestHandler, password: str) -> dict[str, Any]
     allowed, retry_after = allow_rate(f"login:{client_ip(handler)}", 5, 900)
     if not allowed:
         raise AppError(429, f"Zu viele Anmeldeversuche. Erneut versuchen in etwa {retry_after} Sekunden.")
-    if not hmac.compare_digest(str(password), CONFIG.app_password):
+    if not hmac.compare_digest(str(password).encode("utf-8"), CONFIG.app_password.encode("utf-8")):
         raise AppError(401, "Ungültiges Passwort.")
     token = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(32)
@@ -16822,9 +16931,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/sync":
                 payload = self.read_json()
                 days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))
-                self.send_json(202, start_sync_operation(days, reason="manuell"))
-            elif path == "/api/sync/status":
-                raise AppError(405, "GET verwenden.")
+                self.send_json(202, enqueue_sync_job("intervals", "refresh", {"days": days, "reason": "manual"}, requested_by="user"))
             elif path == "/api/diagnostics/capture":
                 self.send_json(200, set_diagnostic_capture(self.read_json().get("enabled")))
             elif path == "/api/intervals/full-resync":
@@ -17052,108 +17159,39 @@ class CoachHTTPServer(ThreadingHTTPServer):
     request_queue_size = 32
 
 
-def safe_sync(reason: str, activity_days: int | None = None, operation_id: str | None = None) -> None:
-    run_read_sync_pipeline(
-        reason,
-        activity_days,
-        operation_id,
-        observe=observed_operation,
-        sync_intervals=sync_intervals,
-        sync_competitions=sync_competitions,
-        record_failure=_log_background_sync_failure,
-    )
 
 
-def _log_background_sync_failure(
-    scope: dict[str, Any],
-    provider: str,
-    phase: str,
-    error: BaseException,
-) -> None:
-    competition = phase == "competitions"
-    LOGGER.error(
-        "Background competition synchronization failed" if competition else "Background synchronization failed",
-        extra={
-            "event": "background_competition_sync_failed" if competition else "background_sync_failed",
-            "context": {
-                "operation_id": scope["operation_id"],
-                "trigger": scope["trigger"],
-                "provider": provider,
-                "phase": phase,
-                "error_code": operation_error_code(error),
-            },
-        },
-    )
 
 
 def daily_sync_loop() -> None:
-    """Keep the local snapshot fresh once per calendar day without a webhook."""
+    """Schedule new work after maintenance without killing the daily scheduler."""
     while True:
         time.sleep(300)
-        if get_profile().get("weather_location", "").strip():
-            if not _sync_job_active("weather"):
-                enqueue_sync_job("weather", "refresh", {"force": False, "reason": "dreistündliche automatische Aktualisierung"}, requested_by="scheduler")
-        if not (CONFIG.intervals_api_key or CONFIG.calendar_ical_url):
-            continue
-        if CONFIG.calendar_ical_url and daily_sync_due("calendar"):
-            if not _sync_job_active("calendar"):
-                enqueue_sync_job("calendar", "refresh", {"reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
-        if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
-            if daily_sync_due("garmin"):
-                if not _sync_job_active("garmin"):
-                    enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
-        if not CONFIG.intervals_api_key or not daily_sync_due("intervals") or get_kv("sync_running") == "1" or INTERVALS_RESYNC_GATE.is_resetting():
-            continue
-        if not _sync_job_active("intervals"):
-            enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
+        try:
+            schedule_daily_sync_jobs()
+        except AppError as exc:
+            if exc.reason != "maintenance":
+                LOGGER.error("Daily synchronization scheduling failed", extra={"event": "daily_sync_failed"})
 
 
-def safe_garmin_sync(reason: str, operation_id: str | None = None) -> None:
-    try:
-        sync_garmin(reason=reason, operation_id=operation_id)
-    except Exception as exc:
-        LOGGER.error(
-            "Garmin synchronization failed",
-            extra={"event": "garmin_sync_failed", "context": {
-                "operation_id": operation_id or (OPERATION_CONTEXT.get() or {}).get("operation_id"),
-                "trigger": operation_trigger(reason),
-                "provider": "garmin",
-                "phase": "sync",
-                "error_code": operation_error_code(exc),
-            }},
-        )
-
-
-def safe_external_calendar_sync(reason: str, operation_id: str | None = None) -> None:
-    try:
-        sync_external_calendar(reason, operation_id=operation_id)
-    except Exception as exc:
-        LOGGER.error(
-            "External calendar synchronization failed",
-            extra={"event": "external_calendar_sync_failed", "context": {
-                "operation_id": operation_id or (OPERATION_CONTEXT.get() or {}).get("operation_id"),
-                "trigger": operation_trigger(reason),
-                "provider": "calendar",
-                "phase": "sync",
-                "error_code": operation_error_code(exc),
-            }},
-        )
-
-
-def safe_weather_sync(reason: str, operation_id: str | None = None) -> None:
-    try:
-        sync_weather(reason, operation_id=operation_id)
-    except Exception as exc:
-        LOGGER.error(
-            "Weather synchronization failed",
-            extra={"event": "weather_background_sync_failed", "context": {
-                "operation_id": operation_id or (OPERATION_CONTEXT.get() or {}).get("operation_id"),
-                "trigger": operation_trigger(reason),
-                "provider": "weather",
-                "phase": "sync",
-                "error_code": operation_error_code(exc),
-            }},
-        )
+@maintenance_operation
+def schedule_daily_sync_jobs() -> None:
+    if get_profile().get("weather_location", "").strip():
+        if not _sync_job_active("weather"):
+            enqueue_sync_job("weather", "refresh", {"force": False, "reason": "dreistündliche automatische Aktualisierung"}, requested_by="scheduler")
+    if not (CONFIG.intervals_api_key or CONFIG.calendar_ical_url):
+        return
+    if CONFIG.calendar_ical_url and daily_sync_due("calendar"):
+        if not _sync_job_active("calendar"):
+            enqueue_sync_job("calendar", "refresh", {"reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
+    if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
+        if daily_sync_due("garmin"):
+            if not _sync_job_active("garmin"):
+                enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
+    if not CONFIG.intervals_api_key or not daily_sync_due("intervals") or get_kv("sync_running") == "1" or INTERVALS_RESYNC_GATE.is_resetting():
+        return
+    if not _sync_job_active("intervals"):
+        enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
 
 
 def enqueue_startup_sync_jobs() -> None:

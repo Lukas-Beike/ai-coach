@@ -1576,60 +1576,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(status["state_versions"], {"activities": "v1"})
         self.assertNotIn("activities", json.dumps(status["message"]))
 
-    def test_read_sync_orchestration_is_dependency_light_and_read_only(self):
-        from backend.sync.orchestration import run_read_sync_pipeline
 
-        calls = []
-        failures = []
-
-        class Scope:
-            def __enter__(self):
-                return {"operation_id": "operation-test", "trigger": "manual"}
-
-            def __exit__(self, exc_type, exc_value, traceback):
-                return False
-
-        def observe(*args):
-            return Scope()
-
-        def intervals(*args, **kwargs):
-            calls.append(("intervals", args, kwargs))
-            raise RuntimeError("intervals failure")
-
-        def competitions(*args, **kwargs):
-            calls.append(("competitions", args, kwargs))
-
-        run_read_sync_pipeline(
-            "manual",
-            7,
-            "operation-input",
-            observe=observe,
-            sync_intervals=intervals,
-            sync_competitions=competitions,
-            record_failure=lambda scope, provider, phase, error: failures.append((scope, provider, phase, str(error))),
-        )
-
-        self.assertEqual([call[0] for call in calls], ["intervals", "competitions"])
-        self.assertEqual(calls[1][2], {"push_local": False, "operation_id": "operation-test"})
-        self.assertEqual(failures[0][1:], ("intervals", "sync", "intervals failure"))
-
-    def test_start_sync_operation_claims_one_operation(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with patch.object(server, "CONFIG", config), patch.object(server, "safe_sync") as worker, patch.object(server.threading, "Thread") as thread:
-            thread.return_value.start = Mock()
-            result = server.start_sync_operation(7, reason="test")
-            duplicate = server.start_sync_operation(7, reason="test")
-        try:
-            self.assertEqual(result["status"], "started")
-            self.assertEqual(result["activity_days"], 7)
-            self.assertEqual(duplicate["status"], "already_running")
-            self.assertEqual(duplicate["operation_id"], result["operation_id"])
-            thread.assert_called_once()
-            thread.return_value.start.assert_called_once_with()
-            worker.assert_not_called()
-        finally:
-            server.set_kv("sync_running", "0")
-            server.set_kv("sync_operation_status", "idle")
 
     def test_daily_sync_markers_are_separate_per_provider(self):
         local_day = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
@@ -1651,7 +1598,7 @@ class CoachTests(unittest.TestCase):
 
     def test_daily_sync_loop_uses_local_provider_markers(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
-        loop = source[source.index("def daily_sync_loop"):source.index("def safe_garmin_sync")]
+        loop = source[source.index("def daily_sync_loop"):source.index("def enqueue_startup_sync_jobs")]
         self.assertIn('daily_sync_due("calendar")', loop)
         self.assertIn('daily_sync_due("garmin")', loop)
         self.assertIn('daily_sync_due("intervals")', loop)
@@ -3842,8 +3789,8 @@ class CoachTests(unittest.TestCase):
             def get_race_predictions(self):
                 return [{"race": "local fixture"}]
 
-            def get_max_metrics(self, current):
-                return {"date": current}
+            def get_max_metrics_range(self, start, end):
+                return {"date": end}
 
             def get_cycling_ftp(self):
                 return {"functionalThresholdPower": 301}
@@ -4024,8 +3971,8 @@ class CoachTests(unittest.TestCase):
             def get_race_predictions(self):
                 return []
 
-            def get_max_metrics(self, current):
-                return {"date": current}
+            def get_max_metrics_range(self, start, end):
+                return {"date": end}
 
         fake = FakeGarmin()
         collect_garmin_data(
@@ -5355,7 +5302,8 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server, "IntervalsClient", return_value=client
         ):
-            server.safe_sync("startup")
+            server.enqueue_sync_job("intervals", "refresh", {"days": 7, "reason": "startup"})
+            server._run_claimed_sync_job(server._claim_sync_job())
         self.assertEqual(recorder.mutations, [])
 
     def test_daily_sync_contract_rejects_remote_mutations(self):
@@ -5363,7 +5311,8 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server, "IntervalsClient", return_value=client
         ):
-            server.safe_sync("daily")
+            server.enqueue_sync_job("intervals", "refresh", {"days": 7, "reason": "daily"})
+            server._run_claimed_sync_job(server._claim_sync_job())
         self.assertEqual(recorder.mutations, [])
 
     def _prepare_competition_contract_fixture(self):
@@ -5381,7 +5330,8 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server, "IntervalsClient", return_value=client
         ):
-            server.safe_sync("startup")
+            server.enqueue_sync_job("intervals", "refresh", {"days": 7, "reason": "startup"})
+            server._run_claimed_sync_job(server._claim_sync_job())
         self.assertEqual(recorder.mutations, [])
 
     def test_daily_sync_competition_contract_rejects_remote_mutations(self):
@@ -5389,7 +5339,8 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server, "IntervalsClient", return_value=client
         ):
-            server.safe_sync("daily")
+            server.enqueue_sync_job("intervals", "refresh", {"days": 7, "reason": "daily"})
+            server._run_claimed_sync_job(server._claim_sync_job())
         self.assertEqual(recorder.mutations, [])
 
     def test_manual_activity_sync_contract_rejects_remote_mutations(self):
@@ -5679,14 +5630,11 @@ class CoachTests(unittest.TestCase):
                     self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()["count"], 0)
 
                 incomplete_path = data_dir / "incomplete.db"
+                incomplete_path.write_bytes(valid_backup)
                 connection = server.sqlite_backend.connect(incomplete_path, timeout=20)
                 try:
                     server._configure_cipher(connection, config.app_password)
-                    connection.executescript(
-                        "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);"
-                        "CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);"
-                        "CREATE TABLE snapshots (id INTEGER PRIMARY KEY, payload TEXT NOT NULL, created_at TEXT NOT NULL);"
-                    )
+                    connection.execute("DROP TABLE snapshots")
                     connection.commit()
                 finally:
                     connection.close()
