@@ -68,16 +68,18 @@ jobs:
                 }));
             } else if (context.eventName === 'pull_request_target') {
               const pullRequest = context.payload.pull_request;
-               const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
+              const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
+              const titleChanged = context.payload.action === 'edited' && context.payload.changes?.title;
+              const reviewBaselineChanged = baseChanged || titleChanged || context.payload.action === 'reopened';
               if (
                 pullRequest.draft !== true &&
                 ['develop', 'main'].includes(pullRequest.base.ref) &&
-                (context.payload.action !== 'edited' || baseChanged)
+                (context.payload.action !== 'edited' || reviewBaselineChanged)
               ) {
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
                   baseRef: pullRequest.base.ref,
-                  reviewRequestedAt: (baseChanged || context.payload.action === 'reopened')
+                  reviewRequestedAt: reviewBaselineChanged
                     ? pullRequest.updated_at
                     : '',
                   skipCodexReview: shouldSkipCodexReview(pullRequest),
