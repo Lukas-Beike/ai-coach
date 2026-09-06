@@ -12537,7 +12537,7 @@ def requested_activity_refresh_days(message: str) -> int | None:
     """Extract an explicit activity-history window from the athlete's request."""
     text = str(message or "").casefold()
     refresh_context = r"(?:aktualisier|refresh|sync|synchronisier|abruf|lad|hol|histor(?:ie|y)|aktivität|aktivitaet|activity|activities|einheit)"
-    for match in re.finditer(r"\b(\d{1,4})\s*(?:tage|tag|days?|d)\b", text):
+    for match in re.finditer(r"\b(\d{1,4})\s*(?:tage[n]?|tag|days?|d)\b", text):
         prefix = text[max(0, match.start() - 100):match.start()]
         suffix = text[match.end():min(len(text), match.end() + 100)]
         if not re.search(refresh_context, prefix + suffix):
