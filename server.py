@@ -13910,11 +13910,15 @@ def _chat_with_structured_coach_impl(
             return False
         requested_days = arguments.get("days")
         if requested_days is None:
-            return bool(completed_refresh.get("result", {}).get("days"))
+            requested_days = sync_period("intervals")
         try:
-            requested_days = max(1, int(requested_days))
+            requested_days = int(requested_days)
             completed_days = int(completed_refresh.get("result", {}).get("days"))
         except (TypeError, ValueError):
+            return False
+        if requested_days == ALL_SYNC_DAYS:
+            return completed_days == ALL_SYNC_DAYS
+        if requested_days < 1 or completed_days < 1:
             return False
         return requested_days <= completed_days
 

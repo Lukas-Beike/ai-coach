@@ -230,6 +230,28 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(result["command_receipts"][0]["result"].get("days"), 3)
         self.assertEqual(result["command_receipts"][1]["result"]["status"], "queued")
 
+    def test_waited_refresh_does_not_cache_omitted_or_all_time_window(self):
+        for requested_days in (None, server.ALL_SYNC_DAYS):
+            with self.subTest(requested_days=requested_days):
+                intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+                arguments = {} if requested_days is None else {"days": requested_days}
+                responses = [
+                    {"output": [self.call("start_provider_refresh", arguments, "refresh")]},
+                    {"output_text": "Der Zeitraum wurde aktualisiert."},
+                ]
+                with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+                    server, "ensure_conversation", return_value=f"omitted-refresh-{requested_days}"
+                ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+                    server, "sync_period", return_value=90
+                ), patch.object(
+                    server, "sync_intervals", return_value={"status": "ok", "waited_for_existing": True, "activity_days": 3}
+                ), patch.object(server, "responses_request", side_effect=responses):
+                    result = server.chat_with_coach(
+                        "Aktualisiere und analysiere die letzte Einheit.",
+                        client_turn_id=f"omitted-refresh-{requested_days}",
+                    )
+                self.assertEqual(result["command_receipts"][1]["result"]["status"], "queued")
+
     def test_latest_analysis_keeps_authorized_follow_up(self):
         intent = {**self.intent("start_provider_refresh", ["intervals_refresh"], ["list_planned_workouts"]), "intent": "remote_sync", "target_system": "intervals"}
         with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
