@@ -14638,6 +14638,13 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             if isinstance(item, dict)
         )
     )
+    preflight_required = bool(
+        latest_activity_analysis
+        and structured_intent.get("intent") in {"local_action", "remote_sync"}
+        and structured_intent.get("target_system") == "intervals"
+        and "start_provider_refresh" in _structured_authorized_operations(structured_intent)
+        and "intervals_refresh" in structured_intent.get("authorization_scope", [])
+    )
     if not resuming_background_response and ((latest_activity_analysis and not completed_preflight_receipt) or (prompt_requests_fresh_data(message) and not (
         structured_intent.get("operation") == "start_provider_refresh"
         and structured_intent.get("target_system") == "intervals"
@@ -14654,6 +14661,29 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                     "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.",
                     reason="provider_busy",
                 )
+            if preflight_required:
+                preflight_receipt = {
+                    "call_id": "preflight-intervals-refresh",
+                    "tool": "start_provider_refresh",
+                    "effect_key": "preflight-intervals-refresh",
+                    "result": {
+                        "ok": True,
+                        "status": "completed",
+                        "provider": "intervals",
+                        "before_analysis": True,
+                    },
+                }
+                try:
+                    preflight_days = int(sync_result.get("activity_days"))
+                except (TypeError, ValueError):
+                    preflight_days = None if sync_result.get("waited_for_existing") else sync_period("intervals")
+                if preflight_days is not None:
+                    preflight_receipt["result"]["days"] = preflight_days
+                if existing_command:
+                    background_receipt = _merge_coach_command_receipt(
+                        client_turn_id,
+                        {"command_receipts": [*background_receipt.get("command_receipts", []), preflight_receipt]},
+                    )
             try:
                 completed_intervals_refresh_days = int(sync_result.get("activity_days"))
             except (TypeError, ValueError):
