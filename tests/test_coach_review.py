@@ -736,6 +736,55 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(len(receipt["command_receipts"]),2)
         with server.database() as db:self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM athlete_checkins").fetchone()["n"],2)
 
+    def test_resumed_same_tool_effect_keeps_tools_enabled_after_first_receipt(self):
+        csrf_hash = server.session_token_hash("resumed-same-tool")
+        client_turn_id = "resumed-same-tool"
+        server.enqueue_background_coach_job(
+            "Erstelle und speichere den Trainingsplan fuer die naechsten sechs Wochen.",
+            client_turn_id,
+            csrf_hash,
+            operation_id="resumed-same-tool-op",
+        )
+        intent = self.intent("save_checkin", ["local_checkin"])
+        first_result = {"ok": True, "status": "saved", "checkin_date": "2026-09-05"}
+        persisted_receipt = {
+            "mode": "background",
+            "session_key": server._coach_session_key(csrf_hash),
+            "ai_provider": "openai",
+            "model": "gpt-5.6-sol",
+            "openai_response_id": "response-after-first-effect",
+            "phase": "waiting_final_response",
+            "command_receipts": [{
+                "call_id": "first",
+                "tool": "save_checkin",
+                "effect_key": server._coach_action_hash({"tool": "save_checkin", "arguments": {"payload": {"checkin_date": "2026-09-05", "notes": "First"}}}),
+                "result": first_result,
+            }],
+        }
+        second = self.call(
+            "save_checkin",
+            {"payload": {"checkin_date": "2026-09-04", "notes": "Second"}},
+            "second",
+        )
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE coach_commands SET conversation_id=?, intent=?, receipt=? WHERE client_turn_id=?",
+                ("resumed-same-tool-conversation", json.dumps(intent), json.dumps(persisted_receipt), client_turn_id),
+            )
+        with patch.object(server, "build_training_context", return_value="Synthetic resumed context"), patch.object(
+            server, "responses_background_request", side_effect=[{"output": [second]}, {"output_text": "Beide Check-ins gespeichert."}]
+        ) as request:
+            result = server.chat_with_coach(
+                "Speichere meine Check-ins.",
+                client_turn_id=client_turn_id,
+                session_csrf_hash=csrf_hash,
+                background_job=True,
+            )
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], "auto")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(result["command_receipts"]), 2)
+        self.assertEqual(len(server.list_checkins()), 1)
+
     def test_same_call_id_cannot_be_rebound_to_a_new_effect_or_session(self):
         one=self.call("manage_training_templates",{"templates":[{"name":"One","sport":"Run"}]})
         two=self.call("manage_training_templates",{"templates":[{"name":"Two","sport":"Run"}]})

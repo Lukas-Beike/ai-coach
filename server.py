@@ -14092,12 +14092,26 @@ def _chat_with_structured_coach_impl(
         and background_receipt.get("phase") == "waiting_final_response"
         and resumed_tool_rounds > 0
     )
+    # A background response can be checkpointed after one effect has been
+    # committed but before the next model round is requested.  The intent only
+    # names the operation, so a name-only successful_tools set cannot prove
+    # that a second effect using the same tool was handled.  Resume that round
+    # with tools enabled and let the persisted response state identify the
+    # remaining call; cached effect keys still make already committed calls
+    # idempotent.
+    recovered_tool_round_needs_follow_up = bool(
+        background_owned
+        and resuming_background_response
+        and background_receipt.get("phase") == "waiting_final_response"
+        and not pending_durable_tool_calls
+    )
     all_authorized_operations_completed = (
         bool(authorized_operations)
         and authorized_operations.issubset(successful_tools)
         and not preflight_only_refresh
         and not pending_durable_tool_calls
         and not recovered_response_needs_follow_up
+        and not recovered_tool_round_needs_follow_up
     )
     if all_authorized_operations_completed:
         forced_tool = "none"
@@ -14695,7 +14709,14 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                 "UPDATE coach_commands SET conversation_id=?, intent=?, target_system=?, status='running', updated_at=? WHERE client_turn_id=?",
                 (conversation_id, json.dumps(structured_intent, ensure_ascii=False, separators=(",", ":")), str(structured_intent.get("target_system") or "none"), utc_now(), client_turn_id),
             )
-        _merge_coach_command_receipt(client_turn_id, {"status": "running", "phase": "preparing"})
+        # Preserve a checkpointed OpenAI response phase while recovering a
+        # background turn.  Replacing waiting_final_response with preparing
+        # would make a committed first effect look like a completed operation
+        # and could skip the next same-tool effect.
+        phase_update = {"status": "running"}
+        if not background_receipt.get("openai_response_id"):
+            phase_update["phase"] = "preparing"
+        _merge_coach_command_receipt(client_turn_id, phase_update)
     refresh_error = None
     latest_activity_analysis = prompt_requests_latest_activity_analysis(message)
     resuming_background_response = bool(background_owned and ai_provider == "openai" and background_receipt.get("openai_response_id"))
@@ -14738,6 +14759,10 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                     "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.",
                     reason="provider_busy",
                 )
+            try:
+                completed_intervals_refresh_days = int(sync_result.get("activity_days"))
+            except (TypeError, ValueError):
+                completed_intervals_refresh_days = None if sync_result.get("waited_for_existing") else sync_period("intervals")
             if preflight_required:
                 preflight_receipt = {
                     "call_id": "preflight-intervals-refresh",
@@ -14761,10 +14786,6 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                         client_turn_id,
                         {"command_receipts": [*background_receipt.get("command_receipts", []), preflight_receipt]},
                     )
-            try:
-                completed_intervals_refresh_days = int(sync_result.get("activity_days"))
-            except (TypeError, ValueError):
-                completed_intervals_refresh_days = None if sync_result.get("waited_for_existing") else sync_period("intervals")
         except Exception as exc:
             refresh_error = redact_text(str(exc))[:1000]
             if latest_activity_analysis:
