@@ -4105,6 +4105,38 @@ class CoachTests(unittest.TestCase):
             )
         self.assertIsNone(getattr(cancel_event, "_provider_response", None))
 
+    def test_http_json_rechecks_cancellation_after_provider_response(self):
+        cancel_event = threading.Event()
+
+        class Response:
+            status = 200
+            headers = {}
+
+            def read(self, *_args):
+                raise AssertionError("cancelled response must not be read")
+
+            def close(self):
+                return None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        response = Response()
+        def return_cancelled_response(*_args, **_kwargs):
+            cancel_event.set()
+            return response
+
+        with patch.object(server, "urlopen", side_effect=return_cancelled_response):
+            with self.assertRaises(server.AppError) as raised:
+                server.http_json(
+                    "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals", cancel_event=cancel_event
+                )
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.assertIsNone(getattr(cancel_event, "_provider_response", None))
+
     def test_transcribe_audio_sends_bounded_multipart_request(self):
         captured = {}
 
@@ -5095,6 +5127,19 @@ class CoachTests(unittest.TestCase):
                 server.sync_intervals("cancellable-library", activity_days=42, cancel_event=cancel_event)
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         self.assertFalse(server.get_kv("last_library_sync_error"))
+
+    def test_sync_intervals_persists_activity_coverage_with_snapshot(self):
+        snapshot = {"synced_at": "new", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        server.set_kv("last_sync_activity_days", "7")
+        cancellation = server.AppError(499, "abgebrochen", reason="chat_cancelled")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", return_value=snapshot
+        ), patch.object(server, "refresh_workout_library", side_effect=cancellation):
+            with self.assertRaises(server.AppError):
+                server.sync_intervals("cancellable-library", activity_days=42, cancel_event=threading.Event())
+        self.assertEqual(server.get_kv("last_sync_at"), "new")
+        self.assertEqual(server.get_kv("last_sync_activity_days"), "42")
 
     def test_workout_library_refresh_forwards_cancellation(self):
         cancel_event = threading.Event()

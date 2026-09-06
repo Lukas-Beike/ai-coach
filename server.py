@@ -6583,6 +6583,7 @@ def http_json(
             if cancel_event is not None:
                 cancel_event._provider_response = response
             try:
+                _raise_chat_cancelled(cancel_event)
                 try:
                     raw = response.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
                 except TypeError:  # Small fake responses in unit tests may not accept a size.
@@ -10236,12 +10237,16 @@ def latest_snapshot() -> dict[str, Any] | None:
     return json.loads(payload) if payload else None
 
 
-def save_snapshot(snapshot: dict[str, Any], update_full_sync: bool = True) -> None:
+def save_snapshot(
+    snapshot: dict[str, Any], update_full_sync: bool = True, *, activity_days: int | None = None
+) -> None:
     with DB_LOCK, database() as db:
         SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
         if update_full_sync:
             set_kv("last_sync_at", snapshot["synced_at"], db)
             set_kv("last_sync_error", "", db)
+            if activity_days is not None:
+                set_kv("last_sync_activity_days", str(activity_days), db)
         if not update_full_sync:
             set_kv("last_performance_refresh_at", snapshot["synced_at"], db)
 
@@ -10612,7 +10617,7 @@ def sync_intervals(
             snapshot = merge_historical_snapshot(latest_snapshot(), snapshot)
             save_snapshot(snapshot, update_full_sync=False)
         else:
-            save_snapshot(snapshot)
+            save_snapshot(snapshot, activity_days=activity_days)
         calendar_window = snapshot.get("provider_sync", {}).get("calendar_window", {}) if isinstance(snapshot.get("provider_sync"), dict) else {}
         planned_import = {"imported": 0, "updated": 0, "conflicts": 0}
         if end_date is None and not planning_imported_at:
