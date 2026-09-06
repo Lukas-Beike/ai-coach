@@ -14013,7 +14013,9 @@ def _chat_with_structured_coach_impl(
                 "UPDATE coach_commands SET intent=?, updated_at=? WHERE client_turn_id=? AND status='running'",
                 (json.dumps(intent, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
             )
-    bulk_read_complete = "read_training_state" in successful_tools
+    # A persisted read receipt does not mean the resumed model saw its output;
+    # replay the bounded state read once after a background restart.
+    bulk_read_complete = "read_training_state" in successful_tools and not background_owned
     # A complete-plan edit needs the current opaque IDs before the mutating
     # call. Read the full bounded local state first, then let the next round
     # submit the authorized changes with the long-plan output budget.
@@ -14267,7 +14269,18 @@ def _chat_with_structured_coach_impl(
     text = output_text(response)
     analysis_pending = bool(background_receipt.get("analysis_pending")) and not bool(text)
     successful_operations = {entry["tool"] for entry in command_receipts if entry.get("result", {}).get("ok")}
-    pending_operations = sorted(_structured_authorized_operations(intent) - successful_operations - {""})
+    explicit_successful_operations = {
+        entry["tool"] for entry in command_receipts
+        if entry.get("result", {}).get("ok") and entry.get("call_id") != "preflight-intervals-refresh"
+    }
+    failed_explicit_operations = {
+        entry["tool"] for entry in command_receipts
+        if not entry.get("result", {}).get("ok") and entry.get("call_id") != "preflight-intervals-refresh"
+    }
+    pending_operations = sorted(
+        (_structured_authorized_operations(intent) - successful_operations - {""})
+        | (failed_explicit_operations - explicit_successful_operations)
+    )
     if not text:
         effects = [entry for entry in command_receipts if entry.get("result", {}).get("ok")]
         if pending_operations or analysis_pending:
