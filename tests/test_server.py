@@ -4784,6 +4784,12 @@ class CoachTests(unittest.TestCase):
             "Ändere nicht meinen gesamten Trainingsplan."
         ))
 
+    def test_complete_plan_rebuild_requires_plan_level_scope(self):
+        self.assertTrue(server.prompt_requests_complete_plan_rebuild("Replace my training plan."))
+        self.assertTrue(server.prompt_requests_complete_plan_rebuild("Redo my entire training plan from the ground up."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild the Tuesday workout in my training plan."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my Tuesday workout."))
+
     def test_complete_plan_rebuild_normalizes_mixed_draft_edit_and_sync_flow(self):
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),

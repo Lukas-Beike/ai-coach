@@ -12632,10 +12632,19 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         return False
     plan_level = bool(
         re.search(r"\b(?:entire|whole|complete|all|my\s+full|full|gesamt\w*|komplett\w*|ganz\w*)\s+(?:(?:of|my|the|mein\w*|der|die|das|den)\s+){0,2}(?:training\s+plan|trainingsplan|plan|planung)\b", text)
-        or re.search(r"\b(?:training\s+plan|trainingsplan|planung)\b", text)
+        or re.search(
+            r"\b(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|redo\w*|neu|erset\w*)\s+"
+            r"(?:(?:my|the|mein\w*|der|die|das|den)\s+)?(?:training\s+plan|trainingsplan|plan|planung)\b",
+            text,
+        )
+        or re.search(
+            r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
+            r"(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|redo\w*|neu|erset\w*)\b",
+            text,
+        )
     )
     return bool(
-        plan_level and re.search(r"\b(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|from\s+scratch|start\s+over|neu|erset\w*)\b", text)
+        plan_level and re.search(r"\b(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|redo\w*|from\s+scratch|start\s+over|neu|erset\w*)\b", text)
     )
 
 
@@ -13222,7 +13231,7 @@ COACH_STRUCTURED_TOOLS = [
                 "additionalProperties": False,
                 "required": ["plan_name", "goal", "workouts"],
                 "properties": {
-                    "plan_name": {"type": "string"},
+                    "plan_name": {"type": "string", "minLength": 1},
                     "goal": {"type": "string"},
                     "workouts": {
                         "type": "array", "minItems": 1, "maxItems": 366,
@@ -13492,6 +13501,9 @@ def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, An
     except (TypeError, ValueError) as exc:
         raise AppError(400, "Ein vollständiger Planersatz benötigt die gelesene Planrevision.", reason="planning_revision_required") from exc
     workouts = [normalize_workout(workout) for workout in payload["workouts"]]
+    plan_name = str(payload.get("plan_name") or "").strip()[:200]
+    if not plan_name:
+        raise AppError(400, "Ein vollstÃ¤ndiger Planersatz benÃ¶tigt einen Namen.", reason="invalid_plan")
     today = local_now().date().isoformat()
     dates: set[str] = set()
     for workout in workouts:
@@ -13550,7 +13562,6 @@ def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, An
                 archived_plan["start_date"], archived_plan["end_date"], "archived", now,
             )
             _record_change(db, "training_plan", superseded_plan_id, "update", superseded_plan, archived_plan, source="coach")
-        plan_name = str(payload.get("plan_name") or "").strip()[:200]
         goal = str(payload.get("goal") or "").strip()[:2000]
         plan_id = str(uuid.uuid4()) if plan_name else ""
         if plan_id:
@@ -14366,7 +14377,11 @@ def _chat_with_structured_coach_impl(
             forced_tool = "start_provider_refresh"
     bulk_training_change = bool(
         requested_operation in {"apply_training_changes", "replace_training_plan"}
-        and (intent.get("bulk_change") or prompt_requests_bulk_training_change(message))
+        and (
+            requested_operation == "replace_training_plan"
+            or intent.get("bulk_change")
+            or prompt_requests_bulk_training_change(message)
+        )
     )
     if bulk_training_change and not intent.get("bulk_change"):
         intent["bulk_change"] = True
