@@ -320,6 +320,23 @@ test("fresh service worker keeps the current shell available offline", async ({ 
   } finally { await page.context().setOffline(false); }
 });
 
+test("plan overview deep link focuses and reveals today after loading", async ({ page }) => {
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => state.loadPromise === null && state.loadedAreas.has("plan"))).toBe(true);
+  const today = page.locator(".planned-day.is-today");
+  await expect(today).toHaveCount(1);
+  await expect(today).toBeInViewport();
+  const position = await today.evaluate((element) => ({
+    top: element.getBoundingClientRect().top,
+    viewportHeight: window.innerHeight,
+    weekOpen: element.closest(".planned-week")?.open,
+  }));
+  expect(position.weekOpen).toBe(true);
+  expect(position.top).toBeGreaterThanOrEqual(0);
+  expect(position.top).toBeLessThan(position.viewportHeight / 2);
+});
+
 test("current plan payload displays each requested sport exactly", async ({ page }) => {
   await ready(page);
   await page.getByRole("link", { name: "Geplant", exact: true }).click();

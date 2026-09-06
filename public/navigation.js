@@ -1,6 +1,5 @@
 const NAV_ROUTES = Object.freeze({
   coach: "chatPanel",
-  today: "todayPanel",
   plan: "workoutsPanel",
   "plan/overview": "workoutsPanel",
   "plan/library": "workoutsPanel",
@@ -16,7 +15,6 @@ const NAV_ROUTES = Object.freeze({
 });
 const NAV_LINK_ROUTES = Object.freeze({
   coach: "coach",
-  today: "today",
   plan: "plan",
   analysis: "analysis",
   more: "more",
