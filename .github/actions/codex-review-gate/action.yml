@@ -47,6 +47,7 @@ runs:
         script: |
           const {
             commitMatchesHead,
+            isAtOrAfterTimestamp,
             parseCodeReviewSummary,
           } = require(`${process.env.ACTION_PATH}/summary.cjs`);
           const prNumber = Number(process.env.PR_NUMBER);
@@ -141,13 +142,34 @@ runs:
                 new Date(left.comment.updated_at).getTime()
               ));
 
-            return {
-              current: summaries.find((summary) => (
-                commitMatchesHead(summary.codeReview?.commit, headSha) &&
-                summary.updatedAt >= minimumUpdatedAt
-              )),
-              latest: summaries[0],
-            };
+            let current;
+            for (const summary of summaries) {
+              if (summary.updatedAt < minimumUpdatedAt || !summary.codeReview?.commit) {
+                continue;
+              }
+              if (commitMatchesHead(summary.codeReview.commit, headSha)) {
+                current = summary;
+                break;
+              }
+              if (!/^[0-9a-f]{7,39}$/i.test(summary.codeReview.commit)) {
+                continue;
+              }
+              try {
+                const response = await github.rest.repos.getCommit({
+                  owner,
+                  repo,
+                  ref: summary.codeReview.commit,
+                });
+                if (response.data.sha?.toLowerCase() === headSha.toLowerCase()) {
+                  current = summary;
+                  break;
+                }
+              } catch (error) {
+                core.debug(`Ignoring unresolved Codex commit reference: ${error}`);
+              }
+            }
+
+            return { current, latest: summaries[0] };
           };
 
           const getCleanReactions = async (minimumCreatedAt) => {
@@ -164,7 +186,7 @@ runs:
             return reactions.filter((reaction) => (
               botLogins.has(reaction.user?.login) &&
               reaction.content === '+1' &&
-              Date.parse(reaction.created_at || '') >= minimumCreatedAt
+              isAtOrAfterTimestamp(reaction.created_at, minimumCreatedAt)
             ));
           };
 

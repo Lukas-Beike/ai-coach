@@ -32,14 +32,27 @@ function parseCodeReviewSummary(body) {
 function commitMatchesHead(commit, headSha) {
   return (
     typeof commit === 'string' &&
-    /^[0-9a-f]{7,40}$/i.test(commit) &&
+    /^[0-9a-f]{40}$/i.test(commit) &&
     typeof headSha === 'string' &&
     /^[0-9a-f]{40}$/i.test(headSha) &&
-    headSha.toLowerCase().startsWith(commit.toLowerCase())
+    headSha.toLowerCase() === commit.toLowerCase()
   );
+}
+
+function timestampAtSecond(value) {
+  const timestamp = typeof value === 'number' ? value : Date.parse(value || '');
+  return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : Number.NaN;
+}
+
+function isAtOrAfterTimestamp(value, minimum) {
+  const actual = timestampAtSecond(value);
+  const threshold = timestampAtSecond(minimum);
+  return Number.isFinite(actual) && Number.isFinite(threshold) && actual >= threshold;
 }
 
 module.exports = {
   commitMatchesHead,
+  isAtOrAfterTimestamp,
   parseCodeReviewSummary,
+  timestampAtSecond,
 };

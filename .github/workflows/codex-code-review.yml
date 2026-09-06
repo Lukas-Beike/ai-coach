@@ -1,11 +1,15 @@
 name: Codex review gate
 
 on:
+  # Re-evaluate open pull requests when their target branch advances. The
+  # resulting check remains blocking until a fresh review is requested.
+  push:
+    branches: [develop, main]
   # pull_request_target runs the workflow and local action from the trusted
   # target branch. This workflow never checks out or executes pull-request code.
   pull_request_target:
     branches: [develop, main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   # Allow a manually requested @codex review to start or restart the gate.
   issue_comment:
     types: [created]
@@ -34,7 +38,22 @@ jobs:
           github-token: ${{ github.token }}
           script: |
             let affectedPullRequests = [];
-            if (context.eventName === 'pull_request_target') {
+            if (context.eventName === 'push') {
+              const base = context.ref.replace(/^refs\/heads\//, '');
+              const pullRequests = await github.paginate(github.rest.pulls.list, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                base,
+                per_page: 100,
+              });
+              affectedPullRequests = pullRequests
+                .filter((pullRequest) => pullRequest.draft !== true)
+                .map((pullRequest) => ({
+                  pullRequestNumber: pullRequest.number,
+                  baseRef: base,
+                }));
+            } else if (context.eventName === 'pull_request_target') {
               const pullRequest = context.payload.pull_request;
               if (
                 pullRequest.draft !== true &&
@@ -132,11 +151,20 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Capture target-branch review baseline
+        id: review_baseline
+        if: >-
+          github.event_name == 'push' ||
+          (github.event_name == 'pull_request_target' && github.event.action == 'edited')
+        shell: bash
+        run: echo "requested_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
       - name: Wait for the subscription-backed Codex review
         uses: ./.github/actions/codex-review-gate
         with:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}
+          review-requested-at: ${{ steps.review_baseline.outputs.requested_at }}
           check-name: Codex code review
           codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
           timeout-seconds: 2400
