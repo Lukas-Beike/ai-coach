@@ -44,19 +44,22 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         action = (root / ".github/actions/codex-review-gate/action.yml").read_text(encoding="utf-8")
 
         self.assertIn("pull_request_target:", workflow)
-        self.assertIn("push:", workflow)
         self.assertIn("ready_for_review", workflow)
-        self.assertIn("edited", workflow)
-        self.assertIn("github.event.changes.base", workflow)
         self.assertIn("issue_comment:", workflow)
         self.assertIn("pullRequest.draft !== true", workflow)
         self.assertIn("uses: ./.github/actions/codex-review-gate", workflow)
-        self.assertIn("github.rest.issues.createComment", workflow)
         self.assertRegex(
             workflow,
-            r"(?ms)  gate:.*?    permissions:\n      contents: read\n      issues: write\n      pull-requests: write\n      checks: write",
+            r"(?ms)  gate:.*?    permissions:\n      contents: read\n      issues: read\n      pull-requests: read\n      checks: write",
         )
-        self.assertIn("github.event.action != 'edited'", workflow)
+        self.assertNotIn("github.rest.issues.createComment", workflow)
+        self.assertIn("push:", workflow)
+        self.assertIn("edited", workflow)
+        self.assertIn("const baseChanged = context.payload.action === 'edited'", workflow)
+        self.assertIn("context.payload.changes.base", workflow.replace("changes?.base", "changes.base"))
+        self.assertIn("github.event.action == 'reopened'", workflow)
+        self.assertIn("Fresh Codex review required", workflow)
+        self.assertIn("github.event_name != 'push'", workflow)
         self.assertIn("pull_requests: ${{ steps.resolve_base.outputs.pull_requests }}", workflow)
         self.assertIn("has_pull_requests: ${{ steps.resolve_base.outputs.has_pull_requests }}", workflow)
         self.assertIn("core.setOutput('has_pull_requests', affectedPullRequests.length > 0 ? 'true' : 'false')", workflow)
@@ -72,7 +75,6 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertNotIn("steps.resolve_base.outputs.base_sha", workflow)
         self.assertIn("EXPECTED_BASE_REF: ${{ matrix.baseRef }}", workflow)
         self.assertIn("cancel-in-progress: true", workflow)
-        self.assertIn("review-requested-at:", workflow)
         self.assertIn("check-name: Codex code review", workflow)
         self.assertNotIn("openai/codex-action", workflow)
         self.assertNotIn("openai-api-key", workflow)
@@ -80,8 +82,13 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("checks.create", action)
         self.assertIn("issues.listComments", action)
         self.assertIn("pulls.listReviews", action)
+        self.assertIn("reactions.listForIssue", action)
         self.assertIn("codex-pull-request-review-summary", action)
-        self.assertIn("codex-security-review:v1", action)
+        self.assertIn("parseCodeReviewSummary", action)
+        self.assertIn("commitMatchesHead", action)
+        self.assertIn("repos.getCommit", action)
+        self.assertIn("isAtOrAfterTimestamp", action)
+        self.assertNotIn("parseCodexSummaryMetadata", action)
         self.assertIn("summaryStatus === 'completed'", action)
         self.assertIn("context.payload.comment?.created_at", action)
         self.assertIn("REVIEW_REQUESTED_AT", action)
@@ -95,8 +102,19 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("pull_request_review_id", action)
         self.assertIn("review.commit_id === headSha", action)
         self.assertNotIn("comment.commit_id === headSha", action)
+        self.assertIn("reaction.content === '+1'", action)
+        self.assertIn("waiting for a submitted review or clean reaction", action)
         self.assertIn("core.setFailed", action)
         self.assertFalse((root / ".github/codex/prompts/review.md").exists())
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
+    def test_codex_summary_parser(self):
+        root = Path(__file__).resolve().parents[1]
+        subprocess.run(
+            ["node", "--test", str(root / "tests/codex-review-gate.test.cjs")],
+            cwd=root,
+            check=True,
+        )
 
 
 class DiscoveryTests(unittest.TestCase):
