@@ -2628,7 +2628,15 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                 if not isinstance(current_payload, dict):
                     raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.")
                 restore_date = str(target.get("date") or current_payload.get("date") or "")[:10]
-                if restore_date and calendar_conflicts({"date": restore_date}, {entity_id}):
+                current_date = str(current_payload.get("date") or "")[:10]
+                restoring_deletion = history.get("action") == "delete"
+                target_archived = bool(target["archived"]) if "archived" in target else (False if restoring_deletion else bool(current_payload.get("archived")))
+                target_local_deleted = bool(target["local_deleted"]) if "local_deleted" in target else (False if restoring_deletion else bool(current_payload.get("local_deleted")))
+                schedule_change = restore_date != current_date or (
+                    (bool(current_payload.get("archived")) or bool(current_payload.get("local_deleted")))
+                    and not target_archived and not target_local_deleted
+                )
+                if schedule_change and restore_date and calendar_conflicts({"date": restore_date}, {entity_id}):
                     raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht wiederhergestellt werden.", reason="plan_date_conflict")
                 restored_target = dict(target)
                 if restore_date:
@@ -2639,8 +2647,8 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                     {
                         **current_payload,
                         **restored_target,
-                        "archived": bool(target.get("archived")),
-                        "local_deleted": bool(target.get("local_deleted")),
+                        "archived": target_archived,
+                        "local_deleted": target_local_deleted,
                     },
                     local_id=entity_id,
                     external_id=str(current.get("external_id") or current_payload.get("external_id") or "") or None,

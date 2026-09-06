@@ -44,8 +44,6 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
             )
             if archived_mentioned and not active_id_mentioned:
                 return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Der genannte Trainingsplan ist archiviert; bitte nenne einen aktiven Plan oder bestätige eine neue Planung."]}
-            if "start_intervals_plan_sync" in operations and candidates:
-                return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Einen benannten Plan kann ich ersetzen; die Synchronisierung muss danach separat bestätigt werden."]}
         mentions = []
         for ref in candidates:
             for value in {ref["id"], ref["name"]} - {""}:
@@ -59,6 +57,8 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
                 for outer_start, outer_end, _ in mentions
             ) for start, end, selected in mentions
         )]
+        if named and kind == "training_plan" and "replace_training_plan" in operations and "start_intervals_plan_sync" in operations:
+            return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Einen benannten Plan kann ich ersetzen; die Synchronisierung muss danach separat bestätigt werden."]}
         for ref in named:
             equal_names = [other for other in candidates if other["name"].casefold() == ref["name"].casefold()]
             if len(equal_names) > 1 and not any(other["id"] in message for other in equal_names):

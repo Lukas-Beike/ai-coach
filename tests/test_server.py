@@ -5087,6 +5087,10 @@ class CoachTests(unittest.TestCase):
         }
         resolved = server.resolve_intent_objects(intent, "Replace Base Build and sync it", refs)
         self.assertEqual(resolved["intent"], "needs_clarification")
+        broad_intent = {**intent, "authorization_scope": ["local_plan"]}
+        broad = server.resolve_intent_objects(broad_intent, "Replace my entire training plan and sync it", refs)
+        self.assertEqual(broad["intent"], "remote_sync")
+        self.assertIn("local_plan", broad["authorization_scope"])
 
     def test_training_plan_metadata_changes_advance_planning_revision(self):
         plan_entry = server.save_workout_library_entries([{
