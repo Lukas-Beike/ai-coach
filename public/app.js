@@ -3567,6 +3567,23 @@ async function loadChatHistoryFresh() {
   await load("/api/bootstrap", ["chat"]);
 }
 
+async function refreshChatProposalsInBackground(expectedContentVersion) {
+  const sessionGeneration = state.sessionGeneration;
+  const chatGeneration = state.chatGeneration;
+  try {
+    const result = await api("/api/chat/history?limit=100");
+    if (sessionGeneration !== state.sessionGeneration
+      || chatGeneration !== state.chatGeneration
+      || expectedContentVersion !== state.chatContentVersion
+      || !Array.isArray(result.proposed_actions)) return;
+    state.coachActionProposals = result.proposed_actions;
+    renderCoachActionReview();
+    renderMessages(state.data?.messages || [], false);
+  } catch (_) {
+    // The completed SSE receipt is already usable; a background refresh is best effort.
+  }
+}
+
 async function resumeQueuedChat() {
   if (!state.chatQueue.length || state.chatRequest || state.chatServerOperationId) {
     if (!state.chatQueue.length && !state.chatRequest && !state.chatServerOperationId) {
@@ -3819,7 +3836,9 @@ async function requestCoachResponse(message) {
     // A completed SSE receipt already contains the persisted assistant message.
     // Do not keep the composer in "reconciling" while unrelated/pending loads
     // finish; refresh the authoritative proposal list in the background.
-    if (completed && request.responseMessageReceived) void loadChatHistoryFresh().catch(() => {});
+    if (completed && request.responseMessageReceived) {
+      void refreshChatProposalsInBackground(state.chatContentVersion);
+    }
     else await loadChatHistoryFresh();
     if (completed) scrollChatToResponseStart();
     invalidateContextPreview();
