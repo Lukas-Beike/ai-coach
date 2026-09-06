@@ -158,11 +158,42 @@ jobs:
         if: >-
           github.event_name == 'push' ||
           (github.event_name == 'pull_request_target' &&
-          github.event.action == 'edited' && github.event.changes.base)
+          ((github.event.action == 'edited' && github.event.changes.base) ||
+          github.event.action == 'reopened'))
         shell: bash
         run: echo "requested_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
+      - name: Block until a fresh Codex review is requested
+        if: github.event_name == 'push'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ matrix.pullRequestNumber }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const pullRequest = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            const headSha = pullRequest.data.head.sha;
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Codex code review',
+              head_sha: headSha,
+              status: 'completed',
+              conclusion: 'failure',
+              started_at: new Date().toISOString(),
+              completed_at: new Date().toISOString(),
+              output: {
+                title: 'Fresh Codex review required',
+                summary: `The target branch advanced. Comment @codex review on PR #${pullRequest.data.number} to obtain a review against the current base.`,
+              },
+            });
+
       - name: Wait for the subscription-backed Codex review
+        if: github.event_name != 'push'
         uses: ./.github/actions/codex-review-gate
         with:
           github-token: ${{ github.token }}
