@@ -10539,7 +10539,14 @@ def sync_intervals(
                 try:
                     current_sync_at = get_kv("last_sync_at")
                     if current_sync_at and current_sync_at != previous_sync_at:
-                        return {"status": "ok", "waited_for_existing": True, "synced_at": current_sync_at}
+                        try:
+                            completed_activity_days = int(get_kv("last_sync_activity_days") or 0)
+                        except (TypeError, ValueError):
+                            completed_activity_days = 0
+                        return {
+                            "status": "ok", "waited_for_existing": True, "synced_at": current_sync_at,
+                            **({"activity_days": completed_activity_days} if completed_activity_days > 0 else {}),
+                        }
                     last_error = redact_text(get_kv("last_sync_error") or "")
                     detail = f" {last_error[:300]}" if last_error else ""
                     raise AppError(
@@ -10606,6 +10613,7 @@ def sync_intervals(
             update_provider_sync_cursor("intervals", "historical", sync_window[0][0].isoformat(), snapshot["synced_at"])
         set_kv("last_sync_window_start", sync_window[0][0].isoformat())
         set_kv("last_sync_window_end", sync_window[-1][1].isoformat())
+        set_kv("last_sync_activity_days", str(activity_days))
         pagination = snapshot.get("provider_sync", {}).get("pagination", {}) if isinstance(snapshot, dict) else {}
         set_kv("last_sync_pagination", json.dumps(pagination, ensure_ascii=False, separators=(",", ":")))
         set_sync_operation_state(operation_id, "completed", "complete", 100, "Intervals.icu-Synchronisierung abgeschlossen.")
@@ -13819,6 +13827,7 @@ def _chat_with_structured_coach_impl(
     refresh_error: str | None = None,
     duplicate_activity: dict[str, Any] | None = None,
     completed_intervals_refresh: bool = False,
+    completed_intervals_refresh_days: int | None = None,
     background_job: bool = False,
     ai_provider: str | None = None,
     model: str | None = None,
@@ -13868,11 +13877,20 @@ def _chat_with_structured_coach_impl(
             db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?", (json.dumps(receipt, ensure_ascii=False), utc_now(), client_turn_id))
         return receipt
     if completed_intervals_refresh:
-        preflight_days = sync_period("intervals")
+        preflight_days = completed_intervals_refresh_days
+        if preflight_days is None:
+            preflight_days = next(
+                (
+                    item.get("result", {}).get("days") for item in background_receipt.get("command_receipts", [])
+                    if item.get("call_id") == "preflight-intervals-refresh"
+                    and item.get("result", {}).get("ok")
+                ),
+                None,
+            )
         refresh_receipt = {
             "call_id": "preflight-intervals-refresh", "tool": "start_provider_refresh",
             "effect_key": "preflight-intervals-refresh",
-            "result": {"ok": True, "status": "completed", "provider": "intervals", "before_analysis": True, "days": preflight_days},
+            "result": {"ok": True, "status": "completed", "provider": "intervals", "before_analysis": True, **({"days": preflight_days} if preflight_days is not None else {})},
         }
         commands = list(background_receipt.get("command_receipts") or [])
         if not any(item.get("call_id") == refresh_receipt["call_id"] for item in commands):
@@ -13892,13 +13910,50 @@ def _chat_with_structured_coach_impl(
             return False
         requested_days = arguments.get("days")
         if requested_days is None:
-            return True
+            return bool(completed_refresh.get("result", {}).get("days"))
         try:
             requested_days = max(1, int(requested_days))
             completed_days = int(completed_refresh.get("result", {}).get("days"))
         except (TypeError, ValueError):
             return False
         return requested_days <= completed_days
+
+    sync_job_ids: list[str] = list(background_receipt.get("sync_job_ids") or [])
+    command_receipts: list[dict[str, Any]] = list(background_receipt.get("command_receipts") or [])
+    successful_tools: set[str] = {
+        str(item.get("tool") or "") for item in command_receipts if isinstance(item, dict) and item.get("result", {}).get("ok")
+    }
+
+    def restore_staged_artifact_intent() -> None:
+        """Rehydrate the commit scope before selecting the resumed model action."""
+        if intent.get("artifact_id"):
+            return
+        staged = next(
+            (
+                item for item in reversed(command_receipts)
+                if item.get("tool") == "stage_training_plan"
+                and item.get("result", {}).get("ok")
+                and str(item.get("result", {}).get("artifact_id") or "").strip()
+            ),
+            None,
+        )
+        if not staged:
+            return
+        artifact_id = str(staged["result"]["artifact_id"]).strip()
+        with DB_LOCK, database() as db:
+            artifact = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact_id,)).fetchone()
+            if not artifact or artifact.get("status") not in {"draft", "committed"}:
+                return
+            intent["artifact_id"] = artifact_id
+            scope = intent.setdefault("authorization_scope", [])
+            if f"artifact:{artifact_id}" not in scope:
+                scope.append(f"artifact:{artifact_id}")
+            db.execute(
+                "UPDATE coach_commands SET intent=?, artifact_id=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+                (json.dumps(intent, ensure_ascii=False, separators=(",", ":")), artifact_id, utc_now(), client_turn_id),
+            )
+
+    restore_staged_artifact_intent()
 
     model_instructions = build_training_context()
     if completed_refresh:
@@ -13924,11 +13979,20 @@ def _chat_with_structured_coach_impl(
         )
     requested_operation = intent.get("operation")
     forced_tool = requested_operation if requested_operation in COACH_CANONICAL_TOOL_NAMES else "none"
+    if requested_operation in successful_tools:
+        forced_tool = next(
+            (
+                operation for operation in [intent.get("operation"), *(intent.get("follow_up_operations") or [])]
+                if operation in COACH_CANONICAL_TOOL_NAMES and operation not in successful_tools
+                and (operation != "commit_training_plan" or intent.get("artifact_id"))
+            ),
+            "none",
+        )
     if completed_refresh and requested_operation == "start_provider_refresh":
         forced_tool = next(
             (
                 operation for operation in intent.get("follow_up_operations") or []
-                if operation in COACH_CANONICAL_TOOL_NAMES and operation != requested_operation
+                if operation in COACH_CANONICAL_TOOL_NAMES and operation != requested_operation and operation not in successful_tools
             ),
             "none",
         )
@@ -14017,43 +14081,8 @@ def _chat_with_structured_coach_impl(
         )
         capture_diagnostic_event("openai_conversation_recovered", {"service": "openai", "reason": exc.reason})
         response = request_response(request_payload)
-    sync_job_ids: list[str] = list(background_receipt.get("sync_job_ids") or [])
-    command_receipts: list[dict[str, Any]] = list(background_receipt.get("command_receipts") or [])
     tool_outputs: list[dict[str, Any]] = []
-    successful_tools: set[str] = {
-        str(item.get("tool") or "") for item in command_receipts if isinstance(item, dict) and item.get("result", {}).get("ok")
-    }
     bulk_read_complete = "read_training_state" in successful_tools
-    def restore_staged_artifact_intent() -> None:
-        """Rehydrate the commit scope after a restart from a durable stage receipt."""
-        if intent.get("artifact_id"):
-            return
-        staged = next(
-            (
-                item for item in reversed(command_receipts)
-                if item.get("tool") == "stage_training_plan"
-                and item.get("result", {}).get("ok")
-                and str(item.get("result", {}).get("artifact_id") or "").strip()
-            ),
-            None,
-        )
-        if not staged:
-            return
-        artifact_id = str(staged["result"]["artifact_id"]).strip()
-        with DB_LOCK, database() as db:
-            artifact = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact_id,)).fetchone()
-            if not artifact or artifact.get("status") not in {"draft", "committed"}:
-                return
-            intent["artifact_id"] = artifact_id
-            scope = intent.setdefault("authorization_scope", [])
-            if f"artifact:{artifact_id}" not in scope:
-                scope.append(f"artifact:{artifact_id}")
-            db.execute(
-                "UPDATE coach_commands SET intent=?, artifact_id=?, updated_at=? WHERE client_turn_id=? AND status='running'",
-                (json.dumps(intent, ensure_ascii=False, separators=(",", ":")), artifact_id, utc_now(), client_turn_id),
-            )
-
-    restore_staged_artifact_intent()
     rounds = int(background_receipt.get("tool_rounds") or 0) if background_owned else 0
     while rounds < COACH_TOOL_MAX_ROUNDS:
         tool_outputs = []
@@ -14546,6 +14575,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     refresh_error = None
     latest_activity_analysis = prompt_requests_latest_activity_analysis(message)
     resuming_background_response = bool(background_owned and ai_provider == "openai" and background_receipt.get("openai_response_id"))
+    completed_intervals_refresh_days: int | None = None
     completed_preflight_receipt = bool(
         latest_activity_analysis
         and structured_intent.get("intent") in {"local_action", "remote_sync"}
@@ -14577,6 +14607,10 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                     "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.",
                     reason="provider_busy",
                 )
+            try:
+                completed_intervals_refresh_days = int(sync_result.get("activity_days"))
+            except (TypeError, ValueError):
+                completed_intervals_refresh_days = None if sync_result.get("waited_for_existing") else sync_period("intervals")
         except Exception as exc:
             refresh_error = redact_text(str(exc))[:1000]
             if latest_activity_analysis:
@@ -14609,6 +14643,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         refresh_error=refresh_error,
         duplicate_activity=duplicate_activity,
         completed_intervals_refresh=completed_intervals_refresh,
+        completed_intervals_refresh_days=completed_intervals_refresh_days,
         background_job=background_owned,
         ai_provider=ai_provider,
         model=model,
