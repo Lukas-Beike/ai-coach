@@ -12,6 +12,8 @@ const SYNC_POLL_LEASE_MS = 4_000;
 let mobileViewportFrame = null;
 const mobileViewportBaselines = { portrait: 0, landscape: 0 };
 
+if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
+
 function hasTouchFirstInput() {
   return Boolean(window.matchMedia?.("(hover: none) and (pointer: coarse)").matches);
 }
@@ -124,7 +126,9 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   if (currentPanel !== NAV_ROUTES[panelRoute] && !(await confirmDiscardChanges())) return false;
   if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges({ includeChatDraft: false })) discardUnsavedChanges();
   const returningToChat = currentPanel !== "chatPanel" && mainRoute === "coach";
-  if (state.data && currentPanel === "chatPanel" && mainRoute !== "coach") state.chatScrollY = window.scrollY;
+  if (state.data && !state.chatInitialScrollPending && historyMode === "push" && currentPanel === "chatPanel" && mainRoute !== "coach") {
+    state.chatScrollY = window.scrollY;
+  }
   if (currentPanel === "chatPanel" && mainRoute !== "coach" && (state.chatRequest || state.chatServerOperationId)) {
     state.chatResponseScrollPending = true;
   }
@@ -155,6 +159,7 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   if (state.data && mainRoute === "more") loadChangeHistory();
   if (mainRoute === "coach") {
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
+    else if (state.chatInitialScrollPending) scrollChatToLatest();
     else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest(true);
   } else requestAnimationFrame(() => {
     if (!shouldFocusPlannedToday || !focusPlannedToday()) window.scrollTo({ top: 0, behavior: "auto" });
@@ -1860,6 +1865,13 @@ function restoreChatScrollPosition() {
   return true;
 }
 
+function handleWindowScroll() {
+  if (!state.chatInitialScrollPending && $("#chatPanel")?.classList.contains("active")) {
+    state.chatScrollY = window.scrollY;
+  }
+  updateChatComposerVisibility();
+}
+
 function renderContextPreview(preview) {
   const status = $("#systemContextPreviewStatus");
   const content = $("#systemContextPreviewContent");
@@ -3379,6 +3391,13 @@ function render(data) {
   updateHeaderAction();
 }
 
+function latestAssistantMessageKey(messages) {
+  const message = [...(messages || [])].reverse().find((entry) => entry.role === "assistant");
+  if (!message) return null;
+  if (message.id != null) return `id:${message.id}`;
+  return `fallback:${message.created_at || ""}:${message.content || ""}`;
+}
+
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
@@ -3424,7 +3443,13 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       if (error) { failures.push(`${area}: ${error.message}`); return; }
       if (area === "chat") {
         if (!Array.isArray(result.messages)) throw new Error("Die Nachrichtenbestätigung fehlt.");
-        Object.assign(payload, { messages: mergeChatMessages(result.messages), messages_next_cursor: result.next_cursor });
+        const previousAssistantKey = latestAssistantMessageKey(payload.messages);
+        const messages = mergeChatMessages(result.messages);
+        const nextAssistantKey = latestAssistantMessageKey(messages);
+        if (state.initialStateLoaded && baseRoute() !== "coach" && nextAssistantKey && nextAssistantKey !== previousAssistantKey) {
+          state.chatResponseScrollPending = true;
+        }
+        Object.assign(payload, { messages, messages_next_cursor: result.next_cursor });
         if (chatContentVersion === state.chatContentVersion && Array.isArray(result.proposed_actions)) {
           state.coachActionProposals = result.proposed_actions;
           state.chatProposalRefreshPending = false;
@@ -4502,7 +4527,7 @@ document.addEventListener("visibilitychange", () => {
 document.addEventListener("pointerdown", handlePwaInteraction, { passive: true });
 document.addEventListener("focusin", scheduleMobileViewportLayout);
 document.addEventListener("focusout", scheduleMobileViewportLayout);
-window.addEventListener("scroll", updateChatComposerVisibility, { passive: true });
+window.addEventListener("scroll", handleWindowScroll, { passive: true });
 window.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
 window.addEventListener("orientationchange", scheduleMobileViewportLayout, { passive: true });
 window.addEventListener("pageshow", () => {

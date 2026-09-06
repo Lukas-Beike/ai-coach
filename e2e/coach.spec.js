@@ -293,9 +293,20 @@ test.describe("critical browser states", () => {
       return window.scrollY;
     });
     expect(savedScrollY).toBeGreaterThan(0);
-    await page.getByRole("link", { name: "Heute", exact: true }).click();
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    await expect(page).toHaveURL(/#plan\/overview$/);
     await page.getByRole("link", { name: "Coach", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
+
+    await page.goBack();
+    await expect(page).toHaveURL(/#plan\/overview$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/#coach$/);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
+    await page.goForward();
+    await expect(page).toHaveURL(/#plan\/overview$/);
+    await page.goForward();
+    await expect(page).toHaveURL(/#coach$/);
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
 
     await page.reload();
@@ -307,6 +318,66 @@ test.describe("critical browser states", () => {
       const desiredBottom = Math.min(window.innerHeight, composer.getBoundingClientRect().top) - 12;
       return Math.abs(message.getBoundingClientRect().bottom - desiredBottom);
     }, latestMessageId)).toBeLessThanOrEqual(24);
+  });
+
+  test("initial chat positioning wins when navigation happens while history loads", async ({ page }) => {
+    const messages = Array.from({ length: 18 }, (_, index) => ({
+      id: 91_000 + index,
+      role: index % 2 ? "assistant" : "user",
+      content: `${index % 2 ? "Coach" : "Athlet"} verzögerter Abschnitt ${index + 1}\n\n${"Ausführlicher Trainingskontext. ".repeat(12)}`,
+      created_at: `2099-01-02T00:${String(index).padStart(2, "0")}:00Z`,
+    }));
+    let releaseHistory;
+    await page.route("**/api/chat/history?*", (route) => new Promise((resolve) => {
+      releaseHistory = () => resolve(route.fulfill({ json: { messages, next_cursor: null, proposed_actions: [] } }));
+    }));
+
+    await page.goto("/#coach");
+    await expect(page.locator("#appShell")).toBeVisible();
+    await expect.poll(() => Boolean(releaseHistory)).toBe(true);
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    releaseHistory();
+    const latest = page.locator(`[data-message-id="${messages.at(-1).id}"]`);
+    await expect(latest).toBeAttached();
+    await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+
+    await page.getByRole("link", { name: "Coach", exact: true }).click();
+    await expect.poll(() => latest.evaluate((message) => {
+      const composer = document.querySelector("#chatForm");
+      const desiredBottom = Math.min(window.innerHeight, composer.getBoundingClientRect().top) - 12;
+      return Math.abs(message.getBoundingClientRect().bottom - desiredBottom);
+    })).toBeLessThanOrEqual(24);
+  });
+
+  test("a new cross-tab coach reply takes priority over the saved scroll position", async ({ page }) => {
+    let messages = Array.from({ length: 18 }, (_, index) => ({
+      id: 92_000 + index,
+      role: index % 2 ? "assistant" : "user",
+      content: `${index % 2 ? "Coach" : "Athlet"} Abschnitt ${index + 1}\n\n${"Ausführlicher Trainingskontext. ".repeat(12)}`,
+      created_at: `2099-01-03T00:${String(index).padStart(2, "0")}:00Z`,
+    }));
+    await page.route("**/api/chat/history?*", (route) => route.fulfill({
+      json: { messages, next_cursor: null, proposed_actions: [] },
+    }));
+
+    await page.goto("/#coach");
+    await expect(page.locator("#appShell")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+    await page.evaluate(() => window.scrollTo({ top: 240, behavior: "auto" }));
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    messages = [...messages, {
+      id: 92_018,
+      role: "assistant",
+      content: `Neue Antwort aus einem anderen Browser-Tab.\n\n${"Neue Trainingshinweise. ".repeat(300)}`,
+      created_at: "2099-01-03T00:18:00Z",
+    }];
+    await page.evaluate(() => handleStateEvent({ type: "coach", data: "{}", lastEventId: "99" }));
+    const latest = page.locator('[data-message-id="92018"]');
+    await expect(latest).toBeAttached();
+    await expect.poll(() => page.evaluate(() => state.chatResponseScrollPending)).toBe(true);
+
+    await page.getByRole("link", { name: "Coach", exact: true }).click();
+    await expect.poll(() => latest.evaluate((message) => Math.round(message.getBoundingClientRect().top))).toBe(16);
   });
 
   test("coach streaming, tab changes, long markdown and scrolling stay stable", async ({ page }, testInfo) => {
