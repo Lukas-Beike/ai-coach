@@ -13868,27 +13868,45 @@ def _chat_with_structured_coach_impl(
             db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?", (json.dumps(receipt, ensure_ascii=False), utc_now(), client_turn_id))
         return receipt
     if completed_intervals_refresh:
+        preflight_days = sync_period("intervals")
         refresh_receipt = {
             "call_id": "preflight-intervals-refresh", "tool": "start_provider_refresh",
             "effect_key": "preflight-intervals-refresh",
-            "result": {"ok": True, "status": "completed", "provider": "intervals", "before_analysis": True},
+            "result": {"ok": True, "status": "completed", "provider": "intervals", "before_analysis": True, "days": preflight_days},
         }
         commands = list(background_receipt.get("command_receipts") or [])
         if not any(item.get("call_id") == refresh_receipt["call_id"] for item in commands):
             commands.append(refresh_receipt)
         background_receipt["command_receipts"] = commands
-        _merge_coach_command_receipt(client_turn_id, {"command_receipts": commands})
+        background_receipt["analysis_pending"] = True
+        _merge_coach_command_receipt(client_turn_id, {"command_receipts": commands, "analysis_pending": True})
     completed_refresh = next((
         item for item in background_receipt.get("command_receipts", [])
         if item.get("call_id") == "preflight-intervals-refresh"
         and item.get("tool") == "start_provider_refresh" and item.get("result", {}).get("ok")
     ), None)
+
+    def preflight_covers_refresh(arguments: dict[str, Any]) -> bool:
+        """Reuse the synchronous preflight only for a covered activity window."""
+        if not completed_refresh:
+            return False
+        requested_days = arguments.get("days")
+        if requested_days is None:
+            return True
+        try:
+            requested_days = max(1, int(requested_days))
+            completed_days = int(completed_refresh.get("result", {}).get("days"))
+        except (TypeError, ValueError):
+            return False
+        return requested_days <= completed_days
+
     model_instructions = build_training_context()
     if completed_refresh:
         model_instructions += (
             "\n\n[Systemhinweis: Die angeforderte Intervals.icu-Aktualisierung wurde in diesem Auftrag "
             "bereits erfolgreich abgeschlossen. Der Kontext enthaelt den aktualisierten Snapshot. "
-            "Analysiere jetzt die letzte Einheit; starte keinen weiteren Datenabruf.]"
+            "Analysiere jetzt die letzte Einheit. Ein ausdruecklich angeforderter Datenabruf mit einem "
+            "groesseren Zeitraum als der Vorababruf muss trotzdem ausgefuehrt werden.]"
         )
     if refresh_error:
         model_instructions += (
@@ -13915,9 +13933,16 @@ def _chat_with_structured_coach_impl(
             "none",
         )
     bulk_training_change = bool(
-        requested_operation == "apply_training_changes"
+        "apply_training_changes" in _structured_authorized_operations(intent)
         and (intent.get("bulk_change") or prompt_requests_bulk_training_change(message))
     )
+    if bulk_training_change and not intent.get("bulk_change"):
+        intent["bulk_change"] = True
+        with DB_LOCK, database() as db:
+            db.execute(
+                "UPDATE coach_commands SET intent=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+                (json.dumps(intent, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+            )
     bulk_read_complete = False
     # A complete-plan edit needs the current opaque IDs before the mutating
     # call. Read the full bounded local state first, then let the next round
@@ -13998,6 +14023,37 @@ def _chat_with_structured_coach_impl(
     successful_tools: set[str] = {
         str(item.get("tool") or "") for item in command_receipts if isinstance(item, dict) and item.get("result", {}).get("ok")
     }
+    bulk_read_complete = "read_training_state" in successful_tools
+    def restore_staged_artifact_intent() -> None:
+        """Rehydrate the commit scope after a restart from a durable stage receipt."""
+        if intent.get("artifact_id"):
+            return
+        staged = next(
+            (
+                item for item in reversed(command_receipts)
+                if item.get("tool") == "stage_training_plan"
+                and item.get("result", {}).get("ok")
+                and str(item.get("result", {}).get("artifact_id") or "").strip()
+            ),
+            None,
+        )
+        if not staged:
+            return
+        artifact_id = str(staged["result"]["artifact_id"]).strip()
+        with DB_LOCK, database() as db:
+            artifact = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact_id,)).fetchone()
+            if not artifact or artifact.get("status") not in {"draft", "committed"}:
+                return
+            intent["artifact_id"] = artifact_id
+            scope = intent.setdefault("authorization_scope", [])
+            if f"artifact:{artifact_id}" not in scope:
+                scope.append(f"artifact:{artifact_id}")
+            db.execute(
+                "UPDATE coach_commands SET intent=?, artifact_id=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+                (json.dumps(intent, ensure_ascii=False, separators=(",", ":")), artifact_id, utc_now(), client_turn_id),
+            )
+
+    restore_staged_artifact_intent()
     rounds = int(background_receipt.get("tool_rounds") or 0) if background_owned else 0
     while rounds < COACH_TOOL_MAX_ROUNDS:
         tool_outputs = []
@@ -14036,7 +14092,7 @@ def _chat_with_structured_coach_impl(
             if prior_call and prior_call.get("effect_key") != effect_key:
                 raise AppError(409, "Ein Werkzeugaufruf wurde mit anderen Argumenten wiederholt.", reason="tool_call_conflict")
             cached = prior_call
-            if cached is None and name == "start_provider_refresh" and completed_refresh and intent.get("target_system") == "intervals":
+            if cached is None and name == "start_provider_refresh" and intent.get("target_system") == "intervals" and preflight_covers_refresh(arguments):
                 _require_coach_scope(intent, "intervals_refresh")
                 cached = completed_refresh
             elif cached is None and name == "stage_training_plan":
@@ -14155,14 +14211,17 @@ def _chat_with_structured_coach_impl(
         }
         response = request_response(followup_payload)
     text = output_text(response)
+    analysis_pending = bool(background_receipt.get("analysis_pending")) and not bool(text)
     successful_operations = {entry["tool"] for entry in command_receipts if entry.get("result", {}).get("ok")}
     pending_operations = sorted(_structured_authorized_operations(intent) - successful_operations - {""})
     if not text:
         effects = [entry for entry in command_receipts if entry.get("result", {}).get("ok")]
-        if pending_operations:
+        if pending_operations or analysis_pending:
             text = "Der Coach-Auftrag konnte nicht vollstaendig abgeschlossen werden."
         else:
             text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Coach-Antwort enthaelt keine Textantwort; es wurde keine Aktion bestaetigt."
+    if analysis_pending:
+        text += "\nDie Analyse der letzten Einheit wurde nicht erfolgreich abgeschlossen."
     if pending_operations:
         text += "\nNoch nicht erfolgreich abgeschlossen: " + ", ".join(COACH_ACTION_LABELS.get(operation, "Angeforderter Schritt") for operation in pending_operations) + "."
         failures = coach_failure_lines(command_receipts, set(pending_operations))
@@ -14175,6 +14234,7 @@ def _chat_with_structured_coach_impl(
     receipt = {
         **background_receipt,
         "status": ("partial" if successful_operations else "failed") if pending_operations else "completed",
+        "analysis_pending": analysis_pending,
         "pending_operations": pending_operations,
         "client_turn_id": client_turn_id,
         "message": None,
@@ -14184,6 +14244,8 @@ def _chat_with_structured_coach_impl(
         "tool_rounds": rounds,
         "proposed_actions": proposed_actions,
     }
+    if analysis_pending:
+        receipt["status"] = "partial"
     receipt.pop("openai_response_id", None)
     with DB_LOCK, database() as db:
         assistant_message = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
@@ -14271,15 +14333,16 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
                 if isinstance(item, dict) and str(item.get("tool") or "").strip()
             })
         final_response_failure = receipt.get("phase") == "waiting_final_response"
+        analysis_pending = bool(receipt.get("analysis_pending"))
         cancelled = isinstance(error, AppError) and error.reason == "chat_cancelled"
         if cancelled:
-            status = "completed" if successes and not pending and final_response_failure else "partial" if successes else "cancelled"
+            status = "completed" if successes and not pending and final_response_failure and not analysis_pending else "partial" if successes else "cancelled"
             text = "Ergebnis: " + "; ".join(coach_effect_label(item) for item in successes) if status == "completed" else "Die Coach-Verarbeitung wurde abgebrochen."
         elif pending:
             status = "partial" if successes else "failed"
             text = "Die Coach-Zusammenfassung ist fehlgeschlagen." if successes else "Der Coach-Auftrag konnte nicht abgeschlossen werden."
         elif successes:
-            status = "completed" if final_response_failure else "partial"
+            status = "partial" if analysis_pending or not final_response_failure else "completed"
             text = "Ergebnis: " + "; ".join(coach_effect_label(item) for item in successes) if status == "completed" else "Die Coach-Zusammenfassung ist fehlgeschlagen."
         else:
             status = "failed"
@@ -14290,10 +14353,12 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
             text += "\nFehlgeschlagene Schritte:\n" + coach_failure_lines(commands, set(pending))
         if pending:
             text += "\nNicht erfolgreich abgeschlossen: " + ", ".join(COACH_ACTION_LABELS.get(operation, "Angeforderter Schritt") for operation in pending) + "."
+        if analysis_pending:
+            text += "\nDie Analyse der letzten Einheit wurde nicht erfolgreich abgeschlossen."
         receipt.update({
             "status": status, "error": safe_error, "client_turn_id": client_turn_id,
             "command_receipts": commands, "sync_job_ids": receipt.get("sync_job_ids") or [],
-            "intent": intent, "pending_operations": pending,
+            "intent": intent, "pending_operations": pending, "analysis_pending": analysis_pending,
             "proposed_actions": [item["result"]["proposed_action"] for item in commands if item.get("result", {}).get("proposed_action")],
         })
         receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
