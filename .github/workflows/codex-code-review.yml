@@ -39,9 +39,16 @@ jobs:
           script: |
             let affectedPullRequests = [];
             const releaseBotLogin = 'ai-coach-release-bot[bot]';
-            const shouldSkipCodexReview = (pullRequest) => (
-              pullRequest.user?.login === releaseBotLogin
-            );
+            const releaseVersionPattern = /^chore\/release-version-(\d+\.\d+\.\d+)$/;
+            const shouldSkipCodexReview = (pullRequest) => {
+              const versionMatch = releaseVersionPattern.exec(pullRequest.head?.ref || '');
+              return (
+                pullRequest.user?.login === releaseBotLogin &&
+                pullRequest.base?.ref === 'develop' &&
+                versionMatch &&
+                pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`
+              );
+            };
             if (context.eventName === 'push') {
               const base = context.ref.replace(/^refs\/heads\//, '');
               const pullRequests = await github.paginate(github.rest.pulls.list, {
@@ -56,11 +63,12 @@ jobs:
                 .map((pullRequest) => ({
                   pullRequestNumber: pullRequest.number,
                   baseRef: base,
+                  reviewRequestedAt: '',
                   skipCodexReview: shouldSkipCodexReview(pullRequest),
                 }));
             } else if (context.eventName === 'pull_request_target') {
               const pullRequest = context.payload.pull_request;
-              const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
+               const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
               if (
                 pullRequest.draft !== true &&
                 ['develop', 'main'].includes(pullRequest.base.ref) &&
@@ -69,6 +77,7 @@ jobs:
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
                   baseRef: pullRequest.base.ref,
+                  reviewRequestedAt: baseChanged ? pullRequest.updated_at : '',
                   skipCodexReview: shouldSkipCodexReview(pullRequest),
                 }];
               }
@@ -88,6 +97,7 @@ jobs:
                 affectedPullRequests = [{
                   pullRequestNumber: response.data.number,
                   baseRef: response.data.base.ref,
+                  reviewRequestedAt: context.payload.comment.created_at,
                   skipCodexReview: shouldSkipCodexReview(response.data),
                 }];
               }
@@ -97,6 +107,7 @@ jobs:
               affectedPullRequests = [{
                 pullRequestNumber: 0,
                 baseRef: 'none',
+                reviewRequestedAt: '',
                 skipCodexReview: false,
                 skip: true,
               }];
@@ -300,6 +311,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}
+          review-requested-at: ${{ matrix.reviewRequestedAt }}
           check-name: Codex code review
           codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
           timeout-seconds: 2400

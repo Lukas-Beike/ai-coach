@@ -839,8 +839,10 @@ use the connector's native automatic trigger; a human can manually request a
 fresh review with `@codex review`. The trusted `ai-coach-release-bot[bot]`
 exception is limited to an exact `develop` version-bump PR whose branch, title,
 repository, and one-file `APP_VERSION` diff match the release contract. The
+release promotion PR to `main` remains on the normal Codex review path. The
 workflow records a successful `Codex code review` check with the exemption
-reason. If
+reason only for that validated version bump. Retargeting a PR also establishes
+a fresh review baseline. If
 the PR is closed or merged while the gate is waiting, the gate cancels its
 check instead of polling until the timeout.
 
