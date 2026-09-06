@@ -13600,10 +13600,18 @@ def _structured_coach_tool_result(
             artifact = db.execute("SELECT * FROM coach_plan_artifacts WHERE id=?", (artifact_id,)).fetchone()
             if not artifact:
                 raise AppError(404, "Planartefakt nicht gefunden.", reason="artifact_not_found")
-            if str(artifact.get("conversation_id") or "") != str(conversation_id):
-                raise AppError(403, "Das Planartefakt gehört nicht zu dieser Coach-Conversation.", reason="artifact_scope_denied")
             if artifact["status"] == "committed":
                 return {"ok": True, "status": "already_applied", "artifact_id": artifact_id}
+            if str(artifact.get("conversation_id") or "") != str(conversation_id):
+                # Provider conversations can rotate after an interrupted
+                # response or change when the athlete switches providers. The
+                # exact artifact scope from the separately classified current
+                # turn remains the authorization boundary, so move the draft's
+                # audit binding to the active conversation.
+                db.execute(
+                    "UPDATE coach_plan_artifacts SET conversation_id=?, updated_at=? WHERE id=? AND status='draft'",
+                    (conversation_id, utc_now(), artifact_id),
+                )
             revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
             current_revision = int((revision_row or {}).get("revision") or 0)
             if int(artifact["base_revision"] or 0) != current_revision:
@@ -13860,6 +13868,55 @@ def _structured_authorized_operations(intent: dict[str, Any]) -> set[str]:
     if isinstance(follow_ups, list):
         operations.update(str(value).strip() for value in follow_ups if str(value).strip())
     return operations
+
+
+def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dict[str, Any]:
+    """Route an explicit whole-plan rebuild through the existing-unit path.
+
+    The classifier may otherwise combine staging a new plan with editing the
+    current one. A staged plan necessarily collides with the dated local units
+    that a whole-plan rebuild is meant to replace.
+    """
+    if intent.get("intent") not in {"local_action", "remote_sync"}:
+        return intent
+    if not prompt_requests_bulk_training_change(message):
+        return intent
+    plan_operations = {"stage_training_plan", "commit_training_plan", "apply_training_changes"}
+    if not (_structured_authorized_operations(intent) & plan_operations):
+        return intent
+    today = local_now().date().isoformat()
+    with DB_LOCK, database() as db:
+        existing_plan = db.execute(
+            "SELECT 1 FROM planned_units "
+            "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
+            "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
+            "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ? LIMIT 1",
+            (today,),
+        ).fetchone()
+    if not existing_plan:
+        return intent
+    follow_ups: list[str] = []
+    for operation in [intent.get("operation"), *(intent.get("follow_up_operations") or [])]:
+        if isinstance(operation, str) and operation and operation not in plan_operations and operation not in follow_ups:
+            follow_ups.append(operation)
+    scope = [
+        token for token in (intent.get("authorization_scope") or [])
+        if isinstance(token, str) and not token.startswith("artifact:")
+    ]
+    if "local_plan" not in scope:
+        scope.append("local_plan")
+    normalized = {
+        **intent,
+        "operation": "apply_training_changes",
+        "artifact_id": None,
+        "authorization_scope": sorted(set(scope)),
+        "follow_up_operations": follow_ups,
+        "bulk_change": True,
+    }
+    if "start_intervals_plan_sync" in follow_ups:
+        normalized["intent"] = "remote_sync"
+        normalized["target_system"] = "intervals"
+    return normalized
 
 
 def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf_hash: str = "") -> dict[str, Any]:
@@ -14791,12 +14848,8 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             "intent": "advice", "operation": None, "target_system": "none",
             "artifact_id": None, "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
         }
-    if (
-        isinstance(structured_intent, dict)
-        and structured_intent.get("operation") == "apply_training_changes"
-        and prompt_requests_bulk_training_change(message)
-    ):
-        structured_intent = {**structured_intent, "bulk_change": True}
+    if isinstance(structured_intent, dict):
+        structured_intent = _normalize_complete_plan_intent(message, structured_intent)
     if background_owned:
         with DB_LOCK, database() as db:
             db.execute(

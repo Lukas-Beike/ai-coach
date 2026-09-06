@@ -456,6 +456,62 @@ class CoachTests(unittest.TestCase):
             )
         self.assertEqual(denied.exception.reason, "intent_scope_denied")
 
+    def test_structured_commit_rebinds_explicit_draft_to_recovered_conversation(self):
+        artifact = server._stage_coach_artifact(
+            "conversation-stale",
+            "turn-draft",
+            {
+                "plan_name": "Recovered",
+                "goal": "Ausdauer",
+                "workouts": [{
+                    "date": "2099-01-03", "sport": "Ride", "name": "Grundlage",
+                    "description": "- 30m 60%", "duration_minutes": 30,
+                    "target": "POWER", "rationale": "Basis",
+                }],
+            },
+        )
+        intent = {
+            "intent": "local_action",
+            "operation": "commit_training_plan",
+            "target_system": "local",
+            "artifact_id": artifact["artifact_id"],
+            "ambiguities": [],
+            "authorization_scope": [f"artifact:{artifact['artifact_id']}"],
+            "follow_up_operations": [],
+        }
+        responses = [
+            server.AppError(400, "stale", reason="conversation_state_invalid"),
+            {"output": [{
+                "type": "function_call", "name": "commit_training_plan", "call_id": "call-recovered-commit",
+                "arguments": json.dumps({"artifact_id": artifact["artifact_id"]}),
+            }]},
+            {"output_text": "Der Plan ist gespeichert."},
+        ]
+
+        def response(_payload):
+            value = responses.pop(0)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        with patch.object(server, "responses_request", side_effect=response), patch.object(
+            server, "replace_stale_openai_conversation", return_value="conversation-recovered"
+        ):
+            result = server._chat_with_structured_coach_impl(
+                "Speichere diesen Plan.", intent=intent, conversation_id="conversation-stale",
+                client_turn_id="turn-recovered-commit",
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "committed")
+        with server.DB_LOCK, server.database() as db:
+            stored = db.execute(
+                "SELECT conversation_id, status FROM coach_plan_artifacts WHERE id=?",
+                (artifact["artifact_id"],),
+            ).fetchone()
+        self.assertEqual(stored["conversation_id"], "conversation-recovered")
+        self.assertEqual(stored["status"], "committed")
+
     def test_structured_plan_push_declares_and_uses_bounded_entries(self):
         local_id = str(uuid.uuid4())
         entry = {"library_workout_id": local_id, "expected_payload_hash": "b" * 64}
@@ -4727,6 +4783,93 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(server.prompt_requests_bulk_training_change(
             "Ändere nicht meinen gesamten Trainingsplan."
         ))
+
+    def test_complete_plan_rebuild_normalizes_mixed_draft_edit_and_sync_flow(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Alter Plan", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        target = next(item for item in state["planned_units"] if item["local_id"] == planned["id"])
+        stale_artifact_id = str(uuid.uuid4())
+        mixed_intent = {
+            "intent": "remote_sync", "operation": "stage_training_plan", "target_system": "intervals",
+            "artifact_id": stale_artifact_id, "ambiguities": [],
+            "authorization_scope": ["local_plan", f"artifact:{stale_artifact_id}"],
+            "follow_up_operations": [
+                "commit_training_plan", "apply_training_changes", "start_intervals_plan_sync",
+            ],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "read_training_state", "call_id": "read", "arguments": "{}"}]},
+            {"output": [{"type": "function_call", "name": "apply_training_changes", "call_id": "apply", "arguments": json.dumps({
+                "expected_revision": state["planning_revision"],
+                "changes": [{
+                    "local_id": planned["id"], "action": "update", "name": "Neu geplant",
+                    "expected_payload_hash": target["expected_payload_hash"],
+                }],
+            })}]},
+            {"output": [{
+                "type": "function_call", "name": "start_intervals_plan_sync", "call_id": "sync",
+                "arguments": json.dumps({"reason": "Ausdrücklich angefordert"}),
+            }]},
+            {"output_text": "Der Plan wurde neu erstellt, gespeichert und zur Synchronisierung vorgemerkt."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=mixed_intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-plan-rebuild"
+        ), patch.object(server, "responses_request", side_effect=responses) as request, patch.object(
+            server, "_enqueue_coach_plan_push", return_value={"ok": True, "status": "queued", "sync_job_ids": ["job"]}
+        ):
+            result = server.chat_with_coach(
+                "Erstelle den gesamten Plan mit den neuen Informationen neu für die kommenden 2 Wochen, "
+                "speichere ihn und synchronisiere ihn zu intervals.icu",
+                client_turn_id="turn-plan-rebuild",
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["intent"]["operation"], "apply_training_changes")
+        self.assertIsNone(result["intent"]["artifact_id"])
+        self.assertNotIn(f"artifact:{stale_artifact_id}", result["intent"]["authorization_scope"])
+        self.assertEqual(result["intent"]["follow_up_operations"], ["start_intervals_plan_sync"])
+        self.assertEqual(
+            [item["tool"] for item in result["command_receipts"]],
+            ["read_training_state", "apply_training_changes", "start_intervals_plan_sync"],
+        )
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "read_training_state"})
+        self.assertEqual(request.call_args_list[1].args[0]["tool_choice"], {"type": "function", "name": "apply_training_changes"})
+        self.assertEqual(request.call_args_list[2].args[0]["tool_choice"], {"type": "function", "name": "start_intervals_plan_sync"})
+        self.assertEqual(server.list_planned_units()[0]["name"], "Neu geplant")
+
+    def test_complete_plan_rebuild_keeps_draft_flow_when_no_local_plan_exists(self):
+        intent = {
+            "intent": "local_action", "operation": "stage_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": ["commit_training_plan"],
+        }
+
+        normalized = server._normalize_complete_plan_intent(
+            "Erstelle meinen gesamten Trainingsplan neu.", intent
+        )
+
+        self.assertEqual(normalized, intent)
+
+    def test_complete_plan_rebuild_preserves_sync_when_classifier_makes_it_primary(self):
+        server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Alter Plan", "description": "- 30m easy",
+        })
+        intent = {
+            "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+        }
+
+        normalized = server._normalize_complete_plan_intent(
+            "Erstelle den gesamten Plan mit neuen Informationen neu und synchronisiere ihn.", intent
+        )
+
+        self.assertEqual(normalized["operation"], "apply_training_changes")
+        self.assertEqual(normalized["follow_up_operations"], ["start_intervals_plan_sync"])
 
     def test_complete_plan_edit_reads_full_state_before_mutating(self):
         intent = {
