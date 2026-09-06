@@ -4980,6 +4980,7 @@ class CoachTests(unittest.TestCase):
     def test_complete_plan_replace_keeps_other_named_future_plan(self):
         base = server.save_workout_library_entries([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
+            "start_date_local": (date.today() + timedelta(days=1)).isoformat() + "T07:30:00",
             "sport": "Ride", "name": "Base old", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
         }], plan_name="Base Build")[0]
         race = server.save_workout_library_entries([{
@@ -5077,7 +5078,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(resolved["authorization_scope"], [f"training_plan:{base_plan['id']}"])
         self.assertEqual(base["plan_id"], base_plan["id"])
 
-    def test_named_replacement_keeps_local_plan_scope_for_sync_follow_up(self):
+    def test_named_replacement_with_sync_requires_separate_confirmation(self):
         refs = [{"kind": "training_plan", "id": "active-plan", "name": "Base Build", "status": "planned"}]
         intent = {
             "intent": "remote_sync", "operation": "replace_training_plan", "target_system": "intervals",
@@ -5085,8 +5086,7 @@ class CoachTests(unittest.TestCase):
             "follow_up_operations": ["start_intervals_plan_sync"],
         }
         resolved = server.resolve_intent_objects(intent, "Replace Base Build and sync it", refs)
-        self.assertIn("local_plan", resolved["authorization_scope"])
-        self.assertIn("training_plan:active-plan", resolved["authorization_scope"])
+        self.assertEqual(resolved["intent"], "needs_clarification")
 
     def test_training_plan_metadata_changes_advance_planning_revision(self):
         plan_entry = server.save_workout_library_entries([{
@@ -5126,6 +5126,7 @@ class CoachTests(unittest.TestCase):
     def test_planned_unit_undo_rejects_a_new_date_conflict(self):
         old = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
+            "start_date_local": (date.today() + timedelta(days=1)).isoformat() + "T07:30:00",
             "sport": "Ride", "name": "Old", "description": "- 30m easy",
         })
         state = server._structured_training_state()

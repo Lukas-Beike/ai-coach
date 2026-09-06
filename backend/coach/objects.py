@@ -22,19 +22,30 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
         candidates = all_candidates
         if kind == "training_plan" and "replace_training_plan" in operations:
             candidates = [ref for ref in candidates if ref.get("status") != "archived"]
-            archived_mentioned = any(
-                value and re.search(
-                    r"(?<![\w-])" + re.escape(str(value).casefold()) + r"(?![\w-])", text
-                )
+            archived_spans = [
+                match.span()
                 for ref in all_candidates if ref.get("status") == "archived"
-                for value in (ref.get("id"), ref.get("name"))
-            )
+                for value in (ref.get("id"), ref.get("name")) if value
+                for match in re.finditer(r"(?<![\w-])" + re.escape(str(value).casefold()) + r"(?![\w-])", text)
+            ]
+            active_spans = [
+                match.span()
+                for ref in candidates
+                for value in (ref.get("id"), ref.get("name")) if value
+                for match in re.finditer(r"(?<![\w-])" + re.escape(str(value).casefold()) + r"(?![\w-])", text)
+            ]
+            archived_mentioned = any(
+                not any(start <= a_start and a_end <= end for start, end in active_spans)
+                for a_start, a_end in archived_spans
+            ) or bool(re.search(r"\barchiv\w*\b", text))
             active_id_mentioned = any(
                 ref.get("id") and str(ref["id"]).casefold() in text
                 for ref in candidates
             )
             if archived_mentioned and not active_id_mentioned:
                 return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Der genannte Trainingsplan ist archiviert; bitte nenne einen aktiven Plan oder bestätige eine neue Planung."]}
+            if "start_intervals_plan_sync" in operations and candidates:
+                return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Einen benannten Plan kann ich ersetzen; die Synchronisierung muss danach separat bestätigt werden."]}
         mentions = []
         for ref in candidates:
             for value in {ref["id"], ref["name"]} - {""}:
@@ -64,8 +75,6 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
             resolved.add(f"{kind}:{matches[0]['id']}")
         if named:
             scope.discard(broad)
-            if kind == "training_plan" and "replace_training_plan" in operations and "start_intervals_plan_sync" in operations:
-                scope.add(broad)
             scope.difference_update(requested)
             scope.update(resolved or {f"{kind}:{ref['id']}" for ref in named})
         elif requested:

@@ -2630,10 +2630,15 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                 restore_date = str(target.get("date") or current_payload.get("date") or "")[:10]
                 if restore_date and calendar_conflicts({"date": restore_date}, {entity_id}):
                     raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht wiederhergestellt werden.", reason="plan_date_conflict")
+                restored_target = dict(target)
+                if restore_date:
+                    previous_start = str(current_payload.get("start_date_local") or "")
+                    time_suffix = previous_start[10:] if len(previous_start) > 10 and previous_start[10] == "T" else "T00:00:00"
+                    restored_target["start_date_local"] = restore_date + time_suffix
                 restored = normalize_planned_unit(
                     {
                         **current_payload,
-                        **target,
+                        **restored_target,
                         "archived": bool(target.get("archived")),
                         "local_deleted": bool(target.get("local_deleted")),
                     },
