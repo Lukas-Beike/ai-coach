@@ -63,6 +63,7 @@ jobs:
                 .map((pullRequest) => ({
                   pullRequestNumber: pullRequest.number,
                   baseRef: base,
+                  checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: '',
                   skipCodexReview: shouldSkipCodexReview(pullRequest),
                 }));
@@ -80,6 +81,7 @@ jobs:
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
                   baseRef: pullRequest.base.ref,
+                  checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: reviewBaselineChanged
                     ? pullRequest.updated_at
                     : '',
@@ -102,6 +104,7 @@ jobs:
                 affectedPullRequests = [{
                   pullRequestNumber: response.data.number,
                   baseRef: response.data.base.ref,
+                  checkName: response.data.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: context.payload.comment.created_at,
                   // An explicit human request must review even an otherwise
                   // exempt release-bot version PR.
@@ -114,6 +117,7 @@ jobs:
               affectedPullRequests = [{
                 pullRequestNumber: 0,
                 baseRef: 'none',
+                checkName: 'Codex code review',
                 reviewRequestedAt: '',
                 skipCodexReview: false,
                 skip: true,
@@ -168,7 +172,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
-          CHECK_NAME: Codex code review (${{ matrix.baseRef }})
+          CHECK_NAME: ${{ matrix.checkName }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -289,7 +293,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
-          CHECK_NAME: Codex code review (${{ matrix.baseRef }})
+          CHECK_NAME: ${{ matrix.checkName }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -321,7 +325,7 @@ jobs:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}
           review-requested-at: ${{ matrix.reviewRequestedAt }}
-          check-name: Codex code review (${{ matrix.baseRef }})
+          check-name: ${{ matrix.checkName }}
           codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
           timeout-seconds: 2400
           poll-seconds: 30
