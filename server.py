@@ -1098,7 +1098,9 @@ DIAGNOSTIC_CAPTURE_STATE_KEY = "diagnostic_capture_state"
 DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
 
 CHANGE_HISTORY_RETENTION_DAYS = 180
-CHANGE_HISTORY_MAX_ROWS = 500
+# A complete replacement can archive and recreate up to 366 sessions. Keep
+# enough bounded history rows for that operation plus normal recent changes.
+CHANGE_HISTORY_MAX_ROWS = 1000
 CHANGE_HISTORY_TTL_SECONDS = 10 * 60
 CHANGE_HISTORY_ENTITY_TYPES = {"profile", "workout_library", "planned_unit", "competition", "training_plan"}
 CHANGE_HISTORY_ACTIONS = {"create", "update", "delete", "undo"}
@@ -8149,6 +8151,7 @@ TRAINING_PLAN_STATUS_ALIASES = {
     "abgebrochen": "cancelled",
     "pausiert": "paused",
 }
+TRAINING_PLAN_STATUSES = frozenset({"draft", "planned", "active", "completed", "archived", "cancelled", "paused"})
 
 
 def _training_plan_candidate(current: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
@@ -8190,6 +8193,7 @@ def update_training_plan(plan_id: Any, values: Any) -> dict[str, Any]:
         if action == "delete":
             TRAINING_PLAN_REPOSITORY.delete(db, normalized_id)
             _record_change(db, "training_plan", normalized_id, "delete", current, None)
+            _bump_planning_revision(db)
             result = {"status": "deleted", "plan_id": normalized_id, "plan": None}
         elif action == "update":
             candidate = _training_plan_candidate(current, values)
@@ -8199,6 +8203,7 @@ def update_training_plan(plan_id: Any, values: Any) -> dict[str, Any]:
             )
             updated = {**current, **candidate}
             _record_change(db, "training_plan", normalized_id, "update", current, updated)
+            _bump_planning_revision(db)
             result = {"status": "updated", "plan_id": normalized_id, "plan": updated}
         else:
             raise AppError(400, "Unbekannte Aktion für den Trainingsplan.")
@@ -8906,6 +8911,12 @@ def _insert_planned_unit(db: Any, entry: dict[str, Any], *, sync_dirty: int = 1,
 def _bump_planning_revision(db: Any, amount: int = 1) -> None:
     """Advance the optimistic-concurrency revision in the same transaction."""
     if amount > 0:
+        # Keep the mutation safe even when an older/reset test database lacks
+        # the singleton row; current-schema startup normally creates it.
+        db.execute(
+            "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
+            (utc_now(),),
+        )
         db.execute(
             "UPDATE planning_state SET revision=revision+?, updated_at=? WHERE id=1",
             (int(amount), utc_now()),

@@ -5028,6 +5028,16 @@ class CoachTests(unittest.TestCase):
             server.coach_intent_object_refs(),
         )
         self.assertEqual(restored_intent["authorization_scope"], [f"training_plan:{base_plan['id']}"])
+        archived_replacement = server.resolve_intent_objects(
+            {
+                "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+                "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+                "follow_up_operations": [],
+            },
+            "Replace my archived training plan Base Build",
+            server.coach_intent_object_refs(),
+        )
+        self.assertEqual(archived_replacement["intent"], "needs_clarification")
         deleted_history = next(
             item for item in server.list_change_history()
             if item["entity_type"] == "planned_unit" and item["entity_id"] == base["id"] and item["action"] == "delete"
@@ -5066,6 +5076,30 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(resolved["operation"], "replace_training_plan")
         self.assertEqual(resolved["authorization_scope"], [f"training_plan:{base_plan['id']}"])
         self.assertEqual(base["plan_id"], base_plan["id"])
+
+    def test_named_replacement_keeps_local_plan_scope_for_sync_follow_up(self):
+        refs = [{"kind": "training_plan", "id": "active-plan", "name": "Base Build", "status": "planned"}]
+        intent = {
+            "intent": "remote_sync", "operation": "replace_training_plan", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan", "training_plan:active-plan"],
+            "follow_up_operations": ["start_intervals_plan_sync"],
+        }
+        resolved = server.resolve_intent_objects(intent, "Replace Base Build and sync it", refs)
+        self.assertIn("local_plan", resolved["authorization_scope"])
+        self.assertIn("training_plan:active-plan", resolved["authorization_scope"])
+
+    def test_training_plan_metadata_changes_advance_planning_revision(self):
+        plan_entry = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Metadata", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Metadata Plan")[0]
+        plan = next(item for item in server.list_training_plans() if item["id"] == plan_entry["plan_id"])
+        before = server._structured_training_state()["planning_revision"]
+        server.update_training_plan(plan["id"], {"action": "update", "name": "Renamed Plan"})
+        self.assertEqual(server._structured_training_state()["planning_revision"], before + 1)
+
+    def test_history_capacity_covers_one_complete_plan_replacement(self):
+        self.assertGreaterEqual(server.CHANGE_HISTORY_MAX_ROWS, server.COACH_TRAINING_CHANGE_LIMIT * 2)
 
     def test_complete_plan_replace_archives_selected_plan_without_future_units(self):
         past_plan_id = str(uuid.uuid4())

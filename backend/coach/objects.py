@@ -18,9 +18,23 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
     scope = set(intent.get("authorization_scope") or [])
     text = message.casefold()
     for kind in kinds:
-        candidates = [ref for ref in refs if ref["kind"] == kind]
+        all_candidates = [ref for ref in refs if ref["kind"] == kind]
+        candidates = all_candidates
         if kind == "training_plan" and "replace_training_plan" in operations:
             candidates = [ref for ref in candidates if ref.get("status") != "archived"]
+            archived_mentioned = any(
+                value and re.search(
+                    r"(?<![\w-])" + re.escape(str(value).casefold()) + r"(?![\w-])", text
+                )
+                for ref in all_candidates if ref.get("status") == "archived"
+                for value in (ref.get("id"), ref.get("name"))
+            )
+            active_id_mentioned = any(
+                ref.get("id") and str(ref["id"]).casefold() in text
+                for ref in candidates
+            )
+            if archived_mentioned and not active_id_mentioned:
+                return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Der genannte Trainingsplan ist archiviert; bitte nenne einen aktiven Plan oder bestätige eine neue Planung."]}
         mentions = []
         for ref in candidates:
             for value in {ref["id"], ref["name"]} - {""}:
@@ -50,6 +64,8 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
             resolved.add(f"{kind}:{matches[0]['id']}")
         if named:
             scope.discard(broad)
+            if kind == "training_plan" and "replace_training_plan" in operations and "start_intervals_plan_sync" in operations:
+                scope.add(broad)
             scope.difference_update(requested)
             scope.update(resolved or {f"{kind}:{ref['id']}" for ref in named})
         elif requested:
