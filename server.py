@@ -12499,7 +12499,8 @@ def requested_activity_refresh_days(message: str) -> int | None:
     all_time = re.search(r"\b(?:alle|sämtliche|saemtliche|vollständig|vollstaendig|komplett|all)\b.*\b(?:daten|histor(?:ie|y)|aktivität\w*|aktivitaet\w*|activities)\b", text)
     if all_time:
         context = text[max(0, all_time.start() - 100):min(len(text), all_time.end() + 100)]
-        if re.search(refresh_context, context):
+        refresh_verbs = r"(?:aktualisier|refresh|sync|synchronisier|abruf|lad|hol|histor(?:ie|y))"
+        if re.search(refresh_verbs, context):
             return ALL_SYNC_DAYS
     return None
 
@@ -13662,7 +13663,22 @@ def _structured_coach_tool_result(
             try:
                 completed_days = int(result.get("activity_days"))
             except (TypeError, ValueError):
-                completed_days = activity_days
+                completed_days = 0
+            covers_requested_window = (
+                completed_days == ALL_SYNC_DAYS and activity_days >= 1
+            ) or (
+                activity_days == ALL_SYNC_DAYS and completed_days == ALL_SYNC_DAYS
+            ) or (
+                activity_days >= 1 and completed_days >= activity_days
+            )
+            if result.get("waited_for_existing") and not covers_requested_window:
+                result = sync_intervals("Chat-Anfrage", activity_days=activity_days, wait_for_existing=False)
+                if result.get("status") == "already_running":
+                    raise AppError(503, "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.", reason="provider_busy")
+                try:
+                    completed_days = int(result.get("activity_days"))
+                except (TypeError, ValueError):
+                    completed_days = activity_days
             return {"ok": True, "status": "completed", "provider": provider, "activity_days": completed_days, "synchronous_refresh": True}
         job = enqueue_sync_job(provider, "refresh", arguments, requested_by="coach")
         sync_job_ids.append(job["id"])

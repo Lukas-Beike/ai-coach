@@ -332,6 +332,9 @@ class CoachReviewTests(unittest.TestCase):
             server.requested_activity_refresh_days("Aktualisiere alle verfuegbaren Aktivitaetsdaten und analysiere die letzte Einheit."),
             server.ALL_SYNC_DAYS,
         )
+        self.assertIsNone(
+            server.requested_activity_refresh_days("Analysiere meine letzte Einheit und beruecksichtige alle Aktivitaeten in meinem Trainingsplan."),
+        )
 
     def test_synchronous_refresh_rejects_windows_beyond_job_limit(self):
         intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
@@ -351,6 +354,30 @@ class CoachReviewTests(unittest.TestCase):
                 )
         self.assertEqual(error.exception.reason, "invalid_refresh_request")
         sync.assert_not_called()
+
+    def test_synchronous_refresh_retries_after_waiting_for_narrower_sync(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        kwargs = {
+            "intent": intent,
+            "conversation_id": "wide-sync-retry",
+            "client_turn_id": "wide-sync-retry",
+            "session_csrf_hash": "review-session",
+            "sync_job_ids": [],
+        }
+        with patch.object(
+            server,
+            "sync_intervals",
+            side_effect=[{"status": "ok", "waited_for_existing": True, "activity_days": 3}, {"status": "ok", "activity_days": 365}],
+        ) as sync:
+            result = server._structured_coach_tool_result(
+                "start_provider_refresh",
+                {"days": 365, "_wait_for_completion": True},
+                **kwargs,
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["activity_days"], 365)
+        self.assertEqual(sync.call_count, 2)
+        self.assertFalse(sync.call_args_list[1].kwargs["wait_for_existing"])
 
     def test_wider_refresh_rebuild_keeps_duplicate_selection_instruction(self):
         intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
