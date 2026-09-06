@@ -4062,10 +4062,12 @@ async function fullResync(source) {
 }
 
 async function resetCoachChat() {
-  const button = $("#chatResetButton");
-  if (!button || !await requestConfirmation("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?", { title: "Coach-Chat zurücksetzen?" })) return;
-  button.disabled = true;
-  button.textContent = "Wird zurückgesetzt…";
+  const buttons = [$("#openaiChatResetButton"), $("#chatResetButton")].filter(Boolean);
+  if (!buttons.length || !await requestConfirmation("Coach-Chat wirklich zurücksetzen und eine neue Unterhaltung beginnen?", { title: "Coach-Chat zurücksetzen?" })) return;
+  buttons.forEach((button) => {
+    button.disabled = true;
+    button.textContent = "Wird zurückgesetzt…";
+  });
   try {
     await api("/api/chat/reset", { method: "POST", body: "{}" });
     state.chatGeneration += 1;
@@ -4088,7 +4090,12 @@ async function resetCoachChat() {
     }
     toast("Neuer Coach-Chat gestartet");
   } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = "Chat zurücksetzen"; }
+  finally {
+    buttons.forEach((button) => {
+      button.disabled = false;
+      button.textContent = "Chat zurücksetzen";
+    });
+  }
 }
 
 async function saveProfile(event) {
@@ -4467,6 +4474,7 @@ $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
 $("#diagnosticCaptureToggle").addEventListener("change", setDiagnosticCapture);
 $("#logsRefreshButton").addEventListener("click", loadLogs);
+$("#openaiChatResetButton").addEventListener("click", resetCoachChat);
 $("#chatResetButton").addEventListener("click", resetCoachChat);
 $("#privacyExportButton").addEventListener("click", downloadPrivacyExport);
 $("#privacyDeleteButton").addEventListener("click", deletePrivacyData);
