@@ -5034,11 +5034,13 @@ class CoachTests(unittest.TestCase):
         )
         preview = server._history_preview(deleted_history["id"], "session-undo")
         self.assertEqual(preview["status"], "preview")
+        revision_before_undo = server._structured_training_state()["planning_revision"]
         undone = server._apply_change_undo({
             "change_id": deleted_history["id"],
             "expected_current_hash": deleted_history["after_hash"],
         })
         self.assertEqual(undone["status"], "undone")
+        self.assertEqual(server._structured_training_state()["planning_revision"], revision_before_undo + 1)
         restored = next(item for item in server.list_planned_units(20, include_archived=True) if item["id"] == base["id"])
         self.assertFalse(restored["archived"])
         self.assertFalse(restored["local_deleted"])
@@ -5086,6 +5088,33 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "replaced")
         self.assertEqual(next(plan for plan in server.list_training_plans() if plan["id"] == past_plan_id)["status"], "archived")
+
+    def test_planned_unit_undo_rejects_a_new_date_conflict(self):
+        old = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Old", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        server._structured_coach_tool_result(
+            "replace_training_plan",
+            {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Conflict Replacement", "goal": "", "workouts": [
+                {"date": old["date"], "sport": "Ride", "name": "New", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+            ]}},
+            intent=intent, conversation_id="conversation-undo-conflict", client_turn_id="turn-undo-conflict",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        deleted_history = next(
+            item for item in server.list_change_history()
+            if item["entity_type"] == "planned_unit" and item["entity_id"] == old["id"] and item["action"] == "delete"
+        )
+        with self.assertRaises(server.AppError) as error:
+            server._apply_change_undo({"change_id": deleted_history["id"], "expected_current_hash": deleted_history["after_hash"]})
+        self.assertEqual(error.exception.reason, "plan_date_conflict")
 
     def test_complete_plan_edit_reads_full_state_before_mutating(self):
         intent = {

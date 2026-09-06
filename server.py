@@ -2625,6 +2625,9 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                     raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.") from exc
                 if not isinstance(current_payload, dict):
                     raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.")
+                restore_date = str(target.get("date") or current_payload.get("date") or "")[:10]
+                if restore_date and calendar_conflicts({"date": restore_date}, {entity_id}):
+                    raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht wiederhergestellt werden.", reason="plan_date_conflict")
                 restored = normalize_planned_unit(
                     {
                         **current_payload,
@@ -2642,6 +2645,9 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                 )
                 after = restored
             else:
+                restore_date = str(target.get("date") or "")[:10]
+                if restore_date and calendar_conflicts({"date": restore_date}, {entity_id}):
+                    raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht wiederhergestellt werden.", reason="plan_date_conflict")
                 restored = normalize_planned_unit(target, local_id=entity_id, sync_status="local")
                 _insert_planned_unit(db, restored)
                 after = restored
@@ -2658,6 +2664,8 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                 after = target
         else:
             raise AppError(400, "Unbekannte lokale Änderung.")
+        if entity_type == "planned_unit":
+            _bump_planning_revision(db)
         _record_change(db, entity_type, entity_id, "undo", current, after, source="undo")
     return {"status": "undone", "change_id": change_id, "entity_type": entity_type, "entity_id": entity_id, "remote_untouched": True}
 
