@@ -332,6 +332,10 @@ class CoachReviewTests(unittest.TestCase):
             server.requested_activity_refresh_days("Aktualisiere alle verfuegbaren Aktivitaetsdaten und analysiere die letzte Einheit."),
             server.ALL_SYNC_DAYS,
         )
+        self.assertEqual(
+            server.requested_activity_refresh_days("Die letzten 365 Tage meiner Aktivitaeten bitte synchronisieren und danach meine letzte Einheit analysieren."),
+            365,
+        )
         self.assertIsNone(
             server.requested_activity_refresh_days("Analysiere meine letzte Einheit und beruecksichtige alle Aktivitaeten in meinem Trainingsplan."),
         )

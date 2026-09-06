@@ -12488,7 +12488,8 @@ def requested_activity_refresh_days(message: str) -> int | None:
     refresh_context = r"(?:aktualisier|refresh|sync|synchronisier|abruf|lad|hol|histor(?:ie|y)|aktivität|aktivitaet|activity|activities|einheit)"
     for match in re.finditer(r"\b(\d{1,4})\s*(?:tage|tag|days?|d)\b", text):
         prefix = text[max(0, match.start() - 100):match.start()]
-        if not re.search(refresh_context, prefix):
+        suffix = text[match.end():min(len(text), match.end() + 100)]
+        if not re.search(refresh_context, prefix + suffix):
             continue
         if re.search(r"\b(?:plan|trainingsplan|training plan)\b.{0,40}\b(?:kommend\w*|nächst\w*|naechst\w*|next)\b", prefix[-90:]):
             continue
