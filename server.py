@@ -1227,7 +1227,10 @@ def observed_sync(provider: str, area: str = "default"):
                 try:
                     result = function(*args, **kwargs)
                 except Exception as exc:
-                    _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
+                    if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
+                        _provider_refresh_finish(refresh_id, "skipped", "cancelled")
+                    else:
+                        _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
                     raise
                 result_status = result.get("status") if isinstance(result, dict) else None
                 refresh_status = "skipped" if result_status == "not_configured" else "partial" if result_status == "partial" else "success"
@@ -12524,7 +12527,12 @@ def requested_activity_refresh_days(message: str) -> int | None:
             return int(match.group(1))
         except (TypeError, ValueError):
             continue
-    all_time = re.search(r"\b(?:alle|sämtliche|saemtliche|vollständig|vollstaendig|komplett|all)\b.*\b(?:daten|histor(?:ie|y)|aktivität\w*|aktivitaet\w*|activities)\b", text)
+    completeness = r"(?:alle[nr]?|sämtliche|saemtliche|vollständig\w*|vollstaendig\w*|komplett\w*|gesamte[nr]?|all|entire|whole|complete)"
+    history = r"(?:daten|histor(?:ie|y)|aktivität\w*|aktivitaet\w*|activity|activities)"
+    all_time = re.search(
+        rf"(?:\b{completeness}\b.{{0,80}}\b{history}\b|\b{history}\b.{{0,80}}\b{completeness}\b)",
+        text,
+    )
     if all_time:
         context = text[max(0, all_time.start() - 100):min(len(text), all_time.end() + 100)]
         refresh_verbs = r"(?:aktualisier|refresh|sync|synchronisier|abruf|lad|hol)"

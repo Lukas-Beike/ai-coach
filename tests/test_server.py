@@ -5050,6 +5050,28 @@ class CoachTests(unittest.TestCase):
             server.sync_intervals("cancellable", activity_days=42, cancel_event=cancel_event)
         fetch_snapshot.assert_called_once_with(activity_days=42, cancel_event=cancel_event)
 
+    def test_cancelled_intervals_sync_is_recorded_as_skipped(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config):
+            with self.assertRaises(server.AppError) as raised:
+                server.sync_intervals("cancelled", activity_days=42, cancel_event=cancel_event)
+            freshness = {
+                (item["provider"], item["area"]): item
+                for item in server.provider_freshness_state()
+            }
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute(
+                "SELECT status, phase, error_code FROM provider_refresh_history "
+                "WHERE provider='intervals' AND area='activities' ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+        self.assertEqual(row["status"], "skipped")
+        self.assertEqual(row["phase"], "cancelled")
+        self.assertIsNone(row["error_code"])
+        self.assertEqual(freshness[("intervals", "activities")]["state"], "never_loaded")
+
     def test_initial_intervals_sync_copies_remote_library_to_empty_local_library(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
         remote = [{
