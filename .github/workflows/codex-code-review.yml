@@ -10,7 +10,7 @@ on:
   pull_request_target:
     branches: [develop, main]
     types: [opened, synchronize, reopened, ready_for_review, edited]
-  # Allow a manually requested @codex review to start or restart the gate.
+  # Allow a trusted human-authored @codex review to start or restart the gate.
   issue_comment:
     types: [created]
 
