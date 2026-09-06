@@ -13907,7 +13907,13 @@ def _chat_with_structured_coach_impl(
     requested_operation = intent.get("operation")
     forced_tool = requested_operation if requested_operation in COACH_CANONICAL_TOOL_NAMES else "none"
     if completed_refresh and requested_operation == "start_provider_refresh":
-        forced_tool = "none"
+        forced_tool = next(
+            (
+                operation for operation in intent.get("follow_up_operations") or []
+                if operation in COACH_CANONICAL_TOOL_NAMES and operation != requested_operation
+            ),
+            "none",
+        )
     bulk_training_change = bool(
         requested_operation == "apply_training_changes"
         and (intent.get("bulk_change") or prompt_requests_bulk_training_change(message))
@@ -14475,7 +14481,22 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     refresh_error = None
     latest_activity_analysis = prompt_requests_latest_activity_analysis(message)
     resuming_background_response = bool(background_owned and ai_provider == "openai" and background_receipt.get("openai_response_id"))
-    if not resuming_background_response and (latest_activity_analysis or (prompt_requests_fresh_data(message) and not (
+    completed_preflight_receipt = bool(
+        latest_activity_analysis
+        and structured_intent.get("intent") in {"local_action", "remote_sync"}
+        and structured_intent.get("target_system") == "intervals"
+        and "start_provider_refresh" in _structured_authorized_operations(structured_intent)
+        and "intervals_refresh" in structured_intent.get("authorization_scope", [])
+        and any(
+            item.get("call_id") == "preflight-intervals-refresh"
+            and item.get("tool") == "start_provider_refresh"
+            and item.get("result", {}).get("ok")
+            and item.get("result", {}).get("status") == "completed"
+            for item in background_receipt.get("command_receipts") or []
+            if isinstance(item, dict)
+        )
+    )
+    if not resuming_background_response and ((latest_activity_analysis and not completed_preflight_receipt) or (prompt_requests_fresh_data(message) and not (
         structured_intent.get("operation") == "start_provider_refresh"
         and structured_intent.get("target_system") == "intervals"
     ))):
@@ -14505,6 +14526,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         and "start_provider_refresh" in _structured_authorized_operations(structured_intent)
         and structured_intent.get("target_system") == "intervals"
         and "intervals_refresh" in structured_intent.get("authorization_scope", [])
+        and (completed_preflight_receipt or not refresh_error)
     )
     duplicate_activity = (
         latest_wahoo_garmin_duplicate()

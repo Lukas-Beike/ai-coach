@@ -83,6 +83,41 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(output["status"], "completed")
         self.assertIn("Analyse der aktuellen Einheit", result["message"]["content"])
 
+    def test_background_latest_analysis_reuses_persisted_preflight_refresh(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        message = "Aktualisiere Intervals, analysiere meine letzte Einheit und erstelle den Trainingsplan fuer die naechsten sechs Wochen."
+        csrf_hash = server.session_token_hash("csrf")
+        server.enqueue_background_coach_job(message, "background-preflight", csrf_hash, operation_id="preflight-op")
+        persisted_receipt = {
+            "mode": "background",
+            "session_key": server._coach_session_key(csrf_hash),
+            "command_receipts": [{
+                "call_id": "preflight-intervals-refresh", "tool": "start_provider_refresh",
+                "effect_key": "preflight-intervals-refresh",
+                "result": {"ok": True, "status": "completed", "provider": "intervals", "before_analysis": True},
+            }],
+        }
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE coach_commands SET intent=?, receipt=? WHERE client_turn_id=?",
+                (json.dumps(intent), json.dumps(persisted_receipt), "background-preflight"),
+            )
+        with patch.object(server, "ensure_conversation", return_value="preflight-conversation"), patch.object(
+            server, "build_training_context", return_value="Synthetic persisted context"
+        ), patch.object(server, "sync_intervals", side_effect=AssertionError("persisted refresh must be reused")) as sync, patch.object(
+            server, "responses_background_request", return_value={"output_text": "Die aktuelle Einheit ist analysiert."}
+        ):
+            result = server.chat_with_coach(
+                message,
+                client_turn_id="background-preflight",
+                session_csrf_hash=csrf_hash,
+                background_job=True,
+            )
+        sync.assert_not_called()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["pending_operations"], [])
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+
     def test_latest_analysis_keeps_authorized_follow_up(self):
         intent = {**self.intent("start_provider_refresh", ["intervals_refresh"], ["list_planned_workouts"]), "intent": "remote_sync", "target_system": "intervals"}
         with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
@@ -92,11 +127,12 @@ class CoachReviewTests(unittest.TestCase):
                 {"output": [self.call("list_planned_workouts", {})]},
                 {"output_text": "Analyse und geplante Einheiten."},
             ]
-        ):
+        ) as request:
             result = server.chat_with_coach("Aktualisiere Intervals und analysiere meine letzte Einheit. Liste danach die geplanten Einheiten.", client_turn_id="latest-follow-up")
         self.assertEqual(result["intent"], intent)
         self.assertEqual(result["status"], "completed")
         self.assertEqual({item["tool"] for item in result["command_receipts"]}, {"start_provider_refresh", "list_planned_workouts"})
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "list_planned_workouts"})
 
     def test_latest_analysis_does_not_satisfy_requested_garmin_refresh(self):
         intent = {**self.intent("start_provider_refresh", ["garmin_refresh"]), "intent": "remote_sync", "target_system": "garmin"}
