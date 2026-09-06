@@ -4802,12 +4802,12 @@ class CoachTests(unittest.TestCase):
         }
         responses = [
             {"output": [{"type": "function_call", "name": "read_training_state", "call_id": "read", "arguments": "{}"}]},
-            {"output": [{"type": "function_call", "name": "apply_training_changes", "call_id": "apply", "arguments": json.dumps({
+            {"output": [{"type": "function_call", "name": "replace_training_plan", "call_id": "replace", "arguments": json.dumps({
                 "expected_revision": state["planning_revision"],
-                "changes": [{
-                    "local_id": planned["id"], "action": "update", "name": "Neu geplant",
-                    "expected_payload_hash": target["expected_payload_hash"],
-                }],
+                "payload": {"plan_name": "Neu geplant", "goal": "Ausdauer", "workouts": [
+                    {"date": (date.today() + timedelta(days=2)).isoformat(), "sport": "Ride", "name": "Neu geplant", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+                    {"date": (date.today() + timedelta(days=4)).isoformat(), "sport": "Run", "name": "Neu geplant 2", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test"},
+                ]},
             })}]},
             {"output": [{
                 "type": "function_call", "name": "start_intervals_plan_sync", "call_id": "sync",
@@ -4827,18 +4827,18 @@ class CoachTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["intent"]["operation"], "apply_training_changes")
+        self.assertEqual(result["intent"]["operation"], "replace_training_plan")
         self.assertIsNone(result["intent"]["artifact_id"])
         self.assertNotIn(f"artifact:{stale_artifact_id}", result["intent"]["authorization_scope"])
         self.assertEqual(result["intent"]["follow_up_operations"], ["start_intervals_plan_sync"])
         self.assertEqual(
             [item["tool"] for item in result["command_receipts"]],
-            ["read_training_state", "apply_training_changes", "start_intervals_plan_sync"],
+            ["read_training_state", "replace_training_plan", "start_intervals_plan_sync"],
         )
         self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "read_training_state"})
-        self.assertEqual(request.call_args_list[1].args[0]["tool_choice"], {"type": "function", "name": "apply_training_changes"})
+        self.assertEqual(request.call_args_list[1].args[0]["tool_choice"], {"type": "function", "name": "replace_training_plan"})
         self.assertEqual(request.call_args_list[2].args[0]["tool_choice"], {"type": "function", "name": "start_intervals_plan_sync"})
-        self.assertEqual(server.list_planned_units()[0]["name"], "Neu geplant")
+        self.assertEqual({item["name"] for item in server.list_planned_units()}, {"Neu geplant", "Neu geplant 2"})
 
     def test_complete_plan_rebuild_keeps_draft_flow_when_no_local_plan_exists(self):
         intent = {
@@ -4868,8 +4868,39 @@ class CoachTests(unittest.TestCase):
             "Erstelle den gesamten Plan mit neuen Informationen neu und synchronisiere ihn.", intent
         )
 
-        self.assertEqual(normalized["operation"], "apply_training_changes")
+        self.assertEqual(normalized["operation"], "replace_training_plan")
         self.assertEqual(normalized["follow_up_operations"], ["start_intervals_plan_sync"])
+
+    def test_complete_plan_replace_can_create_more_sessions_and_archive_old_ones(self):
+        old = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Old", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        result = server._structured_coach_tool_result(
+            "replace_training_plan",
+            {
+                "expected_revision": state["planning_revision"],
+                "payload": {"plan_name": "Replacement", "goal": "Base", "workouts": [
+                    {"date": (date.today() + timedelta(days=2)).isoformat(), "sport": "Ride", "name": "New 1", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Base"},
+                    {"date": (date.today() + timedelta(days=3)).isoformat(), "sport": "Run", "name": "New 2", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Base"},
+                ]},
+            },
+            intent=intent, conversation_id="conversation-replace", client_turn_id="turn-replace",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["status"], "replaced")
+        self.assertEqual(result["archived_count"], 1)
+        self.assertEqual(result["created_count"], 2)
+        self.assertEqual({item["name"] for item in server.list_planned_units()}, {"New 1", "New 2"})
+        archived = next(item for item in server.list_planned_units(20, include_archived=True) if item["id"] == old["id"])
+        self.assertTrue(archived["archived"])
+        self.assertTrue(archived["local_deleted"])
 
     def test_complete_plan_edit_reads_full_state_before_mutating(self):
         intent = {
