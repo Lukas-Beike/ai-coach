@@ -10,7 +10,7 @@ on:
   pull_request_target:
     branches: [develop, main]
     types: [opened, synchronize, reopened, ready_for_review, edited]
-  # Allow a trusted human-authored @codex review to start or restart the gate.
+  # Allow a manually requested @codex review to start or restart the gate.
   issue_comment:
     types: [created]
 
@@ -38,6 +38,17 @@ jobs:
           github-token: ${{ github.token }}
           script: |
             let affectedPullRequests = [];
+            const releaseBotLogin = 'ai-coach-release-bot[bot]';
+            const releaseVersionPattern = /^chore\/release-version-(\d+\.\d+\.\d+)$/;
+            const shouldSkipCodexReview = (pullRequest) => {
+              const versionMatch = releaseVersionPattern.exec(pullRequest.head?.ref || '');
+              return (
+                pullRequest.user?.login === releaseBotLogin &&
+                pullRequest.base?.ref === 'develop' &&
+                versionMatch &&
+                pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`
+              );
+            };
             if (context.eventName === 'push') {
               const base = context.ref.replace(/^refs\/heads\//, '');
               const pullRequests = await github.paginate(github.rest.pulls.list, {
@@ -52,18 +63,29 @@ jobs:
                 .map((pullRequest) => ({
                   pullRequestNumber: pullRequest.number,
                   baseRef: base,
+                  checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review',
+                  reviewRequestedAt: '',
+                  skipCodexReview: shouldSkipCodexReview(pullRequest),
                 }));
             } else if (context.eventName === 'pull_request_target') {
               const pullRequest = context.payload.pull_request;
               const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
+              const titleChanged = context.payload.action === 'edited' && context.payload.changes?.title;
+              const releaseBotTitleChanged = titleChanged && pullRequest.user?.login === releaseBotLogin && releaseVersionPattern.test(pullRequest.head?.ref || '');
+              const reviewBaselineChanged = baseChanged || releaseBotTitleChanged || context.payload.action === 'reopened';
               if (
                 pullRequest.draft !== true &&
                 ['develop', 'main'].includes(pullRequest.base.ref) &&
-                (context.payload.action !== 'edited' || baseChanged)
+                (context.payload.action !== 'edited' || reviewBaselineChanged)
               ) {
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
                   baseRef: pullRequest.base.ref,
+                  checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
+                  reviewRequestedAt: reviewBaselineChanged
+                    ? pullRequest.updated_at
+                    : '',
+                  skipCodexReview: shouldSkipCodexReview(pullRequest),
                 }];
               }
             } else if (
@@ -82,6 +104,11 @@ jobs:
                 affectedPullRequests = [{
                   pullRequestNumber: response.data.number,
                   baseRef: response.data.base.ref,
+                  checkName: response.data.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
+                  reviewRequestedAt: context.payload.comment.created_at,
+                  // An explicit human request must review even an otherwise
+                  // exempt release-bot version PR.
+                  skipCodexReview: false,
                 }];
               }
             }
@@ -90,6 +117,9 @@ jobs:
               affectedPullRequests = [{
                 pullRequestNumber: 0,
                 baseRef: 'none',
+                checkName: 'Codex code review',
+                reviewRequestedAt: '',
+                skipCodexReview: false,
                 skip: true,
               }];
             }
@@ -137,8 +167,113 @@ jobs:
               return;
             }
 
+      - name: Mark trusted release-bot version PR as Codex-exempt
+        if: matrix.skipCodexReview == true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ matrix.pullRequestNumber }}
+          CHECK_NAME: ${{ matrix.checkName }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const releaseBotLogin = 'ai-coach-release-bot[bot]';
+            const pullRequest = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (pullRequest.data.user?.login !== releaseBotLogin) {
+              core.setFailed('The Codex exemption was requested for an untrusted pull-request author.');
+              return;
+            }
+
+            const versionMatch = /^chore\/release-version-(\d+\.\d+\.\d+)$/.exec(
+              pullRequest.data.head.ref || '',
+            );
+            const version = versionMatch?.[1];
+            const expectedTitle = version
+              ? `chore(release): set application version to ${version}`
+              : '';
+            const expectedHeadRepository = `${context.repo.owner}/${context.repo.repo}`;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+              per_page: 100,
+            });
+            const file = files.length === 1 ? files[0] : null;
+            const changedLines = file
+              ? String(file.patch || '')
+                .split('\n')
+                .filter((line) => /^[+-](?!\+\+\+|---)/.test(line))
+              : [];
+            const hasExpectedVersion = changedLines.includes(`+APP_VERSION = "${version}"`);
+            const hasPreviousVersion = changedLines.some((line) => (
+              /^-APP_VERSION = "\d+\.\d+\.\d+"$/.test(line)
+            ));
+            if (
+              !version ||
+              pullRequest.data.title !== expectedTitle ||
+              pullRequest.data.base.ref !== 'develop' ||
+              pullRequest.data.head.repo?.full_name !== expectedHeadRepository ||
+              !file ||
+              file.filename !== 'server.py' ||
+              file.status !== 'modified' ||
+              file.additions !== 1 ||
+              file.deletions !== 1 ||
+              file.changes !== 2 ||
+              changedLines.length !== 2 ||
+              !hasExpectedVersion ||
+              !hasPreviousVersion
+            ) {
+              core.setFailed(
+                'The release-bot Codex exemption requires an exact develop version-bump PR ' +
+                'that changes only APP_VERSION in server.py.',
+              );
+              return;
+            }
+
+            const headSha = pullRequest.data.head.sha;
+            const output = {
+              title: 'Codex review skipped for trusted release-bot version PR',
+              summary: `The trusted release bot owns this exact version-only release pull request for ${version} (${headSha}); no Codex review is required.`,
+            };
+            const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: headSha,
+              per_page: 100,
+            });
+            const existingRun = checkRuns
+              .filter((run) => run.name === process.env.CHECK_NAME)
+              .find((run) => run.status !== 'completed');
+            const now = new Date().toISOString();
+            if (existingRun) {
+              await github.rest.checks.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                check_run_id: existingRun.id,
+                status: 'completed',
+                conclusion: 'success',
+                completed_at: now,
+                output,
+              });
+            } else {
+              await github.rest.checks.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: process.env.CHECK_NAME,
+                head_sha: headSha,
+                status: 'completed',
+                conclusion: 'success',
+                started_at: now,
+                completed_at: now,
+                output,
+              });
+            }
+
       - name: Check out trusted develop workflow sources
-        if: matrix.baseRef == 'develop'
+        if: matrix.skipCodexReview != true && matrix.baseRef == 'develop'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: develop
@@ -146,28 +281,19 @@ jobs:
           persist-credentials: false
 
       - name: Check out trusted main workflow sources
-        if: matrix.baseRef == 'main'
+        if: matrix.skipCodexReview != true && matrix.baseRef == 'main'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Capture target-branch review baseline
-        id: review_baseline
-        if: >-
-          github.event_name == 'push' ||
-          (github.event_name == 'pull_request_target' &&
-          ((github.event.action == 'edited' && github.event.changes.base) ||
-          github.event.action == 'reopened'))
-        shell: bash
-        run: echo "requested_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
-
       - name: Block until a fresh Codex review is requested
-        if: github.event_name == 'push'
+        if: matrix.skipCodexReview != true && github.event_name == 'push'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
+          CHECK_NAME: ${{ matrix.checkName }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -180,7 +306,7 @@ jobs:
             await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              name: 'Codex code review',
+              name: process.env.CHECK_NAME,
               head_sha: headSha,
               status: 'completed',
               conclusion: 'failure',
@@ -193,13 +319,13 @@ jobs:
             });
 
       - name: Wait for the subscription-backed Codex review
-        if: github.event_name != 'push'
+        if: matrix.skipCodexReview != true && github.event_name != 'push'
         uses: ./.github/actions/codex-review-gate
         with:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}
-          review-requested-at: ${{ steps.review_baseline.outputs.requested_at }}
-          check-name: Codex code review
+          review-requested-at: ${{ matrix.reviewRequestedAt }}
+          check-name: ${{ matrix.checkName }}
           codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
           timeout-seconds: 2400
           poll-seconds: 30

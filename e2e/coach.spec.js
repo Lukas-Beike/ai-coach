@@ -361,6 +361,7 @@ test.describe("critical browser states", () => {
     expect(await page.evaluate(() => window.scrollY), "background chat updates must not scroll another tab").toBe(inactiveScrollY);
 
     await expect.poll(() => page.evaluate(() => window.__chatTest.historyResolvers.length)).toBe(1);
+    await page.evaluate(() => window.__chatTest.releaseHistory());
     await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
     await page.evaluate(() => window.__chatTest.releaseHistory());
     await expect(page.locator("#todayPanel")).toHaveClass(/active/);
