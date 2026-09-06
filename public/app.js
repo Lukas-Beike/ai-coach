@@ -257,12 +257,9 @@ function showLogin() {
   state.profileDirty = false;
   state.checkinDirty = false;
   state.chatDraftDirty = false;
-  state.activityFeedbackDirty.clear();
-  state.activityFeedbackDrafts.clear();
   state.activityFromDate = "";
   state.activityToDate = "";
   state.activityVisibleCount = 250;
-  setDirtyIndicator("activityDirtyIndicator", false);
   $("#appShell").hidden = true;
   $("#authLoading").hidden = true;
   const dialog = $("#loginDialog");
@@ -429,12 +426,12 @@ function changedSyncAreas(nextVersions) {
   const previous = state.data?.state_versions || {};
   const areaMap = {
     activities: ["activities"],
-    performance: ["performance"],
-    garmin: ["performance"],
+    performance: ["performance", "plan"],
+    garmin: ["performance", "plan"],
     chat: ["chat"],
     library: ["library", "plan"],
-    checkins: ["feedback"],
-    activity_feedback: ["feedback"],
+    checkins: ["feedback", "plan"],
+    activity_feedback: ["feedback", "activities"],
     profile: ["profile"],
     plan: ["plan"],
   };
@@ -1193,8 +1190,7 @@ function formatTime(value) {
 function hasUnsavedChanges({ includeChatDraft = true } = {}) {
   return state.profileDirty
     || state.checkinDirty
-    || (includeChatDraft && (state.chatDraftDirty || Boolean($("#messageInput")?.value.trim())))
-    || state.activityFeedbackDirty.size > 0;
+    || (includeChatDraft && (state.chatDraftDirty || Boolean($("#messageInput")?.value.trim())));
 }
 
 function setDirtyIndicator(id, dirty) {
@@ -1209,9 +1205,6 @@ async function confirmDiscardChanges() {
 function discardUnsavedChanges() {
   state.profileDirty = false;
   state.checkinDirty = false;
-  state.activityFeedbackDirty.clear();
-  state.activityFeedbackDrafts.clear();
-  setDirtyIndicator("activityDirtyIndicator", false);
   if (state.data) render(state.data);
 }
 
@@ -1219,7 +1212,7 @@ function renderStatus(data) {
   const configured = data.configured;
   const morning = data.morning_checkin || {};
   const missing = [];
-  if (!configured.openai) missing.push("OpenAI-API-Schlüssel");
+  if (!configured.openai && !configured.gemini) missing.push("OpenAI- oder Gemini-API-Schlüssel");
   if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
   const performanceRefresh = data.performance_refresh || {};
   const openaiStatus = data.usage?.status || {};
@@ -1293,10 +1286,6 @@ async function askCoach(message) {
   $("#chatForm")?.requestSubmit();
 }
 
-function todayActivityDate(activity) {
-  return String(activity?.start_date_local || activity?.date || activity?.activity_date || "").slice(0, 10);
-}
-
 function renderToday(data) {
   const root = $("#todaySummary");
   const status = $("#todayStatus");
@@ -1311,10 +1300,6 @@ function renderToday(data) {
   }
   const todayKey = timezoneDateKey(data.profile?.timezone, new Date());
   const context = (data.daily_planning_context || []).find((item) => item.date === todayKey) || {};
-  const checkin = data.local_feedback?.today || data.checkins?.find((item) => item.checkin_date === todayKey) || context.checkin;
-  const morning = data.morning_checkin || {};
-  const automaticMorningRunning = morning.running || morning.status === "working";
-  const automaticMorningReady = morning.status === "ready" && morning.date === todayKey;
   const recovery = context.recovery || data.performance?.recovery || {};
   const todayWorkouts = (data.planned || []).filter((event) => plannedEventDate(event) === todayKey);
   const weather = context.weather || (data.weather?.days || []).find((item) => item.date === todayKey);
@@ -1330,43 +1315,6 @@ function renderToday(data) {
   } else if (syncMessages.length) status.classList.add("working");
   status.textContent = syncMessages.join(" · ");
   if (detail) detail.textContent = syncMessages.length ? syncMessages.join(" · ") : `Stand: ${dateLabel(todayKey)}`;
-
-  const adjustment = data.planning?.latest_replan;
-  const priorityCard = todayCard("Coach-Einordnung", "today-priority");
-  if (checkin?.illness) {
-    todayCardText(priorityCard, `Im Morgen-Check-in ist Krankheit vermerkt: ${checkin.illness}. Die Belastung für heute wird vorsichtig eingeordnet.`, "today-card-summary");
-  } else if (adjustment?.changes?.length || adjustment?.illness_pause) {
-    todayCardText(priorityCard, "Für die lokale Planung liegt eine Anpassung vor. Sie wird in der Einordnung für heute berücksichtigt.", "today-card-summary");
-  } else if (todayWorkouts.length) {
-    todayCardText(priorityCard, `${todayWorkouts.length} geplante Einheit${todayWorkouts.length === 1 ? "" : "en"} für heute. Die verfügbaren Quellen und der Morgen-Check-in bilden die Grundlage der Einordnung.`, "today-card-summary");
-  } else if (automaticMorningRunning) {
-    todayCardText(priorityCard, "Der Morgen-Check-in wird noch erstellt.", "today-card-summary");
-  } else if (automaticMorningReady) {
-    todayCardText(priorityCard, "Der Morgen-Check-in ist abgeschlossen. Die Einordnung basiert auf dem aktualisierten Snapshot.", "today-card-summary");
-  } else if (!checkin) {
-    todayCardText(priorityCard, "Für heute liegt noch kein Morgen-Check-in vor. Die Einordnung basiert deshalb auf den verfügbaren Quellendaten.", "today-card-summary");
-  } else {
-    todayCardText(priorityCard, "Die verfügbaren Quellen und der Morgen-Check-in zeigen keine dringende Anpassung für heute.", "today-card-summary");
-  }
-  root.append(priorityCard);
-
-  const checkinCard = todayCard("Morgen-Check-in", "today-checkin");
-  if (checkin) {
-    const values = [
-      checkin.day_form,
-      checkin.soreness != null ? `Muskelkater ${checkin.soreness}/10` : null,
-      checkin.stress != null ? `Stress ${checkin.stress}/10` : null,
-      checkin.motivation != null ? `Motivation ${checkin.motivation}/10` : null,
-      checkin.available_minutes != null ? `${checkin.available_minutes} Min. verfügbar` : null,
-      checkin.illness ? `Krankheit: ${checkin.illness}` : null,
-    ].filter(Boolean);
-    todayCardText(checkinCard, values.join(" · ") || "Check-in gespeichert.", "today-card-summary");
-  } else if (automaticMorningRunning) {
-    todayCardText(checkinCard, "Der Morgen-Check-in wird noch erstellt.", "today-card-summary");
-  } else if (automaticMorningReady) {
-    todayCardText(checkinCard, "Morgen-Check-in abgeschlossen. Die ausführliche Einordnung findest du im Coach-Chat.", "today-card-summary");
-  } else todayCardText(checkinCard, "Noch kein Tages-Check-in gespeichert.");
-  root.append(checkinCard);
 
   const readinessCard = todayCard("Readiness & Erholung", "today-readiness");
   const recoveryValues = [
@@ -1400,13 +1348,7 @@ function renderToday(data) {
   else todayCardText(weatherCard, [weatherIconFor(weather), weather.condition || "Vorhersage", weatherNumber(weather.temperature_min, " °C"), weatherNumber(weather.temperature_max, " °C"), weatherNumber(weather.precipitation_probability_max, " % Regen")].join(" · "), "today-card-summary");
   root.append(weatherCard);
 
-  const feedbackCard = todayCard("Offene Rückmeldung", "today-feedback");
-  const openFeedback = (data.activities || []).find((activity) => todayActivityDate(activity) && !activity.activity_feedback);
-  if (openFeedback) {
-    todayCardText(feedbackCard, `Noch keine Rückmeldung zu „${openFeedback.name || "letzter Aktivität"}“ gespeichert.`, "today-card-summary");
-  } else todayCardText(feedbackCard, "Keine offene Rückmeldung zu den geladenen Aktivitäten.");
-  root.append(feedbackCard);
-
+  const adjustment = data.planning?.latest_replan;
   if (adjustment && (adjustment.changes?.length || adjustment.illness_pause)) {
     const adjustmentCard = todayCard("Aktuelle Plananpassung", "today-adjustment");
     todayCardText(adjustmentCard, "Eine lokale Planänderung liegt vor.", "today-card-summary");
@@ -1500,7 +1442,6 @@ function renderActivityStats(activities, filtered = false) {
 }
 
 function renderActivities(activities) {
-  setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
   const list = Array.isArray(activities) ? activities : [];
   const syncDetail = $("#activitySyncDetail");
   const syncNotices = [];
@@ -1556,19 +1497,6 @@ function renderActivities(activities) {
     date.className = "eyebrow";
     date.textContent = dateLabel(activity.start_date_local);
     top.append(title, date);
-    const meta = document.createElement("button");
-    meta.type = "button";
-    meta.className = "activity-meta";
-    meta.classList.add("activity-type-button");
-    const type = activityTypeKey(activity);
-    meta.textContent = type;
-    meta.setAttribute("aria-pressed", state.activityTypes.has(type) ? "true" : "false");
-    meta.addEventListener("click", () => {
-      if (state.activityTypes.has(type)) state.activityTypes.delete(type);
-      else state.activityTypes.add(type);
-      state.activityVisibleCount = 250;
-      renderActivities(state.data?.activities || []);
-    });
     const stats = document.createElement("div");
     stats.className = "activity-stats";
     const addStat = (label, value) => {
@@ -1582,48 +1510,20 @@ function renderActivities(activities) {
     addStat("Belastung", activity.icu_training_load);
     addStat("Ø Puls", activity.average_heartrate ? `${Math.round(activity.average_heartrate)} bpm` : null);
     addStat("Ø Leistung", activity.average_watts ? `${Math.round(activity.average_watts)} W` : null);
-    card.append(top, meta, stats);
+    card.append(top, stats);
 
-    const activityId = activity.id ?? activity.activityId ?? activity.external_id;
-    if (activityId != null && String(activityId).trim()) {
-      const feedback = activity.activity_feedback || {};
-      const feedbackDetails = document.createElement("details");
-      feedbackDetails.className = "activity-feedback";
-      feedbackDetails.open = Boolean(feedback.notes);
-      const feedbackSummary = document.createElement("summary");
-      feedbackSummary.className = "activity-feedback-summary";
-      const feedbackTitle = document.createElement("span");
+    const feedbackNotes = String(activity.activity_feedback?.notes || "").trim();
+    if (feedbackNotes) {
+      const feedback = document.createElement("section");
+      feedback.className = "activity-feedback";
+      const feedbackTitle = document.createElement("h4");
+      feedbackTitle.className = "activity-feedback-title";
       feedbackTitle.textContent = "Besonderheiten";
-      const feedbackHint = document.createElement("span");
-      feedbackHint.className = "activity-feedback-hint";
-      feedbackHint.textContent = feedback.notes ? "Eintrag vorhanden" : "Nach Abschluss notieren";
-      feedbackSummary.append(feedbackTitle, feedbackHint);
-      const feedbackForm = document.createElement("form");
-      feedbackForm.className = "activity-feedback-form";
-      const feedbackLabel = document.createElement("label");
-      feedbackLabel.textContent = "Gab es bei dieser Einheit Besonderheiten?";
-      const feedbackInput = document.createElement("textarea");
-      feedbackInput.name = "notes";
-      feedbackInput.rows = 3;
-      feedbackInput.maxLength = 4000;
-      feedbackInput.placeholder = "Zum Beispiel Schmerzen, ungewohnte Müdigkeit oder etwas, das besonders gut lief …";
-      feedbackInput.value = state.activityFeedbackDrafts.has(String(activityId))
-        ? state.activityFeedbackDrafts.get(String(activityId))
-        : feedback.notes || "";
-      feedbackLabel.append(feedbackInput);
-      const feedbackButton = document.createElement("button");
-      feedbackButton.type = "submit";
-      feedbackButton.textContent = "Besonderheiten speichern";
-      feedbackForm.append(feedbackLabel, feedbackButton);
-      feedbackInput.addEventListener("input", () => {
-        const key = String(activityId);
-        state.activityFeedbackDrafts.set(key, feedbackInput.value);
-        state.activityFeedbackDirty.add(key);
-        setDirtyIndicator("activityDirtyIndicator", true);
-      });
-      feedbackForm.addEventListener("submit", (event) => saveActivityFeedback(event, activity, feedbackButton));
-      feedbackDetails.append(feedbackSummary, feedbackForm);
-      card.append(feedbackDetails);
+      const feedbackText = document.createElement("p");
+      feedbackText.className = "activity-feedback-notes";
+      feedbackText.textContent = feedbackNotes;
+      feedback.append(feedbackTitle, feedbackText);
+      card.append(feedback);
     }
     root.append(card);
   });
@@ -2163,12 +2063,10 @@ function plannedWeatherLabel(weather) {
   const hasForecast = weather.condition || weather.weather_code != null
     || weather.temperature_min != null || weather.temperature_max != null;
   if (!hasForecast) return "";
-  return [
-    weatherIconFor(weather),
-    weather.condition,
-    weatherNumber(weather.temperature_min, " °C"),
-    weatherNumber(weather.temperature_max, " °C"),
-  ].filter((value) => value && value !== "–").join(" · ");
+  const temperatures = [weather.temperature_min, weather.temperature_max]
+    .filter((value) => value != null && value !== "" && Number.isFinite(Number(value)))
+    .map((value) => weatherNumber(value, "°"));
+  return [weatherIconFor(weather), temperatures.join(" / ")].filter(Boolean).join(" ");
 }
 
 function plannedAppointmentLabel(event) {
@@ -2177,6 +2075,103 @@ function plannedAppointmentLabel(event) {
   if (event.all_day) return `${name} · ganztägig`;
   const time = String(event.start_local || "").match(/(?:T|\s)(\d{2}:\d{2})/);
   return time ? `${name} · ${time[1]}` : name;
+}
+
+function plannedDayInsights(context, weather, dateKey, todayKey) {
+  const checkin = context.checkin || {};
+  const recovery = dateKey <= todayKey ? context.recovery || {} : {};
+  const metrics = [];
+  const addMetric = (label, value, suffix, source) => {
+    const formatted = calendarMetricNumber(value, suffix);
+    if (formatted != null) metrics.push({ label, value: formatted, source });
+  };
+  for (const [key, label, suffix] of [
+    ["sleep_hours", "Schlaf", " h"], ["sleep_score", "Schlafscore", "/100"],
+    ["hrv", "HRV", " ms"], ["resting_hr", "Ruhepuls", " bpm"],
+    ["readiness", "Readiness", "/100"], ["body_battery", "Body Battery", "/100"],
+  ]) addMetric(label, recovery[key], suffix, recovery.sources?.[key]);
+  for (const [key, label, suffix] of [
+    ["soreness", "Muskelkater", "/10"], ["stress", "Stress", "/10"],
+    ["motivation", "Motivation", "/10"], ["available_minutes", "Zeit verfügbar", " Min."],
+  ]) addMetric(label, checkin[key], suffix, "Eigene Angabe");
+
+  const section = document.createElement("div");
+  section.className = "planned-day-insights";
+  const content = document.createElement("div");
+  content.className = "planned-insights-content";
+  if (metrics.length || Object.keys(checkin).length) {
+    if (checkin.day_form) {
+      const form = document.createElement("p");
+      form.className = "planned-day-form";
+      form.textContent = checkin.day_form;
+      content.append(form);
+    }
+    const grid = document.createElement("dl");
+    grid.className = "planned-day-metrics";
+    metrics.forEach(({ label, value, source }) => {
+      const item = document.createElement("div");
+      if (source) item.title = `${label}: ${source}`;
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const measurement = document.createElement("dd");
+      measurement.textContent = value;
+      item.append(term, measurement);
+      grid.append(item);
+    });
+    if (metrics.length) content.append(grid);
+  } else if (dateKey <= todayKey) {
+    const empty = document.createElement("p");
+    empty.className = "planned-insights-empty";
+    empty.textContent = "Keine Check-in- oder Erholungswerte gespeichert";
+    content.append(empty);
+  }
+  const details = document.createElement("div");
+  details.className = "planned-day-observations";
+  const body = document.createElement("div");
+  const text = (value, className = "") => {
+    const p = document.createElement("p");
+    p.className = className;
+    p.textContent = value;
+    body.append(p);
+    return p;
+  };
+  if (weather && plannedWeatherLabel(weather)) {
+    const condition = text([
+      weather.condition, plannedWeatherLabel(weather),
+    ].filter(Boolean).join(" · "), "planned-weather-detail");
+    condition.title = [
+      weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage",
+      "Open-Meteo", weather.forecast_location || state.data?.weather?.location?.name,
+      weather.forecast_saved_at ? `Stand: ${formatTime(weather.forecast_saved_at)}` : null,
+    ].filter(Boolean).join(" · ");
+    const directionValue = calendarMetricNumber(weather.wind_direction_dominant);
+    const direction = directionValue != null && Number(weather.wind_direction_dominant) >= 0
+      && Number(weather.wind_direction_dominant) <= 360 ? weatherDirection(weather.wind_direction_dominant) : "";
+    const peakTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(weather.rain_peak_time || "") ? weather.rain_peak_time : "";
+    const values = [
+      calendarMetricNumber(weather.precipitation_probability_max, ` % Regen${peakTime ? ` (max. ${peakTime} Uhr)` : ""}`),
+      calendarMetricNumber(weather.wind_speed_max, ` km/h Wind${direction ? ` ${direction}` : ""}`),
+      calendarMetricNumber(weather.wind_gusts_max, " km/h Böen"),
+    ].filter(Boolean);
+    if (peakTime && weather.precipitation_probability_max == null) values.unshift(`Regen am ehesten ${peakTime} Uhr`);
+    if (values.length) text(values.join(" · "), "planned-weather-metrics");
+  }
+  for (const [field, label] of [["availability_notes", "Zeitplanung"], ["notes", "Notizen"]]) {
+    if (checkin[field]) text(`${label}: ${checkin[field]}`);
+  }
+  const rpe = calendarRpeLabel(checkin.session_rpe);
+  if (rpe != null) text(`Belastung nach dem Training: RPE ${rpe}/10 · Eigene Angabe`);
+  if (body.childElementCount) {
+    details.append(body);
+    content.append(details);
+  }
+  if (!content.childElementCount) return null;
+  const title = document.createElement("p");
+  title.className = "planned-insights-title";
+  title.textContent = metrics.length || Object.keys(checkin).length
+    ? "Check-in & Erholung" : "Tagesdetails";
+  section.append(title, content);
+  return section;
 }
 
 function plannedWeekSummary(weekKey, weekEndKey, weekEntries, compliance, todayKey) {
@@ -2279,7 +2274,6 @@ function renderPlanned(trainingCalendar) {
   const root = $("#plannedCalendar");
   const summary = $("#plannedSummary");
   if (!root) return;
-  root.replaceChildren();
   const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
   const currentWeekKey = planWeekStart(todayKey);
   const display = state.data?.calendar_display || {};
@@ -2290,6 +2284,7 @@ function renderPlanned(trainingCalendar) {
   const previousWeekOpenState = new Map(
     [...root.querySelectorAll(".planned-week[data-week-key]")].map((week) => [week.dataset.weekKey, week.open]),
   );
+  root.replaceChildren();
   const weeklyCompliance = new Map(
     (Array.isArray(state.data?.planning_compliance) ? state.data.planning_compliance : [])
       .filter((item) => item && item.week_start)
@@ -2332,7 +2327,7 @@ function renderPlanned(trainingCalendar) {
     count.className = "planned-week-summary";
     const additionalCompleted = weekEntries.filter((entry) => entry.is_completed_activity).length;
     const weekSummary = plannedWeekSummary(weekKey, weekEndKey, weekEntries, weekCompliance, todayKey);
-    count.textContent = additionalCompleted ? `${weekSummary} · +${additionalCompleted} zusätzlich` : weekSummary;
+    count.textContent = calendarCountLabel(weekEntries, todayKey) || "Keine Einheiten";
     heading.append(title, count);
     week.append(heading);
 
@@ -2347,25 +2342,45 @@ function renderPlanned(trainingCalendar) {
         : null);
       const day = document.createElement("section");
       day.className = `planned-day${dateKey === todayKey ? " is-today" : ""}`;
+      day.dataset.date = dateKey;
       const dayHeading = document.createElement("div");
       dayHeading.className = "planned-day-heading";
-      const dayHeadingMain = document.createElement("div");
-      dayHeadingMain.className = "planned-day-heading-main";
       const dayTitle = document.createElement("h5");
-      dayTitle.textContent = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(dateFromKey(dateKey));
-      dayHeadingMain.append(dayTitle);
+      dayTitle.id = `planned-day-${dateKey}`;
+      dayTitle.textContent = new Intl.DateTimeFormat("de-DE", { weekday: "long" }).format(dateFromKey(dateKey));
+      day.setAttribute("aria-labelledby", dayTitle.id);
+      const dayDate = document.createElement("time");
+      dayDate.dateTime = dateKey;
+      dayDate.textContent = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short" }).format(dateFromKey(dateKey));
+      dayHeading.append(dayTitle, dayDate);
+      if (dateKey === todayKey) {
+        const today = document.createElement("span");
+        today.className = "planned-today-label";
+        today.textContent = "Heute";
+        dayHeading.append(today);
+      }
       const weatherLabel = plannedWeatherLabel(weather);
       if (weatherLabel) {
         const weatherText = document.createElement("span");
         weatherText.className = "planned-day-weather";
         weatherText.textContent = weatherLabel;
-        weatherText.title = "Wettervorhersage";
-        dayHeadingMain.append(weatherText);
+        weatherText.title = [weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage", weather.condition, weatherLabel].filter(Boolean).join(": ");
+        weatherText.setAttribute("aria-label", weatherText.title);
+        dayHeading.append(weatherText);
+      } else {
+        const weatherMissing = document.createElement("span");
+        weatherMissing.className = "planned-day-weather is-missing";
+        weatherMissing.textContent = "Wetter fehlt";
+        weatherMissing.title = !state.data?.weather?.configured
+          ? "Kein Wetterort im Profil hinterlegt"
+          : dateKey < todayKey ? "Für diesen Tag wurde keine Vorhersage gespeichert" : "Für diesen Tag ist keine Vorhersage verfügbar";
+        dayHeading.append(weatherMissing);
       }
-      const dayCount = document.createElement("span");
-      dayCount.textContent = calendarCountLabel(dayEntries, todayKey) || (dateKey > todayKey ? "frei" : "keine Aktivität");
-      dayHeading.append(dayHeadingMain, dayCount);
       day.append(dayHeading);
+      const dayContent = document.createElement("div");
+      dayContent.className = "planned-day-content";
+      const dayNotes = document.createElement("div");
+      dayNotes.className = "planned-day-notes";
 
       const appointments = (Array.isArray(dayContext.appointments) ? dayContext.appointments : [])
         .filter((event) => event && event.training_relevant !== false)
@@ -2375,7 +2390,7 @@ function renderPlanned(trainingCalendar) {
         const calendarNotice = document.createElement("p");
         calendarNotice.className = "planned-day-context planned-day-calendar";
         calendarNotice.textContent = `Kalender: ${appointments.join(", ")}`;
-        day.append(calendarNotice);
+        dayNotes.append(calendarNotice);
       }
       const checkin = dayContext.checkin && typeof dayContext.checkin === "object" ? dayContext.checkin : {};
       const illness = String(checkin.illness || "").trim();
@@ -2387,15 +2402,15 @@ function renderPlanned(trainingCalendar) {
           illness ? `Krankheit: ${illness}` : "",
           pain ? `Verletzung/Beschwerden: ${pain}` : "",
         ].filter(Boolean).join(" · ");
-        day.append(healthNotice);
+        dayNotes.append(healthNotice);
       }
       if (!dayEntries.length) {
         const empty = document.createElement("p");
         empty.className = "planned-day-empty";
         empty.textContent = dateKey < todayKey
           ? "Keine Aktivität"
-          : dateKey === todayKey ? "Noch keine Einheit geplant oder abgeschlossen" : "Keine Einheit geplant";
-        day.append(empty);
+          : "Keine Einheit geplant";
+        dayContent.append(empty);
       }
       dayEntries.forEach((entry) => {
         const actual = calendarActualActivity(entry);
@@ -2410,22 +2425,28 @@ function renderPlanned(trainingCalendar) {
         meta.className = "planned-meta";
         const displayed = actual || entry;
         meta.textContent = [
-          calendarStatusLabel(entry, dateKey, todayKey),
           activitySportLabel(displayed),
           calendarStartTime(displayed.start_date_local),
           actual ? formatDuration(actual.moving_time ?? actual.elapsed_time) : entry.duration_minutes ? `${entry.duration_minutes} Min.` : formatDuration(entry.moving_time),
-          actual ? distanceLabel(actual.distance) : null,
         ].filter(Boolean).join(" · ");
         cardSummary.append(cardTitle, meta);
+        if (status === "completed" || status === "missed") {
+          const statusText = document.createElement("span");
+          statusText.className = "planned-entry-status";
+          statusText.textContent = calendarStatusLabel(entry, dateKey, todayKey);
+          cardSummary.append(statusText);
+        }
+        card.append(cardSummary);
+        const details = document.createElement("div");
+        details.className = "planned-entry-details";
         if (actual) {
           const primaryMetrics = document.createElement("span");
           primaryMetrics.className = "planned-actual-summary";
           const load = calendarMetricNumber(actual.icu_training_load);
           const rpe = calendarRpeLabel(actual.icu_rpe);
           primaryMetrics.textContent = [load != null ? `Load ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
-          cardSummary.append(primaryMetrics);
+          details.append(primaryMetrics);
         }
-        card.append(cardSummary);
         if (actual) {
           const facts = document.createElement("div");
           facts.className = "planned-actual-facts";
@@ -2442,7 +2463,7 @@ function renderPlanned(trainingCalendar) {
           appendCalendarFact(facts, "Ø Leistung", averagePower);
           appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
           appendCalendarFact(facts, "Höhenmeter", elevation);
-          card.append(facts);
+          details.append(facts);
         }
         if (actual && !entry.is_completed_activity) {
           const comparison = document.createElement("div");
@@ -2466,19 +2487,36 @@ function renderPlanned(trainingCalendar) {
             ratio.textContent = `${entry.compliance.basis === "training_load" ? "Load" : "Umfang"} Plan/Ist: ${entry.compliance.percentage} %`;
             comparison.append(ratio);
           }
-          card.append(comparison);
+          details.append(comparison);
         }
         if (entry.description) {
           const description = document.createElement("p");
           description.className = "planned-description";
           description.textContent = entry.description;
-          card.append(description);
+          details.append(description);
         }
-        day.append(card);
+        if (!details.childElementCount) {
+          const description = document.createElement("p");
+          description.className = "planned-description";
+          description.textContent = "Keine weiteren Details hinterlegt.";
+          details.append(description);
+        }
+        card.append(details);
+        dayContent.append(card);
       });
+      if (dayNotes.childElementCount) dayContent.append(dayNotes);
+      const insights = plannedDayInsights(dayContext, weather, dateKey, todayKey);
+      day.append(dayContent);
+      if (insights) day.append(insights);
       days.append(day);
     }
     week.append(days);
+    if (weekEntries.length) {
+      const weekDetails = document.createElement("p");
+      weekDetails.className = "planned-week-totals";
+      weekDetails.textContent = additionalCompleted ? `${weekSummary} · +${additionalCompleted} zusätzlich` : weekSummary;
+      week.append(weekDetails);
+    }
     root.append(week);
   }
 }
@@ -3046,6 +3084,26 @@ function updateHeaderAction() {
   }
 }
 
+function renderAiProvider(provider) {
+  if (!provider) return;
+  const select = $("#aiProviderSelect");
+  const currentIds = [...select.options].map((option) => option.value).join(",");
+  const nextIds = (provider.options || []).map((option) => option.id).join(",");
+  if (currentIds !== nextIds) {
+    select.replaceChildren();
+    for (const option of provider.options || []) {
+      const element = document.createElement("option");
+      element.value = option.id;
+      element.textContent = option.label;
+      element.title = option.description || "";
+      select.append(element);
+    }
+  }
+  select.value = provider.selected;
+  const selected = (provider.options || []).find((option) => option.id === provider.selected);
+  $("#aiProviderDescription").textContent = selected?.description || "Der ausgewählte Anbieter erhält den Coach-Kontext.";
+}
+
 function renderModel(model) {
   if (!model) return;
   const select = $("#modelSelect");
@@ -3099,28 +3157,46 @@ function renderSettings(data) {
   const garmin = data.garmin || {};
   const weather = data.weather || {};
   const openaiStatus = data.usage?.status || {};
+  const activeProvider = data.ai_provider?.selected || "openai";
   const setStatus = (selector, ok, text) => {
     const node = $(selector);
     if (!node) return;
     node.textContent = text;
     node.className = ok ? "configured" : "not-configured";
   };
-  const openaiHealthy = configured.openai && openaiStatus.state !== "error";
+  const openaiHealthy = configured.openai && (activeProvider !== "openai" || openaiStatus.state !== "error");
   setStatus(
     "#openaiConnectionStatus",
     openaiHealthy,
-    !configured.openai ? "Nicht konfiguriert" : openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
+    !configured.openai ? "Nicht konfiguriert" : activeProvider === "openai" && openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
   );
   const openaiDetail = $("#openaiConnectionDetail");
   if (openaiDetail) {
-    openaiDetail.classList.toggle("error", Boolean(configured.openai && openaiStatus.state === "error"));
+    openaiDetail.classList.toggle("error", Boolean(configured.openai && activeProvider === "openai" && openaiStatus.state === "error"));
     openaiDetail.textContent = !configured.openai
       ? "API-Schlüssel nicht konfiguriert"
-      : openaiStatus.state === "error"
+      : activeProvider === "openai" && openaiStatus.state === "error"
         ? `${openaiStatus.message || "OpenAI-Anfrage fehlgeschlagen."}${openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : ""}`
-        : openaiStatus.state === "ok"
+        : activeProvider === "openai" && openaiStatus.state === "ok"
           ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
-          : "Noch kein API-Aufruf geprüft";
+          : "Als alternativer Anbieter konfiguriert";
+  }
+  const geminiHealthy = configured.gemini && (activeProvider !== "gemini" || openaiStatus.state !== "error");
+  setStatus(
+    "#geminiConnectionStatus",
+    geminiHealthy,
+    !configured.gemini ? "Nicht konfiguriert" : activeProvider === "gemini" && openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
+  );
+  const geminiDetail = $("#geminiConnectionDetail");
+  if (geminiDetail) {
+    geminiDetail.classList.toggle("error", Boolean(configured.gemini && activeProvider === "gemini" && openaiStatus.state === "error"));
+    geminiDetail.textContent = !configured.gemini
+      ? "GEMINI_API_KEY nicht konfiguriert"
+      : activeProvider === "gemini" && openaiStatus.state === "error"
+        ? `${openaiStatus.message || "Gemini-Anfrage fehlgeschlagen."}${openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : ""}`
+        : activeProvider === "gemini" && openaiStatus.state === "ok"
+          ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
+          : "Als alternativer Anbieter konfiguriert";
   }
   const intervals = data.intervals || {
     configured: Boolean(configured.intervals),
@@ -3182,7 +3258,7 @@ function renderSettings(data) {
   }
   const connectionsSummary = $("#connectionsSummary");
   if (connectionsSummary) {
-    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
+    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Gemini", geminiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
       .map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
   }
   const intervalsDays = $("#intervalsSyncDays");
@@ -3237,14 +3313,15 @@ function renderSettings(data) {
   const usageNode = $("#usageSummary");
   if (usageNode) {
     const rateLimits = usage.rate_limits || {};
+    const providerLabel = activeProvider === "gemini" ? "Gemini" : "OpenAI";
     const remaining = rateLimits.remaining_requests != null || rateLimits.remaining_tokens != null
-      ? ` · Restkontingent im aktuellen OpenAI-Fenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
+      ? ` · Restkontingent im aktuellen Anbieterfenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
       : " · Restkontingent wird nach einem API-Aufruf angezeigt";
     const openaiError = usage.status?.state === "error" ? ` · Status: ${usage.status.message || "Fehler bei letzter Anfrage"}` : "";
-    usageNode.textContent = `OpenAI heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}${openaiError}`;
+    usageNode.textContent = `${providerLabel} heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}${openaiError}`;
   }
   const privacySummary = $("#privacySummary");
-  if (privacySummary) privacySummary.textContent = `${usage.requests || 0} OpenAI-Anfragen heute`;
+  if (privacySummary) privacySummary.textContent = `${usage.requests || 0} ${activeProvider === "gemini" ? "Gemini" : "OpenAI"}-Anfragen heute`;
   renderNotificationStatus();
   renderProviderAttention(data);
   renderConnectionsSyncProgress(data);
@@ -3366,6 +3443,7 @@ function render(data) {
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
   renderPerformance(data.performance);
+  renderAiProvider(data.ai_provider);
   renderModel(data.model);
   renderThinkingLevel(data.thinking_level);
   renderDiagnosticCapture(data.diagnostic_capture);
@@ -4084,34 +4162,6 @@ async function saveCheckin(event) {
   }
 }
 
-async function saveActivityFeedback(event, activity, button) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const activityId = activity.id ?? activity.activityId ?? activity.external_id;
-  const payload = {
-    activity_name: activity.name || activity.type || "",
-    activity_date: activity.start_date_local || "",
-    notes: String(new FormData(form).get("notes") || ""),
-  };
-  button.disabled = true;
-  button.setAttribute("aria-busy", "true");
-  button.textContent = "Wird gespeichert…";
-  try {
-    const result = await api(`/api/activities/${encodeURIComponent(String(activityId))}/feedback`, { method: "POST", body: JSON.stringify(payload) });
-    if (result.status !== "ok" || (payload.notes.trim() ? String(result.activity_feedback?.activity_id) !== String(activityId) : result.activity_feedback !== null)) throw new Error("Die Feedback-Bestätigung fehlt. Der Entwurf bleibt erhalten.");
-    state.activityFeedbackDirty.delete(String(activityId));
-    state.activityFeedbackDrafts.delete(String(activityId));
-    setDirtyIndicator("activityDirtyIndicator", state.activityFeedbackDirty.size > 0);
-    toast(payload.notes.trim() ? "Besonderheiten gespeichert" : "Besonderheiten entfernt");
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    button.disabled = false;
-    button.removeAttribute("aria-busy");
-    button.textContent = "Besonderheiten speichern";
-  }
-}
-
 async function downloadDatabaseBackup() {
   const button = $("#backupDownloadButton");
   if (button) button.disabled = true;
@@ -4150,6 +4200,19 @@ async function saveModel(event) {
   select.disabled = true;
   try {
     await api("/api/settings/model", { method: "PUT", body: JSON.stringify({ model: select.value }) });
+    toast(`Aktiv: ${select.options[select.selectedIndex].text}`);
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+    await load();
+  } finally { select.disabled = false; }
+}
+
+async function saveAiProvider(event) {
+  const select = event.currentTarget;
+  select.disabled = true;
+  try {
+    await api("/api/settings/ai-provider", { method: "PUT", body: JSON.stringify({ provider: select.value }) });
     toast(`Aktiv: ${select.options[select.selectedIndex].text}`);
     await load();
   } catch (error) {
@@ -4386,6 +4449,7 @@ $("#coachAdaptivePlanningButton").addEventListener("click", () => askCoach("Prü
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#checkinForm").addEventListener("input", () => { state.checkinDirty = true; setDirtyIndicator("checkinDirtyIndicator", true); });
 $("#modelSelect").addEventListener("change", saveModel);
+$("#aiProviderSelect").addEventListener("change", saveAiProvider);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);

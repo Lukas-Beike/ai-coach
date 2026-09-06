@@ -150,6 +150,18 @@ class CoachReviewTests(unittest.TestCase):
             )
         self.assertIn("noch nicht abgeschlossen", receipt["message"]["content"])
 
+    def test_tool_round_limit_keeps_the_captured_provider_and_model(self):
+        read = self.call("read_training_state", {}, "read")
+        intent = self.intent("stage_training_plan", ["local_plan"])
+        responses = [{"output": [read]}, {"output_text": "Zusammenfassung."}]
+        with patch.object(server, "COACH_TOOL_MAX_ROUNDS", 1), patch.object(server, "selected_ai_provider", return_value="gemini"), patch.object(server, "selected_model", return_value="gemini-3.8-flash"), patch.object(server, "selected_thinking_level", return_value="low"), patch.object(server, "request_coach_intent", return_value=intent), patch.object(server, "ensure_conversation", return_value="gemini-conversation"), patch.object(server, "build_training_context", return_value="Synthetic context"), patch.object(server, "responses_request", side_effect=responses) as request:
+            server.chat_with_coach("Speichere die angegebenen lokalen Aenderungen", client_turn_id="round-limit-gemini", session_csrf_hash="review-session")
+
+        summary_payload = request.call_args_list[1].args[0]
+        self.assertEqual(summary_payload["_ai_provider"], "gemini")
+        self.assertEqual(summary_payload["model"], "gemini-3.8-flash")
+        self.assertEqual(summary_payload["reasoning"], {"effort": "low"})
+
     def test_empty_final_summary_reports_only_unresolved_plan_step(self):
         bad = self.call("stage_training_plan", {"payload": {"plan_name": "Retry", "goal": "Base", "workouts": []}}, "bad-stage")
         good_workout = self.workout()

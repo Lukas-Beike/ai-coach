@@ -229,7 +229,7 @@ class ProviderReviewTests(unittest.TestCase):
         server.save_snapshot({"synced_at": "synthetic", "recent_activities": [intervals]})
         for fixture in (False, True):
             with self.subTest(fixture=fixture):
-                payload = {"synced_at": "2026-09-05T00:00:00+00:00", "start": "2026-09-04", "end": "2026-09-05",
+                payload = {"synced_at": "2026-09-05T00:00:00+00:00", "start": "2026-09-04", "end": date.today().isoformat(),
                            "activities": [dict(original)], "errors": [],
                            "provider_sync": {"pagination": {"activities": {"complete": True}}}}
                 client = Mock()

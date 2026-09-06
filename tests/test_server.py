@@ -20,7 +20,7 @@ os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
     "OPENAI_API_KEY": "test-openai-key",
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
-    "OPENAI_MODEL": "gpt-5.6-sol",
+    "OPENAI_MODEL": "gpt-5.6-luna",
     "INTERVALS_API_KEY": "test-intervals-key",
     "INTERVALS_ATHLETE_ID": "0",
     "GARMIN_EMAIL": "test-garmin@example.invalid",
@@ -881,6 +881,49 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(profile["name"], "Ada")
         self.assertNotIn("admin", profile)
 
+    def test_daily_weather_rain_peak_uses_local_hours_and_stays_date_specific(self):
+        forecast = {"daily": {"time": ["2026-09-05", "2026-09-06", "2026-09-07", "2026-09-08"]},
+                    "hourly": {
+                        "time": ["2026-09-05T19:00", "2026-09-05T06:00", "2026-09-05T15:00",
+                                 "2026-09-06T09:00", "2026-09-06T18:00", "2026-09-07T09:00", "2026-09-07T10:00"],
+                        "precipitation_probability": [80, 5, 80, 0, 0, 30, 30],
+                    }}
+        days = server._weather_daily_summary(forecast)
+        self.assertEqual(days[0]["rain_peak_time"], "15:00")
+        self.assertIsNone(days[1]["rain_peak_time"])
+        self.assertIsNone(days[2]["rain_peak_time"])
+        self.assertIsNone(days[3]["rain_peak_time"])
+        forecast["hourly"]["precipitation_probability"] = [None, 5, None]
+        self.assertIsNone(server._weather_daily_summary(forecast)[0]["rain_peak_time"])
+
+    def test_calendar_weather_history_survives_refresh_location_change_and_restart(self):
+        today = server.local_now().date()
+        yesterday = (today - timedelta(days=1)).isoformat()
+        tomorrow = (today + timedelta(days=1)).isoformat()
+        server.save_profile({"weather_location": "Berlin"})
+        old = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": server.utc_now(),
+               "forecast": {"daily": {"time": [yesterday, tomorrow], "temperature_2m_max": [12, 18]},
+                            "hourly": {"time": [f"{yesterday}T09:00", f"{yesterday}T15:00"], "precipitation_probability": [5, 80]}}}
+        new = {"query": "Berlin", "location": {"name": "Berlin"}, "fetched_at": server.utc_now(),
+               "forecast": {"daily": {"time": [today.isoformat(), tomorrow], "temperature_2m_max": [15, 19]}}}
+        with patch.object(server, "_fetch_weather_forecast", side_effect=[old, new]) as fetch:
+            server.weather_state([], force=True)
+            server.weather_state([], force=True)
+            server.save_profile({"weather_location": "Emsdetten"})
+            server.initialise_database()
+            calendar = server.public_plan_state(local_only=True)
+        self.assertEqual(fetch.call_count, 2)
+        history = calendar["weather"]["days"]
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["date"], yesterday)
+        self.assertEqual(history[0]["temperature_max"], 12)
+        self.assertEqual(history[0]["forecast_location"], "Berlin")
+        self.assertTrue(history[0]["archived_forecast"])
+        context = next(day for day in calendar["daily_planning_context"] if day["date"] == yesterday)
+        self.assertTrue(context["weather"]["archived_forecast"])
+        self.assertEqual(context["weather"]["forecast_saved_at"], old["fetched_at"])
+        self.assertEqual(context["weather"]["rain_peak_time"], "15:00")
+
     def test_changing_weather_location_invalidates_previous_forecast(self):
         server.save_profile({"weather_location": "Münster"})
         server.set_kv(server.WEATHER_CACHE_KEY, json.dumps({"query": "Münster", "forecast": {}}))
@@ -1478,7 +1521,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('new EventSource(`/api/state/events?since=', app)
         self.assertIn('function connectStateEvents()', app)
         self.assertIn('event.type === "reset"', app)
-        self.assertIn('garmin: ["performance"]', app)
+        self.assertIn('garmin: ["performance", "plan"]', app)
+        self.assertIn('checkins: ["feedback", "plan"]', app)
         self.assertIn("function scrollChatToResponseStart()", app)
         self.assertIn("async function loadChatHistoryFresh()", app)
         self.assertIn("state.chatStatusPollInFlight", app)
@@ -1773,19 +1817,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request, responseError });", api_client)
         self.assertIn("window.AppApi.request(path, options, () =>", app)
         self.assertIn("window.AppApi.audio(path, blob, () =>", app)
-        self.assertIn('/api.js?v=178', index)
-        self.assertIn('/navigation.js?v=178', index)
-        self.assertIn('/state.js?v=178', index)
-        self.assertIn('/views.js?v=178', index)
-        self.assertIn('/forms.js?v=178', index)
-        self.assertIn('/components.js?v=178', index)
-        self.assertIn('/app.js?v=178', index)
-        self.assertIn('intervals-coach-v178', service_worker)
-        self.assertIn('"/navigation.js?v=178"', service_worker)
-        self.assertIn('"/state.js?v=178"', service_worker)
-        self.assertIn('"/views.js?v=178"', service_worker)
-        self.assertIn('"/forms.js?v=178"', service_worker)
-        self.assertIn('"/components.js?v=178"', service_worker)
+        self.assertIn('/api.js?v=182', index)
+        self.assertIn('/navigation.js?v=182', index)
+        self.assertIn('/state.js?v=182', index)
+        self.assertIn('/views.js?v=182', index)
+        self.assertIn('/forms.js?v=182', index)
+        self.assertIn('/components.js?v=182', index)
+        self.assertIn('/app.js?v=182', index)
+        self.assertIn('intervals-coach-v182', service_worker)
+        self.assertIn('"/navigation.js?v=182"', service_worker)
+        self.assertIn('"/state.js?v=182"', service_worker)
+        self.assertIn('"/views.js?v=182"', service_worker)
+        self.assertIn('"/forms.js?v=182"', service_worker)
+        self.assertIn('"/components.js?v=182"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1811,8 +1855,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=178'), index.index('/components.js?v=178'))
-        self.assertLess(index.index('/components.js?v=178'), index.index('/app.js?v=178'))
+        self.assertLess(index.index('/forms.js?v=182'), index.index('/components.js?v=182'))
+        self.assertLess(index.index('/components.js?v=182'), index.index('/app.js?v=182'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -1856,7 +1900,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function createActionReceipt(', components)
         self.assertIn('createSkeletonStack(4)', app)
         self.assertIn('id="todaySummary"', index)
-        self.assertIn('today-priority', app)
+        self.assertNotIn('today-priority', app)
         self.assertIn('id="analysisHistorySegment"', index)
         self.assertIn('id="analysisPerformanceSegment"', index)
         self.assertIn('function analysisSegmentFromRoute(', (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8"))
@@ -1872,10 +1916,10 @@ class CoachTests(unittest.TestCase):
     def test_today_view_is_a_read_only_coach_oriented_summary(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         today_view = app[app.index("function renderToday(data)"):app.index("function distanceLabel(")]
-        self.assertIn('todayCard("Coach-Einordnung", "today-priority")', today_view)
-        self.assertIn('todayCard("Morgen-Check-in", "today-checkin")', today_view)
-        self.assertIn('const automaticMorningReady = morning.status === "ready" && morning.date === todayKey;', today_view)
-        self.assertIn("Morgen-Check-in abgeschlossen.", today_view)
+        self.assertNotIn('todayCard("Coach-Einordnung", "today-priority")', today_view)
+        self.assertNotIn('todayCard("Morgen-Check-in", "today-checkin")', today_view)
+        self.assertNotIn('todayCard("Offene Rückmeldung", "today-feedback")', today_view)
+        self.assertNotIn("Morgen-Check-in abgeschlossen.", today_view)
         self.assertNotIn("todayAction(", today_view)
         self.assertNotIn('document.createElement("button")', today_view)
 
@@ -1971,7 +2015,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn('id="weatherNotice"', index)
         self.assertNotIn("function renderWeatherNotice", app)
 
-    def test_activity_feedback_is_persisted_and_attached_to_activity(self):
+    def test_coach_activity_feedback_is_persisted_and_attached_to_activity(self):
         server.save_snapshot({
             "synced_at": "2026-08-30T08:00:00+00:00",
             "athlete": {},
@@ -1979,7 +2023,7 @@ class CoachTests(unittest.TestCase):
             "recent_wellness": [],
             "upcoming_calendar": [],
         })
-        result = server.save_activity_feedback("activity-1", {
+        result = server.save_coach_activity_feedback("activity-1", {
             "activity_name": "Morgenlauf", "activity_date": "2026-08-30T07:00:00", "notes": "Linkes Knie ungewohnt empfindlich",
         })
         self.assertEqual(result["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich")
@@ -2021,12 +2065,22 @@ class CoachTests(unittest.TestCase):
         server.save_activity_feedback("activity-2", {"notes": "   "})
         self.assertEqual(server.list_activity_feedback(), [])
 
-    def test_feedback_form_is_not_rendered_in_profile_markup(self):
+    def test_activity_history_feedback_is_read_only_and_coach_managed(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        app = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+        backend = Path(server.__file__).read_text(encoding="utf-8")
         self.assertNotIn('id="feedbackForm"', markup)
         self.assertNotIn("Lokales Athleten-Feedback", markup)
         self.assertIn('id="analysisHistorySegment"', markup)
         self.assertIn('data-analysis-segment="history"', markup)
+        self.assertNotIn('id="activityDirtyIndicator"', markup)
+        self.assertNotIn("function saveActivityFeedback", app)
+        self.assertNotIn("Besonderheiten speichern", app)
+        self.assertNotIn("activity-type-button", app)
+        self.assertIn("if (feedbackNotes) {", app)
+        self.assertIn("feedbackText.textContent = feedbackNotes;", app)
+        self.assertIn('activity_feedback: ["feedback", "activities"]', app)
+        self.assertNotIn('"^/api/activities/([^/]+)/feedback$"', backend)
 
     def test_settings_do_not_render_calendar_events_or_public_competition_import(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
@@ -2472,6 +2526,14 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM messages WHERE content = 'old chat'").fetchone()["count"], 1)
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM snapshots WHERE created_at LIKE '2000-%'").fetchone()["count"], 1)
 
+    def test_finite_retention_clears_unstamped_gemini_history(self):
+        server.set_kv("gemini_conversation_history", json.dumps([{"role": "user", "parts": [{"text": "old coach context"}]}]))
+        server.set_kv("gemini_call_names", json.dumps({"gemini_old": "save_checkin"}))
+        with patch.object(server, "CONFIG", replace(server.CONFIG, data_retention_days=30)):
+            server.initialise_database()
+        self.assertEqual(server.get_kv("gemini_conversation_history"), "[]")
+        self.assertEqual(server.get_kv("gemini_call_names"), "{}")
+
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, "SQLCipher ist in dieser Testumgebung nicht verfügbar.")
     def test_sqlcipher_database_returns_mapping_rows(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -2664,7 +2726,9 @@ class CoachTests(unittest.TestCase):
             "description": "- 30m Z2", "moving_time": 1800,
         }
         first = server.upsert_remote_planned_units([event])
+        revision_after_import = server._structured_training_state()["planning_revision"]
         second = server.upsert_remote_planned_units([event])
+        self.assertEqual(server._structured_training_state()["planning_revision"], revision_after_import)
         planned = server.list_dated_local_planned_workouts()
         self.assertEqual(first["imported"], 1)
         self.assertEqual(len(planned), 1)
@@ -3547,6 +3611,11 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(FakeGarmin.sleep_calls, ["2026-09-04"])
         self.assertEqual(FakeGarmin.body_battery_calls, [("2026-09-03", "2026-09-04")])
         self.assertEqual(server.garmin_public_state()["morning_body_battery"]["morning"]["value"], 78)
+        self.assertEqual(server._saved_daily_history(server.MORNING_BATTERY_HISTORY_KEY)["2026-09-04"], 78)
+        server.set_kv("garmin_snapshot", "{}")
+        recovery = server._planning_recovery_by_date({})
+        self.assertEqual(recovery["2026-09-04"]["body_battery"], 78)
+        self.assertEqual(recovery["2026-09-04"]["sources"]["body_battery"], "Garmin Connect")
 
     def test_body_battery_only_error_does_not_degrade_garmin_public_state(self):
         server.set_kv("last_garmin_error", json.dumps([
@@ -3705,6 +3774,289 @@ class CoachTests(unittest.TestCase):
     def test_output_text_falls_back_to_nested_content(self):
         response = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Hello"}]}]}
         self.assertEqual(server.output_text(response), "Hello")
+
+    def test_gemini_normalizes_tool_calls_and_preserves_function_history(self):
+        captured = []
+        responses = [
+            {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {"payload": {"energy": 7}}}}]}}], "usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 3, "totalTokenCount": 14}},
+            {"candidates": [{"content": {"role": "model", "parts": [{"text": "Check-in gespeichert."}]}}], "usageMetadata": {"promptTokenCount": 14, "candidatesTokenCount": 4, "totalTokenCount": 18}},
+        ]
+
+        def fake_http_json(method, url, payload=None, headers=None, **kwargs):
+            captured.append({"method": method, "url": url, "payload": payload, "headers": headers})
+            return responses.pop(0)
+
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        tool = {"type": "function", "name": "save_checkin", "description": "Save check-in", "parameters": {"type": "object", "properties": {"payload": {"type": "object"}}}}
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            initial = server.gemini_responses_request({"model": "gemini-3.8-flash", "conversation": "gemini_test", "instructions": "Coach rules", "input": "Speichere meine Tagesform.", "tools": [tool], "tool_choice": "auto", "max_output_tokens": 321})
+            call = next(item for item in initial["output"] if item["type"] == "function_call")
+            followup = server.gemini_responses_request({"conversation": "gemini_test", "instructions": "Coach rules", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "tools": [tool], "tool_choice": "auto"})
+
+        self.assertEqual(captured[0]["url"], "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")
+        self.assertEqual(captured[0]["headers"]["x-goog-api-key"], "test-gemini-key")
+        self.assertEqual(captured[0]["payload"]["systemInstruction"]["parts"][0]["text"], "Coach rules")
+        self.assertEqual(captured[0]["payload"]["tools"][0]["functionDeclarations"][0]["name"], "save_checkin")
+        self.assertEqual(captured[0]["payload"]["tools"][0]["functionDeclarations"][0]["parametersJsonSchema"], tool["parameters"])
+        function_response = next(
+            part["functionResponse"]
+            for content in captured[1]["payload"]["contents"]
+            for part in content.get("parts", [])
+            if "functionResponse" in part
+        )
+        self.assertEqual(function_response["name"], "save_checkin")
+        self.assertEqual(server.output_text(followup), "Check-in gespeichert.")
+
+    def test_gemini_persists_tool_response_before_a_failed_followup(self):
+        responses = [
+            {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {}}}]}}]},
+            server.AppError(429, "Gemini ist ausgelastet.", reason="rate_limit_exceeded"),
+        ]
+
+        def fake_http_json(*args, **kwargs):
+            response = responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            initial = server.gemini_responses_request({"conversation": "gemini-persist-response", "input": "Speichere meine Tagesform.", "parallel_tool_calls": False})
+            call = next(item for item in initial["output"] if item["type"] == "function_call")
+            with self.assertRaises(server.AppError):
+                server.gemini_responses_request({"conversation": "gemini-persist-response", "input": [{"type": "function_call_output", "call_id": call["call_id"], "output": '{"ok":true}'}], "parallel_tool_calls": False})
+
+        history = json.loads(server.get_kv("gemini_conversation_history") or "[]")
+        self.assertEqual(history[-2]["parts"][0]["functionCall"]["name"], "save_checkin")
+        self.assertEqual(history[-1]["parts"][0]["functionResponse"]["name"], "save_checkin")
+
+    def test_gemini_history_trimming_keeps_complete_tool_exchanges(self):
+        history = [
+            {"role": "user", "parts": [{"text": "Starte die Planung."}]},
+            {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {}}}]},
+            {"role": "user", "parts": [{"functionResponse": {"name": "save_checkin", "response": {"ok": True}}}]},
+            {"role": "model", "parts": [{"text": "Gespeichert."}]},
+        ]
+        for index in range(29):
+            history.extend([
+                {"role": "user", "parts": [{"text": f"Frage {index}"}]},
+                {"role": "model", "parts": [{"text": f"Antwort {index}"}]},
+            ])
+
+        # Reproduce a legacy raw slice that starts with a tool response.
+        server.set_kv("gemini_conversation_history", json.dumps(history[-60:]))
+        trimmed = server._gemini_history()
+
+        self.assertEqual(len(trimmed), 58)
+        self.assertEqual(trimmed[0]["parts"][0]["text"], "Frage 0")
+        self.assertFalse(any("functionResponse" in part for content in trimmed for part in content["parts"]))
+
+    def test_gemini_rebuilds_history_from_the_shared_local_dialogue(self):
+        server.add_message("user", "Was war mein letzter Schwerpunkt?")
+        server.add_message("assistant", "Der Schwerpunkt war die Schwelle.")
+        server.add_message("user", "Und wie geht es weiter?")
+        server.set_kv("gemini_conversation_history", json.dumps([
+            {"role": "user", "parts": [{"text": "Veraltete Gemini-Frage"}]},
+            {"role": "model", "parts": [{"text": "Veraltete Gemini-Antwort"}]},
+        ]))
+
+        request, history, _ = server._gemini_request_payload({"conversation": "gemini-shared-dialogue", "input": "Und wie geht es weiter?"}, "gemini-3.8-flash")
+
+        self.assertEqual(history, request["contents"])
+        self.assertEqual([content["parts"][0]["text"] for content in history], [
+            "Was war mein letzter Schwerpunkt?", "Der Schwerpunkt war die Schwelle.", "Und wie geht es weiter?",
+        ])
+
+    def test_gemini_keeps_repeated_text_after_a_model_turn(self):
+        server.set_kv("gemini_conversation_history", json.dumps([
+            {"role": "user", "parts": [{"text": "Ja"}]},
+            {"role": "model", "parts": [{"text": "Ja"}]},
+        ]))
+
+        request, _, _ = server._gemini_request_payload({"conversation": "gemini-repeated-text", "input": "Ja"}, "gemini-3.8-flash")
+
+        self.assertEqual(request["contents"][-1], {"role": "user", "parts": [{"text": "Ja"}]})
+
+    def test_openai_provider_switch_includes_recent_gemini_dialogue(self):
+        server.add_message("user", "Wie lief die Tempoeinheit?")
+        server.add_message("assistant", "Sie war kontrolliert und gleichmäßig.")
+        server.add_message("user", "Was folgt morgen?")
+        server.set_kv("last_coach_ai_provider", "gemini")
+
+        handoff = server.provider_switch_input("Was folgt morgen?", "openai")
+
+        self.assertIn("Wie lief die Tempoeinheit?", handoff)
+        self.assertIn("Sie war kontrolliert und gleichmäßig.", handoff)
+        self.assertTrue(handoff.endswith("Aktuelle Nachricht des Athleten:\nWas folgt morgen?"))
+
+    def test_outstanding_plan_drafts_remain_visible_across_provider_conversations(self):
+        draft = server._stage_coach_artifact("gemini-conversation", "gemini-draft", {"plan_name": "Basis", "goal": "Ausdauer", "workouts": []})
+
+        refs = server.coach_intent_artifact_refs("openai-conversation")
+
+        self.assertIn(draft["artifact_id"], [item["id"] for item in refs])
+
+    def test_gemini_rejects_parallel_tool_calls_when_coach_disables_them(self):
+        response = {"candidates": [{"content": {"role": "model", "parts": [
+            {"functionCall": {"name": "save_checkin", "args": {}}},
+            {"functionCall": {"name": "save_profile", "args": {}}},
+        ]}}]}
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", return_value=response):
+            with self.assertRaises(server.AppError) as raised:
+                server.gemini_responses_request({"conversation": "gemini-single-tool", "input": "Aktualisiere meine Daten.", "parallel_tool_calls": False})
+
+        self.assertEqual(raised.exception.reason, "parallel_tool_calls_unsupported")
+        self.assertEqual(json.loads(server.get_kv("gemini_conversation_history") or "[]"), [])
+
+    def test_gemini_transcription_keeps_audio_server_side_and_returns_text(self):
+        captured = {}
+
+        def fake_http_json(method, url, payload=None, headers=None, **kwargs):
+            captured.update({"method": method, "url": url, "payload": payload, "headers": headers})
+            return {"candidates": [{"content": {"role": "model", "parts": [{"text": "Wie soll ich morgen trainieren?"}]}}]}
+
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "http_json", side_effect=fake_http_json):
+            result = server.transcribe_audio(b"fake-webm-audio", "audio/webm;codecs=opus")
+
+        self.assertEqual(result, {"transcript": "Wie soll ich morgen trainieren?"})
+        self.assertEqual(captured["headers"]["x-goog-api-key"], "test-gemini-key")
+        audio_part = captured["payload"]["contents"][0]["parts"][0]["inlineData"]
+        self.assertEqual(audio_part["mimeType"], "audio/webm")
+        self.assertNotIn("fake-webm-audio", str(captured["payload"]))
+
+    def test_ai_provider_selection_keeps_models_separate(self):
+        config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
+        with patch.object(server, "CONFIG", config):
+            self.assertEqual(server.selected_ai_provider(), "openai")
+            server.save_model("gpt-5.6-luna")
+            self.assertEqual(server.save_ai_provider("gemini")["provider"], "gemini")
+            self.assertEqual(server.selected_model(), "gemini-3.8-flash")
+            server.save_model("gemini-2.5-pro")
+            server.save_ai_provider("openai")
+            self.assertEqual(server.selected_model(), "gpt-5.6-luna")
+
+    def test_gemini_key_is_redacted_from_diagnostics_text(self):
+        key = "AIza" + "a" * 35
+        with patch.object(server, "CONFIG", replace(server.CONFIG, gemini_api_key=key)):
+            self.assertNotIn(key, server.redact_text(f"Gemini request failed: {key}"))
+
+    def test_gemini_turn_uses_its_captured_provider_and_reasoning_level(self):
+        config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="openai")
+        payload = {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "Prüfe die Form.", "reasoning": {"effort": "low"}}
+        with patch.object(server, "CONFIG", config), patch.object(server, "gemini_responses_request", return_value={"output_text": "ok"}) as gemini, patch.object(server, "openai_request") as openai:
+            self.assertEqual(server.responses_request(payload)["output_text"], "ok")
+        gemini.assert_called_once_with(payload)
+        openai.assert_not_called()
+        request, _, _ = server._gemini_request_payload(payload, "gemini-3.8-flash")
+        self.assertEqual(request["generationConfig"]["thinkingConfig"], {"thinkingLevel": "low"})
+
+    def test_gemini_background_job_is_not_replayed_after_restart(self):
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        server.set_kv("gemini_conversation_history", json.dumps([
+            {"role": "user", "parts": [{"text": "Erstelle einen Plan."}]},
+            {"role": "model", "parts": [{"functionCall": {"name": "stage_training_plan", "args": {}}}]},
+        ]))
+        with patch.object(server, "CONFIG", config):
+            server.enqueue_background_coach_job(
+                "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",
+                "turn-gemini-background-restart",
+                "csrf-gemini-background-restart",
+            )
+            self.assertIsNotNone(server._claim_background_coach_job())
+            self.assertEqual(server.resume_interrupted_coach_jobs(), 0)
+        with server.DB_LOCK, server.database() as db:
+            command = db.execute("SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", ("turn-gemini-background-restart",)).fetchone()
+        self.assertEqual(command["status"], "completed")
+        self.assertEqual(json.loads(command["receipt"])["status"], "failed")
+        self.assertEqual(server._gemini_history(), [{"role": "user", "parts": [{"text": "Erstelle einen Plan."}]}])
+
+    def test_gemini_reset_deletes_an_existing_openai_conversation(self):
+        server.set_kv("openai_conversation_id", "conv-test")
+        config = replace(server.CONFIG, openai_api_key="test-openai-key", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "delete_remote_conversation", return_value=True) as delete:
+            result = server.reset_coach_chat()
+        delete.assert_called_once_with("conv-test")
+        self.assertTrue(result["remote_conversation_deleted"])
+
+    def test_gemini_error_classes_preserve_authentication_quota_and_rate_limits(self):
+        self.assertEqual(server.gemini_error_details(401, b"{}")["reason"], "authentication_or_permission")
+        quota = json.dumps({"error": {"status": "RESOURCE_EXHAUSTED", "details": [{"reason": "quotaExceeded"}]}}).encode()
+        self.assertEqual(server.gemini_error_details(429, quota)["reason"], "insufficient_quota")
+        self.assertEqual(server.gemini_error_details(429, b"{}")["reason"], "rate_limit_exceeded")
+
+    def test_provider_authentication_errors_do_not_use_the_session_status(self):
+        provider_error = server.AppError(401, "Gemini-SchlÃ¼ssel ungÃ¼ltig.", reason="authentication_or_permission")
+        self.assertEqual(server.public_app_error_status(provider_error), 502)
+        self.assertEqual(server.public_app_error_status(server.AppError(401, "Anmeldung erforderlich.")), 401)
+
+    def test_gemini_http_errors_keep_the_provider_status(self):
+        upstream_error = server.HTTPError(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+            401,
+            "Unauthorized",
+            {},
+            BytesIO(b'{"error":{"status":"UNAUTHENTICATED"}}'),
+        )
+        with patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError) as raised:
+                server.http_json("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {}, service="gemini")
+        self.assertEqual(raised.exception.status, 401)
+        self.assertEqual(raised.exception.reason, "authentication_or_permission")
+
+    def test_gemini_function_schemas_keep_openai_nullable_fields_as_json_schema(self):
+        schema = {"type": "object", "properties": {"notes": {"type": ["string", "null"]}}}
+        declaration = server._gemini_tools([{"type": "function", "name": "save_feedback", "parameters": schema}])[0]["functionDeclarations"][0]
+        self.assertEqual(declaration["parametersJsonSchema"], schema)
+        self.assertNotIn("parameters", declaration)
+
+    def test_http_json_cancels_while_waiting_for_provider_headers(self):
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        cancelled = threading.Event()
+        outcome = {}
+
+        class Response:
+            status = 200
+            headers = {}
+
+            def read(self, *args):
+                return b"{}"
+
+            def close(self):
+                return None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+
+        def blocked_urlopen(*args, **kwargs):
+            started.set()
+            release.wait(2)
+            finished.set()
+            return Response()
+
+        def send_request():
+            try:
+                server.http_json("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {}, service="gemini", cancel_event=cancelled)
+            except server.AppError as exc:
+                outcome["error"] = exc
+
+        with patch.object(server, "urlopen", side_effect=blocked_urlopen):
+            caller = threading.Thread(target=send_request)
+            caller.start()
+            self.assertTrue(started.wait(1))
+            cancelled.set()
+            caller.join(1)
+            release.set()
+            self.assertTrue(finished.wait(1))
+
+        self.assertFalse(caller.is_alive())
+        self.assertEqual(outcome["error"].status, 499)
 
     def test_transcribe_audio_sends_bounded_multipart_request(self):
         captured = {}
@@ -3973,20 +4325,64 @@ class CoachTests(unittest.TestCase):
             server.enqueue_sync_job("intervals", "plan_push", {"entries": [entry] * 29}, requested_by="coach")
         self.assertEqual(too_many.exception.reason, "invalid_job_request")
 
-    def test_structured_training_change_batch_rolls_back_on_late_failure(self):
-        planned = server.create_local_planned_unit({
-            "date": "2099-01-02", "sport": "Ride", "name": "Original",
+    def test_structured_training_changes_accept_complete_bounded_plan_without_remote_write(self):
+        for count in (29, server.COACH_TRAINING_CHANGE_LIMIT):
+            with self.subTest(count=count):
+                self.setUp()
+                planned = [server.create_local_planned_unit({
+                    "date": (date(2098, 1, 1) + timedelta(days=index)).isoformat(),
+                    "sport": "Ride", "name": f"Original {index}",
+                    "description": "- 30m 60%", "duration_minutes": 30, "target": "AUTO",
+                }) for index in range(count)]
+                result = server._apply_structured_training_changes({
+                    "changes": [
+                        {"local_id": item["id"], "action": "update", "name": f"Changed {index}"}
+                        for index, item in enumerate(planned)
+                    ],
+                })
+                self.assertEqual(len(result["changes"]), count)
+                self.assertEqual(
+                    [item["name"] for item in server.list_planned_units(1000, include_archived=True)],
+                    [f"Changed {index}" for index in range(count)],
+                )
+                with server.DB_LOCK, server.database() as db:
+                    self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM sync_jobs").fetchone()["count"], 0)
+
+    def test_structured_training_change_batch_rolls_back_after_old_boundary(self):
+        planned = [server.create_local_planned_unit({
+            "date": (date(2099, 1, 1) + timedelta(days=index)).isoformat(),
+            "sport": "Ride", "name": f"Original {index}",
             "description": "- 30m 60%", "duration_minutes": 30, "target": "AUTO",
-        })
-        with self.assertRaises(server.AppError):
+        }) for index in range(28)]
+        with self.assertRaises(server.AppError) as raised:
             server._apply_structured_training_changes({
                 "changes": [
-                    {"local_id": planned["id"], "action": "update", "date": "2099-01-02", "name": "Changed"},
+                    *[
+                        {"local_id": item["id"], "action": "update", "name": f"Changed {index}"}
+                        for index, item in enumerate(planned)
+                    ],
                     {"local_id": str(uuid.uuid4()), "action": "update", "date": "2099-01-02", "name": "Missing"},
                 ],
             })
-        saved = next(item for item in server.list_planned_units(100, include_archived=True) if item["id"] == planned["id"])
-        self.assertEqual(saved["name"], "Original")
+        self.assertEqual(raised.exception.status, 404)
+        self.assertEqual(
+            [item["name"] for item in server.list_planned_units(100, include_archived=True)],
+            [f"Original {index}" for index in range(28)],
+        )
+
+    def test_structured_training_changes_reject_more_than_complete_plan_limit(self):
+        with self.assertRaises(server.AppError) as raised:
+            server._apply_structured_training_changes({
+                "changes": [{"local_id": str(uuid.uuid4()), "action": "delete"}]
+                * (server.COACH_TRAINING_CHANGE_LIMIT + 1),
+            })
+        self.assertEqual(raised.exception.reason, "change_limit")
+
+    def test_training_change_tool_schema_exposes_complete_plan_limit(self):
+        tool = next(tool for tool in server.COACH_STRUCTURED_TOOLS if tool["name"] == "apply_training_changes")
+        changes = tool["parameters"]["properties"]["changes"]
+        self.assertEqual(changes["minItems"], 1)
+        self.assertEqual(changes["maxItems"], server.COACH_TRAINING_CHANGE_LIMIT)
 
     def test_context_preview_exposes_context_and_last_chat_input(self):
         server.add_message("user", "Wie soll ich morgen trainieren?")
@@ -4149,7 +4545,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("vendor_payload", context)
 
     def test_model_selection_is_persisted_and_validated(self):
-        self.assertEqual(server.selected_model(), "gpt-5.6-sol")
+        self.assertEqual(server.selected_model(), "gpt-5.6-luna")
         self.assertEqual(server.save_model("gpt-5.6-terra"), {"model": "gpt-5.6-terra"})
         self.assertEqual(server.selected_model(), "gpt-5.6-terra")
         with self.assertRaises(server.AppError):
@@ -4224,6 +4620,166 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(scope["horizon_days"], 14)
         self.assertTrue(scope["background"])
         self.assertTrue(server.coach_plan_scope("Ich brauche einen Plan für die nächsten 2 Wochen.")["background"])
+
+    def test_complete_plan_edits_use_long_plan_scope_and_budget(self):
+        prompt = "Ändere meinen gesamten Trainingsplan nach diesen Vorgaben."
+        scope = server.coach_plan_scope(prompt)
+        self.assertTrue(scope["planning"])
+        self.assertTrue(scope["bulk_change"])
+        self.assertEqual(scope["planned_units"], server.COACH_TRAINING_CHANGE_LIMIT)
+        self.assertTrue(scope["background"])
+        self.assertEqual(server.coach_output_token_budget(prompt), server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+        self.assertEqual(server.coach_output_token_budget(prompt, followup=True), server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+
+    def test_bulk_scope_keeps_scoped_exclusions_and_rejects_negated_mutation(self):
+        self.assertTrue(server.prompt_requests_bulk_training_change(
+            "Ändere meinen gesamten Trainingsplan, aber nicht die Ruhetage."
+        ))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Change my entire training plan."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Edit all of my planned workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Change all future workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Change all upcoming planned workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Replan my entire training plan."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Revise my entire training plan."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Delete all planned workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Lösche alle geplanten Einheiten."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Plane meinen gesamten Trainingsplan neu."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Ändere sämtliche Workouts."))
+        self.assertFalse(server.prompt_requests_bulk_training_change(
+            "Ändere nicht meinen gesamten Trainingsplan."
+        ))
+
+    def test_complete_plan_edit_reads_full_state_before_mutating(self):
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "read_training_state", "call_id": "read", "arguments": "{}"}]},
+            {"output_text": "Die Planänderungen sind vorbereitet."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-bulk-read"
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach(
+                "Ändere meinen gesamten Trainingsplan nach diesen Vorgaben.",
+                client_turn_id="turn-bulk-read",
+            )
+        self.assertEqual(result["command_receipts"][0]["tool"], "read_training_state")
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "read_training_state"})
+        self.assertEqual(request.call_args_list[1].args[0]["max_output_tokens"], server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+
+    def test_complete_plan_edit_forces_authorized_write_after_read(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Bulk target", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        target = next(item for item in state["planned_units"] if item["local_id"] == planned["id"])
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "read_training_state", "call_id": "read", "arguments": "{}"}]},
+            {"output": [{"type": "function_call", "name": "apply_training_changes", "call_id": "apply", "arguments": json.dumps({
+                "expected_revision": state["planning_revision"],
+                "changes": [{"local_id": planned["id"], "action": "update", "name": "Bulk updated", "expected_payload_hash": target["expected_payload_hash"]}],
+            })}]},
+            {"output_text": "Die Planänderung wurde angewendet."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-bulk-write"
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach(
+                "Ändere meinen gesamten Trainingsplan nach diesen Vorgaben.",
+                client_turn_id="turn-bulk-write",
+            )
+        self.assertEqual(request.call_args_list[1].args[0]["tool_choice"], {"type": "function", "name": "apply_training_changes"})
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(server.list_planned_units()[0]["name"], "Bulk updated")
+
+    def test_structured_training_reads_expose_complete_bounded_plan(self):
+        for index in range(server.COACH_TRAINING_CHANGE_LIMIT):
+            server.create_local_planned_unit({
+                "date": (date(2098, 1, 1) + timedelta(days=index)).isoformat(),
+                "sport": "Ride", "name": f"Session {index}", "description": "- 30m easy",
+            })
+        intent = {"intent": "local_action", "operation": "read_training_state", "target_system": "local", "authorization_scope": []}
+        state = server._structured_coach_tool_result(
+            "read_training_state", {}, intent=intent, conversation_id="read-plan", client_turn_id="read-plan",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(len(state["planned_units"]), server.COACH_TRAINING_CHANGE_LIMIT)
+        listed = server._structured_coach_tool_result(
+            "list_planned_workouts", {"limit": server.COACH_TRAINING_CHANGE_LIMIT}, intent=intent,
+            conversation_id="read-plan", client_turn_id="read-plan", session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(len(listed["local"]), server.COACH_TRAINING_CHANGE_LIMIT)
+
+    def test_structured_training_state_filters_inactive_rows_before_limit(self):
+        with patch.object(server, "COACH_TRAINING_CHANGE_LIMIT", 2):
+            archived = server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=1)).isoformat(),
+                "sport": "Ride", "name": "Archived", "description": "- 30m easy",
+            })
+            server.update_local_planned_workout(archived["id"], {"action": "archive"})
+            active = [server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=index)).isoformat(),
+                "sport": "Ride", "name": f"Active {index}", "description": "- 30m easy",
+            }) for index in (2, 3)]
+            state = server._structured_training_state()
+        self.assertEqual([item["local_id"] for item in state["planned_units"]], [item["id"] for item in active])
+
+    def test_bulk_training_changes_require_revision_and_hashes(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Bulk target", "description": "- 30m easy",
+        })
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "authorization_scope": ["local_plan"], "bulk_change": True,
+        }
+        with self.assertRaises(server.AppError) as raised:
+            server._structured_coach_tool_result(
+                "apply_training_changes", {"changes": [{"local_id": planned["id"], "action": "update"}]},
+                intent=intent, conversation_id="bulk-required", client_turn_id="bulk-required",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+        self.assertEqual(raised.exception.reason, "planning_revision_required")
+
+    def test_bulk_training_changes_validate_final_schedule_before_writes(self):
+        first_date = date.today() + timedelta(days=1)
+        second_date = date.today() + timedelta(days=2)
+        first = server.create_local_planned_unit({
+            "date": first_date.isoformat(), "sport": "Ride", "name": "First", "description": "- 30m easy",
+        })
+        second = server.create_local_planned_unit({
+            "date": second_date.isoformat(), "sport": "Ride", "name": "Second", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        refs = {item["local_id"]: item for item in state["planned_units"]}
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "authorization_scope": ["local_plan"], "bulk_change": True,
+        }
+        result = server._structured_coach_tool_result(
+            "apply_training_changes", {
+                "expected_revision": state["planning_revision"],
+                "changes": [
+                    {"local_id": first["id"], "action": "update", "date": second_date.isoformat(), "expected_payload_hash": refs[first["id"]]["expected_payload_hash"]},
+                    {"local_id": second["id"], "action": "update", "date": first_date.isoformat(), "expected_payload_hash": refs[second["id"]]["expected_payload_hash"]},
+                ],
+            },
+            intent=intent, conversation_id="bulk-rotation", client_turn_id="bulk-rotation",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["status"], "applied")
+        current = {item["id"]: item["date"] for item in server.list_planned_units()}
+        self.assertEqual(current[first["id"]], second_date.isoformat())
+        self.assertEqual(current[second["id"]], first_date.isoformat())
 
     def test_openai_background_response_is_created_checkpointed_and_polled(self):
         captured = {}
@@ -5736,16 +6292,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=178"', source)
-        self.assertIn('"/navigation.js?v=178"', source)
-        self.assertIn('"/state.js?v=178"', source)
-        self.assertIn('"/views.js?v=178"', source)
-        self.assertIn('"/forms.js?v=178"', source)
-        self.assertIn('"/components.js?v=178"', source)
+        self.assertIn('"/api.js?v=182"', source)
+        self.assertIn('"/navigation.js?v=182"', source)
+        self.assertIn('"/state.js?v=182"', source)
+        self.assertIn('"/views.js?v=182"', source)
+        self.assertIn('"/forms.js?v=182"', source)
+        self.assertIn('"/components.js?v=182"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=178"', source)
-        self.assertIn('"/icon.svg?v=178"', source)
-        self.assertIn('"/styles.css?v=178"', source)
+        self.assertIn('"/app.js?v=182"', source)
+        self.assertIn('"/icon.svg?v=182"', source)
+        self.assertIn('"/styles.css?v=182"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -6806,7 +7362,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=178', index)
+        self.assertIn('v=182', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)

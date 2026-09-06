@@ -3,7 +3,7 @@
 Intervals Coach is a private, mobile-first PWA for a single athlete. Its
 Python standard-library HTTP server synchronizes training data from
 Intervals.icu and, optionally, Garmin Connect, sends a sanitized coaching
-context to the OpenAI Responses API, and stores the local application state in
+context to the selected OpenAI or Gemini API, and stores the local application state in
 an encrypted SQLite database.
 
 The application is designed for use on a trusted home network or private VPN.
@@ -74,7 +74,7 @@ instructions do not delete or convert its data.
   compact historical points during synchronization.
 - Push-to-talk voice input in the chat: short recordings are transcribed
   server-side and inserted into the editable message field; audio is not stored.
-- Coach chat with selectable GPT-5.6 models, configurable thinking level,
+- Coach chat with selectable OpenAI or Gemini models, configurable thinking level,
   context preview, structured logs, and prioritized steering/FIFO message
   queueing while the coach is responding. Responses are streamed through a
   credential-free server-side SSE bridge; the chat view renders safe partial
@@ -83,8 +83,9 @@ instructions do not delete or convert its data.
   streaming connection does not cancel the server-side coach request; its
   persisted answer appears in the chat after the next load. Planning requests
   longer than seven calendar days or containing more than seven requested
-  units are persisted as background jobs and use OpenAI background responses;
-  their response ID and progress survive a page reload or process restart.
+  units are persisted as background jobs. OpenAI uses resumable background
+  responses whose response ID and progress survive a page reload or process
+  restart; Gemini executes the job locally in the background worker.
   Failed planning steps report their cause in chat. A draft is checked for
   valid workout fields and occupied dates before it is stored; committing
   checks the calendar again. Internal draft/retry receipts are not displayed
@@ -128,8 +129,26 @@ instructions do not delete or convert its data.
   a full Intervals.icu resync.
 - Multi-week plans and library templates are managed through the Coach. The
   Geplant view has read-only Übersicht and Bibliothek segments: the overview
-  shows the combined planned and completed training calendar by week, while the
-  library groups active workout templates by sport.
+  shows the combined planned and completed training calendar as a daily agenda
+  grouped by week. Weekday and date sit beside the workout title, sport and
+  duration; today is highlighted and weather stays compact below the date.
+  Expand a workout for its description, metrics and plan/actual comparison.
+  Relevant calendar and health notes remain visible below the day's sessions.
+  Daily recovery values (sleep, HRV, resting heart rate, readiness and morning
+  Body Battery) and saved check-in scores sit in small, muted text lines
+  spanning the day below the date and workout columns. Values, notes and compact
+  rain/wind forecasts stay visible without expanding anything. Weather uses two
+  text lines: conditions and temperatures, then rain probability, wind direction
+  and speed, and gusts. The earliest hour with the highest rain probability is
+  included when hourly data indicates a distinct peak (local forecast time).
+  Metric sources and forecast location/retrieval time remain in hover text. Missing
+  values remain explicit; today's readings are never reused for another date.
+  Successful weather refreshes retain daily forecasts with their location and
+  retrieval time for the calendar history. Past forecasts are identified as saved
+  predictions in hover text, not measured weather. History starts with collected data; older
+  missing forecasts and check-ins cannot be reconstructed. Set the weather
+  location under Mehr > Profil. The calendar reads up to 365 saved check-ins.
+  The library groups active workout templates by sport.
 - Existing training plans can be renamed, have their goal, status, or date range
   changed, and can be deleted directly through the Coach. Plan deletion removes
   plan metadata only; scheduled local workout units remain untouched.
@@ -150,12 +169,11 @@ instructions do not delete or convert its data.
   Check-ins can be entered or edited through Coach Chat. Check-in dates and daily training
   boundaries use the saved IANA profile timezone, and future check-ins are
   rejected. The Heute tab provides a compact, read-only coach-oriented daily
-  synthesis of the local morning check-in, readiness/recovery signals, today's
-  planned workout, relevant weather, open activity feedback, and pending plan
-  adjustments. It uses already loaded state and does not trigger an additional
-  coach or provider request when opened; navigation and action buttons are not
-  shown in this view. Missing, loading, offline, sync, and error states are
-  shown clearly.
+  synthesis of readiness/recovery signals, today's planned workout, relevant
+  weather, and pending plan adjustments. It uses already loaded state and does not
+  trigger an additional coach or provider request when opened; navigation and
+  action buttons are not shown in this view. Missing, loading, offline, sync, and
+  error states are shown clearly.
 - After a completed activity, the coach can ask for a short subjective follow-up
   and store the athlete's answer as activity feedback.
 - The coach can explicitly read completed activities, the local workout library,
@@ -198,7 +216,7 @@ instructions do not delete or convert its data.
   local cleanup, and retention policy.
 - Encrypted database backup download and validated restore with an automatic
   pre-restore copy of the previous database.
-- OpenAI usage display for the latest request, remaining request/token quotas,
+- Active-provider usage display for the latest request, remaining request/token quotas,
   and the classified status of the last API call. Account dollar balances are
   available through the OpenAI billing dashboard or authorized organization
   access, not through this application.
@@ -271,7 +289,7 @@ application remains LAN/VPN-only.
 ## Coach context projection
 
 The encrypted provider snapshots and the general local state remain complete.
-Only the projection assembled for an OpenAI coaching request is bounded: it
+Only the projection assembled for a coaching request is bounded: it
 includes the five newest activities per normalized sport, compact planned
 workout fields, and at most 50 local planned units. Long descriptions and
 provider-only payloads are omitted from that projection. Local planned units
@@ -301,7 +319,7 @@ through the Coach.
 
 The More view is organized into the deep-linked segments `#more/profile`,
 `#more/connections`, `#more/coach`, `#more/privacy`, and `#more/operations`.
-Profile fields show when they may be included in requests to OpenAI. Sports and
+Profile fields show when they may be included in requests to the selected KI-Anbieter. Sports and
 time zone use controlled selections, while competition duration and distance are
 entered as `hh:mm` and kilometers and normalized before local storage. Privacy,
 backup/restore, and diagnostics remain available within two navigation levels.
@@ -370,6 +388,8 @@ Required:
 
 ```text
 OPENAI_API_KEY=replace-me
+# Or, instead of OPENAI_API_KEY:
+# GEMINI_API_KEY=replace-me
 INTERVALS_API_KEY=replace-me
 INTERVALS_ATHLETE_ID=0
 APP_PASSWORD=replace-with-at-least-12-random-characters
@@ -472,7 +492,10 @@ Other supported operational variables are:
 
 ```text
 OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-5.6-sol
+OPENAI_MODEL=gpt-5.6-luna
+GEMINI_MODEL=gemini-3.8-flash
+# If both API keys are set, OpenAI remains the default. Use gemini to select it on startup.
+AI_PROVIDER=gemini
 DATA_RETENTION_DAYS=-1
 PORT=8090
 DATA_DIR=/data
@@ -487,6 +510,14 @@ endpoint such as `https://<resource>.openai.azure.com/openai/v1`. Keep
 provider's deployment/model name. The configured service must support the
 Responses API, SSE streaming, and Conversations API used by the app; voice
 input additionally requires `/audio/transcriptions`.
+
+Gemini can be configured as an alternative with `GEMINI_API_KEY`. When both
+providers are configured, select the active provider in **More → Coach & Model**
+or set `AI_PROVIDER=gemini`. `GEMINI_MODEL` defaults to `gemini-3.8-flash`.
+The app sends the same sanitised Coach context only to the selected provider.
+Gemini conversations and tool-call history are stored locally so that Coach
+actions continue to use the same local authorization and validation checks.
+Voice input uses the selected provider and is never persisted.
 
 `DATA_RETENTION_DAYS=-1` is the default and disables automatic deletion. The
 application does not impose its own OpenAI request or token limits; it displays
@@ -587,8 +618,8 @@ for review before it is sent to the coach.
 
 ## Data, privacy, and logs
 
-The encrypted database and rotating JSONL logs are written to `/data`. OpenAI
-receives only the structured coaching context required for a request. API keys
+The encrypted database and rotating JSONL logs are written to `/data`. The selected
+KI-Anbieter receives only the structured coaching context required for a request. API keys
 are never sent to the browser or included in the coach context. Text received
 from external services is treated as untrusted data and never as instructions.
 
@@ -614,7 +645,8 @@ preview and one-time confirmation token, checks the current object hash, and
 marks a previously synchronized object as locally changed so any remote sync
 remains a separate action. Session cookies and server credentials are never part of the
 export. The database file itself remains in place. Chat reset and local cleanup
-also attempt to delete the stored OpenAI conversation; if that remote deletion
+also attempt to delete the stored OpenAI conversation when it is active; Gemini
+conversation history is held locally and removed with the local data. If remote deletion
 cannot be confirmed, the UI shows an explicit warning. Data held by external
 providers remains subject to their own policies.
 
@@ -795,23 +827,23 @@ subscription-backed Codex GitHub review. Enable automatic Code Review for this
 repository in Codex Cloud, or request one with `@codex review` in the pull
 request. The gate follows the Codex summary comment that is posted as soon as a
 review starts and edited as its status changes. It passes only after that
-comment reports completion for the current pull-request commit and Codex has
-published the matching submitted review. Inline findings are associated with
-that review by review ID, because their individual commit IDs can refer to
-different revisions of the changed lines. Any finding fails the gate. A new
-push invalidates the old review and starts the gate again. Retargeting the PR
-also starts a fresh gate for the new base branch. A manual `@codex review`
-request requires a summary and submitted review created or updated after that
-request, so an older result cannot be reused. When the target branch advances,
-the gate requests a fresh review for each affected open PR and replaces the
-older polling run. For normal pull-request events it also posts `@codex review`
-to start the subscription review explicitly. If the PR is closed or merged
+comment's Code Review row reports completion for the current pull-request
+commit and Codex has either published a matching submitted review or added its
+post-completion thumbs-up reaction. A submitted review with inline findings is
+associated by review ID and fails the gate; the reaction is the connector's
+clean-review result when it intentionally creates no submitted review. A new
+push invalidates the old result and starts the gate again. A manual human
+`@codex review` request requires a summary and result created or updated after
+that request, so an older result cannot be reused. The workflow relies on the
+connector's automatic pull-request and new-commit triggers and does not post an
+unauthorized request as `github-actions[bot]`. If the PR is closed or merged
 while the gate is waiting, the gate cancels its check instead of polling until
 the timeout.
 
 The workflow runs from the trusted target branch and never checks out or
-executes pull-request code. It uses only the GitHub token to read reviews and
-update the required check; no `OPENAI_API_KEY` repository secret is needed.
+executes pull-request code. It uses only the GitHub token to read the summary,
+reviews, and reactions and to update the required check; no `OPENAI_API_KEY`
+repository secret is needed.
 Keep the exact required status-check name `Codex code review` in the GitHub
 rulesets for `develop` and `main`.
 
