@@ -19,6 +19,8 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
     text = message.casefold()
     for kind in kinds:
         candidates = [ref for ref in refs if ref["kind"] == kind]
+        if kind == "training_plan" and "replace_training_plan" in operations:
+            candidates = [ref for ref in candidates if ref.get("status") != "archived"]
         mentions = []
         for ref in candidates:
             for value in {ref["id"], ref["name"]} - {""}:

@@ -2614,6 +2614,37 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                 now = utc_now()
                 db.execute("INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)", (entity_id, normalized["name"], normalized["event_date"], normalized["sport"], normalized["priority"], normalized["distance"], normalized["target"], normalized["course_profile"], normalized["notes"], normalized["category"], normalized["start_date_local"], normalized["description"], normalized["moving_time"], now, now))
                 after = {**normalized, "sync_state": "local"}
+        elif entity_type == "planned_unit":
+            if target is None:
+                db.execute("DELETE FROM planned_units WHERE local_id=?", (entity_id,))
+                after = None
+            elif current:
+                try:
+                    current_payload = json.loads(current.get("payload") or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.") from exc
+                if not isinstance(current_payload, dict):
+                    raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.")
+                restored = normalize_planned_unit(
+                    {
+                        **current_payload,
+                        **target,
+                        "archived": bool(target.get("archived")),
+                        "local_deleted": bool(target.get("local_deleted")),
+                    },
+                    local_id=entity_id,
+                    external_id=str(current.get("external_id") or current_payload.get("external_id") or "") or None,
+                    sync_status="local",
+                )
+                db.execute(
+                    "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                    (json.dumps(restored, ensure_ascii=False), utc_now(), entity_id),
+                )
+                after = restored
+            else:
+                restored = normalize_planned_unit(target, local_id=entity_id, sync_status="local")
+                _insert_planned_unit(db, restored)
+                after = restored
         elif entity_type == "training_plan":
             if target is None:
                 db.execute("DELETE FROM training_plans WHERE id=?", (entity_id,))
@@ -13590,7 +13621,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
             str(row.get("local_id") or "") for row in archived_rows if row.get("local_id")
         }
         existing_entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
-        superseded_plan_ids: set[str] = set()
+        superseded_plan_ids: set[str] = {selected_plan_id} if selected_plan_id else set()
         for row in rows:
             try:
                 current = json.loads(row.get("payload") or "{}")
@@ -14957,13 +14988,13 @@ def coach_intent_object_refs() -> list[dict[str, Any]]:
     refs: list[dict[str, Any]] = []
     values_by_kind = {
         "competition": list_competitions(),
-        "training_plan": [plan for plan in list_training_plans(100) if plan.get("status") != "archived"],
+        "training_plan": list_training_plans(100),
         "library_workout": list_workout_library(100, include_archived=True),
         "planned_unit": list_planned_units(100, include_archived=True),
     }
     for kind, values in values_by_kind.items():
         for value in values:
-            refs.append({"kind": kind, "id": str(value["id"]), "name": str(value.get("name") or "")[:200], "date": value.get("date") or value.get("event_date")})
+            refs.append({"kind": kind, "id": str(value["id"]), "name": str(value.get("name") or "")[:200], "date": value.get("date") or value.get("event_date"), "status": value.get("status")})
     return refs
 
 
@@ -15092,7 +15123,14 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             "artifact_id": None, "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
         }
     if isinstance(structured_intent, dict):
-        structured_intent = _normalize_complete_plan_intent(message, structured_intent)
+        normalized_intent = _normalize_complete_plan_intent(message, structured_intent)
+        if normalized_intent.get("operation") == "replace_training_plan":
+            # Complete-plan normalization can promote a staged request after
+            # the first resolver pass. Resolve named plan objects again so a
+            # replacement remains scoped to the explicitly named plan.
+            structured_intent = resolve_intent_objects(normalized_intent, message, coach_intent_object_refs())
+        else:
+            structured_intent = normalized_intent
     if background_owned:
         with DB_LOCK, database() as db:
             db.execute(
