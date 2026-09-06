@@ -355,14 +355,11 @@ test.describe("critical browser states", () => {
       window.__chatTest.push("completed", { message, proposed_actions: [], command_receipts: [] });
       window.__chatTest.finish();
     }, longMarkdown);
-    await expect.poll(() => page.evaluate(() => state.chatRequest?.phase)).toBe("reconciling");
     await expect(page.locator('[data-message-id="2"]')).toContainText("Abschnitt 12");
     await expect(page.locator("#unsafe-coach-markdown")).toHaveCount(0);
     expect(await page.evaluate(() => window.__unsafeCoachMarkdown)).toBeUndefined();
     expect(await page.evaluate(() => window.scrollY), "background chat updates must not scroll another tab").toBe(inactiveScrollY);
 
-    await expect.poll(() => page.evaluate(() => window.__chatTest.historyResolvers.length)).toBe(1);
-    await page.evaluate(() => window.__chatTest.releaseHistory());
     await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
     await expect(page.locator("#todayPanel")).toHaveClass(/active/);
     expect(await page.evaluate(() => document.activeElement?.id)).not.toBe("messageInput");
