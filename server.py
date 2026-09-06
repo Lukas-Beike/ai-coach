@@ -10545,7 +10545,7 @@ def sync_intervals(
                             completed_activity_days = 0
                         return {
                             "status": "ok", "waited_for_existing": True, "synced_at": current_sync_at,
-                            **({"activity_days": completed_activity_days} if completed_activity_days > 0 else {}),
+                            **({"activity_days": completed_activity_days} if completed_activity_days > 0 or completed_activity_days == ALL_SYNC_DAYS else {}),
                         }
                     last_error = redact_text(get_kv("last_sync_error") or "")
                     detail = f" {last_error[:300]}" if last_error else ""
@@ -14011,12 +14011,16 @@ def _chat_with_structured_coach_impl(
                 "UPDATE coach_commands SET intent=?, updated_at=? WHERE client_turn_id=? AND status='running'",
                 (json.dumps(intent, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
             )
-    bulk_read_complete = False
+    bulk_read_complete = "read_training_state" in successful_tools
     # A complete-plan edit needs the current opaque IDs before the mutating
     # call. Read the full bounded local state first, then let the next round
     # submit the authorized changes with the long-plan output budget.
-    if bulk_training_change:
+    if bulk_training_change and not bulk_read_complete and "apply_training_changes" not in successful_tools:
         forced_tool = "read_training_state"
+    authorized_operations = _structured_authorized_operations(intent) - {""}
+    all_authorized_operations_completed = bool(authorized_operations) and authorized_operations.issubset(successful_tools)
+    if all_authorized_operations_completed:
+        forced_tool = "none"
     request_payload = {
         "_ai_provider": ai_provider or str(background_receipt.get("ai_provider") or selected_ai_provider()),
         "model": model or str(background_receipt.get("model") or selected_model(ai_provider)),
@@ -14025,7 +14029,11 @@ def _chat_with_structured_coach_impl(
         "instructions": model_instructions,
         "input": provider_switch_input(message, ai_provider),
         "tools": COACH_STRUCTURED_TOOLS,
-        "tool_choice": {"type": "function", "name": forced_tool} if forced_tool != "none" and intent.get("intent") in {"local_action", "remote_sync"} else "auto",
+        "tool_choice": (
+            {"type": "function", "name": forced_tool}
+            if forced_tool != "none" and intent.get("intent") in {"local_action", "remote_sync"}
+            else "none" if all_authorized_operations_completed else "auto"
+        ),
         "parallel_tool_calls": False,
         "max_output_tokens": coach_output_token_budget(message),
         "truncation": "auto",
@@ -14069,12 +14077,18 @@ def _chat_with_structured_coach_impl(
         # can have run; never retry a follow-up request with side effects.
         if request_ai_provider(request_payload) != "openai" or exc.reason != "conversation_state_invalid" or initial_delta_emitted:
             raise
-        recovered_conversation_id = replace_stale_openai_conversation(conversation_id)
+        previous_conversation_id = conversation_id
+        recovered_conversation_id = replace_stale_openai_conversation(previous_conversation_id)
         if recovered_conversation_id == conversation_id:
             raise
         conversation_id = recovered_conversation_id
         request_payload["conversation"] = conversation_id
         with DB_LOCK, database() as db:
+            db.execute(
+                "UPDATE coach_plan_artifacts SET conversation_id=?, updated_at=? "
+                "WHERE client_turn_id=? AND conversation_id=? AND status='draft'",
+                (conversation_id, utc_now(), client_turn_id, previous_conversation_id),
+            )
             db.execute(
                 "UPDATE coach_commands SET conversation_id=?, updated_at=? WHERE client_turn_id=? AND status='running'",
                 (conversation_id, utc_now(), client_turn_id),

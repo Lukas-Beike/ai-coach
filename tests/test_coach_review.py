@@ -78,7 +78,7 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(result["sync_job_ids"], [])
         self.assertEqual(replay, result)
         self.assertEqual(request.call_count, 3)
-        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], "auto")
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], "none")
         output = json.loads(request.call_args_list[2].args[0]["input"][0]["output"])
         self.assertEqual(output["status"], "completed")
         self.assertIn("Analyse der aktuellen Einheit", result["message"]["content"])
@@ -106,7 +106,7 @@ class CoachReviewTests(unittest.TestCase):
             server, "build_training_context", return_value="Synthetic persisted context"
         ), patch.object(server, "sync_intervals", side_effect=AssertionError("persisted refresh must be reused")) as sync, patch.object(
             server, "responses_background_request", return_value={"output_text": "Die aktuelle Einheit ist analysiert."}
-        ):
+        ) as request:
             result = server.chat_with_coach(
                 message,
                 client_turn_id="background-preflight",
@@ -117,6 +117,27 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["pending_operations"], [])
         self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+        self.assertEqual(request.call_args.args[0]["tool_choice"], "none")
+
+    def test_waited_full_refresh_preserves_all_time_window(self):
+        server.set_kv("last_sync_at", "old-sync")
+        server.set_kv("last_sync_activity_days", str(server.ALL_SYNC_DAYS))
+        server.SYNC_LOCK.acquire()
+
+        def finish_active_sync():
+            time.sleep(0.1)
+            server.set_kv("last_sync_at", "new-sync")
+            server.SYNC_LOCK.release()
+
+        worker = threading.Thread(target=finish_active_sync)
+        worker.start()
+        try:
+            result = server.sync_intervals("full refresh test", activity_days=server.ALL_SYNC_DAYS, wait_for_existing=True)
+        finally:
+            worker.join(timeout=2)
+            if server.SYNC_LOCK.locked():
+                server.SYNC_LOCK.release()
+        self.assertEqual(result["activity_days"], server.ALL_SYNC_DAYS)
 
     def test_resumed_plan_commit_rehydrates_artifact_from_stage_receipt(self):
         csrf_hash = server.session_token_hash("csrf")
@@ -152,6 +173,48 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "commit_training_plan"})
         self.assertTrue(server.list_dated_local_planned_workouts(), result)
         self.assertEqual(server.list_dated_local_planned_workouts()[0]["name"], "Synthetic session")
+
+    def test_conversation_recovery_rebinds_resumed_plan_artifact(self):
+        csrf_hash = server.session_token_hash("csrf-recovery")
+        server.enqueue_background_coach_job("Erstelle und speichere den Trainingsplan fuer die naechsten sechs Wochen.", "background-recovery-artifact", csrf_hash, operation_id="recovery-artifact-op")
+        payload = {"plan_name": "Recovered plan", "goal": "Base", "workouts": [self.workout()]}
+        artifact = server._stage_coach_artifact("old-artifact-conversation", "background-recovery-artifact", payload)
+        intent = {**self.intent("stage_training_plan", ["local_plan"], ["commit_training_plan"]), "intent": "local_action"}
+        persisted_receipt = {
+            "mode": "background",
+            "session_key": server._coach_session_key(csrf_hash),
+            "openai_response_id": "stale-response",
+            "command_receipts": [{
+                "call_id": "stage", "tool": "stage_training_plan", "effect_key": "stage-effect",
+                "result": artifact,
+            }],
+        }
+        commit = self.call("commit_training_plan", {"artifact_id": artifact["artifact_id"]}, "commit-recovery")
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE coach_commands SET conversation_id=?, intent=?, receipt=? WHERE client_turn_id=?",
+                ("old-artifact-conversation", json.dumps(intent), json.dumps(persisted_receipt), "background-recovery-artifact"),
+            )
+        responses = [
+            server.AppError(400, "Synthetic conversation error", reason="conversation_state_invalid"),
+            {"output": [commit]},
+            {"output_text": "Der wiederaufgenommene Plan ist gespeichert."},
+        ]
+        with patch.object(server, "replace_stale_openai_conversation", return_value="new-artifact-conversation"), patch.object(
+            server, "responses_background_request", side_effect=responses
+        ) as request:
+            result = server.chat_with_coach(
+                "Erstelle und speichere den Trainingsplan fuer die naechsten sechs Wochen.",
+                client_turn_id="background-recovery-artifact",
+                session_csrf_hash=csrf_hash,
+                background_job=True,
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(request.call_args_list[1].args[0]["conversation"], "new-artifact-conversation")
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute("SELECT conversation_id, status FROM coach_plan_artifacts WHERE id=?", (artifact["artifact_id"],)).fetchone()
+        self.assertEqual(row["conversation_id"], "new-artifact-conversation")
+        self.assertEqual(row["status"], "committed")
 
     def test_latest_analysis_keeps_analysis_pending_when_final_response_fails(self):
         intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
