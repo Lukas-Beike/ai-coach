@@ -55,9 +55,11 @@ jobs:
                 }));
             } else if (context.eventName === 'pull_request_target') {
               const pullRequest = context.payload.pull_request;
+              const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
               if (
                 pullRequest.draft !== true &&
-                ['develop', 'main'].includes(pullRequest.base.ref)
+                ['develop', 'main'].includes(pullRequest.base.ref) &&
+                (context.payload.action !== 'edited' || baseChanged)
               ) {
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
@@ -155,7 +157,8 @@ jobs:
         id: review_baseline
         if: >-
           github.event_name == 'push' ||
-          (github.event_name == 'pull_request_target' && github.event.action == 'edited')
+          (github.event_name == 'pull_request_target' &&
+          github.event.action == 'edited' && github.event.changes.base)
         shell: bash
         run: echo "requested_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 

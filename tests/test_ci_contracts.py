@@ -55,6 +55,8 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertNotIn("github.rest.issues.createComment", workflow)
         self.assertIn("push:", workflow)
         self.assertIn("edited", workflow)
+        self.assertIn("const baseChanged = context.payload.action === 'edited'", workflow)
+        self.assertIn("context.payload.changes.base", workflow.replace("changes?.base", "changes.base"))
         self.assertIn("pull_requests: ${{ steps.resolve_base.outputs.pull_requests }}", workflow)
         self.assertIn("has_pull_requests: ${{ steps.resolve_base.outputs.has_pull_requests }}", workflow)
         self.assertIn("core.setOutput('has_pull_requests', affectedPullRequests.length > 0 ? 'true' : 'false')", workflow)
