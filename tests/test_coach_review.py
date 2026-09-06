@@ -323,6 +323,49 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(result["command_receipts"][1]["result"]["status"], "queued")
         self.assertEqual(result["command_receipts"][1]["result"]["sync_job_id"], result["sync_job_ids"][0])
 
+    def test_latest_analysis_retries_when_preflight_waited_for_narrower_sync(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        sync_results = [
+            {"status": "ok", "waited_for_existing": True, "activity_days": 3},
+            {"status": "ok", "activity_days": 90},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="preflight-retry"
+        ), patch.object(server, "sync_period", return_value=90), patch.object(
+            server, "sync_intervals", side_effect=sync_results
+        ) as sync, patch.object(server, "build_training_context", return_value="fresh context"), patch.object(
+            server, "responses_request", return_value={"output_text": "Analyse abgeschlossen."}
+        ):
+            result = server.chat_with_coach(
+                "Aktualisiere zuerst Intervals und analysiere danach meine letzte Einheit.",
+                client_turn_id="preflight-retry",
+                session_csrf_hash="review-session",
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(sync.call_count, 2)
+        self.assertEqual(sync.call_args_list[0].kwargs["wait_for_existing"], True)
+        self.assertEqual(sync.call_args_list[1].kwargs["wait_for_existing"], False)
+
+    def test_latest_analysis_preserves_cancellation_from_preflight(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        cancel_event = threading.Event()
+
+        def cancel_sync(*_args, **_kwargs):
+            cancel_event.set()
+            raise server.AppError(499, "abgebrochen", reason="chat_cancelled")
+
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="preflight-cancel"
+        ), patch.object(server, "sync_intervals", side_effect=cancel_sync):
+            with self.assertRaises(server.AppError) as raised:
+                server.chat_with_coach(
+                    "Aktualisiere zuerst Intervals und analysiere danach meine letzte Einheit.",
+                    client_turn_id="preflight-cancel",
+                    session_csrf_hash="review-session",
+                    cancel_event=cancel_event,
+                )
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+
     def test_all_activity_refresh_scope_is_detected_before_or_after_refresh_verb(self):
         self.assertEqual(
             server.requested_activity_refresh_days("Alle Aktivitaeten aktualisieren und meine letzte Einheit analysieren."),
@@ -501,11 +544,17 @@ class CoachReviewTests(unittest.TestCase):
         ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
             server, "sync_period", return_value=90
         ), patch.object(
-            server, "sync_intervals", return_value={"status": "ok", "waited_for_existing": True, "activity_days": 3}
-        ), patch.object(server, "responses_request", side_effect=responses):
+            server,
+            "sync_intervals",
+            side_effect=[
+                {"status": "ok", "waited_for_existing": True, "activity_days": 3},
+                {"status": "ok", "activity_days": 90},
+            ],
+        ) as sync, patch.object(server, "responses_request", side_effect=responses):
             result = server.chat_with_coach("Aktualisiere und analysiere die letzte Einheit.", client_turn_id="waited-refresh")
-        self.assertEqual(result["command_receipts"][0]["result"].get("days"), 3)
-        self.assertEqual(result["command_receipts"][1]["result"]["status"], "queued")
+        self.assertEqual(result["command_receipts"][0]["result"].get("days"), 90)
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+        self.assertEqual(sync.call_count, 2)
 
     def test_waited_refresh_does_not_cache_omitted_or_all_time_window(self):
         for requested_days in (None, server.ALL_SYNC_DAYS):
@@ -516,18 +565,27 @@ class CoachReviewTests(unittest.TestCase):
                     {"output": [self.call("start_provider_refresh", arguments, "refresh")]},
                     {"output_text": "Der Zeitraum wurde aktualisiert."},
                 ]
+                sync_results = [
+                    {"status": "ok", "waited_for_existing": True, "activity_days": 3},
+                    {"status": "ok", "activity_days": 90},
+                ]
+                if requested_days == server.ALL_SYNC_DAYS:
+                    sync_results.append({"status": "ok", "activity_days": server.ALL_SYNC_DAYS})
                 with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
                     server, "ensure_conversation", return_value=f"omitted-refresh-{requested_days}"
                 ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
                     server, "sync_period", return_value=90
-                ), patch.object(
-                    server, "sync_intervals", return_value={"status": "ok", "waited_for_existing": True, "activity_days": 3}
-                ), patch.object(server, "responses_request", side_effect=responses):
+                ), patch.object(server, "sync_intervals", side_effect=sync_results), patch.object(
+                    server, "responses_request", side_effect=responses
+                ):
                     result = server.chat_with_coach(
                         "Aktualisiere und analysiere die letzte Einheit.",
                         client_turn_id=f"omitted-refresh-{requested_days}",
                     )
-                self.assertEqual(result["command_receipts"][1]["result"]["status"], "queued")
+                if requested_days is None:
+                    self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+                else:
+                    self.assertEqual(result["command_receipts"][1]["result"]["status"], "queued")
 
     def test_waited_full_refresh_covers_finite_follow_up_window(self):
         intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}

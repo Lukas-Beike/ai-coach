@@ -10651,6 +10651,10 @@ def sync_intervals(
             "pagination": pagination,
         }
     except Exception as exc:
+        if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
+            set_sync_operation_state(operation_id, "cancelled", "cancelled", 100, "Intervals.icu-Synchronisierung abgebrochen.")
+            set_kv("sync_operation_finished_at", utc_now())
+            raise
         set_kv("last_sync_error", redact_text(str(exc))[:1000])
         set_sync_operation_state(operation_id, "error", "error", 100, "Intervals.icu-Synchronisierung fehlgeschlagen.", str(exc))
         set_kv("sync_operation_finished_at", utc_now())
@@ -14816,6 +14820,50 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                     "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.",
                     reason="provider_busy",
                 )
+            if latest_activity_analysis and sync_result.get("waited_for_existing"):
+                try:
+                    completed_days = int(sync_result.get("activity_days"))
+                except (TypeError, ValueError):
+                    completed_days = 0
+                requested_days = sync_period("intervals")
+                covers_requested_window = (
+                    completed_days == ALL_SYNC_DAYS and requested_days >= 1
+                ) or (
+                    requested_days == ALL_SYNC_DAYS and completed_days == ALL_SYNC_DAYS
+                ) or (
+                    requested_days >= 1 and completed_days >= requested_days
+                )
+                if not covers_requested_window:
+                    retry_kwargs: dict[str, Any] = {
+                        "activity_days": requested_days,
+                        "wait_for_existing": False,
+                    }
+                    if cancel_event is not None:
+                        retry_kwargs["cancel_event"] = cancel_event
+                    sync_result = sync_intervals("Chat-Anfrage", **retry_kwargs)
+                    if sync_result.get("status") == "already_running":
+                        raise AppError(
+                            503,
+                            "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.",
+                            reason="provider_busy",
+                        )
+                    try:
+                        completed_days = int(sync_result.get("activity_days"))
+                    except (TypeError, ValueError):
+                        completed_days = 0
+                    covers_requested_window = (
+                        completed_days == ALL_SYNC_DAYS and requested_days >= 1
+                    ) or (
+                        requested_days == ALL_SYNC_DAYS and completed_days == ALL_SYNC_DAYS
+                    ) or (
+                        requested_days >= 1 and completed_days >= requested_days
+                    )
+                    if not covers_requested_window:
+                        raise AppError(
+                            503,
+                            "Die aktuelle Intervals.icu-Synchronisierung deckt den angeforderten Zeitraum nicht ab.",
+                            reason="provider_refresh_incomplete",
+                        )
             try:
                 completed_intervals_refresh_days = int(sync_result.get("activity_days"))
             except (TypeError, ValueError):
@@ -14844,6 +14892,8 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                         {"command_receipts": [*background_receipt.get("command_receipts", []), preflight_receipt]},
                     )
         except Exception as exc:
+            if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
+                raise
             refresh_error = redact_text(str(exc))[:1000]
             if latest_activity_analysis:
                 raise AppError(
