@@ -940,7 +940,7 @@ class CoachReviewTests(unittest.TestCase):
             "ai_provider": "openai",
             "model": "gpt-5.6-sol",
             "openai_response_id": "response-after-first-effect",
-            "phase": "waiting_final_response",
+            "phase": "resuming",
             "command_receipts": [{
                 "call_id": "first",
                 "tool": "save_checkin",

@@ -7568,9 +7568,11 @@ class IntervalsClient:
     def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
         return self._write_transport.delete(path, params)
 
-    def get_workout_library(self) -> list[dict[str, Any]]:
+    def get_workout_library(self, *, cancel_event: threading.Event | None = None) -> list[dict[str, Any]]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.get_paged_collection(f"/athlete/{athlete}/workouts", {}, "workout_library")
+        result = self.get_paged_collection(
+            f"/athlete/{athlete}/workouts", {}, "workout_library", cancel_event=cancel_event
+        )
         if not isinstance(result, list):
             raise AppError(502, "Intervals.icu hat keine Trainingsbibliothek zurÃ¼ckgegeben.")
         fields = (
@@ -9516,10 +9518,14 @@ def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any
 
 @maintenance_operation
 @intervals_operation
-def refresh_workout_library(reason: str = "manual") -> dict[str, Any]:
+def refresh_workout_library(
+    reason: str = "manual",
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
     """Seed the local library once without performing any remote writes."""
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+    _raise_chat_cancelled(cancel_event)
     if get_kv("last_library_sync_at"):
         return {
             "status": "skipped",
@@ -9531,7 +9537,12 @@ def refresh_workout_library(reason: str = "manual") -> dict[str, Any]:
             "library_state": workout_library_sync_summary(),
         }
     with WORKOUT_LIBRARY_SYNC_LOCK:
-        workouts = IntervalsClient().get_workout_library()
+        client = IntervalsClient()
+        if cancel_event is None:
+            workouts = client.get_workout_library()
+        else:
+            workouts = client.get_workout_library(cancel_event=cancel_event)
+        _raise_chat_cancelled(cancel_event)
         normalized = upsert_workout_library(workouts, remove_missing=True)
     synced_at = utc_now()
     set_kv("last_library_sync_at", synced_at)
@@ -10616,7 +10627,12 @@ def sync_intervals(
         library_error = None
         if not get_kv("last_library_sync_at"):
             try:
-                library_refresh = refresh_workout_library(reason=f"Initialer Intervals.icu-Sync ({reason})")
+                if cancel_event is not None:
+                    library_refresh = refresh_workout_library(
+                        reason=f"Initialer Intervals.icu-Sync ({reason})", cancel_event=cancel_event
+                    )
+                else:
+                    library_refresh = refresh_workout_library(reason=f"Initialer Intervals.icu-Sync ({reason})")
                 library_imported = int(library_refresh.get("workouts") or 0)
             except Exception as exc:
                 library_error = redact_text(str(exc))[:1000]
@@ -14169,7 +14185,7 @@ def _chat_with_structured_coach_impl(
     recovered_tool_round_needs_follow_up = bool(
         background_owned
         and resuming_background_response
-        and background_receipt.get("phase") == "waiting_final_response"
+        and background_receipt.get("phase") in {"waiting_final_response", "resuming"}
         and not pending_durable_tool_calls
     )
     all_authorized_operations_completed = (

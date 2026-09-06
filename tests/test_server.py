@@ -5046,9 +5046,33 @@ class CoachTests(unittest.TestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config), patch.object(
             server.IntervalsClient, "fetch_snapshot", return_value=snapshot
-        ) as fetch_snapshot, patch.object(server, "refresh_workout_library", return_value={"workouts": 0}):
+        ) as fetch_snapshot, patch.object(
+            server, "refresh_workout_library", return_value={"workouts": 0}
+        ) as refresh_library:
             server.sync_intervals("cancellable", activity_days=42, cancel_event=cancel_event)
         fetch_snapshot.assert_called_once_with(activity_days=42, cancel_event=cancel_event)
+        refresh_library.assert_called_once_with(
+            reason="Initialer Intervals.icu-Sync (cancellable)", cancel_event=cancel_event
+        )
+
+    def test_workout_library_refresh_forwards_cancellation(self):
+        cancel_event = threading.Event()
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        seen = {}
+
+        def get_library(*, cancel_event=None):
+            seen["cancel_event"] = cancel_event
+            cancel_event.set()
+            server._raise_chat_cancelled(cancel_event)
+
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "get_workout_library", side_effect=get_library
+        ) as get_workout_library:
+            with self.assertRaises(server.AppError) as raised:
+                server.refresh_workout_library("cancellable", cancel_event=cancel_event)
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.assertIs(seen["cancel_event"], cancel_event)
+        get_workout_library.assert_called_once_with(cancel_event=cancel_event)
 
     def test_cancelled_intervals_sync_is_recorded_as_skipped(self):
         cancel_event = threading.Event()
