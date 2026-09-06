@@ -12488,8 +12488,9 @@ def prompt_requests_bulk_training_change(message: str) -> bool:
     text = str(message or "").casefold()
     complete_scope = bool(
         re.search(
-            r"\b(?:alle[nrs]?|saemtliche[nrs]?|gesamte[nmrs]?|komplette[nmrs]?|ganze[nmrs]?|every|entire|whole|all)\s+"
-            r"(?:geplant\w*\s+)?(?:einheit\w*|workout\w*|session\w*|trainingsplan\w*|planung\w*|plan\w*|kalender\w*)\b",
+            r"\b(?:alle[nrs]?|saemtliche[nrs]?|s\N{LATIN SMALL LETTER A WITH DIAERESIS}mtliche[nrs]?|gesamte[nmrs]?|komplette[nmrs]?|ganze[nmrs]?|every|entire|whole|all)\s+"
+            r"(?:(?:of\s+)?(?:my|mein(?:e[nrms]?|er)?|the|der|die|das|den|des)\s+|(?:geplant|planned|eigen)\w*\s+)*"
+            r"(?:einheit\w*|workout\w*|session\w*|trainingsplan\w*|training\s+plan\w*|planung\w*|plan\w*|kalender\w*)\b",
             text,
         )
         or re.search(r"\b(?:gesamt|komplett|ganz)\w*plan\w*\b", text)

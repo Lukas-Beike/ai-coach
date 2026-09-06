@@ -4633,6 +4633,9 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.prompt_requests_bulk_training_change(
             "Ändere meinen gesamten Trainingsplan, aber nicht die Ruhetage."
         ))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Change my entire training plan."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Edit all of my planned workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Ändere sämtliche Workouts."))
         self.assertFalse(server.prompt_requests_bulk_training_change(
             "Ändere nicht meinen gesamten Trainingsplan."
         ))
