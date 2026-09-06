@@ -12607,7 +12607,7 @@ def prompt_requests_bulk_training_change(message: str) -> bool:
     mutation_match = re.search(
         r"\b(?:aender\w*|\N{LATIN SMALL LETTER A WITH DIAERESIS}nd\w*|bearbeit\w*|verschieb\w*|aktualisier\w*|umstell\w*|optimier\w*|mach\w*|"
         r"loesch\w*|l\N{LATIN SMALL LETTER O WITH DIAERESIS}sch\w*|entfern\w*|archivier\w*|leer\w*|"
-        r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*|replan\w*|revis\w*|"
+        r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*|replan\w*|rebuild\w*|recreat\w*|replace\w*|revis\w*|"
         r"plan\w*(?:\W+\w+){0,4}\W+neu|delete\w*|remove\w*|clear\w*|archive\w*)\b",
         text,
     )
@@ -13211,7 +13211,34 @@ COACH_STRUCTURED_TOOLS = [
         "replace_training_plan",
         "Atomically replace all future local Coach/library plan units. Use the planning revision returned by read_training_state. "
         "This operation may create, update, and archive a different number of sessions and never writes remotely.",
-        {"payload": {"type": "object"}, "expected_revision": {"type": "integer"}},
+        {
+            "payload": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["plan_name", "goal", "workouts"],
+                "properties": {
+                    "plan_name": {"type": "string"},
+                    "goal": {"type": "string"},
+                    "workouts": {
+                        "type": "array", "minItems": 1, "maxItems": 366,
+                        "items": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["date", "sport", "name", "description", "duration_minutes", "target", "rationale"],
+                            "properties": {
+                                "date": {"type": "string", "description": "Local workout date in YYYY-MM-DD format."},
+                                "sport": {"type": "string"},
+                                "name": {"type": "string"},
+                                "description": {"type": "string", "minLength": 1},
+                                "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 600},
+                                "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]},
+                                "rationale": {"type": "string", "minLength": 1},
+                            },
+                        },
+                    },
+                },
+            },
+            "expected_revision": {"type": "integer"},
+        },
         strict=True,
     ),
     _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "For complete-plan edits, include the expected_payload_hash returned for every local_id.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string"}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string"}, "type": {"type": "string"}, "sport": {"type": "string"}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
@@ -13476,7 +13503,6 @@ def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, An
             "SELECT local_id, payload FROM planned_units "
             "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
             "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
-            "AND json_extract(payload, '$.source') IN ('coach', 'library') "
             "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ?",
             (today,),
         ).fetchall()
@@ -13984,6 +14010,8 @@ def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dic
     if intent.get("intent") not in {"local_action", "remote_sync"}:
         return intent
     if not prompt_requests_complete_plan_rebuild(message):
+        return intent
+    if not prompt_requests_bulk_training_change(message):
         return intent
     plan_operations = {"stage_training_plan", "commit_training_plan", "replace_training_plan", "apply_training_changes"}
     if not (_structured_authorized_operations(intent) & plan_operations):
