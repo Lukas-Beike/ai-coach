@@ -21,19 +21,20 @@ async function ready(page) {
 async function controlled(page) {
   await page.evaluate(() => {
     const original = fetch.bind(window);
-    const fixture = { histories: [], planCalls: 0, libraryCalls: 0 };
+    const fixture = { histories: [], planCalls: 0, libraryCalls: 0, streamCalls: 0, proposedActions: null };
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
     fixture.push = (event, payload) => fixture.controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
     window.__contract = fixture;
     window.fetch = (path, options) => {
       if (path === "/api/chat/stream") {
+        fixture.streamCalls++;
         fixture.turn = JSON.parse(options.body).client_turn_id;
         return Promise.resolve(new Response(new ReadableStream({ start(controller) {
           fixture.controller = controller;
           fixture.push("started", { operation_id: "fixture-operation" });
         } }), { status: 200 }));
       }
-      if (path.startsWith("/api/chat/history")) return new Promise((resolve) => fixture.histories.push((messages) => resolve(json({ messages, next_cursor: null }))));
+      if (path.startsWith("/api/chat/history")) return new Promise((resolve) => fixture.histories.push((messages) => resolve(json({ messages, next_cursor: null, ...(fixture.proposedActions ? { proposed_actions: fixture.proposedActions } : {}) }))));
       if (path.startsWith("/api/plan")) fixture.planCalls++;
       if (path.startsWith("/api/library")) fixture.libraryCalls++;
       return original(path, options);
@@ -91,15 +92,50 @@ test("history barriers preserve optimistic and completed messages through naviga
   });
   await expect.poll(() => page.evaluate(() => __contract.planCalls)).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => __contract.libraryCalls)).toBeGreaterThan(0);
-  await expect.poll(() => page.evaluate(() => __contract.histories.length)).toBe(1);
-  await page.evaluate(() => __contract.histories.shift()([
-    { id: 101, role: "user", client_turn_id: __contract.turn, content: "Fixture Run plan" },
-    { id: 102, role: "assistant", client_turn_id: __contract.turn, content: "Run plan saved" },
-  ]));
   await page.getByRole("link", { name: "Coach", exact: true }).click();
   await expect(page.locator(".message.user")).toHaveCount(1);
   await expect(page.locator(".message.assistant")).toHaveCount(1);
   await expect(page.locator(".message.assistant")).toHaveText("Run plan saved");
+});
+
+test("a completed answer accepts an immediate follow-up without showing a queue", async ({ page }) => {
+  await ready(page);
+  await controlled(page);
+  await page.locator("#messageInput").fill("First question");
+  await page.locator("#sendButton").click();
+  await page.evaluate(() => {
+    __contract.push("completed", { message: { id: 201, content: "First answer", client_turn_id: __contract.turn }, proposed_actions: [], command_receipts: [] });
+    __contract.controller.close();
+  });
+  await expect(page.locator(".message.assistant")).toHaveText("First answer");
+  await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
+
+  await page.locator("#messageInput").fill("Immediate follow-up");
+  await page.locator("#messageInput").press("Enter");
+
+  await expect.poll(() => page.evaluate(() => __contract.streamCalls)).toBe(2);
+  await expect(page.locator(".message.pending")).toHaveCount(0);
+  await expect(page.locator("#chatQueueStatus")).toBeHidden();
+});
+
+test("completed answers refresh outstanding action proposals asynchronously", async ({ page }) => {
+  await ready(page);
+  await controlled(page);
+  await page.evaluate(() => {
+    state.coachActionProposals = [{ id: "active-proposal", action_type: "undo_change", status: "preview", diff: [] }];
+    renderCoachActionReview();
+    __contract.proposedActions = [{ id: "active-proposal", action_type: "undo_change", status: "preview", diff: [] }];
+  });
+  await page.locator("#messageInput").fill("Question with completed answer");
+  await page.locator("#sendButton").click();
+  await page.evaluate(() => {
+    __contract.push("completed", { message: { id: 202, content: "Answer", client_turn_id: __contract.turn }, proposed_actions: [], command_receipts: [] });
+    __contract.controller.close();
+  });
+  await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
+  await expect.poll(() => page.evaluate(() => __contract.histories.length)).toBe(1);
+  await page.evaluate(() => __contract.histories.shift()([]));
+  await expect.poll(() => page.evaluate(() => state.coachActionProposals.map((proposal) => proposal.id))).toEqual(["active-proposal"]);
 });
 
 test("every definite HTTP rejection retains the draft and concrete error", async ({ page }) => {
