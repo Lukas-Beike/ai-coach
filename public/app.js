@@ -250,6 +250,9 @@ function showLogin() {
   state.chatServerOperationId = null;
   state.chatResponseStarted = false;
   state.chatResponseScrollPending = false;
+  state.chatProposalRefreshPending = false;
+  state.chatProposalRefreshInFlight = false;
+  state.chatProposalRefreshQueued = false;
   cancelScheduledChatStreamRender();
   state.loadedAreas.clear();
   state.planSegment = "overview";
@@ -1676,6 +1679,7 @@ function renderCoachActionReview() {
       later.className = "secondary-button";
       later.textContent = "Später prüfen";
       later.addEventListener("click", () => {
+        state.chatProposalRefreshPending = true;
         state.coachActionProposals = state.coachActionProposals.filter((item) => item.id !== proposal.id);
         renderCoachActionReview();
       });
@@ -1772,6 +1776,7 @@ function rememberChatTurn(clientTurnId) {
 function applyChatReceipt(receipt) {
   state.chatContentVersion += 1;
   if (receipt.message) reconcileCompletedChatMessage(receipt.message);
+  if (Array.isArray(state.coachActionProposals) && state.coachActionProposals.length > 0) state.chatProposalRefreshPending = true;
   state.coachActionProposals = Array.isArray(receipt.proposed_actions) ? receipt.proposed_actions : [];
   addStructuredCoachReceipts(receipt);
   renderMessages(state.data?.messages || [], false);
@@ -3498,7 +3503,10 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       if (area === "chat") {
         if (!Array.isArray(result.messages)) throw new Error("Die Nachrichtenbestätigung fehlt.");
         Object.assign(payload, { messages: mergeChatMessages(result.messages), messages_next_cursor: result.next_cursor });
-        if (chatContentVersion === state.chatContentVersion && Array.isArray(result.proposed_actions)) state.coachActionProposals = result.proposed_actions;
+        if (chatContentVersion === state.chatContentVersion && Array.isArray(result.proposed_actions)) {
+          state.coachActionProposals = result.proposed_actions;
+          state.chatProposalRefreshPending = false;
+        }
       }
       if (area === "activities") Object.assign(payload, { activities: result.activities || [], activities_next_cursor: result.next_cursor });
       if (area === "plan") Object.assign(payload, result);
@@ -3568,8 +3576,13 @@ async function loadChatHistoryFresh() {
 }
 
 async function refreshChatProposalsInBackground(expectedContentVersion) {
+  if (state.chatProposalRefreshInFlight) {
+    state.chatProposalRefreshQueued = true;
+    return;
+  }
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
+  state.chatProposalRefreshInFlight = true;
   try {
     const result = await api("/api/chat/history?limit=100");
     if (sessionGeneration !== state.sessionGeneration
@@ -3577,10 +3590,16 @@ async function refreshChatProposalsInBackground(expectedContentVersion) {
       || expectedContentVersion !== state.chatContentVersion
       || !Array.isArray(result.proposed_actions)) return;
     state.coachActionProposals = result.proposed_actions;
+    state.chatProposalRefreshPending = false;
     renderCoachActionReview();
     renderMessages(state.data?.messages || [], false);
   } catch (_) {
-    // The completed SSE receipt is already usable; a background refresh is best effort.
+    // Keep the pending flag so the next completed turn retries the authoritative refresh.
+  } finally {
+    state.chatProposalRefreshInFlight = false;
+    const retryAtLatestVersion = state.chatProposalRefreshPending && state.chatProposalRefreshQueued;
+    state.chatProposalRefreshQueued = false;
+    if (retryAtLatestVersion) void refreshChatProposalsInBackground(state.chatContentVersion);
   }
 }
 
@@ -3808,6 +3827,8 @@ async function requestCoachResponse(message) {
         request.responseMessageId = payload.message?.id || null;
         request.responseMessageReceived = reconcileCompletedChatMessage(payload.message ? { ...payload.message, client_turn_id: clientTurnId } : null);
         if (request.responseMessageReceived) state.chatStreamText = "";
+        request.hadOutstandingProposals = Array.isArray(state.coachActionProposals) && state.coachActionProposals.length > 0;
+        if (request.hadOutstandingProposals) state.chatProposalRefreshPending = true;
         state.coachActionProposals = Array.isArray(payload?.proposed_actions) ? payload.proposed_actions : [];
         if (payload?.coach_quick_actions && state.data) {
           state.data.coach_quick_actions = payload.coach_quick_actions;
@@ -3837,9 +3858,10 @@ async function requestCoachResponse(message) {
     // Do not keep the composer in "reconciling" while unrelated/pending loads
     // finish; refresh the authoritative proposal list in the background.
     if (completed && request.responseMessageReceived) {
-      void refreshChatProposalsInBackground(state.chatContentVersion);
+      if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground(state.chatContentVersion);
+    } else {
+      await loadChatHistoryFresh();
     }
-    else await loadChatHistoryFresh();
     if (completed) scrollChatToResponseStart();
     invalidateContextPreview();
     return completed ? "completed" : "failed";
