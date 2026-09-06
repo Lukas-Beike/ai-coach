@@ -8056,8 +8056,10 @@ def save_workout_library_entries(
                 workout = {**workout, "source": "coach"}
             if plan_id:
                 workout = {**workout, "plan_id": plan_id, "plan_name": plan_name.strip()[:200]}
-            entry = create_local_planned_unit(workout, db=db)
+            entry = create_local_planned_unit(workout, db=db, bump_planning_revision=False)
             created.append({**entry, "created_at": now, "updated_at": now})
+        if created:
+            _bump_planning_revision(db)
     return created
 
 
@@ -8581,6 +8583,8 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
             )
             _record_change(db, "planned_unit", draft_id, "update", before, {**replacement, "sync_status": "local"}, source="adaptive_replan")
             updated += 1
+        if updated:
+            _bump_planning_revision(db)
         if active_illness_pause:
             updated_checkins = _fill_illness_checkins(db, active_illness_pause, now)
             payload["illness_pause"] = {**active_illness_pause, "approved": True}
@@ -8834,16 +8838,34 @@ def _insert_planned_unit(db: Any, entry: dict[str, Any], *, sync_dirty: int = 1,
     return entry
 
 
-def create_local_planned_unit(workout: dict[str, Any], db: Any | None = None) -> dict[str, Any]:
+def _bump_planning_revision(db: Any, amount: int = 1) -> None:
+    """Advance the optimistic-concurrency revision in the same transaction."""
+    if amount > 0:
+        db.execute(
+            "UPDATE planning_state SET revision=revision+?, updated_at=? WHERE id=1",
+            (int(amount), utc_now()),
+        )
+
+
+def create_local_planned_unit(
+    workout: dict[str, Any],
+    db: Any | None = None,
+    *,
+    bump_planning_revision: bool = True,
+) -> dict[str, Any]:
     local_id = str(uuid.uuid4())
     entry = normalize_planned_unit(workout, local_id=local_id, external_id=None, sync_status="local")
     if db is not None:
         _insert_planned_unit(db, entry)
         _record_change(db, "planned_unit", local_id, "create", None, entry)
+        if bump_planning_revision:
+            _bump_planning_revision(db)
     else:
         with DB_LOCK, database() as own_db:
             _insert_planned_unit(own_db, entry)
             _record_change(own_db, "planned_unit", local_id, "create", None, entry)
+            if bump_planning_revision:
+                _bump_planning_revision(own_db)
     return entry
 
 
@@ -9364,6 +9386,7 @@ def update_planned_unit_sync_state(local_id: str, state: str, error: str | None 
                 local_id,
             ),
         )
+        _bump_planning_revision(db)
 
 
 def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | None:
@@ -10018,7 +10041,13 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": not failed, "status": status, "results": results, "failed_object_ids": failed, "retry_scope": "Nur fehlgeschlagene Objekte erneut auswählen." if failed else None}
 
 
-def update_local_planned_workout(local_id: str, values: Any, *, skip_calendar_conflict: bool = False) -> dict[str, Any]:
+def update_local_planned_workout(
+    local_id: str,
+    values: Any,
+    *,
+    skip_calendar_conflict: bool = False,
+    bump_planning_revision: bool = True,
+) -> dict[str, Any]:
     """Edit or remove a dated local plan without writing to a provider."""
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
@@ -10047,6 +10076,8 @@ def update_local_planned_workout(local_id: str, values: Any, *, skip_calendar_co
                 (json.dumps(current, ensure_ascii=False), utc_now(), normalized_id),
             )
             _record_change(db, "planned_unit", normalized_id, "delete", before, None)
+            if bump_planning_revision:
+                _bump_planning_revision(db)
             updated = None
         elif action in {"archive", "restore", "update"}:
             candidate = dict(current)
@@ -10089,6 +10120,8 @@ def update_local_planned_workout(local_id: str, values: Any, *, skip_calendar_co
                 (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
             )
             _record_change(db, "planned_unit", normalized_id, "update", before, {**normalized, "sync_status": "local"})
+            if bump_planning_revision:
+                _bump_planning_revision(db)
             updated = normalized
         else:
             raise AppError(400, "Unbekannte Aktion für lokale Planung.")
@@ -10158,6 +10191,7 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
                 "UPDATE planned_units SET external_id=?, payload=?, sync_dirty=0, sync_state='synced', sync_error=NULL, sync_conflict='', baseline_hash=?, last_synced_at=?, updated_at=? WHERE local_id=?",
                 (identity, json.dumps(incoming, ensure_ascii=False), baseline_hash, now, now, normalized_id),
             )
+        _bump_planning_revision(db)
     saved = next((item for item in list_planned_units(1000, include_archived=True) if item.get("id") == normalized_id), None)
     return {"status": "resolved", "strategy": selected, "planned_unit": saved}
 
@@ -10283,6 +10317,7 @@ def upsert_remote_planned_units(
     seen_ids: set[str] = set()
     incoming_dates: list[str] = []
     imported = updated = conflicts = 0
+    mutated = False
     now = utc_now()
     with DB_LOCK, database() as db:
         for raw_event in events or []:
@@ -10303,6 +10338,7 @@ def upsert_remote_planned_units(
                 incoming["sync_status"] = "synced"
                 _insert_planned_unit(db, incoming, sync_dirty=0, sync_state="synced", baseline_hash=incoming_hash, last_synced_at=now)
                 imported += 1
+                mutated = True
                 continue
             try:
                 current = json.loads(current_row.get("payload") or "{}")
@@ -10322,6 +10358,7 @@ def upsert_remote_planned_units(
                     (json.dumps(conflict, ensure_ascii=False), json.dumps(current, ensure_ascii=False), now, current_row["local_id"]),
                 )
                 conflicts += 1
+                mutated = True
                 continue
             if local_changed:
                 # The provider is still at the stored baseline. Preserve the
@@ -10337,6 +10374,7 @@ def upsert_remote_planned_units(
                 (identity, json.dumps({**incoming, "sync_status": "synced"}, ensure_ascii=False), incoming_hash, now, now, current_row["local_id"]),
             )
             updated += 1
+            mutated = True
         rows = db.execute("SELECT local_id, payload, sync_state FROM planned_units WHERE json_extract(payload, '$.remote_event_id') IS NOT NULL").fetchall()
         # The provider request is a bounded calendar window. Only interpret a
         # missing event as a remote deletion when the row falls inside the
@@ -10359,11 +10397,15 @@ def upsert_remote_planned_units(
             if state == "synced":
                 payload["sync_status"] = "remote_missing"
                 db.execute("UPDATE planned_units SET sync_state='remote_missing', sync_dirty=0, payload=?, updated_at=? WHERE local_id=?", (json.dumps(payload, ensure_ascii=False), now, row["local_id"]))
+                mutated = True
             elif state in {"local", "sync_error"}:
                 payload["sync_status"] = "conflict"
                 conflict = {"type": "remote_missing", "detected_at": now}
                 db.execute("UPDATE planned_units SET sync_state='conflict', sync_dirty=1, sync_conflict=?, payload=?, updated_at=? WHERE local_id=?", (json.dumps(conflict, ensure_ascii=False), json.dumps(payload, ensure_ascii=False), now, row["local_id"]))
                 conflicts += 1
+                mutated = True
+        if mutated:
+            _bump_planning_revision(db)
     return {"imported": imported, "updated": updated, "conflicts": conflicts}
 
 
@@ -12489,7 +12531,7 @@ def prompt_requests_bulk_training_change(message: str) -> bool:
     complete_scope = bool(
         re.search(
             r"\b(?:alle[nrs]?|saemtliche[nrs]?|s\N{LATIN SMALL LETTER A WITH DIAERESIS}mtliche[nrs]?|gesamte[nmrs]?|komplette[nmrs]?|ganze[nmrs]?|every|entire|whole|all)\s+"
-            r"(?:(?:of\s+my|my|mein\w*|the|der|die|das|den|des|geplant\w*|planned\w*|eigen\w*)\s+){0,5}"
+            r"(?:(?:of\s+my|my|mein\w*|the|der|die|das|den|des|geplant\w*|planned\w*|eigen\w*|future\w*|upcoming\w*|zuk\N{LATIN SMALL LETTER U WITH DIAERESIS}nftig\w*|zukunft\w*)\s+){0,5}"
             r"(?:einheit\w*|workout\w*|session\w*|trainingsplan\w*|training\s+plan\w*|planung\w*|plan\w*|kalender\w*)\b",
             text,
         )
@@ -13241,6 +13283,7 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
     batch_ids = {str(change.get("local_id") or "").strip() for change in changes}
     batch_ids.discard("")
     final_dates: dict[str, str] = {}
+    dates_needing_calendar_check: set[str] = set()
     for change in changes:
         local_id = str(change.get("local_id") or "").strip()
         row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
@@ -13255,6 +13298,7 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
         action = str(change.get("action") or "update").strip().casefold()
         if action in {"delete", "archive"}:
             continue
+        current_date = str(current.get("date") or "").strip()[:10]
         candidate_date = str(change.get("date") or current.get("date") or "").strip()[:10]
         if not candidate_date:
             continue
@@ -13266,7 +13310,9 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
         if previous_id and previous_id != local_id:
             raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
         final_dates[candidate_date] = local_id
-    for candidate_date in final_dates:
+        if action == "restore" or candidate_date != current_date:
+            dates_needing_calendar_check.add(candidate_date)
+    for candidate_date in dates_needing_calendar_check:
         conflicts = calendar_conflicts({"date": candidate_date}, batch_ids)
         if conflicts:
             raise AppError(409, f"Für den {candidate_date} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
@@ -13299,10 +13345,24 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                 if not row or _library_payload_hash(row["payload"]) != expected_hash:
                     raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
         _validate_training_change_batch(changes, db)
-        applied = [update_local_planned_workout(change["local_id"], change, skip_calendar_conflict=True) for change in changes]
-        db.execute("UPDATE planning_state SET revision=revision+1, updated_at=? WHERE id=1", (utc_now(),))
+        applied = [
+            update_local_planned_workout(
+                change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
+            )
+            for change in changes
+        ]
+        _bump_planning_revision(db)
         revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
-    return {"ok": True, "status": "applied", "planning_revision": int((revision or {}).get("revision") or current_revision), "changes": applied}
+    result_changes = [
+        {"local_id": item.get("local_id"), "status": item.get("status")}
+        for item in applied
+    ]
+    return {
+        "ok": True,
+        "status": "applied",
+        "planning_revision": int((revision or {}).get("revision") or current_revision),
+        "changes": result_changes,
+    }
 
 
 def _pending_plan_push_entries() -> list[dict[str, str]]:
@@ -13347,6 +13407,8 @@ def _mark_local_planning_authoritative(local_ids: list[str] | None = None) -> in
                 (json.dumps(payload, ensure_ascii=False), now, row["local_id"]),
             )
             changed += 1
+        if changed:
+            _bump_planning_revision(db)
     return changed
 
 
