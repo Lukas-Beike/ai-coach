@@ -4975,6 +4975,37 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "replaced")
 
+    def test_complete_plan_replace_keeps_other_named_future_plan(self):
+        base = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Base old", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Base Build")[0]
+        race = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=2)).isoformat(),
+            "sport": "Run", "name": "Race prep", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Race Prep")[0]
+        base_plan = next(plan for plan in server.list_training_plans() if plan["name"] == "Base Build")
+        state = server._structured_training_state()
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [],
+            "authorization_scope": ["local_plan", f"training_plan:{base_plan['id']}"],
+            "follow_up_operations": [],
+        }
+        result = server._structured_coach_tool_result(
+            "replace_training_plan",
+            {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Base Replacement", "goal": "", "workouts": [
+                {"date": (date.today() + timedelta(days=3)).isoformat(), "sport": "Ride", "name": "Base new", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+            ]}},
+            intent=intent, conversation_id="conversation-selected-plan", client_turn_id="turn-selected-plan",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["status"], "replaced")
+        remaining = {item["id"]: item for item in server.list_planned_units(20, include_archived=True)}
+        self.assertTrue(remaining[base["id"]]["archived"])
+        self.assertFalse(remaining[race["id"]]["archived"])
+        self.assertEqual(remaining[race["id"]]["name"], "Race prep")
+
     def test_complete_plan_edit_reads_full_state_before_mutating(self):
         intent = {
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",

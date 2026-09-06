@@ -13539,7 +13539,7 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
     }
 
 
-def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, Any]:
+def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_plan_id: str | None = None) -> dict[str, Any]:
     """Atomically replace future local Coach/library sessions with a new plan."""
     payload = _structured_artifact_payload(arguments)
     _validate_structured_plan_limits(payload)
@@ -13569,8 +13569,9 @@ def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, An
             "SELECT local_id, payload FROM planned_units "
             "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
             "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
+            "AND (? = '' OR json_extract(payload, '$.plan_id') = ?) "
             "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ?",
-            (today,),
+            (selected_plan_id or "", selected_plan_id or "", today),
         ).fetchall()
         replace_ids = {str(row.get("local_id") or "") for row in rows if row.get("local_id")}
         archived_rows = db.execute(
@@ -13851,7 +13852,10 @@ def _structured_coach_tool_result(
         if "replace_training_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         _require_coach_scope(intent, "local_plan")
-        return _replace_structured_training_plan(arguments)
+        selected_plan_ids = sorted(token.split(":", 1)[1] for token in _coach_scope_values(intent) if token.startswith("training_plan:") and token.split(":", 1)[1])
+        if len(selected_plan_ids) > 1:
+            raise AppError(400, "Ein Planersatz darf nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
+        return _replace_structured_training_plan(arguments, selected_plan_id=selected_plan_ids[0] if selected_plan_ids else None)
     if name == "apply_training_changes":
         if "apply_training_changes" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")

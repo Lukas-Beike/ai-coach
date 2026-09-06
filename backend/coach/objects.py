@@ -9,7 +9,7 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
     kinds = set()
     if operations & {"save_competition", "delete_competition"}:
         kinds.add("competition")
-    if "update_training_plan" in operations:
+    if operations & {"update_training_plan", "replace_training_plan"}:
         kinds.add("training_plan")
     if "apply_training_changes" in operations:
         kinds.add("planned_unit")
