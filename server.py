@@ -12628,9 +12628,14 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
     text = str(message or "").casefold()
     if re.search(r"\b(?:kein\w*|nicht|nie|do\s+not|don't|never)\b", text):
         return False
+    if re.search(r"\b(?:except|excluding|but\s+keep|keep\s+(?:my|the)|ohne|au(?:s|ß)er|behalt\w*)\b", text):
+        return False
+    plan_level = bool(
+        re.search(r"\b(?:entire|whole|complete|all|my\s+full|full|gesamt\w*|komplett\w*|ganz\w*)\s+(?:(?:of|my|the|mein\w*|der|die|das|den)\s+){0,2}(?:training\s+plan|trainingsplan|plan|planung)\b", text)
+        or re.search(r"\b(?:training\s+plan|trainingsplan|planung)\b", text)
+    )
     return bool(
-        re.search(r"\b(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|from\s+scratch|start\s+over)\b", text)
-        or re.search(r"\b(?:plan\w*|planung\w*|trainingsplan\w*)\b(?:\W+\w+){0,6}\W+(?:neu|komplett\s+neu|von\s+grund\s+auf)", text)
+        plan_level and re.search(r"\b(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|from\s+scratch|start\s+over|neu|erset\w*)\b", text)
     )
 
 
@@ -13487,13 +13492,15 @@ def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, An
     except (TypeError, ValueError) as exc:
         raise AppError(400, "Ein vollständiger Planersatz benötigt die gelesene Planrevision.", reason="planning_revision_required") from exc
     workouts = [normalize_workout(workout) for workout in payload["workouts"]]
+    today = local_now().date().isoformat()
     dates: set[str] = set()
     for workout in workouts:
         workout_date = str(workout.get("date") or "")[:10]
+        if workout_date < today:
+            raise AppError(400, "Ein vollständiger Planersatz darf keine vergangenen Einheiten enthalten.", reason="invalid_plan")
         if workout_date in dates:
             raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {workout_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
         dates.add(workout_date)
-    today = local_now().date().isoformat()
     with DB_LOCK, database() as db:
         revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
@@ -13507,11 +13514,8 @@ def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, An
             (today,),
         ).fetchall()
         replace_ids = {str(row.get("local_id") or "") for row in rows if row.get("local_id")}
-        # Validate every external/calendar conflict before changing any row.
-        for workout in workouts:
-            if calendar_conflicts({"date": workout["date"]}, replace_ids):
-                raise AppError(409, f"Für den {workout['date']} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
-        now = utc_now()
+        existing_entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        superseded_plan_ids: set[str] = set()
         for row in rows:
             try:
                 current = json.loads(row.get("payload") or "{}")
@@ -13519,6 +13523,16 @@ def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, An
                 raise AppError(409, "Eine bestehende lokale Planung ist beschädigt.", reason="invalid_plan") from exc
             if not isinstance(current, dict):
                 raise AppError(409, "Eine bestehende lokale Planung ist beschädigt.", reason="invalid_plan")
+            existing_entries.append((dict(row), current))
+            plan_id = str(current.get("plan_id") or "").strip()
+            if plan_id:
+                superseded_plan_ids.add(plan_id)
+        # Validate every external/calendar conflict before changing any row.
+        for workout in workouts:
+            if calendar_conflicts({"date": workout["date"]}, replace_ids):
+                raise AppError(409, f"Für den {workout['date']} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
+        now = utc_now()
+        for row, current in existing_entries:
             before = {**current, "sync_status": "local"}
             current.update({"local_deleted": True, "archived": True, "sync_status": "local"})
             db.execute(
@@ -13526,6 +13540,16 @@ def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, An
                 (json.dumps(current, ensure_ascii=False), now, row["local_id"]),
             )
             _record_change(db, "planned_unit", row["local_id"], "delete", before, None, source="coach")
+        for superseded_plan_id in superseded_plan_ids:
+            superseded_plan = TRAINING_PLAN_REPOSITORY.get(db, superseded_plan_id)
+            if not superseded_plan or superseded_plan.get("status") == "archived":
+                continue
+            archived_plan = {**superseded_plan, "status": "archived"}
+            TRAINING_PLAN_REPOSITORY.update(
+                db, superseded_plan_id, archived_plan["name"], archived_plan["goal"],
+                archived_plan["start_date"], archived_plan["end_date"], "archived", now,
+            )
+            _record_change(db, "training_plan", superseded_plan_id, "update", superseded_plan, archived_plan, source="coach")
         plan_name = str(payload.get("plan_name") or "").strip()[:200]
         goal = str(payload.get("goal") or "").strip()[:2000]
         plan_id = str(uuid.uuid4()) if plan_name else ""
@@ -14010,8 +14034,6 @@ def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dic
     if intent.get("intent") not in {"local_action", "remote_sync"}:
         return intent
     if not prompt_requests_complete_plan_rebuild(message):
-        return intent
-    if not prompt_requests_bulk_training_change(message):
         return intent
     plan_operations = {"stage_training_plan", "commit_training_plan", "replace_training_plan", "apply_training_changes"}
     if not (_structured_authorized_operations(intent) & plan_operations):
