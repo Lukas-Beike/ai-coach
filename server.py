@@ -12509,7 +12509,8 @@ def prompt_requests_bulk_training_change(message: str) -> bool:
     mutation_match = re.search(
         r"\b(?:aender\w*|\N{LATIN SMALL LETTER A WITH DIAERESIS}nd\w*|bearbeit\w*|verschieb\w*|aktualisier\w*|umstell\w*|optimier\w*|mach\w*|"
         r"loesch\w*|l\N{LATIN SMALL LETTER O WITH DIAERESIS}sch\w*|entfern\w*|archivier\w*|leer\w*|"
-        r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*|delete\w*|remove\w*|clear\w*|archive\w*)\b",
+        r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*|replan\w*|revis\w*|"
+        r"plan\w*(?:\W+\w+){0,4}\W+neu|delete\w*|remove\w*|clear\w*|archive\w*)\b",
         text,
     )
     if not mutation_match:

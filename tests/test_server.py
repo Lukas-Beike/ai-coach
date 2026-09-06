@@ -4639,8 +4639,11 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.prompt_requests_bulk_training_change("Edit all of my planned workouts."))
         self.assertTrue(server.prompt_requests_bulk_training_change("Change all future workouts."))
         self.assertTrue(server.prompt_requests_bulk_training_change("Change all upcoming planned workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Replan my entire training plan."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Revise my entire training plan."))
         self.assertTrue(server.prompt_requests_bulk_training_change("Delete all planned workouts."))
         self.assertTrue(server.prompt_requests_bulk_training_change("Lösche alle geplanten Einheiten."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Plane meinen gesamten Trainingsplan neu."))
         self.assertTrue(server.prompt_requests_bulk_training_change("Ändere sämtliche Workouts."))
         self.assertFalse(server.prompt_requests_bulk_training_change(
             "Ändere nicht meinen gesamten Trainingsplan."
