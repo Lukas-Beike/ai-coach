@@ -21,7 +21,7 @@ async function ready(page) {
 async function controlled(page) {
   await page.evaluate(() => {
     const original = fetch.bind(window);
-    const fixture = { histories: [], planCalls: 0, libraryCalls: 0, streamCalls: 0 };
+    const fixture = { histories: [], planCalls: 0, libraryCalls: 0, streamCalls: 0, proposedActions: null };
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
     fixture.push = (event, payload) => fixture.controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
     window.__contract = fixture;
@@ -34,7 +34,7 @@ async function controlled(page) {
           fixture.push("started", { operation_id: "fixture-operation" });
         } }), { status: 200 }));
       }
-      if (path.startsWith("/api/chat/history")) return new Promise((resolve) => fixture.histories.push((messages) => resolve(json({ messages, next_cursor: null }))));
+      if (path.startsWith("/api/chat/history")) return new Promise((resolve) => fixture.histories.push((messages) => resolve(json({ messages, next_cursor: null, ...(fixture.proposedActions ? { proposed_actions: fixture.proposedActions } : {}) }))));
       if (path.startsWith("/api/plan")) fixture.planCalls++;
       if (path.startsWith("/api/library")) fixture.libraryCalls++;
       return original(path, options);
@@ -116,6 +116,26 @@ test("a completed answer accepts an immediate follow-up without showing a queue"
   await expect.poll(() => page.evaluate(() => __contract.streamCalls)).toBe(2);
   await expect(page.locator(".message.pending")).toHaveCount(0);
   await expect(page.locator("#chatQueueStatus")).toBeHidden();
+});
+
+test("completed answers refresh outstanding action proposals asynchronously", async ({ page }) => {
+  await ready(page);
+  await controlled(page);
+  await page.evaluate(() => {
+    state.coachActionProposals = [{ id: "active-proposal", action_type: "undo_change", status: "preview", diff: [] }];
+    renderCoachActionReview();
+    __contract.proposedActions = [{ id: "active-proposal", action_type: "undo_change", status: "preview", diff: [] }];
+  });
+  await page.locator("#messageInput").fill("Question with completed answer");
+  await page.locator("#sendButton").click();
+  await page.evaluate(() => {
+    __contract.push("completed", { message: { id: 202, content: "Answer", client_turn_id: __contract.turn }, proposed_actions: [], command_receipts: [] });
+    __contract.controller.close();
+  });
+  await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
+  await expect.poll(() => page.evaluate(() => __contract.histories.length)).toBe(1);
+  await page.evaluate(() => __contract.histories.shift()([]));
+  await expect.poll(() => page.evaluate(() => state.coachActionProposals.map((proposal) => proposal.id))).toEqual(["active-proposal"]);
 });
 
 test("every definite HTTP rejection retains the draft and concrete error", async ({ page }) => {

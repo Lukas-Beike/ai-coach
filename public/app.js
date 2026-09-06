@@ -3818,8 +3818,9 @@ async function requestCoachResponse(message) {
     if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
     // A completed SSE receipt already contains the persisted assistant message.
     // Do not keep the composer in "reconciling" while unrelated/pending loads
-    // finish; otherwise an immediate follow-up is incorrectly shown as queued.
-    if (!completed || !request.responseMessageReceived) await loadChatHistoryFresh();
+    // finish; refresh the authoritative proposal list in the background.
+    if (completed && request.responseMessageReceived) void loadChatHistoryFresh().catch(() => {});
+    else await loadChatHistoryFresh();
     if (completed) scrollChatToResponseStart();
     invalidateContextPreview();
     return completed ? "completed" : "failed";
