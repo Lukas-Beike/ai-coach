@@ -96,7 +96,7 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#more\/profile$/);
     await expect(page.locator("#profilePanel")).toBeFocused();
-    await expect(page.locator(".dirty-indicator")).toHaveCount(3);
+    await expect(page.locator(".dirty-indicator")).toHaveCount(2);
     const hiddenIndicators = await page.locator(".dirty-indicator").evaluateAll((nodes) => nodes.every((node) => node.hidden));
     expect(hiddenIndicators).toBe(true);
     for (const [label, panelId, route] of navigation) {

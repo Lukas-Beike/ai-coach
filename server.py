@@ -185,7 +185,6 @@ STATE_EVENTS: deque[dict[str, Any]] = deque(maxlen=500)
 STATE_EVENT_NEXT_ID = 0
 RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMITS: dict[str, list[float]] = {}
-ACTIVITY_FEEDBACK_RE = re.compile(r"^/api/activities/([^/]+)/feedback$")
 SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
 SYNC_JOB_RESOLVE_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)/resolve$")
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
@@ -16091,8 +16090,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, delete_local_data())
             elif path == "/api/feedback":
                 self.send_json(200, save_checkin(self.read_json()))
-            elif match := ACTIVITY_FEEDBACK_RE.match(path):
-                self.send_json(200, save_activity_feedback(unquote(match.group(1)), self.read_json()))
             elif path == "/api/change-history/undo":
                 self.send_json(200, _apply_change_undo(self.read_json()))
             else:
