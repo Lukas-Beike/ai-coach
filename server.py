@@ -12486,6 +12486,10 @@ def reset_coach_chat() -> dict[str, Any]:
                 LOGGER.warning("Remote OpenAI conversation could not be deleted during reset", extra={"event": "openai_reset_remote_delete_failed"}, exc_info=True)
         with DB_LOCK, database() as db:
             db.execute("DELETE FROM messages")
+            db.execute(
+                "UPDATE coach_plan_artifacts SET status='superseded', updated_at=? WHERE status='draft'",
+                (utc_now(),),
+            )
         set_kv("openai_conversation_id", "")
         set_kv("gemini_conversation_id", "")
         set_kv("gemini_conversation_history", "[]")
@@ -12630,6 +12634,22 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         return False
     if re.search(r"\b(?:except|excluding|but\s+keep|keep\s+(?:my|the)|ohne|au(?:s|ß)er|behalt\w*)\b", text):
         return False
+    # A plan named as the container for one workout, or narrowed to one
+    # horizon, is not authorization to replace the complete plan.  Check
+    # these suffixes before the broader plan-level replacement patterns.
+    if re.search(
+        r"\b(?:training\s+plan|trainingsplan|planung|plan)\s*['’]s\s+"
+        r"(?:\w+\s+){0,4}(?:workout|session|unit|einheit)\b",
+        text,
+    ):
+        return False
+    if re.search(
+        r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
+        r"(?:for|in)\s+(?:the\s+)?(?:next|this|coming|last)\s+"
+        r"(?:week|weeks|day|days|month|months)\s+only\b",
+        text,
+    ):
+        return False
     plan_level = bool(
         re.search(r"\b(?:entire|whole|complete|all|my\s+full|full|gesamt\w*|komplett\w*|ganz\w*)\s+(?:(?:of|my|the|mein\w*|der|die|das|den)\s+){0,2}(?:training\s+plan|trainingsplan|plan|planung)\b", text)
         or re.search(
@@ -12678,7 +12698,8 @@ def coach_plan_scope(message: str) -> dict[str, Any]:
     work. Unknown scope stays synchronous instead of being guessed.
     """
     text = str(message or "").casefold()
-    bulk_change = prompt_requests_bulk_training_change(message)
+    complete_rebuild = prompt_requests_complete_plan_rebuild(message)
+    bulk_change = prompt_requests_bulk_training_change(message) or complete_rebuild
     planning_hint = prompt_requests_workout_creation(message) or bulk_change
     horizon_days = 0
     planned_units = 0
@@ -13762,6 +13783,8 @@ def _structured_coach_tool_result(
                 raise AppError(404, "Planartefakt nicht gefunden.", reason="artifact_not_found")
             if artifact["status"] == "committed":
                 return {"ok": True, "status": "already_applied", "artifact_id": artifact_id}
+            if artifact["status"] != "draft":
+                raise AppError(409, "Das Planartefakt ist nicht mehr verfügbar.", reason="artifact_not_available")
             if str(artifact.get("conversation_id") or "") != str(conversation_id):
                 # Provider conversations can rotate after an interrupted
                 # response or change when the athlete switches providers. The
