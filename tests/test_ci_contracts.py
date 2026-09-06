@@ -72,7 +72,7 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("file.additions !== 1", workflow)
         self.assertIn("hasExpectedVersion", workflow)
         self.assertIn("hasPreviousVersion", workflow)
-        self.assertIn("reviewRequestedAt: baseChanged ? pullRequest.updated_at : ''", workflow)
+        self.assertIn("reviewRequestedAt: (baseChanged || context.payload.action === 'reopened')", workflow)
         self.assertIn("reviewRequestedAt: context.payload.comment.created_at", workflow)
         self.assertIn("conclusion: 'success'", workflow)
         self.assertIn("push:", workflow)
