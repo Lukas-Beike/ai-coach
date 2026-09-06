@@ -394,6 +394,23 @@ test.describe("critical browser states", () => {
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
   });
 
+  test("a 401 during initial loading cannot mark the ended session scroll-ready", async ({ page }) => {
+    await openAuthenticatedApp(page);
+    await page.route("**/api/bootstrap?local=1", (route) => route.fulfill({
+      status: 401,
+      json: { error: "Authentication required" },
+    }));
+
+    await page.evaluate(async () => {
+      history.replaceState(null, "", "#plan/overview");
+      state.initialStateLoaded = true;
+      await loadInitialState();
+    });
+
+    await expect(page.locator("#loginDialog")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(false);
+  });
+
   test("a new cross-tab coach reply takes priority over the saved scroll position", async ({ page }) => {
     let messages = Array.from({ length: 18 }, (_, index) => ({
       id: 92_000 + index,

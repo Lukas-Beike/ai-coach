@@ -123,8 +123,10 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   const shouldFocusPlannedToday = mainRoute === "plan" && planSegmentFromRoute(panelRoute) === "overview";
   const navigationRoute = NAV_LINK_ROUTES[mainRoute] || mainRoute;
   const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
-  if (currentPanel !== NAV_ROUTES[panelRoute] && !(await confirmDiscardChanges())) return false;
-  if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges({ includeChatDraft: false })) discardUnsavedChanges();
+  if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges({ includeChatDraft: false })) {
+    if (!(await confirmDiscardChanges())) return false;
+    discardUnsavedChanges();
+  }
   const returningToChat = currentPanel !== "chatPanel" && mainRoute === "coach";
   if (state.data && !state.chatInitialScrollPending && historyMode === "push" && currentPanel === "chatPanel" && mainRoute !== "coach") {
     state.chatScrollY = window.scrollY;
@@ -264,6 +266,7 @@ function showLogin() {
   state.chatProposalRefreshQueued = false;
   state.chatInitialScrollPending = true;
   state.chatScrollY = null;
+  state.chatScrollRestoring = false;
   cancelScheduledChatStreamRender();
   state.loadedAreas.clear();
   state.planSegment = "overview";
@@ -1857,16 +1860,24 @@ function restoreChatScrollPosition() {
   const panel = $("#chatPanel");
   const scrollY = state.chatScrollY;
   if (!panel?.classList.contains("active") || !Number.isFinite(scrollY)) return false;
+  state.chatScrollRestoring = true;
   requestAnimationFrame(() => {
-    if (!panel.classList.contains("active")) return;
+    if (!panel.classList.contains("active")) {
+      state.chatScrollRestoring = false;
+      return;
+    }
     window.scrollTo({ top: scrollY, behavior: "auto" });
-    requestAnimationFrame(updateChatComposerVisibility);
+    requestAnimationFrame(() => {
+      if (panel.classList.contains("active")) window.scrollTo({ top: scrollY, behavior: "auto" });
+      state.chatScrollRestoring = false;
+      updateChatComposerVisibility();
+    });
   });
   return true;
 }
 
 function handleWindowScroll() {
-  if (!state.chatInitialScrollPending && $("#chatPanel")?.classList.contains("active")) {
+  if (!state.chatInitialScrollPending && !state.chatScrollRestoring && $("#chatPanel")?.classList.contains("active")) {
     state.chatScrollY = window.scrollY;
   }
   updateChatComposerVisibility();
@@ -3653,6 +3664,8 @@ async function pollChatStatus() {
 }
 
 async function loadInitialState() {
+  const sessionGeneration = state.sessionGeneration;
+  state.initialStateLoaded = false;
   const route = routeFromHash();
   state.planSegment = planSegmentFromRoute(route);
   state.analysisSegment = analysisSegmentFromRoute(route);
@@ -3660,6 +3673,7 @@ async function loadInitialState() {
   areas.push("weather");
   if (baseRoute(route) === "plan") areas.push("plan", "library");
   await load("/api/bootstrap?local=1", areas);
+  if (sessionGeneration !== state.sessionGeneration) return;
   state.initialStateLoaded = true;
   if (state.chatInitialScrollPending && baseRoute() === "coach") scrollChatToLatest();
   if (state.data?.profile?.weather_location) {

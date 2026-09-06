@@ -23,6 +23,7 @@ const state = {
   chatProposalRefreshQueued: false,
   chatInitialScrollPending: true,
   chatScrollY: null,
+  chatScrollRestoring: false,
   stateEventSource: null,
   stateEventReconnectTimer: null,
   stateEventRefreshTimer: null,
