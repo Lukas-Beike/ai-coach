@@ -6583,9 +6583,13 @@ def http_json(
             if cancel_event is not None:
                 cancel_event._provider_response = response
             try:
-                raw = response.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
-            except TypeError:  # Small fake responses in unit tests may not accept a size.
-                raw = response.read()
+                try:
+                    raw = response.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
+                except TypeError:  # Small fake responses in unit tests may not accept a size.
+                    raw = response.read()
+            finally:
+                if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
+                    cancel_event._provider_response = None
             if len(raw) > MAX_EXTERNAL_RESPONSE_BYTES:
                 raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.")
             result = json.loads(raw) if raw else None
@@ -10635,6 +10639,8 @@ def sync_intervals(
                     library_refresh = refresh_workout_library(reason=f"Initialer Intervals.icu-Sync ({reason})")
                 library_imported = int(library_refresh.get("workouts") or 0)
             except Exception as exc:
+                if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
+                    raise
                 library_error = redact_text(str(exc))[:1000]
                 set_kv("last_library_sync_error", library_error)
         library_count = len(list_workout_library())
