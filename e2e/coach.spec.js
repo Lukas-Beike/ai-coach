@@ -349,6 +349,51 @@ test.describe("critical browser states", () => {
     })).toBeLessThanOrEqual(24);
   });
 
+  test("chat becomes scroll-ready before a slow weather refresh completes", async ({ page }) => {
+    const messages = Array.from({ length: 18 }, (_, index) => ({
+      id: 91_100 + index,
+      role: index % 2 ? "assistant" : "user",
+      content: `${index % 2 ? "Coach" : "Athlet"} Wetterabschnitt ${index + 1}\n\n${"Ausführlicher Trainingskontext. ".repeat(12)}`,
+      created_at: `2099-01-02T01:${String(index).padStart(2, "0")}:00Z`,
+    }));
+    let releaseWeather;
+    await page.route("**/api/chat/history?*", (route) => route.fulfill({
+      json: { messages, next_cursor: null, proposed_actions: [] },
+    }));
+    await page.route("**/api/profile", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ response, json: { ...body, profile: { ...body.profile, weather_location: "Berlin" } } });
+    });
+    await page.route("**/api/weather*", (route) => {
+      if (new URL(route.request().url()).searchParams.get("local") === "1") return route.continue();
+      return new Promise((resolve) => {
+        releaseWeather = () => resolve(route.fulfill({ json: {} }));
+      });
+    });
+
+    await page.goto("/#coach");
+    await expect(page.locator("#appShell")).toBeVisible();
+    const latest = page.locator(`[data-message-id="${messages.at(-1).id}"]`);
+    await expect(latest).toBeAttached();
+    await expect.poll(() => Boolean(releaseWeather)).toBe(true);
+    await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+    await expect.poll(() => latest.evaluate((message) => {
+      const composer = document.querySelector("#chatForm");
+      const desiredBottom = Math.min(window.innerHeight, composer.getBoundingClientRect().top) - 12;
+      return Math.abs(message.getBoundingClientRect().bottom - desiredBottom);
+    })).toBeLessThanOrEqual(24);
+
+    const savedScrollY = await page.evaluate(() => {
+      window.scrollTo({ top: 240, behavior: "auto" });
+      return window.scrollY;
+    });
+    await expect.poll(() => page.evaluate(() => state.chatScrollY)).toBe(savedScrollY);
+    releaseWeather();
+    await expect.poll(() => page.evaluate(() => state.loadPromise)).toBe(null);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
+  });
+
   test("a new cross-tab coach reply takes priority over the saved scroll position", async ({ page }) => {
     let messages = Array.from({ length: 18 }, (_, index) => ({
       id: 92_000 + index,

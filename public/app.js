@@ -3660,11 +3660,11 @@ async function loadInitialState() {
   areas.push("weather");
   if (baseRoute(route) === "plan") areas.push("plan", "library");
   await load("/api/bootstrap?local=1", areas);
+  state.initialStateLoaded = true;
+  if (state.chatInitialScrollPending && baseRoute() === "coach") scrollChatToLatest();
   if (state.data?.profile?.weather_location) {
     await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
   }
-  state.initialStateLoaded = true;
-  if (state.chatInitialScrollPending && baseRoute() === "coach") scrollChatToLatest();
   connectStateEvents();
   scheduleChatStatusPoll(0);
 }
