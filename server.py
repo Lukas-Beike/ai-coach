@@ -12676,6 +12676,13 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         text,
     ):
         return False
+    if re.search(
+        r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
+        r"(?:until|through|before|bis|vor)\s+(?:the\s+)?"
+        r"(?:\d{4}-\d{2}-\d{2}|[a-zäöüß]+(?:\s+[a-zäöüß]+){0,2})\b",
+        text,
+    ):
+        return False
     plan_level = bool(
         re.search(r"\b(?:entire|whole|complete|all|my\s+full|full|gesamt\w*|komplett\w*|ganz\w*)\s+(?:(?:of|my|the|mein\w*|der|die|das|den)\s+){0,2}(?:training\s+plan|trainingsplan|plan|planung)\b", text)
         or re.search(
@@ -13851,10 +13858,11 @@ def _structured_coach_tool_result(
     if name == "replace_training_plan":
         if "replace_training_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        _require_coach_scope(intent, "local_plan")
         selected_plan_ids = sorted(token.split(":", 1)[1] for token in _coach_scope_values(intent) if token.startswith("training_plan:") and token.split(":", 1)[1])
         if len(selected_plan_ids) > 1:
             raise AppError(400, "Ein Planersatz darf nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
+        if not selected_plan_ids and "local_plan" not in _coach_scope_values(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst diesen Plan nicht.", reason="intent_scope_denied")
         return _replace_structured_training_plan(arguments, selected_plan_id=selected_plan_ids[0] if selected_plan_ids else None)
     if name == "apply_training_changes":
         if "apply_training_changes" not in _structured_authorized_operations(intent):
