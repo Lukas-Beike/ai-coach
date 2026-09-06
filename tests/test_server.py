@@ -4789,6 +4789,35 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.prompt_requests_complete_plan_rebuild("Redo my entire training plan from the ground up."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild the Tuesday workout in my training plan."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my Tuesday workout."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Replace my training plan's Tuesday workout."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next week only."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next week."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("What happens if I replace my training plan?"))
+
+    def test_complete_plan_rebuild_uses_long_plan_scope_and_budget(self):
+        prompt = "Replace my training plan."
+        scope = server.coach_plan_scope(prompt)
+        self.assertTrue(scope["planning"])
+        self.assertTrue(scope["bulk_change"])
+        self.assertTrue(scope["background"])
+        self.assertEqual(server.coach_output_token_budget(prompt), server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+        hypothetical = "What happens if I replace my training plan?"
+        self.assertFalse(server.coach_plan_scope(hypothetical)["bulk_change"])
+        self.assertFalse(server.coach_plan_scope(hypothetical)["background"])
+
+    def test_reset_coach_chat_discards_outstanding_plan_drafts(self):
+        artifact = server._stage_coach_artifact(
+            "conversation-before-reset",
+            "turn-before-reset",
+            {"plan_name": "Reset test", "goal": "", "workouts": []},
+        )
+        with patch.object(server, "delete_remote_conversation", return_value=True):
+            result = server.reset_coach_chat()
+        self.assertEqual(result["status"], "ok")
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact["artifact_id"],)).fetchone()
+        self.assertEqual(row["status"], "superseded")
+        self.assertEqual(server.coach_intent_artifact_refs(), [])
 
     def test_complete_plan_rebuild_normalizes_mixed_draft_edit_and_sync_flow(self):
         planned = server.create_local_planned_unit({

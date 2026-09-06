@@ -12632,6 +12632,13 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
     text = str(message or "").casefold()
     if re.search(r"\b(?:kein\w*|nicht|nie|do\s+not|don't|never)\b", text):
         return False
+    if re.search(
+        r"\b(?:what\s+happens\s+if|what\s+if|if\s+i|would\s+i|could\s+i|should\s+i|"
+        r"was\s+wäre\s+wenn|wenn\s+ich|würde\s+ich|könnte\s+ich|soll\s+ich|"
+        r"kann\s+ich)\b",
+        text,
+    ) or "?" in text:
+        return False
     if re.search(r"\b(?:except|excluding|but\s+keep|keep\s+(?:my|the)|ohne|au(?:s|ß)er|behalt\w*)\b", text):
         return False
     # A plan named as the container for one workout, or narrowed to one
@@ -12646,7 +12653,7 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
     if re.search(
         r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
         r"(?:for|in)\s+(?:the\s+)?(?:next|this|coming|last)\s+"
-        r"(?:week|weeks|day|days|month|months)\s+only\b",
+        r"(?:week|weeks|day|days|month|months)\b",
         text,
     ):
         return False
