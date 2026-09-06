@@ -12500,7 +12500,7 @@ def requested_activity_refresh_days(message: str) -> int | None:
     all_time = re.search(r"\b(?:alle|sämtliche|saemtliche|vollständig|vollstaendig|komplett|all)\b.*\b(?:daten|histor(?:ie|y)|aktivität\w*|aktivitaet\w*|activities)\b", text)
     if all_time:
         context = text[max(0, all_time.start() - 100):min(len(text), all_time.end() + 100)]
-        refresh_verbs = r"(?:aktualisier|refresh|sync|synchronisier|abruf|lad|hol|histor(?:ie|y))"
+        refresh_verbs = r"(?:aktualisier|refresh|sync|synchronisier|abruf|lad|hol)"
         if re.search(refresh_verbs, context):
             return ALL_SYNC_DAYS
     return None
