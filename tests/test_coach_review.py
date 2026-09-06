@@ -323,6 +323,62 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(result["command_receipts"][1]["result"]["status"], "queued")
         self.assertEqual(result["command_receipts"][1]["result"]["sync_job_id"], result["sync_job_ids"][0])
 
+    def test_all_activity_refresh_scope_is_detected_before_or_after_refresh_verb(self):
+        self.assertEqual(
+            server.requested_activity_refresh_days("Alle Aktivitaeten aktualisieren und meine letzte Einheit analysieren."),
+            server.ALL_SYNC_DAYS,
+        )
+        self.assertEqual(
+            server.requested_activity_refresh_days("Aktualisiere alle verfuegbaren Aktivitaetsdaten und analysiere die letzte Einheit."),
+            server.ALL_SYNC_DAYS,
+        )
+
+    def test_synchronous_refresh_rejects_windows_beyond_job_limit(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        kwargs = {
+            "intent": intent,
+            "conversation_id": "wide-sync-validation",
+            "client_turn_id": "wide-sync-validation",
+            "session_csrf_hash": "review-session",
+            "sync_job_ids": [],
+        }
+        with patch.object(server, "sync_intervals") as sync:
+            with self.assertRaises(server.AppError) as error:
+                server._structured_coach_tool_result(
+                    "start_provider_refresh",
+                    {"days": 3661, "_wait_for_completion": True},
+                    **kwargs,
+                )
+        self.assertEqual(error.exception.reason, "invalid_refresh_request")
+        sync.assert_not_called()
+
+    def test_wider_refresh_rebuild_keeps_duplicate_selection_instruction(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        message = "Aktualisiere Intervals, lade die letzten 365 Tage und analysiere meine letzte Einheit."
+        responses = [
+            {"output": [self.call("start_provider_refresh", {"days": 365}, "wide-refresh")]},
+            {"output_text": "Analyse der Wahoo-Aufzeichnung."},
+        ]
+        captured = []
+
+        def response(payload):
+            captured.append(payload)
+            return responses.pop(0)
+
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="wide-duplicate"
+        ), patch.object(server, "sync_period", return_value=90), patch.object(
+            server, "sync_intervals", side_effect=[{"status": "ok", "activity_days": 90}, {"status": "ok", "activity_days": 365}]
+        ) as sync, patch.object(server, "latest_wahoo_garmin_duplicate", return_value={"canonical_id": "wahoo", "duplicate_id": "garmin"}), patch.object(
+            server, "duplicate_activity_delete_preview", return_value={"proposed_action": {"action_type": "delete_duplicate_intervals_activity"}}
+        ), patch.object(server, "build_training_context", side_effect=["Initial context", "Refreshed context"]), patch.object(
+            server, "responses_request", side_effect=response
+        ):
+            result = server.chat_with_coach(message, client_turn_id="wide-duplicate")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(sync.call_args_list[1].kwargs["activity_days"], 365)
+        self.assertIn("Wahoo-Aufzeichnung als kanonische", captured[1]["instructions"])
+
     def test_failed_wider_refresh_remains_pending_after_analysis(self):
         intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
         responses = [

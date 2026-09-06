@@ -12497,8 +12497,10 @@ def requested_activity_refresh_days(message: str) -> int | None:
         except (TypeError, ValueError):
             continue
     all_time = re.search(r"\b(?:alle|sämtliche|saemtliche|vollständig|vollstaendig|komplett|all)\b.*\b(?:daten|histor(?:ie|y)|aktivität\w*|aktivitaet\w*|activities)\b", text)
-    if all_time and re.search(refresh_context, text[max(0, all_time.start() - 100):all_time.start()]):
-        return ALL_SYNC_DAYS
+    if all_time:
+        context = text[max(0, all_time.start() - 100):min(len(text), all_time.end() + 100)]
+        if re.search(refresh_context, context):
+            return ALL_SYNC_DAYS
     return None
 
 
@@ -13652,6 +13654,8 @@ def _structured_coach_tool_result(
                 activity_days = int(arguments.get("days"))
             except (TypeError, ValueError) as exc:
                 raise AppError(400, "Der synchrone Aktivitaetsabruf benoetigt einen gueltigen Zeitraum.", reason="invalid_refresh_request") from exc
+            if activity_days != ALL_SYNC_DAYS and not 1 <= activity_days <= 3660:
+                raise AppError(400, "Der Synchronisationszeitraum ist zu gross.", reason="invalid_refresh_request")
             result = sync_intervals("Chat-Anfrage", activity_days=activity_days, wait_for_existing=True)
             if result.get("status") == "already_running":
                 raise AppError(503, "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.", reason="provider_busy")
@@ -14009,6 +14013,7 @@ def _chat_with_structured_coach_impl(
     restore_staged_artifact_intent()
 
     model_instructions = build_training_context()
+    base_model_instructions = model_instructions
     if completed_refresh:
         model_instructions += (
             "\n\n[Systemhinweis: Die angeforderte Intervals.icu-Aktualisierung wurde in diesem Auftrag "
@@ -14036,6 +14041,9 @@ def _chat_with_structured_coach_impl(
             "Intervals.icu gelöscht werden soll. Behaupte nicht, dass sie bereits gelöscht wurde; die Löschung "
             "erfolgt nur über die separate Bestätigung unter der Antwort.]"
         )
+    # Keep request-specific safety and duplicate-selection rules when a
+    # synchronous wider refresh rebuilds the provider context below.
+    turn_specific_instructions = model_instructions[len(base_model_instructions):]
     requested_operation = intent.get("operation")
     forced_tool = requested_operation if requested_operation in COACH_CANONICAL_TOOL_NAMES else "none"
     if requested_operation in successful_tools:
@@ -14300,7 +14308,7 @@ def _chat_with_structured_coach_impl(
             if result.get("ok"):
                 successful_tools.add(name)
                 if result.get("synchronous_refresh"):
-                    model_instructions = build_training_context()
+                    model_instructions = build_training_context() + turn_specific_instructions
                 if bulk_training_change and name == "read_training_state":
                     bulk_read_complete = True
             tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
