@@ -13818,6 +13818,7 @@ def _chat_with_structured_coach_impl(
     session_csrf_hash: str = "",
     refresh_error: str | None = None,
     duplicate_activity: dict[str, Any] | None = None,
+    completed_intervals_refresh: bool = False,
     background_job: bool = False,
     ai_provider: str | None = None,
     model: str | None = None,
@@ -13866,7 +13867,29 @@ def _chat_with_structured_coach_impl(
             receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
             db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?", (json.dumps(receipt, ensure_ascii=False), utc_now(), client_turn_id))
         return receipt
+    if completed_intervals_refresh:
+        refresh_receipt = {
+            "call_id": "preflight-intervals-refresh", "tool": "start_provider_refresh",
+            "effect_key": "preflight-intervals-refresh",
+            "result": {"ok": True, "status": "completed", "provider": "intervals", "before_analysis": True},
+        }
+        commands = list(background_receipt.get("command_receipts") or [])
+        if not any(item.get("call_id") == refresh_receipt["call_id"] for item in commands):
+            commands.append(refresh_receipt)
+        background_receipt["command_receipts"] = commands
+        _merge_coach_command_receipt(client_turn_id, {"command_receipts": commands})
+    completed_refresh = next((
+        item for item in background_receipt.get("command_receipts", [])
+        if item.get("call_id") == "preflight-intervals-refresh"
+        and item.get("tool") == "start_provider_refresh" and item.get("result", {}).get("ok")
+    ), None)
     model_instructions = build_training_context()
+    if completed_refresh:
+        model_instructions += (
+            "\n\n[Systemhinweis: Die angeforderte Intervals.icu-Aktualisierung wurde in diesem Auftrag "
+            "bereits erfolgreich abgeschlossen. Der Kontext enthaelt den aktualisierten Snapshot. "
+            "Analysiere jetzt die letzte Einheit; starte keinen weiteren Datenabruf.]"
+        )
     if refresh_error:
         model_instructions += (
             "\n\n[Systemhinweis: Die angeforderte Intervals.icu-Aktualisierung ist fehlgeschlagen. "
@@ -13883,6 +13906,8 @@ def _chat_with_structured_coach_impl(
         )
     requested_operation = intent.get("operation")
     forced_tool = requested_operation if requested_operation in COACH_CANONICAL_TOOL_NAMES else "none"
+    if completed_refresh and requested_operation == "start_provider_refresh":
+        forced_tool = "none"
     bulk_training_change = bool(
         requested_operation == "apply_training_changes"
         and (intent.get("bulk_change") or prompt_requests_bulk_training_change(message))
@@ -14005,7 +14030,10 @@ def _chat_with_structured_coach_impl(
             if prior_call and prior_call.get("effect_key") != effect_key:
                 raise AppError(409, "Ein Werkzeugaufruf wurde mit anderen Argumenten wiederholt.", reason="tool_call_conflict")
             cached = prior_call
-            if cached is None and name == "stage_training_plan":
+            if cached is None and name == "start_provider_refresh" and completed_refresh and intent.get("target_system") == "intervals":
+                _require_coach_scope(intent, "intervals_refresh")
+                cached = completed_refresh
+            elif cached is None and name == "stage_training_plan":
                 candidate = next(
                     (
                         entry for entry in command_receipts
@@ -14471,14 +14499,13 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
                     "Die aktuelle Intervals.icu-Synchronisierung ist nicht verfügbar. Die letzte Einheit wurde nicht analysiert.",
                     reason="latest_activity_refresh_failed",
                 ) from exc
-    if latest_activity_analysis and structured_intent.get("operation") == "start_provider_refresh":
-        # The quick action deliberately performs the required synchronous
-        # refresh above so the same Coach turn can analyse the new snapshot.
-        structured_intent = {
-            "intent": "advice", "operation": None, "target_system": "none",
-            "artifact_id": None, "ambiguities": [], "authorization_scope": [],
-            "follow_up_operations": [],
-        }
+    completed_intervals_refresh = bool(
+        latest_activity_analysis and not resuming_background_response
+        and structured_intent.get("intent") in {"local_action", "remote_sync"}
+        and "start_provider_refresh" in _structured_authorized_operations(structured_intent)
+        and structured_intent.get("target_system") == "intervals"
+        and "intervals_refresh" in structured_intent.get("authorization_scope", [])
+    )
     duplicate_activity = (
         latest_wahoo_garmin_duplicate()
         if not refresh_error and latest_activity_analysis
@@ -14494,6 +14521,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         session_csrf_hash=session_csrf_hash,
         refresh_error=refresh_error,
         duplicate_activity=duplicate_activity,
+        completed_intervals_refresh=completed_intervals_refresh,
         background_job=background_owned,
         ai_provider=ai_provider,
         model=model,
