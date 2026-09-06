@@ -123,16 +123,27 @@ class CoachReviewTests(unittest.TestCase):
         server.set_kv("last_sync_at", "old-sync")
         server.set_kv("last_sync_activity_days", str(server.ALL_SYNC_DAYS))
         server.SYNC_LOCK.acquire()
+        previous_sync_read = threading.Event()
+        original_get_kv = server.get_kv
+
+        def observe_previous_sync_read(key, db=None):
+            value = original_get_kv(key, db)
+            if key == "last_sync_at" and threading.current_thread() is threading.main_thread():
+                previous_sync_read.set()
+            return value
 
         def finish_active_sync():
-            time.sleep(0.1)
-            server.set_kv("last_sync_at", "new-sync")
-            server.SYNC_LOCK.release()
+            try:
+                previous_sync_read.wait(timeout=2)
+                server.set_kv("last_sync_at", "new-sync")
+            finally:
+                server.SYNC_LOCK.release()
 
         worker = threading.Thread(target=finish_active_sync)
         worker.start()
         try:
-            result = server.sync_intervals("full refresh test", activity_days=server.ALL_SYNC_DAYS, wait_for_existing=True)
+            with patch.object(server, "get_kv", side_effect=observe_previous_sync_read):
+                result = server.sync_intervals("full refresh test", activity_days=server.ALL_SYNC_DAYS, wait_for_existing=True)
         finally:
             worker.join(timeout=2)
             if server.SYNC_LOCK.locked():
