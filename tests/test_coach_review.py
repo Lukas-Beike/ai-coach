@@ -340,6 +340,56 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["pending_operations"], ["start_provider_refresh"])
 
+    def test_failed_wider_refresh_remains_pending_when_analysis_request_fails(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        responses = [
+            {"output": [self.call("start_provider_refresh", {"days": 365}, "failed-wide-error")]},
+            server.AppError(503, "Model unavailable"),
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="failed-wide-error"
+        ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+            server, "sync_period", return_value=90
+        ), patch.object(server, "sync_intervals", return_value={"status": "ok"}), patch.object(
+            server, "enqueue_sync_job", side_effect=server.AppError(400, "too wide", reason="sync_window_too_wide")
+        ), patch.object(server, "responses_request", side_effect=responses):
+            result = server.chat_with_coach("Aktualisiere und analysiere die letzte Einheit.", client_turn_id="failed-wide-error")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["pending_operations"], ["start_provider_refresh"])
+
+    def test_resumed_completed_effect_stays_completed_when_summary_fails(self):
+        csrf_hash = server.session_token_hash("csrf-summary-recovery")
+        client_turn_id = "summary-recovery"
+        intent = self.intent("manage_training_templates", ["local_template"])
+        message = "Speichere die Vorlage und erstelle einen Trainingsplan fuer die naechsten acht Wochen."
+        server.enqueue_background_coach_job(message, client_turn_id, csrf_hash, operation_id="summary-recovery-op")
+        persisted_receipt = {
+            "mode": "background", "phase": "preparing", "session_key": server._coach_session_key(csrf_hash),
+            "command_receipts": [{
+                "call_id": "template-success", "tool": "manage_training_templates", "effect_key": "template-success",
+                "result": {"ok": True, "status": "completed"},
+            }],
+        }
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE coach_commands SET intent=?, receipt=? WHERE client_turn_id=?",
+                (json.dumps(intent), json.dumps(persisted_receipt), client_turn_id),
+            )
+        with patch.object(server, "ensure_conversation", return_value="summary-recovery-conversation"), patch.object(
+            server, "build_training_context", return_value="Synthetic summary context"
+        ), patch.object(
+            server, "responses_background_request", side_effect=server.AppError(503, "Model unavailable")
+        ):
+            result = server.chat_with_coach(
+                message,
+                client_turn_id=client_turn_id,
+                session_csrf_hash=csrf_hash,
+                background_job=True,
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["pending_operations"], [])
+        self.assertIn("Ergebnis:", result["message"]["content"])
+
     def test_waited_refresh_reuses_only_the_completed_activity_window(self):
         intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
         responses = [

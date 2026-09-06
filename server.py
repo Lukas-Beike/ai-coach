@@ -14392,6 +14392,13 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         failures = [item for item in commands if not item.get("result", {}).get("ok")]
         completed_tools = {item.get("tool") for item in successes}
         pending = sorted(_structured_authorized_operations(intent) - completed_tools - {""})
+        explicit_successful_tools = {
+            item.get("tool") for item in successes if item.get("call_id") != "preflight-intervals-refresh"
+        }
+        failed_explicit_tools = {
+            item.get("tool") for item in failures if item.get("call_id") != "preflight-intervals-refresh"
+        }
+        pending = sorted(set(pending) | (failed_explicit_tools - explicit_successful_tools))
         active_tool_calls = receipt.get("pending_tool_calls")
         if isinstance(active_tool_calls, list):
             pending = sorted(set(pending) | {
@@ -14399,7 +14406,9 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
                 for item in active_tool_calls
                 if isinstance(item, dict) and str(item.get("tool") or "").strip()
             })
-        final_response_failure = receipt.get("phase") == "waiting_final_response"
+        final_response_failure = receipt.get("phase") == "waiting_final_response" or (
+            bool(successes) and not pending and not failures
+        )
         analysis_pending = bool(receipt.get("analysis_pending"))
         cancelled = isinstance(error, AppError) and error.reason == "chat_cancelled"
         if cancelled:
