@@ -252,6 +252,7 @@ function showLogin() {
   state.chatResponseScrollPending = false;
   state.chatProposalRefreshPending = false;
   state.chatProposalRefreshInFlight = false;
+  state.chatProposalRefreshQueued = false;
   cancelScheduledChatStreamRender();
   state.loadedAreas.clear();
   state.planSegment = "overview";
@@ -1678,6 +1679,7 @@ function renderCoachActionReview() {
       later.className = "secondary-button";
       later.textContent = "Später prüfen";
       later.addEventListener("click", () => {
+        state.chatProposalRefreshPending = true;
         state.coachActionProposals = state.coachActionProposals.filter((item) => item.id !== proposal.id);
         renderCoachActionReview();
       });
@@ -1774,6 +1776,7 @@ function rememberChatTurn(clientTurnId) {
 function applyChatReceipt(receipt) {
   state.chatContentVersion += 1;
   if (receipt.message) reconcileCompletedChatMessage(receipt.message);
+  if (Array.isArray(state.coachActionProposals) && state.coachActionProposals.length > 0) state.chatProposalRefreshPending = true;
   state.coachActionProposals = Array.isArray(receipt.proposed_actions) ? receipt.proposed_actions : [];
   addStructuredCoachReceipts(receipt);
   renderMessages(state.data?.messages || [], false);
@@ -3573,7 +3576,10 @@ async function loadChatHistoryFresh() {
 }
 
 async function refreshChatProposalsInBackground(expectedContentVersion) {
-  if (state.chatProposalRefreshInFlight) return;
+  if (state.chatProposalRefreshInFlight) {
+    state.chatProposalRefreshQueued = true;
+    return;
+  }
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
   state.chatProposalRefreshInFlight = true;
@@ -3591,6 +3597,9 @@ async function refreshChatProposalsInBackground(expectedContentVersion) {
     // Keep the pending flag so the next completed turn retries the authoritative refresh.
   } finally {
     state.chatProposalRefreshInFlight = false;
+    const retryAtLatestVersion = state.chatProposalRefreshPending && state.chatProposalRefreshQueued;
+    state.chatProposalRefreshQueued = false;
+    if (retryAtLatestVersion) void refreshChatProposalsInBackground(state.chatContentVersion);
   }
 }
 
