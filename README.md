@@ -822,7 +822,8 @@ merge successful update pull requests.
 
 ### Codex pull-request review
 
-The required `Codex code review` check is a merge gate for the native,
+The required `Codex code review (develop)` and `Codex code review (main)` checks
+are merge gates for the native,
 subscription-backed Codex GitHub review. Enable automatic Code Review for this
 repository in Codex Cloud, or request one with `@codex review` in the pull
 request. The gate follows the Codex summary comment that is posted as soon as a
@@ -840,9 +841,11 @@ fresh review with `@codex review`. The trusted `ai-coach-release-bot[bot]`
 exception is limited to an exact `develop` version-bump PR whose branch, title,
 repository, and one-file `APP_VERSION` diff match the release contract. The
 release promotion PR to `main` remains on the normal Codex review path. The
-workflow records a successful `Codex code review` check with the exemption
-reason only for that validated version bump. Retargeting a PR also establishes
-a fresh review baseline. If
+workflow records a successful `Codex code review (develop)` check with the
+exemption reason only for that validated version bump; a manual review request
+overrides the exemption. Retargeting a PR also establishes a fresh review
+baseline. Release-bot title edits establish a fresh baseline, while ordinary
+title-only edits do not. If
 the PR is closed or merged while the gate is waiting, the gate cancels its
 check instead of polling until the timeout.
 
@@ -850,8 +853,9 @@ The workflow runs from the trusted target branch and never checks out or
 executes pull-request code. It uses only the GitHub token to read the summary,
 reviews, and reactions and to update the required check; no `OPENAI_API_KEY`
 repository secret is needed.
-Keep the exact required status-check name `Codex code review` in the GitHub
-rulesets for `develop` and `main`.
+Keep `Codex code review (develop)` required in the `develop` ruleset and
+`Codex code review (main)` required in the `main` ruleset. Base-specific names
+prevent a successful develop exemption check from satisfying the main gate.
 
 ### Image supply chain and runtime boundary
 

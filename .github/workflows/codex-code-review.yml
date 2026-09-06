@@ -70,7 +70,8 @@ jobs:
               const pullRequest = context.payload.pull_request;
               const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
               const titleChanged = context.payload.action === 'edited' && context.payload.changes?.title;
-              const reviewBaselineChanged = baseChanged || titleChanged || context.payload.action === 'reopened';
+              const releaseBotTitleChanged = titleChanged && pullRequest.user?.login === releaseBotLogin && releaseVersionPattern.test(pullRequest.head?.ref || '');
+              const reviewBaselineChanged = baseChanged || releaseBotTitleChanged || context.payload.action === 'reopened';
               if (
                 pullRequest.draft !== true &&
                 ['develop', 'main'].includes(pullRequest.base.ref) &&
@@ -102,7 +103,9 @@ jobs:
                   pullRequestNumber: response.data.number,
                   baseRef: response.data.base.ref,
                   reviewRequestedAt: context.payload.comment.created_at,
-                  skipCodexReview: shouldSkipCodexReview(response.data),
+                  // An explicit human request must review even an otherwise
+                  // exempt release-bot version PR.
+                  skipCodexReview: false,
                 }];
               }
             }
@@ -165,6 +168,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
+          CHECK_NAME: Codex code review (${{ matrix.baseRef }})
         with:
           github-token: ${{ github.token }}
           script: |
@@ -237,7 +241,7 @@ jobs:
               per_page: 100,
             });
             const existingRun = checkRuns
-              .filter((run) => run.name === 'Codex code review')
+              .filter((run) => run.name === process.env.CHECK_NAME)
               .find((run) => run.status !== 'completed');
             const now = new Date().toISOString();
             if (existingRun) {
@@ -254,7 +258,7 @@ jobs:
               await github.rest.checks.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                name: 'Codex code review',
+                name: process.env.CHECK_NAME,
                 head_sha: headSha,
                 status: 'completed',
                 conclusion: 'success',
@@ -285,6 +289,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
+          CHECK_NAME: Codex code review (${{ matrix.baseRef }})
         with:
           github-token: ${{ github.token }}
           script: |
@@ -297,7 +302,7 @@ jobs:
             await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              name: 'Codex code review',
+              name: process.env.CHECK_NAME,
               head_sha: headSha,
               status: 'completed',
               conclusion: 'failure',
@@ -316,7 +321,7 @@ jobs:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}
           review-requested-at: ${{ matrix.reviewRequestedAt }}
-          check-name: Codex code review
+          check-name: Codex code review (${{ matrix.baseRef }})
           codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
           timeout-seconds: 2400
           poll-seconds: 30
