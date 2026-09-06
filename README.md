@@ -259,16 +259,12 @@ can be forced manually from the Open-Meteo card in the More tab.
 The morning check-in is generated at most once per local calendar day when its required
 integrations are configured.
 
-The five main views use stable hash links: `#coach`, `#today`, `#plan`,
-`#analysis`, and `#more`. Navigation is implemented with real
+The four main views use stable hash links: `#coach`, `#plan`, `#analysis`,
+and `#more`. Navigation is implemented with real
 links, so direct links, reload, browser back/forward, keyboard access, and
 screen-reader announcements remain available. An unknown hash falls back to
-`#coach`; a deep link is retained through the login flow. The `#today` view
-combines the local check-in, current recovery/readiness signals, today's
-planned workout, relevant weather, open activity feedback, and pending plan
-adjustments. It uses already loaded state only; opening the view does not
-trigger an additional coach or provider request. Missing data, offline state,
-sync progress, and the last sync error are shown explicitly.
+`#coach`; a deep link is retained through the login flow. Opening the plan
+overview focuses and scrolls to the current day in the training calendar.
 
 The PWA provides an installable offline shell only. It does not provide a full
 offline data view or a local mutation queue: authenticated API responses are

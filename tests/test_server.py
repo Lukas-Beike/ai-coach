@@ -1871,12 +1871,13 @@ class CoachTests(unittest.TestCase):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
-        for route in ("coach", "today", "plan/overview", "analysis/performance", "more"):
+        for route in ("coach", "plan/overview", "analysis/performance", "more"):
             self.assertIn(f'href="#{route}"', index)
         self.assertIn('window.addEventListener("hashchange", syncNavigationRoute)', app)
         self.assertIn("window.history.pushState", app)
         self.assertIn("panel.focus({ preventScroll: true })", app)
-        self.assertIn('today: "todayPanel"', navigation)
+        self.assertNotIn('today: "todayPanel"', navigation)
+        self.assertNotIn('href="#today"', index)
         self.assertIn('analysis: "dataPanel"', navigation)
         self.assertIn('plan: "workoutsPanel"', navigation)
         self.assertIn('"analysis/performance": "dataPanel"', navigation)
@@ -1886,8 +1887,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('class="desktop-nav"', index)
         self.assertIn('class="icon-sprite"', index)
         self.assertEqual(index.count('class="bottom-nav"'), 1)
-        self.assertEqual(index[index.index('<nav class="bottom-nav"'):].split('</nav>', 1)[0].count('class="nav-item'), 5)
-        self.assertIn('function renderToday(data)', app)
+        self.assertEqual(index[index.index('<nav class="bottom-nav"'):].split('</nav>', 1)[0].count('class="nav-item'), 4)
+        self.assertNotIn('function renderToday(data)', app)
 
     def test_task8_coach_first_views_have_shared_states_and_analysis_segments(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -1905,7 +1906,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function renderCoachReceipts()', app)
         self.assertIn('function createActionReceipt(', components)
         self.assertIn('createSkeletonStack(4)', app)
-        self.assertIn('id="todaySummary"', index)
+        self.assertNotIn('id="todaySummary"', index)
         self.assertNotIn('today-priority', app)
         self.assertIn('id="analysisHistorySegment"', index)
         self.assertIn('id="analysisPerformanceSegment"', index)
@@ -1918,16 +1919,6 @@ class CoachTests(unittest.TestCase):
         self.assertIn('data-analysis-segment-panel="history" aria-labelledby="analysisHistoryTitle" hidden', index)
         self.assertIn('coachReceipts: []', state)
         self.assertNotIn('id="activitiesPanel"', index)
-
-    def test_today_view_is_a_read_only_coach_oriented_summary(self):
-        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
-        today_view = app[app.index("function renderToday(data)"):app.index("function distanceLabel(")]
-        self.assertNotIn('todayCard("Coach-Einordnung", "today-priority")', today_view)
-        self.assertNotIn('todayCard("Morgen-Check-in", "today-checkin")', today_view)
-        self.assertNotIn('todayCard("Offene Rückmeldung", "today-feedback")', today_view)
-        self.assertNotIn("Morgen-Check-in abgeschlossen.", today_view)
-        self.assertNotIn("todayAction(", today_view)
-        self.assertNotIn('document.createElement("button")', today_view)
 
     def test_plan_route_has_read_only_overview_and_library_segments(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -1957,6 +1948,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("function calendarActualActivity(", app)
         self.assertIn("function calendarStatusLabel(", app)
         self.assertIn('renderPlanned(data.training_calendar || data.planned || [])', app)
+        self.assertIn('function focusPlannedToday()', app)
+        self.assertIn('today.scrollIntoView({ block: "start", behavior: "auto" })', app)
         self.assertIn('"RPE offen"', app)
         self.assertIn('"Trainingsload"', app)
         self.assertIn('Plan/Ist:', app)
@@ -2009,7 +2002,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('id="checkinForm"', index)
         self.assertIn('id="checkinHistory"', index)
         self.assertIn('id="checkinDialog"', index)
-        self.assertIn('id="todayPanel"', index)
+        self.assertNotIn('id="todayPanel"', index)
         self.assertIn('name="day_form"', index)
         self.assertIn('name="illness"', index)
         self.assertNotIn('id="syncIllnessToIntervals"', app)
@@ -2017,7 +2010,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.ILLNESS_CALENDAR_CATEGORY, "SICK")
         self.assertNotIn('class="checkin-section"', index)
         self.assertNotIn("planned-day-checkin-button", app)
-        self.assertNotIn("todayAction(checkin ?", app)
         self.assertNotIn('id="weatherNotice"', index)
         self.assertNotIn("function renderWeatherNotice", app)
 
@@ -6091,8 +6083,9 @@ class CoachTests(unittest.TestCase):
         playwright_config = (server.PUBLIC_DIR.parent / "playwright.config.cjs").read_text(encoding="utf-8")
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
         app_source = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
-        for route in ("#coach", "#today", "plan/overview", "analysis/performance", "#more"):
+        for route in ("#coach", "plan/overview", "analysis/performance", "#more"):
             self.assertIn(route, e2e_source)
+        self.assertNotIn("#today", e2e_source)
         for guard in ("expectNoBrowserErrorsOrOverflow", "reducedMotion", 'fontSize = "200%"', "touch targets below 44"):
             self.assertIn(guard, e2e_source)
         self.assertIn('name: "desktop"', playwright_config)

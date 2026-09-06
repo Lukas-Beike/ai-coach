@@ -3,7 +3,6 @@ const { AxeBuilder } = require("@axe-core/playwright");
 
 const navigation = [
   ["Coach", "chatPanel", "coach"],
-  ["Heute", "todayPanel", "today"],
   ["Geplant", "workoutsPanel", "plan/overview"],
   ["Analyse", "dataPanel", "analysis/performance"],
   ["Mehr", "settingsPanel", "more"],
@@ -159,10 +158,7 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#plan$/);
 
-    await page.getByRole("link", { name: "Heute", exact: true }).click();
-    await expect(page.locator("#todayPanel .today-priority")).toHaveCount(0);
-    await expect(page.locator("#todayPanel .today-checkin")).toHaveCount(0);
-    await expect(page.locator("#todayPanel .today-feedback")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Heute", exact: true })).toHaveCount(0);
     await expect(page.locator("#checkinDialog")).toBeHidden();
     await expect(page.locator("#chatPanel")).toContainText("Morgen-Check-in");
 
@@ -201,9 +197,10 @@ test.describe("critical browser states", () => {
     expect(safetyLayout.hintBottom).toBeLessThanOrEqual(Math.min(safetyLayout.composerTop, safetyLayout.navigationTop));
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.getByRole("link", { name: "Heute", exact: true }).focus();
+    await page.getByRole("link", { name: "Geplant", exact: true }).focus();
     await page.keyboard.press("Enter");
-    await expect(page.locator("#todayPanel")).toHaveClass(/active/);
+    await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
+    await expect(page.locator(".planned-day.is-today")).toBeInViewport();
 
     await page.goto("/#more/profile");
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
@@ -306,7 +303,7 @@ test.describe("critical browser states", () => {
     }
     await expect(input).toBeVisible();
     await input.fill("Dieser Entwurf bleibt beim Tabwechsel erhalten.");
-    await page.getByRole("link", { name: "Heute", exact: true }).click();
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
     await expect(page.locator("#confirmationDialog")).toBeHidden();
     await expect(input).toHaveValue("Dieser Entwurf bleibt beim Tabwechsel erhalten.");
     await page.getByRole("link", { name: "Coach", exact: true }).click();
@@ -342,7 +339,7 @@ test.describe("critical browser states", () => {
       "",
       ...Array.from({ length: 12 }, (_, index) => `## Abschnitt ${index + 1}\n\n${"Ausführliche, gut lesbare Trainingsbegründung. ".repeat(5)}`),
     ].join("\n");
-    await page.getByRole("link", { name: "Heute", exact: true }).click();
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const inactiveScrollY = await page.evaluate(() => window.scrollY);
     await page.evaluate((content) => {
@@ -362,7 +359,7 @@ test.describe("critical browser states", () => {
 
     await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
     await expect.poll(() => page.evaluate(() => window.__chatTest.historyResolvers.length)).toBe(0);
-    await expect(page.locator("#todayPanel")).toHaveClass(/active/);
+    await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     expect(await page.evaluate(() => document.activeElement?.id)).not.toBe("messageInput");
 
     await page.getByRole("link", { name: "Coach", exact: true }).click();

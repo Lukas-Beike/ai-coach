@@ -39,6 +39,7 @@ const state = {
   activityToDate: "",
   activityVisibleCount: 250,
   planSegment: "overview",
+  plannedTodayFocusPending: false,
   analysisSegment: "performance",
   loadedAreas: new Set(),
   voiceRecorder: null,
