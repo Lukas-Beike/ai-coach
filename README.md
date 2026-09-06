@@ -96,7 +96,9 @@ instructions do not delete or convert its data.
   the athlete's local day. "Plan anpassen" appears only for an unapplied
   calendar, illness, injury, or blocking-weather change affecting a planned
   unit within the next three days. "Letzte Einheit analysieren" refreshes
-  Intervals.icu before coaching. When near-identical Wahoo and Garmin cycling
+  Intervals.icu before coaching and records the successful refresh in the same
+  Coach receipt. A repeated refresh tool call reuses that result so analysis
+  continues without a second sync. When near-identical Wahoo and Garmin cycling
   recordings are present, Wahoo is canonical; deleting the Garmin cloud copy
   always requires a separate confirmation in Coach Chat.
 - The Coach is the local source of truth for future planned units, target

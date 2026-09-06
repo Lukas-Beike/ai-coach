@@ -1172,7 +1172,8 @@ function addStructuredCoachReceipts(payload) {
     }
     const failed = result.ok === false;
     const queued = Boolean(result.sync_job_id || result.job_id || result.job?.id || result.status === "queued");
-    const title = failed ? "Coach-Aktion fehlgeschlagen" : labels[entry.tool] || (queued ? "Synchronisierung beauftragt" : "Informationen geladen");
+    const completedRefresh = entry.tool === "start_provider_refresh" && result.status === "completed";
+    const title = failed ? "Coach-Aktion fehlgeschlagen" : completedRefresh ? "Daten aktualisiert" : labels[entry.tool] || (queued ? "Synchronisierung beauftragt" : "Informationen geladen");
     const details = [];
     if (Array.isArray(result.library_entry_ids) && result.library_entry_ids.length) details.push(`${result.library_entry_ids.length} lokale Einheit(en) gespeichert`);
     if (result.remote_untouched) details.push("Providerdaten unverändert");
