@@ -834,11 +834,13 @@ associated by review ID and fails the gate; the reaction is the connector's
 clean-review result when it intentionally creates no submitted review. A new
 push invalidates the old result and starts the gate again. A manual human
 `@codex review` request requires a summary and result created or updated after
-that request, so an older result cannot be reused. For normal pull-request
-events, the trusted workflow explicitly posts `@codex review` so the gate does
-not depend on the connector's ambient automatic trigger. The trusted
-`ai-coach-release-bot[bot]` version-bump PRs are explicitly exempt; the workflow
-records a successful `Codex code review` check with the exemption reason. If
+that request, so an older result cannot be reused. Normal pull-request events
+use the connector's native automatic trigger; a human can manually request a
+fresh review with `@codex review`. The trusted `ai-coach-release-bot[bot]`
+exception is limited to an exact `develop` version-bump PR whose branch, title,
+repository, and one-file `APP_VERSION` diff match the release contract. The
+workflow records a successful `Codex code review` check with the exemption
+reason. If
 the PR is closed or merged while the gate is waiting, the gate cancels its
 check instead of polling until the timeout.
 
