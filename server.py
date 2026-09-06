@@ -12661,17 +12661,18 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         return False
     if re.search(
         r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
-        r"(?:for|in)\s+(?:the\s+)?(?:next|this|coming|last)\s+"
+        r"(?:neu\s+)?(?:for|in|starting|from|after|ab)\s+(?:the\s+)?"
+        r"(?:next|this|coming|last|nächste[nr]?|kommend\w*|folgend\w*|diese[rn]?)\s+"
         r"(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
         r"ein|eine|einer|einen|zwei|drei|vier|fünf|fuenf|sechs|sieben|"
         r"acht|neun|zehn)\s+)?"
-        r"(?:week|weeks|day|days|month|months)\b",
+        r"(?:week|weeks|day|days|month|months|woche|wochen|tag|tage|monat|monate)\b",
         text,
     ):
         return False
     if re.search(
         r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
-        r"(?:for|in)\s+(?:the\s+)?\d{4}-\d{2}-\d{2}\b",
+        r"(?:neu\s+)?(?:for|in|starting|from|after|ab)\s+(?:the\s+)?\d{4}-\d{2}-\d{2}\b",
         text,
     ):
         return False
