@@ -4104,7 +4104,7 @@ def sync_garmin(
         mark_daily_sync("garmin")
         set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
         if garmin_collection_complete(payload):
-            update_provider_sync_cursor("garmin", "data", windows[-1][1].isoformat(), payload["synced_at"])
+            update_provider_sync_cursor("garmin", "data", str(payload.get("end") or windows[-1][1].isoformat())[:10], payload["synced_at"])
         if end_date is not None and garmin_collection_complete(payload):
             update_provider_sync_cursor("garmin", "historical", windows[0][0].isoformat(), payload["synced_at"])
         return {
@@ -8847,12 +8847,23 @@ def create_local_planned_unit(workout: dict[str, Any], db: Any | None = None) ->
     return entry
 
 
-def list_planned_units(limit: int = 500, include_archived: bool = False) -> list[dict[str, Any]]:
+def list_planned_units(limit: int = 500, include_archived: bool = False, *, future_only: bool = False) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
+        clauses = []
+        params: list[Any] = []
+        if not include_archived:
+            clauses.append("COALESCE(json_extract(payload, '$.archived'), 0) = 0")
+        if future_only:
+            clauses.extend([
+                "COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
+                "substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ?",
+            ])
+            params.append(local_now().date().isoformat())
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = db.execute(
             "SELECT local_id, payload, sync_state, sync_error, sync_conflict FROM planned_units "
-            "ORDER BY json_extract(payload, '$.date'), lower(json_extract(payload, '$.name')), local_id LIMIT ?",
-            (max(1, min(int(limit) * (2 if include_archived else 1), 1000)),),
+            f"{where} ORDER BY json_extract(payload, '$.date'), lower(json_extract(payload, '$.name')), local_id LIMIT ?",
+            (*params, max(1, min(int(limit) * (2 if include_archived else 1), 1000))),
         ).fetchall()
     result: list[dict[str, Any]] = []
     for row in rows:
@@ -9182,18 +9193,7 @@ def list_recent_activities(days: int = ALL_SYNC_DAYS, limit: int = 250) -> dict[
 
 def list_local_planned_workouts(limit: int = 250) -> list[dict[str, Any]]:
     """Return future concrete units from the local canonical planning store."""
-    today = local_now().date()
-    result = []
-    for entry in list_planned_units(limit):
-        if not isinstance(entry, dict):
-            continue
-        try:
-            entry_date = date.fromisoformat(str(entry.get("date") or ""))
-        except (TypeError, ValueError):
-            continue
-        if entry_date >= today:
-            result.append(entry)
-    return result
+    return list_planned_units(limit, future_only=True)
 
 
 def list_dated_local_planned_workouts(limit: int = 500) -> list[dict[str, Any]]:
@@ -10018,7 +10018,7 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": not failed, "status": status, "results": results, "failed_object_ids": failed, "retry_scope": "Nur fehlgeschlagene Objekte erneut auswählen." if failed else None}
 
 
-def update_local_planned_workout(local_id: str, values: Any) -> dict[str, Any]:
+def update_local_planned_workout(local_id: str, values: Any, *, skip_calendar_conflict: bool = False) -> dict[str, Any]:
     """Edit or remove a dated local plan without writing to a provider."""
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
@@ -10069,7 +10069,7 @@ def update_local_planned_workout(local_id: str, values: Any) -> dict[str, Any]:
                 old_start = str(current.get("start_date_local") or "")
                 time_suffix = old_start[10:] if len(old_start) > 10 and old_start[10] == "T" else "T00:00:00"
                 candidate["start_date_local"] = candidate["date"][:10] + time_suffix
-            if candidate["date"][:10] != str(current.get("date") or "")[:10]:
+            if not skip_calendar_conflict and candidate["date"][:10] != str(current.get("date") or "")[:10]:
                 conflicts = calendar_conflicts({"date": candidate["date"][:10]}, {normalized_id})
                 if conflicts:
                     raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht verschoben werden.")
@@ -12446,11 +12446,9 @@ def prompt_requests_workout_creation(message: str) -> bool:
     return (asks_for_workout or asks_for_schedule_window) and asks_to_create
 
 
-def prompt_requests_bulk_training_change(message: str) -> bool:
+def _legacy_prompt_requests_bulk_training_change(message: str) -> bool:
     """Recognise an explicit request to change the complete local plan."""
     text = str(message or "").casefold()
-    if re.search(r"\b(?:kein\w*|nicht|nie)\b", text):
-        return False
     complete_scope = bool(
         re.search(
             r"\b(?:alle[nrs]?|saemtliche[nrs]?|gesamte[nmrs]?|komplette[nmrs]?|ganze[nmrs]?|every|entire|whole|all)\s+"
@@ -12466,7 +12464,53 @@ def prompt_requests_bulk_training_change(message: str) -> bool:
             text,
         )
     )
-    return complete_scope and mutation
+    if not complete_scope or not mutation:
+        return False
+    mutation_match = re.search(
+        r"\b(?:aender\w*|Ã¤nd\w*|bearbeit\w*|verschieb\w*|aktualisier\w*|umstell\w*|optimier\w*|mach\w*|"
+        r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*)\b",
+        text,
+    )
+    if not mutation_match:
+        return False
+    prefix = text[:mutation_match.start()]
+    if re.search(r"\b(?:kein\w*|nicht|nie|do\s+not|don't|never)\b(?:\W+\w+){0,3}\s*$", prefix):
+        return False
+    suffix = text[mutation_match.end():]
+    direct_negation = re.match(r"(?:\W+\w+){0,5}\W+(?:kein\w*|nicht|nie|never)\b", suffix)
+    if direct_negation and not re.search(r"\b(?:aber|but|ausser|auÃŸer|except)\b", direct_negation.group(0)):
+        return False
+    return True
+
+
+def prompt_requests_bulk_training_change(message: str) -> bool:
+    """Recognise complete-plan edits while allowing scoped exclusions."""
+    text = str(message or "").casefold()
+    complete_scope = bool(
+        re.search(
+            r"\b(?:alle[nrs]?|saemtliche[nrs]?|gesamte[nmrs]?|komplette[nmrs]?|ganze[nmrs]?|every|entire|whole|all)\s+"
+            r"(?:geplant\w*\s+)?(?:einheit\w*|workout\w*|session\w*|trainingsplan\w*|planung\w*|plan\w*|kalender\w*)\b",
+            text,
+        )
+        or re.search(r"\b(?:gesamt|komplett|ganz)\w*plan\w*\b", text)
+    )
+    if not complete_scope:
+        return False
+    mutation_match = re.search(
+        r"\b(?:aender\w*|\N{LATIN SMALL LETTER A WITH DIAERESIS}nd\w*|bearbeit\w*|verschieb\w*|aktualisier\w*|umstell\w*|optimier\w*|mach\w*|"
+        r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*)\b",
+        text,
+    )
+    if not mutation_match:
+        return False
+    prefix = text[:mutation_match.start()]
+    if re.search(r"\b(?:kein\w*|nicht|nie|do\s+not|don't|never)\b(?:\W+\w+){0,3}\s*$", prefix):
+        return False
+    suffix = text[mutation_match.end():]
+    direct_negation = re.match(r"(?:\W+\w+){0,5}\W+(?:kein\w*|nicht|nie|never)\b", suffix)
+    if direct_negation and not re.search(r"\b(?:aber|but|ausser|except)\b", direct_negation.group(0)):
+        return False
+    return True
 
 
 def prompt_requests_long_plan(message: str) -> bool:
@@ -13041,7 +13085,7 @@ COACH_STRUCTURED_TOOLS = [
         },
     }}, strict=True),
     _canonical_coach_tool("commit_training_plan", "Commit a referenced local training-plan artifact atomically.", {"artifact_id": {"type": "string"}}),
-    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. A complete bounded plan may be changed in one call.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "items": {"type": "object"}}, "expected_revision": {"type": "integer"}}),
+    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "For complete-plan edits, include the expected_payload_hash returned for every local_id.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string"}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string"}, "type": {"type": "string"}, "sport": {"type": "string"}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
     _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {"type": "object"}}}),
     _canonical_coach_tool("apply_workout_library_plan", "Schedule selected saved library templates locally after conflict checks; never writes remotely.", {"entries": {"type": "array", "items": {"type": "object"}}}),
     _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in.", {"payload": {"type": "object"}}),
@@ -13091,11 +13135,16 @@ def _require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
 
 
 def _structured_training_state() -> dict[str, Any]:
+    today = local_now().date().isoformat()
     with DB_LOCK, database() as db:
         revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
         planned_rows = db.execute(
-            "SELECT local_id, sync_state, payload FROM planned_units ORDER BY updated_at DESC LIMIT ?",
-            (COACH_TRAINING_CHANGE_LIMIT,),
+            "SELECT local_id, sync_state, payload FROM planned_units "
+            "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
+            "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
+            "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ? "
+            "ORDER BY json_extract(payload, '$.date'), lower(json_extract(payload, '$.name')), local_id LIMIT ?",
+            (today, COACH_TRAINING_CHANGE_LIMIT),
         ).fetchall()
         template_rows = db.execute(
             "SELECT local_id, sync_state, payload FROM workout_library "
@@ -13186,7 +13235,43 @@ def _stage_coach_artifact(conversation_id: str, client_turn_id: str, payload: di
     return {"ok": True, "status": "draft", "artifact_id": artifact_id, "base_revision": base_revision}
 
 
-def _apply_structured_training_changes(arguments: dict[str, Any]) -> dict[str, Any]:
+def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> None:
+    """Validate all final dates before applying any member of a batch."""
+    batch_ids = {str(change.get("local_id") or "").strip() for change in changes}
+    batch_ids.discard("")
+    final_dates: dict[str, str] = {}
+    for change in changes:
+        local_id = str(change.get("local_id") or "").strip()
+        row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+        if not row:
+            continue
+        try:
+            current = json.loads(row.get("payload") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            current = {}
+        if not isinstance(current, dict):
+            continue
+        action = str(change.get("action") or "update").strip().casefold()
+        if action in {"delete", "archive"}:
+            continue
+        candidate_date = str(change.get("date") or current.get("date") or "").strip()[:10]
+        if not candidate_date:
+            continue
+        try:
+            date.fromisoformat(candidate_date)
+        except ValueError as exc:
+            raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
+        previous_id = final_dates.get(candidate_date)
+        if previous_id and previous_id != local_id:
+            raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
+        final_dates[candidate_date] = local_id
+    for candidate_date in final_dates:
+        conflicts = calendar_conflicts({"date": candidate_date}, batch_ids)
+        if conflicts:
+            raise AppError(409, f"Für den {candidate_date} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
+
+
+def _apply_structured_training_changes(arguments: dict[str, Any], *, require_revision: bool = False) -> dict[str, Any]:
     changes = arguments.get("changes") or []
     if not isinstance(changes, list) or not changes or len(changes) > COACH_TRAINING_CHANGE_LIMIT:
         raise AppError(
@@ -13198,17 +13283,22 @@ def _apply_structured_training_changes(arguments: dict[str, Any]) -> dict[str, A
         revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
         expected_revision = arguments.get("expected_revision")
+        if require_revision and expected_revision is None:
+            raise AppError(400, "Eine vollständige Planänderung benötigt die gelesene Planrevision.", reason="planning_revision_required")
         if expected_revision is not None and int(expected_revision) != current_revision:
             raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
         for change in changes:
             if not isinstance(change, dict) or not change.get("local_id"):
                 raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
             expected_hash = str(change.get("expected_payload_hash") or "").strip().lower()
+            if require_revision and not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+                raise AppError(400, "Eine vollständige Planänderung benötigt aktuelle Payload-Hashes.", reason="payload_hash_required")
             if expected_hash:
                 row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (str(change["local_id"]),)).fetchone()
                 if not row or _library_payload_hash(row["payload"]) != expected_hash:
                     raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
-        applied = [update_local_planned_workout(change["local_id"], change) for change in changes]
+        _validate_training_change_batch(changes, db)
+        applied = [update_local_planned_workout(change["local_id"], change, skip_calendar_conflict=True) for change in changes]
         db.execute("UPDATE planning_state SET revision=revision+1, updated_at=? WHERE id=1", (utc_now(),))
         revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
     return {"ok": True, "status": "applied", "planning_revision": int((revision or {}).get("revision") or current_revision), "changes": applied}
@@ -13411,7 +13501,7 @@ def _structured_coach_tool_result(
             if isinstance(change, dict) and change.get("local_id"):
                 local_id = str(change["local_id"]).strip()
                 _require_coach_scope(intent, f"planned_unit:{local_id}", "local_plan")
-        return _apply_structured_training_changes(arguments)
+        return _apply_structured_training_changes(arguments, require_revision=bool(intent.get("bulk_change")))
     if name == "manage_training_templates":
         if "manage_training_templates" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
@@ -13757,10 +13847,15 @@ def _chat_with_structured_coach_impl(
         )
     requested_operation = intent.get("operation")
     forced_tool = requested_operation if requested_operation in COACH_CANONICAL_TOOL_NAMES else "none"
+    bulk_training_change = bool(
+        requested_operation == "apply_training_changes"
+        and (intent.get("bulk_change") or prompt_requests_bulk_training_change(message))
+    )
+    bulk_read_complete = False
     # A complete-plan edit needs the current opaque IDs before the mutating
     # call. Read the full bounded local state first, then let the next round
     # submit the authorized changes with the long-plan output budget.
-    if requested_operation == "apply_training_changes" and prompt_requests_bulk_training_change(message):
+    if bulk_training_change:
         forced_tool = "read_training_state"
     request_payload = {
         "_ai_provider": ai_provider or str(background_receipt.get("ai_provider") or selected_ai_provider()),
@@ -13933,6 +14028,8 @@ def _chat_with_structured_coach_impl(
             active_tool_calls = [entry for entry in active_tool_calls if entry.get("call_id") != call_id]
             if result.get("ok"):
                 successful_tools.add(name)
+                if bulk_training_change and name == "read_training_state":
+                    bulk_read_complete = True
             tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
             running_receipt = {
                 "message": None, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids,
@@ -13968,6 +14065,8 @@ def _chat_with_structured_coach_impl(
             if operation not in successful_tools
             and (operation != "commit_training_plan" or intent.get("artifact_id"))
         ]
+        if bulk_training_change and bulk_read_complete and "apply_training_changes" not in successful_tools:
+            pending_follow_ups.insert(0, "apply_training_changes")
         # A failed call needs room for corrected arguments or prerequisite reads.
         # Do not force a dependent write before its draft exists.
         round_failed = any(not json.loads(item["output"]).get("ok") for item in tool_outputs)
@@ -14296,6 +14395,12 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             "intent": "advice", "operation": None, "target_system": "none",
             "artifact_id": None, "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
         }
+    if (
+        isinstance(structured_intent, dict)
+        and structured_intent.get("operation") == "apply_training_changes"
+        and prompt_requests_bulk_training_change(message)
+    ):
+        structured_intent = {**structured_intent, "bulk_change": True}
     if background_owned:
         with DB_LOCK, database() as db:
             db.execute(
