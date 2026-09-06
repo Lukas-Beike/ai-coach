@@ -2726,7 +2726,9 @@ class CoachTests(unittest.TestCase):
             "description": "- 30m Z2", "moving_time": 1800,
         }
         first = server.upsert_remote_planned_units([event])
+        revision_after_import = server._structured_training_state()["planning_revision"]
         second = server.upsert_remote_planned_units([event])
+        self.assertEqual(server._structured_training_state()["planning_revision"], revision_after_import)
         planned = server.list_dated_local_planned_workouts()
         self.assertEqual(first["imported"], 1)
         self.assertEqual(len(planned), 1)
@@ -4637,6 +4639,8 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.prompt_requests_bulk_training_change("Edit all of my planned workouts."))
         self.assertTrue(server.prompt_requests_bulk_training_change("Change all future workouts."))
         self.assertTrue(server.prompt_requests_bulk_training_change("Change all upcoming planned workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Delete all planned workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Lösche alle geplanten Einheiten."))
         self.assertTrue(server.prompt_requests_bulk_training_change("Ändere sämtliche Workouts."))
         self.assertFalse(server.prompt_requests_bulk_training_change(
             "Ändere nicht meinen gesamten Trainingsplan."

@@ -10365,6 +10365,10 @@ def upsert_remote_planned_units(
                 # local dirty row and let the explicit push send it; a read
                 # sync must never turn a local-only edit into a remote copy.
                 continue
+            if state == "synced" and not remote_changed:
+                # An unchanged clean provider row must not invalidate a
+                # pending local plan operation's optimistic-concurrency read.
+                continue
             incoming["id"] = str(current_row.get("local_id") or incoming["id"])
             for key in ("plan_id", "plan_name", "rationale", "archived", "private_calendar_adjustment"):
                 if current.get(key) is not None:
@@ -12488,43 +12492,6 @@ def prompt_requests_workout_creation(message: str) -> bool:
     return (asks_for_workout or asks_for_schedule_window) and asks_to_create
 
 
-def _legacy_prompt_requests_bulk_training_change(message: str) -> bool:
-    """Recognise an explicit request to change the complete local plan."""
-    text = str(message or "").casefold()
-    complete_scope = bool(
-        re.search(
-            r"\b(?:alle[nrs]?|saemtliche[nrs]?|gesamte[nmrs]?|komplette[nmrs]?|ganze[nmrs]?|every|entire|whole|all)\s+"
-            r"(?:geplant\w*\s+)?(?:einheit\w*|workout\w*|session\w*|trainingsplan\w*|planung\w*|plan\w*|kalender\w*)\b",
-            text,
-        )
-        or re.search(r"\b(?:gesamt|komplett|ganz)\w*plan\w*\b", text)
-    )
-    mutation = bool(
-        re.search(
-            r"\b(?:aender\w*|änd\w*|bearbeit\w*|verschieb\w*|aktualisier\w*|umstell\w*|optimier\w*|mach\w*|"
-            r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*)\b",
-            text,
-        )
-    )
-    if not complete_scope or not mutation:
-        return False
-    mutation_match = re.search(
-        r"\b(?:aender\w*|Ã¤nd\w*|bearbeit\w*|verschieb\w*|aktualisier\w*|umstell\w*|optimier\w*|mach\w*|"
-        r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*)\b",
-        text,
-    )
-    if not mutation_match:
-        return False
-    prefix = text[:mutation_match.start()]
-    if re.search(r"\b(?:kein\w*|nicht|nie|do\s+not|don't|never)\b(?:\W+\w+){0,3}\s*$", prefix):
-        return False
-    suffix = text[mutation_match.end():]
-    direct_negation = re.match(r"(?:\W+\w+){0,5}\W+(?:kein\w*|nicht|nie|never)\b", suffix)
-    if direct_negation and not re.search(r"\b(?:aber|but|ausser|auÃŸer|except)\b", direct_negation.group(0)):
-        return False
-    return True
-
-
 def prompt_requests_bulk_training_change(message: str) -> bool:
     """Recognise complete-plan edits while allowing scoped exclusions."""
     text = str(message or "").casefold()
@@ -12541,7 +12508,8 @@ def prompt_requests_bulk_training_change(message: str) -> bool:
         return False
     mutation_match = re.search(
         r"\b(?:aender\w*|\N{LATIN SMALL LETTER A WITH DIAERESIS}nd\w*|bearbeit\w*|verschieb\w*|aktualisier\w*|umstell\w*|optimier\w*|mach\w*|"
-        r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*)\b",
+        r"loesch\w*|l\N{LATIN SMALL LETTER O WITH DIAERESIS}sch\w*|entfern\w*|archivier\w*|leer\w*|"
+        r"change\w*|edit\w*|move\w*|update\w*|adjust\w*|modify\w*|delete\w*|remove\w*|clear\w*|archive\w*)\b",
         text,
     )
     if not mutation_match:
