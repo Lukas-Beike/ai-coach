@@ -12485,15 +12485,21 @@ def prompt_requests_latest_activity_analysis(message: str) -> bool:
 def requested_activity_refresh_days(message: str) -> int | None:
     """Extract an explicit activity-history window from the athlete's request."""
     text = str(message or "").casefold()
-    if re.search(r"\b(?:alle|sämtliche|saemtliche|vollständig|vollstaendig|komplett|all)\b.*\b(?:daten|histor(?:ie|y)|aktivität|aktivitaet|activities)\b", text):
+    refresh_context = r"(?:aktualisier|refresh|sync|synchronisier|abruf|lad|hol|histor(?:ie|y)|aktivität|aktivitaet|activity|activities|einheit)"
+    for match in re.finditer(r"\b(\d{1,4})\s*(?:tage|tag|days?|d)\b", text):
+        prefix = text[max(0, match.start() - 100):match.start()]
+        if not re.search(refresh_context, prefix):
+            continue
+        if re.search(r"\b(?:plan|trainingsplan|training plan)\b.{0,40}\b(?:kommend\w*|nächst\w*|naechst\w*|next)\b", prefix[-90:]):
+            continue
+        try:
+            return int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+    all_time = re.search(r"\b(?:alle|sämtliche|saemtliche|vollständig|vollstaendig|komplett|all)\b.*\b(?:daten|histor(?:ie|y)|aktivität\w*|aktivitaet\w*|activities)\b", text)
+    if all_time and re.search(refresh_context, text[max(0, all_time.start() - 100):all_time.start()]):
         return ALL_SYNC_DAYS
-    match = re.search(r"\b(\d{1,4})\s*(?:tage|tag|days?|d)\b", text)
-    if not match:
-        return None
-    try:
-        return int(match.group(1))
-    except (TypeError, ValueError):
-        return None
+    return None
 
 
 def prompt_requests_morning_checkin(message: str) -> bool:
@@ -13639,6 +13645,21 @@ def _structured_coach_tool_result(
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         provider = str(intent.get("target_system") or "")
         _require_coach_scope(intent, f"{provider}_refresh")
+        if arguments.pop("_wait_for_completion", False):
+            if provider != "intervals":
+                raise AppError(400, "Ein synchroner Vorababruf ist nur fuer Intervals.icu zulaessig.", reason="invalid_refresh_request")
+            try:
+                activity_days = int(arguments.get("days"))
+            except (TypeError, ValueError) as exc:
+                raise AppError(400, "Der synchrone Aktivitaetsabruf benoetigt einen gueltigen Zeitraum.", reason="invalid_refresh_request") from exc
+            result = sync_intervals("Chat-Anfrage", activity_days=activity_days, wait_for_existing=True)
+            if result.get("status") == "already_running":
+                raise AppError(503, "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.", reason="provider_busy")
+            try:
+                completed_days = int(result.get("activity_days"))
+            except (TypeError, ValueError):
+                completed_days = activity_days
+            return {"ok": True, "status": "completed", "provider": provider, "activity_days": completed_days, "synchronous_refresh": True}
         job = enqueue_sync_job(provider, "refresh", arguments, requested_by="coach")
         sync_job_ids.append(job["id"])
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
@@ -14194,7 +14215,7 @@ def _chat_with_structured_coach_impl(
             if not isinstance(arguments, dict):
                 raise AppError(400, "Coach-Aktionsargumente muessen ein Objekt sein.")
             if name == "start_provider_refresh" and uncovered_explicit_refresh:
-                arguments = {**arguments, "days": explicit_refresh_days}
+                arguments = {**arguments, "days": explicit_refresh_days, "_wait_for_completion": True}
             effect_key = _coach_action_hash({"tool": name, "arguments": arguments})
             prior_call = next((entry for entry in command_receipts if entry.get("call_id") == call_id), None)
             if prior_call and prior_call.get("effect_key") != effect_key:
@@ -14242,7 +14263,9 @@ def _chat_with_structured_coach_impl(
                 try:
                     # The local effect and durable receipt commit together. Nested domain
                     # operations reuse this unit of work and roll back on any exception.
-                    local_transaction = name != "apply_adaptive_replan"
+                    local_transaction = name != "apply_adaptive_replan" and not (
+                        name == "start_provider_refresh" and uncovered_explicit_refresh
+                    )
                     with (DB_LOCK if local_transaction else nullcontext()), (database() if local_transaction else nullcontext()):
                         result = _structured_coach_tool_result(name, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids)
                         command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "result": result})
@@ -14262,6 +14285,8 @@ def _chat_with_structured_coach_impl(
             active_tool_calls = [entry for entry in active_tool_calls if entry.get("call_id") != call_id]
             if result.get("ok"):
                 successful_tools.add(name)
+                if result.get("synchronous_refresh"):
+                    model_instructions = build_training_context()
                 if bulk_training_change and name == "read_training_state":
                     bulk_read_complete = True
             tool_outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
