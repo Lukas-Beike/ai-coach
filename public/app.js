@@ -3808,6 +3808,7 @@ async function requestCoachResponse(message) {
         request.responseMessageId = payload.message?.id || null;
         request.responseMessageReceived = reconcileCompletedChatMessage(payload.message ? { ...payload.message, client_turn_id: clientTurnId } : null);
         if (request.responseMessageReceived) state.chatStreamText = "";
+        request.hadOutstandingProposals = Array.isArray(state.coachActionProposals) && state.coachActionProposals.length > 0;
         state.coachActionProposals = Array.isArray(payload?.proposed_actions) ? payload.proposed_actions : [];
         if (payload?.coach_quick_actions && state.data) {
           state.data.coach_quick_actions = payload.coach_quick_actions;
@@ -3837,9 +3838,10 @@ async function requestCoachResponse(message) {
     // Do not keep the composer in "reconciling" while unrelated/pending loads
     // finish; refresh the authoritative proposal list in the background.
     if (completed && request.responseMessageReceived) {
-      void refreshChatProposalsInBackground(state.chatContentVersion);
+      if (request.hadOutstandingProposals) void refreshChatProposalsInBackground(state.chatContentVersion);
+    } else {
+      await loadChatHistoryFresh();
     }
-    else await loadChatHistoryFresh();
     if (completed) scrollChatToResponseStart();
     invalidateContextPreview();
     return completed ? "completed" : "failed";
