@@ -4212,7 +4212,15 @@ async function saveAiProvider(event) {
   const select = event.currentTarget;
   select.disabled = true;
   try {
-    await api("/api/settings/ai-provider", { method: "PUT", body: JSON.stringify({ provider: select.value }) });
+    const result = await api("/api/settings/ai-provider", { method: "PUT", body: JSON.stringify({ provider: select.value }) });
+    if (result?.provider && Array.isArray(result.model_options)) {
+      const provider = { ...(state.data?.ai_provider || {}), selected: result.provider };
+      const model = { selected: result.model, options: result.model_options };
+      state.data = { ...(state.data || {}), ai_provider: provider, model };
+      renderAiProvider(provider);
+      renderModel(model);
+      renderThinkingLevel(state.data.thinking_level);
+    }
     toast(`Aktiv: ${select.options[select.selectedIndex].text}`);
     await load();
   } catch (error) {

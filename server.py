@@ -502,12 +502,16 @@ def selected_ai_provider() -> str:
     return ""
 
 
-def save_ai_provider(provider: Any) -> dict[str, str]:
+def save_ai_provider(provider: Any) -> dict[str, Any]:
     provider_id = str(provider or "").strip().casefold()
     if provider_id not in {item["id"] for item in available_ai_providers()}:
         raise AppError(400, "Der ausgewählte KI-Anbieter ist nicht konfiguriert.")
     set_kv("selected_ai_provider", provider_id)
-    return {"provider": provider_id, "model": selected_model()}
+    return {
+        "provider": provider_id,
+        "model": selected_model(provider_id),
+        "model_options": available_model_options(provider_id),
+    }
 
 
 def available_model_options(provider: str | None = None) -> list[dict[str, str]]:
