@@ -12482,6 +12482,20 @@ def prompt_requests_latest_activity_analysis(message: str) -> bool:
     )
 
 
+def requested_activity_refresh_days(message: str) -> int | None:
+    """Extract an explicit activity-history window from the athlete's request."""
+    text = str(message or "").casefold()
+    if re.search(r"\b(?:alle|sämtliche|saemtliche|vollständig|vollstaendig|komplett|all)\b.*\b(?:daten|histor(?:ie|y)|aktivität|aktivitaet|activities)\b", text):
+        return ALL_SYNC_DAYS
+    match = re.search(r"\b(\d{1,4})\s*(?:tage|tag|days?|d)\b", text)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
 def prompt_requests_morning_checkin(message: str) -> bool:
     return bool(re.search(r"\bmorgen[- ]?check[- ]?in\b", message.casefold())) and prompt_contains_checkin(message)
 
@@ -13840,6 +13854,11 @@ def _chat_with_structured_coach_impl(
         if existing_command:
             _require_command_owner(background_receipt, session_csrf_hash)
         background_owned = bool(background_job and background_receipt.get("mode") == "background")
+        resuming_background_response = bool(
+            background_owned
+            and str(ai_provider or background_receipt.get("ai_provider") or "").casefold() == "openai"
+            and background_receipt.get("openai_response_id")
+        )
         if existing_command and existing_command.get("status") == "running":
             age = db.execute("SELECT (julianday('now') - julianday(?)) * 86400 AS age", (existing_command.get("updated_at"),)).fetchone()
             if not background_owned and float((age or {}).get("age") or 0) > COACH_COMMAND_STALE_SECONDS:
@@ -13924,6 +13943,13 @@ def _chat_with_structured_coach_impl(
             return False
         return requested_days <= completed_days
 
+    explicit_refresh_days = requested_activity_refresh_days(message)
+    uncovered_explicit_refresh = bool(
+        completed_refresh
+        and explicit_refresh_days is not None
+        and not preflight_covers_refresh({"days": explicit_refresh_days})
+    )
+
     sync_job_ids: list[str] = list(background_receipt.get("sync_job_ids") or [])
     command_receipts: list[dict[str, Any]] = list(background_receipt.get("command_receipts") or [])
     successful_tools: set[str] = {
@@ -13969,6 +13995,12 @@ def _chat_with_structured_coach_impl(
             "Analysiere jetzt die letzte Einheit. Ein ausdruecklich angeforderter Datenabruf mit einem "
             "groesseren Zeitraum als der Vorababruf muss trotzdem ausgefuehrt werden.]"
         )
+    if uncovered_explicit_refresh:
+        model_instructions += (
+            "\n\n[Systemhinweis: Die Anfrage verlangt ausdruecklich eine Aktualisierung fuer "
+            f"{explicit_refresh_days if explicit_refresh_days != ALL_SYNC_DAYS else 'alle verfuegbaren'} "
+            "Aktivitaetsdaten. Fuehre start_provider_refresh mit genau diesem Zeitraum aus, bevor du analysierst.]"
+        )
     if refresh_error:
         model_instructions += (
             "\n\n[Systemhinweis: Die angeforderte Intervals.icu-Aktualisierung ist fehlgeschlagen. "
@@ -14002,6 +14034,8 @@ def _chat_with_structured_coach_impl(
             ),
             "none",
         )
+        if uncovered_explicit_refresh:
+            forced_tool = "start_provider_refresh"
     bulk_training_change = bool(
         "apply_training_changes" in _structured_authorized_operations(intent)
         and (intent.get("bulk_change") or prompt_requests_bulk_training_change(message))
@@ -14023,10 +14057,26 @@ def _chat_with_structured_coach_impl(
         forced_tool = "read_training_state"
     authorized_operations = _structured_authorized_operations(intent) - {""}
     preflight_only_refresh = completed_refresh is not None and authorized_operations == {"start_provider_refresh"}
+    pending_durable_tool_calls = any(
+        isinstance(item, dict) and str(item.get("call_id") or "").strip()
+        for item in (background_receipt.get("pending_tool_calls") or [])
+    )
+    try:
+        resumed_tool_rounds = int(background_receipt.get("tool_rounds") or 0)
+    except (TypeError, ValueError):
+        resumed_tool_rounds = 0
+    recovered_response_needs_follow_up = bool(
+        background_owned
+        and not resuming_background_response
+        and background_receipt.get("phase") == "waiting_final_response"
+        and resumed_tool_rounds > 0
+    )
     all_authorized_operations_completed = (
         bool(authorized_operations)
         and authorized_operations.issubset(successful_tools)
         and not preflight_only_refresh
+        and not pending_durable_tool_calls
+        and not recovered_response_needs_follow_up
     )
     if all_authorized_operations_completed:
         forced_tool = "none"
@@ -14143,6 +14193,8 @@ def _chat_with_structured_coach_impl(
             arguments = json.loads(item.get("arguments") or "{}")
             if not isinstance(arguments, dict):
                 raise AppError(400, "Coach-Aktionsargumente muessen ein Objekt sein.")
+            if name == "start_provider_refresh" and uncovered_explicit_refresh:
+                arguments = {**arguments, "days": explicit_refresh_days}
             effect_key = _coach_action_hash({"tool": name, "arguments": arguments})
             prior_call = next((entry for entry in command_receipts if entry.get("call_id") == call_id), None)
             if prior_call and prior_call.get("effect_key") != effect_key:
