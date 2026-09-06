@@ -428,7 +428,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["pending_operations"], [])
         self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
-        self.assertEqual(captured[0]["tool_choice"], "none")
+        self.assertEqual(captured[0]["tool_choice"], "auto")
         self.assertEqual(result["proposed_actions"][0]["action_type"], "delete_duplicate_intervals_activity")
         self.assertIn("Wahoo-Aufzeichnung als kanonische", captured[0]["instructions"])
 

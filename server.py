@@ -13918,6 +13918,8 @@ def _chat_with_structured_coach_impl(
             return False
         if requested_days == ALL_SYNC_DAYS:
             return completed_days == ALL_SYNC_DAYS
+        if completed_days == ALL_SYNC_DAYS:
+            return requested_days >= 1
         if requested_days < 1 or completed_days < 1:
             return False
         return requested_days <= completed_days
@@ -14018,7 +14020,12 @@ def _chat_with_structured_coach_impl(
     if bulk_training_change and not bulk_read_complete and "apply_training_changes" not in successful_tools:
         forced_tool = "read_training_state"
     authorized_operations = _structured_authorized_operations(intent) - {""}
-    all_authorized_operations_completed = bool(authorized_operations) and authorized_operations.issubset(successful_tools)
+    preflight_only_refresh = completed_refresh is not None and authorized_operations == {"start_provider_refresh"}
+    all_authorized_operations_completed = (
+        bool(authorized_operations)
+        and authorized_operations.issubset(successful_tools)
+        and not preflight_only_refresh
+    )
     if all_authorized_operations_completed:
         forced_tool = "none"
     request_payload = {

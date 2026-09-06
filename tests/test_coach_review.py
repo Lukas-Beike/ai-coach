@@ -78,7 +78,7 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(result["sync_job_ids"], [])
         self.assertEqual(replay, result)
         self.assertEqual(request.call_count, 3)
-        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], "none")
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], "auto")
         output = json.loads(request.call_args_list[2].args[0]["input"][0]["output"])
         self.assertEqual(output["status"], "completed")
         self.assertIn("Analyse der aktuellen Einheit", result["message"]["content"])
@@ -117,7 +117,7 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["pending_operations"], [])
         self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
-        self.assertEqual(request.call_args.args[0]["tool_choice"], "none")
+        self.assertEqual(request.call_args.args[0]["tool_choice"], "auto")
 
     def test_waited_full_refresh_preserves_all_time_window(self):
         server.set_kv("last_sync_at", "old-sync")
@@ -314,6 +314,24 @@ class CoachReviewTests(unittest.TestCase):
                         client_turn_id=f"omitted-refresh-{requested_days}",
                     )
                 self.assertEqual(result["command_receipts"][1]["result"]["status"], "queued")
+
+    def test_waited_full_refresh_covers_finite_follow_up_window(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        responses = [
+            {"output": [self.call("start_provider_refresh", {"days": 30}, "full-refresh")]},
+            {"output_text": "Der Zeitraum wurde aktualisiert."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="full-refresh"
+        ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+            server, "sync_period", return_value=90
+        ), patch.object(
+            server, "sync_intervals", return_value={"status": "ok", "waited_for_existing": True, "activity_days": server.ALL_SYNC_DAYS}
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach("Aktualisiere und analysiere die letzte Einheit.", client_turn_id="full-refresh")
+        self.assertEqual(len(result["command_receipts"]), 1)
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], "auto")
 
     def test_latest_analysis_keeps_authorized_follow_up(self):
         intent = {**self.intent("start_provider_refresh", ["intervals_refresh"], ["list_planned_workouts"]), "intent": "remote_sync", "target_system": "intervals"}
