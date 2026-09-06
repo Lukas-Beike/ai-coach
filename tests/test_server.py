@@ -2726,7 +2726,9 @@ class CoachTests(unittest.TestCase):
             "description": "- 30m Z2", "moving_time": 1800,
         }
         first = server.upsert_remote_planned_units([event])
+        revision_after_import = server._structured_training_state()["planning_revision"]
         second = server.upsert_remote_planned_units([event])
+        self.assertEqual(server._structured_training_state()["planning_revision"], revision_after_import)
         planned = server.list_dated_local_planned_workouts()
         self.assertEqual(first["imported"], 1)
         self.assertEqual(len(planned), 1)
@@ -4323,20 +4325,64 @@ class CoachTests(unittest.TestCase):
             server.enqueue_sync_job("intervals", "plan_push", {"entries": [entry] * 29}, requested_by="coach")
         self.assertEqual(too_many.exception.reason, "invalid_job_request")
 
-    def test_structured_training_change_batch_rolls_back_on_late_failure(self):
-        planned = server.create_local_planned_unit({
-            "date": "2099-01-02", "sport": "Ride", "name": "Original",
+    def test_structured_training_changes_accept_complete_bounded_plan_without_remote_write(self):
+        for count in (29, server.COACH_TRAINING_CHANGE_LIMIT):
+            with self.subTest(count=count):
+                self.setUp()
+                planned = [server.create_local_planned_unit({
+                    "date": (date(2098, 1, 1) + timedelta(days=index)).isoformat(),
+                    "sport": "Ride", "name": f"Original {index}",
+                    "description": "- 30m 60%", "duration_minutes": 30, "target": "AUTO",
+                }) for index in range(count)]
+                result = server._apply_structured_training_changes({
+                    "changes": [
+                        {"local_id": item["id"], "action": "update", "name": f"Changed {index}"}
+                        for index, item in enumerate(planned)
+                    ],
+                })
+                self.assertEqual(len(result["changes"]), count)
+                self.assertEqual(
+                    [item["name"] for item in server.list_planned_units(1000, include_archived=True)],
+                    [f"Changed {index}" for index in range(count)],
+                )
+                with server.DB_LOCK, server.database() as db:
+                    self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM sync_jobs").fetchone()["count"], 0)
+
+    def test_structured_training_change_batch_rolls_back_after_old_boundary(self):
+        planned = [server.create_local_planned_unit({
+            "date": (date(2099, 1, 1) + timedelta(days=index)).isoformat(),
+            "sport": "Ride", "name": f"Original {index}",
             "description": "- 30m 60%", "duration_minutes": 30, "target": "AUTO",
-        })
-        with self.assertRaises(server.AppError):
+        }) for index in range(28)]
+        with self.assertRaises(server.AppError) as raised:
             server._apply_structured_training_changes({
                 "changes": [
-                    {"local_id": planned["id"], "action": "update", "date": "2099-01-02", "name": "Changed"},
+                    *[
+                        {"local_id": item["id"], "action": "update", "name": f"Changed {index}"}
+                        for index, item in enumerate(planned)
+                    ],
                     {"local_id": str(uuid.uuid4()), "action": "update", "date": "2099-01-02", "name": "Missing"},
                 ],
             })
-        saved = next(item for item in server.list_planned_units(100, include_archived=True) if item["id"] == planned["id"])
-        self.assertEqual(saved["name"], "Original")
+        self.assertEqual(raised.exception.status, 404)
+        self.assertEqual(
+            [item["name"] for item in server.list_planned_units(100, include_archived=True)],
+            [f"Original {index}" for index in range(28)],
+        )
+
+    def test_structured_training_changes_reject_more_than_complete_plan_limit(self):
+        with self.assertRaises(server.AppError) as raised:
+            server._apply_structured_training_changes({
+                "changes": [{"local_id": str(uuid.uuid4()), "action": "delete"}]
+                * (server.COACH_TRAINING_CHANGE_LIMIT + 1),
+            })
+        self.assertEqual(raised.exception.reason, "change_limit")
+
+    def test_training_change_tool_schema_exposes_complete_plan_limit(self):
+        tool = next(tool for tool in server.COACH_STRUCTURED_TOOLS if tool["name"] == "apply_training_changes")
+        changes = tool["parameters"]["properties"]["changes"]
+        self.assertEqual(changes["minItems"], 1)
+        self.assertEqual(changes["maxItems"], server.COACH_TRAINING_CHANGE_LIMIT)
 
     def test_context_preview_exposes_context_and_last_chat_input(self):
         server.add_message("user", "Wie soll ich morgen trainieren?")
@@ -4574,6 +4620,166 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(scope["horizon_days"], 14)
         self.assertTrue(scope["background"])
         self.assertTrue(server.coach_plan_scope("Ich brauche einen Plan für die nächsten 2 Wochen.")["background"])
+
+    def test_complete_plan_edits_use_long_plan_scope_and_budget(self):
+        prompt = "Ändere meinen gesamten Trainingsplan nach diesen Vorgaben."
+        scope = server.coach_plan_scope(prompt)
+        self.assertTrue(scope["planning"])
+        self.assertTrue(scope["bulk_change"])
+        self.assertEqual(scope["planned_units"], server.COACH_TRAINING_CHANGE_LIMIT)
+        self.assertTrue(scope["background"])
+        self.assertEqual(server.coach_output_token_budget(prompt), server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+        self.assertEqual(server.coach_output_token_budget(prompt, followup=True), server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+
+    def test_bulk_scope_keeps_scoped_exclusions_and_rejects_negated_mutation(self):
+        self.assertTrue(server.prompt_requests_bulk_training_change(
+            "Ändere meinen gesamten Trainingsplan, aber nicht die Ruhetage."
+        ))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Change my entire training plan."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Edit all of my planned workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Change all future workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Change all upcoming planned workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Replan my entire training plan."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Revise my entire training plan."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Delete all planned workouts."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Lösche alle geplanten Einheiten."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Plane meinen gesamten Trainingsplan neu."))
+        self.assertTrue(server.prompt_requests_bulk_training_change("Ändere sämtliche Workouts."))
+        self.assertFalse(server.prompt_requests_bulk_training_change(
+            "Ändere nicht meinen gesamten Trainingsplan."
+        ))
+
+    def test_complete_plan_edit_reads_full_state_before_mutating(self):
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "read_training_state", "call_id": "read", "arguments": "{}"}]},
+            {"output_text": "Die Planänderungen sind vorbereitet."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-bulk-read"
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach(
+                "Ändere meinen gesamten Trainingsplan nach diesen Vorgaben.",
+                client_turn_id="turn-bulk-read",
+            )
+        self.assertEqual(result["command_receipts"][0]["tool"], "read_training_state")
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "read_training_state"})
+        self.assertEqual(request.call_args_list[1].args[0]["max_output_tokens"], server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+
+    def test_complete_plan_edit_forces_authorized_write_after_read(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Bulk target", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        target = next(item for item in state["planned_units"] if item["local_id"] == planned["id"])
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "read_training_state", "call_id": "read", "arguments": "{}"}]},
+            {"output": [{"type": "function_call", "name": "apply_training_changes", "call_id": "apply", "arguments": json.dumps({
+                "expected_revision": state["planning_revision"],
+                "changes": [{"local_id": planned["id"], "action": "update", "name": "Bulk updated", "expected_payload_hash": target["expected_payload_hash"]}],
+            })}]},
+            {"output_text": "Die Planänderung wurde angewendet."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-bulk-write"
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach(
+                "Ändere meinen gesamten Trainingsplan nach diesen Vorgaben.",
+                client_turn_id="turn-bulk-write",
+            )
+        self.assertEqual(request.call_args_list[1].args[0]["tool_choice"], {"type": "function", "name": "apply_training_changes"})
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(server.list_planned_units()[0]["name"], "Bulk updated")
+
+    def test_structured_training_reads_expose_complete_bounded_plan(self):
+        for index in range(server.COACH_TRAINING_CHANGE_LIMIT):
+            server.create_local_planned_unit({
+                "date": (date(2098, 1, 1) + timedelta(days=index)).isoformat(),
+                "sport": "Ride", "name": f"Session {index}", "description": "- 30m easy",
+            })
+        intent = {"intent": "local_action", "operation": "read_training_state", "target_system": "local", "authorization_scope": []}
+        state = server._structured_coach_tool_result(
+            "read_training_state", {}, intent=intent, conversation_id="read-plan", client_turn_id="read-plan",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(len(state["planned_units"]), server.COACH_TRAINING_CHANGE_LIMIT)
+        listed = server._structured_coach_tool_result(
+            "list_planned_workouts", {"limit": server.COACH_TRAINING_CHANGE_LIMIT}, intent=intent,
+            conversation_id="read-plan", client_turn_id="read-plan", session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(len(listed["local"]), server.COACH_TRAINING_CHANGE_LIMIT)
+
+    def test_structured_training_state_filters_inactive_rows_before_limit(self):
+        with patch.object(server, "COACH_TRAINING_CHANGE_LIMIT", 2):
+            archived = server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=1)).isoformat(),
+                "sport": "Ride", "name": "Archived", "description": "- 30m easy",
+            })
+            server.update_local_planned_workout(archived["id"], {"action": "archive"})
+            active = [server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=index)).isoformat(),
+                "sport": "Ride", "name": f"Active {index}", "description": "- 30m easy",
+            }) for index in (2, 3)]
+            state = server._structured_training_state()
+        self.assertEqual([item["local_id"] for item in state["planned_units"]], [item["id"] for item in active])
+
+    def test_bulk_training_changes_require_revision_and_hashes(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Bulk target", "description": "- 30m easy",
+        })
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "authorization_scope": ["local_plan"], "bulk_change": True,
+        }
+        with self.assertRaises(server.AppError) as raised:
+            server._structured_coach_tool_result(
+                "apply_training_changes", {"changes": [{"local_id": planned["id"], "action": "update"}]},
+                intent=intent, conversation_id="bulk-required", client_turn_id="bulk-required",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+        self.assertEqual(raised.exception.reason, "planning_revision_required")
+
+    def test_bulk_training_changes_validate_final_schedule_before_writes(self):
+        first_date = date.today() + timedelta(days=1)
+        second_date = date.today() + timedelta(days=2)
+        first = server.create_local_planned_unit({
+            "date": first_date.isoformat(), "sport": "Ride", "name": "First", "description": "- 30m easy",
+        })
+        second = server.create_local_planned_unit({
+            "date": second_date.isoformat(), "sport": "Ride", "name": "Second", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        refs = {item["local_id"]: item for item in state["planned_units"]}
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "authorization_scope": ["local_plan"], "bulk_change": True,
+        }
+        result = server._structured_coach_tool_result(
+            "apply_training_changes", {
+                "expected_revision": state["planning_revision"],
+                "changes": [
+                    {"local_id": first["id"], "action": "update", "date": second_date.isoformat(), "expected_payload_hash": refs[first["id"]]["expected_payload_hash"]},
+                    {"local_id": second["id"], "action": "update", "date": first_date.isoformat(), "expected_payload_hash": refs[second["id"]]["expected_payload_hash"]},
+                ],
+            },
+            intent=intent, conversation_id="bulk-rotation", client_turn_id="bulk-rotation",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["status"], "applied")
+        current = {item["id"]: item["date"] for item in server.list_planned_units()}
+        self.assertEqual(current[first["id"]], second_date.isoformat())
+        self.assertEqual(current[second["id"]], first_date.isoformat())
 
     def test_openai_background_response_is_created_checkpointed_and_polled(self):
         captured = {}
