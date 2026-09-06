@@ -10110,7 +10110,7 @@ def update_local_planned_workout(
                 "UPDATE planned_units SET payload=?, sync_state='local', sync_dirty=1, sync_conflict='', updated_at=? WHERE local_id = ?",
                 (json.dumps(current, ensure_ascii=False), utc_now(), normalized_id),
             )
-            _record_change(db, "planned_unit", normalized_id, "delete", before, None)
+            _record_change(db, "planned_unit", normalized_id, "delete", before, current)
             if bump_planning_revision:
                 _bump_planning_revision(db)
             updated = None
@@ -13614,7 +13614,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
                 "UPDATE planned_units SET payload=?, sync_state='local', sync_dirty=1, sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
                 (json.dumps(current, ensure_ascii=False), now, row["local_id"]),
             )
-            _record_change(db, "planned_unit", row["local_id"], "delete", before, None, source="coach")
+            _record_change(db, "planned_unit", row["local_id"], "delete", before, current, source="coach")
         for superseded_plan_id in superseded_plan_ids:
             superseded_plan = TRAINING_PLAN_REPOSITORY.get(db, superseded_plan_id)
             if not superseded_plan or superseded_plan.get("status") == "archived":
@@ -14955,12 +14955,13 @@ def coach_intent_artifact_refs(conversation_id: str | None = None) -> list[dict[
 def coach_intent_object_refs() -> list[dict[str, Any]]:
     """Only current local object identities/names enter the isolated classifier."""
     refs: list[dict[str, Any]] = []
-    for kind, values in (
-        ("competition", list_competitions()),
-        ("training_plan", list_training_plans(100)),
-        ("library_workout", list_workout_library(100, include_archived=True)),
-        ("planned_unit", list_planned_units(100, include_archived=True)),
-    ):
+    values_by_kind = {
+        "competition": list_competitions(),
+        "training_plan": [plan for plan in list_training_plans(100) if plan.get("status") != "archived"],
+        "library_workout": list_workout_library(100, include_archived=True),
+        "planned_unit": list_planned_units(100, include_archived=True),
+    }
+    for kind, values in values_by_kind.items():
         for value in values:
             refs.append({"kind": kind, "id": str(value["id"]), "name": str(value.get("name") or "")[:200], "date": value.get("date") or value.get("event_date")})
     return refs

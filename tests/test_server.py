@@ -4996,7 +4996,7 @@ class CoachTests(unittest.TestCase):
         }
         result = server._structured_coach_tool_result(
             "replace_training_plan",
-            {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Base Replacement", "goal": "", "workouts": [
+            {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Base Build", "goal": "", "workouts": [
                 {"date": (date.today() + timedelta(days=3)).isoformat(), "sport": "Ride", "name": "Base new", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
             ]}},
             intent=intent, conversation_id="conversation-selected-plan", client_turn_id="turn-selected-plan",
@@ -5007,6 +5007,17 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(remaining[base["id"]]["archived"])
         self.assertFalse(remaining[race["id"]]["archived"])
         self.assertEqual(remaining[race["id"]]["name"], "Race prep")
+        active_named_refs = [
+            ref for ref in server.coach_intent_object_refs()
+            if ref["kind"] == "training_plan" and ref["name"] == "Base Build"
+        ]
+        self.assertEqual(len(active_named_refs), 1)
+        self.assertNotEqual(active_named_refs[0]["id"], base_plan["id"])
+        deleted_history = next(
+            item for item in server.list_change_history()
+            if item["entity_type"] == "planned_unit" and item["entity_id"] == base["id"] and item["action"] == "delete"
+        )
+        self.assertEqual(server._history_preview(deleted_history["id"], "session-undo")["status"], "preview")
 
     def test_complete_plan_edit_reads_full_state_before_mutating(self):
         intent = {
