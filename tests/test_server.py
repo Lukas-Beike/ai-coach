@@ -1840,19 +1840,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi.audio(path, blob, () =>", app)
         self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
-        self.assertIn('/api.js?v=194', index)
-        self.assertIn('/navigation.js?v=194', index)
-        self.assertIn('/state.js?v=194', index)
-        self.assertIn('/views.js?v=194', index)
-        self.assertIn('/forms.js?v=194', index)
-        self.assertIn('/components.js?v=194', index)
-        self.assertIn('/app.js?v=194', index)
-        self.assertIn('intervals-coach-v194', service_worker)
-        self.assertIn('"/navigation.js?v=194"', service_worker)
-        self.assertIn('"/state.js?v=194"', service_worker)
-        self.assertIn('"/views.js?v=194"', service_worker)
-        self.assertIn('"/forms.js?v=194"', service_worker)
-        self.assertIn('"/components.js?v=194"', service_worker)
+        self.assertIn('/api.js?v=195', index)
+        self.assertIn('/navigation.js?v=195', index)
+        self.assertIn('/state.js?v=195', index)
+        self.assertIn('/views.js?v=195', index)
+        self.assertIn('/forms.js?v=195', index)
+        self.assertIn('/components.js?v=195', index)
+        self.assertIn('/app.js?v=195', index)
+        self.assertIn('intervals-coach-v195', service_worker)
+        self.assertIn('"/navigation.js?v=195"', service_worker)
+        self.assertIn('"/state.js?v=195"', service_worker)
+        self.assertIn('"/views.js?v=195"', service_worker)
+        self.assertIn('"/forms.js?v=195"', service_worker)
+        self.assertIn('"/components.js?v=195"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1879,8 +1879,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=194'), index.index('/components.js?v=194'))
-        self.assertLess(index.index('/components.js?v=194'), index.index('/app.js?v=194'))
+        self.assertLess(index.index('/forms.js?v=195'), index.index('/components.js?v=195'))
+        self.assertLess(index.index('/components.js?v=195'), index.index('/app.js?v=195'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -4955,6 +4955,41 @@ class CoachTests(unittest.TestCase):
                 server._run_background_coach_job(resumed)
         self.assertEqual(seen["response_id"], "resp_background_resume")
 
+    def test_background_worker_preserves_checkpointed_recovery_phase(self):
+        server.enqueue_background_coach_job(
+            "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
+            "turn-background-recovery-phase",
+            "csrf-background-recovery-phase",
+            operation_id="operation-background-recovery-phase",
+        )
+        job = server._claim_background_coach_job()
+        server._merge_coach_command_receipt(
+            "turn-background-recovery-phase",
+            {"openai_response_id": "resp-recovery-phase", "phase": "waiting_final_response", "tool_rounds": 1},
+        )
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                ("turn-background-recovery-phase",),
+            ).fetchone()
+        job["receipt"] = server._coach_command_receipt(row["receipt"])
+        seen = {}
+
+        def capture_phase(*_args, **_kwargs):
+            with server.DB_LOCK, server.database() as db:
+                row = db.execute(
+                    "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                    ("turn-background-recovery-phase",),
+                ).fetchone()
+            seen["phase"] = json.loads(row["receipt"])["phase"]
+            return {}
+
+        with patch.object(server, "chat_with_coach", side_effect=capture_phase), patch.object(
+            server, "_restore_coach_session_csrf_hash", return_value="csrf-background-recovery-phase"
+        ):
+            server._run_background_coach_job(job)
+        self.assertEqual(seen["phase"], "waiting_final_response")
+
     def test_conversation_recovery_lock_is_reentrant(self):
         with patch.object(server, "get_kv", return_value="conversation-stale"), patch.object(
             server, "openai_request", return_value={"id": "conversation-recovered"}
@@ -5004,6 +5039,16 @@ class CoachTests(unittest.TestCase):
         openai_request.assert_not_called()
         self.assertEqual(result["activity_days"], 65)
         self.assertEqual(result["window_end"], server.local_now().date().isoformat())
+
+    def test_sync_intervals_passes_cancellation_to_snapshot_fetch(self):
+        snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        cancel_event = threading.Event()
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", return_value=snapshot
+        ) as fetch_snapshot, patch.object(server, "refresh_workout_library", return_value={"workouts": 0}):
+            server.sync_intervals("cancellable", activity_days=42, cancel_event=cancel_event)
+        fetch_snapshot.assert_called_once_with(activity_days=42, cancel_event=cancel_event)
 
     def test_initial_intervals_sync_copies_remote_library_to_empty_local_library(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
@@ -6312,16 +6357,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=194"', source)
-        self.assertIn('"/navigation.js?v=194"', source)
-        self.assertIn('"/state.js?v=194"', source)
-        self.assertIn('"/views.js?v=194"', source)
-        self.assertIn('"/forms.js?v=194"', source)
-        self.assertIn('"/components.js?v=194"', source)
+        self.assertIn('"/api.js?v=195"', source)
+        self.assertIn('"/navigation.js?v=195"', source)
+        self.assertIn('"/state.js?v=195"', source)
+        self.assertIn('"/views.js?v=195"', source)
+        self.assertIn('"/forms.js?v=195"', source)
+        self.assertIn('"/components.js?v=195"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=194"', source)
-        self.assertIn('"/icon.svg?v=194"', source)
-        self.assertIn('"/styles.css?v=194"', source)
+        self.assertIn('"/app.js?v=195"', source)
+        self.assertIn('"/icon.svg?v=195"', source)
+        self.assertIn('"/styles.css?v=195"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -7382,7 +7427,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=194', index)
+        self.assertIn('v=195', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)

@@ -342,6 +342,16 @@ class CoachReviewTests(unittest.TestCase):
         self.assertIsNone(
             server.requested_activity_refresh_days("Analysiere meine letzte Einheit und beruecksichtige die komplette Historie."),
         )
+        self.assertIsNone(
+            server.requested_activity_refresh_days(
+                "Aktualisiere und analysiere meine letzte Einheit; erstelle danach einen Trainingsplan fuer 365 Tage."
+            ),
+        )
+        self.assertIsNone(
+            server.requested_activity_refresh_days(
+                "Aktualisiere und analysiere meine letzte Einheit; erstelle danach einen 365 Tage Trainingsplan."
+            ),
+        )
 
     def test_synchronous_refresh_rejects_windows_beyond_job_limit(self):
         intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}

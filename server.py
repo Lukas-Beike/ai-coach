@@ -7525,8 +7525,8 @@ class IntervalsClient:
         self.pagination: dict[str, dict[str, Any]] = {}
         self._workout_folder_id: int | None = None
 
-    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        return self._read_transport.get(path, params)
+    def get(self, path: str, params: dict[str, Any] | None = None, *, cancel_event: threading.Event | None = None) -> Any:
+        return self._read_transport.get(path, params, cancel_event=cancel_event)
 
     def get_paged_collection(
         self,
@@ -7534,6 +7534,7 @@ class IntervalsClient:
         params: dict[str, Any] | None,
         collection: str,
         page_size: int = 500,
+        cancel_event: threading.Event | None = None,
     ) -> list[dict[str, Any]]:
         rows, page_metadata = fetch_paged_collection(
             self.get,
@@ -7542,6 +7543,7 @@ class IntervalsClient:
             collection,
             error=lambda message: AppError(502, message),
             page_size=page_size,
+            cancel_event=cancel_event,
         )
         previous = self.pagination.get(collection) or {"pages": 0, "records": 0, "complete": True}
         self.pagination[collection] = {
@@ -7665,7 +7667,12 @@ class IntervalsClient:
             raise AppError(502, "Intervals.icu hat keine geplante Einheit zurÃ¼ckgegeben.")
         return result[0]
 
-    def fetch_snapshot(self, activity_days: int = 42, end_date: date | None = None) -> dict[str, Any]:
+    def fetch_snapshot(
+        self,
+        activity_days: int = 42,
+        end_date: date | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         today = end_date or local_now().date()
         calendar_start = today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)
@@ -7676,17 +7683,22 @@ class IntervalsClient:
         activities: list[Any] = []
         wellness: list[Any] = []
         for window_start, window_end in sync_date_windows(request_days, today):
+            _raise_chat_cancelled(cancel_event)
             range_params = {"oldest": window_start.isoformat(), "newest": window_end.isoformat()}
-            activities.extend(self.get_paged_collection(f"/athlete/{athlete}/activities", range_params, "activities"))
-            wellness.extend(self.get_paged_collection(f"/athlete/{athlete}/wellness", range_params, "wellness"))
+            activities.extend(self.get_paged_collection(f"/athlete/{athlete}/activities", range_params, "activities", cancel_event=cancel_event))
+            wellness.extend(self.get_paged_collection(f"/athlete/{athlete}/wellness", range_params, "wellness", cancel_event=cancel_event))
         activities = deduplicate_api_records(activities)
         wellness = deduplicate_api_records(wellness)
+        _raise_chat_cancelled(cancel_event)
         events = self.get_paged_collection(
             f"/athlete/{athlete}/events",
             {"oldest": calendar_start.isoformat(), "newest": calendar_end.isoformat()},
             "events",
+            cancel_event=cancel_event,
         )
-        athlete_data = self.get(f"/athlete/{athlete}")
+        _raise_chat_cancelled(cancel_event)
+        athlete_kwargs = {"cancel_event": cancel_event} if cancel_event is not None else {}
+        athlete_data = self.get(f"/athlete/{athlete}", **athlete_kwargs)
         incoming = compact_snapshot(athlete_data, activities, wellness, events, history_days=request_days)
         # Keep the complete provider collections in the durable snapshot. The
         # compact fields above are the read model; Coach projection is the only
@@ -10522,11 +10534,13 @@ def sync_intervals(
     operation_id: str | None = None,
     end_date: date | None = None,
     wait_for_existing: bool = False,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
     if activity_days is None:
         activity_days = sync_period("intervals")
+    _raise_chat_cancelled(cancel_event)
     acquired = SYNC_LOCK.acquire(blocking=False)
     if not acquired:
         if not wait_for_existing:
@@ -10534,6 +10548,7 @@ def sync_intervals(
         previous_sync_at = get_kv("last_sync_at")
         deadline = time.monotonic() + INTERVALS_SYNC_WAIT_SECONDS
         while time.monotonic() < deadline:
+            _raise_chat_cancelled(cancel_event)
             remaining = max(0.05, min(1.0, deadline - time.monotonic()))
             if SYNC_LOCK.acquire(timeout=remaining):
                 try:
@@ -10570,6 +10585,8 @@ def sync_intervals(
         fetch_kwargs = {"activity_days": activity_days}
         if end_date is not None:
             fetch_kwargs["end_date"] = end_date
+        if cancel_event is not None:
+            fetch_kwargs["cancel_event"] = cancel_event
         snapshot = IntervalsClient().fetch_snapshot(**fetch_kwargs)
         planning_imported_at = get_kv("planned_units_initial_import_at")
         set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
@@ -12491,7 +12508,13 @@ def requested_activity_refresh_days(message: str) -> int | None:
         suffix = text[match.end():min(len(text), match.end() + 100)]
         if not re.search(refresh_context, prefix + suffix):
             continue
-        if re.search(r"\b(?:plan|trainingsplan|training plan)\b.{0,40}\b(?:kommend\w*|nächst\w*|naechst\w*|next)\b", prefix[-90:]):
+        plan_horizon = (
+            re.search(r"\b(?:plan|trainingsplan|training plan)\b.{0,40}$", prefix[-100:])
+            or re.search(r"^\W{0,6}(?:(?:fuer|for|im)\W+){0,2}\b(?:plan|trainingsplan|training plan)\b", suffix)
+            or re.search(r"\b(?:plan|trainingsplan|training plan)\b.{0,40}\b(?:kommend\w*|nächst\w*|naechst\w*|next)\b", prefix[-100:])
+            or re.search(r"\b(?:plan|trainingsplan|training plan)\b.{0,40}\b(?:kommend\w*|nächst\w*|naechst\w*|next)\b", suffix[:100])
+        )
+        if plan_horizon:
             continue
         try:
             return int(match.group(1))
@@ -13482,6 +13505,7 @@ def _structured_coach_tool_result(
     client_turn_id: str,
     session_csrf_hash: str,
     sync_job_ids: list[str],
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     operation = intent.get("operation")
     if name == "read_training_state":
@@ -13658,7 +13682,10 @@ def _structured_coach_tool_result(
                 raise AppError(400, "Der synchrone Aktivitaetsabruf benoetigt einen gueltigen Zeitraum.", reason="invalid_refresh_request") from exc
             if activity_days != ALL_SYNC_DAYS and not 1 <= activity_days <= 3660:
                 raise AppError(400, "Der Synchronisationszeitraum ist zu gross.", reason="invalid_refresh_request")
-            result = sync_intervals("Chat-Anfrage", activity_days=activity_days, wait_for_existing=True)
+            sync_kwargs: dict[str, Any] = {"activity_days": activity_days, "wait_for_existing": True}
+            if cancel_event is not None:
+                sync_kwargs["cancel_event"] = cancel_event
+            result = sync_intervals("Chat-Anfrage", **sync_kwargs)
             if result.get("status") == "already_running":
                 raise AppError(503, "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.", reason="provider_busy")
             try:
@@ -13673,7 +13700,10 @@ def _structured_coach_tool_result(
                 activity_days >= 1 and completed_days >= activity_days
             )
             if result.get("waited_for_existing") and not covers_requested_window:
-                result = sync_intervals("Chat-Anfrage", activity_days=activity_days, wait_for_existing=False)
+                retry_kwargs: dict[str, Any] = {"activity_days": activity_days, "wait_for_existing": False}
+                if cancel_event is not None:
+                    retry_kwargs["cancel_event"] = cancel_event
+                result = sync_intervals("Chat-Anfrage", **retry_kwargs)
                 if result.get("status") == "already_running":
                     raise AppError(503, "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.", reason="provider_busy")
                 try:
@@ -14306,7 +14336,7 @@ def _chat_with_structured_coach_impl(
                         name == "start_provider_refresh" and uncovered_explicit_refresh
                     )
                     with (DB_LOCK if local_transaction else nullcontext()), (database() if local_transaction else nullcontext()):
-                        result = _structured_coach_tool_result(name, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids)
+                        result = _structured_coach_tool_result(name, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids, cancel_event=cancel_event)
                         command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "result": result})
                         _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
                     if result.get("artifact_id"):
@@ -14773,11 +14803,13 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
         and structured_intent.get("target_system") == "intervals"
     ))):
         try:
-            sync_result = sync_intervals(
-                "Chat-Anfrage",
-                activity_days=sync_period("intervals"),
-                wait_for_existing=latest_activity_analysis,
-            )
+            preflight_sync_kwargs: dict[str, Any] = {
+                "activity_days": sync_period("intervals"),
+                "wait_for_existing": latest_activity_analysis,
+            }
+            if cancel_event is not None:
+                preflight_sync_kwargs["cancel_event"] = cancel_event
+            sync_result = sync_intervals("Chat-Anfrage", **preflight_sync_kwargs)
             if latest_activity_analysis and sync_result.get("status") == "already_running":
                 raise AppError(
                     503,
@@ -14977,7 +15009,10 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
         if not session_csrf_hash:
             raise AppError(401, "Die Sitzung des Coach-Auftrags ist abgelaufen.", reason="session_expired")
         message = _background_coach_message(job)
-        _merge_coach_command_receipt(client_turn_id, {"status": "running", "phase": "preparing"})
+        worker_phase = {"status": "running"}
+        if not receipt.get("openai_response_id"):
+            worker_phase["phase"] = "preparing"
+        _merge_coach_command_receipt(client_turn_id, worker_phase)
         chat_with_coach(
             message,
             cancel_event=cancel_event,
