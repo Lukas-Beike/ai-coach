@@ -4792,7 +4792,10 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Replace my training plan's Tuesday workout."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next week only."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next week."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for the next two weeks."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for 2026-09-08."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("What happens if I replace my training plan?"))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Preview a replacement for my entire training plan."))
 
     def test_complete_plan_rebuild_uses_long_plan_scope_and_budget(self):
         prompt = "Replace my training plan."
@@ -4804,6 +4807,9 @@ class CoachTests(unittest.TestCase):
         hypothetical = "What happens if I replace my training plan?"
         self.assertFalse(server.coach_plan_scope(hypothetical)["bulk_change"])
         self.assertFalse(server.coach_plan_scope(hypothetical)["background"])
+        preview = "Preview a replacement for my entire training plan."
+        self.assertFalse(server.coach_plan_scope(preview)["bulk_change"])
+        self.assertFalse(server.coach_plan_scope(preview)["background"])
 
     def test_reset_coach_chat_discards_outstanding_plan_drafts(self):
         artifact = server._stage_coach_artifact(
@@ -4936,6 +4942,32 @@ class CoachTests(unittest.TestCase):
         archived = next(item for item in server.list_planned_units(20, include_archived=True) if item["id"] == old["id"])
         self.assertTrue(archived["archived"])
         self.assertTrue(archived["local_deleted"])
+
+    def test_complete_plan_replace_ignores_archived_units_in_date_conflicts(self):
+        archived = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=2)).isoformat(),
+            "sport": "Ride", "name": "Archived", "description": "- 30m easy",
+        })
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (archived["id"],)).fetchone()
+            payload = json.loads(row["payload"])
+            payload.update({"archived": True, "local_deleted": True})
+            db.execute("UPDATE planned_units SET payload=? WHERE local_id=?", (json.dumps(payload), archived["id"]))
+        state = server._structured_training_state()
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        result = server._structured_coach_tool_result(
+            "replace_training_plan",
+            {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Replacement", "goal": "", "workouts": [
+                {"date": archived["date"], "sport": "Ride", "name": "New", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+            ]}},
+            intent=intent, conversation_id="conversation-archived", client_turn_id="turn-archived",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["status"], "replaced")
 
     def test_complete_plan_edit_reads_full_state_before_mutating(self):
         intent = {

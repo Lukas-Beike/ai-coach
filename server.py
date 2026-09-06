@@ -12597,6 +12597,13 @@ def prompt_requests_workout_creation(message: str) -> bool:
 def prompt_requests_bulk_training_change(message: str) -> bool:
     """Recognise complete-plan edits while allowing scoped exclusions."""
     text = str(message or "").casefold()
+    if "?" in text or re.search(
+        r"\b(?:preview|draft|proposal|proposed|hypothetical|vorschau|entwurf|vorschlag|"
+        r"what\s+happens\s+if|what\s+if|if\s+i|would\s+i|could\s+i|should\s+i|"
+        r"was\s+wäre\s+wenn|wenn\s+ich|würde\s+ich|könnte\s+ich|soll\s+ich|kann\s+ich)\b",
+        text,
+    ):
+        return False
     complete_scope = bool(
         re.search(
             r"\b(?:alle[nrs]?|saemtliche[nrs]?|s\N{LATIN SMALL LETTER A WITH DIAERESIS}mtliche[nrs]?|gesamte[nmrs]?|komplette[nmrs]?|ganze[nmrs]?|every|entire|whole|all)\s+"
@@ -12639,6 +12646,8 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         text,
     ) or "?" in text:
         return False
+    if re.search(r"\b(?:preview|draft|proposal|proposed|hypothetical|vorschau|entwurf|vorschlag)\w*\b", text):
+        return False
     if re.search(r"\b(?:except|excluding|but\s+keep|keep\s+(?:my|the)|ohne|au(?:s|ß)er|behalt\w*)\b", text):
         return False
     # A plan named as the container for one workout, or narrowed to one
@@ -12653,7 +12662,16 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
     if re.search(
         r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
         r"(?:for|in)\s+(?:the\s+)?(?:next|this|coming|last)\s+"
+        r"(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"ein|eine|einer|einen|zwei|drei|vier|fünf|fuenf|sechs|sieben|"
+        r"acht|neun|zehn)\s+)?"
         r"(?:week|weeks|day|days|month|months)\b",
+        text,
+    ):
+        return False
+    if re.search(
+        r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
+        r"(?:for|in)\s+(?:the\s+)?\d{4}-\d{2}-\d{2}\b",
         text,
     ):
         return False
@@ -13554,6 +13572,14 @@ def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, An
             (today,),
         ).fetchall()
         replace_ids = {str(row.get("local_id") or "") for row in rows if row.get("local_id")}
+        archived_rows = db.execute(
+            "SELECT local_id FROM planned_units "
+            "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 1 "
+            "OR COALESCE(json_extract(payload, '$.local_deleted'), 0) = 1"
+        ).fetchall()
+        ignored_calendar_ids = replace_ids | {
+            str(row.get("local_id") or "") for row in archived_rows if row.get("local_id")
+        }
         existing_entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
         superseded_plan_ids: set[str] = set()
         for row in rows:
@@ -13569,7 +13595,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any]) -> dict[str, An
                 superseded_plan_ids.add(plan_id)
         # Validate every external/calendar conflict before changing any row.
         for workout in workouts:
-            if calendar_conflicts({"date": workout["date"]}, replace_ids):
+            if calendar_conflicts({"date": workout["date"]}, ignored_calendar_ids):
                 raise AppError(409, f"Für den {workout['date']} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
         now = utc_now()
         for row, current in existing_entries:
