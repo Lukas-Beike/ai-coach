@@ -4796,6 +4796,7 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for 2026-09-08."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("What happens if I replace my training plan?"))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Preview a replacement for my entire training plan."))
+        self.assertTrue(server.prompt_requests_complete_plan_rebuild("Could you replace my training plan?"))
 
     def test_complete_plan_rebuild_uses_long_plan_scope_and_budget(self):
         prompt = "Replace my training plan."
@@ -4810,6 +4811,9 @@ class CoachTests(unittest.TestCase):
         preview = "Preview a replacement for my entire training plan."
         self.assertFalse(server.coach_plan_scope(preview)["bulk_change"])
         self.assertFalse(server.coach_plan_scope(preview)["background"])
+        polite = "Could you replace my training plan?"
+        self.assertTrue(server.coach_plan_scope(polite)["bulk_change"])
+        self.assertTrue(server.coach_plan_scope(polite)["background"])
 
     def test_reset_coach_chat_discards_outstanding_plan_drafts(self):
         artifact = server._stage_coach_artifact(

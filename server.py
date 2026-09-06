@@ -12597,7 +12597,7 @@ def prompt_requests_workout_creation(message: str) -> bool:
 def prompt_requests_bulk_training_change(message: str) -> bool:
     """Recognise complete-plan edits while allowing scoped exclusions."""
     text = str(message or "").casefold()
-    if "?" in text or re.search(
+    if re.search(
         r"\b(?:preview|draft|proposal|proposed|hypothetical|vorschau|entwurf|vorschlag|"
         r"what\s+happens\s+if|what\s+if|if\s+i|would\s+i|could\s+i|should\s+i|"
         r"was\s+wäre\s+wenn|wenn\s+ich|würde\s+ich|könnte\s+ich|soll\s+ich|kann\s+ich)\b",
@@ -12644,7 +12644,7 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         r"was\s+wäre\s+wenn|wenn\s+ich|würde\s+ich|könnte\s+ich|soll\s+ich|"
         r"kann\s+ich)\b",
         text,
-    ) or "?" in text:
+    ):
         return False
     if re.search(r"\b(?:preview|draft|proposal|proposed|hypothetical|vorschau|entwurf|vorschlag)\w*\b", text):
         return False
@@ -14662,6 +14662,8 @@ def _chat_with_structured_coach_impl(
                         result = _structured_coach_tool_result(name, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids, cancel_event=cancel_event)
                         command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "result": result})
                         _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
+                    if result.get("ok") and name == "replace_training_plan":
+                        publish_state_event("planning", {"status": "changed"})
                     if result.get("artifact_id"):
                         intent["artifact_id"] = result["artifact_id"]
                         scope = intent.setdefault("authorization_scope", [])
