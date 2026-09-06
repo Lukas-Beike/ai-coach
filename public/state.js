@@ -1,6 +1,7 @@
 const state = {
   data: null,
   route: null,
+  initialStateLoaded: false,
   loadSequence: 0,
   loadPromise: null,
   pendingLoads: new Map(),
@@ -20,6 +21,8 @@ const state = {
   chatProposalRefreshPending: false,
   chatProposalRefreshInFlight: false,
   chatProposalRefreshQueued: false,
+  chatInitialScrollPending: true,
+  chatScrollY: null,
   stateEventSource: null,
   stateEventReconnectTimer: null,
   stateEventRefreshTimer: null,

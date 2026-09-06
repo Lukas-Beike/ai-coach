@@ -263,6 +263,52 @@ test.describe("critical browser states", () => {
     await expectNoBrowserErrorsOrOverflow(page, browserErrors);
   });
 
+  test("coach reload opens at the latest message and tab navigation restores the scroll position", async ({ page }) => {
+    const messages = Array.from({ length: 18 }, (_, index) => ({
+      id: 90_000 + index,
+      role: index % 2 ? "assistant" : "user",
+      content: `${index % 2 ? "Coach" : "Athlet"} Abschnitt ${index + 1}\n\n${"Ausführlicher Trainingskontext für die Scrollprüfung. ".repeat(12)}`,
+      created_at: `2099-01-01T00:${String(index).padStart(2, "0")}:00Z`,
+    }));
+    const latestMessageId = messages.at(-1).id;
+    await page.route("**/api/chat/history?*", (route) => route.fulfill({
+      json: { messages, next_cursor: null, proposed_actions: [] },
+    }));
+
+    await page.goto("/#coach");
+    await expect(page.locator("#appShell")).toBeVisible();
+    const latest = page.locator(`[data-message-id="${latestMessageId}"]`);
+    await expect(latest).toBeAttached();
+    await expect.poll(() => page.evaluate((messageId) => {
+      const message = document.querySelector(`[data-message-id="${messageId}"]`);
+      const composer = document.querySelector("#chatForm");
+      if (!message || !composer) return Number.POSITIVE_INFINITY;
+      const desiredBottom = Math.min(window.innerHeight, composer.getBoundingClientRect().top) - 12;
+      return Math.abs(message.getBoundingClientRect().bottom - desiredBottom);
+    }, latestMessageId)).toBeLessThanOrEqual(24);
+
+    const savedScrollY = await page.evaluate(() => {
+      const target = Math.min(420, Math.max(1, document.documentElement.scrollHeight - window.innerHeight - 240));
+      window.scrollTo({ top: target, behavior: "auto" });
+      return window.scrollY;
+    });
+    expect(savedScrollY).toBeGreaterThan(0);
+    await page.getByRole("link", { name: "Heute", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await page.getByRole("link", { name: "Coach", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
+
+    await page.reload();
+    await expect(latest).toBeAttached();
+    await expect.poll(() => page.evaluate((messageId) => {
+      const message = document.querySelector(`[data-message-id="${messageId}"]`);
+      const composer = document.querySelector("#chatForm");
+      if (!message || !composer) return Number.POSITIVE_INFINITY;
+      const desiredBottom = Math.min(window.innerHeight, composer.getBoundingClientRect().top) - 12;
+      return Math.abs(message.getBoundingClientRect().bottom - desiredBottom);
+    }, latestMessageId)).toBeLessThanOrEqual(24);
+  });
+
   test("coach streaming, tab changes, long markdown and scrolling stay stable", async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);
     await openAuthenticatedApp(page);

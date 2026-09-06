@@ -123,6 +123,8 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   if (currentPanel !== NAV_ROUTES[panelRoute] && !(await confirmDiscardChanges())) return false;
   if (currentPanel !== NAV_ROUTES[panelRoute] && hasUnsavedChanges({ includeChatDraft: false })) discardUnsavedChanges();
+  const returningToChat = currentPanel !== "chatPanel" && mainRoute === "coach";
+  if (state.data && currentPanel === "chatPanel" && mainRoute !== "coach") state.chatScrollY = window.scrollY;
   if (currentPanel === "chatPanel" && mainRoute !== "coach" && (state.chatRequest || state.chatServerOperationId)) {
     state.chatResponseScrollPending = true;
   }
@@ -151,13 +153,12 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   if (state.data && mainRoute === "more") loadContextPreview();
   if (state.data && mainRoute === "more") loadLogs();
   if (state.data && mainRoute === "more") loadChangeHistory();
-  requestAnimationFrame(() => {
-    if (!shouldFocusPlannedToday || !focusPlannedToday()) window.scrollTo({ top: 0, behavior: "auto" });
-  });
   if (mainRoute === "coach") {
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
-    else scrollChatToLatest(true);
-  }
+    else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest(true);
+  } else requestAnimationFrame(() => {
+    if (!shouldFocusPlannedToday || !focusPlannedToday()) window.scrollTo({ top: 0, behavior: "auto" });
+  });
   ensureRouteData(panelRoute);
   if (focus && !$("#appShell")?.hidden) {
     panel.setAttribute("tabindex", "-1");
@@ -225,6 +226,7 @@ function showLogin() {
   state.loadSequence += 1;
   state.pendingLoads.clear();
   state.loadPromise = null;
+  state.initialStateLoaded = false;
   state.chatStatusPollInFlight = null;
   state.chatStream?.controller.abort();
   state.chatStream = null;
@@ -255,6 +257,8 @@ function showLogin() {
   state.chatProposalRefreshPending = false;
   state.chatProposalRefreshInFlight = false;
   state.chatProposalRefreshQueued = false;
+  state.chatInitialScrollPending = true;
+  state.chatScrollY = null;
   cancelScheduledChatStreamRender();
   state.loadedAreas.clear();
   state.planSegment = "overview";
@@ -1766,7 +1770,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   renderCoachActionReview();
   updateChatQueueStatus();
   updateChatComposerVisibility();
-  if (shouldScroll && !state.chatResponseStarted) scrollChatToLatest();
+  if ((state.chatInitialScrollPending || shouldScroll) && !state.chatResponseStarted) scrollChatToLatest();
 }
 
 function cancelScheduledChatStreamRender() {
@@ -1827,18 +1831,33 @@ function scrollChatToLatest() {
   const root = $("#messages");
   if (!panel?.classList.contains("active") || !root) return;
   requestAnimationFrame(() => {
+    if (state.chatInitialScrollPending && (!state.initialStateLoaded || document.readyState !== "complete")) return;
     const target = root.lastElementChild;
     if (!target) return;
+    state.chatInitialScrollPending = false;
     const composer = $("#chatForm");
     const targetBottom = target.getBoundingClientRect().bottom;
     const composerTop = composer?.getBoundingClientRect().top;
     const targetGap = 12;
-    const desiredBottom = Number.isFinite(composerTop)
-      ? composerTop - targetGap
-      : window.innerHeight - targetGap;
+    const desiredBottom = Math.min(
+      window.innerHeight,
+      Number.isFinite(composerTop) ? composerTop : window.innerHeight,
+    ) - targetGap;
     window.scrollTo({ top: Math.max(0, window.scrollY + targetBottom - desiredBottom), behavior: "auto" });
     requestAnimationFrame(updateChatComposerVisibility);
   });
+}
+
+function restoreChatScrollPosition() {
+  const panel = $("#chatPanel");
+  const scrollY = state.chatScrollY;
+  if (!panel?.classList.contains("active") || !Number.isFinite(scrollY)) return false;
+  requestAnimationFrame(() => {
+    if (!panel.classList.contains("active")) return;
+    window.scrollTo({ top: scrollY, behavior: "auto" });
+    requestAnimationFrame(updateChatComposerVisibility);
+  });
+  return true;
 }
 
 function renderContextPreview(preview) {
@@ -3619,6 +3638,8 @@ async function loadInitialState() {
   if (state.data?.profile?.weather_location) {
     await load("/api/bootstrap", state.loadedAreas.has("plan") ? ["plan"] : ["weather"]);
   }
+  state.initialStateLoaded = true;
+  if (state.chatInitialScrollPending && baseRoute() === "coach") scrollChatToLatest();
   connectStateEvents();
   scheduleChatStatusPoll(0);
 }
@@ -4028,6 +4049,7 @@ async function resetCoachChat() {
       state.chatServerOperationId = null;
       state.chatResponseStarted = false;
       state.chatResponseScrollPending = false;
+      state.chatScrollY = null;
       cancelScheduledChatStreamRender();
       renderMessages([], true);
     }
@@ -4483,7 +4505,10 @@ document.addEventListener("focusout", scheduleMobileViewportLayout);
 window.addEventListener("scroll", updateChatComposerVisibility, { passive: true });
 window.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
 window.addEventListener("orientationchange", scheduleMobileViewportLayout, { passive: true });
-window.addEventListener("pageshow", scheduleMobileViewportLayout, { passive: true });
+window.addEventListener("pageshow", () => {
+  scheduleMobileViewportLayout();
+  if (state.chatInitialScrollPending && baseRoute() === "coach") scrollChatToLatest();
+}, { passive: true });
 window.visualViewport?.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
 window.visualViewport?.addEventListener("scroll", scheduleMobileViewportLayout, { passive: true });
 window.addEventListener("pagehide", savePwaActivity);
