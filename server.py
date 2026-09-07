@@ -14273,6 +14273,19 @@ def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dic
     if intent.get("intent") not in {"local_action", "remote_sync"}:
         return intent
     if not prompt_requests_complete_plan_rebuild(message):
+        if "replace_training_plan" in _structured_authorized_operations(intent):
+            return {
+                "intent": "needs_clarification",
+                "operation": None,
+                "target_system": "none",
+                "artifact_id": None,
+                "ambiguities": [
+                    "Ein vollständiger Planersatz ist für diese begrenzte Anfrage nicht eindeutig; "
+                    "bitte bestätige ausdrücklich den Ersatz des gesamten zukünftigen Trainingsplans."
+                ],
+                "authorization_scope": [],
+                "follow_up_operations": [],
+            }
         return intent
     plan_operations = {"stage_training_plan", "commit_training_plan", "replace_training_plan", "apply_training_changes"}
     if not (_structured_authorized_operations(intent) & plan_operations):

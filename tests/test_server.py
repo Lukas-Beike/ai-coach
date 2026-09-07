@@ -4958,6 +4958,27 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual(normalized, intent)
 
+    def test_scoped_direct_plan_replacement_requires_clarification(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Keep", "description": "- 30m easy",
+        })
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+
+        normalized = server._normalize_complete_plan_intent(
+            "Rebuild my training plan for next week.", intent,
+        )
+
+        self.assertEqual(normalized["intent"], "needs_clarification")
+        self.assertIsNone(normalized["operation"])
+        self.assertEqual(normalized["target_system"], "none")
+        self.assertEqual(normalized["authorization_scope"], [])
+        self.assertEqual(server.list_planned_units()[0]["id"], planned["id"])
+
     def test_complete_plan_rebuild_preserves_sync_when_classifier_makes_it_primary(self):
         server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
