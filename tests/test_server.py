@@ -5095,6 +5095,19 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(broad["intent"], "remote_sync")
         self.assertIn("local_plan", broad["authorization_scope"])
 
+    def test_explicit_plan_id_wins_over_duplicate_plan_name(self):
+        refs = [
+            {"kind": "training_plan", "id": "plan-one", "name": "Base Build", "status": "planned"},
+            {"kind": "training_plan", "id": "plan-two", "name": "Base Build", "status": "planned"},
+        ]
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        resolved = server.resolve_intent_objects(intent, "Replace Base Build plan-one", refs)
+        self.assertEqual(resolved["authorization_scope"], ["training_plan:plan-one"])
+
     def test_training_plan_metadata_changes_advance_planning_revision(self):
         plan_entry = server.save_workout_library_entries([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
