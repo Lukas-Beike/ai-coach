@@ -4806,6 +4806,7 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.prompt_requests_complete_plan_rebuild("Replace my existing plan with this draft."))
         self.assertTrue(server.prompt_requests_complete_plan_rebuild("Could you replace my training plan?"))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle meinen Trainingsplan neu für übermorgen."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle meinen Trainingsplan neu für 2026-09-08."))
 
     def test_complete_plan_rebuild_uses_long_plan_scope_and_budget(self):
         prompt = "Replace my training plan."

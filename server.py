@@ -12806,7 +12806,7 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         return False
     if re.search(
         r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
-        r"(?:neu\s+)?(?:for|in|starting|from|after|ab)\s+(?:the\s+)?\d{4}-\d{2}-\d{2}\b",
+        r"(?:neu\s+)?(?:for|in|starting|from|after|ab|f(?:u|ue|\N{LATIN SMALL LETTER U WITH DIAERESIS})r)\s+(?:the\s+)?\d{4}-\d{2}-\d{2}\b",
         text,
     ):
         return False
@@ -15245,7 +15245,22 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             # Complete-plan normalization can promote a staged request after
             # the first resolver pass. Resolve named plan objects again so a
             # replacement remains scoped to the explicitly named plan.
-            structured_intent = resolve_intent_objects(normalized_intent, message, coach_intent_object_refs())
+            replacement_effect_completed = bool(
+                background_owned
+                and any(
+                    isinstance(item, dict)
+                    and item.get("tool") == "replace_training_plan"
+                    and isinstance(item.get("result"), dict)
+                    and item["result"].get("ok")
+                    for item in background_receipt.get("command_receipts") or []
+                )
+            )
+            if not replacement_effect_completed:
+                structured_intent = resolve_intent_objects(normalized_intent, message, coach_intent_object_refs())
+            else:
+                # A resumed command with a committed replacement must retain
+                # its persisted scope even though the old plan is now archived.
+                structured_intent = normalized_intent
         else:
             structured_intent = normalized_intent
     if background_owned:
