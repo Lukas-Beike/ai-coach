@@ -14225,10 +14225,13 @@ def _structured_coach_tool_result(
                 require_hash=True,
                 max_entries=COACH_TRAINING_CHANGE_LIMIT if authorized_ids else LIBRARY_BULK_MAX_ENTRIES,
             )
-            if authorized_ids and any(
-                entry["library_workout_id"] not in authorized_ids for entry in normalized_entries
-            ):
-                raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst diese Einheit nicht.", reason="intent_scope_denied")
+            normalized_ids = {entry["library_workout_id"] for entry in normalized_entries}
+            if authorized_ids and normalized_ids != authorized_ids:
+                raise AppError(
+                    403,
+                    "Die Synchronisierung muss genau die in diesem Turn erstellten Einheiten umfassen.",
+                    reason="intent_scope_denied",
+                )
             for entry in normalized_entries:
                 _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
             _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
@@ -14354,6 +14357,8 @@ def _normalize_new_plan_intent(intent: dict[str, Any]) -> dict[str, Any]:
         normalized["intent"] = "remote_sync"
         normalized["target_system"] = "intervals"
         normalized["_sync_created_entries_only"] = True
+    elif intent.get("intent") == "remote_sync":
+        normalized["intent"] = "remote_sync"
     else:
         normalized["intent"] = "local_action"
         normalized["target_system"] = "local"
@@ -14966,7 +14971,7 @@ def _chat_with_structured_coach_impl(
             if not isinstance(arguments, dict):
                 raise AppError(400, "Coach-Aktionsargumente muessen ein Objekt sein.")
             turn_sync_entry_ids = replacement_follow_up_sync_ids or created_follow_up_sync_ids
-            if name == "start_intervals_plan_sync" and arguments.get("entries") is None and turn_sync_entry_ids:
+            if name == "start_intervals_plan_sync" and turn_sync_entry_ids:
                 pending_by_id = {
                     entry["library_workout_id"]: entry for entry in _pending_plan_push_entries()
                 }

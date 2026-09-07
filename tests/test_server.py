@@ -592,6 +592,28 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["status"], "queued")
         self.assertEqual(len(enqueue.call_args.args[0]), len(local_ids))
 
+    def test_same_turn_plan_sync_rejects_a_subset_of_created_entries(self):
+        local_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+        intent = {
+            "intent": "remote_sync", "operation": "stage_training_plan", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [],
+            "authorization_scope": [*(f"library_workout:{local_id}" for local_id in local_ids)],
+            "follow_up_operations": ["commit_training_plan", "start_intervals_plan_sync"],
+            "_sync_created_entries_only": True,
+            "_created_sync_entry_ids": local_ids,
+        }
+        entries = [{"library_workout_id": local_ids[0], "expected_payload_hash": "b" * 64}]
+
+        with patch.object(server, "_enqueue_coach_plan_push") as enqueue, self.assertRaises(server.AppError) as error:
+            server._structured_coach_tool_result(
+                "start_intervals_plan_sync", {"entries": entries}, intent=intent,
+                conversation_id="conversation-created-subset", client_turn_id="turn-created-subset",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+
+        self.assertEqual(error.exception.reason, "intent_scope_denied")
+        enqueue.assert_not_called()
+
     def test_structured_coach_exposes_competitions_plans_and_adaptive_operations(self):
         names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
         self.assertTrue({
@@ -4445,6 +4467,26 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(error.exception.reason, "plan_commit_required")
         enqueue.assert_not_called()
 
+    def test_new_plan_intent_preserves_other_remote_follow_up_target(self):
+        normalized = server._normalize_new_plan_intent({
+            "intent": "remote_sync",
+            "operation": "sync_competitions",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan", "local_competitions"],
+            "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+        })
+
+        self.assertEqual(normalized["operation"], "stage_training_plan")
+        self.assertEqual(
+            normalized["follow_up_operations"],
+            ["commit_training_plan", "sync_competitions"],
+        )
+        self.assertEqual(normalized["intent"], "remote_sync")
+        self.assertEqual(normalized["target_system"], "intervals")
+        self.assertNotIn("_sync_created_entries_only", normalized)
+
     def test_new_workout_classification_does_not_request_a_foreign_artifact_id(self):
         old = server._stage_coach_artifact(
             "conversation-old", "turn-old", {"plan_name": "Old", "goal": "", "workouts": []},
@@ -4546,7 +4588,10 @@ class CoachTests(unittest.TestCase):
                 }],
             }})}]},
             {"output": [{"type": "function_call", "name": "commit_training_plan", "call_id": "commit", "arguments": "{}"}]},
-            {"output": [{"type": "function_call", "name": "start_intervals_plan_sync", "call_id": "sync", "arguments": json.dumps({"reason": "Ausdrücklich angefordert"})}]},
+            {"output": [{"type": "function_call", "name": "start_intervals_plan_sync", "call_id": "sync", "arguments": json.dumps({
+                "entries": [{"library_workout_id": unrelated["id"], "expected_payload_hash": "b" * 64}],
+                "reason": "Ausdrücklich angefordert",
+            })}]},
             {"output_text": "Die Einheit wurde angelegt und zur Synchronisierung vorgemerkt."},
         ]
 
