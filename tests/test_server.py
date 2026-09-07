@@ -5233,6 +5233,31 @@ class CoachTests(unittest.TestCase):
     def test_history_capacity_covers_one_complete_plan_replacement(self):
         self.assertGreaterEqual(server.CHANGE_HISTORY_MAX_ROWS, server.COACH_TRAINING_CHANGE_LIMIT * 2)
 
+    def test_complete_plan_replacement_rejects_oversized_history_atomically(self):
+        old = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Old", "description": "- 30m easy",
+            "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Old Plan")[0]
+        old_plan = next(plan for plan in server.list_training_plans() if plan["id"] == old["plan_id"])
+        state = server._structured_training_state()
+
+        with patch.object(server, "CHANGE_HISTORY_MAX_ROWS", 3), self.assertRaises(server.AppError) as error:
+            server._replace_structured_training_plan({
+                "expected_revision": state["planning_revision"],
+                "payload": {"plan_name": "Replacement", "goal": "", "workouts": [{
+                    "date": (date.today() + timedelta(days=2)).isoformat(),
+                    "sport": "Ride", "name": "New", "description": "- 40m easy",
+                    "duration_minutes": 40, "target": "AUTO", "rationale": "Test",
+                }]},
+            })
+
+        self.assertEqual(error.exception.reason, "change_history_limit")
+        active = server.list_planned_units()
+        self.assertEqual([item["id"] for item in active], [old["id"]])
+        unchanged_plan = next(plan for plan in server.list_training_plans() if plan["id"] == old_plan["id"])
+        self.assertEqual(unchanged_plan["status"], "planned")
+
     def test_complete_plan_replace_archives_selected_plan_without_future_units(self):
         past_plan_id = str(uuid.uuid4())
         past = (date.today() - timedelta(days=10)).isoformat()

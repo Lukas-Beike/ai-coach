@@ -2402,7 +2402,14 @@ def _cleanup_change_history(db: Any) -> None:
 
 def _reserve_change_history_capacity(db: Any, required_rows: int) -> None:
     """Make room for one atomic operation without deleting its own audit rows."""
-    keep = max(0, CHANGE_HISTORY_MAX_ROWS - max(0, int(required_rows)))
+    required = max(0, int(required_rows))
+    if required > CHANGE_HISTORY_MAX_ROWS:
+        raise AppError(
+            400,
+            "Die Änderung ist zu groß, um vollständig in der Undo-Historie gespeichert zu werden.",
+            reason="change_history_limit",
+        )
+    keep = max(0, CHANGE_HISTORY_MAX_ROWS - required)
     db.execute(
         "DELETE FROM change_history WHERE id NOT IN "
         "(SELECT id FROM change_history ORDER BY created_at DESC LIMIT ?)",
