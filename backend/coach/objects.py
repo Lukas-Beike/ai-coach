@@ -25,6 +25,20 @@ _POST_VERBAL_NEGATED_CREATE_REQUEST_RE = re.compile(
 )
 
 
+def _has_non_negated_creation_request(text: str) -> bool:
+    """Detect a create request without letting another clause veto it."""
+    boundaries = re.compile(r"[;,.!?]|\b(?:and|und|but|aber)\b", re.IGNORECASE)
+    for match in _CREATE_REQUEST_RE.finditer(text):
+        before = list(boundaries.finditer(text, 0, match.start()))
+        clause_start = before[-1].end() if before else 0
+        after = boundaries.search(text, match.end())
+        clause_end = after.start() if after else len(text)
+        clause = text[clause_start:clause_end]
+        if not _NEGATED_CREATE_REQUEST_RE.search(clause) and not _POST_VERBAL_NEGATED_CREATE_REQUEST_RE.search(clause):
+            return True
+    return False
+
+
 def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict[str, Any]]) -> dict[str, Any]:
     """Narrow selected object scopes before any action is authorized."""
     operations = {intent.get("operation"), *(intent.get("follow_up_operations") or [])}
@@ -137,15 +151,13 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
                     for start, end in name_spans:
                         masked[start:end] = " " * (end - start)
                     creation_text = "".join(masked)
-                creates_new_workout = bool(
-                    _CREATE_REQUEST_RE.search(creation_text)
-                    and not _NEGATED_CREATE_REQUEST_RE.search(creation_text)
-                    and not _POST_VERBAL_NEGATED_CREATE_REQUEST_RE.search(creation_text)
-                )
+                creates_new_workout = _has_non_negated_creation_request(creation_text)
             if creates_new_workout:
-                scope.add(broad)
+                scope.discard(broad)
+                scope.add("local_plan_create")
             else:
                 scope.discard(broad)
+                scope.discard("local_plan_create")
             scope.difference_update(requested)
             scope.update(resolved or {f"{kind}:{ref['id']}" for ref in named})
         elif requested:

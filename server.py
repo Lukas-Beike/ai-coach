@@ -13486,7 +13486,7 @@ COACH_STRUCTURED_TOOLS = [
         },
         strict=True,
     ),
-    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. Combine updates to existing local_id values with action=create entries for new dated workouts when the athlete requests a concrete calendar edit. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every existing-unit change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "Existing units need local_id; new units use action=create and include date, sport, name, description, duration_minutes, target, and rationale. For complete-plan edits, existing units also include expected_payload_hash.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string", "enum": ["create", "update", "delete", "archive", "restore"]}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string"}, "type": {"type": "string"}, "sport": {"type": "string"}, "rationale": {"type": "string"}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
+    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. Combine updates to existing local_id values with action=create entries for new dated workouts when the athlete requests a concrete calendar edit. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every existing-unit change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "Existing units need local_id; new units use action=create and include date, sport, name, description, duration_minutes, target, and rationale. For complete-plan edits, existing units also include expected_payload_hash.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string", "enum": ["create", "update", "delete", "archive", "restore"]}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]}, "type": {"type": "string"}, "sport": {"type": "string"}, "rationale": {"type": "string"}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
     _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {"type": "object"}}}),
     _canonical_coach_tool("apply_workout_library_plan", "Schedule selected saved library templates locally after conflict checks; never writes remotely.", {"entries": {"type": "array", "items": {"type": "object"}}}),
     _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in.", {"payload": {"type": "object"}}),
@@ -13734,6 +13734,9 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                     "Eine neue geplante Einheit benötigt alle Workout-Felder.",
                     reason="invalid_change",
                 )
+            target = change.get("target")
+            if target not in {"AUTO", "POWER", "HR", "PACE"}:
+                raise AppError(400, "Das Workout-Ziel muss AUTO, POWER, HR oder PACE sein.", reason="invalid_change")
             normalized = normalize_workout(change)
             prepared_changes.append({
                 "action": "create",
@@ -13805,6 +13808,53 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                     change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
                 ))
         _bump_planning_revision(db)
+        if derived_plan:
+            plan = TRAINING_PLAN_REPOSITORY.get(db, derived_plan["plan_id"])
+            member_rows = db.execute(
+                "SELECT payload FROM planned_units "
+                "WHERE json_extract(payload, '$.plan_id') = ? "
+                "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
+                "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
+                (derived_plan["plan_id"],),
+            ).fetchall()
+            member_dates = []
+            for row in member_rows:
+                try:
+                    payload = json.loads(row.get("payload") or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    payload = {}
+                if isinstance(payload, dict) and str(payload.get("date") or "")[:10]:
+                    member_dates.append(str(payload["date"])[:10])
+            if plan and member_dates:
+                next_start = min(member_dates)
+                next_end = max(member_dates)
+                if plan.get("start_date") != next_start or plan.get("end_date") != next_end:
+                    updated_at = utc_now()
+                    updated_plan = {
+                        **plan,
+                        "start_date": next_start,
+                        "end_date": next_end,
+                        "updated_at": updated_at,
+                    }
+                    TRAINING_PLAN_REPOSITORY.update(
+                        db,
+                        derived_plan["plan_id"],
+                        updated_plan["name"],
+                        updated_plan.get("goal") or "",
+                        next_start,
+                        next_end,
+                        updated_plan.get("status") or "planned",
+                        updated_at,
+                    )
+                    _record_change(
+                        db,
+                        "training_plan",
+                        derived_plan["plan_id"],
+                        "update",
+                        plan,
+                        updated_plan,
+                        source="coach_apply",
+                    )
         revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
     publish_state_event("planning", {"status": "changed"})
     result_changes = [
@@ -13816,6 +13866,7 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
         "status": "applied",
         "planning_revision": int((revision or {}).get("revision") or current_revision),
         "changes": result_changes,
+        "library_entry_ids": [item["local_id"] for item in result_changes if item.get("local_id")],
     }
 
 
@@ -14161,10 +14212,13 @@ def _structured_coach_tool_result(
                 continue
             action = str(change.get("action") or "update").strip().casefold()
             if action == "create":
-                _require_coach_scope(intent, "local_plan")
+                _require_coach_scope(intent, "local_plan", "local_plan_create")
             elif change.get("local_id"):
                 local_id = str(change["local_id"]).strip()
-                _require_coach_scope(intent, f"planned_unit:{local_id}", "local_plan")
+                allowed_scopes = (f"planned_unit:{local_id}",)
+                if "local_plan_create" not in _coach_scope_values(intent):
+                    allowed_scopes += ("local_plan",)
+                _require_coach_scope(intent, *allowed_scopes)
         return _apply_structured_training_changes(arguments, require_revision=bool(intent.get("bulk_change")))
     if name == "manage_training_templates":
         if "manage_training_templates" not in _structured_authorized_operations(intent):
@@ -14308,9 +14362,33 @@ def _structured_coach_tool_result(
                     "Die neu erstellte Planung muss vor der Synchronisierung lokal gespeichert sein.",
                     reason="plan_commit_required",
                 )
-            _require_coach_scope(intent, "local_plan")
-            _mark_local_planning_authoritative()
-            normalized_entries = _pending_plan_push_entries()
+            if intent.get("_sync_changed_entries_only"):
+                changed_ids = {
+                    str(value).strip() for value in intent.get("_changed_sync_entry_ids") or []
+                    if str(value).strip()
+                }
+                if not changed_ids:
+                    raise AppError(
+                        409,
+                        "Die geänderten Planungseinheiten müssen vor der Synchronisierung feststehen.",
+                        reason="plan_changes_required",
+                    )
+                pending_entries = _pending_plan_push_entries()
+                pending_by_id = {entry["library_workout_id"]: entry for entry in pending_entries}
+                if not changed_ids.issubset(pending_by_id):
+                    raise AppError(
+                        403,
+                        "Die Synchronisierung muss genau die in diesem Turn geänderten Einheiten umfassen.",
+                        reason="intent_scope_denied",
+                    )
+                normalized_entries = [pending_by_id[local_id] for local_id in sorted(changed_ids)]
+                for entry in normalized_entries:
+                    _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
+                _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
+            else:
+                _require_coach_scope(intent, "local_plan")
+                _mark_local_planning_authoritative()
+                normalized_entries = _pending_plan_push_entries()
         else:
             replacement_ids = {
                 str(value).strip() for value in intent.get("_replacement_sync_entry_ids") or []
@@ -14495,6 +14573,19 @@ def _normalize_new_plan_intent(intent: dict[str, Any]) -> dict[str, Any]:
             "_sync_all_pending": True,
         }
         normalized.pop("_sync_created_entries_only", None)
+        return normalized
+    if (
+        "apply_training_changes" in operations
+        and "start_intervals_plan_sync" in operations
+        and intent.get("sync_scope") == "created"
+    ):
+        normalized = {
+            **intent,
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "_sync_changed_entries_only": True,
+        }
+        normalized.pop("_sync_all_pending", None)
         return normalized
     if "stage_training_plan" not in operations:
         return intent
@@ -14944,8 +15035,42 @@ def _chat_with_structured_coach_impl(
                 scope.append(token)
         return local_ids
 
+    def changed_plan_sync_ids(result: dict[str, Any] | None = None) -> list[str]:
+        """Scope a direct-edit follow-up sync to every entry changed in its batch."""
+        if (
+            "start_intervals_plan_sync" not in _structured_authorized_operations(intent)
+            or not intent.get("_sync_changed_entries_only")
+        ):
+            return []
+        apply_result = result
+        if apply_result is None:
+            applied = next(
+                (
+                    item for item in reversed(command_receipts)
+                    if item.get("tool") == "apply_training_changes"
+                    and isinstance(item.get("result"), dict)
+                    and item["result"].get("ok")
+                ),
+                None,
+            )
+            apply_result = applied.get("result") if applied else None
+        if not isinstance(apply_result, dict):
+            return []
+        local_ids = [
+            str(value).strip() for value in apply_result.get("library_entry_ids") or []
+            if str(value).strip()
+        ]
+        intent["_changed_sync_entry_ids"] = local_ids
+        scope = intent.setdefault("authorization_scope", [])
+        for local_id in local_ids:
+            token = f"library_workout:{local_id}"
+            if token not in scope:
+                scope.append(token)
+        return local_ids
+
     replacement_follow_up_sync_ids = replacement_sync_ids()
     created_follow_up_sync_ids = committed_plan_sync_ids()
+    changed_follow_up_sync_ids = changed_plan_sync_ids()
 
     def restore_staged_artifact_intent() -> None:
         """Rehydrate the commit scope before selecting the resumed model action."""
@@ -15206,7 +15331,7 @@ def _chat_with_structured_coach_impl(
             arguments = json.loads(item.get("arguments") or "{}")
             if not isinstance(arguments, dict):
                 raise AppError(400, "Coach-Aktionsargumente muessen ein Objekt sein.")
-            turn_sync_entry_ids = replacement_follow_up_sync_ids or created_follow_up_sync_ids
+            turn_sync_entry_ids = replacement_follow_up_sync_ids or created_follow_up_sync_ids or changed_follow_up_sync_ids
             if name == "start_intervals_plan_sync" and intent.get("_sync_all_pending"):
                 arguments = {key: value for key, value in arguments.items() if key != "entries"}
             elif name == "start_intervals_plan_sync" and turn_sync_entry_ids:
@@ -15281,6 +15406,8 @@ def _chat_with_structured_coach_impl(
                         publish_state_event("planning", {"status": "changed"})
                     if result.get("ok") and name == "commit_training_plan":
                         created_follow_up_sync_ids = committed_plan_sync_ids(result)
+                    if result.get("ok") and name == "apply_training_changes":
+                        changed_follow_up_sync_ids = changed_plan_sync_ids(result)
                     if result.get("artifact_id"):
                         intent["artifact_id"] = result["artifact_id"]
                         scope = intent.setdefault("authorization_scope", [])

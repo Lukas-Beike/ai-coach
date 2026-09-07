@@ -804,6 +804,112 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["changes"][0]["status"], "deleted")
         self.assertEqual(server.list_planned_units(), [])
 
+    def test_mixed_edit_scope_cannot_authorize_unrelated_existing_unit(self):
+        first = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "First", "description": "- 20m easy",
+        })
+        second = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=2)).isoformat(),
+            "sport": "Run", "name": "Second", "description": "- 20m easy",
+        })
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [],
+            "authorization_scope": ["local_plan_create", f"planned_unit:{first['id']}"],
+        }
+        with self.assertRaises(server.AppError) as error:
+            server._structured_coach_tool_result(
+                "apply_training_changes",
+                {"changes": [{"local_id": second["id"], "action": "archive"}, {
+                    "action": "create", "date": (date.today() + timedelta(days=3)).isoformat(),
+                    "sport": "Run", "name": "Recovery", "description": "- 20m easy",
+                    "duration_minutes": 20, "target": "AUTO", "rationale": "Recovery",
+                }]},
+                intent=intent, conversation_id="conversation-mixed-scope", client_turn_id="turn-mixed-scope",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+        self.assertEqual(error.exception.reason, "intent_scope_denied")
+        self.assertIsNotNone(next(item for item in server.list_planned_units() if item["id"] == second["id"]))
+
+    def test_apply_training_changes_rejects_unknown_create_target(self):
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan_create"],
+        }
+        with self.assertRaises(server.AppError) as error:
+            server._structured_coach_tool_result(
+                "apply_training_changes",
+                {"changes": [{
+                    "action": "create", "date": (date.today() + timedelta(days=4)).isoformat(),
+                    "sport": "Run", "name": "Bad target", "description": "- 20m easy",
+                    "duration_minutes": 20, "target": "CADENCE", "rationale": "Test",
+                }]},
+                intent=intent, conversation_id="conversation-target", client_turn_id="turn-target",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+        self.assertEqual(error.exception.reason, "invalid_change")
+
+    def test_mixed_create_recomputes_attached_plan_bounds(self):
+        original_date = (date.today() + timedelta(days=5)).isoformat()
+        created = server.save_workout_library_entries([{
+            "date": original_date, "sport": "Ride", "name": "Plan start",
+            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "rationale": "Base",
+        }], plan_name="Bounds plan", goal="Consistency")
+        plan_id = created[0]["plan_id"]
+        existing_id = created[0]["id"]
+        state = server._structured_training_state()
+        target = next(item for item in state["planned_units"] if item["local_id"] == existing_id)
+        later_date = (date.today() + timedelta(days=12)).isoformat()
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [],
+            "authorization_scope": ["local_plan_create", f"planned_unit:{existing_id}"],
+        }
+        result = server._structured_coach_tool_result(
+            "apply_training_changes",
+            {"changes": [{"local_id": existing_id, "action": "update", "date": original_date,
+                           "expected_payload_hash": target["expected_payload_hash"]}, {
+                "action": "create", "date": later_date, "sport": "Run", "name": "Recovery",
+                "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO",
+                "rationale": "Recovery",
+            }]},
+            intent=intent, conversation_id="conversation-bounds", client_turn_id="turn-bounds",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["status"], "applied")
+        plan = next(item for item in server.list_training_plans() if item["id"] == plan_id)
+        self.assertEqual(plan["start_date"], original_date)
+        self.assertEqual(plan["end_date"], later_date)
+
+    def test_changed_batch_sync_is_limited_to_changed_entries(self):
+        changed = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=6)).isoformat(),
+            "sport": "Ride", "name": "Changed", "description": "- 20m easy",
+        })
+        untouched = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=7)).isoformat(),
+            "sport": "Run", "name": "Untouched", "description": "- 20m easy",
+        })
+        pending = {item["library_workout_id"]: item for item in server._pending_plan_push_entries()}
+        intent = {
+            "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [],
+            "authorization_scope": [f"library_workout:{changed['id']}"],
+            "_sync_changed_entries_only": True, "_changed_sync_entry_ids": [changed["id"]],
+        }
+        with patch.object(server, "enqueue_sync_job", return_value={"id": "job-changed"}) as enqueue:
+            result = server._structured_coach_tool_result(
+                "start_intervals_plan_sync", {}, intent=intent,
+                conversation_id="conversation-changed-sync", client_turn_id="turn-changed-sync",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+        queued = enqueue.call_args.args[2]["entries"]
+        self.assertEqual({item["library_workout_id"] for item in queued}, {changed["id"]})
+        self.assertNotEqual(changed["id"], untouched["id"])
+        self.assertEqual(result["status"], "queued")
+
     def test_structured_coach_can_archive_multiple_templates_directly(self):
         templates = [server.create_local_library_template({
             "sport": "Ride", "name": f"Template {index}", "description": "- 30m Z2", "duration_minutes": 30,
