@@ -13718,7 +13718,9 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
             raise AppError(409, f"Für den {candidate_date} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
 
 
-def _apply_structured_training_changes(arguments: dict[str, Any], *, require_revision: bool = False) -> dict[str, Any]:
+def _apply_structured_training_changes(
+    arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
+) -> dict[str, Any]:
     changes = arguments.get("changes") or []
     if not isinstance(changes, list) or not changes or len(changes) > COACH_TRAINING_CHANGE_LIMIT:
         raise AppError(
@@ -13790,7 +13792,7 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
         for change in changes:
             action = str(change.get("action") or "update").strip().casefold()
             local_id = str(change.get("local_id") or "").strip()
-            if action in {"create", "delete", "archive", "restore"}:
+            if action in {"delete", "archive", "restore"}:
                 recompute_plan_bounds = True
             if action == "create" or not local_id:
                 continue
@@ -13816,16 +13818,30 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                     "plan_id": str(candidate_plan["id"]),
                     "plan_name": str(candidate_plan.get("name") or "")[:200],
                 }
+        authorized_plan_id = str(authorized_plan_id or "").strip()
+        if authorized_plan_id:
+            authorized_plan = TRAINING_PLAN_REPOSITORY.get(db, authorized_plan_id)
+            if not authorized_plan or authorized_plan.get("status") == "archived":
+                raise AppError(409, "Der benannte Trainingsplan ist nicht aktiv.", reason="plan_not_available")
+            if derived_plan and derived_plan["plan_id"] != authorized_plan_id:
+                raise AppError(403, "Die Planreferenzen der Änderung sind nicht eindeutig.", reason="intent_scope_denied")
+            derived_plan = {
+                "plan_id": str(authorized_plan["id"]),
+                "plan_name": str(authorized_plan.get("name") or "")[:200],
+            }
         for change in changes:
-            if str(change.get("action") or "update").strip().casefold() != "create" or "plan_id" not in change:
+            if str(change.get("action") or "update").strip().casefold() != "create":
                 continue
-            requested_plan_id = str(change.get("plan_id") or "").strip()
-            if requested_plan_id and requested_plan_id != derived_plan.get("plan_id"):
-                raise AppError(
-                    403,
-                    "Eine neue Einheit darf nur dem eindeutig abgeleiteten Plan zugeordnet werden.",
-                    reason="intent_scope_denied",
-                )
+            requested_plan_id = str(change.get("plan_id") or "").strip() if "plan_id" in change else None
+            if requested_plan_id is not None:
+                if requested_plan_id and requested_plan_id != derived_plan.get("plan_id"):
+                    raise AppError(
+                        403,
+                        "Eine neue Einheit darf nur dem eindeutig abgeleiteten Plan zugeordnet werden.",
+                        reason="intent_scope_denied",
+                    )
+            if requested_plan_id or ("plan_id" not in change and derived_plan):
+                recompute_plan_bounds = True
         applied = []
         for change in changes:
             if str(change.get("action") or "update").strip().casefold() == "create":
@@ -14249,19 +14265,32 @@ def _structured_coach_tool_result(
         changes = arguments.get("changes")
         if not isinstance(changes, list):
             raise AppError(400, "Coach-Änderungen müssen als Liste gesendet werden.", reason="invalid_change")
+        selected_plan_ids = sorted(
+            token.split(":", 1)[1] for token in _coach_scope_values(intent)
+            if token.startswith("training_plan:") and token.split(":", 1)[1]
+        )
+        if len(selected_plan_ids) > 1:
+            raise AppError(400, "Die Änderungen dürfen nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
         for change in changes:
             if not isinstance(change, dict):
                 continue
             action = str(change.get("action") or "update").strip().casefold()
             if action == "create":
                 _require_coach_scope(intent, "local_plan", "local_plan_create")
+                requested_plan_id = str(change.get("plan_id") or "").strip()
+                if requested_plan_id and requested_plan_id not in selected_plan_ids:
+                    raise AppError(403, "Die neue Einheit darf nur dem benannten Trainingsplan zugeordnet werden.", reason="intent_scope_denied")
             elif change.get("local_id"):
                 local_id = str(change["local_id"]).strip()
                 allowed_scopes = (f"planned_unit:{local_id}",)
                 if "local_plan_create" not in _coach_scope_values(intent):
                     allowed_scopes += ("local_plan",)
                 _require_coach_scope(intent, *allowed_scopes)
-        return _apply_structured_training_changes(arguments, require_revision=bool(intent.get("bulk_change")))
+        return _apply_structured_training_changes(
+            arguments,
+            require_revision=bool(intent.get("bulk_change")),
+            authorized_plan_id=selected_plan_ids[0] if selected_plan_ids else None,
+        )
     if name == "manage_training_templates":
         if "manage_training_templates" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")

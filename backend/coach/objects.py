@@ -77,6 +77,19 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
         kinds.add("library_workout")
     scope = set(intent.get("authorization_scope") or [])
     text = message.casefold()
+    if "apply_training_changes" in operations:
+        plan_candidates = [ref for ref in refs if ref["kind"] == "training_plan" and ref.get("status") != "archived"]
+        named_plans = [
+            ref for ref in plan_candidates
+            if any(
+                value and re.search(r"(?<![\w-])" + re.escape(str(value).casefold()) + r"(?![\w-])", text)
+                for value in (ref.get("id"), ref.get("name"))
+            )
+        ]
+        if len(named_plans) > 1:
+            return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Welchem konkret benannten Trainingsplan soll die neue Einheit zugeordnet werden?"]}
+        if named_plans:
+            scope.add(f"training_plan:{named_plans[0]['id']}")
     for kind in kinds:
         all_candidates = [ref for ref in refs if ref["kind"] == kind]
         candidates = all_candidates
@@ -198,4 +211,7 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
         elif requested:
             scope.difference_update(requested)
             scope.update(resolved)
+        elif kind == "planned_unit" and _has_non_negated_creation_request(text):
+            scope.discard(broad)
+            scope.add("local_plan_create")
     return {**intent, "authorization_scope": sorted(scope)}

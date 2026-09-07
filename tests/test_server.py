@@ -5288,6 +5288,48 @@ class CoachTests(unittest.TestCase):
         created = next(item for item in server.list_planned_units() if item["id"] == created_id)
         self.assertNotIn("plan_id", created)
 
+    def test_named_plan_scope_assigns_create_without_unit_reference(self):
+        plan_id = "named-create-plan"
+        with server.DB_LOCK, server.database() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db, plan_id, "Named create", "Build", "2099-04-01", "2099-04-30", "planned", server.utc_now(),
+            )
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [],
+            "authorization_scope": ["local_plan_create", f"training_plan:{plan_id}"],
+        }
+        result = server._structured_coach_tool_result(
+            "apply_training_changes",
+            {"changes": [{"action": "create", "date": "2099-04-02", "sport": "Run",
+                          "name": "Plan addition", "description": "- 20m easy", "duration_minutes": 20,
+                          "target": "AUTO", "rationale": "Test"}]},
+            intent=intent, conversation_id="conversation-plan-create", client_turn_id="turn-plan-create",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        created = next(item for item in server.list_planned_units() if item["id"] == result["library_entry_ids"][0])
+        self.assertEqual(created["plan_id"], plan_id)
+
+    def test_standalone_create_does_not_recompute_referenced_plan_bounds(self):
+        plan_id = "standalone-bounds-plan"
+        with server.DB_LOCK, server.database() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db, plan_id, "Standalone bounds", "Build", "2099-05-01", "2099-05-31", "planned", server.utc_now(),
+            )
+        existing = server.create_local_planned_unit({
+            "date": "2099-05-10", "sport": "Run", "name": "Plan unit", "description": "- 30m easy",
+            "duration_minutes": 30, "target": "AUTO", "plan_id": plan_id, "plan_name": "Standalone bounds",
+        })
+        server._apply_structured_training_changes({"changes": [
+            {"local_id": existing["id"], "action": "update", "name": "Renamed plan unit"},
+            {"action": "create", "date": "2099-06-10", "sport": "Run", "name": "Standalone",
+             "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test",
+             "plan_id": ""},
+        ]})
+        with server.DB_LOCK, server.database() as db:
+            plan = server.TRAINING_PLAN_REPOSITORY.get(db, plan_id)
+        self.assertEqual((plan["start_date"], plan["end_date"]), ("2099-05-01", "2099-05-31"))
+
     def test_structured_training_plan_membership_includes_archived_and_standalone_references(self):
         plan_id = "membership-boundary-plan"
         with server.DB_LOCK, server.database() as db:
