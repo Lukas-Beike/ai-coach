@@ -13759,11 +13759,11 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                 if not row or _library_payload_hash(row["payload"]) != expected_hash:
                     raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
         _validate_training_change_batch(changes, db)
-        plan_ids: set[str] = set()
+        referenced_memberships: set[str] = set()
         for change in changes:
             action = str(change.get("action") or "update").strip().casefold()
             local_id = str(change.get("local_id") or "").strip()
-            if action in {"create", "delete", "archive"} or not local_id:
+            if action == "create" or not local_id:
                 continue
             row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
             if not row:
@@ -13772,11 +13772,12 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                 current = json.loads(row.get("payload") or "{}")
             except (TypeError, ValueError, json.JSONDecodeError):
                 current = {}
-            if isinstance(current, dict) and str(current.get("plan_id") or "").strip():
-                plan_ids.add(str(current["plan_id"]).strip())
+            if isinstance(current, dict):
+                referenced_memberships.add(str(current.get("plan_id") or "").strip())
         derived_plan: dict[str, str] = {}
-        if len(plan_ids) == 1:
-            candidate_plan = TRAINING_PLAN_REPOSITORY.get(db, next(iter(plan_ids)))
+        if len(referenced_memberships) == 1:
+            membership = next(iter(referenced_memberships))
+            candidate_plan = TRAINING_PLAN_REPOSITORY.get(db, membership) if membership else None
             if candidate_plan and candidate_plan.get("status") != "archived":
                 derived_plan = {
                     "plan_id": str(candidate_plan["id"]),

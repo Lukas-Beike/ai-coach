@@ -120,9 +120,20 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
         if named:
             creates_new_workout = False
             if kind == "planned_unit" and "apply_training_changes" in operations:
+                creation_text = text
+                name_spans = [
+                    (start, end)
+                    for start, end, ref in mentions
+                    if ref in named
+                ]
+                if name_spans:
+                    masked = list(text)
+                    for start, end in name_spans:
+                        masked[start:end] = " " * (end - start)
+                    creation_text = "".join(masked)
                 creates_new_workout = bool(
-                    _CREATE_REQUEST_RE.search(text)
-                    and not _NEGATED_CREATE_REQUEST_RE.search(text)
+                    _CREATE_REQUEST_RE.search(creation_text)
+                    and not _NEGATED_CREATE_REQUEST_RE.search(creation_text)
                 )
             if creates_new_workout:
                 scope.add(broad)

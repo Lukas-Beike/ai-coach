@@ -5051,6 +5051,44 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(created["plan_id"], plan_id)
         self.assertEqual(created["plan_name"], plan_name)
 
+    def test_structured_training_plan_membership_includes_archived_and_standalone_references(self):
+        plan_id = "membership-boundary-plan"
+        with server.DB_LOCK, server.database() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db, plan_id, "Membership Boundary", "Build", "2099-02-01", "2099-02-28", "planned", server.utc_now(),
+            )
+        planned = server.create_local_planned_unit({
+            "date": "2099-02-01", "sport": "Run", "name": "Planned reference",
+            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "plan_id": plan_id, "plan_name": "Membership Boundary",
+        })
+        replacement = server._apply_structured_training_changes({
+            "changes": [
+                {"local_id": planned["id"], "action": "archive"},
+                {"action": "create", "date": "2099-02-02", "sport": "Run", "name": "Plan replacement",
+                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
+            ],
+        })
+        replacement_id = next(item["local_id"] for item in replacement["changes"] if item["local_id"] != planned["id"])
+        replacement_unit = next(item for item in server.list_planned_units(include_archived=True) if item["id"] == replacement_id)
+        self.assertEqual(replacement_unit["plan_id"], plan_id)
+
+        standalone = server.create_local_planned_unit({
+            "date": "2099-02-03", "sport": "Run", "name": "Standalone reference",
+            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+        })
+        mixed = server._apply_structured_training_changes({
+            "changes": [
+                {"local_id": replacement_id, "action": "update", "name": "Plan update"},
+                {"local_id": standalone["id"], "action": "update", "name": "Standalone update"},
+                {"action": "create", "date": "2099-02-04", "sport": "Run", "name": "Ambiguous membership",
+                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
+            ],
+        })
+        mixed_id = next(item["local_id"] for item in mixed["changes"] if item["local_id"] not in {replacement_id, standalone["id"]})
+        mixed_unit = next(item for item in server.list_planned_units() if item["id"] == mixed_id)
+        self.assertNotIn("plan_id", mixed_unit)
+
     def test_structured_training_change_batch_rolls_back_after_old_boundary(self):
         planned = [server.create_local_planned_unit({
             "date": (date(2099, 1, 1) + timedelta(days=index)).isoformat(),
