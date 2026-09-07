@@ -424,7 +424,11 @@ class CoachTests(unittest.TestCase):
         ):
             result = server.chat_with_coach(message, client_turn_id="turn-latest", session_csrf_hash="csrf-hash")
         sync.assert_called_once()
-        self.assertEqual(result["intent"]["intent"], "advice")
+        self.assertEqual(result["intent"], intent)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["pending_operations"], [])
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+        self.assertEqual(captured[0]["tool_choice"], "auto")
         self.assertEqual(result["proposed_actions"][0]["action_type"], "delete_duplicate_intervals_activity")
         self.assertIn("Wahoo-Aufzeichnung als kanonische", captured[0]["instructions"])
 
@@ -1524,7 +1528,24 @@ class CoachTests(unittest.TestCase):
         self.assertIn('garmin: ["performance", "plan"]', app)
         self.assertIn('checkins: ["feedback", "plan"]', app)
         self.assertIn("function scrollChatToResponseStart()", app)
+        self.assertIn("function restoreChatScrollPosition()", app)
+        self.assertIn('state.chatScrollY = window.scrollY', app)
+        self.assertIn('state.chatInitialScrollPending', app)
+        self.assertIn('window.history.scrollRestoration = "manual"', app)
+        self.assertIn("function latestAssistantMessageKey(messages)", app)
+        self.assertIn('state.chatResponseScrollPending = true', app)
+        self.assertIn('state.initialStateLoaded = true', app)
+        initial_state = app[app.index("async function loadInitialState()"):app.index("function queueChatMessage(")]
+        self.assertIn("const sessionGeneration = state.sessionGeneration", initial_state)
+        self.assertIn("state.initialStateLoaded = false", initial_state)
+        self.assertLess(initial_state.index("if (sessionGeneration !== state.sessionGeneration) return"), initial_state.index("state.initialStateLoaded = true"))
+        self.assertLess(initial_state.index("state.initialStateLoaded = true"), initial_state.index("if (state.data?.profile?.weather_location)"))
+        self.assertIn("!state.chatScrollRestoring", app)
         self.assertIn("async function loadChatHistoryFresh()", app)
+        self.assertIn("chatProposalRefreshPending", app)
+        self.assertIn("chatProposalRefreshInFlight", app)
+        self.assertIn("chatProposalRefreshQueued", app)
+        self.assertIn("if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground", app)
         self.assertIn("state.chatStatusPollInFlight", app)
         self.assertIn('request.phase = "reconciling"', app)
         self.assertIn('request.phase = "recovering"', app)
@@ -1817,19 +1838,21 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi = Object.freeze({ audio, request, responseError });", api_client)
         self.assertIn("window.AppApi.request(path, options, () =>", app)
         self.assertIn("window.AppApi.audio(path, blob, () =>", app)
-        self.assertIn('/api.js?v=182', index)
-        self.assertIn('/navigation.js?v=182', index)
-        self.assertIn('/state.js?v=182', index)
-        self.assertIn('/views.js?v=182', index)
-        self.assertIn('/forms.js?v=182', index)
-        self.assertIn('/components.js?v=182', index)
-        self.assertIn('/app.js?v=182', index)
-        self.assertIn('intervals-coach-v182', service_worker)
-        self.assertIn('"/navigation.js?v=182"', service_worker)
-        self.assertIn('"/state.js?v=182"', service_worker)
-        self.assertIn('"/views.js?v=182"', service_worker)
-        self.assertIn('"/forms.js?v=182"', service_worker)
-        self.assertIn('"/components.js?v=182"', service_worker)
+        self.assertIn("Array.isArray(result.model_options)", app)
+        self.assertIn("renderModel(model)", app)
+        self.assertIn('/api.js?v=195', index)
+        self.assertIn('/navigation.js?v=195', index)
+        self.assertIn('/state.js?v=195', index)
+        self.assertIn('/views.js?v=195', index)
+        self.assertIn('/forms.js?v=195', index)
+        self.assertIn('/components.js?v=195', index)
+        self.assertIn('/app.js?v=195', index)
+        self.assertIn('intervals-coach-v195', service_worker)
+        self.assertIn('"/navigation.js?v=195"', service_worker)
+        self.assertIn('"/state.js?v=195"', service_worker)
+        self.assertIn('"/views.js?v=195"', service_worker)
+        self.assertIn('"/forms.js?v=195"', service_worker)
+        self.assertIn('"/components.js?v=195"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1839,6 +1862,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
         self.assertIn('window.addEventListener("offline"', app)
         self.assertIn('const state = {', state)
+        self.assertIn('chatScrollRestoring: false', state)
         self.assertNotIn('const state = {', app)
         self.assertIn('function markdownToHtml(markdown)', views)
         self.assertNotIn('function markdownToHtml(markdown)', app)
@@ -1855,8 +1879,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=182'), index.index('/components.js?v=182'))
-        self.assertLess(index.index('/components.js?v=182'), index.index('/app.js?v=182'))
+        self.assertLess(index.index('/forms.js?v=195'), index.index('/components.js?v=195'))
+        self.assertLess(index.index('/components.js?v=195'), index.index('/app.js?v=195'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -1865,12 +1889,13 @@ class CoachTests(unittest.TestCase):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
         navigation = (Path(__file__).resolve().parents[1] / "public" / "navigation.js").read_text(encoding="utf-8")
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
-        for route in ("coach", "today", "plan/overview", "analysis/performance", "more"):
+        for route in ("coach", "plan/overview", "analysis/performance", "more"):
             self.assertIn(f'href="#{route}"', index)
         self.assertIn('window.addEventListener("hashchange", syncNavigationRoute)', app)
         self.assertIn("window.history.pushState", app)
         self.assertIn("panel.focus({ preventScroll: true })", app)
-        self.assertIn('today: "todayPanel"', navigation)
+        self.assertNotIn('today: "todayPanel"', navigation)
+        self.assertNotIn('href="#today"', index)
         self.assertIn('analysis: "dataPanel"', navigation)
         self.assertIn('plan: "workoutsPanel"', navigation)
         self.assertIn('"analysis/performance": "dataPanel"', navigation)
@@ -1880,8 +1905,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('class="desktop-nav"', index)
         self.assertIn('class="icon-sprite"', index)
         self.assertEqual(index.count('class="bottom-nav"'), 1)
-        self.assertEqual(index[index.index('<nav class="bottom-nav"'):].split('</nav>', 1)[0].count('class="nav-item'), 5)
-        self.assertIn('function renderToday(data)', app)
+        self.assertEqual(index[index.index('<nav class="bottom-nav"'):].split('</nav>', 1)[0].count('class="nav-item'), 4)
+        self.assertNotIn('function renderToday(data)', app)
 
     def test_task8_coach_first_views_have_shared_states_and_analysis_segments(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -1899,7 +1924,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function renderCoachReceipts()', app)
         self.assertIn('function createActionReceipt(', components)
         self.assertIn('createSkeletonStack(4)', app)
-        self.assertIn('id="todaySummary"', index)
+        self.assertNotIn('id="todaySummary"', index)
         self.assertNotIn('today-priority', app)
         self.assertIn('id="analysisHistorySegment"', index)
         self.assertIn('id="analysisPerformanceSegment"', index)
@@ -1912,16 +1937,6 @@ class CoachTests(unittest.TestCase):
         self.assertIn('data-analysis-segment-panel="history" aria-labelledby="analysisHistoryTitle" hidden', index)
         self.assertIn('coachReceipts: []', state)
         self.assertNotIn('id="activitiesPanel"', index)
-
-    def test_today_view_is_a_read_only_coach_oriented_summary(self):
-        app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
-        today_view = app[app.index("function renderToday(data)"):app.index("function distanceLabel(")]
-        self.assertNotIn('todayCard("Coach-Einordnung", "today-priority")', today_view)
-        self.assertNotIn('todayCard("Morgen-Check-in", "today-checkin")', today_view)
-        self.assertNotIn('todayCard("Offene Rückmeldung", "today-feedback")', today_view)
-        self.assertNotIn("Morgen-Check-in abgeschlossen.", today_view)
-        self.assertNotIn("todayAction(", today_view)
-        self.assertNotIn('document.createElement("button")', today_view)
 
     def test_plan_route_has_read_only_overview_and_library_segments(self):
         app = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
@@ -1951,6 +1966,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn("function calendarActualActivity(", app)
         self.assertIn("function calendarStatusLabel(", app)
         self.assertIn('renderPlanned(data.training_calendar || data.planned || [])', app)
+        self.assertIn('function focusPlannedToday()', app)
+        self.assertIn('today.scrollIntoView({ block: "start", behavior: "auto" })', app)
         self.assertIn('"RPE offen"', app)
         self.assertIn('"Trainingsload"', app)
         self.assertIn('Plan/Ist:', app)
@@ -2003,7 +2020,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('id="checkinForm"', index)
         self.assertIn('id="checkinHistory"', index)
         self.assertIn('id="checkinDialog"', index)
-        self.assertIn('id="todayPanel"', index)
+        self.assertNotIn('id="todayPanel"', index)
         self.assertIn('name="day_form"', index)
         self.assertIn('name="illness"', index)
         self.assertNotIn('id="syncIllnessToIntervals"', app)
@@ -2011,7 +2028,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.ILLNESS_CALENDAR_CATEGORY, "SICK")
         self.assertNotIn('class="checkin-section"', index)
         self.assertNotIn("planned-day-checkin-button", app)
-        self.assertNotIn("todayAction(checkin ?", app)
         self.assertNotIn('id="weatherNotice"', index)
         self.assertNotIn("function renderWeatherNotice", app)
 
@@ -3931,7 +3947,10 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "CONFIG", config):
             self.assertEqual(server.selected_ai_provider(), "openai")
             server.save_model("gpt-5.6-luna")
-            self.assertEqual(server.save_ai_provider("gemini")["provider"], "gemini")
+            provider_state = server.save_ai_provider("gemini")
+            self.assertEqual(provider_state["provider"], "gemini")
+            self.assertEqual(provider_state["model"], "gemini-3.8-flash")
+            self.assertEqual([option["id"] for option in provider_state["model_options"]], ["gemini-3.8-flash", "gemini-2.5-pro"])
             self.assertEqual(server.selected_model(), "gemini-3.8-flash")
             server.save_model("gemini-2.5-pro")
             server.save_ai_provider("openai")
@@ -4057,6 +4076,66 @@ class CoachTests(unittest.TestCase):
 
         self.assertFalse(caller.is_alive())
         self.assertEqual(outcome["error"].status, 499)
+
+    def test_http_json_clears_provider_response_handle_after_read(self):
+        cancel_event = threading.Event()
+        class Response:
+            status = 200
+            headers = {}
+
+            def read(self, *_args):
+                return b"{}"
+
+            def close(self):
+                return None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        response = Response()
+        with patch.object(server, "urlopen", return_value=response):
+            self.assertEqual(
+                server.http_json(
+                    "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals", cancel_event=cancel_event
+                ),
+                {},
+            )
+        self.assertIsNone(getattr(cancel_event, "_provider_response", None))
+
+    def test_http_json_rechecks_cancellation_after_provider_response(self):
+        cancel_event = threading.Event()
+
+        class Response:
+            status = 200
+            headers = {}
+
+            def read(self, *_args):
+                raise AssertionError("cancelled response must not be read")
+
+            def close(self):
+                return None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        response = Response()
+        def return_cancelled_response(*_args, **_kwargs):
+            cancel_event.set()
+            return response
+
+        with patch.object(server, "urlopen", side_effect=return_cancelled_response):
+            with self.assertRaises(server.AppError) as raised:
+                server.http_json(
+                    "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals", cancel_event=cancel_event
+                )
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.assertIsNone(getattr(cancel_event, "_provider_response", None))
 
     def test_transcribe_audio_sends_bounded_multipart_request(self):
         captured = {}
@@ -4936,6 +5015,41 @@ class CoachTests(unittest.TestCase):
                 server._run_background_coach_job(resumed)
         self.assertEqual(seen["response_id"], "resp_background_resume")
 
+    def test_background_worker_preserves_checkpointed_recovery_phase(self):
+        server.enqueue_background_coach_job(
+            "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
+            "turn-background-recovery-phase",
+            "csrf-background-recovery-phase",
+            operation_id="operation-background-recovery-phase",
+        )
+        job = server._claim_background_coach_job()
+        server._merge_coach_command_receipt(
+            "turn-background-recovery-phase",
+            {"openai_response_id": "resp-recovery-phase", "phase": "waiting_final_response", "tool_rounds": 1},
+        )
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                ("turn-background-recovery-phase",),
+            ).fetchone()
+        job["receipt"] = server._coach_command_receipt(row["receipt"])
+        seen = {}
+
+        def capture_phase(*_args, **_kwargs):
+            with server.DB_LOCK, server.database() as db:
+                row = db.execute(
+                    "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                    ("turn-background-recovery-phase",),
+                ).fetchone()
+            seen["phase"] = json.loads(row["receipt"])["phase"]
+            return {}
+
+        with patch.object(server, "chat_with_coach", side_effect=capture_phase), patch.object(
+            server, "_restore_coach_session_csrf_hash", return_value="csrf-background-recovery-phase"
+        ):
+            server._run_background_coach_job(job)
+        self.assertEqual(seen["phase"], "waiting_final_response")
+
     def test_conversation_recovery_lock_is_reentrant(self):
         with patch.object(server, "get_kv", return_value="conversation-stale"), patch.object(
             server, "openai_request", return_value={"id": "conversation-recovered"}
@@ -4985,6 +5099,88 @@ class CoachTests(unittest.TestCase):
         openai_request.assert_not_called()
         self.assertEqual(result["activity_days"], 65)
         self.assertEqual(result["window_end"], server.local_now().date().isoformat())
+
+    def test_sync_intervals_passes_cancellation_to_snapshot_fetch(self):
+        snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        cancel_event = threading.Event()
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", return_value=snapshot
+        ) as fetch_snapshot, patch.object(
+            server, "refresh_workout_library", return_value={"workouts": 0}
+        ) as refresh_library:
+            server.sync_intervals("cancellable", activity_days=42, cancel_event=cancel_event)
+        fetch_snapshot.assert_called_once_with(activity_days=42, cancel_event=cancel_event)
+        refresh_library.assert_called_once_with(
+            reason="Initialer Intervals.icu-Sync (cancellable)", cancel_event=cancel_event
+        )
+
+    def test_sync_intervals_reraises_library_import_cancellation(self):
+        snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        cancel_event = threading.Event()
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        cancellation = server.AppError(499, "abgebrochen", reason="chat_cancelled")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", return_value=snapshot
+        ), patch.object(server, "refresh_workout_library", side_effect=cancellation):
+            with self.assertRaises(server.AppError) as raised:
+                server.sync_intervals("cancellable-library", activity_days=42, cancel_event=cancel_event)
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.assertFalse(server.get_kv("last_library_sync_error"))
+
+    def test_sync_intervals_persists_activity_coverage_with_snapshot(self):
+        snapshot = {"synced_at": "new", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        server.set_kv("last_sync_activity_days", "7")
+        cancellation = server.AppError(499, "abgebrochen", reason="chat_cancelled")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", return_value=snapshot
+        ), patch.object(server, "refresh_workout_library", side_effect=cancellation):
+            with self.assertRaises(server.AppError):
+                server.sync_intervals("cancellable-library", activity_days=42, cancel_event=threading.Event())
+        self.assertEqual(server.get_kv("last_sync_at"), "new")
+        self.assertEqual(server.get_kv("last_sync_activity_days"), "42")
+
+    def test_workout_library_refresh_forwards_cancellation(self):
+        cancel_event = threading.Event()
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        seen = {}
+
+        def get_library(*, cancel_event=None):
+            seen["cancel_event"] = cancel_event
+            cancel_event.set()
+            server._raise_chat_cancelled(cancel_event)
+
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "get_workout_library", side_effect=get_library
+        ) as get_workout_library:
+            with self.assertRaises(server.AppError) as raised:
+                server.refresh_workout_library("cancellable", cancel_event=cancel_event)
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.assertIs(seen["cancel_event"], cancel_event)
+        get_workout_library.assert_called_once_with(cancel_event=cancel_event)
+
+    def test_cancelled_intervals_sync_is_recorded_as_skipped(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config):
+            with self.assertRaises(server.AppError) as raised:
+                server.sync_intervals("cancelled", activity_days=42, cancel_event=cancel_event)
+            freshness = {
+                (item["provider"], item["area"]): item
+                for item in server.provider_freshness_state()
+            }
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute(
+                "SELECT status, phase, error_code FROM provider_refresh_history "
+                "WHERE provider='intervals' AND area='activities' ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+        self.assertEqual(row["status"], "skipped")
+        self.assertEqual(row["phase"], "cancelled")
+        self.assertIsNone(row["error_code"])
+        self.assertEqual(freshness[("intervals", "activities")]["state"], "never_loaded")
 
     def test_initial_intervals_sync_copies_remote_library_to_empty_local_library(self):
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
@@ -6082,8 +6278,9 @@ class CoachTests(unittest.TestCase):
         playwright_config = (server.PUBLIC_DIR.parent / "playwright.config.cjs").read_text(encoding="utf-8")
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
         app_source = (server.PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
-        for route in ("#coach", "#today", "plan/overview", "analysis/performance", "#more"):
+        for route in ("#coach", "plan/overview", "analysis/performance", "#more"):
             self.assertIn(route, e2e_source)
+        self.assertNotIn("#today", e2e_source)
         for guard in ("expectNoBrowserErrorsOrOverflow", "reducedMotion", 'fontSize = "200%"', "touch targets below 44"):
             self.assertIn(guard, e2e_source)
         self.assertIn('name: "desktop"', playwright_config)
@@ -6292,16 +6489,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=182"', source)
-        self.assertIn('"/navigation.js?v=182"', source)
-        self.assertIn('"/state.js?v=182"', source)
-        self.assertIn('"/views.js?v=182"', source)
-        self.assertIn('"/forms.js?v=182"', source)
-        self.assertIn('"/components.js?v=182"', source)
+        self.assertIn('"/api.js?v=195"', source)
+        self.assertIn('"/navigation.js?v=195"', source)
+        self.assertIn('"/state.js?v=195"', source)
+        self.assertIn('"/views.js?v=195"', source)
+        self.assertIn('"/forms.js?v=195"', source)
+        self.assertIn('"/components.js?v=195"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=182"', source)
-        self.assertIn('"/icon.svg?v=182"', source)
-        self.assertIn('"/styles.css?v=182"', source)
+        self.assertIn('"/app.js?v=195"', source)
+        self.assertIn('"/icon.svg?v=195"', source)
+        self.assertIn('"/styles.css?v=195"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -7362,7 +7559,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=182', index)
+        self.assertIn('v=195', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)

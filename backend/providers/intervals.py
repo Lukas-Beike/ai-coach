@@ -22,13 +22,24 @@ class IntervalsReadTransport:
         self._headers = headers
         self._request = request
 
-    def get(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
+    def get(
+        self,
+        path: str,
+        params: Mapping[str, Any] | None = None,
+        *,
+        cancel_event: Any = None,
+    ) -> Any:
         query = "?" + urlencode(params, doseq=True) if params else ""
+        request_kwargs = {
+            "headers": self._headers,
+            "service": "intervals",
+        }
+        if cancel_event is not None:
+            request_kwargs["cancel_event"] = cancel_event
         return self._request(
             "GET",
             self._base + path + query,
-            headers=self._headers,
-            service="intervals",
+            **request_kwargs,
         )
 
 
@@ -78,6 +89,7 @@ def fetch_paged_collection(
     error: ErrorFactory,
     page_size: int = 500,
     max_pages: int = 100,
+    cancel_event: Any = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Read a bounded provider collection through an injected GET operation.
 
@@ -90,7 +102,11 @@ def fetch_paged_collection(
     pages = 0
     fingerprints: set[str] = set()
     while True:
-        page = get(path, {**(dict(params) if params else {}), "limit": page_size, "offset": offset})
+        page_params = {**(dict(params) if params else {}), "limit": page_size, "offset": offset}
+        if cancel_event is None:
+            page = get(path, page_params)
+        else:
+            page = get(path, page_params, cancel_event=cancel_event)
         if not isinstance(page, list):
             raise error(f"Intervals.icu hat keine gültige {collection}-Seite zurückgegeben.")
         page_rows = [item for item in page if isinstance(item, dict)]

@@ -96,7 +96,9 @@ instructions do not delete or convert its data.
   the athlete's local day. "Plan anpassen" appears only for an unapplied
   calendar, illness, injury, or blocking-weather change affecting a planned
   unit within the next three days. "Letzte Einheit analysieren" refreshes
-  Intervals.icu before coaching. When near-identical Wahoo and Garmin cycling
+  Intervals.icu before coaching and records the successful refresh in the same
+  Coach receipt. A repeated refresh tool call reuses that result so analysis
+  continues without a second sync. When near-identical Wahoo and Garmin cycling
   recordings are present, Wahoo is canonical; deleting the Garmin cloud copy
   always requires a separate confirmation in Coach Chat.
 - The Coach is the local source of truth for future planned units, target
@@ -168,12 +170,9 @@ instructions do not delete or convert its data.
   the corresponding future check-in days filled.
   Check-ins can be entered or edited through Coach Chat. Check-in dates and daily training
   boundaries use the saved IANA profile timezone, and future check-ins are
-  rejected. The Heute tab provides a compact, read-only coach-oriented daily
-  synthesis of readiness/recovery signals, today's planned workout, relevant
-  weather, and pending plan adjustments. It uses already loaded state and does not
-  trigger an additional coach or provider request when opened; navigation and
-  action buttons are not shown in this view. Missing, loading, offline, sync, and
-  error states are shown clearly.
+  rejected. The Geplant overview focuses the current day in the training calendar
+  when opened, while retaining the surrounding planned units, recovery context,
+  weather, and calendar signals.
 - After a completed activity, the coach can ask for a short subjective follow-up
   and store the athlete's answer as activity feedback.
 - The coach can explicitly read completed activities, the local workout library,
@@ -259,16 +258,12 @@ can be forced manually from the Open-Meteo card in the More tab.
 The morning check-in is generated at most once per local calendar day when its required
 integrations are configured.
 
-The five main views use stable hash links: `#coach`, `#today`, `#plan`,
-`#analysis`, and `#more`. Navigation is implemented with real
+The four main views use stable hash links: `#coach`, `#plan`, `#analysis`,
+and `#more`. Navigation is implemented with real
 links, so direct links, reload, browser back/forward, keyboard access, and
 screen-reader announcements remain available. An unknown hash falls back to
-`#coach`; a deep link is retained through the login flow. The `#today` view
-combines the local check-in, current recovery/readiness signals, today's
-planned workout, relevant weather, open activity feedback, and pending plan
-adjustments. It uses already loaded state only; opening the view does not
-trigger an additional coach or provider request. Missing data, offline state,
-sync progress, and the last sync error are shown explicitly.
+`#coach`; a deep link is retained through the login flow. Opening the plan
+overview focuses and scrolls to the current day in the training calendar.
 
 The PWA provides an installable offline shell only. It does not provide a full
 offline data view or a local mutation queue: authenticated API responses are
@@ -822,7 +817,8 @@ merge successful update pull requests.
 
 ### Codex pull-request review
 
-The required `Codex code review` check is a merge gate for the native,
+The required `Codex code review` check on `develop` and `Codex code review
+(main)` on `main` are merge gates for the native,
 subscription-backed Codex GitHub review. Enable automatic Code Review for this
 repository in Codex Cloud, or request one with `@codex review` in the pull
 request. The gate follows the Codex summary comment that is posted as soon as a
@@ -834,18 +830,27 @@ associated by review ID and fails the gate; the reaction is the connector's
 clean-review result when it intentionally creates no submitted review. A new
 push invalidates the old result and starts the gate again. A manual human
 `@codex review` request requires a summary and result created or updated after
-that request, so an older result cannot be reused. The workflow relies on the
-connector's automatic pull-request and new-commit triggers and does not post an
-unauthorized request as `github-actions[bot]`. If the PR is closed or merged
-while the gate is waiting, the gate cancels its check instead of polling until
-the timeout.
+that request, so an older result cannot be reused. Normal pull-request events
+use the connector's native automatic trigger; a human can manually request a
+fresh review with `@codex review`. The trusted `ai-coach-release-bot[bot]`
+exception is limited to an exact `develop` version-bump PR whose branch, title,
+repository, and one-file `APP_VERSION` diff match the release contract. The
+release promotion PR to `main` remains on the normal Codex review path. The
+workflow records a successful `Codex code review` check with the
+exemption reason only for that validated version bump; a manual review request
+overrides the exemption. Retargeting a PR also establishes a fresh review
+baseline. Release-bot title edits establish a fresh baseline, while ordinary
+title-only edits do not. If
+the PR is closed or merged while the gate is waiting, the gate cancels its
+check instead of polling until the timeout.
 
 The workflow runs from the trusted target branch and never checks out or
 executes pull-request code. It uses only the GitHub token to read the summary,
 reviews, and reactions and to update the required check; no `OPENAI_API_KEY`
 repository secret is needed.
-Keep the exact required status-check name `Codex code review` in the GitHub
-rulesets for `develop` and `main`.
+Keep `Codex code review` required in the `develop` ruleset and
+`Codex code review (main)` required in the `main` ruleset. Base-specific names
+prevent a successful develop exemption check from satisfying the main gate.
 
 ### Image supply chain and runtime boundary
 

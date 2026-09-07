@@ -3,7 +3,6 @@ const { AxeBuilder } = require("@axe-core/playwright");
 
 const navigation = [
   ["Coach", "chatPanel", "coach"],
-  ["Heute", "todayPanel", "today"],
   ["Geplant", "workoutsPanel", "plan/overview"],
   ["Analyse", "dataPanel", "analysis/performance"],
   ["Mehr", "settingsPanel", "more"],
@@ -159,10 +158,7 @@ test.describe("critical browser states", () => {
     await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#plan$/);
 
-    await page.getByRole("link", { name: "Heute", exact: true }).click();
-    await expect(page.locator("#todayPanel .today-priority")).toHaveCount(0);
-    await expect(page.locator("#todayPanel .today-checkin")).toHaveCount(0);
-    await expect(page.locator("#todayPanel .today-feedback")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Heute", exact: true })).toHaveCount(0);
     await expect(page.locator("#checkinDialog")).toBeHidden();
     await expect(page.locator("#chatPanel")).toContainText("Morgen-Check-in");
 
@@ -201,9 +197,10 @@ test.describe("critical browser states", () => {
     expect(safetyLayout.hintBottom).toBeLessThanOrEqual(Math.min(safetyLayout.composerTop, safetyLayout.navigationTop));
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.getByRole("link", { name: "Heute", exact: true }).focus();
+    await page.getByRole("link", { name: "Geplant", exact: true }).focus();
     await page.keyboard.press("Enter");
-    await expect(page.locator("#todayPanel")).toHaveClass(/active/);
+    await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
+    await expect(page.locator(".planned-day.is-today")).toBeInViewport();
 
     await page.goto("/#more/profile");
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
@@ -266,6 +263,185 @@ test.describe("critical browser states", () => {
     await expectNoBrowserErrorsOrOverflow(page, browserErrors);
   });
 
+  test("coach reload opens at the latest message and tab navigation restores the scroll position", async ({ page }) => {
+    const messages = Array.from({ length: 18 }, (_, index) => ({
+      id: 90_000 + index,
+      role: index % 2 ? "assistant" : "user",
+      content: `${index % 2 ? "Coach" : "Athlet"} Abschnitt ${index + 1}\n\n${"Ausführlicher Trainingskontext für die Scrollprüfung. ".repeat(12)}`,
+      created_at: `2099-01-01T00:${String(index).padStart(2, "0")}:00Z`,
+    }));
+    const latestMessageId = messages.at(-1).id;
+    await page.route("**/api/chat/history?*", (route) => route.fulfill({
+      json: { messages, next_cursor: null, proposed_actions: [] },
+    }));
+
+    await page.goto("/#coach");
+    await expect(page.locator("#appShell")).toBeVisible();
+    const latest = page.locator(`[data-message-id="${latestMessageId}"]`);
+    await expect(latest).toBeAttached();
+    await expect.poll(() => page.evaluate((messageId) => {
+      const message = document.querySelector(`[data-message-id="${messageId}"]`);
+      const composer = document.querySelector("#chatForm");
+      if (!message || !composer) return Number.POSITIVE_INFINITY;
+      const desiredBottom = Math.min(window.innerHeight, composer.getBoundingClientRect().top) - 12;
+      return Math.abs(message.getBoundingClientRect().bottom - desiredBottom);
+    }, latestMessageId)).toBeLessThanOrEqual(24);
+
+    const savedScrollY = await page.evaluate(() => {
+      const target = Math.min(420, Math.max(1, document.documentElement.scrollHeight - window.innerHeight - 240));
+      window.scrollTo({ top: target, behavior: "auto" });
+      return window.scrollY;
+    });
+    expect(savedScrollY).toBeGreaterThan(0);
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    await expect(page).toHaveURL(/#plan\/overview$/);
+    await page.getByRole("link", { name: "Coach", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
+
+    await page.goBack();
+    await expect(page).toHaveURL(/#plan\/overview$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/#coach$/);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
+    await page.goForward();
+    await expect(page).toHaveURL(/#plan\/overview$/);
+    await page.goForward();
+    await expect(page).toHaveURL(/#coach$/);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
+
+    await page.reload();
+    await expect(latest).toBeAttached();
+    await expect.poll(() => page.evaluate((messageId) => {
+      const message = document.querySelector(`[data-message-id="${messageId}"]`);
+      const composer = document.querySelector("#chatForm");
+      if (!message || !composer) return Number.POSITIVE_INFINITY;
+      const desiredBottom = Math.min(window.innerHeight, composer.getBoundingClientRect().top) - 12;
+      return Math.abs(message.getBoundingClientRect().bottom - desiredBottom);
+    }, latestMessageId)).toBeLessThanOrEqual(24);
+  });
+
+  test("initial chat positioning wins when navigation happens while history loads", async ({ page }) => {
+    const messages = Array.from({ length: 18 }, (_, index) => ({
+      id: 91_000 + index,
+      role: index % 2 ? "assistant" : "user",
+      content: `${index % 2 ? "Coach" : "Athlet"} verzögerter Abschnitt ${index + 1}\n\n${"Ausführlicher Trainingskontext. ".repeat(12)}`,
+      created_at: `2099-01-02T00:${String(index).padStart(2, "0")}:00Z`,
+    }));
+    let releaseHistory;
+    await page.route("**/api/chat/history?*", (route) => new Promise((resolve) => {
+      releaseHistory = () => resolve(route.fulfill({ json: { messages, next_cursor: null, proposed_actions: [] } }));
+    }));
+
+    await page.goto("/#coach");
+    await expect(page.locator("#appShell")).toBeVisible();
+    await expect.poll(() => Boolean(releaseHistory)).toBe(true);
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    releaseHistory();
+    const latest = page.locator(`[data-message-id="${messages.at(-1).id}"]`);
+    await expect(latest).toBeAttached();
+    await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+
+    await page.getByRole("link", { name: "Coach", exact: true }).click();
+    await expect.poll(() => latest.evaluate((message) => {
+      const composer = document.querySelector("#chatForm");
+      const desiredBottom = Math.min(window.innerHeight, composer.getBoundingClientRect().top) - 12;
+      return Math.abs(message.getBoundingClientRect().bottom - desiredBottom);
+    })).toBeLessThanOrEqual(24);
+  });
+
+  test("chat becomes scroll-ready before a slow weather refresh completes", async ({ page }) => {
+    const messages = Array.from({ length: 18 }, (_, index) => ({
+      id: 91_100 + index,
+      role: index % 2 ? "assistant" : "user",
+      content: `${index % 2 ? "Coach" : "Athlet"} Wetterabschnitt ${index + 1}\n\n${"Ausführlicher Trainingskontext. ".repeat(12)}`,
+      created_at: `2099-01-02T01:${String(index).padStart(2, "0")}:00Z`,
+    }));
+    let releaseWeather;
+    await page.route("**/api/chat/history?*", (route) => route.fulfill({
+      json: { messages, next_cursor: null, proposed_actions: [] },
+    }));
+    await page.route("**/api/profile", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ response, json: { ...body, profile: { ...body.profile, weather_location: "Berlin" } } });
+    });
+    await page.route("**/api/weather*", (route) => {
+      if (new URL(route.request().url()).searchParams.get("local") === "1") return route.continue();
+      return new Promise((resolve) => {
+        releaseWeather = () => resolve(route.fulfill({ json: {} }));
+      });
+    });
+
+    await page.goto("/#coach");
+    await expect(page.locator("#appShell")).toBeVisible();
+    const latest = page.locator(`[data-message-id="${messages.at(-1).id}"]`);
+    await expect(latest).toBeAttached();
+    await expect.poll(() => Boolean(releaseWeather)).toBe(true);
+    await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+    await expect.poll(() => latest.evaluate((message) => {
+      const composer = document.querySelector("#chatForm");
+      const desiredBottom = Math.min(window.innerHeight, composer.getBoundingClientRect().top) - 12;
+      return Math.abs(message.getBoundingClientRect().bottom - desiredBottom);
+    })).toBeLessThanOrEqual(24);
+
+    const savedScrollY = await page.evaluate(() => {
+      window.scrollTo({ top: 240, behavior: "auto" });
+      return window.scrollY;
+    });
+    await expect.poll(() => page.evaluate(() => state.chatScrollY)).toBe(savedScrollY);
+    releaseWeather();
+    await expect.poll(() => page.evaluate(() => state.loadPromise)).toBe(null);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(savedScrollY);
+  });
+
+  test("a 401 during initial loading cannot mark the ended session scroll-ready", async ({ page }) => {
+    await openAuthenticatedApp(page);
+    await page.route("**/api/bootstrap?local=1", (route) => route.fulfill({
+      status: 401,
+      json: { error: "Authentication required" },
+    }));
+
+    await page.evaluate(async () => {
+      history.replaceState(null, "", "#plan/overview");
+      state.initialStateLoaded = true;
+      await loadInitialState();
+    });
+
+    await expect(page.locator("#loginDialog")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(false);
+  });
+
+  test("a new cross-tab coach reply takes priority over the saved scroll position", async ({ page }) => {
+    let messages = Array.from({ length: 18 }, (_, index) => ({
+      id: 92_000 + index,
+      role: index % 2 ? "assistant" : "user",
+      content: `${index % 2 ? "Coach" : "Athlet"} Abschnitt ${index + 1}\n\n${"Ausführlicher Trainingskontext. ".repeat(12)}`,
+      created_at: `2099-01-03T00:${String(index).padStart(2, "0")}:00Z`,
+    }));
+    await page.route("**/api/chat/history?*", (route) => route.fulfill({
+      json: { messages, next_cursor: null, proposed_actions: [] },
+    }));
+
+    await page.goto("/#coach");
+    await expect(page.locator("#appShell")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+    await page.evaluate(() => window.scrollTo({ top: 240, behavior: "auto" }));
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
+    messages = [...messages, {
+      id: 92_018,
+      role: "assistant",
+      content: `Neue Antwort aus einem anderen Browser-Tab.\n\n${"Neue Trainingshinweise. ".repeat(300)}`,
+      created_at: "2099-01-03T00:18:00Z",
+    }];
+    await page.evaluate(() => handleStateEvent({ type: "coach", data: "{}", lastEventId: "99" }));
+    const latest = page.locator('[data-message-id="92018"]');
+    await expect(latest).toBeAttached();
+    await expect.poll(() => page.evaluate(() => state.chatResponseScrollPending)).toBe(true);
+
+    await page.getByRole("link", { name: "Coach", exact: true }).click();
+    await expect.poll(() => latest.evaluate((message) => Math.round(message.getBoundingClientRect().top))).toBe(16);
+  });
+
   test("coach streaming, tab changes, long markdown and scrolling stay stable", async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);
     await openAuthenticatedApp(page);
@@ -306,7 +482,7 @@ test.describe("critical browser states", () => {
     }
     await expect(input).toBeVisible();
     await input.fill("Dieser Entwurf bleibt beim Tabwechsel erhalten.");
-    await page.getByRole("link", { name: "Heute", exact: true }).click();
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
     await expect(page.locator("#confirmationDialog")).toBeHidden();
     await expect(input).toHaveValue("Dieser Entwurf bleibt beim Tabwechsel erhalten.");
     await page.getByRole("link", { name: "Coach", exact: true }).click();
@@ -342,7 +518,7 @@ test.describe("critical browser states", () => {
       "",
       ...Array.from({ length: 12 }, (_, index) => `## Abschnitt ${index + 1}\n\n${"Ausführliche, gut lesbare Trainingsbegründung. ".repeat(5)}`),
     ].join("\n");
-    await page.getByRole("link", { name: "Heute", exact: true }).click();
+    await page.getByRole("link", { name: "Geplant", exact: true }).click();
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const inactiveScrollY = await page.evaluate(() => window.scrollY);
     await page.evaluate((content) => {
@@ -355,16 +531,14 @@ test.describe("critical browser states", () => {
       window.__chatTest.push("completed", { message, proposed_actions: [], command_receipts: [] });
       window.__chatTest.finish();
     }, longMarkdown);
-    await expect.poll(() => page.evaluate(() => state.chatRequest?.phase)).toBe("reconciling");
     await expect(page.locator('[data-message-id="2"]')).toContainText("Abschnitt 12");
     await expect(page.locator("#unsafe-coach-markdown")).toHaveCount(0);
     expect(await page.evaluate(() => window.__unsafeCoachMarkdown)).toBeUndefined();
     expect(await page.evaluate(() => window.scrollY), "background chat updates must not scroll another tab").toBe(inactiveScrollY);
 
-    await expect.poll(() => page.evaluate(() => window.__chatTest.historyResolvers.length)).toBe(1);
-    await page.evaluate(() => window.__chatTest.releaseHistory());
     await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
-    await expect(page.locator("#todayPanel")).toHaveClass(/active/);
+    await expect.poll(() => page.evaluate(() => window.__chatTest.historyResolvers.length)).toBe(0);
+    await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     expect(await page.evaluate(() => document.activeElement?.id)).not.toBe("messageInput");
 
     await page.getByRole("link", { name: "Coach", exact: true }).click();

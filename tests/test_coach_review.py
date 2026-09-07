@@ -37,6 +37,666 @@ class CoachReviewTests(unittest.TestCase):
     def workout(self, offset=0, sport="Run"):
         return {"date": (date.today() + timedelta(days=50+offset)).isoformat(), "sport": sport, "name": "Synthetic session", "description": "Easy session", "duration_minutes": 30, "target": "AUTO"}
 
+    def test_latest_analysis_accepts_completed_refresh_after_conversation_recovery(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        message = (
+            "Aktualisiere zuerst meine Intervals.icu-Daten. Analysiere danach meine letzte absolvierte "
+            "Einheit: Was lief gut, was sollte ich anpassen und wie beeinflusst sie die naechste Einheit? "
+            "Nutze bei einer nahezu gleichen Wahoo- und Garmin-Radaufzeichnung immer Wahoo."
+        )
+        order = []
+        responses = [
+            server.AppError(400, "Synthetic conversation error", reason="conversation_state_invalid"),
+            {"output": [self.call("start_provider_refresh", {"days": 3}, "refresh-again")]},
+            {"output_text": "Analyse der aktuellen Einheit: gleichmaessige Belastung."},
+        ]
+
+        def refresh(*args, **kwargs):
+            order.append("refresh")
+            server.save_snapshot({"synced_at": "2026-09-06T16:42:31+00:00", "recent_activities": [{"id": "fresh-ride", "type": "Ride"}]})
+            return {"status": "ok"}
+
+        def context():
+            order.append("context")
+            self.assertEqual(server.latest_snapshot()["recent_activities"][0]["id"], "fresh-ride")
+            return "Synthetic fresh context"
+
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="old-conversation"
+        ), patch.object(server, "replace_stale_openai_conversation", return_value="new-conversation"), patch.object(
+            server, "sync_intervals", side_effect=refresh
+        ) as sync, patch.object(server, "build_training_context", side_effect=context), patch.object(
+            server, "responses_request", side_effect=responses
+        ) as request, patch.object(server, "enqueue_sync_job") as enqueue:
+            result = server.chat_with_coach(message, client_turn_id="latest-analysis", session_csrf_hash="review-session")
+            replay = server.chat_with_coach(message, client_turn_id="latest-analysis", session_csrf_hash="review-session")
+        self.assertEqual(order, ["refresh", "context"])
+        sync.assert_called_once_with("Chat-Anfrage", activity_days=server.sync_period("intervals"), wait_for_existing=True)
+        enqueue.assert_not_called()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["pending_operations"], [])
+        self.assertEqual(result["sync_job_ids"], [])
+        self.assertEqual(replay, result)
+        self.assertEqual(request.call_count, 3)
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], "auto")
+        output = json.loads(request.call_args_list[2].args[0]["input"][0]["output"])
+        self.assertEqual(output["status"], "completed")
+        self.assertIn("Analyse der aktuellen Einheit", result["message"]["content"])
+
+    def test_background_latest_analysis_reuses_persisted_preflight_refresh(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        message = "Aktualisiere Intervals, analysiere meine letzte Einheit und erstelle den Trainingsplan fuer die naechsten sechs Wochen."
+        csrf_hash = server.session_token_hash("csrf")
+        server.enqueue_background_coach_job(message, "background-preflight", csrf_hash, operation_id="preflight-op")
+        persisted_receipt = {
+            "mode": "background",
+            "session_key": server._coach_session_key(csrf_hash),
+            "command_receipts": [{
+                "call_id": "preflight-intervals-refresh", "tool": "start_provider_refresh",
+                "effect_key": "preflight-intervals-refresh",
+                "result": {"ok": True, "status": "completed", "provider": "intervals", "before_analysis": True},
+            }],
+        }
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE coach_commands SET intent=?, receipt=? WHERE client_turn_id=?",
+                (json.dumps(intent), json.dumps(persisted_receipt), "background-preflight"),
+            )
+        with patch.object(server, "ensure_conversation", return_value="preflight-conversation"), patch.object(
+            server, "build_training_context", return_value="Synthetic persisted context"
+        ), patch.object(server, "sync_intervals", side_effect=AssertionError("persisted refresh must be reused")) as sync, patch.object(
+            server, "responses_background_request", return_value={"output_text": "Die aktuelle Einheit ist analysiert."}
+        ) as request:
+            result = server.chat_with_coach(
+                message,
+                client_turn_id="background-preflight",
+                session_csrf_hash=csrf_hash,
+                background_job=True,
+            )
+        sync.assert_not_called()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["pending_operations"], [])
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+        self.assertEqual(request.call_args.args[0]["tool_choice"], "auto")
+
+    def test_waited_full_refresh_preserves_all_time_window(self):
+        server.set_kv("last_sync_at", "old-sync")
+        server.set_kv("last_sync_activity_days", str(server.ALL_SYNC_DAYS))
+        server.SYNC_LOCK.acquire()
+        previous_sync_read = threading.Event()
+        original_get_kv = server.get_kv
+
+        def observe_previous_sync_read(key, db=None):
+            value = original_get_kv(key, db)
+            if key == "last_sync_at" and threading.current_thread() is threading.main_thread():
+                previous_sync_read.set()
+            return value
+
+        def finish_active_sync():
+            try:
+                previous_sync_read.wait(timeout=2)
+                server.set_kv("last_sync_at", "new-sync")
+            finally:
+                server.SYNC_LOCK.release()
+
+        worker = threading.Thread(target=finish_active_sync)
+        worker.start()
+        try:
+            with patch.object(server, "get_kv", side_effect=observe_previous_sync_read):
+                result = server.sync_intervals("full refresh test", activity_days=server.ALL_SYNC_DAYS, wait_for_existing=True)
+        finally:
+            worker.join(timeout=2)
+            if server.SYNC_LOCK.locked():
+                server.SYNC_LOCK.release()
+        self.assertEqual(result["activity_days"], server.ALL_SYNC_DAYS)
+
+    def test_resumed_plan_commit_rehydrates_artifact_from_stage_receipt(self):
+        csrf_hash = server.session_token_hash("csrf")
+        server.enqueue_background_coach_job("Erstelle und speichere den Trainingsplan fuer die naechsten sechs Wochen.", "background-artifact", csrf_hash, operation_id="artifact-op")
+        payload = {"plan_name": "Resumed plan", "goal": "Base", "workouts": [self.workout()]}
+        artifact = server._stage_coach_artifact("artifact-conversation", "background-artifact", payload)
+        intent = {**self.intent("stage_training_plan", ["local_plan"], ["commit_training_plan"]), "intent": "local_action"}
+        persisted_receipt = {
+            "mode": "background",
+            "session_key": server._coach_session_key(csrf_hash),
+            "command_receipts": [{
+                "call_id": "stage", "tool": "stage_training_plan", "effect_key": "stage-effect",
+                "result": artifact,
+            }],
+        }
+        commit = self.call("commit_training_plan", {"artifact_id": artifact["artifact_id"]}, "commit")
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE coach_commands SET conversation_id=?, intent=?, receipt=? WHERE client_turn_id=?",
+                ("artifact-conversation", json.dumps(intent), json.dumps(persisted_receipt), "background-artifact"),
+            )
+        with patch.object(server, "build_training_context", return_value="Synthetic context"), patch.object(
+            server, "responses_background_request", side_effect=[{"output": [commit]}, {"output_text": "Der Plan ist gespeichert."}]
+        ) as request:
+            result = server.chat_with_coach(
+                "Erstelle und speichere den Trainingsplan fuer die naechsten sechs Wochen.",
+                client_turn_id="background-artifact",
+                session_csrf_hash=csrf_hash,
+                background_job=True,
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["intent"]["artifact_id"], artifact["artifact_id"])
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "commit_training_plan"})
+        self.assertTrue(server.list_dated_local_planned_workouts(), result)
+        self.assertEqual(server.list_dated_local_planned_workouts()[0]["name"], "Synthetic session")
+
+    def test_conversation_recovery_rebinds_resumed_plan_artifact(self):
+        csrf_hash = server.session_token_hash("csrf-recovery")
+        server.enqueue_background_coach_job("Erstelle und speichere den Trainingsplan fuer die naechsten sechs Wochen.", "background-recovery-artifact", csrf_hash, operation_id="recovery-artifact-op")
+        payload = {"plan_name": "Recovered plan", "goal": "Base", "workouts": [self.workout()]}
+        artifact = server._stage_coach_artifact("old-artifact-conversation", "background-recovery-artifact", payload)
+        intent = {**self.intent("stage_training_plan", ["local_plan"], ["commit_training_plan"]), "intent": "local_action"}
+        persisted_receipt = {
+            "mode": "background",
+            "session_key": server._coach_session_key(csrf_hash),
+            "openai_response_id": "stale-response",
+            "command_receipts": [{
+                "call_id": "stage", "tool": "stage_training_plan", "effect_key": "stage-effect",
+                "result": artifact,
+            }],
+        }
+        commit = self.call("commit_training_plan", {"artifact_id": artifact["artifact_id"]}, "commit-recovery")
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE coach_commands SET conversation_id=?, intent=?, receipt=? WHERE client_turn_id=?",
+                ("old-artifact-conversation", json.dumps(intent), json.dumps(persisted_receipt), "background-recovery-artifact"),
+            )
+        responses = [
+            server.AppError(400, "Synthetic conversation error", reason="conversation_state_invalid"),
+            {"output": [commit]},
+            {"output_text": "Der wiederaufgenommene Plan ist gespeichert."},
+        ]
+        with patch.object(server, "replace_stale_openai_conversation", return_value="new-artifact-conversation"), patch.object(
+            server, "responses_background_request", side_effect=responses
+        ) as request:
+            result = server.chat_with_coach(
+                "Erstelle und speichere den Trainingsplan fuer die naechsten sechs Wochen.",
+                client_turn_id="background-recovery-artifact",
+                session_csrf_hash=csrf_hash,
+                background_job=True,
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(request.call_args_list[1].args[0]["conversation"], "new-artifact-conversation")
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute("SELECT conversation_id, status FROM coach_plan_artifacts WHERE id=?", (artifact["artifact_id"],)).fetchone()
+        self.assertEqual(row["conversation_id"], "new-artifact-conversation")
+        self.assertEqual(row["status"], "committed")
+
+    def test_latest_analysis_keeps_analysis_pending_when_final_response_fails(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="pending-conversation"
+        ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+            server, "sync_intervals", return_value={"status": "ok"}
+        ), patch.object(server, "responses_request", side_effect=server.AppError(503, "Model unavailable")):
+            result = server.chat_with_coach("Aktualisiere und analysiere die letzte Einheit.", client_turn_id="analysis-pending")
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["analysis_pending"])
+        self.assertIn("Analyse der letzten Einheit wurde nicht erfolgreich abgeschlossen", result["message"]["content"])
+
+    def test_refresh_follow_up_uses_bulk_revision_safeguards(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Bulk follow-up", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        target = next(item for item in state["planned_units"] if item["local_id"] == planned["id"])
+        intent = {
+            **self.intent("start_provider_refresh", ["intervals_refresh", "local_plan"], ["apply_training_changes"]),
+            "intent": "remote_sync", "target_system": "intervals",
+        }
+        responses = [
+            {"output": [self.call("read_training_state", {}, "read") ]},
+            {"output": [self.call("apply_training_changes", {
+                "expected_revision": state["planning_revision"],
+                "changes": [{"local_id": planned["id"], "action": "update", "name": "Bulk follow-up updated", "expected_payload_hash": target["expected_payload_hash"]}],
+            }, "apply")]},
+            {"output_text": "Die Planänderung wurde angewendet."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="bulk-follow-up"
+        ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+            server, "sync_intervals", return_value={"status": "ok"}
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach("Aktualisiere, analysiere und ändere den gesamten Plan.", client_turn_id="bulk-follow-up")
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "read_training_state"})
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(result["intent"]["bulk_change"])
+        self.assertEqual(server.list_planned_units()[0]["name"], "Bulk follow-up updated")
+
+    def test_resumed_bulk_edit_repeats_state_read_before_write(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Resumed bulk", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        target = next(item for item in state["planned_units"] if item["local_id"] == planned["id"])
+        csrf_hash = server.session_token_hash("csrf-resumed-bulk")
+        client_turn_id = "resumed-bulk"
+        server.enqueue_background_coach_job("Aktualisiere, analysiere und aendere den gesamten Plan.", client_turn_id, csrf_hash, operation_id="resumed-bulk-op")
+        intent = {
+            **self.intent("start_provider_refresh", ["intervals_refresh", "local_plan"], ["apply_training_changes"]),
+            "intent": "remote_sync", "target_system": "intervals", "bulk_change": True,
+        }
+        persisted_receipt = {
+            "mode": "background", "session_key": server._coach_session_key(csrf_hash),
+            "command_receipts": [
+                {"call_id": "preflight-intervals-refresh", "tool": "start_provider_refresh", "effect_key": "preflight", "result": {"ok": True, "status": "completed", "days": 90}},
+                {"call_id": "read-old", "tool": "read_training_state", "effect_key": "read-old", "result": {"ok": True, **state}},
+            ],
+        }
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE coach_commands SET conversation_id=?, intent=?, receipt=? WHERE client_turn_id=?",
+                ("resumed-bulk-conversation", json.dumps(intent), json.dumps(persisted_receipt), client_turn_id),
+            )
+        responses = [
+            {"output": [self.call("read_training_state", {}, "read-replayed")]},
+            {"output": [self.call("apply_training_changes", {
+                "expected_revision": state["planning_revision"],
+                "changes": [{"local_id": planned["id"], "action": "update", "name": "Resumed bulk updated", "expected_payload_hash": target["expected_payload_hash"]}],
+            }, "apply-resumed")]},
+            {"output_text": "Die Planänderung wurde angewendet."},
+        ]
+        with patch.object(server, "build_training_context", return_value="Synthetic resumed context"), patch.object(
+            server, "responses_background_request", side_effect=responses
+        ) as request:
+            result = server.chat_with_coach(
+                "Aktualisiere, analysiere und aendere den gesamten Plan.",
+                client_turn_id=client_turn_id,
+                session_csrf_hash=csrf_hash,
+                background_job=True,
+            )
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "read_training_state"})
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(server.list_planned_units()[0]["name"], "Resumed bulk updated")
+
+    def test_refresh_preflight_does_not_cover_wider_follow_up_window(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        responses = [
+            {"output": [self.call("start_provider_refresh", {"days": 365}, "wide-refresh")]},
+            {"output_text": "Der Zeitraum wurde aktualisiert."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="wide-refresh"
+        ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+            server, "sync_period", return_value=90
+        ), patch.object(server, "sync_intervals", return_value={"status": "ok"}), patch.object(
+            server, "responses_request", side_effect=responses
+        ):
+            result = server.chat_with_coach("Aktualisiere und analysiere die letzte Einheit.", client_turn_id="wide-refresh")
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+        self.assertEqual(result["command_receipts"][1]["result"]["status"], "queued")
+        self.assertEqual(result["command_receipts"][1]["result"]["sync_job_id"], result["sync_job_ids"][0])
+
+    def test_latest_analysis_retries_when_preflight_waited_for_narrower_sync(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        sync_results = [
+            {"status": "ok", "waited_for_existing": True, "activity_days": 3},
+            {"status": "ok", "activity_days": 90},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="preflight-retry"
+        ), patch.object(server, "sync_period", return_value=90), patch.object(
+            server, "sync_intervals", side_effect=sync_results
+        ) as sync, patch.object(server, "build_training_context", return_value="fresh context"), patch.object(
+            server, "responses_request", return_value={"output_text": "Analyse abgeschlossen."}
+        ):
+            result = server.chat_with_coach(
+                "Aktualisiere zuerst Intervals und analysiere danach meine letzte Einheit.",
+                client_turn_id="preflight-retry",
+                session_csrf_hash="review-session",
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(sync.call_count, 2)
+        self.assertEqual(sync.call_args_list[0].kwargs["wait_for_existing"], True)
+        self.assertEqual(sync.call_args_list[1].kwargs["wait_for_existing"], False)
+
+    def test_latest_analysis_preserves_cancellation_from_preflight(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        cancel_event = threading.Event()
+
+        def cancel_sync(*_args, **_kwargs):
+            cancel_event.set()
+            raise server.AppError(499, "abgebrochen", reason="chat_cancelled")
+
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="preflight-cancel"
+        ), patch.object(server, "sync_intervals", side_effect=cancel_sync):
+            with self.assertRaises(server.AppError) as raised:
+                server.chat_with_coach(
+                    "Aktualisiere zuerst Intervals und analysiere danach meine letzte Einheit.",
+                    client_turn_id="preflight-cancel",
+                    session_csrf_hash="review-session",
+                    cancel_event=cancel_event,
+                )
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+
+    def test_all_activity_refresh_scope_is_detected_before_or_after_refresh_verb(self):
+        self.assertEqual(
+            server.requested_activity_refresh_days("Alle Aktivitaeten aktualisieren und meine letzte Einheit analysieren."),
+            server.ALL_SYNC_DAYS,
+        )
+        self.assertEqual(
+            server.requested_activity_refresh_days("Aktualisiere alle verfuegbaren Aktivitaetsdaten und analysiere die letzte Einheit."),
+            server.ALL_SYNC_DAYS,
+        )
+        self.assertEqual(
+            server.requested_activity_refresh_days(
+                "Synchronisiere meine gesamte Historie und analysiere meine letzte Einheit."
+            ),
+            server.ALL_SYNC_DAYS,
+        )
+        self.assertEqual(
+            server.requested_activity_refresh_days(
+                "Historie vollstaendig aktualisieren und danach meine letzte Einheit analysieren."
+            ),
+            server.ALL_SYNC_DAYS,
+        )
+        self.assertEqual(
+            server.requested_activity_refresh_days(
+                "Please refresh my entire activity history and analyze my latest activity."
+            ),
+            server.ALL_SYNC_DAYS,
+        )
+        self.assertEqual(
+            server.requested_activity_refresh_days("Die letzten 365 Tage meiner Aktivitaeten bitte synchronisieren und danach meine letzte Einheit analysieren."),
+            365,
+        )
+        self.assertEqual(
+            server.requested_activity_refresh_days(
+                "Synchronisiere meine Aktivitäten aus den letzten 365 Tagen und analysiere meine letzte Einheit."
+            ),
+            365,
+        )
+        self.assertIsNone(
+            server.requested_activity_refresh_days("Analysiere meine letzte Einheit und beruecksichtige alle Aktivitaeten in meinem Trainingsplan."),
+        )
+        self.assertIsNone(
+            server.requested_activity_refresh_days("Analysiere meine letzte Einheit und beruecksichtige die komplette Historie."),
+        )
+        self.assertIsNone(
+            server.requested_activity_refresh_days(
+                "Aktualisiere und analysiere meine letzte Einheit; erstelle danach einen Trainingsplan fuer 365 Tage."
+            ),
+        )
+        self.assertIsNone(
+            server.requested_activity_refresh_days(
+                "Aktualisiere und analysiere meine letzte Einheit; erstelle danach einen 365 Tage Trainingsplan."
+            ),
+        )
+
+    def test_synchronous_refresh_rejects_windows_beyond_job_limit(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        kwargs = {
+            "intent": intent,
+            "conversation_id": "wide-sync-validation",
+            "client_turn_id": "wide-sync-validation",
+            "session_csrf_hash": "review-session",
+            "sync_job_ids": [],
+        }
+        with patch.object(server, "sync_intervals") as sync:
+            with self.assertRaises(server.AppError) as error:
+                server._structured_coach_tool_result(
+                    "start_provider_refresh",
+                    {"days": 3661, "_wait_for_completion": True},
+                    **kwargs,
+                )
+        self.assertEqual(error.exception.reason, "invalid_refresh_request")
+        sync.assert_not_called()
+
+    def test_synchronous_refresh_retries_after_waiting_for_narrower_sync(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        kwargs = {
+            "intent": intent,
+            "conversation_id": "wide-sync-retry",
+            "client_turn_id": "wide-sync-retry",
+            "session_csrf_hash": "review-session",
+            "sync_job_ids": [],
+        }
+        with patch.object(
+            server,
+            "sync_intervals",
+            side_effect=[{"status": "ok", "waited_for_existing": True, "activity_days": 3}, {"status": "ok", "activity_days": 365}],
+        ) as sync:
+            result = server._structured_coach_tool_result(
+                "start_provider_refresh",
+                {"days": 365, "_wait_for_completion": True},
+                **kwargs,
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["activity_days"], 365)
+        self.assertEqual(sync.call_count, 2)
+        self.assertFalse(sync.call_args_list[1].kwargs["wait_for_existing"])
+
+    def test_wider_refresh_rebuild_keeps_duplicate_selection_instruction(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        message = "Aktualisiere Intervals, lade die letzten 365 Tage und analysiere meine letzte Einheit."
+        responses = [
+            {"output": [self.call("start_provider_refresh", {"days": 365}, "wide-refresh")]},
+            {"output_text": "Analyse der Wahoo-Aufzeichnung."},
+        ]
+        captured = []
+
+        def response(payload):
+            captured.append(payload)
+            return responses.pop(0)
+
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="wide-duplicate"
+        ), patch.object(server, "sync_period", return_value=90), patch.object(
+            server, "sync_intervals", side_effect=[{"status": "ok", "activity_days": 90}, {"status": "ok", "activity_days": 365}]
+        ) as sync, patch.object(server, "latest_wahoo_garmin_duplicate", return_value={"canonical_id": "wahoo", "duplicate_id": "garmin"}), patch.object(
+            server, "duplicate_activity_delete_preview", return_value={"proposed_action": {"action_type": "delete_duplicate_intervals_activity"}}
+        ), patch.object(server, "build_training_context", side_effect=["Initial context", "Refreshed context"]), patch.object(
+            server, "responses_request", side_effect=response
+        ):
+            result = server.chat_with_coach(message, client_turn_id="wide-duplicate")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(sync.call_args_list[1].kwargs["activity_days"], 365)
+        self.assertIn("Wahoo-Aufzeichnung als kanonische", captured[1]["instructions"])
+
+    def test_failed_wider_refresh_remains_pending_after_analysis(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        responses = [
+            {"output": [self.call("start_provider_refresh", {"days": 365}, "failed-wide-refresh")]},
+            {"output_text": "Die Analyse ist erstellt."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="failed-wide-refresh"
+        ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+            server, "sync_period", return_value=90
+        ), patch.object(server, "sync_intervals", return_value={"status": "ok"}), patch.object(
+            server, "enqueue_sync_job", side_effect=server.AppError(400, "too wide", reason="sync_window_too_wide")
+        ), patch.object(server, "responses_request", side_effect=responses):
+            result = server.chat_with_coach("Aktualisiere und analysiere die letzte Einheit.", client_turn_id="failed-wide-refresh")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["pending_operations"], ["start_provider_refresh"])
+
+    def test_failed_wider_refresh_remains_pending_when_analysis_request_fails(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        responses = [
+            {"output": [self.call("start_provider_refresh", {"days": 365}, "failed-wide-error")]},
+            server.AppError(503, "Model unavailable"),
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="failed-wide-error"
+        ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+            server, "sync_period", return_value=90
+        ), patch.object(server, "sync_intervals", return_value={"status": "ok"}), patch.object(
+            server, "enqueue_sync_job", side_effect=server.AppError(400, "too wide", reason="sync_window_too_wide")
+        ), patch.object(server, "responses_request", side_effect=responses):
+            result = server.chat_with_coach("Aktualisiere und analysiere die letzte Einheit.", client_turn_id="failed-wide-error")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["pending_operations"], ["start_provider_refresh"])
+
+    def test_resumed_completed_effect_stays_completed_when_summary_fails(self):
+        csrf_hash = server.session_token_hash("csrf-summary-recovery")
+        client_turn_id = "summary-recovery"
+        intent = self.intent("manage_training_templates", ["local_template"])
+        message = "Speichere die Vorlage und erstelle einen Trainingsplan fuer die naechsten acht Wochen."
+        server.enqueue_background_coach_job(message, client_turn_id, csrf_hash, operation_id="summary-recovery-op")
+        persisted_receipt = {
+            "mode": "background", "phase": "preparing", "session_key": server._coach_session_key(csrf_hash),
+            "command_receipts": [{
+                "call_id": "template-success", "tool": "manage_training_templates", "effect_key": "template-success",
+                "result": {"ok": True, "status": "completed"},
+            }],
+        }
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE coach_commands SET intent=?, receipt=? WHERE client_turn_id=?",
+                (json.dumps(intent), json.dumps(persisted_receipt), client_turn_id),
+            )
+        with patch.object(server, "ensure_conversation", return_value="summary-recovery-conversation"), patch.object(
+            server, "build_training_context", return_value="Synthetic summary context"
+        ), patch.object(
+            server, "responses_background_request", side_effect=server.AppError(503, "Model unavailable")
+        ):
+            result = server.chat_with_coach(
+                message,
+                client_turn_id=client_turn_id,
+                session_csrf_hash=csrf_hash,
+                background_job=True,
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["pending_operations"], [])
+        self.assertIn("Ergebnis:", result["message"]["content"])
+
+    def test_waited_refresh_reuses_only_the_completed_activity_window(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        responses = [
+            {"output": [self.call("start_provider_refresh", {"days": 30}, "waited-refresh")]},
+            {"output_text": "Der Zeitraum wurde aktualisiert."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="waited-refresh"
+        ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+            server, "sync_period", return_value=90
+        ), patch.object(
+            server,
+            "sync_intervals",
+            side_effect=[
+                {"status": "ok", "waited_for_existing": True, "activity_days": 3},
+                {"status": "ok", "activity_days": 90},
+            ],
+        ) as sync, patch.object(server, "responses_request", side_effect=responses):
+            result = server.chat_with_coach("Aktualisiere und analysiere die letzte Einheit.", client_turn_id="waited-refresh")
+        self.assertEqual(result["command_receipts"][0]["result"].get("days"), 90)
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+        self.assertEqual(sync.call_count, 2)
+
+    def test_waited_refresh_does_not_cache_omitted_or_all_time_window(self):
+        for requested_days in (None, server.ALL_SYNC_DAYS):
+            with self.subTest(requested_days=requested_days):
+                intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+                arguments = {} if requested_days is None else {"days": requested_days}
+                responses = [
+                    {"output": [self.call("start_provider_refresh", arguments, "refresh")]},
+                    {"output_text": "Der Zeitraum wurde aktualisiert."},
+                ]
+                sync_results = [
+                    {"status": "ok", "waited_for_existing": True, "activity_days": 3},
+                    {"status": "ok", "activity_days": 90},
+                ]
+                if requested_days == server.ALL_SYNC_DAYS:
+                    sync_results.append({"status": "ok", "activity_days": server.ALL_SYNC_DAYS})
+                with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+                    server, "ensure_conversation", return_value=f"omitted-refresh-{requested_days}"
+                ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+                    server, "sync_period", return_value=90
+                ), patch.object(server, "sync_intervals", side_effect=sync_results), patch.object(
+                    server, "responses_request", side_effect=responses
+                ):
+                    result = server.chat_with_coach(
+                        "Aktualisiere und analysiere die letzte Einheit.",
+                        client_turn_id=f"omitted-refresh-{requested_days}",
+                    )
+                if requested_days is None:
+                    self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+                else:
+                    self.assertEqual(result["command_receipts"][1]["result"]["status"], "queued")
+
+    def test_waited_full_refresh_covers_finite_follow_up_window(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        responses = [
+            {"output": [self.call("start_provider_refresh", {"days": 30}, "full-refresh")]},
+            {"output_text": "Der Zeitraum wurde aktualisiert."},
+        ]
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="full-refresh"
+        ), patch.object(server, "prompt_requests_latest_activity_analysis", return_value=True), patch.object(
+            server, "sync_period", return_value=90
+        ), patch.object(
+            server, "sync_intervals", return_value={"status": "ok", "waited_for_existing": True, "activity_days": server.ALL_SYNC_DAYS}
+        ), patch.object(server, "responses_request", side_effect=responses) as request:
+            result = server.chat_with_coach("Aktualisiere und analysiere die letzte Einheit.", client_turn_id="full-refresh")
+        self.assertEqual(len(result["command_receipts"]), 1)
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "completed")
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], "auto")
+
+    def test_latest_analysis_keeps_authorized_follow_up(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"], ["list_planned_workouts"]), "intent": "remote_sync", "target_system": "intervals"}
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="review-conversation"
+        ), patch.object(server, "sync_intervals", return_value={"status": "ok"}), patch.object(
+            server, "responses_request", side_effect=[
+                {"output": [self.call("list_planned_workouts", {})]},
+                {"output_text": "Analyse und geplante Einheiten."},
+            ]
+        ) as request:
+            result = server.chat_with_coach("Aktualisiere Intervals und analysiere meine letzte Einheit. Liste danach die geplanten Einheiten.", client_turn_id="latest-follow-up")
+        self.assertEqual(result["intent"], intent)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual({item["tool"] for item in result["command_receipts"]}, {"start_provider_refresh", "list_planned_workouts"})
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "list_planned_workouts"})
+
+    def test_latest_analysis_does_not_satisfy_requested_garmin_refresh(self):
+        intent = {**self.intent("start_provider_refresh", ["garmin_refresh"]), "intent": "remote_sync", "target_system": "garmin"}
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="review-conversation"
+        ), patch.object(server, "sync_intervals", return_value={"status": "ok"}), patch.object(
+            server, "responses_request", side_effect=[
+                {"output": [self.call("start_provider_refresh", {})]}, {"output_text": "Garmin wird aktualisiert."},
+            ]
+        ):
+            result = server.chat_with_coach("Aktualisiere Garmin und analysiere meine letzte Einheit.", client_turn_id="latest-garmin")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(server.sync_job_state(result["sync_job_ids"][0])["provider"], "garmin")
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "queued")
+
+    def test_latest_analysis_refresh_does_not_authorize_plan_writes(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="review-conversation"
+        ), patch.object(server, "sync_intervals", return_value={"status": "ok"}), patch.object(
+            server, "responses_request", return_value={"output": [self.call("apply_training_changes", {})]}
+        ), patch.object(server, "_apply_structured_training_changes") as write:
+            result = server.chat_with_coach("Aktualisiere Intervals und analysiere meine letzte Einheit.", client_turn_id="latest-denied")
+        write.assert_not_called()
+        self.assertEqual(result["status"], "partial")
+        self.assertNotIn("start_provider_refresh", result["pending_operations"])
+        self.assertIn("apply_training_changes", result["pending_operations"])
+        self.assertIn("Daten aktualisiert", result["message"]["content"])
+
+    def test_latest_analysis_stops_when_required_refresh_fails_or_is_busy(self):
+        intent = {**self.intent("start_provider_refresh", ["intervals_refresh"]), "intent": "remote_sync", "target_system": "intervals"}
+        for outcome in (server.AppError(503, "Synthetic unavailable provider"), {"status": "already_running"}):
+            with self.subTest(outcome=type(outcome).__name__), patch.object(
+                server, "request_coach_intent", return_value=intent
+            ), patch.object(server, "ensure_conversation", return_value="review-conversation"), patch.object(
+                server, "sync_intervals", side_effect=[outcome]
+            ), patch.object(server, "responses_request") as request:
+                with self.assertRaises(server.AppError) as error:
+                    server.chat_with_coach("Aktualisiere Intervals und analysiere meine letzte Einheit.", client_turn_id="latest-failed")
+            request.assert_not_called()
+            self.assertEqual(error.exception.reason, "latest_activity_refresh_failed")
+
     def test_plan_sport_survives_storage_and_provider_projection(self):
         sports = ["Run", "Swim", "WeightTraining", "VirtualRide", "Ride"]
         entries = server.save_workout_library_entries([self.workout(i, sport) for i, sport in enumerate(sports)])
@@ -268,6 +928,55 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(receipt["status"],"completed")
         self.assertEqual(len(receipt["command_receipts"]),2)
         with server.database() as db:self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM athlete_checkins").fetchone()["n"],2)
+
+    def test_resumed_same_tool_effect_keeps_tools_enabled_after_first_receipt(self):
+        csrf_hash = server.session_token_hash("resumed-same-tool")
+        client_turn_id = "resumed-same-tool"
+        server.enqueue_background_coach_job(
+            "Erstelle und speichere den Trainingsplan fuer die naechsten sechs Wochen.",
+            client_turn_id,
+            csrf_hash,
+            operation_id="resumed-same-tool-op",
+        )
+        intent = self.intent("save_checkin", ["local_checkin"])
+        first_result = {"ok": True, "status": "saved", "checkin_date": "2026-09-05"}
+        persisted_receipt = {
+            "mode": "background",
+            "session_key": server._coach_session_key(csrf_hash),
+            "ai_provider": "openai",
+            "model": "gpt-5.6-sol",
+            "openai_response_id": "response-after-first-effect",
+            "phase": "resuming",
+            "command_receipts": [{
+                "call_id": "first",
+                "tool": "save_checkin",
+                "effect_key": server._coach_action_hash({"tool": "save_checkin", "arguments": {"payload": {"checkin_date": "2026-09-05", "notes": "First"}}}),
+                "result": first_result,
+            }],
+        }
+        second = self.call(
+            "save_checkin",
+            {"payload": {"checkin_date": "2026-09-04", "notes": "Second"}},
+            "second",
+        )
+        with server.DB_LOCK, server.database() as db:
+            db.execute(
+                "UPDATE coach_commands SET conversation_id=?, intent=?, receipt=? WHERE client_turn_id=?",
+                ("resumed-same-tool-conversation", json.dumps(intent), json.dumps(persisted_receipt), client_turn_id),
+            )
+        with patch.object(server, "build_training_context", return_value="Synthetic resumed context"), patch.object(
+            server, "responses_background_request", side_effect=[{"output": [second]}, {"output_text": "Beide Check-ins gespeichert."}]
+        ) as request:
+            result = server.chat_with_coach(
+                "Speichere meine Check-ins.",
+                client_turn_id=client_turn_id,
+                session_csrf_hash=csrf_hash,
+                background_job=True,
+            )
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], "auto")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(result["command_receipts"]), 2)
+        self.assertEqual(len(server.list_checkins()), 1)
 
     def test_same_call_id_cannot_be_rebound_to_a_new_effect_or_session(self):
         one=self.call("manage_training_templates",{"templates":[{"name":"One","sport":"Run"}]})

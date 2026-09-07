@@ -47,5 +47,7 @@ def coach_failure_lines(commands: list[dict[str, Any]], pending_operations: set[
 def coach_effect_label(item: dict[str, Any]) -> str:
     label = COACH_OPERATION_LABELS.get(item.get("tool"), "Lokale Aktion")
     result = item.get("result") or {}
+    if item.get("tool") == "start_provider_refresh" and result.get("status") == "completed":
+        label = "Daten aktualisiert"
     count = len(result.get("library_entry_ids") or result.get("templates") or result.get("changes") or [])
     return f"{label} ({count})" if count else label
