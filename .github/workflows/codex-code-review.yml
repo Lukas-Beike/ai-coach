@@ -43,8 +43,10 @@ jobs:
             const releaseBotLogin = 'ai-coach-release-bot[bot]';
             const manualReviewCheckName = 'Codex manual review request';
             const releaseVersionPattern = /^chore\/release-version-(\d+\.\d+\.\d+)$/;
+            const releasePromotionPattern = /^chore\/release-promotion-(\d+\.\d+\.\d+)$/;
             const shouldSkipCodexReview = (pullRequest) => {
               const versionMatch = releaseVersionPattern.exec(pullRequest.head?.ref || '');
+              const promotionMatch = releasePromotionPattern.exec(pullRequest.head?.ref || '');
               return (
                 (
                   pullRequest.user?.login === dependabotLogin &&
@@ -55,6 +57,12 @@ jobs:
                   pullRequest.base?.ref === 'develop' &&
                   versionMatch &&
                   pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`
+                ) ||
+                (
+                  pullRequest.user?.login === releaseBotLogin &&
+                  pullRequest.base?.ref === 'main' &&
+                  promotionMatch &&
+                  pullRequest.title === `chore(release): promote ${promotionMatch[1]} to main`
                 )
               );
             };
@@ -103,7 +111,10 @@ jobs:
               const pullRequest = context.payload.pull_request;
               const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
               const titleChanged = context.payload.action === 'edited' && context.payload.changes?.title;
-              const releaseBotTitleChanged = titleChanged && pullRequest.user?.login === releaseBotLogin && releaseVersionPattern.test(pullRequest.head?.ref || '');
+              const releaseBotTitleChanged = titleChanged && pullRequest.user?.login === releaseBotLogin && (
+                releaseVersionPattern.test(pullRequest.head?.ref || '') ||
+                releasePromotionPattern.test(pullRequest.head?.ref || '')
+              );
               const reviewBaselineChanged = baseChanged || releaseBotTitleChanged || context.payload.action === 'reopened';
               if (
                 pullRequest.draft !== true &&
@@ -259,48 +270,67 @@ jobs:
               const versionMatch = /^chore\/release-version-(\d+\.\d+\.\d+)$/.exec(
                 pullRequest.data.head.ref || '',
               );
-              version = versionMatch?.[1];
-              const expectedTitle = version
-                ? `chore(release): set application version to ${version}`
-                : '';
-              const files = await github.paginate(github.rest.pulls.listFiles, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: Number(process.env.PR_NUMBER),
-                per_page: 100,
-              });
-              const file = files.length === 1 ? files[0] : null;
-              const changedLines = file
-                ? String(file.patch || '')
-                  .split('\n')
-                  .filter((line) => /^[+-](?!\+\+\+|---)/.test(line))
-                : [];
-              const hasExpectedVersion = changedLines.includes(`+APP_VERSION = "${version}"`);
-              const hasPreviousVersion = changedLines.some((line) => (
-                /^-APP_VERSION = "\d+\.\d+\.\d+"$/.test(line)
-              ));
+              const promotionMatch = /^chore\/release-promotion-(\d+\.\d+\.\d+)$/.exec(
+                pullRequest.data.head.ref || '',
+              );
+              version = versionMatch?.[1] || promotionMatch?.[1];
+              const expectedTitle = versionMatch
+                ? `chore(release): set application version to ${versionMatch[1]}`
+                : promotionMatch
+                  ? `chore(release): promote ${promotionMatch[1]} to main`
+                  : '';
               if (
                 !version ||
                 pullRequest.data.title !== expectedTitle ||
-                pullRequest.data.base.ref !== 'develop' ||
                 pullRequest.data.head.repo?.full_name !== expectedHeadRepository ||
-                !file ||
-                file.filename !== 'server.py' ||
-                file.status !== 'modified' ||
-                file.additions !== 1 ||
-                file.deletions !== 1 ||
-                file.changes !== 2 ||
-                changedLines.length !== 2 ||
-                !hasExpectedVersion ||
-                !hasPreviousVersion
+                (versionMatch && pullRequest.data.base.ref !== 'develop') ||
+                (promotionMatch && pullRequest.data.base.ref !== 'main') ||
+                (!versionMatch && !promotionMatch)
               ) {
                 core.setFailed(
-                  'The release-bot Codex exemption requires an exact develop version-bump PR ' +
-                  'that changes only APP_VERSION in server.py.',
+                  'The release-bot Codex exemption requires an exact same-repository release PR ' +
+                  'with the expected target branch and title.',
                 );
                 return;
               }
-              summary = `The trusted release bot owns this exact version-only release pull request for ${version}; no Codex review is required.`;
+              if (versionMatch) {
+                const files = await github.paginate(github.rest.pulls.listFiles, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: Number(process.env.PR_NUMBER),
+                  per_page: 100,
+                });
+                const file = files.length === 1 ? files[0] : null;
+                const changedLines = file
+                  ? String(file.patch || '')
+                    .split('\n')
+                    .filter((line) => /^[+-](?!\+\+\+|---)/.test(line))
+                  : [];
+                const hasExpectedVersion = changedLines.includes(`+APP_VERSION = "${version}"`);
+                const hasPreviousVersion = changedLines.some((line) => (
+                  /^-APP_VERSION = "\d+\.\d+\.\d+"$/.test(line)
+                ));
+                if (
+                  !file ||
+                  file.filename !== 'server.py' ||
+                  file.status !== 'modified' ||
+                  file.additions !== 1 ||
+                  file.deletions !== 1 ||
+                  file.changes !== 2 ||
+                  changedLines.length !== 2 ||
+                  !hasExpectedVersion ||
+                  !hasPreviousVersion
+                ) {
+                  core.setFailed(
+                    'The release-bot Codex exemption requires an exact develop version-bump PR ' +
+                    'that changes only APP_VERSION in server.py.',
+                  );
+                  return;
+                }
+                summary = `The trusted release bot owns this exact version-only release pull request for ${version}; no Codex review is required.`;
+              } else {
+                summary = `The trusted release bot owns this exact release promotion pull request for ${version}; no Codex review is required.`;
+              }
             } else {
               const dependabotCommits = await github.paginate(github.rest.pulls.listCommits, {
                 owner: context.repo.owner,
