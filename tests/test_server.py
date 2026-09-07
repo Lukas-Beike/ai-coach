@@ -459,7 +459,7 @@ class CoachTests(unittest.TestCase):
     def test_structured_commit_rebinds_explicit_draft_to_recovered_conversation(self):
         artifact = server._stage_coach_artifact(
             "conversation-stale",
-            "turn-draft",
+            "turn-recovered-commit",
             {
                 "plan_name": "Recovered",
                 "goal": "Ausdauer",
@@ -511,6 +511,34 @@ class CoachTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(stored["conversation_id"], "conversation-recovered")
         self.assertEqual(stored["status"], "committed")
+
+    def test_structured_commit_does_not_rebind_foreign_draft_via_recovery_flag(self):
+        artifact = server._stage_coach_artifact(
+            "conversation-foreign",
+            "turn-foreign",
+            {
+                "plan_name": "Foreign",
+                "workouts": [{
+                    "date": "2099-01-04", "sport": "Ride", "name": "Foreign ride",
+                    "description": "- 30m easy", "duration_minutes": 30,
+                }],
+            },
+        )
+        intent = {
+            "intent": "local_action", "operation": "commit_training_plan", "target_system": "local",
+            "artifact_id": artifact["artifact_id"], "ambiguities": [],
+            "authorization_scope": [f"artifact:{artifact['artifact_id']}"],
+            "follow_up_operations": [], "_allow_artifact_rebind": True,
+        }
+
+        with self.assertRaises(server.AppError) as denied:
+            server._structured_coach_tool_result(
+                "commit_training_plan", {"artifact_id": artifact["artifact_id"]},
+                intent=intent, conversation_id="conversation-current", client_turn_id="turn-current",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+
+        self.assertEqual(denied.exception.reason, "artifact_conversation_conflict")
 
     def test_structured_plan_push_declares_and_uses_bounded_entries(self):
         local_id = str(uuid.uuid4())
@@ -4338,6 +4366,28 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(failed["intent"], "needs_clarification")
         self.assertEqual(failed["target_system"], "none")
 
+    def test_structured_coach_intent_checks_foreign_artifact_in_follow_up_commit(self):
+        artifact = server._stage_coach_artifact(
+            "conversation-foreign", "turn-foreign-intent",
+            {"plan_name": "Foreign", "workouts": []},
+        )
+        intent = {
+            "intent": "remote_sync", "operation": "start_provider_refresh", "target_system": "intervals",
+            "artifact_id": artifact["artifact_id"], "ambiguities": [],
+            "authorization_scope": ["intervals_refresh", f"artifact:{artifact['artifact_id']}"],
+            "follow_up_operations": ["commit_training_plan"],
+        }
+
+        with patch.object(server, "responses_request", return_value={"output_text": json.dumps(intent)}):
+            denied = server.request_coach_intent("Aktualisiere und speichere den Entwurf.", "conversation-current")
+            explicit = server.request_coach_intent(
+                f"Aktualisiere und speichere Entwurf {artifact['artifact_id']}.", "conversation-current",
+            )
+
+        self.assertEqual(denied["intent"], "needs_clarification")
+        self.assertIsNone(denied["operation"])
+        self.assertTrue(explicit["_artifact_explicit"])
+
     def test_structured_coach_loop_keeps_tools_and_returns_command_receipt(self):
         intent = {
             "intent": "local_action",
@@ -4905,11 +4955,15 @@ class CoachTests(unittest.TestCase):
             }]},
             {"output_text": "Der Plan wurde neu erstellt, gespeichert und zur Synchronisierung vorgemerkt."},
         ]
+        unrelated = server.create_local_workout_library_entry({
+            "sport": "Ride", "name": "Unrelated template", "description": "- 20m easy",
+            "duration_minutes": 20,
+        })
         with patch.object(server, "request_coach_intent", return_value=mixed_intent), patch.object(
             server, "ensure_conversation", return_value="conversation-plan-rebuild"
         ), patch.object(server, "responses_request", side_effect=responses) as request, patch.object(
             server, "_enqueue_coach_plan_push", return_value={"ok": True, "status": "queued", "sync_job_ids": ["job"]}
-        ):
+        ) as enqueue:
             result = server.chat_with_coach(
                 "Erstelle den gesamten Plan mit den neuen Informationen neu für die kommenden 2 Wochen, "
                 "speichere ihn und synchronisiere ihn zu intervals.icu",
@@ -4929,6 +4983,10 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(request.call_args_list[1].args[0]["tool_choice"], {"type": "function", "name": "replace_training_plan"})
         self.assertEqual(request.call_args_list[2].args[0]["tool_choice"], {"type": "function", "name": "start_intervals_plan_sync"})
         self.assertEqual({item["name"] for item in server.list_planned_units()}, {"Neu geplant", "Neu geplant 2"})
+        replacement_ids = set(result["command_receipts"][1]["result"]["library_entry_ids"])
+        synced_ids = {item["library_workout_id"] for item in enqueue.call_args.args[0]}
+        self.assertEqual(synced_ids, replacement_ids)
+        self.assertNotIn(unrelated["id"], synced_ids)
 
     def test_complete_plan_rebuild_keeps_draft_flow_when_no_local_plan_exists(self):
         intent = {
@@ -4957,6 +5015,27 @@ class CoachTests(unittest.TestCase):
             "Replace the Tuesday workout in my entire training plan.", intent
         )
         self.assertEqual(normalized, intent)
+
+    def test_complete_plan_rebuild_replaces_future_empty_plan_metadata(self):
+        today = date.today()
+        with server.DB_LOCK, server.database() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db, str(uuid.uuid4()), "Empty Future", "Base",
+                (today + timedelta(days=1)).isoformat(),
+                (today + timedelta(days=14)).isoformat(), "planned", server.utc_now(),
+            )
+        intent = {
+            "intent": "local_action", "operation": "stage_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": ["commit_training_plan"],
+        }
+
+        normalized = server._normalize_complete_plan_intent(
+            "Erstelle meinen gesamten Trainingsplan neu.", intent,
+        )
+
+        self.assertEqual(normalized["operation"], "replace_training_plan")
+        self.assertEqual(normalized["follow_up_operations"], [])
 
     def test_scoped_direct_plan_replacement_requires_clarification(self):
         planned = server.create_local_planned_unit({

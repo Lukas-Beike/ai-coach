@@ -13997,7 +13997,7 @@ def _structured_coach_tool_result(
             if artifact["status"] != "draft":
                 raise AppError(409, "Das Planartefakt ist nicht mehr verfügbar.", reason="artifact_not_available")
             if str(artifact.get("conversation_id") or "") != str(conversation_id):
-                if not intent.get("_artifact_explicit") and not intent.get("_allow_artifact_rebind"):
+                if not intent.get("_artifact_explicit"):
                     raise AppError(409, "Der Planentwurf gehört zu einer anderen Coach-Unterhaltung; bitte bestätige die Artefakt-ID.", reason="artifact_conversation_conflict")
                 db.execute(
                     "UPDATE coach_plan_artifacts SET conversation_id=?, updated_at=? WHERE id=? AND status='draft'",
@@ -14314,6 +14314,12 @@ def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dic
             "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ? LIMIT 1",
             (today,),
         ).fetchone()
+        if not existing_plan:
+            existing_plan = db.execute(
+                "SELECT 1 FROM training_plans "
+                "WHERE status <> 'archived' AND end_date >= ? LIMIT 1",
+                (today,),
+            ).fetchone()
     if not existing_plan:
         return intent
     follow_ups: list[str] = []
@@ -14547,6 +14553,37 @@ def _chat_with_structured_coach_impl(
         str(item.get("tool") or "") for item in command_receipts if isinstance(item, dict) and item.get("result", {}).get("ok")
     }
 
+    def replacement_sync_ids(result: dict[str, Any] | None = None) -> list[str]:
+        """Scope a rebuild follow-up sync to the units created by that rebuild."""
+        if "start_intervals_plan_sync" not in _structured_authorized_operations(intent):
+            return []
+        replacement_result = result
+        if replacement_result is None:
+            replacement = next(
+                (
+                    item for item in reversed(command_receipts)
+                    if item.get("tool") == "replace_training_plan"
+                    and isinstance(item.get("result"), dict)
+                    and item["result"].get("ok")
+                ),
+                None,
+            )
+            replacement_result = replacement.get("result") if replacement else None
+        if not isinstance(replacement_result, dict):
+            return []
+        local_ids = [
+            str(value).strip() for value in replacement_result.get("library_entry_ids") or []
+            if str(value).strip()
+        ]
+        scope = intent.setdefault("authorization_scope", [])
+        for local_id in local_ids:
+            token = f"library_workout:{local_id}"
+            if token not in scope:
+                scope.append(token)
+        return local_ids
+
+    replacement_follow_up_sync_ids = replacement_sync_ids()
+
     def restore_staged_artifact_intent() -> None:
         """Rehydrate the commit scope before selecting the resumed model action."""
         if intent.get("artifact_id"):
@@ -14754,7 +14791,6 @@ def _chat_with_structured_coach_impl(
         if recovered_conversation_id == conversation_id:
             raise
         conversation_id = recovered_conversation_id
-        intent["_allow_artifact_rebind"] = True
         request_payload["conversation"] = conversation_id
         with DB_LOCK, database() as db:
             db.execute(
@@ -14807,6 +14843,17 @@ def _chat_with_structured_coach_impl(
             arguments = json.loads(item.get("arguments") or "{}")
             if not isinstance(arguments, dict):
                 raise AppError(400, "Coach-Aktionsargumente muessen ein Objekt sein.")
+            if name == "start_intervals_plan_sync" and arguments.get("entries") is None and replacement_follow_up_sync_ids:
+                pending_by_id = {
+                    entry["library_workout_id"]: entry for entry in _pending_plan_push_entries()
+                }
+                arguments = {
+                    **arguments,
+                    "entries": [
+                        pending_by_id[local_id] for local_id in replacement_follow_up_sync_ids
+                        if local_id in pending_by_id
+                    ],
+                }
             if name == "start_provider_refresh" and uncovered_explicit_refresh:
                 arguments = {**arguments, "days": explicit_refresh_days, "_wait_for_completion": True}
             effect_key = _coach_action_hash({"tool": name, "arguments": arguments})
@@ -14864,6 +14911,7 @@ def _chat_with_structured_coach_impl(
                         command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "result": result})
                         _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
                     if result.get("ok") and name == "replace_training_plan":
+                        replacement_follow_up_sync_ids = replacement_sync_ids(result)
                         publish_state_event("planning", {"status": "changed"})
                     if result.get("artifact_id"):
                         intent["artifact_id"] = result["artifact_id"]
@@ -15183,7 +15231,7 @@ def request_coach_intent(
         try:
             resolved = resolve_intent_objects(parse_intent_response(responses_request(payload)), message, object_refs)
             artifact_id = str(resolved.get("artifact_id") or "").strip()
-            if resolved.get("operation") == "commit_training_plan" and artifact_id:
+            if "commit_training_plan" in _structured_authorized_operations(resolved) and artifact_id:
                 artifact = next((item for item in artifact_refs if str(item.get("id") or "") == artifact_id), None)
                 if artifact and str(artifact.get("conversation_id") or "") != str(conversation_id):
                     if artifact_id.casefold() not in message.casefold():
