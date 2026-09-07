@@ -10069,11 +10069,13 @@ def apply_workout_library_plan(
     }
 
 
-def _library_bulk_request_entries(entries: Any, *, require_hash: bool = False) -> list[dict[str, Any]]:
+def _library_bulk_request_entries(
+    entries: Any, *, require_hash: bool = False, max_entries: int = LIBRARY_BULK_MAX_ENTRIES,
+) -> list[dict[str, Any]]:
     if not isinstance(entries, list) or not entries:
         raise AppError(400, "Mindestens eine Bibliothekseinheit muss ausgewählt werden.")
-    if len(entries) > LIBRARY_BULK_MAX_ENTRIES:
-        raise AppError(400, f"Es können höchstens {LIBRARY_BULK_MAX_ENTRIES} Bibliothekseinheiten gleichzeitig ausgewählt werden.")
+    if len(entries) > max_entries:
+        raise AppError(400, f"Es können höchstens {max_entries} Bibliothekseinheiten gleichzeitig ausgewählt werden.")
     result: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in entries:
@@ -14181,7 +14183,19 @@ def _structured_coach_tool_result(
             _mark_local_planning_authoritative()
             normalized_entries = _pending_plan_push_entries()
         else:
-            normalized_entries = _library_bulk_request_entries(entries, require_hash=True)
+            replacement_ids = {
+                str(value).strip() for value in intent.get("_replacement_sync_entry_ids") or []
+                if str(value).strip()
+            }
+            normalized_entries = _library_bulk_request_entries(
+                entries,
+                require_hash=True,
+                max_entries=COACH_TRAINING_CHANGE_LIMIT if replacement_ids else LIBRARY_BULK_MAX_ENTRIES,
+            )
+            if replacement_ids and any(
+                entry["library_workout_id"] not in replacement_ids for entry in normalized_entries
+            ):
+                raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst diese Einheit nicht.", reason="intent_scope_denied")
             for entry in normalized_entries:
                 _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
             _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
@@ -14575,6 +14589,7 @@ def _chat_with_structured_coach_impl(
             str(value).strip() for value in replacement_result.get("library_entry_ids") or []
             if str(value).strip()
         ]
+        intent["_replacement_sync_entry_ids"] = local_ids
         scope = intent.setdefault("authorization_scope", [])
         for local_id in local_ids:
             token = f"library_workout:{local_id}"

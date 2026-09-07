@@ -566,6 +566,32 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["status"], "queued")
         self.assertEqual(enqueue.call_args.kwargs["item_operations"][0]["item_key"], local_id)
 
+    def test_replacement_follow_up_sync_accepts_complete_plan_size(self):
+        local_ids = [str(uuid.uuid4()) for _ in range(server.LIBRARY_BULK_MAX_ENTRIES + 1)]
+        entries = [
+            {"library_workout_id": local_id, "expected_payload_hash": "b" * 64}
+            for local_id in local_ids
+        ]
+        intent = {
+            "intent": "remote_sync", "operation": "replace_training_plan", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [],
+            "authorization_scope": ["local_plan", *(f"library_workout:{local_id}" for local_id in local_ids)],
+            "follow_up_operations": ["start_intervals_plan_sync"],
+            "_replacement_sync_entry_ids": local_ids,
+        }
+
+        with patch.object(server, "_mark_local_planning_authoritative"), patch.object(
+            server, "_enqueue_coach_plan_push", return_value={"ok": True, "status": "queued"},
+        ) as enqueue:
+            result = server._structured_coach_tool_result(
+                "start_intervals_plan_sync", {"entries": entries}, intent=intent,
+                conversation_id="conversation-large-replacement", client_turn_id="turn-large-replacement",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(len(enqueue.call_args.args[0]), len(local_ids))
+
     def test_structured_coach_exposes_competitions_plans_and_adaptive_operations(self):
         names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
         self.assertTrue({
