@@ -14226,6 +14226,16 @@ def _structured_coach_tool_result(
                 max_entries=COACH_TRAINING_CHANGE_LIMIT if authorized_ids else LIBRARY_BULK_MAX_ENTRIES,
             )
             normalized_ids = {entry["library_workout_id"] for entry in normalized_entries}
+            if intent.get("_sync_all_pending"):
+                pending_ids = {
+                    entry["library_workout_id"] for entry in _pending_plan_push_entries()
+                }
+                if normalized_ids != pending_ids:
+                    raise AppError(
+                        403,
+                        "Die Synchronisierung muss alle offenen Einheiten der lokalen Bibliothek umfassen.",
+                        reason="intent_scope_denied",
+                    )
             if authorized_ids and normalized_ids != authorized_ids:
                 raise AppError(
                     403,
@@ -14336,6 +14346,24 @@ def _normalize_new_plan_intent(intent: dict[str, Any]) -> dict[str, Any]:
     ]
     if "stage_training_plan" not in operations:
         return intent
+    if (
+        intent.get("_artifact_explicit")
+        and str(intent.get("artifact_id") or "").strip()
+        and "commit_training_plan" in operations
+    ):
+        return {
+            "intent": "needs_clarification",
+            "operation": None,
+            "target_system": "none",
+            "artifact_id": None,
+            "ambiguities": [
+                "Bitte trenne das Speichern des bestehenden Entwurfs von der neuen Planung in zwei Nachrichten, "
+                "damit kein falscher Entwurf überschrieben wird."
+            ],
+            "authorization_scope": [],
+            "follow_up_operations": [],
+            "sync_scope": None,
+        }
     ordered = ["stage_training_plan"]
     if "commit_training_plan" in operations:
         ordered.append("commit_training_plan")
@@ -14356,7 +14384,26 @@ def _normalize_new_plan_intent(intent: dict[str, Any]) -> dict[str, Any]:
     if "start_intervals_plan_sync" in ordered:
         normalized["intent"] = "remote_sync"
         normalized["target_system"] = "intervals"
-        normalized["_sync_created_entries_only"] = True
+        sync_scope = intent.get("sync_scope", "created")
+        if sync_scope == "all_pending":
+            normalized["_sync_all_pending"] = True
+            normalized.pop("_sync_created_entries_only", None)
+        elif sync_scope == "created":
+            normalized["_sync_created_entries_only"] = True
+            normalized.pop("_sync_all_pending", None)
+        else:
+            return {
+                "intent": "needs_clarification",
+                "operation": None,
+                "target_system": "none",
+                "artifact_id": None,
+                "ambiguities": [
+                    "Soll die neue Planung oder die gesamte offene lokale Bibliothek synchronisiert werden?"
+                ],
+                "authorization_scope": [],
+                "follow_up_operations": [],
+                "sync_scope": None,
+            }
     elif intent.get("intent") == "remote_sync":
         normalized["intent"] = "remote_sync"
     else:
@@ -14435,6 +14482,7 @@ def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dic
         "follow_up_operations": follow_ups,
         "bulk_change": True,
     }
+    normalized.pop("_sync_created_entries_only", None)
     if "start_intervals_plan_sync" in follow_ups:
         normalized["intent"] = "remote_sync"
         normalized["target_system"] = "intervals"
@@ -14650,7 +14698,10 @@ def _chat_with_structured_coach_impl(
 
     def replacement_sync_ids(result: dict[str, Any] | None = None) -> list[str]:
         """Scope a rebuild follow-up sync to the units created by that rebuild."""
-        if "start_intervals_plan_sync" not in _structured_authorized_operations(intent):
+        if (
+            "start_intervals_plan_sync" not in _structured_authorized_operations(intent)
+            or intent.get("_sync_all_pending")
+        ):
             return []
         replacement_result = result
         if replacement_result is None:
@@ -14680,7 +14731,10 @@ def _chat_with_structured_coach_impl(
 
     def committed_plan_sync_ids(result: dict[str, Any] | None = None) -> list[str]:
         """Scope a same-turn plan push to entries created by its commit."""
-        if "start_intervals_plan_sync" not in _structured_authorized_operations(intent):
+        if (
+            "start_intervals_plan_sync" not in _structured_authorized_operations(intent)
+            or not intent.get("_sync_created_entries_only")
+        ):
             return []
         commit_result = result
         if commit_result is None:
@@ -14971,7 +15025,12 @@ def _chat_with_structured_coach_impl(
             if not isinstance(arguments, dict):
                 raise AppError(400, "Coach-Aktionsargumente muessen ein Objekt sein.")
             turn_sync_entry_ids = replacement_follow_up_sync_ids or created_follow_up_sync_ids
-            if name == "start_intervals_plan_sync" and turn_sync_entry_ids:
+            if name == "start_intervals_plan_sync" and intent.get("_sync_all_pending"):
+                arguments = {
+                    **arguments,
+                    "entries": _pending_plan_push_entries(),
+                }
+            elif name == "start_intervals_plan_sync" and turn_sync_entry_ids:
                 pending_by_id = {
                     entry["library_workout_id"]: entry for entry in _pending_plan_push_entries()
                 }
@@ -15359,17 +15418,19 @@ def request_coach_intent(
     payload["model"] = model or selected_model(provider)
     for attempt in range(COACH_INTENT_MAX_ATTEMPTS):
         try:
-            resolved = _normalize_new_plan_intent(
-                resolve_intent_objects(parse_intent_response(responses_request(payload)), message, object_refs)
+            resolved = resolve_intent_objects(
+                parse_intent_response(responses_request(payload)), message, object_refs
             )
             artifact_id = str(resolved.get("artifact_id") or "").strip()
             if "commit_training_plan" in _structured_authorized_operations(resolved) and artifact_id:
                 artifact = next((item for item in artifact_refs if str(item.get("id") or "") == artifact_id), None)
                 if artifact and str(artifact.get("conversation_id") or "") != str(conversation_id):
-                    if artifact_id.casefold() not in message.casefold():
+                    stage_requested = "stage_training_plan" in _structured_authorized_operations(resolved)
+                    if artifact_id.casefold() not in message.casefold() and not stage_requested:
                         return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "ambiguities": ["Mehrere offene Planentwürfe stammen aus anderen Coach-Unterhaltungen; bitte nenne die Artefakt-ID ausdrücklich."], "authorization_scope": [], "follow_up_operations": []}
+                if artifact_id.casefold() in message.casefold():
                     resolved["_artifact_explicit"] = True
-            return resolved
+            return _normalize_new_plan_intent(resolved)
         except (AppError, TypeError, ValueError, json.JSONDecodeError):
             if attempt + 1 < COACH_INTENT_MAX_ATTEMPTS:
                 continue

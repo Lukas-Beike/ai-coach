@@ -25,6 +25,8 @@ class CoachIntentContractTests(unittest.TestCase):
             "artifact_id": None,
             "ambiguities": [],
             "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+            "sync_scope": None,
         })})
         self.assertEqual(result["operation"], "stage_training_plan")
         self.assertEqual(result["target_system"], "local")
@@ -40,6 +42,19 @@ class CoachIntentContractTests(unittest.TestCase):
                 "authorization_scope": [],
             })})
 
+    def test_parse_intent_requires_scope_for_new_plan_sync(self):
+        with self.assertRaises(ValueError):
+            parse_intent_response({"output_text": json.dumps({
+                "intent": "remote_sync",
+                "operation": "stage_training_plan",
+                "target_system": "intervals",
+                "artifact_id": None,
+                "ambiguities": [],
+                "authorization_scope": ["local_plan", "intervals_sync"],
+                "follow_up_operations": ["commit_training_plan", "start_intervals_plan_sync"],
+                "sync_scope": None,
+            })})
+
     def test_parse_intent_accepts_explicit_competition_sync_operation(self):
         result = parse_intent_response({"output_text": json.dumps({
             "intent": "remote_sync",
@@ -49,6 +64,7 @@ class CoachIntentContractTests(unittest.TestCase):
             "ambiguities": [],
             "authorization_scope": ["local_competitions"],
             "follow_up_operations": [],
+            "sync_scope": None,
         })})
         self.assertEqual(result["operation"], "sync_competitions")
         self.assertEqual(result["target_system"], "intervals")
@@ -82,6 +98,7 @@ class CoachIntentContractTests(unittest.TestCase):
                 "ambiguities": [],
                 "authorization_scope": [scope],
                 "follow_up_operations": [],
+                "sync_scope": None,
             })})
             self.assertEqual(result["operation"], operation)
 
@@ -100,6 +117,7 @@ class CoachIntentContractTests(unittest.TestCase):
             "ambiguities": [],
             "authorization_scope": ["adaptive_replan:preview-1", "intervals_sync"],
             "follow_up_operations": [],
+            "sync_scope": None,
         })})
         self.assertEqual(result["target_system"], "intervals")
 

@@ -849,6 +849,29 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["entries"], 2)
         self.assertEqual(job_ids, ["job-all"])
 
+    def test_structured_coach_all_pending_sync_rejects_a_subset(self):
+        first = server.create_local_workout_library_entry({
+            "sport": "Ride", "name": "First pending", "description": "- 30m easy", "duration_minutes": 30,
+        })
+        second = server.create_local_workout_library_entry({
+            "sport": "Run", "name": "Second pending", "description": "- 20m easy", "duration_minutes": 20,
+        })
+        intent = {
+            "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "_sync_all_pending": True,
+        }
+        pending = {item["library_workout_id"]: item for item in server._pending_plan_push_entries()}
+        with self.assertRaises(server.AppError) as error:
+            server._structured_coach_tool_result(
+                "start_intervals_plan_sync",
+                {"entries": [pending[first["id"]]]},
+                intent=intent, conversation_id="conversation-sync-all", client_turn_id="turn-sync-all",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+        self.assertEqual(error.exception.reason, "intent_scope_denied")
+        self.assertIn(second["id"], {item["library_workout_id"] for item in server._pending_plan_push_entries()})
+
     def test_startup_sync_does_not_duplicate_resumed_jobs(self):
         config = replace(server.CONFIG, intervals_api_key="configured", calendar_ical_url="", garmin_email="", garmin_tokenstore="")
         with patch.object(server, "CONFIG", config), patch.object(server, "_sync_job_active", return_value=True) as active, patch.object(
@@ -4445,6 +4468,7 @@ class CoachTests(unittest.TestCase):
             "ambiguities": [],
             "authorization_scope": ["artifact:old-foreign-draft", "intervals_sync"],
             "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+            "sync_scope": "created",
         })
 
         self.assertEqual(normalized["operation"], "stage_training_plan")
@@ -4476,6 +4500,7 @@ class CoachTests(unittest.TestCase):
             "ambiguities": [],
             "authorization_scope": ["local_plan", "local_competitions"],
             "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+            "sync_scope": "created",
         })
 
         self.assertEqual(normalized["operation"], "stage_training_plan")
@@ -4486,6 +4511,39 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(normalized["intent"], "remote_sync")
         self.assertEqual(normalized["target_system"], "intervals")
         self.assertNotIn("_sync_created_entries_only", normalized)
+
+    def test_new_plan_intent_preserves_all_pending_sync_scope(self):
+        normalized = server._normalize_new_plan_intent({
+            "intent": "remote_sync",
+            "operation": "stage_training_plan",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["intervals_sync"],
+            "follow_up_operations": ["commit_training_plan", "start_intervals_plan_sync"],
+            "sync_scope": "all_pending",
+        })
+
+        self.assertEqual(normalized["operation"], "stage_training_plan")
+        self.assertTrue(normalized["_sync_all_pending"])
+        self.assertNotIn("_sync_created_entries_only", normalized)
+        self.assertEqual(normalized["target_system"], "intervals")
+
+    def test_new_plan_intent_rejects_explicit_existing_draft_mixed_with_new_plan(self):
+        normalized = server._normalize_new_plan_intent({
+            "intent": "local_action",
+            "operation": "stage_training_plan",
+            "target_system": "local",
+            "artifact_id": "existing-draft",
+            "_artifact_explicit": True,
+            "ambiguities": [],
+            "authorization_scope": ["local_plan", "artifact:existing-draft"],
+            "follow_up_operations": ["commit_training_plan"],
+        })
+
+        self.assertEqual(normalized["intent"], "needs_clarification")
+        self.assertIsNone(normalized["operation"])
+        self.assertIn("bestehenden Entwurfs", normalized["ambiguities"][0])
 
     def test_new_workout_classification_does_not_request_a_foreign_artifact_id(self):
         old = server._stage_coach_artifact(
@@ -4499,6 +4557,7 @@ class CoachTests(unittest.TestCase):
             "ambiguities": [],
             "authorization_scope": [f"artifact:{old['artifact_id']}", "intervals_sync"],
             "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+            "sync_scope": "created",
         }
 
         with patch.object(server, "responses_request", return_value={"output_text": json.dumps(classified)}):
