@@ -13642,6 +13642,7 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
     batch_ids.discard("")
     original_dates: dict[str, str] = {}
     final_dates: dict[str, str] = {}
+    restore_identities: set[str] = set()
     for index, change in enumerate(changes):
         local_id = str(change.get("local_id") or "").strip()
         action = str(change.get("action") or "update").strip().casefold()
@@ -13656,6 +13657,8 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
                 raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
             final_dates[change_identity] = candidate_date
             continue
+        if action == "restore":
+            restore_identities.add(change_identity)
         row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
         if not row:
             continue
@@ -13690,7 +13693,11 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
     dates_needing_calendar_check = {
         candidate_date
         for change_identity, candidate_date in final_dates.items()
-        if change_identity.startswith("create:") or original_dates.get(change_identity) != candidate_date
+        if (
+            change_identity.startswith("create:")
+            or original_dates.get(change_identity) != candidate_date
+            or change_identity in restore_identities
+        )
     }
     for candidate_date in dates_needing_calendar_check:
         conflicts = calendar_conflicts({"date": candidate_date}, batch_ids)

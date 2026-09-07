@@ -17,6 +17,12 @@ _NEGATED_CREATE_REQUEST_RE = re.compile(
     r"zus[aä]tzlich\w*|erg[aä]nz\w*|hinzuf[uü]g\w*|hinzu\w*|"
     r"anleg\w*|erstell\w*|neu\w*)\b"
 )
+_POST_VERBAL_NEGATED_CREATE_REQUEST_RE = re.compile(
+    r"\b(?:add\w*|schedule\w*|create\w*|include\w*|"
+    r"zus[aä]tzlich\w*|erg[aä]nz\w*|hinzuf[uü]g\w*|hinzu\w*|"
+    r"anleg\w*|erstell\w*)\b"
+    r"(?:\W+\w+){0,4}\W+\b(?:no|not|kein\w*|nicht|never)\b"
+)
 
 
 def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -134,6 +140,7 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
                 creates_new_workout = bool(
                     _CREATE_REQUEST_RE.search(creation_text)
                     and not _NEGATED_CREATE_REQUEST_RE.search(creation_text)
+                    and not _POST_VERBAL_NEGATED_CREATE_REQUEST_RE.search(creation_text)
                 )
             if creates_new_workout:
                 scope.add(broad)

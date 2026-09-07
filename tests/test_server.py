@@ -5027,6 +5027,21 @@ class CoachTests(unittest.TestCase):
         current = {item["id"]: item for item in server.list_planned_units()}
         self.assertEqual(current[workout["id"]]["date"], moved_date.isoformat())
 
+    def test_structured_training_restore_rechecks_original_calendar_date(self):
+        workout = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=25)).isoformat(), "sport": "Run",
+            "name": "Restore conflict", "description": "- 30m easy", "duration_minutes": 30,
+            "target": "AUTO",
+        })
+        server.update_local_planned_workout(workout["id"], {"action": "archive"})
+        with patch.object(server, "calendar_conflicts", return_value=[{"name": "Occupied"}]) as conflicts:
+            with self.assertRaises(server.AppError) as raised:
+                server._apply_structured_training_changes({
+                    "changes": [{"local_id": workout["id"], "action": "restore"}],
+                })
+        self.assertEqual(raised.exception.reason, "plan_date_conflict")
+        conflicts.assert_called_once()
+
     def test_structured_training_create_inherits_unambiguous_plan_membership(self):
         plan_id = "mixed-create-plan"
         plan_name = "Mixed Create Plan"
