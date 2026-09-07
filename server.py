@@ -14351,6 +14351,46 @@ def _normalize_new_plan_intent(intent: dict[str, Any]) -> dict[str, Any]:
         operation for operation in [intent.get("operation"), *(intent.get("follow_up_operations") or [])]
         if isinstance(operation, str) and operation
     ]
+    if (
+        "start_provider_refresh" in operations
+        and "start_intervals_plan_sync" in operations
+        and any(
+            token in (intent.get("authorization_scope") or [])
+            for token in {"garmin_refresh", "calendar_refresh", "weather_refresh"}
+        )
+    ):
+        return {
+            "intent": "needs_clarification",
+            "operation": None,
+            "target_system": "none",
+            "artifact_id": None,
+            "ambiguities": [
+                "Bitte trenne die Aktualisierung des externen Anbieters vom anschließenden Intervals.icu-Sync, "
+                "damit beide Ziele eindeutig ausgeführt werden können."
+            ],
+            "authorization_scope": [],
+            "follow_up_operations": [],
+            "sync_scope": None,
+        }
+    if "start_intervals_plan_sync" in operations and intent.get("sync_scope") == "all_pending":
+        # A standalone all-pending push must use the server-derived pending
+        # snapshot.  Otherwise the model can supply a partial ``entries`` list
+        # and silently narrow the explicitly requested library-wide sync.
+        scope = [
+            token for token in (intent.get("authorization_scope") or [])
+            if isinstance(token, str) and not token.startswith("artifact:")
+        ]
+        if "local_plan" not in scope:
+            scope.append("local_plan")
+        normalized = {
+            **intent,
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "authorization_scope": sorted(set(scope)),
+            "_sync_all_pending": True,
+        }
+        normalized.pop("_sync_created_entries_only", None)
+        return normalized
     if "stage_training_plan" not in operations:
         return intent
     if (
@@ -14381,6 +14421,11 @@ def _normalize_new_plan_intent(intent: dict[str, Any]) -> dict[str, Any]:
         "list_training_plans",
         "start_provider_refresh",
         "refresh_current_performance",
+        "save_checkin",
+        "save_activity_feedback",
+        "delete_activity_feedback",
+        "save_competition",
+        "delete_competition",
     }
     stage_index = operations.index("stage_training_plan")
     ordered = [

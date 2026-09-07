@@ -4530,6 +4530,59 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("_sync_created_entries_only", normalized)
         self.assertEqual(normalized["target_system"], "intervals")
 
+    def test_standalone_all_pending_sync_uses_full_library_scope(self):
+        normalized = server._normalize_new_plan_intent({
+            "intent": "remote_sync",
+            "operation": "start_intervals_plan_sync",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["intervals_sync"],
+            "follow_up_operations": [],
+            "sync_scope": "all_pending",
+        })
+
+        self.assertEqual(normalized["intent"], "remote_sync")
+        self.assertEqual(normalized["target_system"], "intervals")
+        self.assertTrue(normalized["_sync_all_pending"])
+        self.assertNotIn("_sync_created_entries_only", normalized)
+        self.assertIn("local_plan", normalized["authorization_scope"])
+
+    def test_cross_provider_refresh_and_plan_sync_requires_clarification(self):
+        normalized = server._normalize_new_plan_intent({
+            "intent": "remote_sync",
+            "operation": "start_provider_refresh",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["garmin_refresh", "local_plan", "intervals_sync"],
+            "follow_up_operations": [
+                "stage_training_plan", "commit_training_plan", "start_intervals_plan_sync",
+            ],
+            "sync_scope": "created",
+        })
+
+        self.assertEqual(normalized["intent"], "needs_clarification")
+        self.assertIsNone(normalized["operation"])
+        self.assertIn("externen Anbieter", normalized["ambiguities"][0])
+
+    def test_new_plan_intent_keeps_local_updates_before_staging(self):
+        normalized = server._normalize_new_plan_intent({
+            "intent": "local_action",
+            "operation": "save_checkin",
+            "target_system": "local",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_checkin", "local_plan"],
+            "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+        })
+
+        self.assertEqual(normalized["operation"], "save_checkin")
+        self.assertEqual(
+            normalized["follow_up_operations"],
+            ["stage_training_plan", "commit_training_plan"],
+        )
+
     def test_new_plan_intent_rejects_explicit_existing_draft_mixed_with_new_plan(self):
         normalized = server._normalize_new_plan_intent({
             "intent": "local_action",
