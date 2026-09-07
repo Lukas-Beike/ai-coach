@@ -1010,6 +1010,127 @@ class CoachReviewTests(unittest.TestCase):
         selected = server.resolve_intent_objects(intent, "Benenne Marathon und Berlin Marathon um", overlapping)
         self.assertCountEqual(selected["authorization_scope"], ["competition:long-id", "competition:short-id"])
 
+    def test_mixed_planned_edit_uses_create_only_scope_for_new_workout(self):
+        refs = [{"kind": "planned_unit", "id": "upper-body", "name": "Oberkörper Einheit", "date": "2099-09-09"}]
+        intent = self.intent("apply_training_changes", ["local_plan"])
+        resolved = server.resolve_intent_objects(
+            intent,
+            "Verschiebe die Oberkörper Einheit und ergänze zusätzlich einen lockeren Lauf.",
+            refs,
+        )
+        self.assertIn("local_plan_create", resolved["authorization_scope"])
+        self.assertNotIn("local_plan", resolved["authorization_scope"])
+        self.assertIn("planned_unit:upper-body", resolved["authorization_scope"])
+
+    def test_mixed_planned_edit_detects_ordinary_creation_and_rejects_negation(self):
+        refs = [{"kind": "planned_unit", "id": "upper-body", "name": "Upper Body", "date": "2099-09-09"}]
+        intent = self.intent("apply_training_changes", ["planned_unit:upper-body"])
+        scheduled = server.resolve_intent_objects(intent, "Move Upper Body and schedule a recovery ride.", refs)
+        self.assertIn("local_plan_create", scheduled["authorization_scope"])
+        self.assertNotIn("local_plan", scheduled["authorization_scope"])
+        negated = server.resolve_intent_objects(intent, "Move Upper Body; do not add a new workout.", refs)
+        self.assertNotIn("local_plan", negated["authorization_scope"])
+        plan_mention = server.resolve_intent_objects(intent, "Move Upper Body in my training plan to Tuesday.", refs)
+        self.assertNotIn("local_plan", plan_mention["authorization_scope"])
+        isolated_keyword = server.resolve_intent_objects(intent, "Set Upper Body to the new duration and include the target.", refs)
+        self.assertNotIn("local_plan", isolated_keyword["authorization_scope"])
+        named_create_word = server.resolve_intent_objects(
+            intent,
+            "Move Add a Run to Tuesday.",
+            [{"kind": "planned_unit", "id": "add-a-run", "name": "Add a Run", "date": "2099-09-09"}],
+        )
+        self.assertNotIn("local_plan", named_create_word["authorization_scope"])
+        post_verbal_negation = server.resolve_intent_objects(
+            intent,
+            "Move Upper Body to Tuesday, but add no workout on Wednesday.",
+            refs,
+        )
+        self.assertNotIn("local_plan", post_verbal_negation["authorization_scope"])
+        mixed_negation = server.resolve_intent_objects(
+            intent,
+            "Move Upper Body; do not archive it; add a recovery run.",
+            refs,
+        )
+        self.assertIn("local_plan_create", mixed_negation["authorization_scope"])
+        self.assertNotIn("local_plan", mixed_negation["authorization_scope"])
+
+    def test_creation_clause_does_not_resolve_generic_existing_workout_name(self):
+        refs = [
+            {"kind": "planned_unit", "id": "upper-body", "name": "Upper Body", "date": "2099-09-09"},
+            {"kind": "planned_unit", "id": "recovery-run", "name": "Recovery Run", "date": "2099-09-10"},
+        ]
+        resolved = server.resolve_intent_objects(
+            self.intent("apply_training_changes", ["local_plan"]),
+            "Move Upper Body to Tuesday and add a recovery run on Wednesday.",
+            refs,
+        )
+        self.assertIn("planned_unit:upper-body", resolved["authorization_scope"])
+        self.assertNotIn("planned_unit:recovery-run", resolved["authorization_scope"])
+        self.assertIn("local_plan_create", resolved["authorization_scope"])
+
+    def test_update_clause_does_not_grant_creation_scope(self):
+        refs = [
+            {"kind": "planned_unit", "id": "upper-body", "name": "Upper Body", "date": "2099-09-09"},
+            {"kind": "planned_unit", "id": "recovery-run", "name": "Recovery Run", "date": "2099-09-10"},
+        ]
+        resolved = server.resolve_intent_objects(
+            self.intent("apply_training_changes", ["local_plan"]),
+            "Move Upper Body to Tuesday and add intensity to Recovery Run.",
+            refs,
+        )
+        self.assertIn("planned_unit:upper-body", resolved["authorization_scope"])
+        self.assertIn("planned_unit:recovery-run", resolved["authorization_scope"])
+        self.assertNotIn("local_plan_create", resolved["authorization_scope"])
+
+    def test_update_preposition_does_not_grant_creation_scope(self):
+        refs = [
+            {"kind": "planned_unit", "id": "upper-body", "name": "Upper Body", "date": "2099-09-09"},
+            {"kind": "planned_unit", "id": "recovery-run", "name": "Recovery Run", "date": "2099-09-10"},
+        ]
+        resolved = server.resolve_intent_objects(
+            self.intent("apply_training_changes", ["local_plan"]),
+            "Move Upper Body and include heart-rate target in Recovery Run.",
+            refs,
+        )
+        self.assertIn("planned_unit:recovery-run", resolved["authorization_scope"])
+        self.assertNotIn("local_plan_create", resolved["authorization_scope"])
+
+    def test_named_plan_create_resolves_plan_without_existing_unit_reference(self):
+        refs = [
+            {"kind": "training_plan", "id": "build-plan", "name": "Build Plan", "status": "planned"},
+            {"kind": "planned_unit", "id": "other-run", "name": "Other Run", "date": "2099-09-10"},
+        ]
+        resolved = server.resolve_intent_objects(
+            self.intent("apply_training_changes", ["local_plan"]),
+            "Add a recovery run to Build Plan on Wednesday.",
+            refs,
+        )
+        self.assertIn("training_plan:build-plan", resolved["authorization_scope"])
+        self.assertIn("local_plan_create", resolved["authorization_scope"])
+        self.assertNotIn("local_plan", resolved["authorization_scope"])
+
+    def test_workout_name_containing_plan_name_does_not_assign_membership(self):
+        refs = [
+            {"kind": "training_plan", "id": "marathon-plan", "name": "Marathon", "status": "planned"},
+            {"kind": "planned_unit", "id": "upper-body", "name": "Upper Body", "date": "2099-09-09"},
+        ]
+        resolved = server.resolve_intent_objects(
+            self.intent("apply_training_changes", ["local_plan"]),
+            "Move Upper Body and add a Marathon Pace Run.",
+            refs,
+        )
+        self.assertNotIn("training_plan:marathon-plan", resolved["authorization_scope"])
+        self.assertIn("local_plan_create", resolved["authorization_scope"])
+
+    def test_separable_german_create_request_uses_create_only_scope(self):
+        resolved = server.resolve_intent_objects(
+            self.intent("apply_training_changes", ["local_plan"]),
+            "Füge einen Lauf hinzu.",
+            [],
+        )
+        self.assertIn("local_plan_create", resolved["authorization_scope"])
+        self.assertNotIn("local_plan", resolved["authorization_scope"])
+
     def test_undo_proposal_is_top_level_recoverable_and_keeps_hash_guard(self):
         template=server.create_local_library_template({"name":"Synthetic undo","sport":"Run"})
         change=next(row for row in server.list_change_history() if row["entity_id"]==template["id"])

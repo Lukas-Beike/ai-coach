@@ -127,7 +127,7 @@ STATIC_TARGETS = {
 VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
 STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.9.1"
+APP_VERSION = "1.9.2"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -7918,7 +7918,16 @@ def compact_sport_settings(athlete: Any) -> list[dict[str, Any]]:
         "lthr", "max_hr", "maxHR", "maxHeartRate", "threshold_pace", "pace_units", "vo2max", "vo2_max",
         "running_vo2max", "cycling_vo2max",
     )
-    return [selected(item, fields) for item in raw_settings if isinstance(item, dict)][:30]
+    compacted: list[dict[str, Any]] = []
+    for item in raw_settings[:30]:
+        if not isinstance(item, dict):
+            continue
+        setting = selected(item, fields)
+        mmp_model = item.get("mmp_model")
+        if isinstance(mmp_model, dict):
+            setting["mmp_model"] = selected(mmp_model, ("ftp", "eftp", "eFTP"))
+        compacted.append(setting)
+    return compacted
 
 
 def compact_wellness_sport_info(value: Any) -> list[dict[str, Any]]:
@@ -7934,7 +7943,7 @@ def compact_wellness_sport_info(value: Any) -> list[dict[str, Any]]:
 def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, history_days: int = 42) -> dict[str, Any]:
     activity_fields = (
         "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain", "elapsed_time",
-        "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "average_heartrate",
+        "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "icu_eftp", "average_heartrate",
         "max_heartrate", "average_watts", "weighted_average_watts", "average_speed", "max_speed",
         "icu_weighted_avg_speed", "icu_pace", "feel", "icu_rpe", "paired_event_id",
         "source", "device_name", "external_id", "file_type",
@@ -8080,7 +8089,11 @@ def calendar_conflicts(
     conflicts = []
     excluded = exclude_library_ids or set()
     with DB_LOCK, database() as db:
-        rows = db.execute("SELECT local_id, payload FROM planned_units WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0").fetchall()
+        rows = db.execute(
+            "SELECT local_id, payload FROM planned_units "
+            "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
+            "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0"
+        ).fetchall()
         competitions = [dict(row) for row in db.execute("SELECT id, name, event_date, start_date_local, moving_time FROM competitions").fetchall()]
     for row in rows:
         local_id = str(row.get("local_id") or "")
@@ -10953,7 +10966,7 @@ def eftp_30_day_average(wellness_rows: list[dict[str, Any]], activities: list[An
         raw_type = str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold()
         if not any(term in raw_type for term in ("ride", "rad", "bike", "cycling")):
             continue
-        value = as_number(first_present(activity, ("icu_ftp", "eftp", "eFTP")))
+        value = as_number(first_present(activity, ("icu_eftp", "eftp", "eFTP")))
         if value is not None:
             values.append(float(value))
     return round(sum(values) / len(values), 1) if values else None
@@ -11072,6 +11085,18 @@ def sport_info_setting(wellness: dict[str, Any], sport: str) -> dict[str, Any]:
     return {}
 
 
+def intervals_eftp_value(setting: Any) -> Any:
+    """Read Intervals.icu's estimated FTP without falling back to user FTP."""
+    if not isinstance(setting, dict):
+        return None
+    mmp_model = setting.get("mmp_model")
+    if isinstance(mmp_model, dict):
+        value = first_present(mmp_model, ("ftp", "eftp", "eFTP"))
+        if value not in (None, ""):
+            return value
+    return first_present(setting, ("eftp", "eFTP"))
+
+
 def metric(value: Any, unit: str, source: str | None, note: str = "") -> dict[str, Any]:
     number = as_number(value)
     return {"value": number, "unit": unit, "source": source if number is not None else None, "note": note if number is not None else ""}
@@ -11136,7 +11161,8 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
     wellness_run = sport_info_setting(latest_wellness, "run")
     latest_ride_activity = next((activity for activity in sorted(activities, key=lambda item: str(item.get("start_date_local") or ""), reverse=True)
                                  if isinstance(activity, dict) and any(term in str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold() for term in ("ride", "rad", "bike", "cycling"))), {})
-    latest_ride_eftp = first_present(latest_ride_activity, ("icu_ftp",))
+    latest_ride_eftp = first_present(latest_ride_activity, ("icu_eftp", "eftp", "eFTP"))
+    current_ride_eftp = intervals_eftp_value(ride) or intervals_eftp_value(wellness_ride)
     generic_lthr = first_present(athlete, ("lthr",))
     profile = get_profile()
     garmin_metrics = garmin_performance_metrics(garmin_snapshot())
@@ -11192,7 +11218,7 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         # never be populated from Intervals.icu eFTP; the fallback only uses an
         # explicitly labelled FTP field.
         **garmin_threshold_metrics,
-        "cycling_eftp_watts": metric(latest_ride_eftp or first_present(wellness_ride, ("eftp", "eFTP")) or first_present(ride, ("eftp", "eFTP")), "W", "Intervals.icu"),
+        "cycling_eftp_watts": metric(current_ride_eftp or latest_ride_eftp, "W", "Intervals.icu"),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
         "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
@@ -13464,7 +13490,7 @@ COACH_STRUCTURED_TOOLS = [
         },
         strict=True,
     ),
-    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "For complete-plan edits, include the expected_payload_hash returned for every local_id.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string"}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string"}, "type": {"type": "string"}, "sport": {"type": "string"}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
+    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. Combine updates to existing local_id values with action=create entries for new dated workouts when the athlete requests a concrete calendar edit. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every existing-unit change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "Existing units need local_id; new units use action=create and include date, sport, name, description, duration_minutes, target, and rationale. Omit plan_id to inherit an unambiguous referenced plan; set plan_id to an empty string for an explicitly standalone new unit. For complete-plan edits, existing units also include expected_payload_hash.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string", "enum": ["create", "update", "delete", "archive", "restore"]}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]}, "type": {"type": "string"}, "sport": {"type": "string"}, "rationale": {"type": "string"}, "plan_id": {"type": "string", "description": "Empty string explicitly keeps a created unit outside a plan."}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
     _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {"type": "object"}}}),
     _canonical_coach_tool("apply_workout_library_plan", "Schedule selected saved library templates locally after conflict checks; never writes remotely.", {"entries": {"type": "array", "items": {"type": "object"}}}),
     _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in.", {"payload": {"type": "object"}}),
@@ -13618,10 +13644,27 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
     """Validate all final dates before applying any member of a batch."""
     batch_ids = {str(change.get("local_id") or "").strip() for change in changes}
     batch_ids.discard("")
+    original_dates: dict[str, str] = {}
     final_dates: dict[str, str] = {}
-    dates_needing_calendar_check: set[str] = set()
-    for change in changes:
+    final_active: dict[str, bool] = {}
+    restore_identities: set[str] = set()
+    for index, change in enumerate(changes):
         local_id = str(change.get("local_id") or "").strip()
+        action = str(change.get("action") or "update").strip().casefold()
+        change_identity = local_id or f"create:{index}"
+        if action == "create":
+            candidate_date = str(change.get("date") or "").strip()[:10]
+            if not candidate_date:
+                raise AppError(400, "Eine neue geplante Einheit benötigt ein Datum.", reason="invalid_change")
+            try:
+                date.fromisoformat(candidate_date)
+            except ValueError as exc:
+                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
+            final_active[change_identity] = True
+            final_dates[change_identity] = candidate_date
+            continue
+        if action == "restore":
+            restore_identities.add(change_identity)
         row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
         if not row:
             continue
@@ -13631,30 +13674,57 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
             current = {}
         if not isinstance(current, dict):
             continue
-        action = str(change.get("action") or "update").strip().casefold()
-        if action in {"delete", "archive"}:
-            continue
         current_date = str(current.get("date") or "").strip()[:10]
-        candidate_date = str(change.get("date") or current.get("date") or "").strip()[:10]
+        if current_date:
+            original_dates.setdefault(change_identity, current_date)
+        final_active.setdefault(
+            change_identity,
+            not bool(current.get("archived")) and not bool(current.get("local_deleted")),
+        )
+        if action in {"delete", "archive"}:
+            final_active[change_identity] = False
+            continue
+        if action == "restore":
+            final_active[change_identity] = True
+        candidate_date = str(
+            change.get("date") or final_dates.get(change_identity) or current.get("date") or ""
+        ).strip()[:10]
         if not candidate_date:
             continue
         try:
             date.fromisoformat(candidate_date)
         except ValueError as exc:
             raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
-        previous_id = final_dates.get(candidate_date)
-        if previous_id and previous_id != local_id:
+        final_dates[change_identity] = candidate_date
+    occupied_dates: dict[str, str] = {}
+    for change_identity, candidate_date in final_dates.items():
+        if not final_active.get(change_identity, True):
+            continue
+        previous_identity = occupied_dates.get(candidate_date)
+        if previous_identity is not None and previous_identity != change_identity:
             raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
-        final_dates[candidate_date] = local_id
-        if action == "restore" or candidate_date != current_date:
-            dates_needing_calendar_check.add(candidate_date)
+        occupied_dates[candidate_date] = change_identity
+    dates_needing_calendar_check = {
+        candidate_date
+        for change_identity, candidate_date in final_dates.items()
+        if (
+            final_active.get(change_identity, True)
+            and (
+                change_identity.startswith("create:")
+                or original_dates.get(change_identity) != candidate_date
+                or change_identity in restore_identities
+            )
+        )
+    }
     for candidate_date in dates_needing_calendar_check:
         conflicts = calendar_conflicts({"date": candidate_date}, batch_ids)
         if conflicts:
             raise AppError(409, f"Für den {candidate_date} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
 
 
-def _apply_structured_training_changes(arguments: dict[str, Any], *, require_revision: bool = False) -> dict[str, Any]:
+def _apply_structured_training_changes(
+    arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
+) -> dict[str, Any]:
     changes = arguments.get("changes") or []
     if not isinstance(changes, list) or not changes or len(changes) > COACH_TRAINING_CHANGE_LIMIT:
         raise AppError(
@@ -13662,6 +13732,43 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
             f"Ein Coach-Kommando darf höchstens {COACH_TRAINING_CHANGE_LIMIT} Änderungen enthalten.",
             reason="change_limit",
         )
+    prepared_changes: list[dict[str, Any]] = []
+    for change in changes:
+        if not isinstance(change, dict):
+            raise AppError(400, "Jede Planänderung muss ein Objekt sein.", reason="invalid_change")
+        action = str(change.get("action") or "update").strip().casefold()
+        if action == "create":
+            if change.get("local_id"):
+                raise AppError(400, "Eine neue geplante Einheit darf keine lokale ID vorgeben.", reason="invalid_change")
+            required_fields = ("date", "sport", "name", "description", "duration_minutes", "target", "rationale")
+            missing_fields = [
+                field for field in required_fields
+                if field not in change or change[field] is None or (
+                    isinstance(change[field], str) and not change[field].strip()
+                )
+            ]
+            if missing_fields:
+                raise AppError(
+                    400,
+                    "Eine neue geplante Einheit benötigt alle Workout-Felder.",
+                    reason="invalid_change",
+                )
+            target = change.get("target")
+            if target not in {"AUTO", "POWER", "HR", "PACE"}:
+                raise AppError(400, "Das Workout-Ziel muss AUTO, POWER, HR oder PACE sein.", reason="invalid_change")
+            normalized = normalize_workout(change)
+            prepared_change = {
+                "action": "create",
+                **{key: normalized[key] for key in (
+                    "date", "sport", "name", "description", "duration_minutes", "target", "rationale"
+                )},
+            }
+            if "plan_id" in change:
+                prepared_change["plan_id"] = str(change.get("plan_id") or "").strip()
+            prepared_changes.append(prepared_change)
+        else:
+            prepared_changes.append(change)
+    changes = prepared_changes
     with DB_LOCK, database() as db:
         revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
@@ -13671,7 +13778,10 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
         if expected_revision is not None and int(expected_revision) != current_revision:
             raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
         for change in changes:
-            if not isinstance(change, dict) or not change.get("local_id"):
+            action = str(change.get("action") or "update").strip().casefold()
+            if action == "create":
+                continue
+            if not change.get("local_id"):
                 raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
             expected_hash = str(change.get("expected_payload_hash") or "").strip().lower()
             if require_revision and not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
@@ -13681,14 +13791,133 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                 if not row or _library_payload_hash(row["payload"]) != expected_hash:
                     raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
         _validate_training_change_batch(changes, db)
-        applied = [
-            update_local_planned_workout(
-                change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
-            )
-            for change in changes
-        ]
+        referenced_memberships: set[str] = set()
+        plans_needing_bounds: set[str] = set()
+        for change in changes:
+            action = str(change.get("action") or "update").strip().casefold()
+            local_id = str(change.get("local_id") or "").strip()
+            if action == "create" or not local_id:
+                continue
+            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            if not row:
+                continue
+            try:
+                current = json.loads(row.get("payload") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                current = {}
+            if isinstance(current, dict):
+                membership = str(current.get("plan_id") or "").strip()
+                referenced_memberships.add(membership)
+                changes_bounds = action in {"delete", "archive", "restore"} or (
+                    action == "update" and "date" in change
+                    and str(change.get("date") or "")[:10] != str(current.get("date") or "")[:10]
+                )
+                if membership and changes_bounds:
+                    plans_needing_bounds.add(membership)
+        derived_plan: dict[str, str] = {}
+        if len(referenced_memberships) == 1:
+            membership = next(iter(referenced_memberships))
+            candidate_plan = TRAINING_PLAN_REPOSITORY.get(db, membership) if membership else None
+            if candidate_plan and candidate_plan.get("status") != "archived":
+                derived_plan = {
+                    "plan_id": str(candidate_plan["id"]),
+                    "plan_name": str(candidate_plan.get("name") or "")[:200],
+                }
+        authorized_plan_id = str(authorized_plan_id or "").strip()
+        if authorized_plan_id:
+            authorized_plan = TRAINING_PLAN_REPOSITORY.get(db, authorized_plan_id)
+            if not authorized_plan or authorized_plan.get("status") == "archived":
+                raise AppError(409, "Der benannte Trainingsplan ist nicht aktiv.", reason="plan_not_available")
+            if derived_plan and derived_plan["plan_id"] != authorized_plan_id:
+                raise AppError(403, "Die Planreferenzen der Änderung sind nicht eindeutig.", reason="intent_scope_denied")
+            derived_plan = {
+                "plan_id": str(authorized_plan["id"]),
+                "plan_name": str(authorized_plan.get("name") or "")[:200],
+            }
+        for change in changes:
+            if str(change.get("action") or "update").strip().casefold() != "create":
+                continue
+            requested_plan_id = str(change.get("plan_id") or "").strip() if "plan_id" in change else None
+            if requested_plan_id is not None:
+                if requested_plan_id and requested_plan_id != derived_plan.get("plan_id"):
+                    raise AppError(
+                        403,
+                        "Eine neue Einheit darf nur dem eindeutig abgeleiteten Plan zugeordnet werden.",
+                        reason="intent_scope_denied",
+                    )
+            if requested_plan_id or ("plan_id" not in change and derived_plan):
+                plans_needing_bounds.add(derived_plan["plan_id"])
+        applied = []
+        for change in changes:
+            if str(change.get("action") or "update").strip().casefold() == "create":
+                entry_payload = {**change, "source": "coach"}
+                if "plan_id" not in change:
+                    entry_payload.update(derived_plan)
+                elif not str(change.get("plan_id") or "").strip():
+                    entry_payload.pop("plan_id", None)
+                    entry_payload.pop("plan_name", None)
+                else:
+                    entry_payload.update(derived_plan)
+                applied.append({
+                    "local_id": create_local_planned_unit(
+                        entry_payload, db=db, bump_planning_revision=False
+                    )["id"],
+                    "status": "local",
+                })
+            else:
+                applied.append(update_local_planned_workout(
+                    change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
+                ))
         _bump_planning_revision(db)
+        for affected_plan_id in sorted(plans_needing_bounds):
+            plan = TRAINING_PLAN_REPOSITORY.get(db, affected_plan_id)
+            member_rows = db.execute(
+                "SELECT payload FROM planned_units "
+                "WHERE json_extract(payload, '$.plan_id') = ? "
+                "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
+                "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
+                (affected_plan_id,),
+            ).fetchall()
+            member_dates = []
+            for row in member_rows:
+                try:
+                    payload = json.loads(row.get("payload") or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    payload = {}
+                if isinstance(payload, dict) and str(payload.get("date") or "")[:10]:
+                    member_dates.append(str(payload["date"])[:10])
+            if plan and member_dates:
+                next_start = min(member_dates)
+                next_end = max(member_dates)
+                if plan.get("start_date") != next_start or plan.get("end_date") != next_end:
+                    updated_at = utc_now()
+                    updated_plan = {
+                        **plan,
+                        "start_date": next_start,
+                        "end_date": next_end,
+                        "updated_at": updated_at,
+                    }
+                    TRAINING_PLAN_REPOSITORY.update(
+                        db,
+                        affected_plan_id,
+                        updated_plan["name"],
+                        updated_plan.get("goal") or "",
+                        next_start,
+                        next_end,
+                        updated_plan.get("status") or "planned",
+                        updated_at,
+                    )
+                    _record_change(
+                        db,
+                        "training_plan",
+                        affected_plan_id,
+                        "update",
+                        plan,
+                        updated_plan,
+                        source="coach_apply",
+                    )
         revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+    publish_state_event("planning", {"status": "changed"})
     result_changes = [
         {"local_id": item.get("local_id"), "status": item.get("status")}
         for item in applied
@@ -13698,6 +13927,9 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
         "status": "applied",
         "planning_revision": int((revision or {}).get("revision") or current_revision),
         "changes": result_changes,
+        "library_entry_ids": list(dict.fromkeys(
+            item["local_id"] for item in result_changes if item.get("local_id")
+        )),
     }
 
 
@@ -14038,11 +14270,32 @@ def _structured_coach_tool_result(
         changes = arguments.get("changes")
         if not isinstance(changes, list):
             raise AppError(400, "Coach-Änderungen müssen als Liste gesendet werden.", reason="invalid_change")
+        selected_plan_ids = sorted(
+            token.split(":", 1)[1] for token in _coach_scope_values(intent)
+            if token.startswith("training_plan:") and token.split(":", 1)[1]
+        )
+        if len(selected_plan_ids) > 1:
+            raise AppError(400, "Die Änderungen dürfen nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
         for change in changes:
-            if isinstance(change, dict) and change.get("local_id"):
+            if not isinstance(change, dict):
+                continue
+            action = str(change.get("action") or "update").strip().casefold()
+            if action == "create":
+                _require_coach_scope(intent, "local_plan", "local_plan_create")
+                requested_plan_id = str(change.get("plan_id") or "").strip()
+                if requested_plan_id and requested_plan_id not in selected_plan_ids:
+                    raise AppError(403, "Die neue Einheit darf nur dem benannten Trainingsplan zugeordnet werden.", reason="intent_scope_denied")
+            elif change.get("local_id"):
                 local_id = str(change["local_id"]).strip()
-                _require_coach_scope(intent, f"planned_unit:{local_id}", "local_plan")
-        return _apply_structured_training_changes(arguments, require_revision=bool(intent.get("bulk_change")))
+                allowed_scopes = (f"planned_unit:{local_id}",)
+                if "local_plan_create" not in _coach_scope_values(intent):
+                    allowed_scopes += ("local_plan",)
+                _require_coach_scope(intent, *allowed_scopes)
+        return _apply_structured_training_changes(
+            arguments,
+            require_revision=bool(intent.get("bulk_change")),
+            authorized_plan_id=selected_plan_ids[0] if selected_plan_ids else None,
+        )
     if name == "manage_training_templates":
         if "manage_training_templates" not in _structured_authorized_operations(intent):
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
@@ -14179,25 +14432,84 @@ def _structured_coach_tool_result(
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         entries = arguments.get("entries")
         if entries is None:
-            _require_coach_scope(intent, "local_plan")
-            _mark_local_planning_authoritative()
-            normalized_entries = _pending_plan_push_entries()
+            if intent.get("_sync_created_entries_only"):
+                raise AppError(
+                    409,
+                    "Die neu erstellte Planung muss vor der Synchronisierung lokal gespeichert sein.",
+                    reason="plan_commit_required",
+                )
+            if intent.get("_sync_changed_entries_only"):
+                changed_ids = {
+                    str(value).strip() for value in intent.get("_changed_sync_entry_ids") or []
+                    if str(value).strip()
+                }
+                if not changed_ids:
+                    raise AppError(
+                        409,
+                        "Die geänderten Planungseinheiten müssen vor der Synchronisierung feststehen.",
+                        reason="plan_changes_required",
+                    )
+                pending_entries = _pending_plan_push_entries()
+                pending_by_id = {entry["library_workout_id"]: entry for entry in pending_entries}
+                if not changed_ids.issubset(pending_by_id):
+                    raise AppError(
+                        403,
+                        "Die Synchronisierung muss genau die in diesem Turn geänderten Einheiten umfassen.",
+                        reason="intent_scope_denied",
+                    )
+                normalized_entries = [pending_by_id[local_id] for local_id in sorted(changed_ids)]
+                for entry in normalized_entries:
+                    _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
+                _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
+            else:
+                _require_coach_scope(intent, "local_plan")
+                _mark_local_planning_authoritative()
+                normalized_entries = _pending_plan_push_entries()
         else:
             replacement_ids = {
                 str(value).strip() for value in intent.get("_replacement_sync_entry_ids") or []
                 if str(value).strip()
             }
+            created_ids = {
+                str(value).strip() for value in intent.get("_created_sync_entry_ids") or []
+                if str(value).strip()
+            }
+            changed_ids = {
+                str(value).strip() for value in intent.get("_changed_sync_entry_ids") or []
+                if str(value).strip()
+            }
+            authorized_ids = replacement_ids | created_ids | changed_ids
             normalized_entries = _library_bulk_request_entries(
                 entries,
                 require_hash=True,
-                max_entries=COACH_TRAINING_CHANGE_LIMIT if replacement_ids else LIBRARY_BULK_MAX_ENTRIES,
+                max_entries=(
+                    COACH_TRAINING_CHANGE_LIMIT
+                    if authorized_ids or intent.get("_sync_all_pending")
+                    else LIBRARY_BULK_MAX_ENTRIES
+                ),
             )
-            if replacement_ids and any(
-                entry["library_workout_id"] not in replacement_ids for entry in normalized_entries
-            ):
-                raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst diese Einheit nicht.", reason="intent_scope_denied")
-            for entry in normalized_entries:
-                _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
+            normalized_ids = {entry["library_workout_id"] for entry in normalized_entries}
+            if intent.get("_sync_all_pending"):
+                pending_ids = {
+                    entry["library_workout_id"] for entry in _pending_plan_push_entries()
+                }
+                if normalized_ids != pending_ids:
+                    raise AppError(
+                        403,
+                        "Die Synchronisierung muss alle offenen Einheiten der lokalen Bibliothek umfassen.",
+                        reason="intent_scope_denied",
+                    )
+            if authorized_ids and normalized_ids != authorized_ids:
+                raise AppError(
+                    403,
+                    "Die Synchronisierung muss genau die in diesem Turn erstellten Einheiten umfassen.",
+                    reason="intent_scope_denied",
+                )
+            if intent.get("_sync_all_pending"):
+                _require_coach_scope(intent, "local_plan")
+            else:
+                for entry in normalized_entries:
+                    _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
             _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
         return _enqueue_coach_plan_push(
             normalized_entries,
@@ -14284,6 +14596,166 @@ def _structured_authorized_operations(intent: dict[str, Any]) -> set[str]:
     return operations
 
 
+def _normalize_new_plan_intent(intent: dict[str, Any]) -> dict[str, Any]:
+    """Keep creation, commit, and an explicitly classified sync in safe order.
+
+    A stage operation always creates its own artifact. Reusing an outstanding
+    draft ID would bind a new workout request to unrelated durable state. The
+    operation set still comes exclusively from the isolated classifier; this
+    function neither infers nor adds a write that was not classified.
+    """
+    if intent.get("intent") not in {"local_action", "remote_sync"}:
+        return intent
+    operations = [
+        operation for operation in [intent.get("operation"), *(intent.get("follow_up_operations") or [])]
+        if isinstance(operation, str) and operation
+    ]
+    if (
+        "start_provider_refresh" in operations
+        and "start_intervals_plan_sync" in operations
+        and any(
+            token in (intent.get("authorization_scope") or [])
+            for token in {"garmin_refresh", "calendar_refresh", "weather_refresh"}
+        )
+    ):
+        return {
+            "intent": "needs_clarification",
+            "operation": None,
+            "target_system": "none",
+            "artifact_id": None,
+            "ambiguities": [
+                "Bitte trenne die Aktualisierung des externen Anbieters vom anschließenden Intervals.icu-Sync, "
+                "damit beide Ziele eindeutig ausgeführt werden können."
+            ],
+            "authorization_scope": [],
+            "follow_up_operations": [],
+            "sync_scope": None,
+        }
+    if (
+        "start_intervals_plan_sync" in operations
+        and "stage_training_plan" not in operations
+        and intent.get("sync_scope") == "all_pending"
+    ):
+        # A standalone all-pending push must use the server-derived pending
+        # snapshot.  Otherwise the model can supply a partial ``entries`` list
+        # and silently narrow the explicitly requested library-wide sync.
+        scope = [
+            token for token in (intent.get("authorization_scope") or [])
+            if isinstance(token, str) and not token.startswith("artifact:")
+        ]
+        if "local_plan" not in scope:
+            scope.append("local_plan")
+        normalized = {
+            **intent,
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "authorization_scope": sorted(set(scope)),
+            "_sync_all_pending": True,
+        }
+        normalized.pop("_sync_created_entries_only", None)
+        return normalized
+    if (
+        "apply_training_changes" in operations
+        and "start_intervals_plan_sync" in operations
+        and intent.get("sync_scope") == "created"
+    ):
+        normalized = {
+            **intent,
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "_sync_changed_entries_only": True,
+        }
+        normalized.pop("_sync_all_pending", None)
+        return normalized
+    if "stage_training_plan" not in operations:
+        return intent
+    if (
+        intent.get("_artifact_explicit")
+        and str(intent.get("artifact_id") or "").strip()
+        and "commit_training_plan" in operations
+    ):
+        return {
+            "intent": "needs_clarification",
+            "operation": None,
+            "target_system": "none",
+            "artifact_id": None,
+            "ambiguities": [
+                "Bitte trenne das Speichern des bestehenden Entwurfs von der neuen Planung in zwei Nachrichten, "
+                "damit kein falscher Entwurf überschrieben wird."
+            ],
+            "authorization_scope": [],
+            "follow_up_operations": [],
+            "sync_scope": None,
+        }
+    prerequisite_operations = {
+        "read_training_state",
+        "list_recent_activities",
+        "list_workout_library",
+        "list_planned_workouts",
+        "list_change_history",
+        "list_competitions",
+        "list_training_plans",
+        "start_provider_refresh",
+        "refresh_current_performance",
+        "save_checkin",
+        "save_activity_feedback",
+        "delete_activity_feedback",
+        "save_competition",
+        "delete_competition",
+    }
+    stage_index = operations.index("stage_training_plan")
+    ordered = [
+        operation for operation in operations[:stage_index]
+        if operation in prerequisite_operations and operation not in {"stage_training_plan", "commit_training_plan"}
+    ]
+    ordered.append("stage_training_plan")
+    if "commit_training_plan" in operations:
+        ordered.append("commit_training_plan")
+    ordered.extend(operation for operation in operations if operation not in ordered)
+    scope = [
+        token for token in (intent.get("authorization_scope") or [])
+        if isinstance(token, str) and not token.startswith("artifact:")
+    ]
+    if "local_plan" not in scope:
+        scope.append("local_plan")
+    normalized = {
+        **intent,
+        "operation": ordered[0],
+        "artifact_id": None,
+        "authorization_scope": sorted(set(scope)),
+        "follow_up_operations": ordered[1:],
+    }
+    if "start_intervals_plan_sync" in ordered:
+        normalized["intent"] = "remote_sync"
+        normalized["target_system"] = "intervals"
+        sync_scope = intent.get("sync_scope", "created")
+        if sync_scope == "all_pending":
+            normalized["_sync_all_pending"] = True
+            normalized.pop("_sync_created_entries_only", None)
+        elif sync_scope == "created":
+            normalized["_sync_created_entries_only"] = True
+            normalized.pop("_sync_all_pending", None)
+        else:
+            return {
+                "intent": "needs_clarification",
+                "operation": None,
+                "target_system": "none",
+                "artifact_id": None,
+                "ambiguities": [
+                    "Soll die neue Planung oder die gesamte offene lokale Bibliothek synchronisiert werden?"
+                ],
+                "authorization_scope": [],
+                "follow_up_operations": [],
+                "sync_scope": None,
+            }
+    elif intent.get("intent") == "remote_sync":
+        normalized["intent"] = "remote_sync"
+    else:
+        normalized["intent"] = "local_action"
+        normalized["target_system"] = "local"
+    return normalized
+
+
 def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dict[str, Any]:
     """Route an explicit whole-plan rebuild through the existing-unit path.
 
@@ -14293,6 +14765,13 @@ def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dic
     """
     if intent.get("intent") not in {"local_action", "remote_sync"}:
         return intent
+    operations = _structured_authorized_operations(intent)
+    if (
+        "replace_training_plan" in operations
+        and "start_intervals_plan_sync" in operations
+        and intent.get("sync_scope") == "all_pending"
+    ):
+        intent = {**intent, "_sync_all_pending": True}
     if not prompt_requests_complete_plan_rebuild(message):
         if "replace_training_plan" in _structured_authorized_operations(intent):
             return {
@@ -14354,6 +14833,7 @@ def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dic
         "follow_up_operations": follow_ups,
         "bulk_change": True,
     }
+    normalized.pop("_sync_created_entries_only", None)
     if "start_intervals_plan_sync" in follow_ups:
         normalized["intent"] = "remote_sync"
         normalized["target_system"] = "intervals"
@@ -14398,6 +14878,8 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
         for change in changes:
             if isinstance(change, dict) and change.get("local_id"):
                 intent["authorization_scope"].append(f"planned_unit:{change['local_id']}")
+            elif isinstance(change, dict) and str(change.get("action") or "update").strip().casefold() == "create":
+                intent["authorization_scope"].append("local_plan")
     elif operation == "replace_training_plan":
         intent["authorization_scope"].append("local_plan")
     elif operation == "manage_training_templates":
@@ -14569,7 +15051,10 @@ def _chat_with_structured_coach_impl(
 
     def replacement_sync_ids(result: dict[str, Any] | None = None) -> list[str]:
         """Scope a rebuild follow-up sync to the units created by that rebuild."""
-        if "start_intervals_plan_sync" not in _structured_authorized_operations(intent):
+        if (
+            "start_intervals_plan_sync" not in _structured_authorized_operations(intent)
+            or intent.get("_sync_all_pending")
+        ):
             return []
         replacement_result = result
         if replacement_result is None:
@@ -14597,7 +15082,75 @@ def _chat_with_structured_coach_impl(
                 scope.append(token)
         return local_ids
 
+    def committed_plan_sync_ids(result: dict[str, Any] | None = None) -> list[str]:
+        """Scope a same-turn plan push to entries created by its commit."""
+        if (
+            "start_intervals_plan_sync" not in _structured_authorized_operations(intent)
+            or not intent.get("_sync_created_entries_only")
+        ):
+            return []
+        commit_result = result
+        if commit_result is None:
+            committed = next(
+                (
+                    item for item in reversed(command_receipts)
+                    if item.get("tool") == "commit_training_plan"
+                    and isinstance(item.get("result"), dict)
+                    and item["result"].get("ok")
+                ),
+                None,
+            )
+            commit_result = committed.get("result") if committed else None
+        if not isinstance(commit_result, dict):
+            return []
+        local_ids = [
+            str(value).strip() for value in commit_result.get("library_entry_ids") or []
+            if str(value).strip()
+        ]
+        intent["_created_sync_entry_ids"] = local_ids
+        scope = intent.setdefault("authorization_scope", [])
+        for local_id in local_ids:
+            token = f"library_workout:{local_id}"
+            if token not in scope:
+                scope.append(token)
+        return local_ids
+
+    def changed_plan_sync_ids(result: dict[str, Any] | None = None) -> list[str]:
+        """Scope a direct-edit follow-up sync to every entry changed in its batch."""
+        if (
+            "start_intervals_plan_sync" not in _structured_authorized_operations(intent)
+            or not intent.get("_sync_changed_entries_only")
+        ):
+            return []
+        apply_result = result
+        if apply_result is None:
+            applied = next(
+                (
+                    item for item in reversed(command_receipts)
+                    if item.get("tool") == "apply_training_changes"
+                    and isinstance(item.get("result"), dict)
+                    and item["result"].get("ok")
+                ),
+                None,
+            )
+            apply_result = applied.get("result") if applied else None
+        if not isinstance(apply_result, dict):
+            return []
+        local_ids = [
+            str(value).strip() for value in apply_result.get("library_entry_ids") or []
+            if str(value).strip()
+        ]
+        intent["_changed_sync_entry_ids"] = local_ids
+        scope = intent.setdefault("authorization_scope", [])
+        for local_id in local_ids:
+            token = f"library_workout:{local_id}"
+            if token not in scope:
+                scope.append(token)
+        return local_ids
+
     replacement_follow_up_sync_ids = replacement_sync_ids()
+    created_follow_up_sync_ids = committed_plan_sync_ids()
+    changed_follow_up_sync_ids = changed_plan_sync_ids()
 
     def restore_staged_artifact_intent() -> None:
         """Rehydrate the commit scope before selecting the resumed model action."""
@@ -14858,14 +15411,17 @@ def _chat_with_structured_coach_impl(
             arguments = json.loads(item.get("arguments") or "{}")
             if not isinstance(arguments, dict):
                 raise AppError(400, "Coach-Aktionsargumente muessen ein Objekt sein.")
-            if name == "start_intervals_plan_sync" and arguments.get("entries") is None and replacement_follow_up_sync_ids:
+            turn_sync_entry_ids = replacement_follow_up_sync_ids or created_follow_up_sync_ids or changed_follow_up_sync_ids
+            if name == "start_intervals_plan_sync" and intent.get("_sync_all_pending"):
+                arguments = {key: value for key, value in arguments.items() if key != "entries"}
+            elif name == "start_intervals_plan_sync" and turn_sync_entry_ids:
                 pending_by_id = {
                     entry["library_workout_id"]: entry for entry in _pending_plan_push_entries()
                 }
                 arguments = {
                     **arguments,
                     "entries": [
-                        pending_by_id[local_id] for local_id in replacement_follow_up_sync_ids
+                        pending_by_id[local_id] for local_id in turn_sync_entry_ids
                         if local_id in pending_by_id
                     ],
                 }
@@ -14928,6 +15484,10 @@ def _chat_with_structured_coach_impl(
                     if result.get("ok") and name == "replace_training_plan":
                         replacement_follow_up_sync_ids = replacement_sync_ids(result)
                         publish_state_event("planning", {"status": "changed"})
+                    if result.get("ok") and name == "commit_training_plan":
+                        created_follow_up_sync_ids = committed_plan_sync_ids(result)
+                    if result.get("ok") and name == "apply_training_changes":
+                        changed_follow_up_sync_ids = changed_plan_sync_ids(result)
                     if result.get("artifact_id"):
                         intent["artifact_id"] = result["artifact_id"]
                         scope = intent.setdefault("authorization_scope", [])
@@ -15203,6 +15763,16 @@ def coach_intent_artifact_refs(conversation_id: str | None = None) -> list[dict[
     return [dict(row) for row in rows]
 
 
+def prompt_requests_plan_artifact(message: str) -> bool:
+    """Expose draft identities to intent classification only when requested."""
+    return bool(re.search(
+        r"\b(?:planentwurf\w*|entwurf\w*|planartefakt\w*|artefakt(?:-?id)?\w*|"
+        r"artifact\w*|"
+        r"draft\w*|proposal\w*|vorschlag\w*)\b",
+        str(message or "").casefold(),
+    ))
+
+
 def coach_intent_object_refs() -> list[dict[str, Any]]:
     """Only current local object identities/names enter the isolated classifier."""
     refs: list[dict[str, Any]] = []
@@ -15237,22 +15807,31 @@ def request_coach_intent(
     if get_profile().get("weather_location", "").strip():
         allowed_targets.append("weather")
     object_refs = coach_intent_object_refs()
-    artifact_refs = coach_intent_artifact_refs(conversation_id)
+    all_artifact_refs = coach_intent_artifact_refs(conversation_id)
+    current_artifact_refs = [
+        item for item in all_artifact_refs
+        if str(item.get("conversation_id") or "") == str(conversation_id or "")
+    ]
+    artifact_refs = all_artifact_refs if prompt_requests_plan_artifact(message) else current_artifact_refs
     payload = intent_request_payload(message, artifact_refs, allowed_targets, object_refs)
     provider = ai_provider or selected_ai_provider()
     payload["_ai_provider"] = provider
     payload["model"] = model or selected_model(provider)
     for attempt in range(COACH_INTENT_MAX_ATTEMPTS):
         try:
-            resolved = resolve_intent_objects(parse_intent_response(responses_request(payload)), message, object_refs)
+            resolved = resolve_intent_objects(
+                parse_intent_response(responses_request(payload)), message, object_refs
+            )
             artifact_id = str(resolved.get("artifact_id") or "").strip()
             if "commit_training_plan" in _structured_authorized_operations(resolved) and artifact_id:
                 artifact = next((item for item in artifact_refs if str(item.get("id") or "") == artifact_id), None)
                 if artifact and str(artifact.get("conversation_id") or "") != str(conversation_id):
-                    if artifact_id.casefold() not in message.casefold():
+                    stage_requested = "stage_training_plan" in _structured_authorized_operations(resolved)
+                    if artifact_id.casefold() not in message.casefold() and not stage_requested:
                         return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "ambiguities": ["Mehrere offene Planentwürfe stammen aus anderen Coach-Unterhaltungen; bitte nenne die Artefakt-ID ausdrücklich."], "authorization_scope": [], "follow_up_operations": []}
+                if artifact_id.casefold() in message.casefold():
                     resolved["_artifact_explicit"] = True
-            return resolved
+            return _normalize_new_plan_intent(resolved)
         except (AppError, TypeError, ValueError, json.JSONDecodeError):
             if attempt + 1 < COACH_INTENT_MAX_ATTEMPTS:
                 continue
@@ -15352,7 +15931,9 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             "artifact_id": None, "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
         }
     if isinstance(structured_intent, dict):
-        normalized_intent = _normalize_complete_plan_intent(message, structured_intent)
+        normalized_intent = _normalize_complete_plan_intent(
+            message, _normalize_new_plan_intent(structured_intent)
+        )
         if normalized_intent.get("operation") == "replace_training_plan":
             # Complete-plan normalization can promote a staged request after
             # the first resolver pass. Resolve named plan objects again so a
@@ -17195,12 +17776,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
             self.send_json(500, {"error": "Interner Serverfehler."})
 
-    def send_sse_headers(self) -> None:
+    def send_sse_headers(self, *, persistent: bool = True) -> None:
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
-            self.send_header("Connection", "keep-alive")
+            self.send_header("Connection", "keep-alive" if persistent else "close")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("X-Accel-Buffering", "no")
@@ -17279,7 +17860,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             self.connection.settimeout(OPENAI_RESPONSE_TIMEOUT_SECONDS + 30)
             try:
-                self.send_sse_headers()
+                self.send_sse_headers(persistent=False)
                 send_event("started", {"operation_id": operation_id})
             except ClientDisconnected:
                 client_connected = False
@@ -17312,6 +17893,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             send_event("error", {"reason": "internal_error", "message": "Interner Serverfehler."})
         finally:
             unregister_chat_stream(session["csrf_hash"], operation_id)
+            self.close_connection = True
 
     def handle_authenticated_post(self, path: str, session: dict[str, Any]) -> None:
             if path == "/api/transcribe":

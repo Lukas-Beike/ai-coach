@@ -38,6 +38,13 @@ class WorkflowSourceTests(unittest.TestCase):
 
 
 class CodexReviewWorkflowTests(unittest.TestCase):
+    def test_dependabot_automerge_is_limited_to_develop(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/dependabot-automerge.yml").read_text(encoding="utf-8")
+        self.assertIn("github.event.pull_request.user.login == 'dependabot[bot]'", workflow)
+        self.assertIn("github.event.pull_request.base.ref == 'develop'", workflow)
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", workflow)
+
     def test_codex_gate_uses_subscription_review_and_required_check_context(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/codex-code-review.yml").read_text(encoding="utf-8")
@@ -55,15 +62,27 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertNotIn("github.rest.issues.createComment", workflow)
         self.assertNotIn("Request a fresh Codex review for pull-request events", workflow)
         self.assertNotIn("steps.request_review.outputs.requested_at", workflow)
+        self.assertIn("const dependabotLogin = 'dependabot[bot]'", workflow)
+        self.assertIn("pullRequest.user?.login === dependabotLogin &&", workflow)
+        self.assertIn("pullRequest.base?.ref === 'develop'", workflow)
         self.assertIn("const releaseBotLogin = 'ai-coach-release-bot[bot]'", workflow)
         self.assertIn("pullRequest.base?.ref === 'develop'", workflow)
         self.assertIn("pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`", workflow)
         self.assertIn("skipCodexReview: shouldSkipCodexReview(pullRequest)", workflow)
-        self.assertIn("Mark trusted release-bot version PR as Codex-exempt", workflow)
+        self.assertIn("Mark trusted Dependabot or release-bot PR as Codex-exempt", workflow)
         self.assertIn("matrix.skipCodexReview == true", workflow)
         self.assertIn("matrix.skipCodexReview != true", workflow)
-        self.assertIn("Codex review skipped for trusted release-bot version PR", workflow)
-        self.assertIn("pullRequest.data.user?.login !== releaseBotLogin", workflow)
+        self.assertIn("Codex review skipped for trusted Dependabot or release-bot PR", workflow)
+        self.assertIn("The Dependabot Codex exemption requires a same-repository develop pull request", workflow)
+        self.assertIn("![dependabotLogin, releaseBotLogin].includes(authorLogin)", workflow)
+        self.assertIn("github.rest.pulls.listCommits", workflow)
+        self.assertIn("commit.author?.login === dependabotLogin", workflow)
+        self.assertIn("allowedDependencyFiles", workflow)
+        self.assertIn("actionPinLinePattern", workflow)
+        self.assertIn("const manualReviewCheckName = 'Codex manual review request'", workflow)
+        self.assertIn("getManualReviewRequest", workflow)
+        self.assertIn("Manual Codex review requested", workflow)
+        self.assertIn("pushReviewRequestedAt", workflow)
         self.assertIn("/^chore\\/release-version-(\\d+\\.\\d+\\.\\d+)$/", workflow)
         self.assertIn("pullRequest.data.title !== expectedTitle", workflow)
         self.assertIn("pullRequest.data.head.repo?.full_name !== expectedHeadRepository", workflow)

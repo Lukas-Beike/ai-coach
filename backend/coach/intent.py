@@ -48,7 +48,7 @@ OPERATION_VALUES = frozenset({
 INTENT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["intent", "operation", "target_system", "artifact_id", "ambiguities", "authorization_scope", "follow_up_operations"],
+    "required": ["intent", "operation", "target_system", "artifact_id", "ambiguities", "authorization_scope", "follow_up_operations", "sync_scope"],
     "properties": {
         "intent": {"type": "string", "enum": sorted(INTENT_VALUES)},
         "operation": {"type": ["string", "null"], "enum": [*sorted(OPERATION_VALUES), None]},
@@ -57,6 +57,7 @@ INTENT_SCHEMA: dict[str, Any] = {
         "ambiguities": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
         "authorization_scope": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
         "follow_up_operations": {"type": "array", "items": {"type": "string", "enum": sorted(OPERATION_VALUES)}, "maxItems": 4},
+        "sync_scope": {"type": ["string", "null"], "enum": ["created", "all_pending", None]},
     },
 }
 
@@ -81,6 +82,14 @@ def intent_request_payload(
             "For a request to actually create dated workouts, use stage_training_plan and include "
             "commit_training_plan in follow_up_operations so the plan is saved in the same turn. Only omit the "
             "commit step when the user explicitly asks for a draft, preview, proposal, or hypothetical plan. "
+            "If that same request explicitly asks to synchronize the newly created workouts to Intervals.icu, "
+            "classify it as remote_sync with target_system intervals, operation stage_training_plan, and ordered "
+            "follow_up_operations commit_training_plan then start_intervals_plan_sync. Use local_plan and "
+            "intervals_sync scope, set sync_scope to created, and keep artifact_id null because the stage operation "
+            "creates a new artifact. If the same request instead asks to synchronize all pending/open local plan "
+            "entries, set sync_scope to all_pending; never silently narrow that scope to only newly created entries. "
+            "Never select an artifact_ref for a new dated workout; artifact_refs are only for a request that "
+            "explicitly refers to an already existing draft. "
             "For an explicit rebuild or replacement of an existing complete local plan, use replace_training_plan "
             "because it can atomically create, update, and archive future local sessions. "
             "An explicit request to save the athlete's stated daily condition or availability is a local_action "
@@ -96,10 +105,20 @@ def intent_request_payload(
             "list_training_plans, or list_change_history. "
             "An explicit request to schedule saved library templates locally is a local_action using "
             "apply_workout_library_plan. "
+            "For a concrete request to edit existing dated local workouts, including moving a named workout "
+            "and adding another workout on a date, use apply_training_changes. The changes list may combine "
+            "updates to existing planned_unit IDs with one or more action=create entries for new dated local "
+            "workouts; include the new workout's date, sport, name, description, duration_minutes, target, and "
+            "rationale. This direct calendar-edit operation is atomic and must not use stage_training_plan, "
+            "commit_training_plan, or ask for an artifact ID unless the athlete explicitly refers to a draft, "
+            "proposal, or plan artifact. If the same direct calendar edit explicitly asks to synchronize these "
+            "changed entries afterward, include start_intervals_plan_sync with sync_scope created; that follow-up "
+            "must cover only the exact entries changed in this batch. "
             "An explicit request to rename, edit, or delete training-plan metadata is a local_action using update_training_plan. "
             "An explicit request to add, edit, or delete a competition is a local_action using the matching competition operation. "
             "An explicit request to synchronize the local plan or library to Intervals.icu is a remote_sync using "
-            "start_intervals_plan_sync; use local_plan scope when the athlete requests all pending entries. "
+            "start_intervals_plan_sync; use local_plan scope and sync_scope all_pending when the athlete requests "
+            "all pending entries. Use sync_scope null for requests without a plan push. "
             "An explicit request to synchronize competitions to Intervals.icu is a remote_sync using sync_competitions. "
             "An explicit request to refresh current Intervals.icu performance metrics without a full activity sync is a "
             "remote_sync using refresh_current_performance. An explicit request to preview adaptive planning is a "
@@ -166,12 +185,17 @@ def parse_intent_response(response: Any) -> dict[str, Any]:
     ambiguities = value.get("ambiguities")
     scope = value.get("authorization_scope")
     follow_up_operations = value.get("follow_up_operations") or []
+    sync_scope = value.get("sync_scope")
     if not isinstance(ambiguities, list) or not all(isinstance(item, str) for item in ambiguities):
         raise ValueError("intent ambiguities must be a string list")
     if not isinstance(scope, list) or not all(isinstance(item, str) for item in scope):
         raise ValueError("intent authorization scope must be a string list")
     if not isinstance(follow_up_operations, list) or not all(item in OPERATION_VALUES for item in follow_up_operations):
         raise ValueError("intent follow-up operations must be a supported operation list")
+    if sync_scope not in {None, "created", "all_pending"}:
+        raise ValueError("intent sync scope is unsupported")
+    if "stage_training_plan" in {operation, *follow_up_operations} and "start_intervals_plan_sync" in {operation, *follow_up_operations} and sync_scope not in {"created", "all_pending"}:
+        raise ValueError("plan creation sync requires an explicit sync scope")
     if intent == "needs_clarification" and len(ambiguities) != 1:
         raise ValueError("clarification must contain exactly one question")
     if intent in {"advice", "needs_clarification"} and operation is not None:
@@ -194,4 +218,5 @@ def parse_intent_response(response: Any) -> dict[str, Any]:
         "ambiguities": [item[:300] for item in ambiguities[:8]],
         "authorization_scope": [item[:120] for item in scope[:8]],
         "follow_up_operations": [item for item in follow_up_operations[:4]],
+        "sync_scope": sync_scope,
     }
