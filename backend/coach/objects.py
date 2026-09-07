@@ -9,7 +9,7 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
     kinds = set()
     if operations & {"save_competition", "delete_competition"}:
         kinds.add("competition")
-    if "update_training_plan" in operations:
+    if operations & {"update_training_plan", "replace_training_plan"}:
         kinds.add("training_plan")
     if "apply_training_changes" in operations:
         kinds.add("planned_unit")
@@ -18,7 +18,35 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
     scope = set(intent.get("authorization_scope") or [])
     text = message.casefold()
     for kind in kinds:
-        candidates = [ref for ref in refs if ref["kind"] == kind]
+        all_candidates = [ref for ref in refs if ref["kind"] == kind]
+        candidates = all_candidates
+        if kind == "training_plan" and "replace_training_plan" in operations:
+            candidates = [ref for ref in candidates if ref.get("status") != "archived"]
+            archived_spans = [
+                match.span()
+                for ref in all_candidates if ref.get("status") == "archived"
+                for value in (ref.get("id"), ref.get("name")) if value
+                for match in re.finditer(r"(?<![\w-])" + re.escape(str(value).casefold()) + r"(?![\w-])", text)
+            ]
+            active_spans = [
+                match.span()
+                for ref in candidates
+                for value in (ref.get("id"), ref.get("name")) if value
+                for match in re.finditer(r"(?<![\w-])" + re.escape(str(value).casefold()) + r"(?![\w-])", text)
+            ]
+            archived_mentioned = any(
+                (
+                    not any(start <= a_start and a_end <= end for start, end in active_spans)
+                    or bool(re.search(r"\barchiv\w*\b", text[max(0, a_start - 30):a_end + 30]))
+                )
+                for a_start, a_end in archived_spans
+            )
+            active_id_mentioned = any(
+                ref.get("id") and str(ref["id"]).casefold() in text
+                for ref in candidates
+            )
+            if archived_mentioned and not active_id_mentioned:
+                return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Der genannte Trainingsplan ist archiviert; bitte nenne einen aktiven Plan oder bestätige eine neue Planung."]}
         mentions = []
         for ref in candidates:
             for value in {ref["id"], ref["name"]} - {""}:
@@ -26,12 +54,39 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
                 mentions.extend((match.start(), match.end(), ref) for match in re.finditer(pattern, text))
         # A shorter name inside the explicitly named longer object does not
         # authorize a second object. Separate mentions still select both.
-        named = [ref for ref in candidates if any(
+        explicit_id_refs = [
+            ref for ref in candidates
+            if ref.get("id") and re.search(
+                r"(?<![\w-])" + re.escape(str(ref["id"]).casefold()) + r"(?![\w-])", text
+            )
+        ]
+        natural_named = [ref for ref in candidates if any(
             selected == ref and not any(
                 outer_start <= start and end <= outer_end and (outer_start, outer_end) != (start, end)
                 for outer_start, outer_end, _ in mentions
             ) for start, end, selected in mentions
         )]
+        if explicit_id_refs:
+            # An exact ID disambiguates only its duplicate-name group. Keep
+            # independent names in the same multi-object request selected.
+            duplicate_id_refs = [
+                ref for ref in explicit_id_refs
+                if sum(1 for other in candidates if other["name"].casefold() == ref["name"].casefold()) > 1
+            ]
+            duplicate_groups = {
+                other["name"].casefold()
+                for ref in duplicate_id_refs
+                for other in candidates
+                if other["name"].casefold() == ref["name"].casefold()
+            }
+            named = [
+                ref for ref in natural_named
+                if ref["name"].casefold() not in duplicate_groups
+            ] + duplicate_id_refs
+        else:
+            named = natural_named
+        if named and kind == "training_plan" and "replace_training_plan" in operations and "start_intervals_plan_sync" in operations:
+            return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Einen benannten Plan kann ich ersetzen; die Synchronisierung muss danach separat bestätigt werden."]}
         for ref in named:
             equal_names = [other for other in candidates if other["name"].casefold() == ref["name"].casefold()]
             if len(equal_names) > 1 and not any(other["id"] in message for other in equal_names):

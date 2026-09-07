@@ -25,6 +25,7 @@ OPERATION_VALUES = frozenset({
     "update_training_plan",
     "stage_training_plan",
     "commit_training_plan",
+    "replace_training_plan",
     "apply_training_changes",
     "manage_training_templates",
     "save_checkin",
@@ -80,6 +81,8 @@ def intent_request_payload(
             "For a request to actually create dated workouts, use stage_training_plan and include "
             "commit_training_plan in follow_up_operations so the plan is saved in the same turn. Only omit the "
             "commit step when the user explicitly asks for a draft, preview, proposal, or hypothetical plan. "
+            "For an explicit rebuild or replacement of an existing complete local plan, use replace_training_plan "
+            "because it can atomically create, update, and archive future local sessions. "
             "An explicit request to save the athlete's stated daily condition or availability is a local_action "
             "using save_checkin. An explicit message containing the athlete's actual observations about a completed "
             "activity is a local_action using save_activity_feedback; an explicit request to remove such feedback "

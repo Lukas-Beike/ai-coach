@@ -456,6 +456,90 @@ class CoachTests(unittest.TestCase):
             )
         self.assertEqual(denied.exception.reason, "intent_scope_denied")
 
+    def test_structured_commit_rebinds_explicit_draft_to_recovered_conversation(self):
+        artifact = server._stage_coach_artifact(
+            "conversation-stale",
+            "turn-recovered-commit",
+            {
+                "plan_name": "Recovered",
+                "goal": "Ausdauer",
+                "workouts": [{
+                    "date": "2099-01-03", "sport": "Ride", "name": "Grundlage",
+                    "description": "- 30m 60%", "duration_minutes": 30,
+                    "target": "POWER", "rationale": "Basis",
+                }],
+            },
+        )
+        intent = {
+            "intent": "local_action",
+            "operation": "commit_training_plan",
+            "target_system": "local",
+            "artifact_id": artifact["artifact_id"],
+            "ambiguities": [],
+            "authorization_scope": [f"artifact:{artifact['artifact_id']}"],
+            "follow_up_operations": [],
+        }
+        responses = [
+            server.AppError(400, "stale", reason="conversation_state_invalid"),
+            {"output": [{
+                "type": "function_call", "name": "commit_training_plan", "call_id": "call-recovered-commit",
+                "arguments": json.dumps({"artifact_id": artifact["artifact_id"]}),
+            }]},
+            {"output_text": "Der Plan ist gespeichert."},
+        ]
+
+        def response(_payload):
+            value = responses.pop(0)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        with patch.object(server, "responses_request", side_effect=response), patch.object(
+            server, "replace_stale_openai_conversation", return_value="conversation-recovered"
+        ):
+            result = server._chat_with_structured_coach_impl(
+                "Speichere diesen Plan.", intent=intent, conversation_id="conversation-stale",
+                client_turn_id="turn-recovered-commit",
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["command_receipts"][0]["result"]["status"], "committed")
+        with server.DB_LOCK, server.database() as db:
+            stored = db.execute(
+                "SELECT conversation_id, status FROM coach_plan_artifacts WHERE id=?",
+                (artifact["artifact_id"],),
+            ).fetchone()
+        self.assertEqual(stored["conversation_id"], "conversation-recovered")
+        self.assertEqual(stored["status"], "committed")
+
+    def test_structured_commit_does_not_rebind_foreign_draft_via_recovery_flag(self):
+        artifact = server._stage_coach_artifact(
+            "conversation-foreign",
+            "turn-foreign",
+            {
+                "plan_name": "Foreign",
+                "workouts": [{
+                    "date": "2099-01-04", "sport": "Ride", "name": "Foreign ride",
+                    "description": "- 30m easy", "duration_minutes": 30,
+                }],
+            },
+        )
+        intent = {
+            "intent": "local_action", "operation": "commit_training_plan", "target_system": "local",
+            "artifact_id": artifact["artifact_id"], "ambiguities": [],
+            "authorization_scope": [f"artifact:{artifact['artifact_id']}"],
+            "follow_up_operations": [], "_allow_artifact_rebind": True,
+        }
+
+        with self.assertRaises(server.AppError) as denied:
+            server._structured_coach_tool_result(
+                "commit_training_plan", {"artifact_id": artifact["artifact_id"]},
+                intent=intent, conversation_id="conversation-current", client_turn_id="turn-current",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+
+        self.assertEqual(denied.exception.reason, "artifact_conversation_conflict")
+
     def test_structured_plan_push_declares_and_uses_bounded_entries(self):
         local_id = str(uuid.uuid4())
         entry = {"library_workout_id": local_id, "expected_payload_hash": "b" * 64}
@@ -481,6 +565,32 @@ class CoachTests(unittest.TestCase):
         self.assertIn("entries", schema["properties"])
         self.assertEqual(result["status"], "queued")
         self.assertEqual(enqueue.call_args.kwargs["item_operations"][0]["item_key"], local_id)
+
+    def test_replacement_follow_up_sync_accepts_complete_plan_size(self):
+        local_ids = [str(uuid.uuid4()) for _ in range(server.LIBRARY_BULK_MAX_ENTRIES + 1)]
+        entries = [
+            {"library_workout_id": local_id, "expected_payload_hash": "b" * 64}
+            for local_id in local_ids
+        ]
+        intent = {
+            "intent": "remote_sync", "operation": "replace_training_plan", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [],
+            "authorization_scope": ["local_plan", *(f"library_workout:{local_id}" for local_id in local_ids)],
+            "follow_up_operations": ["start_intervals_plan_sync"],
+            "_replacement_sync_entry_ids": local_ids,
+        }
+
+        with patch.object(server, "_mark_local_planning_authoritative"), patch.object(
+            server, "_enqueue_coach_plan_push", return_value={"ok": True, "status": "queued"},
+        ) as enqueue:
+            result = server._structured_coach_tool_result(
+                "start_intervals_plan_sync", {"entries": entries}, intent=intent,
+                conversation_id="conversation-large-replacement", client_turn_id="turn-large-replacement",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(len(enqueue.call_args.args[0]), len(local_ids))
 
     def test_structured_coach_exposes_competitions_plans_and_adaptive_operations(self):
         names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
@@ -1840,19 +1950,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi.audio(path, blob, () =>", app)
         self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
-        self.assertIn('/api.js?v=195', index)
-        self.assertIn('/navigation.js?v=195', index)
-        self.assertIn('/state.js?v=195', index)
-        self.assertIn('/views.js?v=195', index)
-        self.assertIn('/forms.js?v=195', index)
-        self.assertIn('/components.js?v=195', index)
-        self.assertIn('/app.js?v=195', index)
-        self.assertIn('intervals-coach-v195', service_worker)
-        self.assertIn('"/navigation.js?v=195"', service_worker)
-        self.assertIn('"/state.js?v=195"', service_worker)
-        self.assertIn('"/views.js?v=195"', service_worker)
-        self.assertIn('"/forms.js?v=195"', service_worker)
-        self.assertIn('"/components.js?v=195"', service_worker)
+        self.assertIn('/api.js?v=196', index)
+        self.assertIn('/navigation.js?v=196', index)
+        self.assertIn('/state.js?v=196', index)
+        self.assertIn('/views.js?v=196', index)
+        self.assertIn('/forms.js?v=196', index)
+        self.assertIn('/components.js?v=196', index)
+        self.assertIn('/app.js?v=196', index)
+        self.assertIn('intervals-coach-v196', service_worker)
+        self.assertIn('"/navigation.js?v=196"', service_worker)
+        self.assertIn('"/state.js?v=196"', service_worker)
+        self.assertIn('"/views.js?v=196"', service_worker)
+        self.assertIn('"/forms.js?v=196"', service_worker)
+        self.assertIn('"/components.js?v=196"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1879,8 +1989,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=195'), index.index('/components.js?v=195'))
-        self.assertLess(index.index('/components.js?v=195'), index.index('/app.js?v=195'))
+        self.assertLess(index.index('/forms.js?v=196'), index.index('/components.js?v=196'))
+        self.assertLess(index.index('/components.js?v=196'), index.index('/app.js?v=196'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -2840,6 +2950,35 @@ class CoachTests(unittest.TestCase):
         removed = server.update_local_planned_workout(local["id"], {"action": "delete"})
         self.assertEqual(removed["status"], "deleted")
         self.assertEqual(server.list_dated_local_planned_workouts(), [])
+
+    def test_deleting_archived_planned_workout_records_recoverable_history(self):
+        local = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Archived", "description": "- 30m Z2",
+            "duration_minutes": 30, "source": "library", "rationale": "Test",
+        })
+        server.update_local_planned_workout(local["id"], {"action": "archive"})
+
+        server.update_local_planned_workout(local["id"], {"action": "delete"})
+
+        deletion = next(
+            item for item in server.list_change_history()
+            if item["entity_type"] == "planned_unit"
+            and item["entity_id"] == local["id"]
+            and item["action"] == "delete"
+        )
+        self.assertNotEqual(deletion["before_hash"], deletion["after_hash"])
+        self.assertEqual(deletion["diff"]["fields"]["local_deleted"], {"changed": True})
+        server._apply_change_undo({
+            "change_id": deletion["id"],
+            "expected_current_hash": deletion["after_hash"],
+        })
+        restored = next(
+            item for item in server.list_planned_units(include_archived=True)
+            if item["id"] == local["id"]
+        )
+        self.assertFalse(restored["archived"])
+        self.assertFalse(restored["local_deleted"])
 
     def test_workout_payload_is_an_idempotent_calendar_event(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -4253,6 +4392,28 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(failed["intent"], "needs_clarification")
         self.assertEqual(failed["target_system"], "none")
 
+    def test_structured_coach_intent_checks_foreign_artifact_in_follow_up_commit(self):
+        artifact = server._stage_coach_artifact(
+            "conversation-foreign", "turn-foreign-intent",
+            {"plan_name": "Foreign", "workouts": []},
+        )
+        intent = {
+            "intent": "remote_sync", "operation": "start_provider_refresh", "target_system": "intervals",
+            "artifact_id": artifact["artifact_id"], "ambiguities": [],
+            "authorization_scope": ["intervals_refresh", f"artifact:{artifact['artifact_id']}"],
+            "follow_up_operations": ["commit_training_plan"],
+        }
+
+        with patch.object(server, "responses_request", return_value={"output_text": json.dumps(intent)}):
+            denied = server.request_coach_intent("Aktualisiere und speichere den Entwurf.", "conversation-current")
+            explicit = server.request_coach_intent(
+                f"Aktualisiere und speichere Entwurf {artifact['artifact_id']}.", "conversation-current",
+            )
+
+        self.assertEqual(denied["intent"], "needs_clarification")
+        self.assertIsNone(denied["operation"])
+        self.assertTrue(explicit["_artifact_explicit"])
+
     def test_structured_coach_loop_keeps_tools_and_returns_command_receipt(self):
         intent = {
             "intent": "local_action",
@@ -4727,6 +4888,581 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(server.prompt_requests_bulk_training_change(
             "Ändere nicht meinen gesamten Trainingsplan."
         ))
+
+    def test_complete_plan_rebuild_requires_plan_level_scope(self):
+        self.assertTrue(server.prompt_requests_complete_plan_rebuild("Replace my training plan."))
+        self.assertTrue(server.prompt_requests_complete_plan_rebuild("Redo my entire training plan from the ground up."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild the Tuesday workout in my training plan."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my Tuesday workout."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Replace my training plan's Tuesday workout."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next week only."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next week."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next Tuesday."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for tomorrow."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle meinen Trainingsplan neu für morgen."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for the next two weeks."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for 2026-09-08."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan starting next week."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Plane meinen Trainingsplan neu ab nächster Woche."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan until October."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan through 2026-10-01."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("What happens if I replace my training plan?"))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Preview a replacement for my entire training plan."))
+        self.assertTrue(server.prompt_requests_complete_plan_rebuild("Replace my existing plan with this draft."))
+        self.assertTrue(server.prompt_requests_complete_plan_rebuild("Could you replace my training plan?"))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle meinen Trainingsplan neu für übermorgen."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle meinen Trainingsplan neu für 2026-09-08."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle für morgen meinen Trainingsplan neu."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild for tomorrow my training plan."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle für nächsten Dienstag meinen Trainingsplan neu."))
+
+    def test_complete_plan_rebuild_uses_long_plan_scope_and_budget(self):
+        prompt = "Replace my training plan."
+        scope = server.coach_plan_scope(prompt)
+        self.assertTrue(scope["planning"])
+        self.assertTrue(scope["bulk_change"])
+        self.assertTrue(scope["background"])
+        self.assertEqual(server.coach_output_token_budget(prompt), server.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS)
+        hypothetical = "What happens if I replace my training plan?"
+        self.assertFalse(server.coach_plan_scope(hypothetical)["bulk_change"])
+        self.assertFalse(server.coach_plan_scope(hypothetical)["background"])
+        preview = "Preview a replacement for my entire training plan."
+        self.assertFalse(server.coach_plan_scope(preview)["bulk_change"])
+        self.assertFalse(server.coach_plan_scope(preview)["background"])
+        polite = "Could you replace my training plan?"
+        self.assertTrue(server.coach_plan_scope(polite)["bulk_change"])
+        self.assertTrue(server.coach_plan_scope(polite)["background"])
+        no_remote_sync = "Ersetze meinen ganzen Trainingsplan, aber synchronisiere ihn nicht."
+        self.assertTrue(server.prompt_requests_complete_plan_rebuild(no_remote_sync))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Ersetze meinen ganzen Trainingsplan nicht."))
+
+    def test_reset_coach_chat_discards_outstanding_plan_drafts(self):
+        artifact = server._stage_coach_artifact(
+            "conversation-before-reset",
+            "turn-before-reset",
+            {"plan_name": "Reset test", "goal": "", "workouts": []},
+        )
+        with patch.object(server, "delete_remote_conversation", return_value=True):
+            result = server.reset_coach_chat()
+        self.assertEqual(result["status"], "ok")
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact["artifact_id"],)).fetchone()
+        self.assertEqual(row["status"], "superseded")
+        self.assertEqual(server.coach_intent_artifact_refs(), [])
+
+    def test_complete_plan_rebuild_normalizes_mixed_draft_edit_and_sync_flow(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Alter Plan", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        target = next(item for item in state["planned_units"] if item["local_id"] == planned["id"])
+        stale_artifact_id = str(uuid.uuid4())
+        mixed_intent = {
+            "intent": "remote_sync", "operation": "stage_training_plan", "target_system": "intervals",
+            "artifact_id": stale_artifact_id, "ambiguities": [],
+            "authorization_scope": ["local_plan", f"artifact:{stale_artifact_id}"],
+            "follow_up_operations": [
+                "commit_training_plan", "apply_training_changes", "start_intervals_plan_sync",
+            ],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "read_training_state", "call_id": "read", "arguments": "{}"}]},
+            {"output": [{"type": "function_call", "name": "replace_training_plan", "call_id": "replace", "arguments": json.dumps({
+                "expected_revision": state["planning_revision"],
+                "payload": {"plan_name": "Neu geplant", "goal": "Ausdauer", "workouts": [
+                    {"date": (date.today() + timedelta(days=2)).isoformat(), "sport": "Ride", "name": "Neu geplant", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+                    {"date": (date.today() + timedelta(days=4)).isoformat(), "sport": "Run", "name": "Neu geplant 2", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test"},
+                ]},
+            })}]},
+            {"output": [{
+                "type": "function_call", "name": "start_intervals_plan_sync", "call_id": "sync",
+                "arguments": json.dumps({"reason": "Ausdrücklich angefordert"}),
+            }]},
+            {"output_text": "Der Plan wurde neu erstellt, gespeichert und zur Synchronisierung vorgemerkt."},
+        ]
+        unrelated = server.create_local_workout_library_entry({
+            "sport": "Ride", "name": "Unrelated template", "description": "- 20m easy",
+            "duration_minutes": 20,
+        })
+        with patch.object(server, "request_coach_intent", return_value=mixed_intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-plan-rebuild"
+        ), patch.object(server, "responses_request", side_effect=responses) as request, patch.object(
+            server, "_enqueue_coach_plan_push", return_value={"ok": True, "status": "queued", "sync_job_ids": ["job"]}
+        ) as enqueue:
+            result = server.chat_with_coach(
+                "Erstelle den gesamten Plan mit den neuen Informationen neu für die kommenden 2 Wochen, "
+                "speichere ihn und synchronisiere ihn zu intervals.icu",
+                client_turn_id="turn-plan-rebuild",
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["intent"]["operation"], "replace_training_plan")
+        self.assertIsNone(result["intent"]["artifact_id"])
+        self.assertNotIn(f"artifact:{stale_artifact_id}", result["intent"]["authorization_scope"])
+        self.assertEqual(result["intent"]["follow_up_operations"], ["start_intervals_plan_sync"])
+        self.assertEqual(
+            [item["tool"] for item in result["command_receipts"]],
+            ["read_training_state", "replace_training_plan", "start_intervals_plan_sync"],
+        )
+        self.assertEqual(request.call_args_list[0].args[0]["tool_choice"], {"type": "function", "name": "read_training_state"})
+        self.assertEqual(request.call_args_list[1].args[0]["tool_choice"], {"type": "function", "name": "replace_training_plan"})
+        self.assertEqual(request.call_args_list[2].args[0]["tool_choice"], {"type": "function", "name": "start_intervals_plan_sync"})
+        self.assertEqual({item["name"] for item in server.list_planned_units()}, {"Neu geplant", "Neu geplant 2"})
+        replacement_ids = set(result["command_receipts"][1]["result"]["library_entry_ids"])
+        synced_ids = {item["library_workout_id"] for item in enqueue.call_args.args[0]}
+        self.assertEqual(synced_ids, replacement_ids)
+        self.assertNotIn(unrelated["id"], synced_ids)
+
+    def test_complete_plan_rebuild_keeps_draft_flow_when_no_local_plan_exists(self):
+        intent = {
+            "intent": "local_action", "operation": "stage_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": ["commit_training_plan"],
+        }
+
+        normalized = server._normalize_complete_plan_intent(
+            "Erstelle meinen gesamten Trainingsplan neu.", intent
+        )
+
+        self.assertEqual(normalized, intent)
+
+    def test_complete_plan_rebuild_keeps_exact_workout_scope(self):
+        server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Tuesday", "description": "- 30m easy",
+        })
+        intent = {
+            "intent": "local_action", "operation": "stage_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["planned_unit:unit-1"],
+            "follow_up_operations": ["commit_training_plan"],
+        }
+        normalized = server._normalize_complete_plan_intent(
+            "Replace the Tuesday workout in my entire training plan.", intent
+        )
+        self.assertEqual(normalized, intent)
+
+    def test_complete_plan_rebuild_replaces_future_empty_plan_metadata(self):
+        today = date.today()
+        with server.DB_LOCK, server.database() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db, str(uuid.uuid4()), "Empty Future", "Base",
+                (today + timedelta(days=1)).isoformat(),
+                (today + timedelta(days=14)).isoformat(), "planned", server.utc_now(),
+            )
+        intent = {
+            "intent": "local_action", "operation": "stage_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": ["commit_training_plan"],
+        }
+
+        normalized = server._normalize_complete_plan_intent(
+            "Erstelle meinen gesamten Trainingsplan neu.", intent,
+        )
+
+        self.assertEqual(normalized["operation"], "replace_training_plan")
+        self.assertEqual(normalized["follow_up_operations"], [])
+
+    def test_scoped_direct_plan_replacement_requires_clarification(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Keep", "description": "- 30m easy",
+        })
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+
+        normalized = server._normalize_complete_plan_intent(
+            "Rebuild my training plan for next week.", intent,
+        )
+
+        self.assertEqual(normalized["intent"], "needs_clarification")
+        self.assertIsNone(normalized["operation"])
+        self.assertEqual(normalized["target_system"], "none")
+        self.assertEqual(normalized["authorization_scope"], [])
+        self.assertEqual(server.list_planned_units()[0]["id"], planned["id"])
+
+    def test_complete_plan_rebuild_preserves_sync_when_classifier_makes_it_primary(self):
+        server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Alter Plan", "description": "- 30m easy",
+        })
+        intent = {
+            "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+        }
+
+        normalized = server._normalize_complete_plan_intent(
+            "Erstelle den gesamten Plan mit neuen Informationen neu und synchronisiere ihn.", intent
+        )
+
+        self.assertEqual(normalized["operation"], "replace_training_plan")
+        self.assertEqual(normalized["follow_up_operations"], ["start_intervals_plan_sync"])
+
+    def test_complete_plan_replace_can_create_more_sessions_and_archive_old_ones(self):
+        old = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Old", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        result = server._structured_coach_tool_result(
+            "replace_training_plan",
+            {
+                "expected_revision": state["planning_revision"],
+                "payload": {"plan_name": "Replacement", "goal": "Base", "workouts": [
+                    {"date": (date.today() + timedelta(days=2)).isoformat(), "sport": "Ride", "name": "New 1", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Base"},
+                    {"date": (date.today() + timedelta(days=3)).isoformat(), "sport": "Run", "name": "New 2", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Base"},
+                ]},
+            },
+            intent=intent, conversation_id="conversation-replace", client_turn_id="turn-replace",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["status"], "replaced")
+        self.assertEqual(result["archived_count"], 1)
+        self.assertEqual(result["created_count"], 2)
+        self.assertEqual({item["name"] for item in server.list_planned_units()}, {"New 1", "New 2"})
+        archived = next(item for item in server.list_planned_units(20, include_archived=True) if item["id"] == old["id"])
+        self.assertTrue(archived["archived"])
+        self.assertTrue(archived["local_deleted"])
+
+    def test_complete_plan_replace_ignores_archived_units_in_date_conflicts(self):
+        archived = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=2)).isoformat(),
+            "sport": "Ride", "name": "Archived", "description": "- 30m easy",
+        })
+        with server.DB_LOCK, server.database() as db:
+            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (archived["id"],)).fetchone()
+            payload = json.loads(row["payload"])
+            payload.update({"archived": True, "local_deleted": True})
+            db.execute("UPDATE planned_units SET payload=? WHERE local_id=?", (json.dumps(payload), archived["id"]))
+        state = server._structured_training_state()
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        result = server._structured_coach_tool_result(
+            "replace_training_plan",
+            {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Replacement", "goal": "", "workouts": [
+                {"date": archived["date"], "sport": "Ride", "name": "New", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+            ]}},
+            intent=intent, conversation_id="conversation-archived", client_turn_id="turn-archived",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["status"], "replaced")
+
+    def test_complete_plan_replace_keeps_other_named_future_plan(self):
+        base = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "start_date_local": (date.today() + timedelta(days=1)).isoformat() + "T07:30:00",
+            "sport": "Ride", "name": "Base old", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Base Build")[0]
+        race = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=2)).isoformat(),
+            "sport": "Run", "name": "Race prep", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Race Prep")[0]
+        base_plan = next(plan for plan in server.list_training_plans() if plan["name"] == "Base Build")
+        state = server._structured_training_state()
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [],
+            "authorization_scope": ["local_plan", f"training_plan:{base_plan['id']}"],
+            "follow_up_operations": [],
+        }
+        result = server._structured_coach_tool_result(
+            "replace_training_plan",
+            {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Base Build", "goal": "", "workouts": [
+                {"date": (date.today() + timedelta(days=3)).isoformat(), "sport": "Ride", "name": "Base new", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+            ]}},
+            intent=intent, conversation_id="conversation-selected-plan", client_turn_id="turn-selected-plan",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["status"], "replaced")
+        remaining = {item["id"]: item for item in server.list_planned_units(20, include_archived=True)}
+        self.assertTrue(remaining[base["id"]]["archived"])
+        self.assertFalse(remaining[race["id"]]["archived"])
+        self.assertEqual(remaining[race["id"]]["name"], "Race prep")
+        active_named_refs = [
+            ref for ref in server.coach_intent_object_refs()
+            if ref["kind"] == "training_plan" and ref["name"] == "Base Build" and ref.get("status") != "archived"
+        ]
+        self.assertEqual(len(active_named_refs), 1)
+        self.assertNotEqual(active_named_refs[0]["id"], base_plan["id"])
+        archived_named_refs = [
+            ref for ref in server.coach_intent_object_refs()
+            if ref["kind"] == "training_plan" and ref["name"] == "Base Build" and ref.get("status") == "archived"
+        ]
+        self.assertEqual([ref["id"] for ref in archived_named_refs], [base_plan["id"]])
+        restored_intent = server.resolve_intent_objects(
+            {
+                "intent": "local_action", "operation": "update_training_plan", "target_system": "local",
+                "artifact_id": None, "ambiguities": [], "authorization_scope": [f"training_plan:{base_plan['id']}"],
+                "follow_up_operations": [],
+            },
+            f"Restore Base Build {base_plan['id']}",
+            server.coach_intent_object_refs(),
+        )
+        self.assertEqual(restored_intent["authorization_scope"], [f"training_plan:{base_plan['id']}"])
+        archived_replacement = server.resolve_intent_objects(
+            {
+                "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+                "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+                "follow_up_operations": [],
+            },
+            "Replace my archived training plan Base Build",
+            server.coach_intent_object_refs(),
+        )
+        self.assertEqual(archived_replacement["intent"], "needs_clarification")
+        deleted_history = next(
+            item for item in server.list_change_history()
+            if item["entity_type"] == "planned_unit" and item["entity_id"] == base["id"] and item["action"] == "delete"
+        )
+        preview = server._history_preview(deleted_history["id"], "session-undo")
+        self.assertEqual(preview["status"], "preview")
+        revision_before_undo = server._structured_training_state()["planning_revision"]
+        undone = server._apply_change_undo({
+            "change_id": deleted_history["id"],
+            "expected_current_hash": deleted_history["after_hash"],
+        })
+        self.assertEqual(undone["status"], "undone")
+        self.assertEqual(server._structured_training_state()["planning_revision"], revision_before_undo + 1)
+        restored = next(item for item in server.list_planned_units(20, include_archived=True) if item["id"] == base["id"])
+        self.assertFalse(restored["archived"])
+        self.assertFalse(restored["local_deleted"])
+
+    def test_complete_plan_rebuild_resolves_named_staged_plan_after_normalization(self):
+        base = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Base old", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Base Build")[0]
+        server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=2)).isoformat(),
+            "sport": "Run", "name": "Race prep", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Race Prep")
+        base_plan = next(plan for plan in server.list_training_plans() if plan["name"] == "Base Build")
+        message = "Replace the training plan Base Build."
+        intent = {
+            "intent": "local_action", "operation": "stage_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": ["commit_training_plan"],
+        }
+        normalized = server._normalize_complete_plan_intent(message, intent)
+        resolved = server.resolve_intent_objects(normalized, message, server.coach_intent_object_refs())
+        self.assertEqual(resolved["operation"], "replace_training_plan")
+        self.assertEqual(resolved["authorization_scope"], [f"training_plan:{base_plan['id']}"])
+        self.assertEqual(base["plan_id"], base_plan["id"])
+
+    def test_named_replacement_with_sync_requires_separate_confirmation(self):
+        refs = [{"kind": "training_plan", "id": "active-plan", "name": "Base Build", "status": "planned"}]
+        intent = {
+            "intent": "remote_sync", "operation": "replace_training_plan", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan", "training_plan:active-plan"],
+            "follow_up_operations": ["start_intervals_plan_sync"],
+        }
+        resolved = server.resolve_intent_objects(intent, "Replace Base Build and sync it", refs)
+        self.assertEqual(resolved["intent"], "needs_clarification")
+        broad_intent = {**intent, "authorization_scope": ["local_plan"]}
+        broad = server.resolve_intent_objects(broad_intent, "Replace my entire training plan and sync it", refs)
+        self.assertEqual(broad["intent"], "remote_sync")
+        self.assertIn("local_plan", broad["authorization_scope"])
+
+    def test_explicit_plan_id_wins_over_duplicate_plan_name(self):
+        refs = [
+            {"kind": "training_plan", "id": "plan-one", "name": "Base Build", "status": "planned"},
+            {"kind": "training_plan", "id": "plan-two", "name": "Base Build", "status": "planned"},
+        ]
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        resolved = server.resolve_intent_objects(intent, "Replace Base Build plan-one", refs)
+        self.assertEqual(resolved["authorization_scope"], ["training_plan:plan-one"])
+
+    def test_explicit_id_keeps_independent_batch_object_names(self):
+        refs = [
+            {"kind": "planned_unit", "id": "easy-id", "name": "Easy Ride"},
+            {"kind": "planned_unit", "id": "tempo-id", "name": "Tempo Run"},
+        ]
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        resolved = server.resolve_intent_objects(intent, "Move Easy Ride and Tempo Run tempo-id", refs)
+        self.assertEqual(resolved["authorization_scope"], ["planned_unit:easy-id", "planned_unit:tempo-id"])
+
+    def test_training_plan_metadata_changes_advance_planning_revision(self):
+        plan_entry = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Metadata", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Metadata Plan")[0]
+        plan = next(item for item in server.list_training_plans() if item["id"] == plan_entry["plan_id"])
+        before = server._structured_training_state()["planning_revision"]
+        server.update_training_plan(plan["id"], {"action": "update", "name": "Renamed Plan"})
+        self.assertEqual(server._structured_training_state()["planning_revision"], before + 1)
+
+    def test_training_plan_metadata_undo_advances_planning_revision(self):
+        plan_entry = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Metadata", "description": "- 30m easy",
+            "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Metadata Plan")[0]
+        plan = next(item for item in server.list_training_plans() if item["id"] == plan_entry["plan_id"])
+        server.update_training_plan(plan["id"], {"action": "update", "name": "Renamed Plan"})
+        metadata_change = next(
+            item for item in server.list_change_history()
+            if item["entity_type"] == "training_plan"
+            and item["entity_id"] == plan["id"]
+            and item["action"] == "update"
+        )
+        before_undo = server._structured_training_state()["planning_revision"]
+
+        server._apply_change_undo({
+            "change_id": metadata_change["id"],
+            "expected_current_hash": metadata_change["after_hash"],
+        })
+
+        self.assertEqual(server._structured_training_state()["planning_revision"], before_undo + 1)
+        restored = next(item for item in server.list_training_plans() if item["id"] == plan["id"])
+        self.assertEqual(restored["name"], "Metadata Plan")
+
+    def test_history_capacity_covers_one_complete_plan_replacement(self):
+        self.assertGreaterEqual(server.CHANGE_HISTORY_MAX_ROWS, server.COACH_TRAINING_CHANGE_LIMIT * 2)
+
+    def test_complete_plan_replacement_rejects_oversized_history_atomically(self):
+        old = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Old", "description": "- 30m easy",
+            "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Old Plan")[0]
+        old_plan = next(plan for plan in server.list_training_plans() if plan["id"] == old["plan_id"])
+        state = server._structured_training_state()
+
+        with patch.object(server, "CHANGE_HISTORY_MAX_ROWS", 3), self.assertRaises(server.AppError) as error:
+            server._replace_structured_training_plan({
+                "expected_revision": state["planning_revision"],
+                "payload": {"plan_name": "Replacement", "goal": "", "workouts": [{
+                    "date": (date.today() + timedelta(days=2)).isoformat(),
+                    "sport": "Ride", "name": "New", "description": "- 40m easy",
+                    "duration_minutes": 40, "target": "AUTO", "rationale": "Test",
+                }]},
+            })
+
+        self.assertEqual(error.exception.reason, "change_history_limit")
+        active = server.list_planned_units()
+        self.assertEqual([item["id"] for item in active], [old["id"]])
+        unchanged_plan = next(plan for plan in server.list_training_plans() if plan["id"] == old_plan["id"])
+        self.assertEqual(unchanged_plan["status"], "planned")
+
+    def test_complete_plan_replace_archives_selected_plan_without_future_units(self):
+        past_plan_id = str(uuid.uuid4())
+        past = (date.today() - timedelta(days=10)).isoformat()
+        with server.DB_LOCK, server.database() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(db, past_plan_id, "Past Plan", "", past, past, "planned", server.utc_now())
+        state = server._structured_training_state()
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": [f"training_plan:{past_plan_id}"],
+            "follow_up_operations": [],
+        }
+        result = server._structured_coach_tool_result(
+            "replace_training_plan",
+            {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Past Plan", "goal": "", "workouts": [
+                {"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "New", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+            ]}},
+            intent=intent, conversation_id="conversation-past-plan", client_turn_id="turn-past-plan",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["status"], "replaced")
+        self.assertEqual(next(plan for plan in server.list_training_plans() if plan["id"] == past_plan_id)["status"], "archived")
+
+    def test_broad_plan_replace_archives_future_plan_metadata_without_active_units(self):
+        empty_plan_id = str(uuid.uuid4())
+        starts = (date.today() + timedelta(days=1)).isoformat()
+        ends = (date.today() + timedelta(days=7)).isoformat()
+        with server.DB_LOCK, server.database() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db, empty_plan_id, "Empty Future Plan", "", starts, ends, "planned", server.utc_now(),
+            )
+        state = server._structured_training_state()
+
+        result = server._replace_structured_training_plan({
+            "expected_revision": state["planning_revision"],
+            "payload": {"plan_name": "Replacement", "goal": "", "workouts": [{
+                "date": (date.today() + timedelta(days=2)).isoformat(),
+                "sport": "Ride", "name": "New", "description": "- 40m easy",
+                "duration_minutes": 40, "target": "AUTO", "rationale": "Test",
+            }]},
+        })
+
+        self.assertEqual(result["status"], "replaced")
+        old_plan = next(plan for plan in server.list_training_plans() if plan["id"] == empty_plan_id)
+        self.assertEqual(old_plan["status"], "archived")
+        metadata_history = next(
+            item for item in server.list_change_history()
+            if item["entity_type"] == "training_plan"
+            and item["entity_id"] == empty_plan_id
+            and item["action"] == "update"
+        )
+        self.assertNotEqual(metadata_history["before_hash"], metadata_history["after_hash"])
+
+    def test_broad_plan_replace_preserves_imported_provider_units(self):
+        remote_date = (date.today() + timedelta(days=2)).isoformat()
+        server.upsert_remote_planned_units([{
+            "id": "remote-future-workout", "category": "WORKOUT", "type": "Ride",
+            "name": "Provider workout", "start_date_local": remote_date + "T07:00:00",
+            "moving_time": 1800,
+        }])
+        state = server._structured_training_state()
+        result = server._replace_structured_training_plan({
+            "expected_revision": state["planning_revision"],
+            "payload": {"plan_name": "Coach replacement", "goal": "", "workouts": [{
+                "date": (date.today() + timedelta(days=1)).isoformat(),
+                "sport": "Ride", "name": "New", "description": "- 40m easy",
+                "duration_minutes": 40, "target": "AUTO", "rationale": "Test",
+            }]},
+        })
+        self.assertEqual(result["status"], "replaced")
+        imported = next(item for item in server.list_planned_units(include_archived=True) if item.get("remote_event_id") == "remote-future-workout")
+        self.assertFalse(imported.get("local_deleted", False))
+        self.assertFalse(imported.get("archived", False))
+
+    def test_planned_unit_undo_rejects_a_new_date_conflict(self):
+        old = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "start_date_local": (date.today() + timedelta(days=1)).isoformat() + "T07:30:00",
+            "sport": "Ride", "name": "Old", "description": "- 30m easy",
+        })
+        state = server._structured_training_state()
+        intent = {
+            "intent": "local_action", "operation": "replace_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        server._structured_coach_tool_result(
+            "replace_training_plan",
+            {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Conflict Replacement", "goal": "", "workouts": [
+                {"date": old["date"], "sport": "Ride", "name": "New", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+            ]}},
+            intent=intent, conversation_id="conversation-undo-conflict", client_turn_id="turn-undo-conflict",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        deleted_history = next(
+            item for item in server.list_change_history()
+            if item["entity_type"] == "planned_unit" and item["entity_id"] == old["id"] and item["action"] == "delete"
+        )
+        with self.assertRaises(server.AppError) as error:
+            server._apply_change_undo({"change_id": deleted_history["id"], "expected_current_hash": deleted_history["after_hash"]})
+        self.assertEqual(error.exception.reason, "plan_date_conflict")
 
     def test_complete_plan_edit_reads_full_state_before_mutating(self):
         intent = {
@@ -6489,16 +7225,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=195"', source)
-        self.assertIn('"/navigation.js?v=195"', source)
-        self.assertIn('"/state.js?v=195"', source)
-        self.assertIn('"/views.js?v=195"', source)
-        self.assertIn('"/forms.js?v=195"', source)
-        self.assertIn('"/components.js?v=195"', source)
+        self.assertIn('"/api.js?v=196"', source)
+        self.assertIn('"/navigation.js?v=196"', source)
+        self.assertIn('"/state.js?v=196"', source)
+        self.assertIn('"/views.js?v=196"', source)
+        self.assertIn('"/forms.js?v=196"', source)
+        self.assertIn('"/components.js?v=196"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=195"', source)
-        self.assertIn('"/icon.svg?v=195"', source)
-        self.assertIn('"/styles.css?v=195"', source)
+        self.assertIn('"/app.js?v=196"', source)
+        self.assertIn('"/icon.svg?v=196"', source)
+        self.assertIn('"/styles.css?v=196"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -7559,7 +8295,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=195', index)
+        self.assertIn('v=196', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
