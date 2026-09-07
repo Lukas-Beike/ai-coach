@@ -1082,6 +1082,19 @@ class CoachReviewTests(unittest.TestCase):
         self.assertIn("planned_unit:recovery-run", resolved["authorization_scope"])
         self.assertNotIn("local_plan_create", resolved["authorization_scope"])
 
+    def test_update_preposition_does_not_grant_creation_scope(self):
+        refs = [
+            {"kind": "planned_unit", "id": "upper-body", "name": "Upper Body", "date": "2099-09-09"},
+            {"kind": "planned_unit", "id": "recovery-run", "name": "Recovery Run", "date": "2099-09-10"},
+        ]
+        resolved = server.resolve_intent_objects(
+            self.intent("apply_training_changes", ["local_plan"]),
+            "Move Upper Body and include heart-rate target in Recovery Run.",
+            refs,
+        )
+        self.assertIn("planned_unit:recovery-run", resolved["authorization_scope"])
+        self.assertNotIn("local_plan_create", resolved["authorization_scope"])
+
     def test_named_plan_create_resolves_plan_without_existing_unit_reference(self):
         refs = [
             {"kind": "training_plan", "id": "build-plan", "name": "Build Plan", "status": "planned"},
@@ -1095,6 +1108,19 @@ class CoachReviewTests(unittest.TestCase):
         self.assertIn("training_plan:build-plan", resolved["authorization_scope"])
         self.assertIn("local_plan_create", resolved["authorization_scope"])
         self.assertNotIn("local_plan", resolved["authorization_scope"])
+
+    def test_workout_name_containing_plan_name_does_not_assign_membership(self):
+        refs = [
+            {"kind": "training_plan", "id": "marathon-plan", "name": "Marathon", "status": "planned"},
+            {"kind": "planned_unit", "id": "upper-body", "name": "Upper Body", "date": "2099-09-09"},
+        ]
+        resolved = server.resolve_intent_objects(
+            self.intent("apply_training_changes", ["local_plan"]),
+            "Move Upper Body and add a Marathon Pace Run.",
+            refs,
+        )
+        self.assertNotIn("training_plan:marathon-plan", resolved["authorization_scope"])
+        self.assertIn("local_plan_create", resolved["authorization_scope"])
 
     def test_undo_proposal_is_top_level_recoverable_and_keeps_hash_guard(self):
         template=server.create_local_library_template({"name":"Synthetic undo","sport":"Run"})

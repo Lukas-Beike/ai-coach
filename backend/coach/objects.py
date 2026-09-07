@@ -48,17 +48,17 @@ def _creation_clause_spans(text: str, candidates: list[dict[str, Any]]) -> list[
         if str(ref.get("name") or "").strip()
     }
     for match in _CREATE_REQUEST_RE.finditer(text):
-        existing_target_after_to = False
+        existing_update_target = False
         for name in candidate_names:
             pattern = r"(?<![\w-])" + re.escape(name) + r"(?![\w-])"
             for target in re.finditer(pattern, text[match.start():match.end()]):
                 prefix = text[match.start():match.start() + target.start()]
-                if re.search(r"\bto\b", prefix):
-                    existing_target_after_to = True
+                if re.search(r"\b(?:to|in|for|before|into|zu|zum|zur|im|f[uü]r|vor|bei|an)\b", prefix):
+                    existing_update_target = True
                     break
-            if existing_target_after_to:
+            if existing_update_target:
                 break
-        if not existing_target_after_to:
+        if not existing_update_target:
             spans.append(match.span())
     return spans
 
@@ -79,13 +79,19 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
     text = message.casefold()
     if "apply_training_changes" in operations:
         plan_candidates = [ref for ref in refs if ref["kind"] == "training_plan" and ref.get("status") != "archived"]
-        named_plans = [
-            ref for ref in plan_candidates
-            if any(
-                value and re.search(r"(?<![\w-])" + re.escape(str(value).casefold()) + r"(?![\w-])", text)
-                for value in (ref.get("id"), ref.get("name"))
-            )
-        ]
+        named_plans = []
+        for ref in plan_candidates:
+            for value in (ref.get("id"), ref.get("name")):
+                if not value:
+                    continue
+                for match in re.finditer(r"(?<![\w-])" + re.escape(str(value).casefold()) + r"(?![\w-])", text):
+                    prefix = text[max(0, match.start() - 24):match.start()]
+                    if re.search(r"\b(?:to|into|in|for|zu|zum|zur|im|f[uü]r)\s+(?:the\s+|den\s+|dem\s+)?$", prefix):
+                        named_plans.append(ref)
+                        break
+                if ref in named_plans:
+                    break
+        named_plans = list({ref["id"]: ref for ref in named_plans}.values())
         if len(named_plans) > 1:
             return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Welchem konkret benannten Trainingsplan soll die neue Einheit zugeordnet werden?"]}
         if named_plans:

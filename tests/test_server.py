@@ -3569,6 +3569,14 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(conflict["name"], "Later")
         self.assertEqual(conflict["match"], "time_window")
 
+    def test_calendar_conflicts_ignore_archived_planned_units(self):
+        day = (date.today() + timedelta(days=4)).isoformat()
+        existing = server.create_local_planned_unit({
+            "date": day, "sport": "Run", "name": "Archived", "description": "- 20m easy",
+        })
+        server.update_local_planned_workout(existing["id"], {"action": "archive"})
+        self.assertEqual(server.calendar_conflicts({"date": day}), [])
+
     def test_calendar_conflicts_include_local_competitions_with_date_fallback(self):
         day = (date.today() + timedelta(days=3)).isoformat()
         server.save_athlete_context({}, [{"name": "Local Race", "event_date": day, "sport": "Cycling", "start_date_local": day + "T10:00:00", "moving_time": 7200}])

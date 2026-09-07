@@ -8089,7 +8089,11 @@ def calendar_conflicts(
     conflicts = []
     excluded = exclude_library_ids or set()
     with DB_LOCK, database() as db:
-        rows = db.execute("SELECT local_id, payload FROM planned_units WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0").fetchall()
+        rows = db.execute(
+            "SELECT local_id, payload FROM planned_units "
+            "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
+            "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0"
+        ).fetchall()
         competitions = [dict(row) for row in db.execute("SELECT id, name, event_date, start_date_local, moving_time FROM competitions").fetchall()]
     for row in rows:
         local_id = str(row.get("local_id") or "")
