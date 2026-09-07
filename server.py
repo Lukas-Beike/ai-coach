@@ -2400,6 +2400,16 @@ def _cleanup_change_history(db: Any) -> None:
     )
 
 
+def _reserve_change_history_capacity(db: Any, required_rows: int) -> None:
+    """Make room for one atomic operation without deleting its own audit rows."""
+    keep = max(0, CHANGE_HISTORY_MAX_ROWS - max(0, int(required_rows)))
+    db.execute(
+        "DELETE FROM change_history WHERE id NOT IN "
+        "(SELECT id FROM change_history ORDER BY created_at DESC LIMIT ?)",
+        (keep,),
+    )
+
+
 def _record_change(
     db: Any,
     entity_type: str,
@@ -2429,7 +2439,8 @@ def _record_change(
         "after_hash": after_hash,
         "diff": json.dumps(_audit_diff(before_projection, after_projection), ensure_ascii=False, separators=(",", ":")),
     }
-    _cleanup_change_history(db)
+    if source != "coach_replacement":
+        _cleanup_change_history(db)
     db.execute(
         "INSERT INTO change_history(id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -13646,8 +13657,9 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
         replace_ids = {str(row.get("local_id") or "") for row in rows if row.get("local_id")}
         archived_rows = db.execute(
             "SELECT local_id FROM planned_units "
-            "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 1 "
-            "OR COALESCE(json_extract(payload, '$.local_deleted'), 0) = 1"
+            "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 1 "
+            "OR (COALESCE(json_extract(payload, '$.archived'), 0) = 1 "
+            "AND (external_id IS NULL OR external_id = ''))"
         ).fetchall()
         ignored_calendar_ids = replace_ids | {
             str(row.get("local_id") or "") for row in archived_rows if row.get("local_id")
@@ -13665,6 +13677,9 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
             plan_id = str(current.get("plan_id") or "").strip()
             if plan_id:
                 superseded_plan_ids.add(plan_id)
+        _reserve_change_history_capacity(
+            db, len(rows) + len(superseded_plan_ids) + len(workouts) + 1,
+        )
         # Validate every external/calendar conflict before changing any row.
         for workout in workouts:
             if calendar_conflicts({"date": workout["date"]}, ignored_calendar_ids):
@@ -13677,7 +13692,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
                 "UPDATE planned_units SET payload=?, sync_state='local', sync_dirty=1, sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
                 (json.dumps(current, ensure_ascii=False), now, row["local_id"]),
             )
-            _record_change(db, "planned_unit", row["local_id"], "delete", before, current, source="coach")
+            _record_change(db, "planned_unit", row["local_id"], "delete", before, current, source="coach_replacement")
         for superseded_plan_id in superseded_plan_ids:
             superseded_plan = TRAINING_PLAN_REPOSITORY.get(db, superseded_plan_id)
             if not superseded_plan or superseded_plan.get("status") == "archived":
@@ -13687,7 +13702,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
                 db, superseded_plan_id, archived_plan["name"], archived_plan["goal"],
                 archived_plan["start_date"], archived_plan["end_date"], "archived", now,
             )
-            _record_change(db, "training_plan", superseded_plan_id, "update", superseded_plan, archived_plan, source="coach")
+            _record_change(db, "training_plan", superseded_plan_id, "update", superseded_plan, archived_plan, source="coach_replacement")
         goal = str(payload.get("goal") or "").strip()[:2000]
         plan_id = str(uuid.uuid4()) if plan_name else ""
         if plan_id:
@@ -13696,7 +13711,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
             _record_change(db, "training_plan", plan_id, "create", None, {
                 "id": plan_id, "name": plan_name, "goal": goal,
                 "start_date": sorted_dates[0], "end_date": sorted_dates[-1], "status": "planned",
-            }, source="coach")
+            }, source="coach_replacement")
         created: list[dict[str, Any]] = []
         for workout in workouts:
             entry_payload = {**workout, "source": "coach"}
@@ -13891,11 +13906,8 @@ def _structured_coach_tool_result(
             if artifact["status"] != "draft":
                 raise AppError(409, "Das Planartefakt ist nicht mehr verfügbar.", reason="artifact_not_available")
             if str(artifact.get("conversation_id") or "") != str(conversation_id):
-                # Provider conversations can rotate after an interrupted
-                # response or change when the athlete switches providers. The
-                # exact artifact scope from the separately classified current
-                # turn remains the authorization boundary, so move the draft's
-                # audit binding to the active conversation.
+                if not intent.get("_artifact_explicit") and not intent.get("_allow_artifact_rebind"):
+                    raise AppError(409, "Der Planentwurf gehört zu einer anderen Coach-Unterhaltung; bitte bestätige die Artefakt-ID.", reason="artifact_conversation_conflict")
                 db.execute(
                     "UPDATE coach_plan_artifacts SET conversation_id=?, updated_at=? WHERE id=? AND status='draft'",
                     (conversation_id, utc_now(), artifact_id),
@@ -14630,6 +14642,7 @@ def _chat_with_structured_coach_impl(
         if recovered_conversation_id == conversation_id:
             raise
         conversation_id = recovered_conversation_id
+        intent["_allow_artifact_rebind"] = True
         request_payload["conversation"] = conversation_id
         with DB_LOCK, database() as db:
             db.execute(
@@ -15049,13 +15062,22 @@ def request_coach_intent(
     if get_profile().get("weather_location", "").strip():
         allowed_targets.append("weather")
     object_refs = coach_intent_object_refs()
-    payload = intent_request_payload(message, coach_intent_artifact_refs(conversation_id), allowed_targets, object_refs)
+    artifact_refs = coach_intent_artifact_refs(conversation_id)
+    payload = intent_request_payload(message, artifact_refs, allowed_targets, object_refs)
     provider = ai_provider or selected_ai_provider()
     payload["_ai_provider"] = provider
     payload["model"] = model or selected_model(provider)
     for attempt in range(COACH_INTENT_MAX_ATTEMPTS):
         try:
-            return resolve_intent_objects(parse_intent_response(responses_request(payload)), message, object_refs)
+            resolved = resolve_intent_objects(parse_intent_response(responses_request(payload)), message, object_refs)
+            artifact_id = str(resolved.get("artifact_id") or "").strip()
+            if resolved.get("operation") == "commit_training_plan" and artifact_id:
+                artifact = next((item for item in artifact_refs if str(item.get("id") or "") == artifact_id), None)
+                if artifact and str(artifact.get("conversation_id") or "") != str(conversation_id):
+                    if artifact_id.casefold() not in message.casefold():
+                        return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "ambiguities": ["Mehrere offene Planentwürfe stammen aus anderen Coach-Unterhaltungen; bitte nenne die Artefakt-ID ausdrücklich."], "authorization_scope": [], "follow_up_operations": []}
+                    resolved["_artifact_explicit"] = True
+            return resolved
         except (AppError, TypeError, ValueError, json.JSONDecodeError):
             if attempt + 1 < COACH_INTENT_MAX_ATTEMPTS:
                 continue
