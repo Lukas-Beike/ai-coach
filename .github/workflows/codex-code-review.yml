@@ -30,6 +30,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      checks: write
     steps:
       - name: Resolve affected pull requests
         id: resolve_base
@@ -40,11 +41,15 @@ jobs:
             let affectedPullRequests = [];
             const dependabotLogin = 'dependabot[bot]';
             const releaseBotLogin = 'ai-coach-release-bot[bot]';
+            const manualReviewCheckName = 'Codex manual review request';
             const releaseVersionPattern = /^chore\/release-version-(\d+\.\d+\.\d+)$/;
             const shouldSkipCodexReview = (pullRequest) => {
               const versionMatch = releaseVersionPattern.exec(pullRequest.head?.ref || '');
               return (
-                pullRequest.user?.login === dependabotLogin ||
+                (
+                  pullRequest.user?.login === dependabotLogin &&
+                  pullRequest.base?.ref === 'develop'
+                ) ||
                 (
                   pullRequest.user?.login === releaseBotLogin &&
                   pullRequest.base?.ref === 'develop' &&
@@ -52,6 +57,24 @@ jobs:
                   pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`
                 )
               );
+            };
+            const getManualReviewRequest = async (pullRequest) => {
+              const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: pullRequest.head.sha,
+                per_page: 100,
+              });
+              return checkRuns
+                .filter((run) => (
+                  run.name === manualReviewCheckName &&
+                  run.status === 'completed' &&
+                  run.conclusion === 'success' &&
+                  run.output?.title === 'Manual Codex review requested'
+                ))
+                .sort((left, right) => right.id - left.id)
+                .map((run) => run.completed_at || run.started_at)
+                .find(Boolean) || '';
             };
             if (context.eventName === 'push') {
               const base = context.ref.replace(/^refs\/heads\//, '');
@@ -62,14 +85,19 @@ jobs:
                 base,
                 per_page: 100,
               });
-              affectedPullRequests = pullRequests
+              const pushReviewRequestedAt = new Date().toISOString();
+              affectedPullRequests = await Promise.all(pullRequests
                 .filter((pullRequest) => pullRequest.draft !== true)
-                .map((pullRequest) => ({
-                  pullRequestNumber: pullRequest.number,
-                  baseRef: base,
-                  checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review',
-                  reviewRequestedAt: '',
-                  skipCodexReview: shouldSkipCodexReview(pullRequest),
+                .map(async (pullRequest) => {
+                  const manualReviewRequestedAt = await getManualReviewRequest(pullRequest);
+                  const manualReviewRequested = Boolean(manualReviewRequestedAt);
+                  return {
+                    pullRequestNumber: pullRequest.number,
+                    baseRef: base,
+                    checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review',
+                    reviewRequestedAt: manualReviewRequested ? pushReviewRequestedAt : '',
+                    skipCodexReview: shouldSkipCodexReview(pullRequest) && !manualReviewRequested,
+                  };
                 }));
             } else if (context.eventName === 'pull_request_target') {
               const pullRequest = context.payload.pull_request;
@@ -105,6 +133,22 @@ jobs:
                 pull_number: context.payload.issue.number,
               });
               if (['develop', 'main'].includes(response.data.base.ref) && response.data.draft !== true) {
+                const headSha = response.data.head.sha;
+                const now = new Date().toISOString();
+                await github.rest.checks.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: manualReviewCheckName,
+                  head_sha: headSha,
+                  status: 'completed',
+                  conclusion: 'success',
+                  started_at: now,
+                  completed_at: now,
+                  output: {
+                    title: 'Manual Codex review requested',
+                    summary: `A trusted human requested a Codex review for commit ${headSha}.`,
+                  },
+                });
                 affectedPullRequests = [{
                   pullRequestNumber: response.data.number,
                   baseRef: response.data.base.ref,
@@ -196,9 +240,16 @@ jobs:
             const expectedHeadRepository = `${context.repo.owner}/${context.repo.repo}`;
             if (
               authorLogin === dependabotLogin &&
-              pullRequest.data.head.repo?.full_name !== expectedHeadRepository
+              (
+                pullRequest.data.base.ref !== 'develop' ||
+                !/^dependabot\//.test(pullRequest.data.head.ref || '') ||
+                pullRequest.data.head.repo?.full_name !== expectedHeadRepository
+              )
             ) {
-              core.setFailed('The Dependabot Codex exemption requires a same-repository pull request.');
+              core.setFailed(
+                'The Dependabot Codex exemption requires a same-repository develop pull request ' +
+                'with a dependabot/* head branch.',
+              );
               return;
             }
 
@@ -251,6 +302,50 @@ jobs:
               }
               summary = `The trusted release bot owns this exact version-only release pull request for ${version}; no Codex review is required.`;
             } else {
+              const dependabotCommits = await github.paginate(github.rest.pulls.listCommits, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: Number(process.env.PR_NUMBER),
+                per_page: 100,
+              });
+              const generatedByDependabot = dependabotCommits.length > 0 && dependabotCommits.every((commit) => (
+                commit.author?.login === dependabotLogin &&
+                commit.commit?.author?.email === '49699333+dependabot[bot]@users.noreply.github.com' &&
+                /Signed-off-by: dependabot\[bot\] <support@github\.com>/.test(commit.commit?.message || '')
+              ));
+              const allowedDependencyFiles = new Set([
+                'requirements.txt',
+                'requirements-dev.txt',
+                'package.json',
+                'package-lock.json',
+                'Dockerfile',
+              ]);
+              const actionPinPathPattern = /^\.github\/(?:workflows|actions)\/[^/]+\.ya?ml$/;
+              const actionPinLinePattern = /^[+-]\s+uses:\s+[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$/i;
+              const files = await github.paginate(github.rest.pulls.listFiles, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: Number(process.env.PR_NUMBER),
+                per_page: 100,
+              });
+              const dependencyOnly = files.length > 0 && files.every((file) => {
+                if (allowedDependencyFiles.has(file.filename)) {
+                  return true;
+                }
+                if (!actionPinPathPattern.test(file.filename) || !file.patch) {
+                  return false;
+                }
+                const changedLines = String(file.patch)
+                  .split('\n')
+                  .filter((line) => /^[+-](?!\+\+\+|---)/.test(line));
+                return changedLines.length > 0 && changedLines.every((line) => actionPinLinePattern.test(line));
+              });
+              if (!generatedByDependabot || !dependencyOnly) {
+                core.setFailed(
+                  'The Dependabot Codex exemption requires Dependabot-authored commits and dependency-only changes.',
+                );
+                return;
+              }
               summary = 'The trusted Dependabot bot owns this dependency update; no Codex review is required.';
             }
 
