@@ -1054,6 +1054,20 @@ class CoachReviewTests(unittest.TestCase):
         self.assertIn("local_plan_create", mixed_negation["authorization_scope"])
         self.assertNotIn("local_plan", mixed_negation["authorization_scope"])
 
+    def test_creation_clause_does_not_resolve_generic_existing_workout_name(self):
+        refs = [
+            {"kind": "planned_unit", "id": "upper-body", "name": "Upper Body", "date": "2099-09-09"},
+            {"kind": "planned_unit", "id": "recovery-run", "name": "Recovery Run", "date": "2099-09-10"},
+        ]
+        resolved = server.resolve_intent_objects(
+            self.intent("apply_training_changes", ["local_plan"]),
+            "Move Upper Body to Tuesday and add a recovery run on Wednesday.",
+            refs,
+        )
+        self.assertIn("planned_unit:upper-body", resolved["authorization_scope"])
+        self.assertNotIn("planned_unit:recovery-run", resolved["authorization_scope"])
+        self.assertIn("local_plan_create", resolved["authorization_scope"])
+
     def test_undo_proposal_is_top_level_recoverable_and_keeps_hash_guard(self):
         template=server.create_local_library_template({"name":"Synthetic undo","sport":"Run"})
         change=next(row for row in server.list_change_history() if row["entity_id"]==template["id"])

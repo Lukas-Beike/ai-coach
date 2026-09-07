@@ -883,6 +883,54 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(plan["start_date"], original_date)
         self.assertEqual(plan["end_date"], later_date)
 
+    def test_non_date_plan_edit_does_not_overwrite_metadata_bounds(self):
+        original_date = (date.today() + timedelta(days=8)).isoformat()
+        created = server.save_workout_library_entries([{
+            "date": original_date, "sport": "Ride", "name": "Plan workout",
+            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "rationale": "Base",
+        }], plan_name="Metadata plan", goal="Consistency")
+        plan_id = created[0]["plan_id"]
+        server.update_training_plan(plan_id, {
+            "start_date": "2099-01-01", "end_date": "2099-12-31",
+        })
+        state = server._structured_training_state()
+        target = next(item for item in state["planned_units"] if item["local_id"] == created[0]["id"])
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": [f"planned_unit:{created[0]['id']}"],
+        }
+        server._structured_coach_tool_result(
+            "apply_training_changes",
+            {"changes": [{"local_id": created[0]["id"], "action": "update", "name": "Renamed",
+                           "expected_payload_hash": target["expected_payload_hash"]}]},
+            intent=intent, conversation_id="conversation-metadata", client_turn_id="turn-metadata",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        plan = next(item for item in server.list_training_plans() if item["id"] == plan_id)
+        self.assertEqual(plan["start_date"], "2099-01-01")
+        self.assertEqual(plan["end_date"], "2099-12-31")
+
+    def test_apply_result_deduplicates_changed_ids_for_sync(self):
+        planned = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=9)).isoformat(),
+            "sport": "Ride", "name": "Repeated", "description": "- 20m easy",
+        })
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+        }
+        result = server._structured_coach_tool_result(
+            "apply_training_changes",
+            {"changes": [
+                {"local_id": planned["id"], "action": "update", "name": "First"},
+                {"local_id": planned["id"], "action": "update", "name": "Second"},
+            ]},
+            intent=intent, conversation_id="conversation-dedup", client_turn_id="turn-dedup",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+        self.assertEqual(result["library_entry_ids"], [planned["id"]])
+
     def test_changed_batch_sync_is_limited_to_changed_entries(self):
         changed = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=6)).isoformat(),

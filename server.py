@@ -13770,9 +13770,12 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                     raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
         _validate_training_change_batch(changes, db)
         referenced_memberships: set[str] = set()
+        recompute_plan_bounds = False
         for change in changes:
             action = str(change.get("action") or "update").strip().casefold()
             local_id = str(change.get("local_id") or "").strip()
+            if action in {"create", "delete", "archive", "restore"}:
+                recompute_plan_bounds = True
             if action == "create" or not local_id:
                 continue
             row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
@@ -13784,6 +13787,10 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                 current = {}
             if isinstance(current, dict):
                 referenced_memberships.add(str(current.get("plan_id") or "").strip())
+                if action == "update" and "date" in change:
+                    recompute_plan_bounds = recompute_plan_bounds or (
+                        str(change.get("date") or "")[:10] != str(current.get("date") or "")[:10]
+                    )
         derived_plan: dict[str, str] = {}
         if len(referenced_memberships) == 1:
             membership = next(iter(referenced_memberships))
@@ -13808,7 +13815,7 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                     change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
                 ))
         _bump_planning_revision(db)
-        if derived_plan:
+        if derived_plan and recompute_plan_bounds:
             plan = TRAINING_PLAN_REPOSITORY.get(db, derived_plan["plan_id"])
             member_rows = db.execute(
                 "SELECT payload FROM planned_units "
@@ -13866,7 +13873,9 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
         "status": "applied",
         "planning_revision": int((revision or {}).get("revision") or current_revision),
         "changes": result_changes,
-        "library_entry_ids": [item["local_id"] for item in result_changes if item.get("local_id")],
+        "library_entry_ids": list(dict.fromkeys(
+            item["local_id"] for item in result_changes if item.get("local_id")
+        )),
     }
 
 
