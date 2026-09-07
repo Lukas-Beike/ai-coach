@@ -13486,7 +13486,7 @@ COACH_STRUCTURED_TOOLS = [
         },
         strict=True,
     ),
-    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "For complete-plan edits, include the expected_payload_hash returned for every local_id.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string"}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string"}, "type": {"type": "string"}, "sport": {"type": "string"}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
+    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. Combine updates to existing local_id values with action=create entries for new dated workouts when the athlete requests a concrete calendar edit. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every existing-unit change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "Existing units need local_id; new units use action=create and include date, sport, name, description, duration_minutes, target, and rationale. For complete-plan edits, existing units also include expected_payload_hash.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string", "enum": ["create", "update", "delete", "archive", "restore"]}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string"}, "type": {"type": "string"}, "sport": {"type": "string"}, "rationale": {"type": "string"}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
     _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {"type": "object"}}}),
     _canonical_coach_tool("apply_workout_library_plan", "Schedule selected saved library templates locally after conflict checks; never writes remotely.", {"entries": {"type": "array", "items": {"type": "object"}}}),
     _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in.", {"payload": {"type": "object"}}),
@@ -13644,32 +13644,42 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
     dates_needing_calendar_check: set[str] = set()
     for change in changes:
         local_id = str(change.get("local_id") or "").strip()
-        row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
-        if not row:
-            continue
-        try:
-            current = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            current = {}
-        if not isinstance(current, dict):
-            continue
         action = str(change.get("action") or "update").strip().casefold()
-        if action in {"delete", "archive"}:
-            continue
-        current_date = str(current.get("date") or "").strip()[:10]
-        candidate_date = str(change.get("date") or current.get("date") or "").strip()[:10]
-        if not candidate_date:
-            continue
-        try:
-            date.fromisoformat(candidate_date)
-        except ValueError as exc:
-            raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
-        previous_id = final_dates.get(candidate_date)
-        if previous_id and previous_id != local_id:
+        if action == "create":
+            current = {}
+            candidate_date = str(change.get("date") or "").strip()[:10]
+            if not candidate_date:
+                raise AppError(400, "Eine neue geplante Einheit benötigt ein Datum.", reason="invalid_change")
+            try:
+                date.fromisoformat(candidate_date)
+            except ValueError as exc:
+                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
+            dates_needing_calendar_check.add(candidate_date)
+        else:
+            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            if not row:
+                continue
+            try:
+                current = json.loads(row.get("payload") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                current = {}
+            if not isinstance(current, dict):
+                continue
+            if action in {"delete", "archive"}:
+                continue
+            current_date = str(current.get("date") or "").strip()[:10]
+            candidate_date = str(change.get("date") or current.get("date") or "").strip()[:10]
+            if not candidate_date:
+                continue
+            try:
+                date.fromisoformat(candidate_date)
+            except ValueError as exc:
+                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
+            if action == "restore" or candidate_date != current_date:
+                dates_needing_calendar_check.add(candidate_date)
+        if candidate_date in final_dates:
             raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
         final_dates[candidate_date] = local_id
-        if action == "restore" or candidate_date != current_date:
-            dates_needing_calendar_check.add(candidate_date)
     for candidate_date in dates_needing_calendar_check:
         conflicts = calendar_conflicts({"date": candidate_date}, batch_ids)
         if conflicts:
@@ -13684,6 +13694,19 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
             f"Ein Coach-Kommando darf höchstens {COACH_TRAINING_CHANGE_LIMIT} Änderungen enthalten.",
             reason="change_limit",
         )
+    prepared_changes: list[dict[str, Any]] = []
+    for change in changes:
+        if not isinstance(change, dict):
+            raise AppError(400, "Jede Planänderung muss ein Objekt sein.", reason="invalid_change")
+        action = str(change.get("action") or "update").strip().casefold()
+        if action == "create":
+            if change.get("local_id"):
+                raise AppError(400, "Eine neue geplante Einheit darf keine lokale ID vorgeben.", reason="invalid_change")
+            normalized = normalize_workout(change)
+            prepared_changes.append({**change, **normalized, "action": "create"})
+        else:
+            prepared_changes.append(change)
+    changes = prepared_changes
     with DB_LOCK, database() as db:
         revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
@@ -13693,7 +13716,10 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
         if expected_revision is not None and int(expected_revision) != current_revision:
             raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
         for change in changes:
-            if not isinstance(change, dict) or not change.get("local_id"):
+            action = str(change.get("action") or "update").strip().casefold()
+            if action == "create":
+                continue
+            if not change.get("local_id"):
                 raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
             expected_hash = str(change.get("expected_payload_hash") or "").strip().lower()
             if require_revision and not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
@@ -13703,14 +13729,22 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                 if not row or _library_payload_hash(row["payload"]) != expected_hash:
                     raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
         _validate_training_change_batch(changes, db)
-        applied = [
-            update_local_planned_workout(
-                change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
-            )
-            for change in changes
-        ]
+        applied = []
+        for change in changes:
+            if str(change.get("action") or "update").strip().casefold() == "create":
+                applied.append({
+                    "local_id": create_local_planned_unit(
+                        {**change, "source": "coach"}, db=db, bump_planning_revision=False
+                    )["id"],
+                    "status": "local",
+                })
+            else:
+                applied.append(update_local_planned_workout(
+                    change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
+                ))
         _bump_planning_revision(db)
         revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+    publish_state_event("coach", {"status": "changed"})
     result_changes = [
         {"local_id": item.get("local_id"), "status": item.get("status")}
         for item in applied
@@ -14061,7 +14095,12 @@ def _structured_coach_tool_result(
         if not isinstance(changes, list):
             raise AppError(400, "Coach-Änderungen müssen als Liste gesendet werden.", reason="invalid_change")
         for change in changes:
-            if isinstance(change, dict) and change.get("local_id"):
+            if not isinstance(change, dict):
+                continue
+            action = str(change.get("action") or "update").strip().casefold()
+            if action == "create":
+                _require_coach_scope(intent, "local_plan")
+            elif change.get("local_id"):
                 local_id = str(change["local_id"]).strip()
                 _require_coach_scope(intent, f"planned_unit:{local_id}", "local_plan")
         return _apply_structured_training_changes(arguments, require_revision=bool(intent.get("bulk_change")))
@@ -14606,6 +14645,8 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
         for change in changes:
             if isinstance(change, dict) and change.get("local_id"):
                 intent["authorization_scope"].append(f"planned_unit:{change['local_id']}")
+            elif isinstance(change, dict) and str(change.get("action") or "update").strip().casefold() == "create":
+                intent["authorization_scope"].append("local_plan")
     elif operation == "replace_training_plan":
         intent["authorization_scope"].append("local_plan")
     elif operation == "manage_training_templates":
@@ -15453,6 +15494,16 @@ def coach_intent_artifact_refs(conversation_id: str | None = None) -> list[dict[
     return [dict(row) for row in rows]
 
 
+def prompt_requests_plan_artifact(message: str) -> bool:
+    """Expose draft identities to intent classification only when requested."""
+    return bool(re.search(
+        r"\b(?:planentwurf\w*|entwurf\w*|planartefakt\w*|artefakt(?:-?id)?\w*|"
+        r"artifact\w*|"
+        r"draft\w*|proposal\w*|vorschlag\w*)\b",
+        str(message or "").casefold(),
+    ))
+
+
 def coach_intent_object_refs() -> list[dict[str, Any]]:
     """Only current local object identities/names enter the isolated classifier."""
     refs: list[dict[str, Any]] = []
@@ -15487,7 +15538,7 @@ def request_coach_intent(
     if get_profile().get("weather_location", "").strip():
         allowed_targets.append("weather")
     object_refs = coach_intent_object_refs()
-    artifact_refs = coach_intent_artifact_refs(conversation_id)
+    artifact_refs = coach_intent_artifact_refs(conversation_id) if prompt_requests_plan_artifact(message) else []
     payload = intent_request_payload(message, artifact_refs, allowed_targets, object_refs)
     provider = ai_provider or selected_ai_provider()
     payload["_ai_provider"] = provider

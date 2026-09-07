@@ -4459,6 +4459,27 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(denied["intent"], "needs_clarification")
         self.assertIsNone(denied["operation"])
         self.assertTrue(explicit["_artifact_explicit"])
+    def test_intent_classifier_ignores_unmentioned_plan_drafts(self):
+        draft = server._stage_coach_artifact(
+            "other-conversation", "old-turn", {"plan_name": "Alter Entwurf", "workouts": []}
+        )
+        observed = {}
+
+        def classify(payload):
+            observed.update(json.loads(payload["input"]))
+            return {"output_text": json.dumps({
+                "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+                "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+                "follow_up_operations": [],
+            })}
+
+        with patch.object(server, "responses_request", side_effect=classify):
+            result = server.request_coach_intent(
+                "Verschiebe die Oberkörper-Einheit von Mittwoch auf Dienstag und ergänze Mittwoch einen lockeren Lauf."
+            )
+        self.assertEqual(result["operation"], "apply_training_changes")
+        self.assertEqual(observed["artifact_refs"], [])
+        self.assertNotEqual(draft["artifact_id"], "")
 
     def test_new_plan_intent_ignores_old_artifact_and_orders_commit_before_sync(self):
         normalized = server._normalize_new_plan_intent({
@@ -4891,6 +4912,26 @@ class CoachTests(unittest.TestCase):
                 )
                 with server.DB_LOCK, server.database() as db:
                     self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM sync_jobs").fetchone()["count"], 0)
+
+    def test_structured_training_changes_move_and_create_in_one_atomic_batch(self):
+        wednesday = (date.today() + timedelta(days=20)).isoformat()
+        tuesday = (date.today() + timedelta(days=19)).isoformat()
+        upper_body = server.create_local_planned_unit({
+            "date": wednesday, "sport": "WeightTraining", "name": "Oberkörper Einheit",
+            "description": "Krafttraining", "duration_minutes": 45, "target": "AUTO",
+        })
+        result = server._apply_structured_training_changes({
+            "changes": [
+                {"local_id": upper_body["id"], "action": "update", "date": tuesday},
+                {"action": "create", "date": wednesday, "sport": "Run", "name": "Lockerer Lauf",
+                 "description": "- 30m locker", "duration_minutes": 30, "target": "AUTO"},
+            ],
+        })
+        self.assertEqual(result["status"], "applied")
+        planned = {item["name"]: item for item in server.list_planned_units()}
+        self.assertEqual(planned["Oberkörper Einheit"]["date"], tuesday)
+        self.assertEqual(planned["Lockerer Lauf"]["date"], wednesday)
+        self.assertEqual(len(result["changes"]), 2)
 
     def test_structured_training_change_batch_rolls_back_after_old_boundary(self):
         planned = [server.create_local_planned_unit({

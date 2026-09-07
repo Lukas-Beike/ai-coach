@@ -1010,6 +1010,17 @@ class CoachReviewTests(unittest.TestCase):
         selected = server.resolve_intent_objects(intent, "Benenne Marathon und Berlin Marathon um", overlapping)
         self.assertCountEqual(selected["authorization_scope"], ["competition:long-id", "competition:short-id"])
 
+    def test_mixed_planned_edit_keeps_local_plan_scope_for_new_workout(self):
+        refs = [{"kind": "planned_unit", "id": "upper-body", "name": "Oberkörper Einheit", "date": "2099-09-09"}]
+        intent = self.intent("apply_training_changes", ["local_plan"])
+        resolved = server.resolve_intent_objects(
+            intent,
+            "Verschiebe die Oberkörper Einheit und ergänze zusätzlich einen lockeren Lauf.",
+            refs,
+        )
+        self.assertIn("local_plan", resolved["authorization_scope"])
+        self.assertIn("planned_unit:upper-body", resolved["authorization_scope"])
+
     def test_undo_proposal_is_top_level_recoverable_and_keeps_hash_guard(self):
         template=server.create_local_library_template({"name":"Synthetic undo","sport":"Run"})
         change=next(row for row in server.list_change_history() if row["entity_id"]==template["id"])

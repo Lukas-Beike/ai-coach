@@ -102,7 +102,13 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
                 return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Welches konkret benannte lokale Objekt soll ich bearbeiten?"]}
             resolved.add(f"{kind}:{matches[0]['id']}")
         if named:
-            scope.discard(broad)
+            creates_new_workout = bool(
+                kind == "planned_unit"
+                and "apply_training_changes" in operations
+                and re.search(r"\b(?:zus[aä]tzlich\w*|hinzu(?:f[uü]gen)?\w*|neu\w*|anleg\w*|add\w*|new\w*)\b", text)
+            )
+            if not creates_new_workout:
+                scope.discard(broad)
             scope.difference_update(requested)
             scope.update(resolved or {f"{kind}:{ref['id']}" for ref in named})
         elif requested:
