@@ -12711,8 +12711,11 @@ def prompt_requests_bulk_training_change(message: str) -> bool:
 def prompt_requests_complete_plan_rebuild(message: str) -> bool:
     """Recognise replacement language, distinct from ordinary bulk edits."""
     text = str(message or "").casefold()
-    if re.search(r"\b(?:kein\w*|nicht|nie|do\s+not|don't|never)\b", text):
-        return False
+    negation = re.search(r"\b(?:kein\w*|nicht|nie|do\s+not|don't|never)\b", text)
+    if negation:
+        replacement = re.search(r"\b(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|redo\w*|neu|erset\w*)\b", text)
+        if not replacement or negation.start() < replacement.start():
+            return False
     if re.search(
         r"\b(?:what\s+happens\s+if|what\s+if|if\s+i|would\s+i|could\s+i|should\s+i|"
         r"was\s+wäre\s+wenn|wenn\s+ich|würde\s+ich|könnte\s+ich|soll\s+ich|"
@@ -15033,7 +15036,7 @@ def coach_intent_object_refs() -> list[dict[str, Any]]:
     refs: list[dict[str, Any]] = []
     values_by_kind = {
         "competition": list_competitions(),
-        "training_plan": list_training_plans(100),
+        "training_plan": list_training_plans(500),
         "library_workout": list_workout_library(100, include_archived=True),
         "planned_unit": list_planned_units(100, include_archived=True),
     }

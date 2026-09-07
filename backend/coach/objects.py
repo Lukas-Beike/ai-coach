@@ -35,9 +35,12 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
                 for match in re.finditer(r"(?<![\w-])" + re.escape(str(value).casefold()) + r"(?![\w-])", text)
             ]
             archived_mentioned = any(
-                not any(start <= a_start and a_end <= end for start, end in active_spans)
+                (
+                    not any(start <= a_start and a_end <= end for start, end in active_spans)
+                    or bool(re.search(r"\barchiv\w*\b", text[max(0, a_start - 30):a_end + 30]))
+                )
                 for a_start, a_end in archived_spans
-            ) or bool(re.search(r"\barchiv\w*\b", text))
+            )
             active_id_mentioned = any(
                 ref.get("id") and str(ref["id"]).casefold() in text
                 for ref in candidates
