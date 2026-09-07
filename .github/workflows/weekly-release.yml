@@ -392,8 +392,8 @@ jobs:
               exit 1
             fi
             git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
-            if [[ "$PROMOTION_BRANCH" == "main" ]] && ! git merge-base --is-ancestor "$TESTED_SHA" refs/remotes/origin/main; then
-              echo "The tested main commit $TESTED_SHA is no longer part of main history."
+            if [[ "$PROMOTION_BRANCH" == "main" ]] && [[ "$(git rev-parse refs/remotes/origin/main)" != "$TESTED_SHA" ]]; then
+              echo "The tested main commit $TESTED_SHA is not the current main commit."
               exit 1
             fi
             git reset --hard origin/main

@@ -45,7 +45,8 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("github.event.workflow_run.head_branch == 'main'", create_release)
         self.assertIn("TESTED_SHA: ${{ github.event.workflow_run.head_sha }}", workflow)
         self.assertIn('if [[ "$PROMOTION_BRANCH" == chore/release-promotion-* ]]; then', workflow)
-        self.assertIn('if [[ "$PROMOTION_BRANCH" == "main" ]] && ! git merge-base --is-ancestor "$TESTED_SHA"', workflow)
+        self.assertIn('if [[ "$PROMOTION_BRANCH" == "main" ]] && [[ "$(git rev-parse refs/remotes/origin/main)" != "$TESTED_SHA" ]]', workflow)
+        self.assertNotIn('git merge-base --is-ancestor "$TESTED_SHA" refs/remotes/origin/main', workflow)
         self.assertNotIn('gh pr list --repo "$REPOSITORY" --base main --head "$PROMOTION_BRANCH"', workflow.split('elif [[ "$PROMOTION_BRANCH" != "main" ]]', 1)[1].split('fi', 1)[0])
 
 
