@@ -368,24 +368,34 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           PROMOTION_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.event.workflow_run.head_branch }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -euo pipefail
 
           if [[ "$EVENT_NAME" == "workflow_run" ]]; then
-            for attempt in {1..60}; do
-              merged_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$PROMOTION_BRANCH" --state merged --json number --jq '.[0].number // empty')"
-              if [[ -n "$merged_pr" ]]; then
-                break
+            if [[ "$PROMOTION_BRANCH" == chore/release-promotion-* ]]; then
+              for attempt in {1..60}; do
+                merged_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$PROMOTION_BRANCH" --state merged --json number --jq '.[0].number // empty')"
+                if [[ -n "$merged_pr" ]]; then
+                  break
+                fi
+                echo "Waiting for promotion branch $PROMOTION_BRANCH to merge (attempt $attempt/60)."
+                sleep 10
+              done
+              if [[ -z "${merged_pr:-}" ]]; then
+                echo "Promotion branch $PROMOTION_BRANCH was not merged after the test completed."
+                exit 1
               fi
-              echo "Waiting for promotion branch $PROMOTION_BRANCH to merge (attempt $attempt/60)."
-              sleep 10
-            done
-            if [[ -z "${merged_pr:-}" ]]; then
-              echo "Promotion branch $PROMOTION_BRANCH was not merged after the test completed."
+            elif [[ "$PROMOTION_BRANCH" != "main" ]]; then
+              echo "Unexpected workflow-run branch $PROMOTION_BRANCH."
               exit 1
             fi
             git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+            if [[ "$PROMOTION_BRANCH" == "main" ]] && ! git merge-base --is-ancestor "$TESTED_SHA" refs/remotes/origin/main; then
+              echo "The tested main commit $TESTED_SHA is no longer part of main history."
+              exit 1
+            fi
             git reset --hard origin/main
           fi
 

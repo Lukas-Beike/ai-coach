@@ -43,6 +43,10 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-')", create_release)
         self.assertIn("github.event.workflow_run.event == 'push'", create_release)
         self.assertIn("github.event.workflow_run.head_branch == 'main'", create_release)
+        self.assertIn("TESTED_SHA: ${{ github.event.workflow_run.head_sha }}", workflow)
+        self.assertIn('if [[ "$PROMOTION_BRANCH" == chore/release-promotion-* ]]; then', workflow)
+        self.assertIn('if [[ "$PROMOTION_BRANCH" == "main" ]] && ! git merge-base --is-ancestor "$TESTED_SHA"', workflow)
+        self.assertNotIn('gh pr list --repo "$REPOSITORY" --base main --head "$PROMOTION_BRANCH"', workflow.split('elif [[ "$PROMOTION_BRANCH" != "main" ]]', 1)[1].split('fi', 1)[0])
 
 
 class CodexReviewWorkflowTests(unittest.TestCase):
