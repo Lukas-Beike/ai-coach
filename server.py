@@ -7918,7 +7918,16 @@ def compact_sport_settings(athlete: Any) -> list[dict[str, Any]]:
         "lthr", "max_hr", "maxHR", "maxHeartRate", "threshold_pace", "pace_units", "vo2max", "vo2_max",
         "running_vo2max", "cycling_vo2max",
     )
-    return [selected(item, fields) for item in raw_settings if isinstance(item, dict)][:30]
+    compacted: list[dict[str, Any]] = []
+    for item in raw_settings[:30]:
+        if not isinstance(item, dict):
+            continue
+        setting = selected(item, fields)
+        mmp_model = item.get("mmp_model")
+        if isinstance(mmp_model, dict):
+            setting["mmp_model"] = selected(mmp_model, ("ftp", "eftp", "eFTP"))
+        compacted.append(setting)
+    return compacted
 
 
 def compact_wellness_sport_info(value: Any) -> list[dict[str, Any]]:
@@ -7934,7 +7943,7 @@ def compact_wellness_sport_info(value: Any) -> list[dict[str, Any]]:
 def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, history_days: int = 42) -> dict[str, Any]:
     activity_fields = (
         "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain", "elapsed_time",
-        "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "average_heartrate",
+        "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "icu_eftp", "average_heartrate",
         "max_heartrate", "average_watts", "weighted_average_watts", "average_speed", "max_speed",
         "icu_weighted_avg_speed", "icu_pace", "feel", "icu_rpe", "paired_event_id",
         "source", "device_name", "external_id", "file_type",
@@ -10953,7 +10962,7 @@ def eftp_30_day_average(wellness_rows: list[dict[str, Any]], activities: list[An
         raw_type = str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold()
         if not any(term in raw_type for term in ("ride", "rad", "bike", "cycling")):
             continue
-        value = as_number(first_present(activity, ("icu_ftp", "eftp", "eFTP")))
+        value = as_number(first_present(activity, ("icu_eftp", "eftp", "eFTP")))
         if value is not None:
             values.append(float(value))
     return round(sum(values) / len(values), 1) if values else None
@@ -11072,6 +11081,18 @@ def sport_info_setting(wellness: dict[str, Any], sport: str) -> dict[str, Any]:
     return {}
 
 
+def intervals_eftp_value(setting: Any) -> Any:
+    """Read Intervals.icu's estimated FTP without falling back to user FTP."""
+    if not isinstance(setting, dict):
+        return None
+    mmp_model = setting.get("mmp_model")
+    if isinstance(mmp_model, dict):
+        value = first_present(mmp_model, ("ftp", "eftp", "eFTP"))
+        if value not in (None, ""):
+            return value
+    return first_present(setting, ("eftp", "eFTP"))
+
+
 def metric(value: Any, unit: str, source: str | None, note: str = "") -> dict[str, Any]:
     number = as_number(value)
     return {"value": number, "unit": unit, "source": source if number is not None else None, "note": note if number is not None else ""}
@@ -11136,7 +11157,8 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
     wellness_run = sport_info_setting(latest_wellness, "run")
     latest_ride_activity = next((activity for activity in sorted(activities, key=lambda item: str(item.get("start_date_local") or ""), reverse=True)
                                  if isinstance(activity, dict) and any(term in str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold() for term in ("ride", "rad", "bike", "cycling"))), {})
-    latest_ride_eftp = first_present(latest_ride_activity, ("icu_ftp",))
+    latest_ride_eftp = first_present(latest_ride_activity, ("icu_eftp", "eftp", "eFTP"))
+    current_ride_eftp = intervals_eftp_value(ride) or intervals_eftp_value(wellness_ride)
     generic_lthr = first_present(athlete, ("lthr",))
     profile = get_profile()
     garmin_metrics = garmin_performance_metrics(garmin_snapshot())
@@ -11192,7 +11214,7 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         # never be populated from Intervals.icu eFTP; the fallback only uses an
         # explicitly labelled FTP field.
         **garmin_threshold_metrics,
-        "cycling_eftp_watts": metric(latest_ride_eftp or first_present(wellness_ride, ("eftp", "eFTP")) or first_present(ride, ("eftp", "eFTP")), "W", "Intervals.icu"),
+        "cycling_eftp_watts": metric(current_ride_eftp or latest_ride_eftp, "W", "Intervals.icu"),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
         "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),

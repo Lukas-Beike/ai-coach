@@ -6912,20 +6912,43 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(performance["current_load"]["ctl"], 68)
         self.assertEqual(performance["current_load"]["tsb"], -6)
 
-    def test_current_eftp_prefers_latest_intervals_ride_estimate(self):
+    def test_current_eftp_prefers_current_intervals_model_over_latest_activity_estimate(self):
         today = date.today().isoformat()
         snapshot = server.compact_snapshot(
             {
-                "sportSettings": [{"types": ["Ride"], "eFTP": 274}],
+                "sportSettings": [{"types": ["Ride"], "ftp": 300, "eFTP": 309}],
             },
-            [{"start_date_local": f"{today}T08:00:00", "type": "Ride", "icu_ftp": 310}],
+            [{"start_date_local": f"{today}T08:00:00", "type": "Ride", "icu_ftp": 300, "icu_eftp": 300}],
             [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 274}]}],
             [],
         )
 
-        metric = server.current_performance_context(snapshot)["metrics"]["cycling_eftp_watts"]
-        self.assertEqual(metric["value"], 310)
-        self.assertEqual(metric["source"], "Intervals.icu")
+        performance = server.current_performance_context(snapshot)
+        metrics = performance["metrics"]
+        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
+        self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
+        self.assertEqual(metrics["cycling_eftp_watts"]["source"], "Intervals.icu")
+        self.assertEqual(performance["comparisons"]["cycling_eftp_30d"]["average"], 287)
+
+    def test_current_eftp_reads_mmp_model_without_using_ftp_as_eftp(self):
+        today = date.today().isoformat()
+        snapshot = server.compact_snapshot(
+            {
+                "sportSettings": [{
+                    "types": ["Ride"],
+                    "ftp": 300,
+                    "eFTPSupported": True,
+                    "mmp_model": {"ftp": 309},
+                }],
+            },
+            [],
+            [{"id": today}],
+            [],
+        )
+
+        metrics = server.current_performance_context(snapshot)["metrics"]
+        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
+        self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
 
     def test_manual_body_profile_values_are_used_when_api_values_are_absent(self):
         server.save_profile({"weight_kg": "71,4", "body_fat_pct": "10.5", "height_cm": "181"})
