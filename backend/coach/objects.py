@@ -3,6 +3,19 @@ from typing import Any
 import re
 
 
+_CREATE_REQUEST_RE = re.compile(
+    r"\b(?:add\w*|schedule\w*|create\w*|plan\w*|include\w*|new\w*|"
+    r"zus[aä]tzlich\w*|erg[aä]nz\w*|hinzuf[uü]g\w*|hinzu\w*|"
+    r"anleg\w*|erstell\w*|neu\w*)\b"
+)
+_NEGATED_CREATE_REQUEST_RE = re.compile(
+    r"\b(?:do\s+not|don't|never|not|nicht|kein\w*)\b.{0,50}\b(?:"
+    r"add\w*|schedule\w*|create\w*|plan\w*|include\w*|new\w*|"
+    r"zus[aä]tzlich\w*|erg[aä]nz\w*|hinzuf[uü]g\w*|hinzu\w*|"
+    r"anleg\w*|erstell\w*|neu\w*)\b"
+)
+
+
 def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict[str, Any]]) -> dict[str, Any]:
     """Narrow selected object scopes before any action is authorized."""
     operations = {intent.get("operation"), *(intent.get("follow_up_operations") or [])}
@@ -102,12 +115,15 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
                 return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Welches konkret benannte lokale Objekt soll ich bearbeiten?"]}
             resolved.add(f"{kind}:{matches[0]['id']}")
         if named:
-            creates_new_workout = bool(
-                kind == "planned_unit"
-                and "apply_training_changes" in operations
-                and re.search(r"\b(?:zus[aä]tzlich\w*|hinzu(?:f[uü]gen)?\w*|neu\w*|anleg\w*|add\w*|new\w*)\b", text)
-            )
-            if not creates_new_workout:
+            creates_new_workout = False
+            if kind == "planned_unit" and "apply_training_changes" in operations:
+                creates_new_workout = bool(
+                    _CREATE_REQUEST_RE.search(text)
+                    and not _NEGATED_CREATE_REQUEST_RE.search(text)
+                )
+            if creates_new_workout:
+                scope.add(broad)
+            else:
                 scope.discard(broad)
             scope.difference_update(requested)
             scope.update(resolved or {f"{kind}:{ref['id']}" for ref in named})

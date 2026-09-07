@@ -13703,7 +13703,12 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
             if change.get("local_id"):
                 raise AppError(400, "Eine neue geplante Einheit darf keine lokale ID vorgeben.", reason="invalid_change")
             normalized = normalize_workout(change)
-            prepared_changes.append({**change, **normalized, "action": "create"})
+            prepared_changes.append({
+                "action": "create",
+                **{key: normalized[key] for key in (
+                    "date", "sport", "name", "description", "duration_minutes", "target", "rationale"
+                )},
+            })
         else:
             prepared_changes.append(change)
     changes = prepared_changes
@@ -13744,7 +13749,7 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                 ))
         _bump_planning_revision(db)
         revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
-    publish_state_event("coach", {"status": "changed"})
+    publish_state_event("planning", {"status": "changed"})
     result_changes = [
         {"local_id": item.get("local_id"), "status": item.get("status")}
         for item in applied
@@ -15538,7 +15543,12 @@ def request_coach_intent(
     if get_profile().get("weather_location", "").strip():
         allowed_targets.append("weather")
     object_refs = coach_intent_object_refs()
-    artifact_refs = coach_intent_artifact_refs(conversation_id) if prompt_requests_plan_artifact(message) else []
+    all_artifact_refs = coach_intent_artifact_refs(conversation_id)
+    current_artifact_refs = [
+        item for item in all_artifact_refs
+        if str(item.get("conversation_id") or "") == str(conversation_id or "")
+    ]
+    artifact_refs = all_artifact_refs if prompt_requests_plan_artifact(message) else current_artifact_refs
     payload = intent_request_payload(message, artifact_refs, allowed_targets, object_refs)
     provider = ai_provider or selected_ai_provider()
     payload["_ai_provider"] = provider

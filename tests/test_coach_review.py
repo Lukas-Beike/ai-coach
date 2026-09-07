@@ -1021,6 +1021,14 @@ class CoachReviewTests(unittest.TestCase):
         self.assertIn("local_plan", resolved["authorization_scope"])
         self.assertIn("planned_unit:upper-body", resolved["authorization_scope"])
 
+    def test_mixed_planned_edit_detects_ordinary_creation_and_rejects_negation(self):
+        refs = [{"kind": "planned_unit", "id": "upper-body", "name": "Upper Body", "date": "2099-09-09"}]
+        intent = self.intent("apply_training_changes", ["planned_unit:upper-body"])
+        scheduled = server.resolve_intent_objects(intent, "Move Upper Body and schedule a recovery ride.", refs)
+        self.assertIn("local_plan", scheduled["authorization_scope"])
+        negated = server.resolve_intent_objects(intent, "Move Upper Body; do not add a new workout.", refs)
+        self.assertNotIn("local_plan", negated["authorization_scope"])
+
     def test_undo_proposal_is_top_level_recoverable_and_keeps_hash_guard(self):
         template=server.create_local_library_template({"name":"Synthetic undo","sport":"Run"})
         change=next(row for row in server.list_change_history() if row["entity_id"]==template["id"])

@@ -4685,7 +4685,29 @@ class CoachTests(unittest.TestCase):
         )
         self.assertIsNone(result["artifact_id"])
         self.assertEqual(result["intent"], "remote_sync")
+    def test_intent_classifier_keeps_current_conversation_plan_draft(self):
+        foreign = server._stage_coach_artifact(
+            "other-conversation", "old-turn", {"plan_name": "Foreign draft", "workouts": []}
+        )
+        current = server._stage_coach_artifact(
+            "current-conversation", "current-turn", {"plan_name": "Current draft", "workouts": []}
+        )
+        observed = {}
+        intent = {
+            "intent": "local_action", "operation": "commit_training_plan", "target_system": "local",
+            "artifact_id": current["artifact_id"], "ambiguities": [],
+            "authorization_scope": [f"artifact:{current['artifact_id']}"], "follow_up_operations": [],
+        }
 
+        def classify(payload):
+            observed.update(json.loads(payload["input"]))
+            return {"output_text": json.dumps(intent)}
+
+        with patch.object(server, "responses_request", side_effect=classify):
+            result = server.request_coach_intent("Save it.", "current-conversation")
+        self.assertEqual(result["artifact_id"], current["artifact_id"])
+        self.assertEqual([item["id"] for item in observed["artifact_refs"]], [current["artifact_id"]])
+        self.assertNotIn(foreign["artifact_id"], [item["id"] for item in observed["artifact_refs"]])
     def test_structured_coach_loop_keeps_tools_and_returns_command_receipt(self):
         intent = {
             "intent": "local_action",
@@ -4920,18 +4942,45 @@ class CoachTests(unittest.TestCase):
             "date": wednesday, "sport": "WeightTraining", "name": "Oberkörper Einheit",
             "description": "Krafttraining", "duration_minutes": 45, "target": "AUTO",
         })
-        result = server._apply_structured_training_changes({
-            "changes": [
-                {"local_id": upper_body["id"], "action": "update", "date": tuesday},
-                {"action": "create", "date": wednesday, "sport": "Run", "name": "Lockerer Lauf",
-                 "description": "- 30m locker", "duration_minutes": 30, "target": "AUTO"},
-            ],
-        })
+        with patch.object(server, "publish_state_event") as publish:
+            result = server._apply_structured_training_changes({
+                "changes": [
+                    {"local_id": upper_body["id"], "action": "update", "date": tuesday},
+                    {"action": "create", "date": wednesday, "sport": "Run", "name": "Lockerer Lauf",
+                     "description": "- 30m locker", "duration_minutes": 30, "target": "AUTO"},
+                ],
+            })
+        self.assertTrue(any(
+            call.args == ("planning", {"status": "changed"})
+            for call in publish.call_args_list
+        ))
         self.assertEqual(result["status"], "applied")
         planned = {item["name"]: item for item in server.list_planned_units()}
         self.assertEqual(planned["Oberkörper Einheit"]["date"], tuesday)
         self.assertEqual(planned["Lockerer Lauf"]["date"], wednesday)
         self.assertEqual(len(result["changes"]), 2)
+
+    def test_structured_training_create_strips_protected_identity_fields(self):
+        workout_date = (date.today() + timedelta(days=21)).isoformat()
+        result = server._apply_structured_training_changes({
+            "changes": [{
+                "action": "create", "date": workout_date, "sport": "Run", "name": "Clean Run",
+                "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+                "rationale": "Test", "id": "foreign-id", "local_id": None,
+                "external_id": "foreign-external-id", "remote_event_id": "foreign-remote-id",
+                "remote_event_external_id": "foreign-remote-external-id", "archived": True,
+                "local_deleted": True, "sync_state": "synced",
+            }],
+        })
+        created = next(item for item in server.list_planned_units() if item["name"] == "Clean Run")
+        self.assertEqual(result["status"], "applied")
+        self.assertNotEqual(created["id"], "foreign-id")
+        self.assertIsNone(created.get("external_id"))
+        self.assertNotIn("remote_event_id", created)
+        self.assertNotIn("remote_event_external_id", created)
+        self.assertFalse(created.get("archived", False))
+        self.assertFalse(created.get("local_deleted", False))
+        self.assertEqual(created["sync_status"], "local")
 
     def test_structured_training_change_batch_rolls_back_after_old_boundary(self):
         planned = [server.create_local_planned_unit({
