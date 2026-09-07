@@ -832,15 +832,21 @@ push invalidates the old result and starts the gate again. A manual human
 `@codex review` request requires a summary and result created or updated after
 that request, so an older result cannot be reused. Normal pull-request events
 use the connector's native automatic trigger; a human can manually request a
-fresh review with `@codex review`. The trusted `ai-coach-release-bot[bot]`
-exception is limited to an exact `develop` version-bump PR whose branch, title,
-repository, and one-file `APP_VERSION` diff match the release contract. The
-release promotion PR to `main` remains on the normal Codex review path. The
-workflow records a successful `Codex code review` check with the
-exemption reason only for that validated version bump; a manual review request
-overrides the exemption. Retargeting a PR also establishes a fresh review
-baseline. Release-bot title edits establish a fresh baseline, while ordinary
-title-only edits do not. If
+fresh review with `@codex review`. Same-repository dependency-update PRs from
+the trusted `dependabot[bot]` are exempt on `develop` when all current commits
+are Dependabot-authored and the changed files are limited to dependency
+manifests, lockfiles, `Dockerfile`, or pinned GitHub Action references. This is
+needed because Dependabot PRs do not produce the subscription-backed review
+result. The trusted `ai-coach-release-bot[bot]` exception remains limited to
+an exact `develop` version-bump PR whose branch, title, repository, and
+one-file `APP_VERSION` diff match the release contract. The release promotion
+PR to `main` remains on the normal Codex review path. The workflow records a
+successful `Codex code review` check with the exemption reason only for
+validated Dependabot or release-bot PRs; a manual review request overrides the
+exemption and remains tied to the current head commit across target-branch
+pushes. Retargeting a PR also establishes a fresh review baseline. Release-bot
+title edits establish a fresh baseline, while ordinary title-only edits do
+not. If
 the PR is closed or merged while the gate is waiting, the gate cancels its
 check instead of polling until the timeout.
 
