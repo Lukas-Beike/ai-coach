@@ -89,6 +89,8 @@ class CoachIntentContractTests(unittest.TestCase):
         self.assertIn("ordered follow_up_operations commit_training_plan then start_intervals_plan_sync", payload["instructions"])
         self.assertIn("Never select an artifact_ref for a new dated workout", payload["instructions"])
         self.assertIn("does not request a separate feedback write", payload["instructions"])
+        self.assertIn("moving a named workout and adding another workout", payload["instructions"])
+        self.assertIn("action=create", payload["instructions"])
         for operation, scope in (("save_checkin", "local_checkin"), ("save_activity_feedback", "activity_feedback")):
             result = parse_intent_response({"output_text": json.dumps({
                 "intent": "local_action",
