@@ -714,6 +714,55 @@ class CoachTests(unittest.TestCase):
         performance.assert_called_once_with()
         competitions.assert_called_once_with(reason="Coach request", push_local=True, operation_id="job-competition")
 
+    def test_successful_intervals_refresh_queues_automatic_performance_follow_up(self):
+        refresh_job = {
+            "id": "job-refresh", "provider": "intervals", "type": "refresh",
+            "payload": json.dumps({"days": 90, "reason": "tägliche automatische Aktualisierung"}),
+        }
+        with patch.object(server, "sync_intervals", return_value={"status": "ok"}) as sync, patch.object(
+            server, "sync_competitions", return_value={"status": "ok"}
+        ), patch.object(
+            server, "enqueue_sync_job", return_value={"id": "job-performance-follow-up"}
+        ) as enqueue:
+            result = server._execute_sync_job(refresh_job)
+        self.assertEqual(result["status"], "ok")
+        sync.assert_called_once()
+        enqueue.assert_called_once_with(
+            "intervals",
+            "performance_refresh",
+            {"reason": "Automatische Folgeaktualisierung nach tägliche automatische Aktualisierung"},
+            requested_by="scheduler",
+        )
+
+    def test_partial_intervals_refresh_queues_automatic_performance_follow_up(self):
+        refresh_job = {
+            "id": "job-refresh-partial", "provider": "intervals", "type": "refresh",
+            "payload": json.dumps({"days": 90, "reason": "startup"}),
+        }
+        with patch.object(server, "sync_intervals", return_value={"status": "partial"}), patch.object(
+            server, "sync_competitions", return_value={"status": "ok"}
+        ), patch.object(
+            server, "enqueue_sync_job", return_value={"id": "job-performance-follow-up"}
+        ) as enqueue:
+            server._execute_sync_job(refresh_job)
+        enqueue.assert_called_once_with(
+            "intervals",
+            "performance_refresh",
+            {"reason": "Automatische Folgeaktualisierung nach startup"},
+            requested_by="scheduler",
+        )
+
+    def test_historical_intervals_refresh_does_not_queue_performance_follow_up(self):
+        refresh_job = {
+            "id": "job-historical", "provider": "intervals", "type": "historical_backfill",
+            "payload": json.dumps({"days": 90, "reason": "startup historical backfill", "end_date": "2026-01-01"}),
+        }
+        with patch.object(server, "sync_intervals", return_value={"status": "ok"}), patch.object(
+            server, "sync_competitions", return_value={"status": "ok"}
+        ), patch.object(server, "enqueue_sync_job") as enqueue:
+            server._execute_sync_job(refresh_job)
+        enqueue.assert_not_called()
+
     def test_explicit_competition_push_preserves_provider_id_for_ordinary_edits(self):
         competition = server.save_coach_competition({
             "name": "Linked Race", "event_date": "2099-01-02", "sport": "Cycling",

@@ -24,7 +24,8 @@ instructions do not delete or convert its data.
 
 - Athlete profile, target competitions, performance metrics, training history,
   chat history, and a growing local workout library stored in SQLite.
-- One Intervals.icu synchronization at startup, plus user-requested refreshes.
+- One Intervals.icu synchronization at startup and once per day, followed by an
+  automatic current-performance refresh, plus user-requested refreshes.
 - Optional Garmin Connect synchronization with deduplication against
   Intervals.icu. Garmin-sourced FTP (separate from eFTP), running threshold
   power, running and cycling threshold heart rate, running threshold pace,
@@ -244,6 +245,8 @@ visible and polls more frequently while a manual synchronization is running.
 Large Intervals.icu responses are fetched in bounded pages and the latest
 sync reports the fetched page/window counts; incomplete required Garmin ranges
 remain visible as partial provider status instead of being presented as complete.
+After a successful regular Intervals.icu refresh, the targeted current-performance
+data is refreshed automatically as a separate background job.
 Garmin Body Battery is deliberately separate from the regular and historical
 Garmin synchronization. It is fetched once during the morning check-in, only
 for the completed sleep window (at most the previous and current calendar

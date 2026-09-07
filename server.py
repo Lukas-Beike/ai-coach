@@ -1868,6 +1868,29 @@ def _sync_job_active(provider: str, job_type: str = "refresh") -> bool:
     return bool(row)
 
 
+def _enqueue_automatic_performance_refresh(reason: str) -> dict[str, Any] | None:
+    """Queue the targeted performance read after a complete Intervals refresh."""
+    if not CONFIG.intervals_api_key or _sync_job_active("intervals", "performance_refresh"):
+        return None
+    try:
+        return enqueue_sync_job(
+            "intervals",
+            "performance_refresh",
+            {"reason": f"Automatische Folgeaktualisierung nach {str(reason or 'Intervals-Sync')[:80]}"},
+            requested_by="scheduler",
+        )
+    except Exception:
+        # The activity snapshot is already durable and must not be reported as
+        # failed only because its independent performance follow-up could not
+        # be queued. The next scheduled or manual refresh can retry it.
+        LOGGER.warning(
+            "Automatic Intervals performance refresh could not be queued",
+            extra={"event": "automatic_performance_refresh_queue_failed"},
+            exc_info=True,
+        )
+        return None
+
+
 @maintenance_operation
 def enqueue_sync_job(
     provider: str,
@@ -2104,6 +2127,8 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
             result["historical_next_end"] = next_end.isoformat() if next_end >= SYNC_EARLIEST_DATE else None
         if result.get("status") == "already_running":
             return result
+        if job_type == "refresh" and result.get("status") in {"ok", "partial"}:
+            _enqueue_automatic_performance_refresh(reason)
         try:
             competition_result = sync_competitions(reason=reason, push_local=False, operation_id=job["id"])
         except Exception:
