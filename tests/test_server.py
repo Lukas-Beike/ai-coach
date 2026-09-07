@@ -4792,6 +4792,8 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Replace my training plan's Tuesday workout."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next week only."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next week."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next Tuesday."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for tomorrow."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for the next two weeks."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for 2026-09-08."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan starting next week."))

@@ -12746,7 +12746,17 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         r"(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
         r"ein|eine|einer|einen|zwei|drei|vier|fünf|fuenf|sechs|sieben|"
         r"acht|neun|zehn)\s+)?"
-        r"(?:week|weeks|day|days|month|months|woche|wochen|tag|tage|monat|monate)\b",
+        r"(?:week|weeks|day|days|month|months|woche|wochen|tag|tage|monat|monate|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+        r"montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\b",
+        text,
+    ):
+        return False
+    if re.search(
+        r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
+        r"(?:neu\s+)?(?:for|in|starting|from|after|ab)\s+(?:the\s+)?"
+        r"(?:today|tomorrow|the\s+day\s+after\s+tomorrow|heute|morgen|uebermorgen|"
+        r"Ã¼bermorgen)\b",
         text,
     ):
         return False
