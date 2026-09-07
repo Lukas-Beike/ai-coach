@@ -12716,6 +12716,9 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         replacement = re.search(r"\b(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|redo\w*|neu|erset\w*)\b", text)
         if not replacement or negation.start() < replacement.start():
             return False
+        between = text[replacement.end():negation.start()]
+        if not re.search(r"\b(?:aber|but|synchronisier\w*|sync)\b", between):
+            return False
     if re.search(
         r"\b(?:what\s+happens\s+if|what\s+if|if\s+i|would\s+i|could\s+i|should\s+i|"
         r"was\s+wäre\s+wenn|wenn\s+ich|würde\s+ich|könnte\s+ich|soll\s+ich|"

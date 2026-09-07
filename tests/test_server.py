@@ -4820,6 +4820,7 @@ class CoachTests(unittest.TestCase):
         self.assertTrue(server.coach_plan_scope(polite)["background"])
         no_remote_sync = "Ersetze meinen ganzen Trainingsplan, aber synchronisiere ihn nicht."
         self.assertTrue(server.prompt_requests_complete_plan_rebuild(no_remote_sync))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Ersetze meinen ganzen Trainingsplan nicht."))
 
     def test_reset_coach_chat_discards_outstanding_plan_drafts(self):
         artifact = server._stage_coach_artifact(
