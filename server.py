@@ -14372,7 +14372,11 @@ def _normalize_new_plan_intent(intent: dict[str, Any]) -> dict[str, Any]:
             "follow_up_operations": [],
             "sync_scope": None,
         }
-    if "start_intervals_plan_sync" in operations and intent.get("sync_scope") == "all_pending":
+    if (
+        "start_intervals_plan_sync" in operations
+        and "stage_training_plan" not in operations
+        and intent.get("sync_scope") == "all_pending"
+    ):
         # A standalone all-pending push must use the server-derived pending
         # snapshot.  Otherwise the model can supply a partial ``entries`` list
         # and silently narrow the explicitly requested library-wide sync.

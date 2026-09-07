@@ -4548,6 +4548,25 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("_sync_created_entries_only", normalized)
         self.assertIn("local_plan", normalized["authorization_scope"])
 
+    def test_staged_all_pending_sync_still_orders_stage_before_sync(self):
+        normalized = server._normalize_new_plan_intent({
+            "intent": "remote_sync",
+            "operation": "start_intervals_plan_sync",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["intervals_sync"],
+            "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+            "sync_scope": "all_pending",
+        })
+
+        self.assertEqual(normalized["operation"], "stage_training_plan")
+        self.assertEqual(
+            normalized["follow_up_operations"],
+            ["commit_training_plan", "start_intervals_plan_sync"],
+        )
+        self.assertTrue(normalized["_sync_all_pending"])
+
     def test_cross_provider_refresh_and_plan_sync_requires_clarification(self):
         normalized = server._normalize_new_plan_intent({
             "intent": "remote_sync",
