@@ -13667,8 +13667,9 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
             "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
             "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
             "AND (? = '' OR json_extract(payload, '$.plan_id') = ?) "
+            "AND (? <> '' OR COALESCE(json_extract(payload, '$.source'), 'coach') IN ('coach', 'library')) "
             "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ?",
-            (selected_plan_id or "", selected_plan_id or "", today),
+            (selected_plan_id or "", selected_plan_id or "", selected_plan_id or "", today),
         ).fetchall()
         replace_ids = {str(row.get("local_id") or "") for row in rows if row.get("local_id")}
         archived_rows = db.execute(

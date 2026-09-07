@@ -5159,6 +5159,27 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["status"], "replaced")
         self.assertEqual(next(plan for plan in server.list_training_plans() if plan["id"] == past_plan_id)["status"], "archived")
 
+    def test_broad_plan_replace_preserves_imported_provider_units(self):
+        remote_date = (date.today() + timedelta(days=2)).isoformat()
+        server.upsert_remote_planned_units([{
+            "id": "remote-future-workout", "category": "WORKOUT", "type": "Ride",
+            "name": "Provider workout", "start_date_local": remote_date + "T07:00:00",
+            "moving_time": 1800,
+        }])
+        state = server._structured_training_state()
+        result = server._replace_structured_training_plan({
+            "expected_revision": state["planning_revision"],
+            "payload": {"plan_name": "Coach replacement", "goal": "", "workouts": [{
+                "date": (date.today() + timedelta(days=1)).isoformat(),
+                "sport": "Ride", "name": "New", "description": "- 40m easy",
+                "duration_minutes": 40, "target": "AUTO", "rationale": "Test",
+            }]},
+        })
+        self.assertEqual(result["status"], "replaced")
+        imported = next(item for item in server.list_planned_units(include_archived=True) if item.get("remote_event_id") == "remote-future-workout")
+        self.assertFalse(imported.get("local_deleted", False))
+        self.assertFalse(imported.get("archived", False))
+
     def test_planned_unit_undo_rejects_a_new_date_conflict(self):
         old = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
