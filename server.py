@@ -13642,6 +13642,7 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
     batch_ids.discard("")
     original_dates: dict[str, str] = {}
     final_dates: dict[str, str] = {}
+    final_active: dict[str, bool] = {}
     restore_identities: set[str] = set()
     for index, change in enumerate(changes):
         local_id = str(change.get("local_id") or "").strip()
@@ -13655,6 +13656,7 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
                 date.fromisoformat(candidate_date)
             except ValueError as exc:
                 raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
+            final_active[change_identity] = True
             final_dates[change_identity] = candidate_date
             continue
         if action == "restore":
@@ -13671,9 +13673,15 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
         current_date = str(current.get("date") or "").strip()[:10]
         if current_date:
             original_dates.setdefault(change_identity, current_date)
+        final_active.setdefault(
+            change_identity,
+            not bool(current.get("archived")) and not bool(current.get("local_deleted")),
+        )
         if action in {"delete", "archive"}:
-            final_dates.pop(change_identity, None)
+            final_active[change_identity] = False
             continue
+        if action == "restore":
+            final_active[change_identity] = True
         candidate_date = str(
             change.get("date") or final_dates.get(change_identity) or current.get("date") or ""
         ).strip()[:10]
@@ -13686,6 +13694,8 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
         final_dates[change_identity] = candidate_date
     occupied_dates: dict[str, str] = {}
     for change_identity, candidate_date in final_dates.items():
+        if not final_active.get(change_identity, True):
+            continue
         previous_identity = occupied_dates.get(candidate_date)
         if previous_identity is not None and previous_identity != change_identity:
             raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
@@ -13694,9 +13704,12 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
         candidate_date
         for change_identity, candidate_date in final_dates.items()
         if (
-            change_identity.startswith("create:")
-            or original_dates.get(change_identity) != candidate_date
-            or change_identity in restore_identities
+            final_active.get(change_identity, True)
+            and (
+                change_identity.startswith("create:")
+                or original_dates.get(change_identity) != candidate_date
+                or change_identity in restore_identities
+            )
         )
     }
     for candidate_date in dates_needing_calendar_check:

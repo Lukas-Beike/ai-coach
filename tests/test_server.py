@@ -5181,6 +5181,25 @@ class CoachTests(unittest.TestCase):
         current = {item["id"]: item for item in server.list_planned_units()}
         self.assertEqual(current[workout["id"]]["date"], moved_date.isoformat())
 
+    def test_structured_training_folds_inactive_repeated_changes_before_create_date_check(self):
+        original_date = date.today() + timedelta(days=26)
+        workout = server.create_local_planned_unit({
+            "date": original_date.isoformat(), "sport": "Run", "name": "Archive then update",
+            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+        })
+        result = server._apply_structured_training_changes({
+            "changes": [
+                {"local_id": workout["id"], "action": "archive"},
+                {"local_id": workout["id"], "action": "update", "name": "Still archived"},
+                {"action": "create", "date": original_date.isoformat(), "sport": "Run", "name": "Replacement",
+                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
+            ],
+        })
+        self.assertEqual(result["status"], "applied")
+        current = {item["id"]: item for item in server.list_planned_units(include_archived=True)}
+        self.assertTrue(current[workout["id"]]["archived"])
+        self.assertEqual(sum(item["date"] == original_date.isoformat() and not item.get("archived") for item in current.values()), 1)
+
     def test_structured_training_restore_rechecks_original_calendar_date(self):
         workout = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=25)).isoformat(), "sport": "Run",
