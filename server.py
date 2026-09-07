@@ -1117,7 +1117,7 @@ CHANGE_HISTORY_LIBRARY_FIELDS = {
 CHANGE_HISTORY_PLANNED_UNIT_FIELDS = {
     "id", "type", "name", "description", "duration_minutes", "moving_time", "target", "date",
     "source", "origin", "rationale", "plan_id", "plan_name", "archived", "sync_status",
-    "remote_event_id", "remote_event_external_id",
+    "remote_event_id", "remote_event_external_id", "local_deleted",
 }
 CHANGE_HISTORY_COMPETITION_FIELDS = {
     "id", "name", "event_date", "start_date_local", "sport", "priority", "category", "distance",
@@ -12750,7 +12750,10 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         r"\b(?:for|in|starting|from|after|ab|f(?:u|ue|\N{LATIN SMALL LETTER U WITH DIAERESIS})r)\s+"
         r"(?:the\s+)?(?:today|tomorrow|the\s+day\s+after\s+tomorrow|heute|morgen|uebermorgen|"
         r"\N{LATIN SMALL LETTER U WITH DIAERESIS}bermorgen|"
-        r"(?:next|this|coming|last)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b"
+        r"(?:next|this|coming|last|naechsten|diesen|kommenden|letzten|"
+        r"n\N{LATIN SMALL LETTER A WITH DIAERESIS}chsten)\s+"
+        r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+        r"montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag))\b"
         r"(?:\s+\w+){0,4}\s+\b(?:training\s+plan|trainingsplan|planung|plan)\b",
         text,
     ):
@@ -13736,6 +13739,15 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
         }
         existing_entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
         superseded_plan_ids: set[str] = {selected_plan_id} if selected_plan_id else set()
+        if not selected_plan_id:
+            metadata_rows = db.execute(
+                "SELECT id FROM training_plans "
+                "WHERE status <> 'archived' AND end_date >= ?",
+                (today,),
+            ).fetchall()
+            superseded_plan_ids.update(
+                str(row.get("id") or "") for row in metadata_rows if row.get("id")
+            )
         for row in rows:
             try:
                 current = json.loads(row.get("payload") or "{}")

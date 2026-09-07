@@ -2897,6 +2897,35 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(removed["status"], "deleted")
         self.assertEqual(server.list_dated_local_planned_workouts(), [])
 
+    def test_deleting_archived_planned_workout_records_recoverable_history(self):
+        local = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Archived", "description": "- 30m Z2",
+            "duration_minutes": 30, "source": "library", "rationale": "Test",
+        })
+        server.update_local_planned_workout(local["id"], {"action": "archive"})
+
+        server.update_local_planned_workout(local["id"], {"action": "delete"})
+
+        deletion = next(
+            item for item in server.list_change_history()
+            if item["entity_type"] == "planned_unit"
+            and item["entity_id"] == local["id"]
+            and item["action"] == "delete"
+        )
+        self.assertNotEqual(deletion["before_hash"], deletion["after_hash"])
+        self.assertEqual(deletion["diff"]["fields"]["local_deleted"], {"changed": True})
+        server._apply_change_undo({
+            "change_id": deletion["id"],
+            "expected_current_hash": deletion["after_hash"],
+        })
+        restored = next(
+            item for item in server.list_planned_units(include_archived=True)
+            if item["id"] == local["id"]
+        )
+        self.assertFalse(restored["archived"])
+        self.assertFalse(restored["local_deleted"])
+
     def test_workout_payload_is_an_idempotent_calendar_event(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         payload = server.workout_event_payload("abc", {
@@ -4809,6 +4838,7 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle meinen Trainingsplan neu für 2026-09-08."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle für morgen meinen Trainingsplan neu."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild for tomorrow my training plan."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle für nächsten Dienstag meinen Trainingsplan neu."))
 
     def test_complete_plan_rebuild_uses_long_plan_scope_and_budget(self):
         prompt = "Replace my training plan."
@@ -5178,6 +5208,36 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "replaced")
         self.assertEqual(next(plan for plan in server.list_training_plans() if plan["id"] == past_plan_id)["status"], "archived")
+
+    def test_broad_plan_replace_archives_future_plan_metadata_without_active_units(self):
+        empty_plan_id = str(uuid.uuid4())
+        starts = (date.today() + timedelta(days=1)).isoformat()
+        ends = (date.today() + timedelta(days=7)).isoformat()
+        with server.DB_LOCK, server.database() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db, empty_plan_id, "Empty Future Plan", "", starts, ends, "planned", server.utc_now(),
+            )
+        state = server._structured_training_state()
+
+        result = server._replace_structured_training_plan({
+            "expected_revision": state["planning_revision"],
+            "payload": {"plan_name": "Replacement", "goal": "", "workouts": [{
+                "date": (date.today() + timedelta(days=2)).isoformat(),
+                "sport": "Ride", "name": "New", "description": "- 40m easy",
+                "duration_minutes": 40, "target": "AUTO", "rationale": "Test",
+            }]},
+        })
+
+        self.assertEqual(result["status"], "replaced")
+        old_plan = next(plan for plan in server.list_training_plans() if plan["id"] == empty_plan_id)
+        self.assertEqual(old_plan["status"], "archived")
+        metadata_history = next(
+            item for item in server.list_change_history()
+            if item["entity_type"] == "training_plan"
+            and item["entity_id"] == empty_plan_id
+            and item["action"] == "update"
+        )
+        self.assertNotEqual(metadata_history["before_hash"], metadata_history["after_hash"])
 
     def test_broad_plan_replace_preserves_imported_provider_units(self):
         remote_date = (date.today() + timedelta(days=2)).isoformat()
