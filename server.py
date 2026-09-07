@@ -11214,7 +11214,7 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         # never be populated from Intervals.icu eFTP; the fallback only uses an
         # explicitly labelled FTP field.
         **garmin_threshold_metrics,
-        "cycling_eftp_watts": metric(latest_ride_eftp or current_ride_eftp, "W", "Intervals.icu"),
+        "cycling_eftp_watts": metric(current_ride_eftp or latest_ride_eftp, "W", "Intervals.icu"),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
         "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),

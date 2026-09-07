@@ -6912,13 +6912,13 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(performance["current_load"]["ctl"], 68)
         self.assertEqual(performance["current_load"]["tsb"], -6)
 
-    def test_current_eftp_prefers_latest_intervals_ride_estimate(self):
+    def test_current_eftp_prefers_current_intervals_model_over_latest_activity_estimate(self):
         today = date.today().isoformat()
         snapshot = server.compact_snapshot(
             {
-                "sportSettings": [{"types": ["Ride"], "ftp": 300, "eFTP": 274}],
+                "sportSettings": [{"types": ["Ride"], "ftp": 300, "eFTP": 309}],
             },
-            [{"start_date_local": f"{today}T08:00:00", "type": "Ride", "icu_ftp": 300, "icu_eftp": 309}],
+            [{"start_date_local": f"{today}T08:00:00", "type": "Ride", "icu_ftp": 300, "icu_eftp": 300}],
             [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 274}]}],
             [],
         )
@@ -6928,7 +6928,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
         self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
         self.assertEqual(metrics["cycling_eftp_watts"]["source"], "Intervals.icu")
-        self.assertEqual(performance["comparisons"]["cycling_eftp_30d"]["average"], 291.5)
+        self.assertEqual(performance["comparisons"]["cycling_eftp_30d"]["average"], 287)
 
     def test_current_eftp_reads_mmp_model_without_using_ftp_as_eftp(self):
         today = date.today().isoformat()
