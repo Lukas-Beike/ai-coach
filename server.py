@@ -14526,7 +14526,7 @@ def _chat_with_structured_coach_impl(
         if uncovered_explicit_refresh:
             forced_tool = "start_provider_refresh"
     bulk_training_change = bool(
-        requested_operation in {"apply_training_changes", "replace_training_plan"}
+        ("apply_training_changes" in _structured_authorized_operations(intent) or requested_operation == "replace_training_plan")
         and (
             requested_operation == "replace_training_plan"
             or intent.get("bulk_change")
