@@ -14223,7 +14223,11 @@ def _structured_coach_tool_result(
             normalized_entries = _library_bulk_request_entries(
                 entries,
                 require_hash=True,
-                max_entries=COACH_TRAINING_CHANGE_LIMIT if authorized_ids else LIBRARY_BULK_MAX_ENTRIES,
+                max_entries=(
+                    COACH_TRAINING_CHANGE_LIMIT
+                    if authorized_ids or intent.get("_sync_all_pending")
+                    else LIBRARY_BULK_MAX_ENTRIES
+                ),
             )
             normalized_ids = {entry["library_workout_id"] for entry in normalized_entries}
             if intent.get("_sync_all_pending"):
@@ -14242,8 +14246,11 @@ def _structured_coach_tool_result(
                     "Die Synchronisierung muss genau die in diesem Turn erstellten Einheiten umfassen.",
                     reason="intent_scope_denied",
                 )
-            for entry in normalized_entries:
-                _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
+            if intent.get("_sync_all_pending"):
+                _require_coach_scope(intent, "local_plan")
+            else:
+                for entry in normalized_entries:
+                    _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
             _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
         return _enqueue_coach_plan_push(
             normalized_entries,
@@ -14364,7 +14371,23 @@ def _normalize_new_plan_intent(intent: dict[str, Any]) -> dict[str, Any]:
             "follow_up_operations": [],
             "sync_scope": None,
         }
-    ordered = ["stage_training_plan"]
+    prerequisite_operations = {
+        "read_training_state",
+        "list_recent_activities",
+        "list_workout_library",
+        "list_planned_workouts",
+        "list_change_history",
+        "list_competitions",
+        "list_training_plans",
+        "start_provider_refresh",
+        "refresh_current_performance",
+    }
+    stage_index = operations.index("stage_training_plan")
+    ordered = [
+        operation for operation in operations[:stage_index]
+        if operation in prerequisite_operations and operation not in {"stage_training_plan", "commit_training_plan"}
+    ]
+    ordered.append("stage_training_plan")
     if "commit_training_plan" in operations:
         ordered.append("commit_training_plan")
     ordered.extend(operation for operation in operations if operation not in ordered)
@@ -14421,6 +14444,13 @@ def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dic
     """
     if intent.get("intent") not in {"local_action", "remote_sync"}:
         return intent
+    operations = _structured_authorized_operations(intent)
+    if (
+        "replace_training_plan" in operations
+        and "start_intervals_plan_sync" in operations
+        and intent.get("sync_scope") == "all_pending"
+    ):
+        intent = {**intent, "_sync_all_pending": True}
     if not prompt_requests_complete_plan_rebuild(message):
         if "replace_training_plan" in _structured_authorized_operations(intent):
             return {
@@ -15026,10 +15056,7 @@ def _chat_with_structured_coach_impl(
                 raise AppError(400, "Coach-Aktionsargumente muessen ein Objekt sein.")
             turn_sync_entry_ids = replacement_follow_up_sync_ids or created_follow_up_sync_ids
             if name == "start_intervals_plan_sync" and intent.get("_sync_all_pending"):
-                arguments = {
-                    **arguments,
-                    "entries": _pending_plan_push_entries(),
-                }
+                arguments = {key: value for key, value in arguments.items() if key != "entries"}
             elif name == "start_intervals_plan_sync" and turn_sync_entry_ids:
                 pending_by_id = {
                     entry["library_workout_id"]: entry for entry in _pending_plan_push_entries()

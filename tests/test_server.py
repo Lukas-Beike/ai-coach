@@ -835,6 +835,7 @@ class CoachTests(unittest.TestCase):
         intent = {
             "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
             "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "_sync_all_pending": True,
         }
         job_ids = []
         with patch.object(server, "enqueue_sync_job", return_value={"id": "job-all"}) as enqueue:
@@ -4545,6 +4546,24 @@ class CoachTests(unittest.TestCase):
         self.assertIsNone(normalized["operation"])
         self.assertIn("bestehenden Entwurfs", normalized["ambiguities"][0])
 
+    def test_new_plan_intent_keeps_refresh_before_staging(self):
+        normalized = server._normalize_new_plan_intent({
+            "intent": "remote_sync",
+            "operation": "start_provider_refresh",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["intervals_refresh", "local_plan"],
+            "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+        })
+
+        self.assertEqual(normalized["operation"], "start_provider_refresh")
+        self.assertEqual(
+            normalized["follow_up_operations"],
+            ["stage_training_plan", "commit_training_plan"],
+        )
+        self.assertEqual(normalized["target_system"], "intervals")
+
     def test_new_workout_classification_does_not_request_a_foreign_artifact_id(self):
         old = server._stage_coach_artifact(
             "conversation-old", "turn-old", {"plan_name": "Old", "goal": "", "workouts": []},
@@ -5226,6 +5245,23 @@ class CoachTests(unittest.TestCase):
         synced_ids = {item["library_workout_id"] for item in enqueue.call_args.args[0]}
         self.assertEqual(synced_ids, replacement_ids)
         self.assertNotIn(unrelated["id"], synced_ids)
+
+    def test_complete_plan_replacement_preserves_all_pending_sync_scope(self):
+        server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Existing", "description": "- 30m easy",
+        })
+        normalized = server._normalize_complete_plan_intent(
+            "Ersetze meinen gesamten Trainingsplan und synchronisiere alle offenen Einheiten.",
+            {
+                "intent": "remote_sync", "operation": "replace_training_plan", "target_system": "intervals",
+                "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan", "intervals_sync"],
+                "follow_up_operations": ["start_intervals_plan_sync"], "sync_scope": "all_pending",
+            },
+        )
+
+        self.assertTrue(normalized["_sync_all_pending"])
+        self.assertNotIn("_sync_created_entries_only", normalized)
 
     def test_complete_plan_rebuild_keeps_draft_flow_when_no_local_plan_exists(self):
         intent = {
