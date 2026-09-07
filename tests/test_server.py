@@ -4947,7 +4947,7 @@ class CoachTests(unittest.TestCase):
                 "changes": [
                     {"local_id": upper_body["id"], "action": "update", "date": tuesday},
                     {"action": "create", "date": wednesday, "sport": "Run", "name": "Lockerer Lauf",
-                     "description": "- 30m locker", "duration_minutes": 30, "target": "AUTO"},
+                     "description": "- 30m locker", "duration_minutes": 30, "target": "AUTO", "rationale": "Test"},
                 ],
             })
         self.assertTrue(any(
@@ -4981,6 +4981,32 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(created.get("archived", False))
         self.assertFalse(created.get("local_deleted", False))
         self.assertEqual(created["sync_status"], "local")
+
+    def test_structured_training_create_requires_all_workout_fields(self):
+        with self.assertRaises(server.AppError) as raised:
+            server._apply_structured_training_changes({
+                "changes": [{
+                    "action": "create", "date": (date.today() + timedelta(days=22)).isoformat(),
+                    "sport": "Run", "name": "Missing rationale", "description": "- 30m easy",
+                    "duration_minutes": 30, "target": "AUTO",
+                }],
+            })
+        self.assertEqual(raised.exception.reason, "invalid_change")
+
+    def test_structured_training_allows_repeated_updates_for_same_unit(self):
+        workout = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=23)).isoformat(), "sport": "Run",
+            "name": "Repeated update", "description": "- 30m easy", "duration_minutes": 30,
+            "target": "AUTO",
+        })
+        result = server._apply_structured_training_changes({
+            "changes": [
+                {"local_id": workout["id"], "action": "update", "name": "First update"},
+                {"local_id": workout["id"], "action": "update", "name": "Second update"},
+            ],
+        })
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual(server.list_planned_units()[0]["name"], "Second update")
 
     def test_structured_training_change_batch_rolls_back_after_old_boundary(self):
         planned = [server.create_local_planned_unit({

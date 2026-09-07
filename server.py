@@ -13642,7 +13642,7 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
     batch_ids.discard("")
     final_dates: dict[str, str] = {}
     dates_needing_calendar_check: set[str] = set()
-    for change in changes:
+    for index, change in enumerate(changes):
         local_id = str(change.get("local_id") or "").strip()
         action = str(change.get("action") or "update").strip().casefold()
         if action == "create":
@@ -13677,9 +13677,11 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
                 raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
             if action == "restore" or candidate_date != current_date:
                 dates_needing_calendar_check.add(candidate_date)
-        if candidate_date in final_dates:
+        change_identity = local_id or f"create:{index}"
+        previous_id = final_dates.get(candidate_date)
+        if previous_id is not None and previous_id != change_identity:
             raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
-        final_dates[candidate_date] = local_id
+        final_dates[candidate_date] = change_identity
     for candidate_date in dates_needing_calendar_check:
         conflicts = calendar_conflicts({"date": candidate_date}, batch_ids)
         if conflicts:
@@ -13702,6 +13704,19 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
         if action == "create":
             if change.get("local_id"):
                 raise AppError(400, "Eine neue geplante Einheit darf keine lokale ID vorgeben.", reason="invalid_change")
+            required_fields = ("date", "sport", "name", "description", "duration_minutes", "target", "rationale")
+            missing_fields = [
+                field for field in required_fields
+                if field not in change or change[field] is None or (
+                    isinstance(change[field], str) and not change[field].strip()
+                )
+            ]
+            if missing_fields:
+                raise AppError(
+                    400,
+                    "Eine neue geplante Einheit benötigt alle Workout-Felder.",
+                    reason="invalid_change",
+                )
             normalized = normalize_workout(change)
             prepared_changes.append({
                 "action": "create",

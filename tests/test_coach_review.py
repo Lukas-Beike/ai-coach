@@ -1028,6 +1028,8 @@ class CoachReviewTests(unittest.TestCase):
         self.assertIn("local_plan", scheduled["authorization_scope"])
         negated = server.resolve_intent_objects(intent, "Move Upper Body; do not add a new workout.", refs)
         self.assertNotIn("local_plan", negated["authorization_scope"])
+        plan_mention = server.resolve_intent_objects(intent, "Move Upper Body in my training plan to Tuesday.", refs)
+        self.assertNotIn("local_plan", plan_mention["authorization_scope"])
 
     def test_undo_proposal_is_top_level_recoverable_and_keeps_hash_guard(self):
         template=server.create_local_library_template({"name":"Synthetic undo","sport":"Run"})
