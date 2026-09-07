@@ -4794,6 +4794,7 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next week."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for next Tuesday."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for tomorrow."))
+        self.assertFalse(server.prompt_requests_complete_plan_rebuild("Erstelle meinen Trainingsplan neu für morgen."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for the next two weeks."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan for 2026-09-08."))
         self.assertFalse(server.prompt_requests_complete_plan_rebuild("Rebuild my training plan starting next week."))
@@ -5109,6 +5110,19 @@ class CoachTests(unittest.TestCase):
         }
         resolved = server.resolve_intent_objects(intent, "Replace Base Build plan-one", refs)
         self.assertEqual(resolved["authorization_scope"], ["training_plan:plan-one"])
+
+    def test_explicit_id_keeps_independent_batch_object_names(self):
+        refs = [
+            {"kind": "planned_unit", "id": "easy-id", "name": "Easy Ride"},
+            {"kind": "planned_unit", "id": "tempo-id", "name": "Tempo Run"},
+        ]
+        intent = {
+            "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["local_plan"],
+            "follow_up_operations": [],
+        }
+        resolved = server.resolve_intent_objects(intent, "Move Easy Ride and Tempo Run tempo-id", refs)
+        self.assertEqual(resolved["authorization_scope"], ["planned_unit:easy-id", "planned_unit:tempo-id"])
 
     def test_training_plan_metadata_changes_advance_planning_revision(self):
         plan_entry = server.save_workout_library_entries([{

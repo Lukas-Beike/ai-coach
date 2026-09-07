@@ -60,17 +60,31 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
                 r"(?<![\w-])" + re.escape(str(ref["id"]).casefold()) + r"(?![\w-])", text
             )
         ]
+        natural_named = [ref for ref in candidates if any(
+            selected == ref and not any(
+                outer_start <= start and end <= outer_end and (outer_start, outer_end) != (start, end)
+                for outer_start, outer_end, _ in mentions
+            ) for start, end, selected in mentions
+        )]
         if explicit_id_refs:
-            # An exact ID is an unambiguous disambiguator. Do not also select
-            # same-name candidates mentioned by the surrounding natural text.
-            named = explicit_id_refs
+            # An exact ID disambiguates only its duplicate-name group. Keep
+            # independent names in the same multi-object request selected.
+            duplicate_id_refs = [
+                ref for ref in explicit_id_refs
+                if sum(1 for other in candidates if other["name"].casefold() == ref["name"].casefold()) > 1
+            ]
+            duplicate_groups = {
+                other["name"].casefold()
+                for ref in duplicate_id_refs
+                for other in candidates
+                if other["name"].casefold() == ref["name"].casefold()
+            }
+            named = [
+                ref for ref in natural_named
+                if ref["name"].casefold() not in duplicate_groups
+            ] + duplicate_id_refs
         else:
-            named = [ref for ref in candidates if any(
-                selected == ref and not any(
-                    outer_start <= start and end <= outer_end and (outer_start, outer_end) != (start, end)
-                    for outer_start, outer_end, _ in mentions
-                ) for start, end, selected in mentions
-            )]
+            named = natural_named
         if named and kind == "training_plan" and "replace_training_plan" in operations and "start_intervals_plan_sync" in operations:
             return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Einen benannten Plan kann ich ersetzen; die Synchronisierung muss danach separat bestätigt werden."]}
         for ref in named:

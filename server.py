@@ -12741,7 +12741,7 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         return False
     if re.search(
         r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
-        r"(?:neu\s+)?(?:for|in|starting|from|after|ab)\s+(?:the\s+)?"
+        r"(?:neu\s+)?(?:for|in|starting|from|after|ab|fuer|für)\s+(?:the\s+)?"
         r"(?:next|this|coming|last|nächste[nr]?|kommend\w*|folgend\w*|diese[rn]?)\s+"
         r"(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
         r"ein|eine|einer|einen|zwei|drei|vier|fünf|fuenf|sechs|sieben|"
@@ -12754,7 +12754,7 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         return False
     if re.search(
         r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
-        r"(?:neu\s+)?(?:for|in|starting|from|after|ab)\s+(?:the\s+)?"
+        r"(?:neu\s+)?(?:for|in|starting|from|after|ab|fuer|für)\s+(?:the\s+)?"
         r"(?:today|tomorrow|the\s+day\s+after\s+tomorrow|heute|morgen|uebermorgen|"
         r"Ã¼bermorgen)\b",
         text,
