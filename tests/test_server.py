@@ -1950,19 +1950,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi.audio(path, blob, () =>", app)
         self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
-        self.assertIn('/api.js?v=196', index)
-        self.assertIn('/navigation.js?v=196', index)
-        self.assertIn('/state.js?v=196', index)
-        self.assertIn('/views.js?v=196', index)
-        self.assertIn('/forms.js?v=196', index)
-        self.assertIn('/components.js?v=196', index)
-        self.assertIn('/app.js?v=196', index)
-        self.assertIn('intervals-coach-v196', service_worker)
-        self.assertIn('"/navigation.js?v=196"', service_worker)
-        self.assertIn('"/state.js?v=196"', service_worker)
-        self.assertIn('"/views.js?v=196"', service_worker)
-        self.assertIn('"/forms.js?v=196"', service_worker)
-        self.assertIn('"/components.js?v=196"', service_worker)
+        self.assertIn('/api.js?v=197', index)
+        self.assertIn('/navigation.js?v=197', index)
+        self.assertIn('/state.js?v=197', index)
+        self.assertIn('/views.js?v=197', index)
+        self.assertIn('/forms.js?v=197', index)
+        self.assertIn('/components.js?v=197', index)
+        self.assertIn('/app.js?v=197', index)
+        self.assertIn('intervals-coach-v197', service_worker)
+        self.assertIn('"/navigation.js?v=197"', service_worker)
+        self.assertIn('"/state.js?v=197"', service_worker)
+        self.assertIn('"/views.js?v=197"', service_worker)
+        self.assertIn('"/forms.js?v=197"', service_worker)
+        self.assertIn('"/components.js?v=197"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -1989,8 +1989,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=196'), index.index('/components.js?v=196'))
-        self.assertLess(index.index('/components.js?v=196'), index.index('/app.js?v=196'))
+        self.assertLess(index.index('/forms.js?v=197'), index.index('/components.js?v=197'))
+        self.assertLess(index.index('/components.js?v=197'), index.index('/app.js?v=197'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -4414,6 +4414,65 @@ class CoachTests(unittest.TestCase):
         self.assertIsNone(denied["operation"])
         self.assertTrue(explicit["_artifact_explicit"])
 
+    def test_new_plan_intent_ignores_old_artifact_and_orders_commit_before_sync(self):
+        normalized = server._normalize_new_plan_intent({
+            "intent": "remote_sync",
+            "operation": "start_intervals_plan_sync",
+            "target_system": "intervals",
+            "artifact_id": "old-foreign-draft",
+            "ambiguities": [],
+            "authorization_scope": ["artifact:old-foreign-draft", "intervals_sync"],
+            "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+        })
+
+        self.assertEqual(normalized["operation"], "stage_training_plan")
+        self.assertEqual(
+            normalized["follow_up_operations"],
+            ["commit_training_plan", "start_intervals_plan_sync"],
+        )
+        self.assertIsNone(normalized["artifact_id"])
+        self.assertNotIn("artifact:old-foreign-draft", normalized["authorization_scope"])
+        self.assertIn("local_plan", normalized["authorization_scope"])
+        self.assertEqual(normalized["target_system"], "intervals")
+        self.assertTrue(normalized["_sync_created_entries_only"])
+
+        with patch.object(server, "_enqueue_coach_plan_push") as enqueue, self.assertRaises(server.AppError) as error:
+            server._structured_coach_tool_result(
+                "start_intervals_plan_sync", {}, intent=normalized,
+                conversation_id="conversation-current", client_turn_id="turn-current",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+        self.assertEqual(error.exception.reason, "plan_commit_required")
+        enqueue.assert_not_called()
+
+    def test_new_workout_classification_does_not_request_a_foreign_artifact_id(self):
+        old = server._stage_coach_artifact(
+            "conversation-old", "turn-old", {"plan_name": "Old", "goal": "", "workouts": []},
+        )
+        classified = {
+            "intent": "remote_sync",
+            "operation": "start_intervals_plan_sync",
+            "target_system": "intervals",
+            "artifact_id": old["artifact_id"],
+            "ambiguities": [],
+            "authorization_scope": [f"artifact:{old['artifact_id']}", "intervals_sync"],
+            "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+        }
+
+        with patch.object(server, "responses_request", return_value={"output_text": json.dumps(classified)}):
+            result = server.request_coach_intent(
+                "Trage heute eine neue Radeinheit ein und synchronisiere sie zu Intervals.icu.",
+                "conversation-current",
+            )
+
+        self.assertEqual(result["operation"], "stage_training_plan")
+        self.assertEqual(
+            result["follow_up_operations"],
+            ["commit_training_plan", "start_intervals_plan_sync"],
+        )
+        self.assertIsNone(result["artifact_id"])
+        self.assertEqual(result["intent"], "remote_sync")
+
     def test_structured_coach_loop_keeps_tools_and_returns_command_receipt(self):
         intent = {
             "intent": "local_action",
@@ -4467,6 +4526,56 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([item["tool"] for item in result["command_receipts"]], ["stage_training_plan", "commit_training_plan"])
         self.assertEqual(len(server.list_dated_local_planned_workouts()), 1)
         self.assertEqual(request.call_args_list[1].args[0]["tool_choice"], {"type": "function", "name": "commit_training_plan"})
+
+    def test_new_dated_workout_sync_targets_only_entries_created_in_the_turn(self):
+        unrelated = server.create_local_workout_library_entry({
+            "sport": "Run", "name": "Unrelated pending", "description": "- 20m easy", "duration_minutes": 20,
+        })
+        intent = {
+            "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
+            "artifact_id": "foreign-draft", "ambiguities": [],
+            "authorization_scope": ["artifact:foreign-draft", "intervals_sync"],
+            "follow_up_operations": ["stage_training_plan", "commit_training_plan"],
+        }
+        responses = [
+            {"output": [{"type": "function_call", "name": "stage_training_plan", "call_id": "stage", "arguments": json.dumps({"payload": {
+                "plan_name": "Heutige Einheit", "goal": "Lockere Ausdauer", "workouts": [{
+                    "date": "2099-01-01", "sport": "Ride", "name": "Lockere Radausfahrt",
+                    "description": "- 75m locker, 37 km", "duration_minutes": 75,
+                    "target": "AUTO", "rationale": "Ausdrücklich angefordert",
+                }],
+            }})}]},
+            {"output": [{"type": "function_call", "name": "commit_training_plan", "call_id": "commit", "arguments": "{}"}]},
+            {"output": [{"type": "function_call", "name": "start_intervals_plan_sync", "call_id": "sync", "arguments": json.dumps({"reason": "Ausdrücklich angefordert"})}]},
+            {"output_text": "Die Einheit wurde angelegt und zur Synchronisierung vorgemerkt."},
+        ]
+
+        with patch.object(server, "request_coach_intent", return_value=intent), patch.object(
+            server, "ensure_conversation", return_value="conversation-new-workout"
+        ), patch.object(server, "responses_request", side_effect=responses) as request, patch.object(
+            server, "_enqueue_coach_plan_push", return_value={"ok": True, "status": "queued", "sync_job_ids": ["job-new"]}
+        ) as enqueue:
+            result = server.chat_with_coach(
+                "Trage heute eine 75 Minuten lange 37-km-Radeinheit ein und synchronisiere sie zu Intervals.icu.",
+                client_turn_id="turn-new-workout-sync",
+            )
+
+        self.assertEqual(
+            [item["tool"] for item in result["command_receipts"]],
+            ["stage_training_plan", "commit_training_plan", "start_intervals_plan_sync"],
+        )
+        self.assertNotEqual(result["intent"]["artifact_id"], "foreign-draft")
+        self.assertEqual(
+            result["intent"]["artifact_id"],
+            result["command_receipts"][0]["result"]["artifact_id"],
+        )
+        self.assertEqual(
+            [call.args[0]["tool_choice"]["name"] for call in request.call_args_list[:3]],
+            ["stage_training_plan", "commit_training_plan", "start_intervals_plan_sync"],
+        )
+        committed_id = result["command_receipts"][1]["result"]["library_entry_ids"][0]
+        self.assertEqual([entry["library_workout_id"] for entry in enqueue.call_args.args[0]], [committed_id])
+        self.assertNotEqual(committed_id, unrelated["id"])
 
     def test_structured_coach_exposes_checkin_and_activity_feedback_tools(self):
         names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
@@ -7248,16 +7357,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=196"', source)
-        self.assertIn('"/navigation.js?v=196"', source)
-        self.assertIn('"/state.js?v=196"', source)
-        self.assertIn('"/views.js?v=196"', source)
-        self.assertIn('"/forms.js?v=196"', source)
-        self.assertIn('"/components.js?v=196"', source)
+        self.assertIn('"/api.js?v=197"', source)
+        self.assertIn('"/navigation.js?v=197"', source)
+        self.assertIn('"/state.js?v=197"', source)
+        self.assertIn('"/views.js?v=197"', source)
+        self.assertIn('"/forms.js?v=197"', source)
+        self.assertIn('"/components.js?v=197"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=196"', source)
-        self.assertIn('"/icon.svg?v=196"', source)
-        self.assertIn('"/styles.css?v=196"', source)
+        self.assertIn('"/app.js?v=197"', source)
+        self.assertIn('"/icon.svg?v=197"', source)
+        self.assertIn('"/styles.css?v=197"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -8084,6 +8193,8 @@ class CoachTests(unittest.TestCase):
 
         events = [call.args[0] for call in handler.send_sse_event.call_args_list]
         self.assertEqual(events, ["started", "background"])
+        handler.send_sse_headers.assert_called_once_with(persistent=False)
+        self.assertTrue(handler.close_connection)
         chat.assert_not_called()
         unregister.assert_called_once_with(session_key, operation_id)
 
@@ -8318,7 +8429,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=196', index)
+        self.assertIn('v=197', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)

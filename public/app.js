@@ -3810,6 +3810,14 @@ async function requestCoachResponse(message) {
       const blocks = buffer.split(/\r?\n\r?\n/);
       buffer = blocks.pop() || "";
       for (const block of blocks) consume(block);
+      // The chat endpoint is a finite SSE response. A proxy may keep the HTTP
+      // connection open after the terminal event, so release the reader as
+      // soon as the persisted result has arrived instead of trapping the
+      // composer in the reconciling state.
+      if (completed || background) {
+        await reader.cancel().catch(() => {});
+        break;
+      }
     }
     buffer += decoder.decode();
     if (buffer.trim()) consume(buffer);

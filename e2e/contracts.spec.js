@@ -107,7 +107,6 @@ test("a completed answer accepts an immediate follow-up without showing a queue"
   await page.locator("#sendButton").click();
   await page.evaluate(() => {
     __contract.push("completed", { message: { id: 201, content: "First answer", client_turn_id: __contract.turn }, proposed_actions: [], command_receipts: [] });
-    __contract.controller.close();
   });
   await expect(page.locator(".message.assistant")).toHaveText("First answer");
   await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
