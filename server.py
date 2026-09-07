@@ -13640,13 +13640,13 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
     """Validate all final dates before applying any member of a batch."""
     batch_ids = {str(change.get("local_id") or "").strip() for change in changes}
     batch_ids.discard("")
+    original_dates: dict[str, str] = {}
     final_dates: dict[str, str] = {}
-    dates_needing_calendar_check: set[str] = set()
     for index, change in enumerate(changes):
         local_id = str(change.get("local_id") or "").strip()
         action = str(change.get("action") or "update").strip().casefold()
+        change_identity = local_id or f"create:{index}"
         if action == "create":
-            current = {}
             candidate_date = str(change.get("date") or "").strip()[:10]
             if not candidate_date:
                 raise AppError(400, "Eine neue geplante Einheit benötigt ein Datum.", reason="invalid_change")
@@ -13654,34 +13654,44 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
                 date.fromisoformat(candidate_date)
             except ValueError as exc:
                 raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
-            dates_needing_calendar_check.add(candidate_date)
-        else:
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
-            if not row:
-                continue
-            try:
-                current = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                current = {}
-            if not isinstance(current, dict):
-                continue
-            if action in {"delete", "archive"}:
-                continue
-            current_date = str(current.get("date") or "").strip()[:10]
-            candidate_date = str(change.get("date") or current.get("date") or "").strip()[:10]
-            if not candidate_date:
-                continue
-            try:
-                date.fromisoformat(candidate_date)
-            except ValueError as exc:
-                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
-            if action == "restore" or candidate_date != current_date:
-                dates_needing_calendar_check.add(candidate_date)
-        change_identity = local_id or f"create:{index}"
-        previous_id = final_dates.get(candidate_date)
-        if previous_id is not None and previous_id != change_identity:
+            final_dates[change_identity] = candidate_date
+            continue
+        row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+        if not row:
+            continue
+        try:
+            current = json.loads(row.get("payload") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            current = {}
+        if not isinstance(current, dict):
+            continue
+        current_date = str(current.get("date") or "").strip()[:10]
+        if current_date:
+            original_dates.setdefault(change_identity, current_date)
+        if action in {"delete", "archive"}:
+            final_dates.pop(change_identity, None)
+            continue
+        candidate_date = str(
+            change.get("date") or final_dates.get(change_identity) or current.get("date") or ""
+        ).strip()[:10]
+        if not candidate_date:
+            continue
+        try:
+            date.fromisoformat(candidate_date)
+        except ValueError as exc:
+            raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
+        final_dates[change_identity] = candidate_date
+    occupied_dates: dict[str, str] = {}
+    for change_identity, candidate_date in final_dates.items():
+        previous_identity = occupied_dates.get(candidate_date)
+        if previous_identity is not None and previous_identity != change_identity:
             raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
-        final_dates[candidate_date] = change_identity
+        occupied_dates[candidate_date] = change_identity
+    dates_needing_calendar_check = {
+        candidate_date
+        for change_identity, candidate_date in final_dates.items()
+        if change_identity.startswith("create:") or original_dates.get(change_identity) != candidate_date
+    }
     for candidate_date in dates_needing_calendar_check:
         conflicts = calendar_conflicts({"date": candidate_date}, batch_ids)
         if conflicts:
@@ -13749,12 +13759,36 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                 if not row or _library_payload_hash(row["payload"]) != expected_hash:
                     raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
         _validate_training_change_batch(changes, db)
+        plan_ids: set[str] = set()
+        for change in changes:
+            action = str(change.get("action") or "update").strip().casefold()
+            local_id = str(change.get("local_id") or "").strip()
+            if action in {"create", "delete", "archive"} or not local_id:
+                continue
+            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            if not row:
+                continue
+            try:
+                current = json.loads(row.get("payload") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                current = {}
+            if isinstance(current, dict) and str(current.get("plan_id") or "").strip():
+                plan_ids.add(str(current["plan_id"]).strip())
+        derived_plan: dict[str, str] = {}
+        if len(plan_ids) == 1:
+            candidate_plan = TRAINING_PLAN_REPOSITORY.get(db, next(iter(plan_ids)))
+            if candidate_plan and candidate_plan.get("status") != "archived":
+                derived_plan = {
+                    "plan_id": str(candidate_plan["id"]),
+                    "plan_name": str(candidate_plan.get("name") or "")[:200],
+                }
         applied = []
         for change in changes:
             if str(change.get("action") or "update").strip().casefold() == "create":
+                entry_payload = {**change, "source": "coach", **derived_plan}
                 applied.append({
                     "local_id": create_local_planned_unit(
-                        {**change, "source": "coach"}, db=db, bump_planning_revision=False
+                        entry_payload, db=db, bump_planning_revision=False
                     )["id"],
                     "status": "local",
                 })

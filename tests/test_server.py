@@ -5008,6 +5008,49 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["status"], "applied")
         self.assertEqual(server.list_planned_units()[0]["name"], "Second update")
 
+    def test_structured_training_folds_repeated_updates_before_create_date_check(self):
+        original_date = date.today() + timedelta(days=24)
+        moved_date = original_date + timedelta(days=1)
+        workout = server.create_local_planned_unit({
+            "date": original_date.isoformat(), "sport": "Run", "name": "Move then create",
+            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+        })
+        result = server._apply_structured_training_changes({
+            "changes": [
+                {"local_id": workout["id"], "action": "update", "name": "Renamed"},
+                {"local_id": workout["id"], "action": "update", "date": moved_date.isoformat()},
+                {"action": "create", "date": original_date.isoformat(), "sport": "Run", "name": "New Wednesday",
+                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
+            ],
+        })
+        self.assertEqual(result["status"], "applied")
+        current = {item["id"]: item for item in server.list_planned_units()}
+        self.assertEqual(current[workout["id"]]["date"], moved_date.isoformat())
+
+    def test_structured_training_create_inherits_unambiguous_plan_membership(self):
+        plan_id = "mixed-create-plan"
+        plan_name = "Mixed Create Plan"
+        with server.DB_LOCK, server.database() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db, plan_id, plan_name, "Build", "2099-01-01", "2099-01-31", "planned", server.utc_now(),
+            )
+        existing = server.create_local_planned_unit({
+            "date": "2099-01-01", "sport": "Run", "name": "Existing plan unit",
+            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "plan_id": plan_id, "plan_name": plan_name,
+        })
+        result = server._apply_structured_training_changes({
+            "changes": [
+                {"local_id": existing["id"], "action": "update", "name": "Updated"},
+                {"action": "create", "date": "2099-01-02", "sport": "Run", "name": "Added plan unit",
+                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
+            ],
+        })
+        created_id = next(item["local_id"] for item in result["changes"] if item["local_id"] != existing["id"])
+        created = next(item for item in server.list_planned_units() if item["id"] == created_id)
+        self.assertEqual(created["plan_id"], plan_id)
+        self.assertEqual(created["plan_name"], plan_name)
+
     def test_structured_training_change_batch_rolls_back_after_old_boundary(self):
         planned = [server.create_local_planned_unit({
             "date": (date(2099, 1, 1) + timedelta(days=index)).isoformat(),
