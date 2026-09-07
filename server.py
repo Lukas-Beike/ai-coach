@@ -14256,6 +14256,14 @@ def _normalize_complete_plan_intent(message: str, intent: dict[str, Any]) -> dic
     plan_operations = {"stage_training_plan", "commit_training_plan", "replace_training_plan", "apply_training_changes"}
     if not (_structured_authorized_operations(intent) & plan_operations):
         return intent
+    # An exact workout scope is safer than promoting the surrounding wording
+    # to a destructive whole-plan replacement (for example, "Tuesday workout
+    # in my entire training plan").
+    if any(
+        isinstance(token, str) and token.startswith("planned_unit:")
+        for token in (intent.get("authorization_scope") or [])
+    ):
+        return intent
     today = local_now().date().isoformat()
     with DB_LOCK, database() as db:
         existing_plan = db.execute(

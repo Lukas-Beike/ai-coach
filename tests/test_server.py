@@ -4911,6 +4911,21 @@ class CoachTests(unittest.TestCase):
 
         self.assertEqual(normalized, intent)
 
+    def test_complete_plan_rebuild_keeps_exact_workout_scope(self):
+        server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Tuesday", "description": "- 30m easy",
+        })
+        intent = {
+            "intent": "local_action", "operation": "stage_training_plan", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": ["planned_unit:unit-1"],
+            "follow_up_operations": ["commit_training_plan"],
+        }
+        normalized = server._normalize_complete_plan_intent(
+            "Replace the Tuesday workout in my entire training plan.", intent
+        )
+        self.assertEqual(normalized, intent)
+
     def test_complete_plan_rebuild_preserves_sync_when_classifier_makes_it_primary(self):
         server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
