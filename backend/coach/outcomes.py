@@ -4,6 +4,7 @@ from typing import Any
 
 COACH_OPERATION_LABELS = {
     "stage_training_plan": "Planentwurf gespeichert", "commit_training_plan": "Trainingsplan gespeichert",
+    "replace_training_plan": "Trainingsplan ersetzt",
     "manage_training_templates": "Trainingsvorlagen bearbeitet", "apply_training_changes": "Geplante Einheiten bearbeitet",
     "save_checkin": "Tages-Check-in gespeichert", "save_activity_feedback": "Aktivitaetsfeedback gespeichert",
     "delete_activity_feedback": "Aktivitaetsfeedback entfernt", "save_competition": "Wettkampf gespeichert",
@@ -17,6 +18,7 @@ COACH_OPERATION_LABELS = {
 
 COACH_ACTION_LABELS = {
     "stage_training_plan": "Planentwurf erstellen", "commit_training_plan": "Trainingsplan speichern",
+    "replace_training_plan": "Trainingsplan vollständig ersetzen",
     "manage_training_templates": "Trainingsvorlagen bearbeiten", "apply_training_changes": "Geplante Einheiten bearbeiten",
     "save_checkin": "Tages-Check-in speichern", "save_activity_feedback": "Aktivitaetsfeedback speichern",
     "delete_activity_feedback": "Aktivitaetsfeedback entfernen", "save_competition": "Wettkampf speichern",

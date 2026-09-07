@@ -1141,6 +1141,7 @@ function addCoachReceipt(receipt) {
 function addStructuredCoachReceipts(payload) {
   const labels = {
     stage_training_plan: "Planvorlage vorbereitet", commit_training_plan: "Trainingsplan gespeichert",
+    replace_training_plan: "Trainingsplan vollständig ersetzt",
     apply_training_changes: "Lokale Planung geändert", manage_training_templates: "Trainingsvorlagen bearbeitet",
     apply_workout_library_plan: "Einheiten lokal geplant",
     save_checkin: "Tages-Check-in gespeichert", save_activity_feedback: "Aktivitätsfeedback gespeichert",
