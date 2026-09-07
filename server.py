@@ -13792,12 +13792,10 @@ def _apply_structured_training_changes(
                     raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
         _validate_training_change_batch(changes, db)
         referenced_memberships: set[str] = set()
-        recompute_plan_bounds = False
+        plans_needing_bounds: set[str] = set()
         for change in changes:
             action = str(change.get("action") or "update").strip().casefold()
             local_id = str(change.get("local_id") or "").strip()
-            if action in {"delete", "archive", "restore"}:
-                recompute_plan_bounds = True
             if action == "create" or not local_id:
                 continue
             row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
@@ -13808,11 +13806,14 @@ def _apply_structured_training_changes(
             except (TypeError, ValueError, json.JSONDecodeError):
                 current = {}
             if isinstance(current, dict):
-                referenced_memberships.add(str(current.get("plan_id") or "").strip())
-                if action == "update" and "date" in change:
-                    recompute_plan_bounds = recompute_plan_bounds or (
-                        str(change.get("date") or "")[:10] != str(current.get("date") or "")[:10]
-                    )
+                membership = str(current.get("plan_id") or "").strip()
+                referenced_memberships.add(membership)
+                changes_bounds = action in {"delete", "archive", "restore"} or (
+                    action == "update" and "date" in change
+                    and str(change.get("date") or "")[:10] != str(current.get("date") or "")[:10]
+                )
+                if membership and changes_bounds:
+                    plans_needing_bounds.add(membership)
         derived_plan: dict[str, str] = {}
         if len(referenced_memberships) == 1:
             membership = next(iter(referenced_memberships))
@@ -13845,7 +13846,7 @@ def _apply_structured_training_changes(
                         reason="intent_scope_denied",
                     )
             if requested_plan_id or ("plan_id" not in change and derived_plan):
-                recompute_plan_bounds = True
+                plans_needing_bounds.add(derived_plan["plan_id"])
         applied = []
         for change in changes:
             if str(change.get("action") or "update").strip().casefold() == "create":
@@ -13868,14 +13869,14 @@ def _apply_structured_training_changes(
                     change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
                 ))
         _bump_planning_revision(db)
-        if derived_plan and recompute_plan_bounds:
-            plan = TRAINING_PLAN_REPOSITORY.get(db, derived_plan["plan_id"])
+        for affected_plan_id in sorted(plans_needing_bounds):
+            plan = TRAINING_PLAN_REPOSITORY.get(db, affected_plan_id)
             member_rows = db.execute(
                 "SELECT payload FROM planned_units "
                 "WHERE json_extract(payload, '$.plan_id') = ? "
                 "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
                 "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
-                (derived_plan["plan_id"],),
+                (affected_plan_id,),
             ).fetchall()
             member_dates = []
             for row in member_rows:
@@ -13898,7 +13899,7 @@ def _apply_structured_training_changes(
                     }
                     TRAINING_PLAN_REPOSITORY.update(
                         db,
-                        derived_plan["plan_id"],
+                        affected_plan_id,
                         updated_plan["name"],
                         updated_plan.get("goal") or "",
                         next_start,
@@ -13909,7 +13910,7 @@ def _apply_structured_training_changes(
                     _record_change(
                         db,
                         "training_plan",
-                        derived_plan["plan_id"],
+                        affected_plan_id,
                         "update",
                         plan,
                         updated_plan,

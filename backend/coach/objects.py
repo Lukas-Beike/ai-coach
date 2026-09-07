@@ -5,7 +5,7 @@ import re
 
 _CREATE_REQUEST_RE = re.compile(
     r"\b(?:add\w*|schedule\w*|create\w*|include\w*|"
-    r"zus[aä]tzlich\w*|erg[aä]nz\w*|hinzuf[uü]g\w*|hinzu\w*|"
+    r"zus[aä]tzlich\w*|erg[aä]nz\w*|f[uü]g\w*|hinzuf[uü]g\w*|hinzu\w*|"
     r"anleg\w*|erstell\w*)\b"
     r"(?:\W+\w+){0,6}\W+\b(?:workout\w*|session\w*|ride\w*|run\w*|"
     r"walk\w*|swim\w*|bike\w*|training\w*|einheit\w*|lauf\w*|"
@@ -14,12 +14,12 @@ _CREATE_REQUEST_RE = re.compile(
 _NEGATED_CREATE_REQUEST_RE = re.compile(
     r"\b(?:do\s+not|don't|never|not|nicht|kein\w*)\b.{0,50}\b(?:"
     r"add\w*|schedule\w*|create\w*|include\w*|new\w*|"
-    r"zus[aä]tzlich\w*|erg[aä]nz\w*|hinzuf[uü]g\w*|hinzu\w*|"
+    r"zus[aä]tzlich\w*|erg[aä]nz\w*|f[uü]g\w*|hinzuf[uü]g\w*|hinzu\w*|"
     r"anleg\w*|erstell\w*|neu\w*)\b"
 )
 _POST_VERBAL_NEGATED_CREATE_REQUEST_RE = re.compile(
     r"\b(?:add\w*|schedule\w*|create\w*|include\w*|"
-    r"zus[aä]tzlich\w*|erg[aä]nz\w*|hinzuf[uü]g\w*|hinzu\w*|"
+    r"zus[aä]tzlich\w*|erg[aä]nz\w*|f[uü]g\w*|hinzuf[uü]g\w*|hinzu\w*|"
     r"anleg\w*|erstell\w*)\b"
     r"(?:\W+\w+){0,4}\W+\b(?:no|not|kein\w*|nicht|never)\b"
 )

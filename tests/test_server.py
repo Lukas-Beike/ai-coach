@@ -5338,6 +5338,31 @@ class CoachTests(unittest.TestCase):
             plan = server.TRAINING_PLAN_REPOSITORY.get(db, plan_id)
         self.assertEqual((plan["start_date"], plan["end_date"]), ("2099-05-01", "2099-05-31"))
 
+    def test_mixed_batch_recomputes_each_affected_plan_bounds(self):
+        plan_ids = ["mixed-bounds-a", "mixed-bounds-b"]
+        with server.DB_LOCK, server.database() as db:
+            for index, plan_id in enumerate(plan_ids):
+                server.TRAINING_PLAN_REPOSITORY.create(
+                    db, plan_id, f"Mixed {index}", "Build", "2099-06-01", "2099-06-30", "planned", server.utc_now(),
+                )
+        units = [
+            server.create_local_planned_unit({
+                "date": f"2099-06-{10 + index:02d}", "sport": "Run", "name": f"Plan {index}",
+                "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+                "plan_id": plan_id, "plan_name": f"Mixed {index}",
+            })
+            for index, plan_id in enumerate(plan_ids)
+        ]
+        server._apply_structured_training_changes({"changes": [
+            {"local_id": units[0]["id"], "action": "update", "date": "2099-06-15"},
+            {"local_id": units[1]["id"], "action": "update", "date": "2099-06-16"},
+        ]})
+        with server.DB_LOCK, server.database() as db:
+            plans = [server.TRAINING_PLAN_REPOSITORY.get(db, plan_id) for plan_id in plan_ids]
+        self.assertEqual([(plan["start_date"], plan["end_date"]) for plan in plans], [
+            ("2099-06-15", "2099-06-15"), ("2099-06-16", "2099-06-16"),
+        ])
+
     def test_structured_training_plan_membership_includes_archived_and_standalone_references(self):
         plan_id = "membership-boundary-plan"
         with server.DB_LOCK, server.database() as db:

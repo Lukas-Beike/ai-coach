@@ -1122,6 +1122,15 @@ class CoachReviewTests(unittest.TestCase):
         self.assertNotIn("training_plan:marathon-plan", resolved["authorization_scope"])
         self.assertIn("local_plan_create", resolved["authorization_scope"])
 
+    def test_separable_german_create_request_uses_create_only_scope(self):
+        resolved = server.resolve_intent_objects(
+            self.intent("apply_training_changes", ["local_plan"]),
+            "Füge einen Lauf hinzu.",
+            [],
+        )
+        self.assertIn("local_plan_create", resolved["authorization_scope"])
+        self.assertNotIn("local_plan", resolved["authorization_scope"])
+
     def test_undo_proposal_is_top_level_recoverable_and_keeps_hash_guard(self):
         template=server.create_local_library_template({"name":"Synthetic undo","sport":"Run"})
         change=next(row for row in server.list_change_history() if row["entity_id"]==template["id"])
