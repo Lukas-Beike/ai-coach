@@ -5184,6 +5184,31 @@ class CoachTests(unittest.TestCase):
         server.update_training_plan(plan["id"], {"action": "update", "name": "Renamed Plan"})
         self.assertEqual(server._structured_training_state()["planning_revision"], before + 1)
 
+    def test_training_plan_metadata_undo_advances_planning_revision(self):
+        plan_entry = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Ride", "name": "Metadata", "description": "- 30m easy",
+            "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+        }], plan_name="Metadata Plan")[0]
+        plan = next(item for item in server.list_training_plans() if item["id"] == plan_entry["plan_id"])
+        server.update_training_plan(plan["id"], {"action": "update", "name": "Renamed Plan"})
+        metadata_change = next(
+            item for item in server.list_change_history()
+            if item["entity_type"] == "training_plan"
+            and item["entity_id"] == plan["id"]
+            and item["action"] == "update"
+        )
+        before_undo = server._structured_training_state()["planning_revision"]
+
+        server._apply_change_undo({
+            "change_id": metadata_change["id"],
+            "expected_current_hash": metadata_change["after_hash"],
+        })
+
+        self.assertEqual(server._structured_training_state()["planning_revision"], before_undo + 1)
+        restored = next(item for item in server.list_training_plans() if item["id"] == plan["id"])
+        self.assertEqual(restored["name"], "Metadata Plan")
+
     def test_history_capacity_covers_one_complete_plan_replacement(self):
         self.assertGreaterEqual(server.CHANGE_HISTORY_MAX_ROWS, server.COACH_TRAINING_CHANGE_LIMIT * 2)
 

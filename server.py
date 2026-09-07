@@ -2690,7 +2690,7 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                 after = target
         else:
             raise AppError(400, "Unbekannte lokale Änderung.")
-        if entity_type == "planned_unit":
+        if entity_type in {"planned_unit", "training_plan"}:
             _bump_planning_revision(db)
         _record_change(db, entity_type, entity_id, "undo", current, after, source="undo")
     return {"status": "undone", "change_id": change_id, "entity_type": entity_type, "entity_id": entity_id, "remote_untouched": True}
