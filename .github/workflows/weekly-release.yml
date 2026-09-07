@@ -324,13 +324,25 @@ jobs:
           ensure_release_test "$version_pr_number" "$version_branch" "$next_tag"
 
   create-release:
-    # The explicit promotion test is the single release-creation gate.
+    # A successful explicit promotion test is the normal release gate. The
+    # publish workflow also validates the merged promotion commit on main;
+    # accept that push result so a merge cannot leave the release stranded
+    # when the pre-merge dispatch's workflow_run event is not delivered with
+    # the promotion branch metadata.
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.name == 'Test and publish container image' &&
-      github.event.workflow_run.event == 'workflow_dispatch' &&
       github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-')
+      (
+        (
+          github.event.workflow_run.event == 'workflow_dispatch' &&
+          startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-')
+        ) ||
+        (
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main'
+        )
+      )
     runs-on: ubuntu-latest
     steps:
       - name: Create release GitHub App token
