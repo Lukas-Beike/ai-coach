@@ -12747,6 +12747,15 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
     """Recognise replacement language, distinct from ordinary bulk edits."""
     text = str(message or "").casefold()
     if re.search(
+        r"\b(?:for|in|starting|from|after|ab|f(?:u|ue|\N{LATIN SMALL LETTER U WITH DIAERESIS})r)\s+"
+        r"(?:the\s+)?(?:today|tomorrow|the\s+day\s+after\s+tomorrow|heute|morgen|uebermorgen|"
+        r"\N{LATIN SMALL LETTER U WITH DIAERESIS}bermorgen|"
+        r"(?:next|this|coming|last)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b"
+        r"(?:\s+\w+){0,4}\s+\b(?:training\s+plan|trainingsplan|planung|plan)\b",
+        text,
+    ):
+        return False
+    if re.search(
         r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
         r"(?:neu\s+)?(?:for|in|starting|from|after|ab|f(?:u|ue|\N{LATIN SMALL LETTER U WITH DIAERESIS})r)\s+"
         r"(?:the\s+)?(?:today|tomorrow|the\s+day\s+after\s+tomorrow|heute|morgen|uebermorgen|"
