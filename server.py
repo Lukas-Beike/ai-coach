@@ -13486,7 +13486,7 @@ COACH_STRUCTURED_TOOLS = [
         },
         strict=True,
     ),
-    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. Combine updates to existing local_id values with action=create entries for new dated workouts when the athlete requests a concrete calendar edit. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every existing-unit change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "Existing units need local_id; new units use action=create and include date, sport, name, description, duration_minutes, target, and rationale. For complete-plan edits, existing units also include expected_payload_hash.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string", "enum": ["create", "update", "delete", "archive", "restore"]}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]}, "type": {"type": "string"}, "sport": {"type": "string"}, "rationale": {"type": "string"}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
+    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. Combine updates to existing local_id values with action=create entries for new dated workouts when the athlete requests a concrete calendar edit. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every existing-unit change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "Existing units need local_id; new units use action=create and include date, sport, name, description, duration_minutes, target, and rationale. Omit plan_id to inherit an unambiguous referenced plan; set plan_id to an empty string for an explicitly standalone new unit. For complete-plan edits, existing units also include expected_payload_hash.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string", "enum": ["create", "update", "delete", "archive", "restore"]}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]}, "type": {"type": "string"}, "sport": {"type": "string"}, "rationale": {"type": "string"}, "plan_id": {"type": "string", "description": "Empty string explicitly keeps a created unit outside a plan."}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
     _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {"type": "object"}}}),
     _canonical_coach_tool("apply_workout_library_plan", "Schedule selected saved library templates locally after conflict checks; never writes remotely.", {"entries": {"type": "array", "items": {"type": "object"}}}),
     _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in.", {"payload": {"type": "object"}}),
@@ -13751,12 +13751,15 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
             if target not in {"AUTO", "POWER", "HR", "PACE"}:
                 raise AppError(400, "Das Workout-Ziel muss AUTO, POWER, HR oder PACE sein.", reason="invalid_change")
             normalized = normalize_workout(change)
-            prepared_changes.append({
+            prepared_change = {
                 "action": "create",
                 **{key: normalized[key] for key in (
                     "date", "sport", "name", "description", "duration_minutes", "target", "rationale"
                 )},
-            })
+            }
+            if "plan_id" in change:
+                prepared_change["plan_id"] = str(change.get("plan_id") or "").strip()
+            prepared_changes.append(prepared_change)
         else:
             prepared_changes.append(change)
     changes = prepared_changes
@@ -13813,10 +13816,27 @@ def _apply_structured_training_changes(arguments: dict[str, Any], *, require_rev
                     "plan_id": str(candidate_plan["id"]),
                     "plan_name": str(candidate_plan.get("name") or "")[:200],
                 }
+        for change in changes:
+            if str(change.get("action") or "update").strip().casefold() != "create" or "plan_id" not in change:
+                continue
+            requested_plan_id = str(change.get("plan_id") or "").strip()
+            if requested_plan_id and requested_plan_id != derived_plan.get("plan_id"):
+                raise AppError(
+                    403,
+                    "Eine neue Einheit darf nur dem eindeutig abgeleiteten Plan zugeordnet werden.",
+                    reason="intent_scope_denied",
+                )
         applied = []
         for change in changes:
             if str(change.get("action") or "update").strip().casefold() == "create":
-                entry_payload = {**change, "source": "coach", **derived_plan}
+                entry_payload = {**change, "source": "coach"}
+                if "plan_id" not in change:
+                    entry_payload.update(derived_plan)
+                elif not str(change.get("plan_id") or "").strip():
+                    entry_payload.pop("plan_id", None)
+                    entry_payload.pop("plan_name", None)
+                else:
+                    entry_payload.update(derived_plan)
                 applied.append({
                     "local_id": create_local_planned_unit(
                         entry_payload, db=db, bump_planning_revision=False
@@ -14420,7 +14440,11 @@ def _structured_coach_tool_result(
                 str(value).strip() for value in intent.get("_created_sync_entry_ids") or []
                 if str(value).strip()
             }
-            authorized_ids = replacement_ids | created_ids
+            changed_ids = {
+                str(value).strip() for value in intent.get("_changed_sync_entry_ids") or []
+                if str(value).strip()
+            }
+            authorized_ids = replacement_ids | created_ids | changed_ids
             normalized_entries = _library_bulk_request_entries(
                 entries,
                 require_hash=True,

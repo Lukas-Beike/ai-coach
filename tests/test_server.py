@@ -958,6 +958,32 @@ class CoachTests(unittest.TestCase):
         self.assertNotEqual(changed["id"], untouched["id"])
         self.assertEqual(result["status"], "queued")
 
+    def test_changed_batch_sync_accepts_the_coach_change_limit(self):
+        for index in range(101):
+            server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=index + 10)).isoformat(),
+                "sport": "Ride", "name": f"Changed {index}", "description": "- 20m easy",
+            })
+        pending = server._pending_plan_push_entries()
+        selected = pending[:101]
+        intent = {
+            "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
+            "artifact_id": None, "ambiguities": [],
+            "authorization_scope": [f"library_workout:{item['library_workout_id']}" for item in selected],
+            "_sync_changed_entries_only": True,
+            "_changed_sync_entry_ids": [item["library_workout_id"] for item in selected],
+        }
+        with patch.object(server, "enqueue_sync_job", return_value={"id": "job-large-changed"}) as enqueue:
+            result = server._structured_coach_tool_result(
+                "start_intervals_plan_sync", {"entries": selected}, intent=intent,
+                conversation_id="conversation-large-changed", client_turn_id="turn-large-changed",
+                session_csrf_hash="", sync_job_ids=[],
+            )
+        queued = [entry for call in enqueue.call_args_list for entry in call.args[2]["entries"]]
+        self.assertEqual(len(queued), 101)
+        self.assertEqual(enqueue.call_count, 4)
+        self.assertEqual(result["status"], "queued")
+
     def test_structured_coach_can_archive_multiple_templates_directly(self):
         templates = [server.create_local_library_template({
             "sport": "Ride", "name": f"Template {index}", "description": "- 30m Z2", "duration_minutes": 30,
@@ -5238,6 +5264,29 @@ class CoachTests(unittest.TestCase):
         created = next(item for item in server.list_planned_units() if item["id"] == created_id)
         self.assertEqual(created["plan_id"], plan_id)
         self.assertEqual(created["plan_name"], plan_name)
+
+    def test_structured_training_create_can_explicitly_stay_standalone(self):
+        plan_id = "explicit-standalone-plan"
+        with server.DB_LOCK, server.database() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db, plan_id, "Explicit standalone", "Build", "2099-03-01", "2099-03-31", "planned", server.utc_now(),
+            )
+        existing = server.create_local_planned_unit({
+            "date": "2099-03-01", "sport": "Run", "name": "Plan reference",
+            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "plan_id": plan_id, "plan_name": "Explicit standalone",
+        })
+        result = server._apply_structured_training_changes({
+            "changes": [
+                {"local_id": existing["id"], "action": "update", "name": "Updated"},
+                {"action": "create", "date": "2099-03-02", "sport": "Run", "name": "Standalone walk",
+                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test",
+                 "plan_id": ""},
+            ],
+        })
+        created_id = next(item["local_id"] for item in result["changes"] if item["local_id"] != existing["id"])
+        created = next(item for item in server.list_planned_units() if item["id"] == created_id)
+        self.assertNotIn("plan_id", created)
 
     def test_structured_training_plan_membership_includes_archived_and_standalone_references(self):
         plan_id = "membership-boundary-plan"

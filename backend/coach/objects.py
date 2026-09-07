@@ -39,6 +39,30 @@ def _has_non_negated_creation_request(text: str) -> bool:
     return False
 
 
+def _creation_clause_spans(text: str, candidates: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    """Return create clauses without treating an existing target as new."""
+    spans = []
+    candidate_names = {
+        str(ref.get("name") or "").casefold()
+        for ref in candidates
+        if str(ref.get("name") or "").strip()
+    }
+    for match in _CREATE_REQUEST_RE.finditer(text):
+        existing_target_after_to = False
+        for name in candidate_names:
+            pattern = r"(?<![\w-])" + re.escape(name) + r"(?![\w-])"
+            for target in re.finditer(pattern, text[match.start():match.end()]):
+                prefix = text[match.start():match.start() + target.start()]
+                if re.search(r"\bto\b", prefix):
+                    existing_target_after_to = True
+                    break
+            if existing_target_after_to:
+                break
+        if not existing_target_after_to:
+            spans.append(match.span())
+    return spans
+
+
 def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict[str, Any]]) -> dict[str, Any]:
     """Narrow selected object scopes before any action is authorized."""
     operations = {intent.get("operation"), *(intent.get("follow_up_operations") or [])}
@@ -83,9 +107,10 @@ def resolve_intent_objects(intent: dict[str, Any], message: str, refs: list[dict
             )
             if archived_mentioned and not active_id_mentioned:
                 return {"intent": "needs_clarification", "operation": None, "target_system": "none", "artifact_id": None, "authorization_scope": [], "follow_up_operations": [], "ambiguities": ["Der genannte Trainingsplan ist archiviert; bitte nenne einen aktiven Plan oder bestätige eine neue Planung."]}
-        creation_clause_spans = [
-            match.span() for match in _CREATE_REQUEST_RE.finditer(text)
-        ] if kind == "planned_unit" and "apply_training_changes" in operations else []
+        creation_clause_spans = (
+            _creation_clause_spans(text, candidates)
+            if kind == "planned_unit" and "apply_training_changes" in operations else []
+        )
         mentions = []
         for ref in candidates:
             for value in {ref["id"], ref["name"]} - {""}:
