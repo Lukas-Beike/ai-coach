@@ -38,15 +38,19 @@ jobs:
           github-token: ${{ github.token }}
           script: |
             let affectedPullRequests = [];
+            const dependabotLogin = 'dependabot[bot]';
             const releaseBotLogin = 'ai-coach-release-bot[bot]';
             const releaseVersionPattern = /^chore\/release-version-(\d+\.\d+\.\d+)$/;
             const shouldSkipCodexReview = (pullRequest) => {
               const versionMatch = releaseVersionPattern.exec(pullRequest.head?.ref || '');
               return (
-                pullRequest.user?.login === releaseBotLogin &&
-                pullRequest.base?.ref === 'develop' &&
-                versionMatch &&
-                pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`
+                pullRequest.user?.login === dependabotLogin ||
+                (
+                  pullRequest.user?.login === releaseBotLogin &&
+                  pullRequest.base?.ref === 'develop' &&
+                  versionMatch &&
+                  pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`
+                )
               );
             };
             if (context.eventName === 'push') {
@@ -107,7 +111,7 @@ jobs:
                   checkName: response.data.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: context.payload.comment.created_at,
                   // An explicit human request must review even an otherwise
-                  // exempt release-bot version PR.
+                  // exempt Dependabot or release-bot PR.
                   skipCodexReview: false,
                 }];
               }
@@ -167,7 +171,7 @@ jobs:
               return;
             }
 
-      - name: Mark trusted release-bot version PR as Codex-exempt
+      - name: Mark trusted Dependabot or release-bot PR as Codex-exempt
         if: matrix.skipCodexReview == true
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -176,67 +180,84 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
+            const dependabotLogin = 'dependabot[bot]';
             const releaseBotLogin = 'ai-coach-release-bot[bot]';
             const pullRequest = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: Number(process.env.PR_NUMBER),
             });
-            if (pullRequest.data.user?.login !== releaseBotLogin) {
+            const authorLogin = pullRequest.data.user?.login;
+            if (![dependabotLogin, releaseBotLogin].includes(authorLogin)) {
               core.setFailed('The Codex exemption was requested for an untrusted pull-request author.');
               return;
             }
 
-            const versionMatch = /^chore\/release-version-(\d+\.\d+\.\d+)$/.exec(
-              pullRequest.data.head.ref || '',
-            );
-            const version = versionMatch?.[1];
-            const expectedTitle = version
-              ? `chore(release): set application version to ${version}`
-              : '';
             const expectedHeadRepository = `${context.repo.owner}/${context.repo.repo}`;
-            const files = await github.paginate(github.rest.pulls.listFiles, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: Number(process.env.PR_NUMBER),
-              per_page: 100,
-            });
-            const file = files.length === 1 ? files[0] : null;
-            const changedLines = file
-              ? String(file.patch || '')
-                .split('\n')
-                .filter((line) => /^[+-](?!\+\+\+|---)/.test(line))
-              : [];
-            const hasExpectedVersion = changedLines.includes(`+APP_VERSION = "${version}"`);
-            const hasPreviousVersion = changedLines.some((line) => (
-              /^-APP_VERSION = "\d+\.\d+\.\d+"$/.test(line)
-            ));
             if (
-              !version ||
-              pullRequest.data.title !== expectedTitle ||
-              pullRequest.data.base.ref !== 'develop' ||
-              pullRequest.data.head.repo?.full_name !== expectedHeadRepository ||
-              !file ||
-              file.filename !== 'server.py' ||
-              file.status !== 'modified' ||
-              file.additions !== 1 ||
-              file.deletions !== 1 ||
-              file.changes !== 2 ||
-              changedLines.length !== 2 ||
-              !hasExpectedVersion ||
-              !hasPreviousVersion
+              authorLogin === dependabotLogin &&
+              pullRequest.data.head.repo?.full_name !== expectedHeadRepository
             ) {
-              core.setFailed(
-                'The release-bot Codex exemption requires an exact develop version-bump PR ' +
-                'that changes only APP_VERSION in server.py.',
-              );
+              core.setFailed('The Dependabot Codex exemption requires a same-repository pull request.');
               return;
+            }
+
+            let summary;
+            let version;
+            if (authorLogin === releaseBotLogin) {
+              const versionMatch = /^chore\/release-version-(\d+\.\d+\.\d+)$/.exec(
+                pullRequest.data.head.ref || '',
+              );
+              version = versionMatch?.[1];
+              const expectedTitle = version
+                ? `chore(release): set application version to ${version}`
+                : '';
+              const files = await github.paginate(github.rest.pulls.listFiles, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: Number(process.env.PR_NUMBER),
+                per_page: 100,
+              });
+              const file = files.length === 1 ? files[0] : null;
+              const changedLines = file
+                ? String(file.patch || '')
+                  .split('\n')
+                  .filter((line) => /^[+-](?!\+\+\+|---)/.test(line))
+                : [];
+              const hasExpectedVersion = changedLines.includes(`+APP_VERSION = "${version}"`);
+              const hasPreviousVersion = changedLines.some((line) => (
+                /^-APP_VERSION = "\d+\.\d+\.\d+"$/.test(line)
+              ));
+              if (
+                !version ||
+                pullRequest.data.title !== expectedTitle ||
+                pullRequest.data.base.ref !== 'develop' ||
+                pullRequest.data.head.repo?.full_name !== expectedHeadRepository ||
+                !file ||
+                file.filename !== 'server.py' ||
+                file.status !== 'modified' ||
+                file.additions !== 1 ||
+                file.deletions !== 1 ||
+                file.changes !== 2 ||
+                changedLines.length !== 2 ||
+                !hasExpectedVersion ||
+                !hasPreviousVersion
+              ) {
+                core.setFailed(
+                  'The release-bot Codex exemption requires an exact develop version-bump PR ' +
+                  'that changes only APP_VERSION in server.py.',
+                );
+                return;
+              }
+              summary = `The trusted release bot owns this exact version-only release pull request for ${version}; no Codex review is required.`;
+            } else {
+              summary = 'The trusted Dependabot bot owns this dependency update; no Codex review is required.';
             }
 
             const headSha = pullRequest.data.head.sha;
             const output = {
-              title: 'Codex review skipped for trusted release-bot version PR',
-              summary: `The trusted release bot owns this exact version-only release pull request for ${version} (${headSha}); no Codex review is required.`,
+              title: 'Codex review skipped for trusted Dependabot or release-bot PR',
+              summary: `${summary} Head commit: ${headSha}.`,
             };
             const checkRuns = await github.paginate(github.rest.checks.listForRef, {
               owner: context.repo.owner,
