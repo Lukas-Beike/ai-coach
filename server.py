@@ -8932,19 +8932,31 @@ def _insert_planned_unit(db: Any, entry: dict[str, Any], *, sync_dirty: int = 1,
     return entry
 
 
+_PLANNING_STATE_RESET_PENDING = False
+
+
 def _bump_planning_revision(db: Any, amount: int = 1) -> None:
     """Advance the optimistic-concurrency revision in the same transaction."""
+    global _PLANNING_STATE_RESET_PENDING
     if amount > 0:
-        # Keep the mutation safe even when an older/reset test database lacks
-        # the singleton row; current-schema startup normally creates it.
-        db.execute(
-            "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
-            (utc_now(),),
-        )
-        db.execute(
+        updated = db.execute(
             "UPDATE planning_state SET revision=revision+?, updated_at=? WHERE id=1",
             (int(amount), utc_now()),
         )
+        if updated.rowcount != 1 and _PLANNING_STATE_RESET_PENDING:
+            # Privacy deletion intentionally removes every durable row. Recreate
+            # the singleton only for that explicit reset, never for corruption.
+            db.execute(
+                "INSERT INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
+                (utc_now(),),
+            )
+            _PLANNING_STATE_RESET_PENDING = False
+            updated = db.execute(
+                "UPDATE planning_state SET revision=revision+?, updated_at=? WHERE id=1",
+                (int(amount), utc_now()),
+            )
+        if updated.rowcount != 1:
+            raise AppError(500, "Die lokale Planrevision fehlt; die Datenbank muss repariert werden.", reason="database_corrupt")
 
 
 def create_local_planned_unit(
@@ -8952,18 +8964,19 @@ def create_local_planned_unit(
     db: Any | None = None,
     *,
     bump_planning_revision: bool = True,
+    change_source: str = "local",
 ) -> dict[str, Any]:
     local_id = str(uuid.uuid4())
     entry = normalize_planned_unit(workout, local_id=local_id, external_id=None, sync_status="local")
     if db is not None:
         _insert_planned_unit(db, entry)
-        _record_change(db, "planned_unit", local_id, "create", None, entry)
+        _record_change(db, "planned_unit", local_id, "create", None, entry, source=change_source)
         if bump_planning_revision:
             _bump_planning_revision(db)
     else:
         with DB_LOCK, database() as own_db:
             _insert_planned_unit(own_db, entry)
-            _record_change(own_db, "planned_unit", local_id, "create", None, entry)
+            _record_change(own_db, "planned_unit", local_id, "create", None, entry, source=change_source)
             if bump_planning_revision:
                 _bump_planning_revision(own_db)
     return entry
@@ -12668,11 +12681,33 @@ def prompt_requests_workout_creation(message: str) -> bool:
     return (asks_for_workout or asks_for_schedule_window) and asks_to_create
 
 
+def _prompt_requests_non_mutating_plan_language(message: str) -> bool:
+    """Identify preview language that modifies the requested action itself."""
+    text = str(message or "").casefold()
+    preview = re.search(
+        r"\b(?:preview|draft|proposal|proposed|hypothetical|vorschau|entwurf|vorschlag)\w*\b",
+        text,
+    )
+    if not preview:
+        return False
+    replacement = re.search(
+        r"\b(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|redo\w*|"
+        r"revis\w*|change\w*|edit\w*|update\w*|Ã¤nder\w*|aender\w*|"
+        r"erset\w*|neu)\b",
+        text,
+    )
+    # In "replace my plan with this draft", draft identifies the input and
+    # must not turn an otherwise explicit replacement into a preview.
+    return not replacement or preview.start() < replacement.start()
+
+
 def prompt_requests_bulk_training_change(message: str) -> bool:
     """Recognise complete-plan edits while allowing scoped exclusions."""
     text = str(message or "").casefold()
+    if _prompt_requests_non_mutating_plan_language(text):
+        return False
     if re.search(
-        r"\b(?:preview|draft|proposal|proposed|hypothetical|vorschau|entwurf|vorschlag|"
+        r"\b(?:"
         r"what\s+happens\s+if|what\s+if|if\s+i|would\s+i|could\s+i|should\s+i|"
         r"was\s+wäre\s+wenn|wenn\s+ich|würde\s+ich|könnte\s+ich|soll\s+ich|kann\s+ich)\b",
         text,
@@ -12711,6 +12746,15 @@ def prompt_requests_bulk_training_change(message: str) -> bool:
 def prompt_requests_complete_plan_rebuild(message: str) -> bool:
     """Recognise replacement language, distinct from ordinary bulk edits."""
     text = str(message or "").casefold()
+    if re.search(
+        r"\b(?:training\s+plan|trainingsplan|planung|plan)\s+"
+        r"(?:neu\s+)?(?:for|in|starting|from|after|ab|f(?:u|ue|\N{LATIN SMALL LETTER U WITH DIAERESIS})r)\s+"
+        r"(?:the\s+)?(?:today|tomorrow|the\s+day\s+after\s+tomorrow|heute|morgen|uebermorgen|"
+        r"\N{LATIN SMALL LETTER U WITH DIAERESIS}bermorgen|"
+        r"(?:next|this|coming|last)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b",
+        text,
+    ):
+        return False
     negation = re.search(r"\b(?:kein\w*|nicht|nie|do\s+not|don't|never)\b", text)
     if negation:
         replacement = re.search(r"\b(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|redo\w*|neu|erset\w*)\b", text)
@@ -12726,7 +12770,7 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         text,
     ):
         return False
-    if re.search(r"\b(?:preview|draft|proposal|proposed|hypothetical|vorschau|entwurf|vorschlag)\w*\b", text):
+    if _prompt_requests_non_mutating_plan_language(text):
         return False
     if re.search(r"\b(?:except|excluding|but\s+keep|keep\s+(?:my|the)|ohne|au(?:s|ß)er|behalt\w*)\b", text):
         return False
@@ -12777,7 +12821,7 @@ def prompt_requests_complete_plan_rebuild(message: str) -> bool:
         re.search(r"\b(?:entire|whole|complete|all|my\s+full|full|gesamt\w*|komplett\w*|ganz\w*)\s+(?:(?:of|my|the|mein\w*|der|die|das|den)\s+){0,2}(?:training\s+plan|trainingsplan|plan|planung)\b", text)
         or re.search(
             r"\b(?:rebuild\w*|recreat\w*|replace\w*|replan\w*|redo\w*|neu|erset\w*)\s+"
-            r"(?:(?:my|the|mein\w*|der|die|das|den)\s+)?(?:training\s+plan|trainingsplan|plan|planung)\b",
+            r"(?:(?:my|the|existing|current|mein\w*|der|die|das|den)\s+){0,4}(?:training\s+plan|trainingsplan|plan|planung)\b",
             text,
         )
         or re.search(
@@ -13734,7 +13778,9 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
             entry_payload = {**workout, "source": "coach"}
             if plan_id:
                 entry_payload.update({"plan_id": plan_id, "plan_name": plan_name})
-            entry = create_local_planned_unit(entry_payload, db=db, bump_planning_revision=False)
+            entry = create_local_planned_unit(
+                entry_payload, db=db, bump_planning_revision=False, change_source="coach_replacement"
+            )
             created.append(entry)
         if rows or created or plan_id:
             _bump_planning_revision(db)
@@ -16575,6 +16621,7 @@ def privacy_delete_preview() -> dict[str, Any]:
 
 
 def delete_local_data() -> dict[str, Any]:
+    global _PLANNING_STATE_RESET_PENDING
     with MAINTENANCE_GATE.restore():
         conversation_id = get_kv("openai_conversation_id") or ""
         remote_delete_attempted = bool(conversation_id)
@@ -16591,6 +16638,7 @@ def delete_local_data() -> dict[str, Any]:
                 db.execute(f"DELETE FROM {table}")
             db.execute("DELETE FROM kv")
             set_kv("profile", json.dumps(DEFAULT_PROFILE), db)
+            _PLANNING_STATE_RESET_PENDING = True
         return {
             "status": "ok",
             "local_data_deleted": True,
