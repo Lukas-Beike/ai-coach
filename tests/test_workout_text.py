@@ -139,6 +139,24 @@ class WorkoutTextTests(unittest.TestCase):
     def test_strength_remains_free_text(self):
         self.assertIsNone(server.validate_workout_description(self.workout("Oberkoerperkraft: 3x8 Wiederholungen", 35, sport="WeightTraining")))
 
+    def test_non_endurance_sports_preserve_prose_through_normalization_and_readback(self):
+        for sport in server.INTERVALS_WORKOUT_TYPES - server.INTERVALS_ENDURANCE_WORKOUT_TYPES:
+            with self.subTest(sport=sport):
+                workout = self.workout("Technik und Beweglichkeit nach Bedarf", 30, sport=sport)
+                normalized = server.normalize_workout(workout)
+                self.assertEqual(normalized["description"], workout["description"])
+                payload = server.workout_event_payload("synthetic", normalized)
+                self.assertEqual(payload["type"], sport)
+                self.assertEqual(payload["moving_time"], 1800)
+                server.validate_intervals_workout_result(normalized, {"type": sport, "moving_time": 1800})
+                with self.assertRaises(server.AppError):
+                    server.validate_intervals_workout_result(normalized, {"type": "Run"})
+
+    def test_all_endurance_families_still_require_executable_steps(self):
+        for sport in server.INTERVALS_ENDURANCE_WORKOUT_TYPES:
+            with self.subTest(sport=sport):
+                self.assert_invalid(self.workout("Locker trainieren", 30, sport=sport), "missing_workout_steps")
+
     def test_run_cannot_be_confirmed_as_weight_training(self):
         workout = self.workout("- 30m Z1 HR", 30, sport="Run")
         with self.assertRaises(server.AppError) as raised:

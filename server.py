@@ -6092,6 +6092,17 @@ INTERVALS_WORKOUT_TYPES = {
     "Wheelchair", "Windsurf", "Workout", "Yoga", "Other",
 }
 
+# These sport families have duration/distance and intensity prescriptions.
+# Other supported activities retain free-text instructions (e.g. Yoga/Golf).
+INTERVALS_ENDURANCE_WORKOUT_TYPES = {
+    "Ride", "VirtualRide", "EBikeRide", "EMountainBikeRide", "GravelRide",
+    "MountainBikeRide", "Velomobile", "Handcycle",
+    "Run", "TrailRun", "VirtualRun", "Walk", "Hike", "Wheelchair",
+    "Swim", "OpenWaterSwim", "Rowing", "VirtualRow", "Canoeing", "Kayaking",
+    "StandUpPaddling", "NordicSki", "RollerSki", "Snowshoe",
+    "IceSkate", "InlineSkate", "Elliptical", "StairStepper",
+}
+
 
 def supported_competition_sport(value: Any) -> str | None:
     raw = str(value or "").strip().casefold()
@@ -8182,7 +8193,7 @@ def validate_workout_description(workout: dict[str, Any]) -> float | None:
     of silently adding distance or dropping a legitimate workout step.
     """
     sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
-    if sport == "WeightTraining":
+    if sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:
         return
     quantity = re.compile(
         r"\d+(?:[.,]\d+)?\s*(?P<unit>km|mtr|mi|yd|yards?|meters?|metres?|minutes?|mins?|seconds?|secs?|hours?|hrs?|(?<!\s)[hms]|['\"])(?![a-z])",
@@ -8271,7 +8282,7 @@ def validate_intervals_workout_result(workout: dict[str, Any], remote: dict[str,
     expected_sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
     if not isinstance(remote, dict) or remote.get("type") != expected_sport:
         raise AppError(502, "Intervals.icu hat die Sportart nicht korrekt bestaetigt.", reason="intervals_workout_sport_mismatch")
-    if expected_sport == "WeightTraining":
+    if expected_sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:
         return
     try:
         verify_workout_readback(str(workout.get("description") or ""), remote)

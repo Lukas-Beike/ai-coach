@@ -4,6 +4,12 @@ The supported upload contract is native workout text in `description`.
 Intervals.icu generates `workout_doc`; the application never uploads a
 self-generated `workout_doc` as evidence of successful parsing.
 
+Executable steps are required for endurance families such as cycling, running,
+swimming, walking/hiking, rowing, Nordic skiing and their indoor variants.
+Other supported activities, including strength, Yoga, Pilates, Golf and
+RockClimbing, retain prose instructions. Their exported sport is still checked
+on provider readback; no endurance graph or calculated load is required.
+
 References:
 
 - [Official workout builder guide](https://forum.intervals.icu/t/workout-builder/1163/1)

@@ -106,6 +106,8 @@ feedback, observations or unavailable data. Merely mentioning a completed
 workout as planning context does not ask to save separate feedback.
 
 Every endurance workout description must contain executable Intervals.icu
+steps. Non-endurance activities such as strength, Yoga, Pilates, Golf and
+RockClimbing can retain prose. For endurance sessions use executable
 steps, each starting '- ' followed by duration/distance and a machine-readable
 target: '- 15m 50-70%', '- 6km Z1 HR', '- 10m Z2 Pace'. Plain prose, 'Zone 2',
 'locker', or a duration alone cannot produce training load. Use ASCII hyphens
