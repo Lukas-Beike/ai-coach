@@ -133,12 +133,35 @@ class DiagnosticFollowupTests(unittest.TestCase):
         server.save_snapshot({"synced_at": server.utc_now(), "recent_activities": [{"id": "synthetic-ride", "name": "Synthetic recovery ride", "type": "Ride", "start_date_local": "2026-09-06T10:00:00"}]})
         self.turn("Morgen-Check-in", [{"output_text": "Wie haben sich deine Beine bei der gestrigen Fahrt angefühlt?"}])
         result, _ = self.turn("Beine fühlten sich gut an, die geringe Leistung war aber zäh und langweilig.", [
+            lambda _: self.call("inspect_activity_duplicates"),
             lambda _: self.call("save_activity_feedback", {"payload": {"activity_id": "synthetic-ride", "notes": "Beine gut; geringe Leistung fühlte sich zäh und langweilig an."}}, ["activity_feedback"]),
             {"output_text": "Deine Rückmeldung zur Fahrt ist gespeichert."},
         ])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(server.list_activity_feedback()), 1)
         self.assertEqual(server.list_activity_feedback()[0]["activity_id"], "synthetic-ride")
+
+    def test_duplicate_inspection_returns_confirmation_preview_without_remote_deletion(self):
+        activities = [{"id": "synthetic-wahoo", "source": "Wahoo", "type": "Ride",
+                       "start_date_local": "2026-09-06T10:00:00", "moving_time": 3600, "distance": 30000},
+                      {"id": "synthetic-garmin", "source": "Garmin", "type": "Ride",
+                       "start_date_local": "2026-09-06T10:01:00", "moving_time": 3610, "distance": 30100}]
+        server.save_snapshot({"synced_at": server.utc_now(), "recent_activities": activities})
+        before = server.latest_snapshot()
+        with patch.object(server, "IntervalsClient") as provider:
+            result, model = self.turn("Analysiere die letzte Fahrt.", [
+                lambda _: self.call("inspect_activity_duplicates"),
+                {"output_text": "Die Fahrt wurde doppelt aufgezeichnet. Die Wahoo-Aufzeichnung bleibt maßgeblich."},
+            ])
+        self.assertEqual(result["status"], "completed")
+        provider.assert_not_called()
+        self.assertEqual(server.latest_snapshot(), before)
+        output = json.loads(model.call_args.args[0]["input"][0]["output"])
+        self.assertTrue(output["ok"])
+        self.assertEqual(output["duplicate"]["canonical_id"], "synthetic-wahoo")
+        self.assertEqual(output["duplicate"]["duplicate_id"], "synthetic-garmin")
+        self.assertEqual(output["status"], "preview")
+        self.assertEqual(result["proposed_actions"][0]["action_type"], "delete_duplicate_intervals_activity")
 
     def test_failed_tool_is_diagnosable_without_detail_capture_and_without_content(self):
         private = "synthetic-private-content-never-export"

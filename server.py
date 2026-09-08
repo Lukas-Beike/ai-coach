@@ -14948,7 +14948,7 @@ def _chat_with_structured_coach_impl(
                         elif name == "apply_training_patch":
                             result = _apply_training_patch(arguments, action)
                         elif name == "inspect_activity_duplicates":
-                            duplicate = latest_wahoo_garmin_duplicate_activity()
+                            duplicate = latest_wahoo_garmin_duplicate()
                             result = {"ok": True, "duplicate": duplicate}
                             if duplicate and session_csrf_hash:
                                 result.update(duplicate_activity_delete_preview(duplicate, session_csrf_hash))
