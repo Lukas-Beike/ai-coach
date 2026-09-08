@@ -122,6 +122,11 @@ training load. A later explicit plan sync removes the mapped calendar workouts;
 repair sync also removes their identified duplicate copies. The separate,
 explicitly selected SICK calendar-event export remains available.
 
+Editing a prescription clears its old load, intensity and parsed workout;
+successful provider readback refreshes these values in the local calendar.
+Adaptive recovery uses Pace for swimming, power for cycling and HR for running
+and other aerobic sports.
+
 The regression suite executes the real Coach tool and job path with synthetic
 responses for a run incorrectly stored as WeightTraining, two remote copies,
 sport correction, duplicate removal, and a second idempotent repair.

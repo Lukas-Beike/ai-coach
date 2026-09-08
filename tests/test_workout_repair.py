@@ -109,6 +109,53 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertFalse(any(kind == "delete" for kind, _ in self.mutations))
         self.assertEqual(server.list_planned_units()[0]["sync_status"], "sync_error")
 
+    def test_planned_edit_clears_stale_metrics_and_repair_persists_verified_values(self):
+        local_id = self.seed()
+        old = {**self.remote["existing"], **parsed_workout_fixture(9000, sport="Run"), "icu_training_load": 150, "icu_intensity": 95}
+        server.update_planned_unit_sync_state(local_id, "synced", remote_event=old)
+        server.update_local_planned_workout(local_id, {"description": "- 75m Z1 HR", "duration_minutes": 75})
+        edited = server.list_planned_units()[0]
+        self.assertEqual(edited["moving_time"], 4500)
+        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+            self.assertNotIn(key, edited)
+
+        def upsert_with_intensity(payloads):
+            result = self.upsert(payloads)
+            self.remote[result[0]["id"]]["icu_intensity"] = 55
+            return result
+
+        with patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=upsert_with_intensity):
+            self.assertTrue(self.repair(local_id)["ok"])
+        current = server.list_planned_units()[0]
+        self.assertEqual(current["moving_time"], 4500)
+        self.assertEqual(current["icu_training_load"], 20)
+        self.assertEqual(current["icu_intensity"], 55)
+        self.assertEqual(current["workout_doc"], self.remote["existing"]["workout_doc"])
+
+    def test_adaptive_swim_uses_pace_and_clears_old_load_before_sync(self):
+        entry = server.save_workout_library_entries([{
+            "date": "2026-09-09", "name": "Synthetic swim", "sport": "Swim",
+            "description": "- 60m Z3 Pace", "duration_minutes": 60,
+        }])[0]
+        server.update_planned_unit_sync_state(entry["id"], "synced", remote_event={
+            "id": "swim-event", **parsed_workout_fixture(3600, sport="Swim", kind="pace", units="pace_zone", value=3), "icu_intensity": 90,
+        })
+        with patch.object(server, "local_feedback_context", return_value={"today": {"available_minutes": 30}}), patch.object(
+            server, "weather_state", return_value={}
+        ), patch.object(server, "list_external_calendar_events", return_value=[]):
+            preview = server.adaptive_replan_preview()
+        self.assertEqual(server.apply_adaptive_replan(preview["id"])["updated"], 1)
+        current = server.list_planned_units()[0]
+        self.assertEqual(current["sport"], "Swim")
+        self.assertIn("- 30m Z1 Pace", current["description"])
+        self.assertEqual(current["moving_time"], 1800)
+        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+            self.assertNotIn(key, current)
+        parsed = parsed_workout_fixture(1800, sport="Swim", kind="pace", units="pace_zone", value=1)
+        with patch.object(server.IntervalsClient, "upsert_calendar_events", return_value=[{"id": "swim-event", **parsed}]):
+            self.assertTrue(server._sync_selected_workout_library({"entries": server._pending_plan_push_entries()})["ok"])
+        self.assertEqual(server.list_planned_units()[0]["icu_training_load"], 20)
+
     def test_provider_io_allows_database_polling_and_excludes_same_unit_push(self):
         local_id = self.seed()
         polled = threading.Event()

@@ -8546,17 +8546,21 @@ def adaptive_recovery_replacement(
     available_minutes: int | None = None,
     max_minutes: int | None = None,
 ) -> dict[str, Any]:
-    sport = workout.get("sport", "Ride")
+    sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
     duration_limit = int(available_minutes or workout.get("duration_minutes") or 30)
     if max_minutes is not None:
         duration_limit = min(duration_limit, int(max_minutes))
     duration = max(15, min(duration_limit, 90))
-    if str(sport).casefold() in {"run", "running", "laufen", "lauf"}:
+    if sport == "Run":
         description = f"- {duration}m Z1 HR Easy aerobic run at conversational effort"
-    elif str(sport).casefold() in {"weighttraining", "strength", "kraft", "krafttraining"}:
+    elif sport == "Swim":
+        description = f"- {duration}m Z1 Pace Easy relaxed swim with controlled breathing"
+    elif sport == "WeightTraining":
         description = f"- {duration}m Mobility and easy strength; stop if pain increases"
-    else:
+    elif sport in {"Ride", "VirtualRide"}:
         description = f"- {duration}m 50-65% Easy endurance ride"
+    else:
+        description = f"- {duration}m Z1 HR Easy aerobic session at conversational effort"
     return {
         **workout,
         "duration_minutes": duration,
@@ -8974,6 +8978,8 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
             }
             if not replacement.get("archived") and not replacement.get("local_deleted"):
                 validate_workout_description(replacement)
+                for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+                    replacement.pop(key, None)
             db.execute(
                 "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
                 (json.dumps(replacement, ensure_ascii=False), now, draft_id),
@@ -9784,6 +9790,12 @@ def update_planned_unit_sync_state(local_id: str, state: str, error: str | None 
             if remote_event.get("external_id") not in (None, ""):
                 payload["remote_event_external_id"] = str(remote_event["external_id"])
                 payload["external_id"] = str(remote_event["external_id"])
+            if state == "synced":
+                for key in ("moving_time", "workout_doc", "icu_training_load", "icu_intensity"):
+                    if remote_event.get(key) is not None:
+                        payload[key] = remote_event[key]
+                    elif key != "moving_time":
+                        payload.pop(key, None)
         now = utc_now()
         if state == "synced":
             baseline_hash = _planned_unit_payload_hash(payload)
@@ -10704,7 +10716,13 @@ def update_local_planned_workout(
             )
             normalized["source"] = str(current.get("source") or "library")[:40]
             if action == "update":
-                validate_workout_description(normalized)
+                seconds = validate_workout_description(normalized)
+                minutes = as_number(normalized.get("duration_minutes"))
+                if seconds is not None or minutes is not None:
+                    normalized["moving_time"] = round(seconds if seconds is not None else minutes * 60)
+                if any(key in values for key in ("description", "duration_minutes", "target", "type", "sport")):
+                    for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+                        normalized.pop(key, None)
             for key in ("plan_id", "plan_name", "rationale", "remote_event_id", "remote_event_external_id", "private_calendar_adjustment", "local_deleted"):
                 if current.get(key) is not None:
                     normalized[key] = current[key]
