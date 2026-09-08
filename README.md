@@ -95,7 +95,8 @@ instructions do not delete or convert its data.
   the work. Model/provider selection is captured for the entire turn. If Coach
   processing stops after a sync was queued, the receipt distinguishes that
   interruption from the independent sync job and does not claim the transfer
-  completed or failed without a confirmed result.
+  completed or failed without a confirmed result. Failed OpenAI responses retain
+  only recognized error codes in diagnostics, never the provider's error text.
 - Related workout moves, edits and additions use one atomic change set with current
   revision and object hashes. Replanning until a target date changes only that period;
   later units remain intact. Constraints such as two strength sessions per week stay

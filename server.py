@@ -146,6 +146,15 @@ COACH_DEFAULT_MAX_OUTPUT_TOKENS = 6_000
 COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
 COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
+# Provider error messages can echo athlete data; retain only documented codes.
+OPENAI_RESPONSE_ERROR_CODES = frozenset({
+    "server_error", "rate_limit_exceeded", "invalid_prompt", "data_residency_mismatch",
+    "bio_policy", "misalignment_policy_violation", "vector_store_timeout", "invalid_image",
+    "invalid_image_format", "invalid_base64_image", "invalid_image_url", "image_too_large",
+    "image_too_small", "image_parse_error", "image_content_policy_violation", "invalid_image_mode",
+    "image_file_too_large", "unsupported_image_media_type", "empty_image_file",
+    "failed_to_download_image", "image_file_not_found",
+})
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
@@ -2940,6 +2949,9 @@ def _safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     reason = str(getattr(exc, "reason", "") or "").strip()
     if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
         result["reason"] = reason
+    provider_code = getattr(exc, "provider_error_code", None)
+    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+        result["provider_error_code"] = provider_code
     return result
 
 
@@ -6671,6 +6683,9 @@ def record_openai_status(status: dict[str, Any]) -> None:
         "http_status": status.get("http_status"),
         "updated_at": str(status.get("updated_at") or utc_now()),
     }
+    provider_code = status.get("provider_error_code")
+    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+        safe_status["provider_error_code"] = provider_code
     set_kv(OPENAI_STATUS_KEY, json.dumps(safe_status, ensure_ascii=False))
 
 
@@ -12076,8 +12091,14 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise AppError(502, "OpenAI response is not a JSON object.", reason="invalid_response")
     if result.get("error"):
-        record_openai_status({"state": "error", "reason": "response_error", "message": "OpenAI returned an error response.", "http_status": 200})
-        raise AppError(502, "OpenAI returned an error response.", reason="response_error")
+        provider_error = result["error"]
+        code = provider_error.get("code") if isinstance(provider_error, dict) else None
+        code = code if isinstance(code, str) and code in OPENAI_RESPONSE_ERROR_CODES else None
+        record_openai_status({"state": "error", "reason": "response_error", "message": "OpenAI returned an error response.",
+                              "http_status": 200, "provider_error_code": code})
+        error = AppError(502, "OpenAI returned an error response.", reason="response_error")
+        error.provider_error_code = code
+        raise error
     if path == "/responses":
         response_status = str(result.get("status") or "").casefold()
         if response_status in {"failed", "cancelled"}:
@@ -15345,6 +15366,8 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         if successes:
             if not cancelled:
                 text = "Die weitere Coach-Verarbeitung wurde unterbrochen."
+                if isinstance(error, AppError) and error.reason in {"response_error", "response_failed"}:
+                    text = "Die KI-Antwort konnte wegen eines Fehlers beim Antwortdienst nicht abgeschlossen werden."
             text += "\nBereits erfolgreich ausgefuehrt: " + "; ".join(coach_effect_label(step) for step in successes) + ". Diese Schritte bleiben gespeichert."
             if any(step["tool"] in {"start_intervals_plan_sync", "sync_competitions"}
                    and step["result"].get("status") == "queued" for step in successes):
@@ -16186,6 +16209,9 @@ def coach_diagnostic_history() -> list[dict[str, Any]]:
             item = value.get(key)
             if isinstance(item, str) and re.fullmatch(r"[A-Za-z_]{1,80}", item):
                 result[key] = item
+        provider_code = value.get("provider_error_code")
+        if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+            result["provider_error_code"] = provider_code
         if isinstance(value.get("status"), int) and 100 <= value["status"] <= 599:
             result["status"] = value["status"]
         frames = []
