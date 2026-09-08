@@ -1,6 +1,12 @@
 name: Codex review gate
 
 on:
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Re-evaluate a trusted release promotion from protected develop
+        required: true
+        type: string
   # Re-evaluate open pull requests when their target branch advances. The
   # resulting check remains blocking until a fresh review is requested.
   push:
@@ -43,6 +49,13 @@ jobs:
             const releaseBotLogin = 'ai-coach-release-bot[bot]';
             const manualReviewCheckName = 'Codex manual review request';
             const releaseVersionPattern = /^chore\/release-version-(\d+\.\d+\.\d+)$/;
+            const releasePromotionPattern = /^chore\/release-promotion-(\d+\.\d+\.\d+)$/;
+            const isReleasePromotion = (pullRequest) => {
+              const versionMatch = releasePromotionPattern.exec(pullRequest.head?.ref || '');
+              return pullRequest.user?.login === releaseBotLogin &&
+                pullRequest.base?.ref === 'main' && versionMatch &&
+                pullRequest.title === `chore(release): promote ${versionMatch[1]} to main`;
+            };
             const shouldSkipCodexReview = (pullRequest) => {
               const versionMatch = releaseVersionPattern.exec(pullRequest.head?.ref || '');
               return (
@@ -55,7 +68,7 @@ jobs:
                   pullRequest.base?.ref === 'develop' &&
                   versionMatch &&
                   pullRequest.title === `chore(release): set application version to ${versionMatch[1]}`
-                )
+                ) || isReleasePromotion(pullRequest)
               );
             };
             const getManualReviewRequest = async (pullRequest) => {
@@ -76,7 +89,30 @@ jobs:
                 .map((run) => run.completed_at || run.started_at)
                 .find(Boolean) || '';
             };
-            if (context.eventName === 'push') {
+            if (context.eventName === 'workflow_dispatch') {
+              const pullRequestNumber = Number(context.payload.inputs?.pull_request_number);
+              if (context.ref !== 'refs/heads/develop' || !Number.isSafeInteger(pullRequestNumber) || pullRequestNumber < 1) {
+                core.setFailed('Promotion re-evaluation requires protected develop and a valid pull request number.');
+                return;
+              }
+              const { data: pullRequest } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pullRequestNumber,
+              });
+              if (pullRequest.state !== 'open' || pullRequest.draft === true || !isReleasePromotion(pullRequest)) {
+                core.setFailed('Only an open trusted release promotion can be re-evaluated.');
+                return;
+              }
+              const manualReviewRequestedAt = await getManualReviewRequest(pullRequest);
+              affectedPullRequests = [{
+                pullRequestNumber,
+                baseRef: 'main',
+                checkName: 'Codex code review (main)',
+                reviewRequestedAt: manualReviewRequestedAt,
+                skipCodexReview: !manualReviewRequestedAt,
+              }];
+            } else if (context.eventName === 'push') {
               const base = context.ref.replace(/^refs\/heads\//, '');
               const pullRequests = await github.paginate(github.rest.pulls.list, {
                 owner: context.repo.owner,
@@ -103,25 +139,28 @@ jobs:
               const pullRequest = context.payload.pull_request;
               const baseChanged = context.payload.action === 'edited' && context.payload.changes?.base;
               const titleChanged = context.payload.action === 'edited' && context.payload.changes?.title;
-              const releaseBotTitleChanged = titleChanged && pullRequest.user?.login === releaseBotLogin && releaseVersionPattern.test(pullRequest.head?.ref || '');
+              const releaseBotTitleChanged = titleChanged && pullRequest.user?.login === releaseBotLogin &&
+                (releaseVersionPattern.test(pullRequest.head?.ref || '') || releasePromotionPattern.test(pullRequest.head?.ref || ''));
               const reviewBaselineChanged = baseChanged || releaseBotTitleChanged || context.payload.action === 'reopened';
               if (
                 pullRequest.draft !== true &&
                 ['develop', 'main'].includes(pullRequest.base.ref) &&
                 (context.payload.action !== 'edited' || reviewBaselineChanged)
               ) {
+                const manualReviewRequestedAt = await getManualReviewRequest(pullRequest);
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
                   baseRef: pullRequest.base.ref,
                   checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: reviewBaselineChanged
                     ? pullRequest.updated_at
-                    : '',
-                  skipCodexReview: shouldSkipCodexReview(pullRequest),
+                    : manualReviewRequestedAt,
+                  skipCodexReview: shouldSkipCodexReview(pullRequest) && !manualReviewRequestedAt,
                 }];
               }
             } else if (
               context.eventName === 'issue_comment' &&
+              context.ref === 'refs/heads/develop' &&
               context.payload.issue?.pull_request &&
               context.payload.comment?.user?.type !== 'Bot' &&
               ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(context.payload.comment.author_association) &&
@@ -231,150 +270,234 @@ jobs:
               repo: context.repo.repo,
               pull_number: Number(process.env.PR_NUMBER),
             });
-            const authorLogin = pullRequest.data.user?.login;
-            if (![dependabotLogin, releaseBotLogin].includes(authorLogin)) {
-              core.setFailed('The Codex exemption was requested for an untrusted pull-request author.');
-              return;
-            }
-
-            const expectedHeadRepository = `${context.repo.owner}/${context.repo.repo}`;
-            if (
-              authorLogin === dependabotLogin &&
-              (
-                pullRequest.data.base.ref !== 'develop' ||
-                !/^dependabot\//.test(pullRequest.data.head.ref || '') ||
-                pullRequest.data.head.repo?.full_name !== expectedHeadRepository
-              )
-            ) {
-              core.setFailed(
-                'The Dependabot Codex exemption requires a same-repository develop pull request ' +
-                'with a dependabot/* head branch.',
-              );
-              return;
-            }
-
-            let summary;
-            let version;
-            if (authorLogin === releaseBotLogin) {
-              const versionMatch = /^chore\/release-version-(\d+\.\d+\.\d+)$/.exec(
-                pullRequest.data.head.ref || '',
-              );
-              version = versionMatch?.[1];
-              const expectedTitle = version
-                ? `chore(release): set application version to ${version}`
-                : '';
-              const files = await github.paginate(github.rest.pulls.listFiles, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: Number(process.env.PR_NUMBER),
-                per_page: 100,
-              });
-              const file = files.length === 1 ? files[0] : null;
-              const changedLines = file
-                ? String(file.patch || '')
-                  .split('\n')
-                  .filter((line) => /^[+-](?!\+\+\+|---)/.test(line))
-                : [];
-              const hasExpectedVersion = changedLines.includes(`+APP_VERSION = "${version}"`);
-              const hasPreviousVersion = changedLines.some((line) => (
-                /^-APP_VERSION = "\d+\.\d+\.\d+"$/.test(line)
-              ));
-              if (
-                !version ||
-                pullRequest.data.title !== expectedTitle ||
-                pullRequest.data.base.ref !== 'develop' ||
-                pullRequest.data.head.repo?.full_name !== expectedHeadRepository ||
-                !file ||
-                file.filename !== 'server.py' ||
-                file.status !== 'modified' ||
-                file.additions !== 1 ||
-                file.deletions !== 1 ||
-                file.changes !== 2 ||
-                changedLines.length !== 2 ||
-                !hasExpectedVersion ||
-                !hasPreviousVersion
-              ) {
-                core.setFailed(
-                  'The release-bot Codex exemption requires an exact develop version-bump PR ' +
-                  'that changes only APP_VERSION in server.py.',
-                );
-                return;
-              }
-              summary = `The trusted release bot owns this exact version-only release pull request for ${version}; no Codex review is required.`;
-            } else {
-              const dependabotCommits = await github.paginate(github.rest.pulls.listCommits, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: Number(process.env.PR_NUMBER),
-                per_page: 100,
-              });
-              const generatedByDependabot = dependabotCommits.length > 0 && dependabotCommits.every((commit) => (
-                commit.author?.login === dependabotLogin &&
-                commit.commit?.author?.email === '49699333+dependabot[bot]@users.noreply.github.com' &&
-                /Signed-off-by: dependabot\[bot\] <support@github\.com>/.test(commit.commit?.message || '')
-              ));
-              const allowedDependencyFiles = new Set([
-                'requirements.txt',
-                'requirements-dev.txt',
-                'package.json',
-                'package-lock.json',
-                'Dockerfile',
-              ]);
-              const actionPinPathPattern = /^\.github\/(?:workflows|actions)\/[^/]+\.ya?ml$/;
-              const actionPinLinePattern = /^[+-]\s+uses:\s+[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$/i;
-              const files = await github.paginate(github.rest.pulls.listFiles, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: Number(process.env.PR_NUMBER),
-                per_page: 100,
-              });
-              const dependencyOnly = files.length > 0 && files.every((file) => {
-                if (allowedDependencyFiles.has(file.filename)) {
-                  return true;
-                }
-                if (!actionPinPathPattern.test(file.filename) || !file.patch) {
-                  return false;
-                }
-                const changedLines = String(file.patch)
-                  .split('\n')
-                  .filter((line) => /^[+-](?!\+\+\+|---)/.test(line));
-                return changedLines.length > 0 && changedLines.every((line) => actionPinLinePattern.test(line));
-              });
-              if (!generatedByDependabot || !dependencyOnly) {
-                core.setFailed(
-                  'The Dependabot Codex exemption requires Dependabot-authored commits and dependency-only changes.',
-                );
-                return;
-              }
-              summary = 'The trusted Dependabot bot owns this dependency update; no Codex review is required.';
-            }
-
             const headSha = pullRequest.data.head.sha;
-            const output = {
-              title: 'Codex review skipped for trusted Dependabot or release-bot PR',
-              summary: `${summary} Head commit: ${headSha}.`,
-            };
-            const checkRuns = await github.paginate(github.rest.checks.listForRef, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: headSha,
-              per_page: 100,
-            });
-            const existingRun = checkRuns
-              .filter((run) => run.name === process.env.CHECK_NAME)
-              .find((run) => run.status !== 'completed');
-            const now = new Date().toISOString();
-            if (existingRun) {
-              await github.rest.checks.update({
+            try {
+              const authorLogin = pullRequest.data.user?.login;
+              if (![dependabotLogin, releaseBotLogin].includes(authorLogin)) {
+                throw new Error('The Codex exemption was requested for an untrusted pull-request author.');
+              }
+
+              const expectedHeadRepository = `${context.repo.owner}/${context.repo.repo}`;
+              if (
+                authorLogin === dependabotLogin &&
+                (
+                  pullRequest.data.base.ref !== 'develop' ||
+                  !/^dependabot\//.test(pullRequest.data.head.ref || '') ||
+                  pullRequest.data.head.repo?.full_name !== expectedHeadRepository
+                )
+              ) {
+                throw new Error(
+                  'The Dependabot Codex exemption requires a same-repository develop pull request ' +
+                  'with a dependabot/* head branch.',
+                );
+              }
+
+              let summary;
+              let version;
+              let promotionSourceSha;
+              if (authorLogin === releaseBotLogin) {
+                const promotionMatch = /^chore\/release-promotion-(\d+\.\d+\.\d+)$/.exec(
+                  pullRequest.data.head.ref || '',
+                );
+                if (promotionMatch) {
+                  version = promotionMatch[1];
+                  if (
+                    pullRequest.data.user?.type !== 'Bot' ||
+                    pullRequest.data.base.ref !== 'main' ||
+                    pullRequest.data.head.repo?.full_name !== expectedHeadRepository ||
+                    pullRequest.data.title !== `chore(release): promote ${version} to main`
+                  ) {
+                    throw new Error('The promotion exemption requires an exact same-repository release-bot PR to main.');
+                  }
+
+                  // Read immutable Git objects as data. Never check out or execute
+                  // promotion code in this write-capable workflow.
+                  const { data: headCommit } = await github.rest.git.getCommit({
+                    ...context.repo, commit_sha: headSha,
+                  });
+                  const { data: developRef } = await github.rest.git.getRef({
+                    ...context.repo, ref: 'heads/develop',
+                  });
+                  const isAncestor = async (base, head) => {
+                    const { data: comparison } = await github.rest.repos.compareCommits({
+                      ...context.repo, base, head,
+                    });
+                    return ['ahead', 'identical'].includes(comparison.status) &&
+                      comparison.merge_base_commit?.sha === base;
+                  };
+                  if (await isAncestor(headSha, developRef.object.sha)) {
+                    // When main is already an ancestor, the release workflow can
+                    // promote an unchanged develop commit directly.
+                    if (!await isAncestor(pullRequest.data.base.sha, headSha)) {
+                      throw new Error('A direct promotion must contain the current main commit.');
+                    }
+                    promotionSourceSha = headSha;
+                  } else {
+                    // Squashed releases require one synthetic ours merge. Its
+                    // tree must remain exactly the protected develop snapshot.
+                    if (headCommit.parents?.length !== 2 ||
+                      headCommit.parents[1].sha !== pullRequest.data.base.sha) {
+                      throw new Error('A synthetic promotion must have the develop snapshot and current main as its two parents.');
+                    }
+                    promotionSourceSha = headCommit.parents[0].sha;
+                    const { data: sourceCommit } = await github.rest.git.getCommit({
+                      ...context.repo, commit_sha: promotionSourceSha,
+                    });
+                    if (!headCommit.tree?.sha || headCommit.tree.sha !== sourceCommit.tree?.sha ||
+                      !await isAncestor(promotionSourceSha, developRef.object.sha)) {
+                      throw new Error('The promotion must preserve exactly a commit tree reachable from protected develop.');
+                    }
+                  }
+                  const { data: tree } = await github.rest.git.getTree({
+                    ...context.repo, tree_sha: headCommit.tree.sha,
+                  });
+                  const server = tree.tree?.find((entry) => entry.path === 'server.py' &&
+                    entry.type === 'blob' && entry.mode === '100644');
+                  if (!server || tree.truncated) {
+                    throw new Error('The promotion tree must contain a regular server.py file.');
+                  }
+                  const { data: blob } = await github.rest.git.getBlob({
+                    ...context.repo, file_sha: server.sha,
+                  });
+                  const serverSource = blob.encoding === 'base64'
+                    ? Buffer.from(blob.content, 'base64').toString('utf8') : '';
+                  const versions = [...serverSource.matchAll(/^APP_VERSION = "(\d+\.\d+\.\d+)"\r?$/gm)];
+                  if (versions.length !== 1 || versions[0][1] !== version) {
+                    throw new Error('The promotion branch, title and immutable APP_VERSION must agree.');
+                  }
+                  // Allow develop to advance normally while the promotion waits,
+                  // but never accept a source removed from the protected branch.
+                  const { data: currentDevelop } = await github.rest.git.getRef({
+                    ...context.repo, ref: 'heads/develop',
+                  });
+                  if (!await isAncestor(promotionSourceSha, currentDevelop.object.sha)) {
+                    throw new Error('The promotion source is no longer reachable from protected develop.');
+                  }
+                  summary = `The trusted release bot promotes the unchanged protected develop tree at ${promotionSourceSha} for ${version}; no additional Codex review is required.`;
+                } else {
+                  const versionMatch = /^chore\/release-version-(\d+\.\d+\.\d+)$/.exec(
+                    pullRequest.data.head.ref || '',
+                  );
+                  version = versionMatch?.[1];
+                  const expectedTitle = version
+                    ? `chore(release): set application version to ${version}`
+                    : '';
+                  const files = await github.paginate(github.rest.pulls.listFiles, {
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: Number(process.env.PR_NUMBER),
+                    per_page: 100,
+                  });
+                  const file = files.length === 1 ? files[0] : null;
+                  const changedLines = file
+                    ? String(file.patch || '')
+                      .split('\n')
+                      .filter((line) => /^[+-](?!\+\+\+|---)/.test(line))
+                    : [];
+                  const hasExpectedVersion = changedLines.includes(`+APP_VERSION = "${version}"`);
+                  const hasPreviousVersion = changedLines.some((line) => (
+                    /^-APP_VERSION = "\d+\.\d+\.\d+"$/.test(line)
+                  ));
+                  if (
+                    !version ||
+                    pullRequest.data.title !== expectedTitle ||
+                    pullRequest.data.base.ref !== 'develop' ||
+                    pullRequest.data.head.repo?.full_name !== expectedHeadRepository ||
+                    !file ||
+                    file.filename !== 'server.py' ||
+                    file.status !== 'modified' ||
+                    file.additions !== 1 ||
+                    file.deletions !== 1 ||
+                    file.changes !== 2 ||
+                    changedLines.length !== 2 ||
+                    !hasExpectedVersion ||
+                    !hasPreviousVersion
+                  ) {
+                    throw new Error(
+                      'The release-bot Codex exemption requires an exact develop version-bump PR ' +
+                      'that changes only APP_VERSION in server.py.',
+                    );
+                  }
+                  summary = `The trusted release bot owns this exact version-only release pull request for ${version}; no Codex review is required.`;
+                }
+              } else {
+                const dependabotCommits = await github.paginate(github.rest.pulls.listCommits, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: Number(process.env.PR_NUMBER),
+                  per_page: 100,
+                });
+                const generatedByDependabot = dependabotCommits.length > 0 && dependabotCommits.every((commit) => (
+                  commit.author?.login === dependabotLogin &&
+                  commit.commit?.author?.email === '49699333+dependabot[bot]@users.noreply.github.com' &&
+                  /Signed-off-by: dependabot\[bot\] <support@github\.com>/.test(commit.commit?.message || '')
+                ));
+                const allowedDependencyFiles = new Set([
+                  'requirements.txt',
+                  'requirements-dev.txt',
+                  'package.json',
+                  'package-lock.json',
+                  'Dockerfile',
+                ]);
+                const actionPinPathPattern = /^\.github\/(?:workflows|actions)\/[^/]+\.ya?ml$/;
+                const actionPinLinePattern = /^[+-]\s+uses:\s+[^@\s]+@[0-9a-f]{40}(?:\s+#.*)?$/i;
+                const files = await github.paginate(github.rest.pulls.listFiles, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: Number(process.env.PR_NUMBER),
+                  per_page: 100,
+                });
+                const dependencyOnly = files.length > 0 && files.every((file) => {
+                  if (allowedDependencyFiles.has(file.filename)) {
+                    return true;
+                  }
+                  if (!actionPinPathPattern.test(file.filename) || !file.patch) {
+                    return false;
+                  }
+                  const changedLines = String(file.patch)
+                    .split('\n')
+                    .filter((line) => /^[+-](?!\+\+\+|---)/.test(line));
+                  return changedLines.length > 0 && changedLines.every((line) => actionPinLinePattern.test(line));
+                });
+                if (!generatedByDependabot || !dependencyOnly) {
+                  throw new Error(
+                    'The Dependabot Codex exemption requires Dependabot-authored commits and dependency-only changes.',
+                  );
+                }
+                summary = 'The trusted Dependabot bot owns this dependency update; no Codex review is required.';
+              }
+
+              const output = {
+                title: 'Codex review skipped for trusted Dependabot or release-bot PR',
+                summary: `${summary} Head commit: ${headSha}.`,
+              };
+              const checkRuns = await github.paginate(github.rest.checks.listForRef, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                check_run_id: existingRun.id,
-                status: 'completed',
-                conclusion: 'success',
-                completed_at: now,
-                output,
+                ref: headSha,
+                per_page: 100,
               });
-            } else {
+              if (checkRuns.some((run) => run.name === 'Codex manual review request' &&
+                run.status === 'completed' && run.conclusion === 'success' &&
+                run.output?.title === 'Manual Codex review requested')) {
+                throw new Error('An explicit manual Codex review request prevents automatic exemption.');
+              }
+              const { data: currentPullRequest } = await github.rest.pulls.get({
+                ...context.repo, pull_number: Number(process.env.PR_NUMBER),
+              });
+              if (currentPullRequest.state !== 'open' || currentPullRequest.draft === true ||
+                currentPullRequest.head.sha !== headSha ||
+                currentPullRequest.base.sha !== pullRequest.data.base.sha ||
+                currentPullRequest.base.ref !== pullRequest.data.base.ref ||
+                currentPullRequest.head.ref !== pullRequest.data.head.ref ||
+                currentPullRequest.head.repo?.full_name !== expectedHeadRepository ||
+                currentPullRequest.user?.login !== authorLogin ||
+                currentPullRequest.title !== pullRequest.data.title) {
+                throw new Error('The pull request changed during exemption validation; re-evaluate its current revision.');
+              }
+              const now = new Date().toISOString();
+              // A new check supersedes prior failures and remains independent
+              // of an older cancelled review job that might still finish.
               await github.rest.checks.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -386,10 +509,28 @@ jobs:
                 completed_at: now,
                 output,
               });
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              // Fail the required named check, including when an earlier
+              // exemption succeeded for this head before its base changed.
+              const now = new Date().toISOString();
+              await github.rest.checks.create({
+                ...context.repo,
+                name: process.env.CHECK_NAME,
+                head_sha: headSha,
+                status: 'completed',
+                conclusion: 'failure',
+                started_at: now,
+                completed_at: now,
+                output: { title: 'Codex exemption validation failed', summary: message },
+              });
+              core.setFailed(message);
             }
 
       - name: Check out trusted develop workflow sources
-        if: matrix.skipCodexReview != true && matrix.baseRef == 'develop'
+        # Dispatch and manual-comment workflows already run from protected
+        # develop. Use their current action even before the next main release.
+        if: matrix.skipCodexReview != true && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: develop
@@ -397,7 +538,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out trusted main workflow sources
-        if: matrix.skipCodexReview != true && matrix.baseRef == 'main'
+        if: matrix.skipCodexReview != true && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main

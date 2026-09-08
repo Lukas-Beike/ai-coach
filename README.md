@@ -847,12 +847,14 @@ the trusted `dependabot[bot]` are exempt on `develop` when all current commits
 are Dependabot-authored and the changed files are limited to dependency
 manifests, lockfiles, `Dockerfile`, or pinned GitHub Action references. This is
 needed because Dependabot PRs do not produce the subscription-backed review
-result. The trusted `ai-coach-release-bot[bot]` exception remains limited to
-an exact `develop` version-bump PR whose branch, title, repository, and
-one-file `APP_VERSION` diff match the release contract. The release promotion
-PR to `main` remains on the normal Codex review path. The workflow records a
-successful `Codex code review` check with the exemption reason only for
-validated Dependabot or release-bot PRs; a manual review request overrides the
+result. The trusted `ai-coach-release-bot[bot]` is also exempt for an exact
+`develop` version-bump PR whose branch, title, repository, and one-file
+`APP_VERSION` diff match the release contract. Its promotion PR to `main` is
+exempt only when its Git tree exactly matches a commit already integrated into
+`develop`, includes the current `main`, and its branch, title, repository, and
+`APP_VERSION` match the release version. New or changed promotion content fails
+this proof. The workflow records the base-specific required check with the
+exemption reason only for validated Dependabot or release-bot PRs; a manual review request overrides the
 exemption and remains tied to the current head commit across target-branch
 pushes. Retargeting a PR also establishes a fresh review baseline. Release-bot
 title edits establish a fresh baseline, while ordinary title-only edits do
@@ -861,7 +863,12 @@ the PR is closed or merged while the gate is waiting, the gate cancels its
 check instead of polling until the timeout.
 
 The workflow runs from the trusted target branch and never checks out or
-executes pull-request code. It uses only the GitHub token to read the summary,
+executes pull-request code. The release workflow also dispatches promotion
+validation from protected `develop`, so promotions can use the current proof
+even while `main` still contains an older gate. This dispatch accepts only
+release promotions and preserves manual review requests. Dispatch and manual
+comment events also use the current review action from protected `develop`.
+It uses only the GitHub token to read the summary,
 reviews, and reactions and to update the required check; no `OPENAI_API_KEY`
 repository secret is needed.
 Keep `Codex code review` required in the `develop` ruleset and
@@ -932,10 +939,13 @@ the latest release tag. If there is at least one commit, it opens a
 version-bump PR that increments `APP_VERSION` in `server.py`. After that PR is
 merged into `develop`, the workflow automatically enables squash auto-merge,
 creates a synchronized promotion branch, and opens a promotion PR to protected
-`main`. The promotion PR also uses squash auto-merge. When it is merged, the
-workflow creates a release tag matching `APP_VERSION` on the resulting `main`
-commit. The workflow explicitly starts the test check for its generated PRs
-and publishes the release after the promotion merge. Its release notes
+`main`. The promotion PR also uses squash auto-merge. Once the resulting `main`
+commit passes the test-and-publish workflow, its successful push run triggers
+creation of the release tag matching `APP_VERSION`. The tested commit must
+still be the current `main` commit. The workflow explicitly starts the test
+check for its generated PRs; those pre-merge tests do not wait for the promotion
+to merge or create a release. Pending release runs are queued so that a later
+event cannot replace an earlier release transition. Its release notes
 contain all commits since the previous release. It can also be started
 manually through **Actions -> Daily release -> Run workflow**. Manual runs may
 optionally provide a target `MAJOR.MINOR.PATCH` version such as `1.2.0` or
