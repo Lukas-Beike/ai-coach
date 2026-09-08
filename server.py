@@ -15343,7 +15343,12 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         status = "partial" if successes else "cancelled" if cancelled else "failed"
         text = "Die Coach-Verarbeitung wurde abgebrochen." if cancelled else "Der Coach-Auftrag konnte nicht abgeschlossen werden."
         if successes:
+            if not cancelled:
+                text = "Die weitere Coach-Verarbeitung wurde unterbrochen."
             text += "\nBereits erfolgreich ausgefuehrt: " + "; ".join(coach_effect_label(step) for step in successes) + ". Diese Schritte bleiben gespeichert."
+            if any(step["tool"] in {"start_intervals_plan_sync", "sync_competitions"}
+                   and step["result"].get("status") == "queued" for step in successes):
+                text += "\nDer Sync-Auftrag bleibt bestehen und wird unabhängig vom Coach verarbeitet. Sein Abschluss ist in dieser Antwort noch nicht bestätigt."
         if failures:
             text += "\n" + coach_failure_lines(failures, set(pending))
         if pending:

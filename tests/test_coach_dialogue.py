@@ -529,6 +529,45 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             job = db.execute("SELECT payload FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)).fetchone()
         self.assertEqual(len(json.loads(job["payload"])["entries"]), 1)
 
+    def test_sync_followup_can_read_job_and_inspect_duplicates(self):
+        server.save_workout_library_entries([self.workout("2026-09-08")])
+        def inspect(payload):
+            output = json.loads(payload["input"][0]["output"])
+            return self.call("get_sync_job", {"job_id": output["sync_job_id"]})
+        result, _ = self.turn("Sync zu intervals.icu durchführen", [
+            lambda _: self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
+                               target="intervals", remote_write=True, sync_scope="all_pending"),
+            inspect, lambda _: self.call("inspect_activity_duplicates"),
+            {"output_text": "Synchronisierung beauftragt."},
+        ])
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(all(step["result"]["ok"] for step in result["command_receipts"]))
+        self.assertEqual(server.sync_job_state(result["sync_job_ids"][0])["status"], "queued")
+
+    def test_sync_followup_failure_distinguishes_coach_interruption_and_keeps_job(self):
+        server.save_workout_library_entries([self.workout("2026-09-08")])
+        def broken(_):
+            raise server.AppError(503, "Synthetic model unavailable", reason="provider_unavailable")
+        with patch.object(server, "enqueue_sync_job", wraps=server.enqueue_sync_job) as enqueue:
+            result, _ = self.turn("Sync zu intervals.icu durchführen", [
+                lambda _: self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
+                                   target="intervals", remote_write=True, sync_scope="all_pending"), broken,
+            ], turn="sync-followup-failure")
+            replay, model = self.turn("Sync zu intervals.icu durchführen", [], turn="sync-followup-failure")
+        enqueue.assert_called_once()
+        model.assert_not_called()
+        self.assertEqual(replay, result)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["pending_operations"], [])
+        self.assertEqual(result["diagnostic_error"]["reason"], "provider_unavailable")
+        text = result["message"]["content"]
+        self.assertIn("Die weitere Coach-Verarbeitung wurde unterbrochen", text)
+        self.assertIn("Plansynchronisierung beauftragt", text)
+        self.assertIn("unabhängig vom Coach", text)
+        self.assertIn("noch nicht bestätigt", text)
+        self.assertNotIn("Der Coach-Auftrag konnte nicht abgeschlossen werden", text)
+        self.assertEqual(server.sync_job_state(result["sync_job_ids"][0])["status"], "queued")
+
     def test_failed_plan_cannot_sync_created_entries(self):
         with patch.object(server, "enqueue_sync_job") as enqueue:
             result, _ = self.turn("Planen und übertragen", [lambda _: self.call("start_intervals_plan_sync", {}, ["intervals_sync"],

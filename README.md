@@ -92,7 +92,10 @@ instructions do not delete or convert its data.
   tool receipts support recovery after process restarts; interrupted Gemini calls
   are reported without replaying their completed effects. Cancelling or resetting
   the chat closes a pending clarification. A disconnected browser does not cancel
-  the work. Model/provider selection is captured for the entire turn.
+  the work. Model/provider selection is captured for the entire turn. If Coach
+  processing stops after a sync was queued, the receipt distinguishes that
+  interruption from the independent sync job and does not claim the transfer
+  completed or failed without a confirmed result.
 - Related workout moves, edits and additions use one atomic change set with current
   revision and object hashes. Replanning until a target date changes only that period;
   later units remain intact. Constraints such as two strength sessions per week stay
