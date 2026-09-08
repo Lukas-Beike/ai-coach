@@ -32,7 +32,7 @@ class CoachReviewTests(unittest.TestCase):
 
 
     def workout(self, offset=0, sport="Run"):
-        return {"date": (date.today() + timedelta(days=50+offset)).isoformat(), "sport": sport, "name": "Synthetic session", "description": "Easy session", "duration_minutes": 30, "target": "AUTO"}
+        return {"date": (date.today() + timedelta(days=50+offset)).isoformat(), "sport": sport, "name": "Synthetic session", "description": "- 30m 60% Easy session", "duration_minutes": 30, "target": "AUTO"}
 
 
     def test_waited_full_refresh_preserves_all_time_window(self):
@@ -223,7 +223,7 @@ class CoachReviewTests(unittest.TestCase):
 
 
     def test_current_undo_token_enforces_session_hash_expiry_and_competing_execution(self):
-        template = server.create_local_library_template({"name": "Protected synthetic", "sport": "Run"})
+        template = server.create_local_library_template({"name": "Protected synthetic", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
         change = next(row for row in server.list_change_history() if row["entity_id"] == template["id"])
         proposal = server._history_preview(change["id"], "review-session")["proposed_action"]
         with self.assertRaises(server.AppError):
@@ -249,7 +249,7 @@ class CoachReviewTests(unittest.TestCase):
             results = list(executor.map(lambda _: execute(), range(2)))
         self.assertCountEqual(results, ["applied", "rejected"])
         self.assertEqual(server.list_workout_library(), [])
-        template = server.create_local_library_template({"name": "Expiry synthetic", "sport": "Run"})
+        template = server.create_local_library_template({"name": "Expiry synthetic", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
         change = next(row for row in server.list_change_history() if row["entity_id"] == template["id"])
         proposal = server._history_preview(change["id"], "review-session")["proposed_action"]
         confirmed = server.confirm_coach_action_preview(proposal["id"], "review-session")
@@ -259,7 +259,7 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(len(server.list_workout_library()), 1)
 
     def test_reload_preserves_pending_undo_but_changed_target_rejects_application(self):
-        template = server.create_local_library_template({"name": "Synthetic original", "sport": "Run"})
+        template = server.create_local_library_template({"name": "Synthetic original", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
         change = next(row for row in server.list_change_history() if row["entity_id"] == template["id"])
         proposal = server._history_preview(change["id"], "review-session")["proposed_action"]
         history = server.paged_chat_history(session_csrf_hash="review-session")
@@ -273,7 +273,7 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_adaptive_apply_after_day_change_preserves_now_past_unit(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        planned = server.save_workout_library_entries([{**self.workout(), "date": tomorrow, "duration_minutes": 60}])[0]
+        planned = server.save_workout_library_entries([{**self.workout(), "date": tomorrow, "description": "- 60m 60%", "duration_minutes": 60}])[0]
         server.save_checkin({"soreness": 8})
         preview = server.adaptive_replan_preview()
         self.assertTrue(preview["changes"])
@@ -286,7 +286,7 @@ class CoachReviewTests(unittest.TestCase):
         self.assertEqual(server.list_planned_units()[0]["duration_minutes"], planned["duration_minutes"])
 
     def test_expired_proposal_gc_and_confirmation_serialize_without_losing_drafts(self):
-        template = server.create_local_library_template({"name": "GC synthetic", "sport": "Run"})
+        template = server.create_local_library_template({"name": "GC synthetic", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
         change = next(row for row in server.list_change_history() if row["entity_id"] == template["id"])
         expired = server._history_preview(change["id"], "review-session")["proposed_action"]
         active = server._history_preview(change["id"], "review-session")["proposed_action"]
@@ -318,7 +318,7 @@ class CoachReviewTests(unittest.TestCase):
 
 
     def test_explicit_reconfirmation_after_reload_rotates_only_unused_token(self):
-        template = server.create_local_library_template({"name": "Token recovery", "sport": "Run"})
+        template = server.create_local_library_template({"name": "Token recovery", "sport": "Run", "description": "- 30m 60%", "duration_minutes": 30})
         change = next(row for row in server.list_change_history() if row["entity_id"] == template["id"])
         proposal = server._history_preview(change["id"], "review-session")["proposed_action"]
         first = server.confirm_coach_action_preview(proposal["id"], "review-session")
