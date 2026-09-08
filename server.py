@@ -8161,16 +8161,15 @@ def validate_workout_description(workout: dict[str, Any]) -> None:
     if sport == "WeightTraining":
         return
     quantity = re.compile(
-        r"\d+(?:[.,]\d+)?\s*(?:km|mtr|mi|yd|yards?|meters?|metres?|minutes?|mins?|seconds?|secs?|hours?|hrs?|[hms]|['\"])(?![a-z])",
-        re.IGNORECASE,
+        r"\d+(?:[.,]\d+)?\s*(?P<unit>km|mtr|mi|yd|yards?|meters?|metres?|minutes?|mins?|seconds?|secs?|hours?|hrs?|(?<!\s)[hms]|['\"])(?![a-z])",
     )
     for line_number, line in enumerate(str(workout.get("description") or "")[:12000].splitlines(), 1):
         step = re.match(r"^\s*-\s+(.+)$", line)
         if not step:
             continue
         text = step.group(1)
-        amount = quantity.search(text)
-        if amount and amount.start() != 0:
+        amounts = list(quantity.finditer(text))
+        if amounts and amounts[0].start() != 0:
             raise AppError(
                 400,
                 f"Workout-Text in Zeile {line_number} ist mehrdeutig: "
@@ -8179,6 +8178,25 @@ def validate_workout_description(workout: dict[str, Any]) -> None:
                 "als eigenen Absatz ohne '- ' schreiben; sonst zaehlt Intervals.icu sie als weitere Schritte.",
                 reason="ambiguous_workout_step",
             )
+        # Composite durations such as 1h30m are one provider step. Any other
+        # second quantity, including a distance range or an optional extension,
+        # would be parsed by Intervals.icu as another executable step.
+        if len(amounts) > 1:
+            time_units = {"h", "m", "s", "hours", "hrs", "minutes", "mins", "seconds", "secs", "'", '"'}
+            if any(
+                current.start() != previous.end()
+                or previous.group("unit").casefold() not in time_units
+                or current.group("unit").casefold() not in time_units
+                for previous, current in zip(amounts, amounts[1:])
+            ):
+                raise AppError(
+                    400,
+                    f"Workout-Text in Zeile {line_number} ist mehrdeutig: "
+                    "Ein Trainingsschritt darf nur eine Distanz oder Dauer enthalten; "
+                    "zusammengesetzte Zeiten wie '- 1h30m Z2' sind erlaubt. "
+                    "Optionale Gesamtstrecken als eigenen Absatz ohne '- ' schreiben.",
+                    reason="ambiguous_workout_step",
+                )
 
 
 def workout_event_payload(workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:

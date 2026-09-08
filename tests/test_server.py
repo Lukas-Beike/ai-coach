@@ -3698,6 +3698,8 @@ class CoachTests(unittest.TestCase):
             "- Optional another 10min",
             "- Walk for 5' if needed",
             "- 6-8km Z1 HR",
+            "- 6km Z1 HR; if fresh extend to 8km",
+            "- 6km-8km Z1 HR",
             "- Recovery 30s 50%",  # Rewrite valid provider cue-first syntax too.
         ):
             with self.subTest(description=description), self.assertRaises(server.AppError):
