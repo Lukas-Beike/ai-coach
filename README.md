@@ -288,6 +288,12 @@ removes older versioned caches on activation, and never caches API responses.
 Enable gzip or Brotli only at the documented trusted HTTPS reverse proxy; the
 application remains LAN/VPN-only.
 
+Live status connections pause while the app is hidden or offline and resume
+when it becomes active again. Repeated short disconnects increase the retry
+delay up to 30 seconds; ordinary API requests and status polling remain
+available during that delay. Only a stream that stays open for at least
+30 seconds resets the delay.
+
 ## Coach context projection
 
 The encrypted provider snapshots and the general local state remain complete.

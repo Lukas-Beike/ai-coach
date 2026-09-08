@@ -248,9 +248,7 @@ function showLogin() {
   rememberChatTurn(null);
   if (state.chatStatusTimer) clearTimeout(state.chatStatusTimer);
   state.chatStatusTimer = null;
-  state.stateEventSource?.close();
-  state.stateEventSource = null;
-  if (state.stateEventReconnectTimer) clearTimeout(state.stateEventReconnectTimer);
+  disconnectStateEvents();
   if (state.stateEventRefreshTimer) clearTimeout(state.stateEventRefreshTimer);
   state.stateEventReconnectTimer = null;
   state.stateEventRefreshTimer = null;
@@ -395,7 +393,7 @@ function handleStateEvent(event) {
 }
 
 function scheduleStateEventReconnect() {
-  if (state.stateEventReconnectTimer || !state.data || !navigator.onLine) return;
+  if (state.stateEventReconnectTimer || !state.data || !navigator.onLine || document.visibilityState !== "visible") return;
   const delay = state.stateEventBackoff;
   state.stateEventBackoff = Math.min(state.stateEventBackoff * 2, 30_000);
   state.stateEventReconnectTimer = setTimeout(() => {
@@ -404,16 +402,29 @@ function scheduleStateEventReconnect() {
   }, delay);
 }
 
+function disconnectStateEvents() {
+  const source = state.stateEventSource;
+  state.stateEventSource = null;
+  source?.close();
+  if (state.stateEventReconnectTimer) clearTimeout(state.stateEventReconnectTimer);
+  state.stateEventReconnectTimer = null;
+}
+
 function connectStateEvents() {
-  if (!state.data || !("EventSource" in window) || state.stateEventSource) return;
+  if (!state.data || !("EventSource" in window) || state.stateEventSource || state.stateEventReconnectTimer
+      || !navigator.onLine || document.visibilityState !== "visible") return;
   const source = new EventSource(`/api/state/events?since=${encodeURIComponent(state.stateEventLastId)}`, { withCredentials: true });
   state.stateEventSource = source;
-  source.onopen = () => { state.stateEventBackoff = 1000; };
+  let openedAt = null;
+  source.onopen = () => { if (state.stateEventSource === source) openedAt = performance.now(); };
   ["provider", "job", "planning", "coach", "sync", "reset"].forEach((name) => source.addEventListener(name, handleStateEvent));
   source.onerror = () => {
     if (state.stateEventSource !== source) return;
-    source.close();
-    state.stateEventSource = null;
+    // Receiving headers does not prove a stable stream: a proxy or browser
+    // can repeatedly disconnect immediately afterward. Preserve the backoff
+    // until a connection has actually stayed open for at least 30 seconds.
+    if (openedAt !== null && performance.now() - openedAt >= 30_000) state.stateEventBackoff = 1000;
+    disconnectStateEvents();
     scheduleStateEventReconnect();
   };
 }
@@ -557,10 +568,12 @@ function setupSyncStatusMonitoring() {
 
 function handleSyncVisibility() {
   if (document.visibilityState !== "visible") {
+    disconnectStateEvents();
     state.syncPoll.controller?.abort();
     releaseSyncPollLease();
     return;
   }
+  connectStateEvents();
   scheduleSyncPoll(0);
 }
 
@@ -639,6 +652,7 @@ function setupConnectivityStatus() {
   renderConnectivityStatus();
   window.addEventListener("online", () => renderConnectivityStatus(true));
   window.addEventListener("offline", () => renderConnectivityStatus(false));
+  window.addEventListener("offline", disconnectStateEvents);
   window.addEventListener("online", () => connectStateEvents());
 }
 
@@ -4655,12 +4669,14 @@ window.addEventListener("scroll", handleWindowScroll, { passive: true });
 window.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
 window.addEventListener("orientationchange", scheduleMobileViewportLayout, { passive: true });
 window.addEventListener("pageshow", () => {
+  connectStateEvents();
   scheduleMobileViewportLayout();
   if (state.chatInitialScrollPending && baseRoute() === "coach") scrollChatToLatest();
 }, { passive: true });
 window.visualViewport?.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
 window.visualViewport?.addEventListener("scroll", scheduleMobileViewportLayout, { passive: true });
 window.addEventListener("pagehide", savePwaActivity);
+window.addEventListener("pagehide", disconnectStateEvents);
 window.addEventListener("beforeunload", (event) => {
   if (!hasUnsavedChanges()) return;
   event.preventDefault();
