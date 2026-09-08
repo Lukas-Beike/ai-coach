@@ -1,4 +1,4 @@
 interface:
   display_name: "AI Coach Full Codebase Review"
   short_description: "Coach-first und Natural-Language Vollreview"
-  default_prompt: "Fuehre mit GPT-6 Astra (gpt-6-astra) und $ai-coach-codebase-review ein vollstaendiges Coach-first und Natural-Language Review der Codebasis und lokalen Anwendung durch. Pruefe besonders freie Formulierungen ohne Triggerwoerter, kontextuelle Folgeauftraege, Tool-Nutzung, Nachrichten-Races, API-Fehler, Integrationen und UI/UX."
+  default_prompt: "Fuehre mit $ai-coach-codebase-review ein vollstaendiges Coach-first und Natural-Language Review der Codebasis und lokalen Anwendung durch. Pruefe besonders freie Formulierungen ohne Triggerwoerter, kontextuelle Folgeauftraege, Tool-Nutzung, Nachrichten-Races, API-Fehler, Integrationen und UI/UX."

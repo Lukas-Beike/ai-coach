@@ -5,8 +5,6 @@ description: Review the complete Intervals Coach repository, not just a pull-req
 
 # AI Coach full codebase review
 
-Perform this review with GPT-6 Astra (`gpt-6-astra`). Record the model in the review scope. If GPT-6 Astra is unavailable, disclose that limitation and do not claim completion of the requested review.
-
 Perform a read-only, evidence-backed review of the entire current repository and the locally running application. Treat Coach-first behavior, natural-language understanding, and the athlete's complete usage journey as the center of the review, not as features among many. The result must reveal both defects and areas actually checked, so that "complete" does not merely mean that a few high-risk files were sampled.
 
 ## Central product question
