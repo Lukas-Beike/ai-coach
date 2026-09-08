@@ -68,7 +68,9 @@ def initialise_fixture():
     today = server.local_now().date()
     artifact.update(server._stage_coach_artifact("fixture-conversation", "fixture-stage", {
         "plan_name": "Fixture sport contract",
-        "workouts": [{"date": (today + timedelta(days=index)).isoformat(), "name": f"HTTP fixture {sport}", "sport": sport, "duration_minutes": 30, "description": "Synthetic local workout"}
+        "workouts": [{"date": (today + timedelta(days=index)).isoformat(), "name": f"HTTP fixture {sport}", "sport": sport, "duration_minutes": 30,
+                      "description": {"Run": "- 30m Z1 HR", "WeightTraining": "Synthetic local workout",
+                                      "VirtualRide": "- 30m 60%", "Swim": "- 30m Z1 Pace"}[sport]}
                      for index, sport in enumerate(("Run", "WeightTraining", "VirtualRide", "Swim"))],
     }))
 
