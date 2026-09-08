@@ -69,6 +69,28 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         return next({"library_workout_id": item["local_id"], "expected_payload_hash": item["expected_payload_hash"]}
                     for item in server._structured_training_state(include_inactive=True)["planned_units"] if item["local_id"] == local_id)
 
+    def test_invalid_imported_template_cannot_replace_valid_coach_prescription(self):
+        workout = {"date": "2026-09-09", "sport": "Ride", "name": "Easy endurance ride",
+                   "description": "- 60m 60% easy endurance ride", "duration_minutes": 60, "target": "POWER"}
+        invalid = {"id": "synthetic-template", "type": "Ride", "name": workout["name"],
+                   "description": "- 60m easy endurance ride", "duration_minutes": 60}
+        self.assertIsNone(server.find_similar_library_workout(workout, [invalid]))
+        with patch.object(server, "list_workout_library", return_value=[invalid]):
+            saved = server.save_workout_library_entries([workout])[0]
+        self.assertEqual(saved["description"], workout["description"])
+        self.assertEqual(saved["source"], "coach")
+
+        valid = {**invalid, "description": "- 60m Z1 HR Easy endurance ride"}
+        self.assertIs(server.find_similar_library_workout(workout, [valid]), valid)
+        with patch.object(server, "list_workout_library", return_value=[valid]):
+            reused = server.save_workout_library_entries([{**workout, "date": "2026-09-10"}])[0]
+        self.assertEqual(reused["description"], valid["description"])
+        self.assertEqual(reused["target"], "AUTO")
+        self.assertEqual(reused["source"], "library")
+
+        wrong_total = {**valid, "description": "- 30m Z1 HR Easy endurance ride"}
+        self.assertIsNone(server.find_similar_library_workout(workout, [wrong_total]))
+
     def repair(self, local_id):
         return server._sync_selected_workout_library({"repair": True, "entries": [self.selection(local_id)]})
 

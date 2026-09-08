@@ -8433,7 +8433,7 @@ def save_workout_library_entries(
                     "name": match.get("name") or workout["name"],
                     "description": match.get("description") or workout["description"],
                     "duration_minutes": max(5, round(match_duration)) if match_duration is not None else workout["duration_minutes"],
-                    "target": match.get("target") if match.get("target") in {"AUTO", "POWER", "HR", "PACE"} else workout["target"],
+                    "target": match.get("target") if match.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
                     "source": "library",
                 }
                 LOGGER.info(
@@ -9166,6 +9166,18 @@ def find_similar_library_workout(workout: dict[str, Any], library: list[dict[str
         if not candidate_text:
             continue
         if not compatible_workout_duration(expected_duration, library_workout_duration_minutes(candidate)):
+            continue
+        # Imported templates may contain prose or metadata that contradicts
+        # their steps. Validate the exact prescription we would copy before
+        # allowing a fuzzy match to replace valid Coach-authored workout text.
+        candidate_duration = library_workout_duration_minutes(candidate)
+        try:
+            validate_workout_description({
+                **candidate,
+                "duration_minutes": max(5, round(candidate_duration)) if candidate_duration is not None else expected_duration,
+                "target": candidate.get("target") if candidate.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
+            })
+        except AppError:
             continue
         description_similarity = difflib.SequenceMatcher(None, expected_text, candidate_text).ratio()
         name_similarity = difflib.SequenceMatcher(None, expected_name, candidate_name).ratio()
