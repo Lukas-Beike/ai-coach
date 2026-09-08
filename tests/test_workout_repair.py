@@ -111,6 +111,44 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertFalse(any(kind == "delete" for kind, _ in self.mutations))
         self.assertEqual(server.list_planned_units()[0]["sync_status"], "sync_error")
 
+    def test_multi_unit_repair_reads_calendar_twice_and_checks_all_final_results(self):
+        ids = []
+        for offset in range(3):
+            entry = server.save_workout_library_entries([{
+                "date": (date(2026, 9, 9) + timedelta(days=offset)).isoformat(),
+                "name": f"Synthetic run {offset}", "sport": "Run",
+                "description": "- 75m Z1 HR", "duration_minutes": 75,
+            }])[0]
+            ids.append(entry["id"])
+            remote = {"id": f"event-{offset}", "external_id": server.COACH_EVENT_EXTERNAL_PREFIX + entry["id"],
+                      "category": "WORKOUT", "start_date_local": entry["date"] + "T00:00:00", "name": entry["name"], "type": "Run"}
+            self.remote[remote["id"]] = remote
+            server.update_planned_unit_sync_state(entry["id"], "synced", remote_event=remote)
+
+        for corrupt in (False, True):
+            calls = []
+
+            def read(*args, **kwargs):
+                calls.append(1)
+                if len(calls) == 2:
+                    self.assertTrue(all(item["sync_status"] == "syncing" for item in server.list_planned_units()))
+                    if corrupt:
+                        self.remote["unexpected-copy"] = {**self.remote["event-0"], "id": "unexpected-copy"}
+                return deepcopy(list(self.remote.values()))
+
+            with patch.object(server.IntervalsClient, "get_paged_collection", side_effect=read):
+                result = server._sync_selected_workout_library({"repair": True, "entries": [self.selection(identity) for identity in ids]})
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(result["ok"], not corrupt)
+            self.assertEqual(result["failed_object_ids"], [ids[0]] if corrupt else [])
+
+    def test_open_water_recovery_uses_pace_like_pool_swimming(self):
+        workout = server.adaptive_recovery_replacement({"sport": "OpenWaterSwim", "duration_minutes": 60}, "Synthetic recovery", 30)
+        self.assertEqual(workout["sport"], "OpenWaterSwim")
+        self.assertIn("- 30m Z1 Pace", workout["description"])
+        self.assertEqual(server.validate_workout_description(workout), 1800)
+        server.validate_intervals_workout_result(workout, parsed_workout_fixture(1800, sport="OpenWaterSwim", kind="pace", units="pace_zone", value=1))
+
     def test_planned_edit_clears_stale_metrics_and_repair_persists_verified_values(self):
         local_id = self.seed()
         old = {**self.remote["existing"], **parsed_workout_fixture(9000, sport="Run"), "icu_training_load": 150, "icu_intensity": 95}

@@ -8553,7 +8553,7 @@ def adaptive_recovery_replacement(
     duration = max(15, min(duration_limit, 90))
     if sport == "Run":
         description = f"- {duration}m Z1 HR Easy aerobic run at conversational effort"
-    elif sport == "Swim":
+    elif sport in {"Swim", "OpenWaterSwim"}:
         description = f"- {duration}m Z1 Pace Easy relaxed swim with controlled breathing"
     elif sport == "WeightTraining":
         description = f"- {duration}m Mobility and easy strength; stop if pain increases"
@@ -9838,7 +9838,63 @@ def _planned_unit_sync_guard(local_id: str):
             PLANNED_UNIT_SYNCS.remove(local_id)
 
 
-def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str) -> dict[str, Any] | None:
+class _RepairCalendarBatch:
+    """Share two provider collection reads across a bounded repair job."""
+
+    def __init__(self, requested: list[dict[str, Any]]):
+        self.client = IntervalsClient()
+        self.athlete = quote(self.client.config.intervals_athlete_id, safe="")
+        today = local_now().date()
+        ids = [item["library_workout_id"] for item in requested]
+        with DB_LOCK, database() as db:
+            row = db.execute(
+                "SELECT MAX(json_extract(payload, '$.date')) AS newest FROM planned_units WHERE local_id IN ("
+                + ",".join("?" for _ in ids) + ")", ids,
+            ).fetchone()
+        self.params = {"oldest": today.isoformat(), "newest": max(str((row or {}).get("newest") or ""), (today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat()), "category": "WORKOUT"}
+        self.events: dict[str, dict[str, Any]] | None = None
+        self.read_error: Exception | None = None
+        self.completions: list[tuple[str, Callable]] = []
+
+    def read(self) -> list[dict[str, Any]]:
+        return self.client.get_paged_collection(f"/athlete/{self.athlete}/events", self.params, "repair_workouts")
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        if self.read_error is not None:
+            raise self.read_error
+        if self.events is None:
+            try:
+                self.events = {str(event["id"]): event for event in self.read() if event.get("id") not in (None, "")}
+            except Exception as exc:
+                self.read_error = exc
+                raise
+        return list(self.events.values())
+
+    def remember(self, event: dict[str, Any]) -> None:
+        self.events[str(event["id"])] = event
+
+    def forget(self, event_id: str) -> None:
+        self.events.pop(event_id, None)
+
+    def verify(self) -> dict[str, Exception | None]:
+        outcomes = {}
+        if not self.completions:
+            return outcomes
+        try:
+            final_events = self.read()
+        except Exception as exc:
+            return {local_id: exc for local_id, _ in self.completions}
+        for local_id, complete in self.completions:
+            try:
+                with _planned_unit_sync_guard(local_id):
+                    complete(final_events)
+                outcomes[local_id] = None
+            except Exception as exc:
+                outcomes[local_id] = exc
+        return outcomes
+
+
+def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str, *, batch: _RepairCalendarBatch | None = None) -> dict[str, Any] | None:
     """Reconcile one explicitly selected future unit using exact remote identities."""
     with _planned_unit_sync_guard(local_id):
         with DB_LOCK, database() as db:
@@ -9875,10 +9931,11 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str)
             identities.add(str(workout["remote_event_external_id"]))
         newest = max(planned_date, today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat()
 
-        def related_events():
-            events = client.get_paged_collection(
-                f"/athlete/{athlete}/events", {"oldest": today.isoformat(), "newest": newest, "category": "WORKOUT"}, "repair_workouts",
-            )
+        def related_events(events=None):
+            if events is None:
+                events = batch.snapshot() if batch else client.get_paged_collection(
+                    f"/athlete/{athlete}/events", {"oldest": today.isoformat(), "newest": newest, "category": "WORKOUT"}, "repair_workouts",
+                )
             related = []
             for event in events:
                 event_id = str(event.get("id") or "")
@@ -9917,6 +9974,8 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str)
             if not isinstance(result, dict) or not result.get("id"):
                 raise AppError(502, "Intervals.icu hat keine eindeutige reparierte Einheit zurueckgegeben.", reason="intervals_workout_verification_failed")
             remote_id = str(result["id"])
+            if batch:
+                batch.remember({**result, "external_id": payload["external_id"]})
             with DB_LOCK:
                 try:
                     recheck()
@@ -9936,20 +9995,31 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str)
             if removing or str(event["id"]) != remote_id:
                 recheck()
                 client.delete_event(str(event["id"]))
-        remaining = related_events()
-        if removing:
-            if remaining:
-                raise AppError(502, "Die entfernten Remote-Einheiten sind noch vorhanden.", reason="intervals_workout_verification_failed")
+                if batch:
+                    batch.forget(str(event["id"]))
+
+        def complete(events=None):
+            remaining = related_events(events)
+            verified = None
+            if removing:
+                if remaining:
+                    raise AppError(502, "Die entfernten Remote-Einheiten sind noch vorhanden.", reason="intervals_workout_verification_failed")
+            else:
+                if len(remaining) != 1 or str(remaining[0]["id"]) != remote_id:
+                    raise AppError(502, "Der Kalender bestaetigt keine eindeutige reparierte Einheit.", reason="intervals_workout_verification_failed")
+                if str(remaining[0].get("start_date_local") or "")[:10] != planned_date.isoformat() or remaining[0].get("name") != workout.get("name"):
+                    raise AppError(502, "Der Kalender bestaetigt Datum oder Namen der reparierten Einheit nicht.", reason="intervals_workout_verification_failed")
+                validate_intervals_workout_result(workout, remaining[0])
+                verified = remaining[0]
+            with DB_LOCK:
+                recheck()
+                update_planned_unit_sync_state(local_id, "synced", remote_event=verified)
+            return verified
+
+        if batch:
+            batch.completions.append((local_id, complete))
         else:
-            if len(remaining) != 1 or str(remaining[0]["id"]) != remote_id:
-                raise AppError(502, "Der Kalender bestaetigt keine eindeutige reparierte Einheit.", reason="intervals_workout_verification_failed")
-            if str(remaining[0].get("start_date_local") or "")[:10] != planned_date.isoformat() or remaining[0].get("name") != workout.get("name"):
-                raise AppError(502, "Der Kalender bestaetigt Datum oder Namen der reparierten Einheit nicht.", reason="intervals_workout_verification_failed")
-            validate_intervals_workout_result(workout, remaining[0])
-            result = remaining[0]
-        with DB_LOCK:
-            recheck()
-            update_planned_unit_sync_state(local_id, "synced", remote_event=result)
+            result = complete()
         return result
 
 
@@ -10583,6 +10653,7 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
     requested = _library_bulk_request_entries(payload.get("entries"), require_hash=True)
+    repair_batch = _RepairCalendarBatch(requested) if payload.get("repair") else None
     results: list[dict[str, Any]] = []
     for item in requested:
         with DB_LOCK, database() as db:
@@ -10606,7 +10677,7 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
         if is_planned:
             try:
                 if payload.get("repair"):
-                    event = _repair_local_planned_unit_calendar_entry(item["library_workout_id"], item["expected_payload_hash"])
+                    event = _repair_local_planned_unit_calendar_entry(item["library_workout_id"], item["expected_payload_hash"], batch=repair_batch)
                 else:
                     event = _sync_local_planned_unit_calendar_entry(item["library_workout_id"])
                 results.append({"library_workout_id": item["library_workout_id"], "status": "synced", "calendar_synced": event is not None})
@@ -10640,6 +10711,13 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
             })
         except Exception as exc:
             results.append({"library_workout_id": item["library_workout_id"], "status": "error", "error": redact_text(str(exc))[:500]})
+    if repair_batch:
+        verification = repair_batch.verify()
+        for item in results:
+            error = verification.get(item["library_workout_id"])
+            if error is not None:
+                update_planned_unit_sync_state(item["library_workout_id"], "sync_error", str(error))
+                item.update(status="error", error=redact_text(str(error))[:500], calendar_synced=False)
     failed = [item["library_workout_id"] for item in results if item["status"] in {"error", "conflict"}]
     status = "ok" if not failed else "partial" if len(failed) < len(results) else "error"
     return {"ok": not failed, "status": status, "results": results, "failed_object_ids": failed, "retry_scope": "Nur fehlgeschlagene Objekte erneut auswählen." if failed else None}

@@ -114,6 +114,11 @@ that can be retried. Races, unrelated workouts and completed/past records are
 not cleanup targets. An ambiguous same-name/date record without a matching
 identity is a conflict; the application never guesses ownership from a title.
 
+Each bounded repair job shares one initial calendar collection read and one
+final provider read across its units. Confirmed writes update the in-memory
+index, but only the final provider snapshot can mark a unit synchronized. A
+failed final read leaves the affected units retryable, retaining remote IDs.
+
 Provider requests do not hold the database lock, so status polling remains
 available. A per-unit guard excludes simultaneous pushes of the same workout.
 Payload hashes are rechecked before remote mutations and before recording
@@ -128,7 +133,7 @@ explicitly selected SICK calendar-event export remains available.
 
 Editing a prescription clears its old load, intensity and parsed workout;
 successful provider readback refreshes these values in the local calendar.
-Adaptive recovery uses Pace for swimming, power for cycling and HR for running
+Adaptive recovery uses Pace for pool and open-water swimming, power for cycling and HR for running
 and other aerobic sports.
 
 The regression suite executes the real Coach tool and job path with synthetic
