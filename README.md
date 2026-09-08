@@ -76,22 +76,27 @@ instructions do not delete or convert its data.
 - Push-to-talk voice input in the chat: short recordings are transcribed
   server-side and inserted into the editable message field; audio is not stored.
 - Coach chat with selectable OpenAI or Gemini models, configurable thinking level,
-  context preview, structured logs, and prioritized steering/FIFO message
-  queueing while the coach is responding. Responses are streamed through a
-  credential-free server-side SSE bridge; the chat view renders safe partial
-  Markdown, and **Abbrechen** cancels the active request while **Steuern**
-  remains a separate queued follow-up action. Reloading the page or losing the
-  streaming connection does not cancel the server-side coach request; its
-  persisted answer appears in the chat after the next load. Planning requests
-  longer than seven calendar days or containing more than seven requested
-  units are persisted as background jobs. OpenAI uses resumable background
-  responses whose response ID and progress survive a page reload or process
-  restart; Gemini executes the job locally in the background worker.
-  Failed planning steps report their cause in chat. A draft is checked for
-  valid workout fields and occupied dates before it is stored; committing
-  checks the calendar again. Internal draft/retry receipts are not displayed
-  as completed plans. At the tool-round limit, the Coach submits the remaining
-  tool results and requests a final summary without further actions.
+  context preview and prioritized steering/FIFO follow-ups. The Coach reads local
+  data and chooses tools in one conversational run; there is no separate intent
+  classifier or trigger-word gate. Short replies, corrections and references to
+  earlier messages can complete a request. Real ambiguities produce one concrete
+  question whose request context is stored locally across reloads and model changes.
+- Every HTTP chat turn is saved in the durable background queue before processing.
+  SSE reports the job identity and the browser polls its durable result. This avoids
+  guessing the complexity of a message from its wording. OpenAI response IDs and
+  tool receipts support recovery after process restarts; interrupted Gemini calls
+  are reported without replaying their completed effects. Cancelling or resetting
+  the chat closes a pending clarification. A disconnected browser does not cancel
+  the work. Model/provider selection is captured for the entire turn.
+- Related workout moves, edits and additions use one atomic change set with current
+  revision and object hashes. Replanning until a target date changes only that period;
+  later units remain intact. Constraints such as two strength sessions per week stay
+  attached to that plan, rather than becoming permanent profile preferences.
+  Every write records its source user messages, target and object/period scope.
+  Provider writes require the corresponding synchronization request. Failed steps
+  can be corrected within the bounded tool loop; receipts distinguish saved changes,
+  queued syncs and failures. See [the dialogue evaluation catalogue](docs/coach-dialogue-evaluation.md)
+  for the supported scenarios and the limits of mocked model tests.
 - The Coach start card contains only contextual quick actions, not provider
   connection badges. The morning check-in disappears after it completed for
   the athlete's local day. "Plan anpassen" appears only for an unapplied
@@ -226,9 +231,8 @@ instructions do not delete or convert its data.
   token budget; requests continue until OpenAI rejects them because the
   account or project quota is exhausted. An explicitly cancelled stream never
   executes a partial tool call; a lost browser connection leaves the request
-  running so its completed answer can be recovered after reload. One-week
-  plans and requests for at most seven units remain synchronous; larger plans
-  return control to the browser immediately and are polled from durable state.
+  running so its completed answer can be recovered after reload. All HTTP turns
+  return a durable job immediately and are polled from local state.
 
 ## Loading and synchronization
 
@@ -826,16 +830,19 @@ subscription-backed Codex GitHub review. Enable automatic Code Review for this
 repository in Codex Cloud, or request one with `@codex review` in the pull
 request. The gate follows the Codex summary comment that is posted as soon as a
 review starts and edited as its status changes. It passes only after that
-comment's Code Review row reports completion for the current pull-request
-commit and Codex has either published a matching submitted review or added its
+comment's Code Review row reports completion for a commit in the current
+pull-request history and Codex has either published a matching submitted review or added its
 post-completion thumbs-up reaction. A submitted review with inline findings is
-associated by review ID and fails the gate; the reaction is the connector's
-clean-review result when it intentionally creates no submitted review. A new
-push invalidates the old result and starts the gate again. A manual human
+associated by review ID and fails the gate until all of its Codex review
+threads are resolved; the reaction is the connector's clean-review result when
+it intentionally creates no submitted review. A new push retains this initial
+review as long as its reviewed commit remains an ancestor of the current PR
+head, so ordinary follow-up commits do not require another review. A manual human
 `@codex review` request requires a summary and result created or updated after
-that request, so an older result cannot be reused. Normal pull-request events
-use the connector's native automatic trigger; a human can manually request a
-fresh review with `@codex review`. Same-repository dependency-update PRs from
+that request, so an older result cannot satisfy an explicitly requested fresh
+review. Normal pull-request events use the connector's native automatic
+trigger; a human can still manually request a fresh review with `@codex review`.
+Same-repository dependency-update PRs from
 the trusted `dependabot[bot]` are exempt on `develop` when all current commits
 are Dependabot-authored and the changed files are limited to dependency
 manifests, lockfiles, `Dockerfile`, or pinned GitHub Action references. This is

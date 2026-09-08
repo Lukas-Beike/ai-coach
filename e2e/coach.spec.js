@@ -8,6 +8,8 @@ const navigation = [
   ["Mehr", "settingsPanel", "more"],
 ];
 
+
+
 async function openAuthenticatedApp(page) {
   await page.goto("/");
   const loginDialog = page.locator("#loginDialog");
@@ -610,4 +612,29 @@ test("authorized HTTP plan commit preserves sport through SQLCipher and calendar
   for (const [sport, label] of [["Run", "Laufen"], ["WeightTraining", "Kraft"], ["VirtualRide", "Rad indoor"], ["Swim", "Schwimmen"]]) {
     await expect(page.locator(".planned-entry").filter({ hasText: `HTTP fixture ${sport}` }).locator(".planned-meta")).toContainText(label);
   }
+});
+
+
+test("natural Coach clarification survives reload and saves the follow-up", async ({ page }) => {
+  await page.goto("/#coach");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: {} }));
+  await page.reload();
+  await page.locator("#messageInput").fill("Heute fühle ich mich nicht fit.");
+  await page.locator("#messageInput").press("Enter");
+  await expect(page.locator("#messages")).toContainText("Wie fühlen sich deine Beine an?");
+  await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
+  await page.reload();
+  await expect(page.locator("#messages")).toContainText("Wie fühlen sich deine Beine an?");
+  const jumpToComposer = page.locator("#chatJumpToComposer");
+  if (await jumpToComposer.isVisible()) await jumpToComposer.click();
+  await page.locator("#messageInput").fill("Ziemlich schwer.");
+  await page.locator("#messageInput").press("Enter");
+  await expect(page.locator("#messages")).toContainText("Deine Rückmeldung ist gespeichert.");
+  await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
+  const history = await page.evaluate(() => api("/api/chat/history"));
+  expect(history.messages.filter((item) => item.role === "user")).toHaveLength(2);
+  const data = await page.evaluate(() => api("/api/feedback"));
+  expect(JSON.stringify(data)).toContain("Schwere Beine");
+  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: {} }));
 });

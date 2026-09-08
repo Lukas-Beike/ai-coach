@@ -38,11 +38,12 @@ Reference the narrowest useful line span in prose, but do not omit relevant call
 
 List non-finding design risks, systemic test gaps, or refactoring candidates separately. Make clear why they are not classified as confirmed defects.
 
-### Coach-first verdict
+### Coach-first and natural-language verdict
 
 State whether the Coach is demonstrably the reliable primary interface. Summarize:
 
 - capability parity between UI/API operations and Coach tools;
+- natural paraphrases, contextual follow-ups, references, corrections, ambiguity handling, and freedom from trigger-word or exact-name requirements;
 - direct execution of explicit authorized requests versus protected special cases;
 - message-lifecycle reliability and recovery;
 - tool selection, durable effects, receipts, and truthful final wording;

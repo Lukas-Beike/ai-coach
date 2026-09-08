@@ -6,7 +6,7 @@ This is the mandatory runtime and white-box audit for the application's primary 
 
 Create these ledgers before testing. Derive their rows from the current source rather than assuming this document is exhaustive.
 
-1. **Coach capability ledger:** user goal, UI/API capability, natural-language examples, intent classifier, canonical tool, read/write scope, authorization rule, implementation, durable effect, receipt, refresh event, UI result, tests, runtime result.
+1. **Coach capability ledger:** user goal, UI/API capability, varied natural-language examples, dialogue context and reference resolution, canonical tool, read/write scope, authorization rule, implementation, durable effect, receipt, refresh event, UI result, tests, runtime result.
 2. **Message lifecycle ledger:** state, initiating event, frontend variables/DOM, server job/receipt/message state, exit events, restart behavior, test and runtime evidence.
 3. **API contract ledger:** every route and frontend caller with method, auth/CSRF, request shape, success shape, 400/401/403/404/409/413/422/429/5xx behavior, retry rule, user-visible error, and tests.
 4. **Provider ledger:** capability, data window, cursor/pagination, freshness/provenance, local persistence, last-good behavior, timeout/retry, partial failure, Coach visibility, UI visibility, named-sync path, remote-write risk, tests, and runtime result.
@@ -16,7 +16,7 @@ An implementation path is not covered until its schema, callers, state transitio
 
 ## 2. Coach-first acceptance model
 
-Build the current tool inventory from `COACH_TOOLS`, `COACH_PROPOSAL_TOOLS`, `COACH_STRUCTURED_TOOLS`, `COACH_CANONICAL_TOOL_NAMES`, `COACH_INTENT_TOOL_MAP`, `MUTATING_COACH_TOOL_NAMES`, `STRUCTURED_READ_ONLY_TOOLS`, `requested_coach_tool`, and `_structured_coach_tool_result`. Find drift and unreachable or unrepresented operations between these sets.
+Build the current tool inventory from the active Coach dialogue schemas, read-only/mutating tool sets, dispatcher, request-state contract, authorization checks, and execution receipts. Find drift and unreachable or unrepresented operations. Treat obsolete classifiers, keyword routers, forced-tool maps, and parallel legacy Coach paths as findings when they still influence access or behavior.
 
 For every user-facing capability, verify whether the athlete can perform it naturally through the Coach when the product intends that capability. Include at least:
 
@@ -26,7 +26,7 @@ For every user-facing capability, verify whether the athlete can perform it natu
 - handle missing identifiers by listing/resolving current objects rather than hallucinating IDs or asking the athlete to use a hidden manual UI workflow;
 - provide a truthful action receipt and final answer that names what changed, what stayed local, what synchronized remotely, what failed, and what remains pending.
 
-Test direct German natural-language variants, short commands, polite commands, corrections, follow-ups that rely on dialogue context, multiple actions in one prompt, mixed read/write prompts, ambiguous requests, negation, hypothetical questions, quotations of an instruction, and provider/calendar text containing instruction-like language.
+Test direct German natural-language variants, short and elliptical answers, polite commands, corrections, pronouns, ordinal references, relative dates, typos, paraphrases, follow-ups that complete a pending request, multiple actions in one prompt, mixed read/write prompts, ambiguous requests, negation, hypothetical questions, quotations of an instruction, and provider/calendar text containing instruction-like language. Vary wording independently of expected tool choice; scripted model outputs prove execution mechanics, not natural-language understanding.
 
 Coach-first invariants:
 
@@ -37,6 +37,9 @@ Coach-first invariants:
 - model output alone never grants authority, widens scope, changes target system, or supplies missing user intent;
 - a partial multi-tool failure is reported precisely and does not describe the entire request as successful;
 - retries, repeated tool calls, browser resubmission, and recovered jobs do not duplicate durable or remote effects.
+- no fixed trigger word, phrase list, command syntax, exact-name requirement, or UI-only vocabulary is required to unlock reading, planning, mutation, or synchronization;
+- only decision-relevant ambiguity produces a question, and the question names understandable dated choices rather than internal IDs;
+- a model/provider switch, restart, or short follow-up does not discard the open request or its resolved references.
 
 ## 3. Message lifecycle and disappearing-message audit
 
@@ -122,7 +125,7 @@ Correlate browser network evidence with the backend validator and originating UI
 For every current tool, verify this complete chain:
 
 ```text
-athlete wording -> intent/scope -> forced or model-selected tool -> schema arguments
+athlete wording + dialogue/request state -> reference resolution -> model-selected tool -> schema arguments
 -> canonical name -> authorization -> idempotency/version guard -> handler/transaction
 -> provider job if any -> command receipt/change history -> state event/bootstrap
 -> final Coach wording -> visible UI and reload persistence
@@ -131,7 +134,8 @@ athlete wording -> intent/scope -> forced or model-selected tool -> schema argum
 Test each tool with valid, boundary, malformed, stale, duplicate, unauthorized, ambiguous, and partial-provider-failure inputs. Specifically look for:
 
 - schema fields accepted by the model but rejected or ignored by handlers, and handler capabilities absent from schemas;
-- alias/canonical-name drift, wrong `COACH_INTENT_TOOL_MAP`, missing dispatcher branches, tools excluded from the wrong read/write set, or forced-tool logic selecting a different operation;
+- alias/canonical-name drift, missing dispatcher branches, tools excluded from the wrong read/write set, or routing logic selecting a different operation;
+- keyword, regex, phrase-list, or isolated-classifier gates that suppress tools for valid paraphrases or mistake negated, quoted, hypothetical, assistant, or external text for write authority;
 - arguments synthesized from stale context, hallucinated IDs, unsafe defaults, silent truncation, and date or timezone changes;
 - local durable success followed by failed Coach follow-up, missing receipt, stale UI, or wording that claims remote success;
 - multi-round tool loops, repeated non-read-only tools, tool-order dependency, limit exhaustion, and mixed success;

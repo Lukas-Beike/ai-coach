@@ -1,17 +1,19 @@
 ---
 name: ai-coach-codebase-review
-description: Review the complete Intervals Coach repository, not just a pull-request diff, for actionable correctness, security, privacy, data-integrity, Coach, provider-sync, PWA, deployment, test, and maintainability problems. Use when a full codebase audit or application-wide review of ai-coach is requested; do not use for ordinary change-scoped PR reviews.
+description: Review the complete Intervals Coach repository, not just a pull-request diff, with Coach-first behavior and natural-language tool use as central product criteria alongside correctness, security, privacy, data integrity, provider sync, PWA, deployment, tests, and maintainability. Use for a full ai-coach codebase audit; do not use for ordinary change-scoped PR reviews.
 ---
 
 # AI Coach full codebase review
 
-Perform a read-only, evidence-backed review of the entire current repository and the locally running application. Treat Coach-first behavior and the athlete's complete usage journey as the center of the review, not as one feature among many. The result must reveal both defects and areas actually checked, so that "complete" does not merely mean that a few high-risk files were sampled.
+Perform a read-only, evidence-backed review of the entire current repository and the locally running application. Treat Coach-first behavior, natural-language understanding, and the athlete's complete usage journey as the center of the review, not as features among many. The result must reveal both defects and areas actually checked, so that "complete" does not merely mean that a few high-risk files were sampled.
 
 ## Central product question
 
 Judge every subsystem by this question: can the athlete reliably understand, request, observe, interrupt, resume, and verify the intended result through the Coach-first application without messages, intent, state, or provider truth being lost?
 
-The Coach is the primary interaction surface for planning, local changes, feedback, current-data requests, and named synchronization. Build a parity map from every supported application capability and API mutation to its Coach tool/intent path. An explicit natural-language instruction must perform the matching authorized action as designed, without an unnecessary generic confirmation loop. Hypothetical or informational prompts stay read-only. Preserve the special boundaries for adaptive preview/apply, destructive privacy operations, and explicit remote workout synchronization.
+The Coach is the primary interaction surface for planning, local changes, feedback, current-data requests, and named synchronization. Build a parity map from every supported application capability and API mutation to its contextual Coach tool path. An explicit natural-language instruction must perform the matching authorized action as designed, without an unnecessary generic confirmation loop. Hypothetical or informational prompts stay read-only. Preserve the special boundaries for adaptive preview/apply, destructive privacy operations, and explicit remote workout synchronization.
+
+Natural language is a product invariant. The athlete must not need command syntax, exact object names, IDs, tool names, fixed trigger words, or keyword combinations. The Coach must combine the current message with relevant dialogue, pending questions, prior request state, resolved local objects, current date, and timezone; it may read before deciding whether to advise, act, or ask one decision-relevant question. Review follow-ups, pronouns, corrections, short answers, typos, paraphrases, and multi-step requests as first-class paths. Treat regex, substring, phrase-list, or isolated classifier gates that grant tool access or decide actionability as architectural defects when they make valid wording fail or allow quoted, negated, hypothetical, assistant-authored, or provider-authored text to authorize a write.
 
 ## Safety boundary
 
@@ -42,7 +44,7 @@ The Coach is the primary interaction surface for planning, local changes, feedba
 Do not call the usage review complete merely because all existing tests pass. Before completion:
 
 - enumerate every frontend API call and backend route, then reconcile method, payload, response, authentication, CSRF, error, loading, retry, and cache behavior;
-- enumerate every Coach tool and supported user intent, then reconcile schema, intent classification, forced-tool routing, authorization, dispatcher, durable effect, receipt, final Coach wording, UI refresh, and tests;
+- enumerate every Coach tool and supported user goal, then reconcile schema, contextual resolution, model tool selection, authorization, dispatcher, durable effect, receipt, final Coach wording, UI refresh, and tests;
 - execute or explicitly block every message-lifecycle, race/interleaving, provider, 400/error, and viewport scenario in `coach-first-usage-audit.md`;
 - inspect all normal, empty, loading, long-running, stale, partial, cancelled, offline, unauthorized, validation-error, provider-error, and recovery UI states;
 - retain a concrete ledger row for every blocked scenario and never translate "not tested" into "clean".
