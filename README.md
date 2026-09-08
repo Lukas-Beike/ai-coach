@@ -341,6 +341,15 @@ deletion, editing, or synchronization controls. Planning, template management,
 competitions, multi-week plans, and explicit remote synchronization are handled
 through the Coach.
 
+Endurance workout steps start with an explicit duration or distance, for example
+`- 6km Z1 HR`. Conditions, optional extensions and safety advice belong in plain
+paragraphs without a leading dash: Intervals.icu can count quantities inside
+dash bullets as additional workout steps. For a 6-8 km run, the Coach plans the
+lower total (including warmup/cooldown) and describes the optional upper total
+separately. Ambiguous quantity-bearing bullets are rejected on local authoring
+and before workout export with a correction hint. Cue-first steps such as
+`- Recovery 30s 50%` must be written as `- 30s 50% Recovery` in this app.
+
 The More view is organized into the deep-linked segments `#more/profile`,
 `#more/connections`, `#more/coach`, `#more/privacy`, and `#more/operations`.
 Profile fields show when they may be included in requests to the selected KI-Anbieter. Sports and
