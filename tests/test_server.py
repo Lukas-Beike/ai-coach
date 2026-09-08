@@ -2483,7 +2483,8 @@ class CoachTests(unittest.TestCase):
             b"SUMMARY:[SHORT_ONLY] Summary only\r\nDESCRIPTION:family appointment\r\nEND:VEVENT\r\n"
             b"BEGIN:VEVENT\r\nUID:short-only-description\r\nDTSTART;VALUE=DATE:20260908\r\n"
             b"SUMMARY:Family appointment\r\nDESCRIPTION:Please keep it [short_only] today\r\nEND:VEVENT\r\n"
-            b"END:VCALENDAR\r\n"
+            b"END:VCALENDAR\r\n",
+            window_start=date(2026, 9, 7), window_end=date(2026, 9, 8),
         )
         self.assertFalse(events[0]["training_impact"])
         self.assertTrue(events[1]["training_impact"])
