@@ -138,6 +138,25 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertIn("duplicate", self.remote)
         self.assertFalse(any(kind == "delete" for kind, _ in self.mutations))
         self.assertEqual(server.list_planned_units()[0]["sync_status"], "sync_error")
+        self.assertFalse(server.SYNC_LOCK.locked())
+
+    def test_background_snapshot_import_cannot_overlap_repair_or_final_verification(self):
+        local_id = self.seed()
+        attempted = []
+
+        def read(*args, **kwargs):
+            self.assertTrue(server.SYNC_LOCK.locked())
+            attempted.append(server.sync_intervals("Synthetic automatic sync"))
+            return deepcopy(list(self.remote.values()))
+
+        with patch.object(server.IntervalsClient, "get_paged_collection", side_effect=read), patch.object(
+            server, "upsert_remote_planned_units"
+        ) as imported:
+            self.assertTrue(self.repair(local_id)["ok"])
+        self.assertEqual(attempted, [{"status": "already_running"}] * 2)
+        imported.assert_not_called()
+        self.assertEqual(server.list_planned_units()[0]["sync_status"], "synced")
+        self.assertFalse(server.SYNC_LOCK.locked())
 
     def test_multi_unit_repair_reads_calendar_twice_and_checks_all_final_results(self):
         ids = []

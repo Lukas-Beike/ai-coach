@@ -10684,6 +10684,19 @@ def _library_payload_hash(raw_payload: Any) -> str:
 
 
 def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("repair"):
+        # Snapshot fetching/import and repair must not observe each other's
+        # intermediate provider state. This lock never blocks database reads.
+        if not SYNC_LOCK.acquire(timeout=INTERVALS_SYNC_WAIT_SECONDS):
+            raise AppError(503, "Der Hintergrund-Sync ist noch aktiv. Reparatur wird erneut versucht.", reason="temporary_error")
+        try:
+            return _sync_selected_workout_library_unlocked(payload)
+        finally:
+            SYNC_LOCK.release()
+    return _sync_selected_workout_library_unlocked(payload)
+
+
+def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
     requested = _library_bulk_request_entries(payload.get("entries"), require_hash=True)

@@ -120,7 +120,9 @@ index, but only the final provider snapshot can mark a unit synchronized. A
 failed final read leaves the affected units retryable, retaining remote IDs.
 
 Provider requests do not hold the database lock, so status polling remains
-available. A per-unit guard excludes simultaneous pushes of the same workout.
+available. Repair batches share the provider synchronization lock with snapshot
+refresh/import, preventing intermediate repaired events from creating false
+local conflicts. A per-unit guard excludes simultaneous pushes of the same workout.
 Payload hashes are rechecked before remote mutations and before recording
 success. An intervening local edit stays unsynchronized; a remote identity
 created before the edit was detected is retained for the next repair.
