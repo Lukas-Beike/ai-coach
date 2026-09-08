@@ -1,6 +1,8 @@
 """Real Coach/job execution with synthetic model and provider responses."""
 
 from copy import deepcopy
+from datetime import date, timedelta
+import uuid
 import unittest
 import threading
 from unittest.mock import patch
@@ -311,6 +313,45 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         local_id = self.seed()
         with self.assertRaises(server.AppError):
             server._sync_job_payload("intervals", "plan_push", {"entries": [self.selection(local_id)], "repair": "false"})
+
+    def test_training_state_pages_every_active_unit_and_archived_predecessor(self):
+        expected = set()
+        with server.DB_LOCK, server.database() as db:
+            for offset in range(366):
+                for archived in (False, True):
+                    local_id = str(uuid.uuid4())
+                    expected.add(local_id)
+                    entry = server.normalize_planned_unit({
+                        "date": (date(2026, 9, 9) + timedelta(days=offset)).isoformat(),
+                        "sport": "Run", "name": "Same name and date", "description": "- 30m Z1 HR",
+                        "duration_minutes": 30, "archived": archived,
+                    }, local_id=local_id)
+                    server._insert_planned_unit(db, entry)
+            server._bump_planning_revision(db)
+        first = server._structured_training_state(include_inactive=True)
+        self.assertEqual(len(first["planned_units"]), 366)
+        self.assertTrue(first["planned_units_page"]["has_more"])
+        second = server._structured_training_state(include_inactive=True, cursor=first["planned_units_page"]["next_cursor"])
+        combined = first["planned_units"] + second["planned_units"]
+        self.assertEqual(len(combined), 732)
+        self.assertEqual({item["local_id"] for item in combined}, expected)
+        self.assertEqual(sum(item["archived"] for item in combined), 366)
+        self.assertFalse(second["planned_units_page"]["has_more"])
+        self.assertIsNone(second["planned_units_page"]["next_cursor"])
+
+        active = server._structured_training_state()
+        self.assertEqual(len(active["planned_units"]), 366)
+        self.assertFalse(active["planned_units_page"]["has_more"])
+        cursor = first["planned_units_page"]["next_cursor"]
+        with self.assertRaises(server.AppError):
+            server._structured_training_state(cursor=cursor)
+        server.update_local_planned_workout(active["planned_units"][0]["local_id"], {"name": "Changed after page one"})
+        with self.assertRaises(server.AppError) as caught:
+            server._structured_training_state(include_inactive=True, cursor=cursor)
+        self.assertEqual(caught.exception.reason, "planning_revision_conflict")
+        for malformed in ("invalid", server.encode_page_cursor(["not-a-state-cursor"])):
+            with self.assertRaises(server.AppError):
+                server._structured_training_state(cursor=malformed)
 
     def test_coach_repair_requires_remote_authorization_and_selected_scope(self):
         local_id = self.seed()

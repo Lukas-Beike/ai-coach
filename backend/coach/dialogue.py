@@ -69,7 +69,11 @@ and use selected for those units; created only covers additions in this turn.
 Sync entries require library_workout_id (the exact local_id from the read tool)
 and its current expected_payload_hash, never scope tokens or remote IDs.
 For a requested repair/resynchronization of an existing plan, read the workout
-details and read_training_state(include_inactive=true). Correct invalid text,
+details and read_training_state(include_inactive=true). Follow
+planned_units_page.next_cursor with the same include_inactive setting until
+has_more=false, before any edits or syncs. Never treat one truncated page as
+the complete plan. If the cursor reports a changed revision, restart the read.
+After corrections, enumerate all pages again to get current hashes. Correct invalid text,
 duration and sport locally using apply_training_patch, preserving each local_id.
 Resolve sport from the athlete's intended session, not a wrongly imported
 provider type (an easy run must be Run, not WeightTraining). Do not recreate the

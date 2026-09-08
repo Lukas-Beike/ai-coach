@@ -13609,7 +13609,7 @@ COACH_STRUCTURED_TOOLS = [
                            "value": {"type": "string", "maxLength": 4000}},
         }},
     }, strict=True),
-    _canonical_coach_tool("read_training_state", "Read current local training references. For repair synchronization include inactive entries so removed or superseded workouts can be removed remotely.", {"include_inactive": {"type": "boolean"}}),
+    _canonical_coach_tool("read_training_state", "Read current local training references. For full repair include inactive entries and follow planned_units_page.next_cursor until has_more is false BEFORE editing or syncing. A changed planning revision invalidates the cursor; restart enumeration in that case.", {"include_inactive": {"type": "boolean"}, "cursor": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": COACH_TRAINING_CHANGE_LIMIT}}),
     _canonical_coach_tool("list_recent_activities", "Read completed activities from the latest local snapshot without refreshing a provider.", {"days": {"type": "integer"}, "limit": {"type": "integer"}}),
     _canonical_coach_tool("list_workout_library", "Read saved local training templates; local library data is authoritative.", {"limit": {"type": "integer"}, "include_archived": {"type": "boolean"}}),
     _canonical_coach_tool("list_planned_workouts", "Read future locally scheduled workouts.", {"limit": {"type": "integer"}}),
@@ -13793,17 +13793,28 @@ def _require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
         raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.", reason="intent_scope_denied")
 
 
-def _structured_training_state(*, include_inactive: bool = False) -> dict[str, Any]:
+def _structured_training_state(*, include_inactive: bool = False, cursor: Any = None, limit: Any = None) -> dict[str, Any]:
     today = local_now().date().isoformat()
+    page_size = api_page_limit(limit, COACH_TRAINING_CHANGE_LIMIT, COACH_TRAINING_CHANGE_LIMIT)
+    decoded = decode_page_cursor(cursor)
+    if cursor and (not isinstance(decoded, dict) or not isinstance(decoded.get("key"), list)
+                   or len(decoded["key"]) != 3 or not all(isinstance(value, str) for value in decoded["key"])):
+        raise AppError(400, "Ungueltiger Planungscursor.", reason="invalid_page_cursor")
     with DB_LOCK, database() as db:
         revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision_number = int((revision or {}).get("revision") or 0)
+        if decoded and (decoded.get("revision") != revision_number or decoded.get("include_inactive") != include_inactive or decoded.get("today") != today):
+            raise AppError(409, "Die Planung hat sich waehrend des Lesens geaendert. Alle Seiten erneut lesen.", reason="planning_revision_conflict")
+        after = decoded["key"] if decoded else ["", "", ""]
         planned_rows = db.execute(
-            "SELECT local_id, sync_state, payload FROM planned_units "
+            "SELECT local_id, sync_state, payload, COALESCE(json_extract(payload, '$.date'), '') AS plan_date, "
+            "lower(COALESCE(json_extract(payload, '$.name'), '')) AS sort_name FROM planned_units "
             "WHERE (? OR (COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
             "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0)) "
             "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ? "
-            "ORDER BY json_extract(payload, '$.date'), lower(json_extract(payload, '$.name')), local_id LIMIT ?",
-            (int(include_inactive), today, COACH_TRAINING_CHANGE_LIMIT),
+            "AND (COALESCE(json_extract(payload, '$.date'), ''), lower(COALESCE(json_extract(payload, '$.name'), '')), local_id) > (?, ?, ?) "
+            "ORDER BY plan_date, sort_name, local_id LIMIT ?",
+            (int(include_inactive), today, *after, page_size + 1),
         ).fetchall()
         template_rows = db.execute(
             "SELECT local_id, sync_state, payload FROM workout_library "
@@ -13828,12 +13839,19 @@ def _structured_training_state(*, include_inactive: bool = False) -> dict[str, A
             "expected_payload_hash": _library_payload_hash(row.get("payload")),
         }
 
+    has_more = len(planned_rows) > page_size
+    planned_rows = planned_rows[:page_size]
+    next_cursor = encode_page_cursor({
+        "revision": revision_number, "include_inactive": include_inactive, "today": today,
+        "key": [planned_rows[-1]["plan_date"], planned_rows[-1]["sort_name"], planned_rows[-1]["local_id"]],
+    }) if has_more else None
     return {
-        "planning_revision": int((revision or {}).get("revision") or 0),
+        "planning_revision": revision_number,
         "artifact_refs": coach_dialogue_artifact_refs(),
         "competitions": list_competitions(include_sync=True),
         "training_plans": list_training_plans(100),
         "planned_units": [ref for row in planned_rows if (ref := target_ref(row, planned=True)) is not None],
+        "planned_units_page": {"has_more": has_more, "next_cursor": next_cursor, "limit": page_size},
         "training_templates": [ref for row in template_rows if (ref := target_ref(row, planned=False)) is not None],
         "jobs": sync_jobs_state(),
     }
@@ -14469,7 +14487,7 @@ def _structured_coach_tool_result(
             saved = save_profile(updated)
         return {"ok": True, "stored_locally": True, "updated_fields": sorted(seen), "profile": saved}
     if name == "read_training_state":
-        return {"ok": True, **_structured_training_state(include_inactive=bool(arguments.get("include_inactive")))}
+        return {"ok": True, **_structured_training_state(include_inactive=bool(arguments.get("include_inactive")), cursor=arguments.get("cursor"), limit=arguments.get("limit"))}
     if name == "list_recent_activities":
         try:
             days = max(1, min(int(arguments.get("days", 30)), 3660))

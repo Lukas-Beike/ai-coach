@@ -99,7 +99,11 @@ IDs, and queues `start_intervals_plan_sync` with `repair=true`, selected current
 hashes and the requested period. Already-synchronized entries are included;
 `all_pending` alone is insufficient. `read_training_state(include_inactive=true)`
 also exposes superseded future units for removal. Larger selections are split
-into batches. No fixed wording or trigger phrase is required.
+into batches. Follow `planned_units_page.next_cursor` until `has_more=false`
+before edits or syncs, including every active unit and archived predecessor.
+The cursor binds the ordering, inactive filter, date and planning revision;
+concurrent plan changes require restarting enumeration. Reread all pages after
+corrections to obtain current hashes. No fixed wording or trigger phrase is required.
 
 Repair matches stored event IDs and exact external identities, updates the
 existing event, checks its sport and provider-generated steps, removes its
