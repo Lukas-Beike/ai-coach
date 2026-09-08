@@ -97,7 +97,6 @@ jobs:
                     checkName: base === 'main' ? 'Codex code review (main)' : 'Codex code review',
                     reviewRequestedAt: manualReviewRequested ? pushReviewRequestedAt : '',
                     skipCodexReview: shouldSkipCodexReview(pullRequest) && !manualReviewRequested,
-                    freshReviewRequired: !manualReviewRequested,
                   };
                 }));
             } else if (context.eventName === 'pull_request_target') {
@@ -111,17 +110,14 @@ jobs:
                 ['develop', 'main'].includes(pullRequest.base.ref) &&
                 (context.payload.action !== 'edited' || reviewBaselineChanged)
               ) {
-                const manualReviewRequestedAt = await getManualReviewRequest(pullRequest);
-                const freshReviewRequired = context.payload.action === 'synchronize' && !manualReviewRequestedAt;
                 affectedPullRequests = [{
                   pullRequestNumber: pullRequest.number,
                   baseRef: pullRequest.base.ref,
                   checkName: pullRequest.base.ref === 'main' ? 'Codex code review (main)' : 'Codex code review',
                   reviewRequestedAt: reviewBaselineChanged
                     ? pullRequest.updated_at
-                    : manualReviewRequestedAt,
+                    : '',
                   skipCodexReview: shouldSkipCodexReview(pullRequest),
-                  freshReviewRequired,
                 }];
               }
             } else if (
@@ -161,7 +157,6 @@ jobs:
                   // An explicit human request must review even an otherwise
                   // exempt Dependabot or release-bot PR.
                   skipCodexReview: false,
-                  freshReviewRequired: false,
                 }];
               }
             }
@@ -173,7 +168,6 @@ jobs:
                 checkName: 'Codex code review',
                 reviewRequestedAt: '',
                 skipCodexReview: false,
-                freshReviewRequired: false,
                 skip: true,
               }];
             }
@@ -411,7 +405,7 @@ jobs:
           persist-credentials: false
 
       - name: Block until a fresh Codex review is requested
-        if: matrix.skipCodexReview != true && (github.event_name == 'push' || matrix.freshReviewRequired == true)
+        if: matrix.skipCodexReview != true && github.event_name == 'push'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.pullRequestNumber }}
@@ -436,12 +430,12 @@ jobs:
               completed_at: new Date().toISOString(),
               output: {
                 title: 'Fresh Codex review required',
-                summary: `The pull request revision changed. Comment @codex review on PR #${pullRequest.data.number} to review its current head and base.`,
+                summary: `The target branch advanced. Comment @codex review on PR #${pullRequest.data.number} to obtain a review against the current base.`,
               },
             });
 
       - name: Wait for the subscription-backed Codex review
-        if: matrix.skipCodexReview != true && github.event_name != 'push' && matrix.freshReviewRequired != true
+        if: matrix.skipCodexReview != true && github.event_name != 'push'
         uses: ./.github/actions/codex-review-gate
         with:
           github-token: ${{ github.token }}

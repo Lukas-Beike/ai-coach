@@ -830,16 +830,19 @@ subscription-backed Codex GitHub review. Enable automatic Code Review for this
 repository in Codex Cloud, or request one with `@codex review` in the pull
 request. The gate follows the Codex summary comment that is posted as soon as a
 review starts and edited as its status changes. It passes only after that
-comment's Code Review row reports completion for the current pull-request
-commit and Codex has either published a matching submitted review or added its
+comment's Code Review row reports completion for a commit in the current
+pull-request history and Codex has either published a matching submitted review or added its
 post-completion thumbs-up reaction. A submitted review with inline findings is
-associated by review ID and fails the gate; the reaction is the connector's
-clean-review result when it intentionally creates no submitted review. A new
-push invalidates the old result and starts the gate again. A manual human
+associated by review ID and fails the gate until all of its Codex review
+threads are resolved; the reaction is the connector's clean-review result when
+it intentionally creates no submitted review. A new push retains this initial
+review as long as its reviewed commit remains an ancestor of the current PR
+head, so ordinary follow-up commits do not require another review. A manual human
 `@codex review` request requires a summary and result created or updated after
-that request, so an older result cannot be reused. Normal pull-request events
-use the connector's native automatic trigger; a human can manually request a
-fresh review with `@codex review`. Same-repository dependency-update PRs from
+that request, so an older result cannot satisfy an explicitly requested fresh
+review. Normal pull-request events use the connector's native automatic
+trigger; a human can still manually request a fresh review with `@codex review`.
+Same-repository dependency-update PRs from
 the trusted `dependabot[bot]` are exempt on `develop` when all current commits
 are Dependabot-authored and the changed files are limited to dependency
 manifests, lockfiles, `Dockerfile`, or pinned GitHub Action references. This is
