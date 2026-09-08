@@ -110,6 +110,12 @@ that can be retried. Races, unrelated workouts and completed/past records are
 not cleanup targets. An ambiguous same-name/date record without a matching
 identity is a conflict; the application never guesses ownership from a title.
 
+Provider requests do not hold the database lock, so status polling remains
+available. A per-unit guard excludes simultaneous pushes of the same workout.
+Payload hashes are rechecked before remote mutations and before recording
+success. An intervening local edit stays unsynchronized; a remote identity
+created before the edit was detected is retained for the next repair.
+
 The regression suite executes the real Coach tool and job path with synthetic
 responses for a run incorrectly stored as WeightTraining, two remote copies,
 sport correction, duplicate removal, and a second idempotent repair.

@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import unittest
+import threading
 from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
@@ -107,6 +108,68 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertIn("duplicate", self.remote)
         self.assertFalse(any(kind == "delete" for kind, _ in self.mutations))
         self.assertEqual(server.list_planned_units()[0]["sync_status"], "sync_error")
+
+    def test_provider_io_allows_database_polling_and_excludes_same_unit_push(self):
+        local_id = self.seed()
+        polled = threading.Event()
+        threads = []
+
+        def poll():
+            server.list_planned_units()
+            polled.set()
+
+        def slow_upsert(payloads):
+            thread = threading.Thread(target=poll)
+            threads.append(thread)
+            thread.start()
+            self.assertTrue(polled.wait(2), "Provider I/O blocks database polling")
+            with self.assertRaises(server.AppError) as caught:
+                server._sync_local_planned_unit_calendar_entry(local_id)
+            self.assertEqual(caught.exception.reason, "planned_unit_sync_running")
+            return self.upsert(payloads)
+
+        try:
+            with patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=slow_upsert):
+                self.assertTrue(self.repair(local_id)["ok"])
+        finally:
+            for thread in threads:
+                thread.join(3)
+        self.assertNotIn(local_id, server.PLANNED_UNIT_SYNCS)
+
+    def test_edit_during_upsert_keeps_new_content_and_remote_identity_without_cleanup(self):
+        local_id = self.seed()
+        self.remote.pop("existing")
+        self.remote.pop("duplicate")
+
+        def edit_during_upsert(payloads):
+            server.update_local_planned_workout(local_id, {"name": "Edited during sync"})
+            return self.upsert(payloads)
+
+        with patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=edit_during_upsert):
+            self.assertFalse(self.repair(local_id)["ok"])
+        current = server.list_planned_units()[0]
+        self.assertEqual(current["name"], "Edited during sync")
+        self.assertEqual(current["remote_event_id"], "new-synthetic-event")
+        self.assertEqual(current["sync_status"], "sync_error")
+        self.assertFalse(any(kind == "delete" for kind, _ in self.mutations))
+        self.assertTrue(self.repair(local_id)["ok"])
+        self.assertEqual(set(self.remote), {"new-synthetic-event", "race"})
+
+    def test_edit_during_readback_is_not_marked_synced(self):
+        local_id = self.seed()
+        calls = 0
+
+        def read(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                server.update_local_planned_workout(local_id, {"action": "archive"})
+            return deepcopy(list(self.remote.values()))
+
+        with patch.object(server.IntervalsClient, "get_paged_collection", side_effect=read):
+            self.assertFalse(self.repair(local_id)["ok"])
+        self.assertTrue(self.repair(local_id)["ok"])
+        self.assertEqual(set(self.remote), {"race"})
 
     def test_cleanup_failure_retries_same_remote_identity(self):
         local_id = self.seed()

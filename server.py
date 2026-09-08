@@ -166,6 +166,8 @@ INTERVALS_SYNC_WAIT_SECONDS = 120
 DB_LOCK = threading.RLock()
 SYNC_LOCK = threading.Lock()
 WORKOUT_LIBRARY_SYNC_LOCK = threading.Lock()
+PLANNED_UNIT_SYNC_GUARD = threading.Lock()
+PLANNED_UNIT_SYNCS: set[str] = set()
 COMPETITION_SYNC_LOCK = threading.Lock()
 PERFORMANCE_LOCK = threading.Lock()
 OPENAI_CONVERSATION_LOCK = threading.RLock()
@@ -9808,10 +9810,24 @@ def update_planned_unit_sync_state(local_id: str, state: str, error: str | None 
         _bump_planning_revision(db)
 
 
+@contextmanager
+def _planned_unit_sync_guard(local_id: str):
+    """Exclude concurrent pushes of one unit without blocking database readers."""
+    with PLANNED_UNIT_SYNC_GUARD:
+        if local_id in PLANNED_UNIT_SYNCS:
+            raise AppError(409, "Diese Einheit wird bereits synchronisiert.", reason="planned_unit_sync_running")
+        PLANNED_UNIT_SYNCS.add(local_id)
+    try:
+        yield
+    finally:
+        with PLANNED_UNIT_SYNC_GUARD:
+            PLANNED_UNIT_SYNCS.remove(local_id)
+
+
 def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str) -> dict[str, Any] | None:
     """Reconcile one explicitly selected future unit using exact remote identities."""
-    with DB_LOCK:
-        with database() as db:
+    with _planned_unit_sync_guard(local_id):
+        with DB_LOCK, database() as db:
             row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
             other_rows = db.execute(
                 "SELECT local_id, json_extract(payload, '$.remote_event_id') AS remote_id, "
@@ -9823,6 +9839,13 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str)
             other_external_ids.update(str(item["remote_external_id"]) for item in other_rows if item.get("remote_external_id"))
         if not row or _library_payload_hash(row["payload"]) != expected_hash:
             raise AppError(409, "Die Planung hat sich seit dem Reparaturauftrag geaendert.", reason="planning_revision_conflict")
+
+        def recheck():
+            with DB_LOCK, database() as db:
+                current = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+                if not current or _library_payload_hash(current["payload"]) != expected_hash:
+                    raise AppError(409, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.", reason="planning_revision_conflict")
+
         workout = json.loads(row["payload"])
         today = local_now().date()
         planned_date = date.fromisoformat(str(workout.get("date") or ""))
@@ -9874,17 +9897,30 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str)
                 payload["id"] = str(keeper["id"])
                 payload["external_id"] = str(keeper.get("external_id") or payload["external_id"])
             identities.add(payload["external_id"])
+            recheck()
             response = client.upsert_calendar_events([payload])
             result = response[0] if isinstance(response, list) and len(response) == 1 else None
             if not isinstance(result, dict) or not result.get("id"):
                 raise AppError(502, "Intervals.icu hat keine eindeutige reparierte Einheit zurueckgegeben.", reason="intervals_workout_verification_failed")
             remote_id = str(result["id"])
-            update_planned_unit_sync_state(local_id, "syncing", remote_event={**result, "external_id": payload["external_id"]})
+            with DB_LOCK:
+                try:
+                    recheck()
+                except AppError:
+                    # The remote write happened; retain its identity on the
+                    # current local payload without marking the new edit synced.
+                    update_planned_unit_sync_state(local_id, "sync_error", "Planung waehrend der Reparatur geaendert.", remote_event={**result, "external_id": payload["external_id"]})
+                    raise
+                update_planned_unit_sync_state(local_id, "syncing", remote_event={**result, "external_id": payload["external_id"]})
+                with database() as db:
+                    current = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+                    expected_hash = _library_payload_hash(current["payload"])
             if str(result.get("start_date_local") or "")[:10] != planned_date.isoformat() or result.get("name") != workout.get("name"):
                 raise AppError(502, "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestaetigt.", reason="intervals_workout_verification_failed")
             validate_intervals_workout_result(workout, result)
         for event in related:
             if removing or str(event["id"]) != remote_id:
+                recheck()
                 client.delete_event(str(event["id"]))
         remaining = related_events()
         if removing:
@@ -9897,11 +9933,18 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str)
                 raise AppError(502, "Der Kalender bestaetigt Datum oder Namen der reparierten Einheit nicht.", reason="intervals_workout_verification_failed")
             validate_intervals_workout_result(workout, remaining[0])
             result = remaining[0]
-        update_planned_unit_sync_state(local_id, "synced", remote_event=result)
+        with DB_LOCK:
+            recheck()
+            update_planned_unit_sync_state(local_id, "synced", remote_event=result)
         return result
 
 
 def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | None:
+    with _planned_unit_sync_guard(local_id):
+        return _sync_local_planned_unit_calendar_entry_unlocked(local_id)
+
+
+def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str, Any] | None:
     """Push one approved local calendar unit; this is never called by planning mutations."""
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
