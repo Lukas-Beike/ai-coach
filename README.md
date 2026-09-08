@@ -81,6 +81,11 @@ instructions do not delete or convert its data.
   classifier or trigger-word gate. Short replies, corrections and references to
   earlier messages can complete a request. Real ambiguities produce one concrete
   question whose request context is stored locally across reloads and model changes.
+- Explicit requests to remember permanent facts or preferences update the saved
+  profile directly, including acceptance of a concrete proposal in the dialogue.
+  The Coach reads current field values and applies only the requested changes;
+  concurrent edits require rereading the profile. Daily feedback and temporary
+  planning constraints remain separate from permanent profile facts.
 - Every HTTP chat turn is saved in the durable background queue before processing.
   SSE reports the job identity and the browser polls its durable result. This avoids
   guessing the complexity of a message from its wording. OpenAI response IDs and
@@ -93,6 +98,10 @@ instructions do not delete or convert its data.
   later units remain intact. Constraints such as two strength sessions per week stay
   attached to that plan, rather than becoming permanent profile preferences.
   Every write records its source user messages, target and object/period scope.
+  Editing a planned unit's sport preserves its local identity and updates both
+  the canonical sport and the provider projection. The executable
+  [Coach tool coverage matrix](docs/coach-tool-coverage.md) documents tested
+  actions, conversation flows and the limits of simulated model responses.
   Provider writes require the corresponding synchronization request. Failed steps
   can be corrected within the bounded tool loop; receipts distinguish saved changes,
   queued syncs and failures. See [the dialogue evaluation catalogue](docs/coach-dialogue-evaluation.md)
