@@ -3656,9 +3656,7 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         "running_max_hr_bpm": "heart_rate_zones" if profile_max_hr.get("running") or profile_max_hr.get("generic") else "activities",
     }
     result = {
-        key: garmin_metric_freshness(snapshot, source_keys.get(key) or (
-            "max_metrics" if "vo2max" in key else "race_predictions" if key in race_values else "running_threshold"
-        ), metric(value, unit, GARMIN_PERFORMANCE_SOURCE, note))
+        key: metric(value, unit, GARMIN_PERFORMANCE_SOURCE, note)
         for key, (value, unit, note) in units.items()
     }
     for kind in ("cycling", "running"):
@@ -3668,7 +3666,12 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                               if isinstance(activity, dict) and activity_kind(activity) == kind
                               and as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate"))) == result[key]["value"]]
             result[key]["observed_at"] = max((value for value in observed_dates if value), default=None)
-    return result
+    return {
+        key: garmin_metric_freshness(snapshot, source_keys.get(key) or (
+            "max_metrics" if "vo2max" in key else "race_predictions" if key in race_values else "running_threshold"
+        ), value)
+        for key, value in result.items()
+    }
 
 
 def measurement_age(observed_at: Any) -> dict[str, Any]:
@@ -3689,8 +3692,9 @@ def garmin_metric_freshness(snapshot: dict[str, Any], source: str, value: dict[s
     """Expose observation and retrieval dates without treating a retained value as a new reading."""
     freshness = (snapshot.get("source_freshness") or {}).get(source) or {}
     status = freshness.get("freshness", "unknown")
+    observed_at = value.get("observed_at", freshness.get("observed_at"))
     result = {**value, "freshness": status, "fetched_at": freshness.get("fetched_at"),
-              "observed_at": freshness.get("observed_at"), **measurement_age(freshness.get("observed_at"))}
+              "observed_at": observed_at, **measurement_age(observed_at)}
     if result["measurement_status"] == "earlier":
         result["note"] = "; ".join(part for part in (str(result.get("note") or ""),
             f"Messung ist {result['measurement_age_days']} Tage alt; das Abrufdatum ist keine neue Messung.") if part)
