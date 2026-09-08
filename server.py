@@ -8224,21 +8224,23 @@ def validate_workout_description(workout: dict[str, Any]) -> float | None:
                 )
 
     try:
-        seconds = structured_duration(str(workout.get("description") or "")[:12000], str(workout.get("target") or "AUTO"))
+        seconds, has_distance = structured_duration(str(workout.get("description") or "")[:12000], str(workout.get("target") or "AUTO"))
     except WorkoutTextError as exc:
         raise AppError(400, str(exc), reason=exc.reason) from exc
     expected_minutes = as_number(workout.get("duration_minutes"))
     expected_seconds = expected_minutes * 60 if expected_minutes is not None else as_number(workout.get("moving_time"))
     # Whole-minute local metadata may round sub-minute steps, but must never
     # hide missing intervals. Distance durations depend on provider settings.
-    if seconds is not None and expected_seconds is not None and abs(seconds - expected_seconds) > 30:
+    if expected_seconds is not None and (
+        seconds > expected_seconds if has_distance else abs(seconds - expected_seconds) > 30
+    ):
         raise AppError(
             400,
             f"Trainingsschritte ergeben {seconds / 60:g} Minuten, die angegebene Dauer ist {expected_seconds / 60:g} Minuten. "
             "Dauer und Workout-Text einschliesslich aller Wiederholungen, Pausen, Warmup und Cooldown abgleichen; keine fehlenden Minuten erfinden.",
             reason="workout_duration_mismatch",
         )
-    return seconds
+    return None if has_distance else seconds
 
 
 def workout_event_payload(workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:
@@ -13844,11 +13846,11 @@ COACH_STRUCTURED_TOOLS = [
     _canonical_coach_tool("delete_competition", "Delete one locally stored target competition.", {"competition_id": {"type": "string"}}),
     _canonical_coach_tool("start_provider_refresh", "Queue an explicitly requested read-only provider refresh.", {"days": {"type": "integer"}, "reason": {"type": "string"}}),
     _canonical_coach_tool("refresh_current_performance", "Queue an explicit Intervals.icu performance-metrics refresh without reloading activities.", {"reason": {"type": "string"}}),
-    _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu push. For a repair use repair=true and selected entries, including already-synced and superseded inactive units. First correct local workout text and sport. Repair verifies the remote calendar and removes only exact identity duplicates. For selected entries copy local_id and expected_payload_hash from read_training_state into library_workout_id and expected_payload_hash. For all_pending or created omit entries; the server resolves them. A follow-up sync of previously saved workouts uses selected or all_pending; created only refers to additions in THIS turn.", {"entries": {"type": "array", "minItems": 1, "maxItems": LIBRARY_BULK_MAX_ENTRIES, "items": {
+    _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu push. For repair use repair=true, the current expected_revision, local_plan scope and no entries: the server selects the complete requested period, including already-synced and inactive units. First correct local workout text and sport. Repair verifies the remote calendar and removes only exact identity duplicates. An explicit repair selection must cover the entire period. For ordinary selected entries copy local_id and expected_payload_hash from read_training_state into library_workout_id and expected_payload_hash. For all_pending or created omit entries; the server resolves them. A follow-up sync of previously saved workouts uses selected or all_pending; created only refers to additions in THIS turn.", {"entries": {"type": "array", "minItems": 1, "maxItems": LIBRARY_BULK_MAX_ENTRIES, "items": {
         "type": "object", "additionalProperties": False, "required": ["library_workout_id", "expected_payload_hash"],
         "properties": {"library_workout_id": {"type": "string", "format": "uuid", "description": "Exact local_id of a planned unit, never a remote event ID or a scope token."},
                        "expected_payload_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
-    }}, "reason": {"type": "string"}, "repair": {"type": "boolean", "description": "Reconcile selected existing calendar entries and their exact identity duplicates; requires an explicit repair/resync request."}}),
+    }}, "reason": {"type": "string"}, "expected_revision": {"type": "integer", "description": "For complete-period repair omit entries, authorize local_plan and pass planning_revision from read_training_state. The server resolves every active and inactive unit and chunks the complete manifest."}, "repair": {"type": "boolean", "description": "Reconcile the complete requested future period; requires an explicit repair/resync request. An explicit entries selection must cover the entire period."}}),
     _canonical_coach_tool("sync_competitions", "Queue an explicitly requested push of local target competitions to Intervals.icu.", {"reason": {"type": "string"}}),
     _canonical_coach_tool("get_sync_job", "Read one local synchronization job.", {"job_id": {"type": "string"}}),
     _canonical_coach_tool("resolve_training_sync_conflict", "Resolve a local conflict using local_id and strategy (keep_local or adopt_remote), with local target. Or retry a failed/partial job using only job_id: read get_sync_job first, use its provider target, and include sync_job:<id> plus intervals_sync for pushes (remote_write=true) or <provider>_refresh for reads.", {"local_id": {"type": "string"}, "job_id": {"type": "string"}, "strategy": {"type": "string", "enum": ["keep_local", "adopt_remote"]}}),
@@ -14545,6 +14547,46 @@ def _mark_local_competitions_authoritative() -> int:
     return len(rows)
 
 
+def _coach_repair_manifest(arguments: dict[str, Any], intent: dict[str, Any]) -> list[dict[str, str]]:
+    """Validate one complete period before splitting its manifest into jobs."""
+    period = intent.get("_repair_period")
+    if not period or intent.get("_sync_all_pending"):
+        raise AppError(400, "Reparatur-Sync braucht einen vollstaendigen zukuenftigen Zeitraum.", reason="request_sync")
+    supplied = arguments.get("entries")
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "SELECT local_id, payload FROM planned_units "
+            "WHERE substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) BETWEEN ? AND ? "
+            "ORDER BY local_id", (period["start"], period["end"]),
+        ).fetchall()
+        entries = [{"library_workout_id": row["local_id"], "expected_payload_hash": _library_payload_hash(row["payload"])} for row in rows]
+        if supplied is None:
+            _require_coach_scope(intent, "local_plan")
+            revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+            expected = arguments.get("expected_revision")
+            if type(expected) is not int or expected != int((revision or {}).get("revision") or 0):
+                raise AppError(409, "Lies die aktuelle Planung vor der vollstaendigen Reparatur erneut.", reason="planning_revision_conflict")
+        else:
+            selected = _library_bulk_request_entries(supplied, require_hash=True)
+            if {entry["library_workout_id"] for entry in selected} != {row["local_id"] for row in rows}:
+                raise AppError(409, "Die Reparaturauswahl umfasst nicht den vollstaendigen Zeitraum. Nutze die aktuelle expected_revision ohne entries fuer das komplette serverseitige Manifest.", reason="incomplete_repair_selection")
+            hashes = {entry["library_workout_id"]: entry["expected_payload_hash"] for entry in selected}
+            for entry in entries:
+                _require_coach_scope(intent, "planned_unit:" + entry["library_workout_id"], "library_workout:" + entry["library_workout_id"])
+                if hashes[entry["library_workout_id"]] != entry["expected_payload_hash"]:
+                    raise AppError(409, "Die ausgewaehlte Planung wurde geaendert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
+        for row in rows:
+            workout = json.loads(row["payload"])
+            if not workout.get("archived") and not workout.get("local_deleted"):
+                validate_workout_description(workout)
+        if rows:
+            _mark_local_planning_authoritative([row["local_id"] for row in rows])
+        for entry in entries:
+            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (entry["library_workout_id"],)).fetchone()
+            entry["expected_payload_hash"] = _library_payload_hash(row["payload"])
+    return entries
+
+
 def _enqueue_coach_plan_push(entries: list[dict[str, str]], sync_job_ids: list[str], *, reason: str, repair: bool = False) -> dict[str, Any]:
     """Queue a complete explicit Coach plan push in provider-sized chunks."""
     jobs: list[dict[str, Any]] = []
@@ -14872,8 +14914,9 @@ def _structured_coach_tool_result(
         entries = arguments.get("entries")
         if "repair" in arguments and type(arguments["repair"]) is not bool:
             raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
-        if arguments.get("repair") and (not entries or intent.get("_sync_all_pending")):
-            raise AppError(400, "Reparatur-Sync braucht die genaue Auswahl aller zu pruefenden Einheiten einschliesslich bereits synchronisierter Eintraege.", reason="request_sync")
+        if arguments.get("repair"):
+            manifest = _coach_repair_manifest(arguments, intent)
+            return _enqueue_coach_plan_push(manifest, sync_job_ids, reason=str(arguments.get("reason") or "Coach-Reparatur"), repair=True)
         if entries is None:
             if intent.get("_sync_created_entries_only"):
                 raise AppError(
@@ -15174,6 +15217,7 @@ def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, An
             period = request.get("period")
             if request["sync_scope"] != "selected" or not period:
                 raise AppError(400, "Reparatur-Sync benoetigt eine Auswahl und einen Zeitraum.", reason="request_sync")
+            action["_repair_period"] = {**period, "start": max(period["start"], local_now().date().isoformat())}
             with DB_LOCK, database() as db:
                 for entry in arguments.get("entries") or []:
                     row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (str(entry.get("library_workout_id") or ""),)).fetchone()
@@ -15562,7 +15606,7 @@ def _chat_with_structured_coach_impl(
                             arguments["entries"] = entries
                             action["_created_sync_entry_ids"] = sorted(created_ids)
                             action["authorization_scope"].extend("library_workout:" + value for value in created_ids)
-                        elif not arguments.get("entries"):
+                        elif not arguments.get("entries") and not arguments.get("repair"):
                             raise AppError(400, "Wähle die zu synchronisierenden Einheiten aus.", reason="request_sync")
                     local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan"}
                     with (DB_LOCK if local_transaction else nullcontext()), (database() if local_transaction else nullcontext()):

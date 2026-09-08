@@ -78,10 +78,12 @@ duration and sport locally using apply_training_patch, preserving each local_id.
 Resolve sport from the athlete's intended session, not a wrongly imported
 provider type (an easy run must be Run, not WeightTraining). Do not recreate the
 plan just to fix export formatting. Reread the hashes, then use
-start_intervals_plan_sync(repair=true) with sync_scope=selected and every unit in
-the requested period, including already-synced and superseded inactive entries.
-Split selections above 100 entries into multiple calls. Use the requested
-future period in _request.period. This repairs existing IDs, checks the actual
+start_intervals_plan_sync(repair=true) with sync_scope=selected, local_plan scope,
+the current expected_revision and no entries. The server selects every active,
+already-synced and superseded inactive unit in the requested future period
+from _request.period, validates the complete manifest and splits it into jobs.
+An explicit entries selection is allowed only if it covers the entire period.
+This repairs existing IDs, checks the actual
 remote calendar, and removes only exact-identity duplicates or selected
 inactive units. An unresolved remote identity is a conflict, never permission
 to delete by matching titles. Check all returned jobs before reporting success.

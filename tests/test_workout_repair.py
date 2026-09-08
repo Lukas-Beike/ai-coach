@@ -474,6 +474,58 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 self.assertIsNone(server._claim_sync_job())
         self.assertEqual(self.mutations, [])
 
+    def test_coach_repair_rejects_incomplete_period_before_queueing(self):
+        first = self.seed()
+        second = server.save_workout_library_entries([{
+            "date": "2026-09-10", "sport": "Run", "name": "Archived predecessor",
+            "description": "- 30m Z1 HR", "duration_minutes": 30,
+        }])[0]
+        server.update_local_planned_workout(second["id"], {"archived": True})
+        receipt, _ = self.turn("Repariere den gesamten Zeitraum.", [
+            lambda _: self.call("start_intervals_plan_sync", {"repair": True, "entries": [self.selection(first)]},
+                                ["intervals_sync", "planned_unit:" + first],
+                                period={"start": "2026-09-09", "end": "2026-09-10"},
+                                target="intervals", remote_write=True, sync_scope="selected"),
+            {"output_text": "Auswahl unvollstaendig."},
+        ])
+        self.assertEqual(receipt["status"], "failed")
+        self.assertIsNone(server._claim_sync_job())
+        self.assertEqual(self.mutations, [])
+
+    def test_coach_repair_resolves_complete_manifest_beyond_one_page(self):
+        expected = set()
+        with server.DB_LOCK, server.database() as db:
+            for offset in range(400):
+                local_id = str(uuid.uuid4())
+                expected.add(local_id)
+                server._insert_planned_unit(db, server.normalize_planned_unit({
+                    "date": "2026-09-09", "sport": "Run", "name": "Synthetic manifest unit",
+                    "description": "- 30m Z1 HR", "duration_minutes": 30, "archived": bool(offset % 2),
+                }, local_id=local_id))
+            server._bump_planning_revision(db)
+        revision = self.state()["planning_revision"]
+        intent = {"_repair_period": {"start": "2026-09-09", "end": "2026-09-09"}, "authorization_scope": ["local_plan"]}
+        with self.assertRaises(server.AppError) as caught:
+            server._coach_repair_manifest({"expected_revision": revision - 1}, intent)
+        self.assertEqual(caught.exception.reason, "planning_revision_conflict")
+        receipt, _ = self.turn("Repariere den vollstaendigen Zeitraum in Intervals.", [
+            lambda _: self.call("start_intervals_plan_sync", {"repair": True, "expected_revision": revision},
+                                ["intervals_sync", "local_plan"],
+                                period=intent["_repair_period"], target="intervals", remote_write=True, sync_scope="selected"),
+            {"output_text": "Alle Reparatur-Jobs gestartet."},
+        ])
+        self.assertEqual(receipt["status"], "completed", receipt)
+        selected = []
+        while job := server._claim_sync_job():
+            payload = server.json.loads(job["payload"])
+            selected.extend(entry["library_workout_id"] for entry in payload["entries"])
+            self.assertLessEqual(len(payload["entries"]), 28)
+            self.assertTrue(payload["repair"])
+            server._sync_job_update_from_result(job["id"], {"ok": True}, fallback_status="completed")
+        self.assertEqual(set(selected), expected)
+        self.assertEqual(len(selected), len(expected))
+        self.assertEqual(self.mutations, [])
+
 
 if __name__ == "__main__":
     unittest.main()

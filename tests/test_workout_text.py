@@ -110,6 +110,13 @@ class WorkoutTextTests(unittest.TestCase):
         self.assertIsNone(server.validate_workout_description(workout))
         self.assertEqual(server.workout_event_payload("synthetic", workout)["moving_time"], 2400)
 
+    def test_mixed_distance_steps_preserve_the_known_timed_subtotal(self):
+        for description in ("- 10h Z1 HR\n- 1km Z1 HR", "Main 3x\n- 11m Z1 HR\n- 1km Z1 HR"):
+            self.assert_invalid(self.workout(description, 30, sport="Run"), "workout_duration_mismatch")
+        workout = self.workout("- 10m Z1 HR\n- 1km Z1 HR", 30, sport="Run")
+        self.assertIsNone(server.validate_workout_description(workout))
+        self.assertEqual(server.workout_event_payload("synthetic", workout)["moving_time"], 1800)
+
     def test_supported_power_hr_and_pace_targets(self):
         for target, suffix in (
             ("POWER", "88-92%"), ("POWER", "200-240w"), ("POWER", "ramp 50%-75%"),

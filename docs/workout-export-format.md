@@ -95,8 +95,12 @@ For example, ask in ordinary language:
 > ab und entferne die alten falschen Eintraege und Dubletten.
 
 The Coach reads local workout details, corrects them using the existing local
-IDs, and queues `start_intervals_plan_sync` with `repair=true`, selected current
-hashes and the requested period. Already-synchronized entries are included;
+IDs, and queues `start_intervals_plan_sync` with `repair=true`, the current
+`expected_revision`, `local_plan` authorization and the requested period
+(`sync_scope=selected`, omitting `entries`). The server selects and validates
+the complete period before splitting its manifest into jobs. An explicit
+selection must include every unit in that period; incomplete selections are
+rejected before any job is queued. Already-synchronized entries are included;
 `all_pending` alone is insufficient. `read_training_state(include_inactive=true)`
 also exposes superseded future units for removal. Larger selections are split
 into batches. Follow `planned_units_page.next_cursor` until `has_more=false`

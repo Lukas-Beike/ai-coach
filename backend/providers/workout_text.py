@@ -99,9 +99,9 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
     return result
 
 
-def structured_duration(description: str, target: str = "AUTO") -> float | None:
+def structured_duration(description: str, target: str = "AUTO") -> tuple[float, bool]:
     steps = structured_steps(description, target)
-    return None if any("distance" in step for step in steps) else sum(step["duration"] for step in steps)
+    return sum(step.get("duration", 0) for step in steps), any("distance" in step for step in steps)
 
 
 def verify_workout_readback(description: str, remote: dict) -> None:
