@@ -186,7 +186,7 @@ class DiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = subprocess.check_output([sys.executable, str(runner), "--list"], cwd=directory, text=True, stderr=subprocess.PIPE)
         ids = output.splitlines()
-        self.assertTrue(any(test_id.startswith("test_coach_intent.") for test_id in ids))
+        self.assertTrue(any(test_id.startswith("test_coach_dialogue.") for test_id in ids))
         self.assertTrue(any(test_id.startswith("test_db_manager.") for test_id in ids))
         self.assertEqual(ids, sorted(set(ids)))
 

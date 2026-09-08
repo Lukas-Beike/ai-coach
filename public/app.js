@@ -1540,7 +1540,7 @@ function updateChatQueueStatus() {
 }
 
 function coachWorkingLabel() {
-  if (state.chatRequest?.background) return "Längerer Plan läuft im Hintergrund · du kannst die Seite neu laden…";
+  if (state.chatRequest?.background) return "Der Coach arbeitet · du kannst die Seite neu laden…";
   if (state.chatRequest?.phase === "recovering") return "Verbindung unterbrochen · die Antwort wird im Hintergrund fertiggestellt…";
   if (state.chatRequest?.phase === "reconciling") return "Antwort wird sicher übernommen…";
   return "Coach arbeitet an deiner Antwort…";

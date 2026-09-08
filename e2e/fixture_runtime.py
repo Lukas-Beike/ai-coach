@@ -1,6 +1,7 @@
 """Fresh SQLCipher runtime for local integration tests; all providers are blocked."""
 import os
 import sys
+import json
 from datetime import timedelta
 
 # This file is mounted only in disposable test containers, never normal startup.
@@ -25,7 +26,35 @@ def blocked_provider(*args, **kwargs):
 
 
 server.http_json = blocked_provider
-server.ensure_conversation = lambda: "fixture-conversation"
+server.ensure_conversation = lambda *args, **kwargs: "fixture-conversation"
+
+
+def fixture_coach_response(payload, **kwargs):
+    """Canned model outputs exercise HTTP/worker/storage, not language inference."""
+    value = payload.get("input")
+    if isinstance(value, list):
+        outputs = [json.loads(item["output"]) for item in value if item.get("type") == "function_call_output"]
+        question = next((item.get("question") for item in outputs if item.get("question")), None)
+        return {"output_text": question or "Deine Rückmeldung ist gespeichert."}
+    context = json.loads(value)["dialogue"]
+    current_id = context["current_user_message_id"]
+    if context.get("pending_request"):
+        name = "save_checkin"
+        arguments = {"payload": {"notes": "Schwere Beine"}, "_request": {
+            "summary": "Tagesform aus der Rückfrage speichern", "source_message_ids": [current_id],
+            "target": "local", "scope": ["local_checkin"], "period": None,
+            "constraints": [], "remote_write": False, "sync_scope": None,
+        }}
+    else:
+        name = "clarify_coach_request"
+        arguments = {"source_message_ids": [current_id], "summary": "Tagesform für heute festhalten",
+                     "question": "Wie fühlen sich deine Beine an?"}
+    return {"output": [{"type": "function_call", "name": name,
+                        "call_id": f"fixture-dialogue-{current_id}", "arguments": json.dumps(arguments)}]}
+
+
+server.responses_request = fixture_coach_response
+server.responses_background_request = fixture_coach_response
 initialise = server.initialise_database
 artifact = {}
 
