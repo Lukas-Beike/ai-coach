@@ -12673,18 +12673,41 @@ def reset_coach_chat() -> dict[str, Any]:
                 remote_deleted = delete_remote_conversation(conversation_id)
             except Exception:
                 LOGGER.warning("Remote OpenAI conversation could not be deleted during reset", extra={"event": "openai_reset_remote_delete_failed"}, exc_info=True)
+        cancelled_operation_ids: list[str] = []
         with DB_LOCK, database() as db:
+            active_commands = db.execute(
+                "SELECT client_turn_id, receipt FROM coach_commands WHERE status IN ('queued', 'running')"
+            ).fetchall()
+            now = utc_now()
+            for command in active_commands:
+                receipt = _coach_command_receipt(command["receipt"])
+                operation_id = str(receipt.get("operation_id") or "")
+                if operation_id:
+                    cancelled_operation_ids.append(operation_id)
+                receipt.update({
+                    "status": "cancelled",
+                    "phase": "chat_reset",
+                    "cancel_requested": True,
+                    "message": None,
+                })
+                db.execute(
+                    "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
+                    (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, command["client_turn_id"]),
+                )
             db.execute("DELETE FROM messages")
             db.execute(
                 "UPDATE coach_plan_artifacts SET status='superseded', updated_at=? WHERE status='draft'",
                 (utc_now(),),
             )
+            set_kv("coach_pending_request", "null", db)
+        with CHAT_STREAM_LOCK:
+            for operation_id in cancelled_operation_ids:
+                COACH_JOB_CANCEL_EVENTS.setdefault(operation_id, threading.Event()).set()
         set_kv("openai_conversation_id", "")
         set_kv("gemini_conversation_id", "")
         set_kv("gemini_conversation_history", "[]")
         set_kv("gemini_call_names", "{}")
         set_kv("last_chat_reset_at", utc_now())
-        set_kv("coach_pending_request", "null")
     return {"status": "ok", "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
 
 
@@ -14867,13 +14890,18 @@ def _chat_with_structured_coach_impl(
     if effects and not question and not failures and allow_mutations:
         set_kv("coach_pending_request", "null")
     status = "completed" if question else "partial" if (failures or missing_answer) and effects else "failed" if failures or missing_answer else "cancelled" if cancelled else "completed"
-    final_receipt = {**receipt, "status": status,
+    final_receipt = {**receipt, "status": status, "awaiting_clarification": bool(question),
         "client_turn_id": client_turn_id, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids,
         "intent": intent, "tool_rounds": rounds, "pending_operations": sorted({entry["tool"] for entry in failures}),
         "proposed_actions": [entry["result"]["proposed_action"] for entry in command_receipts if entry.get("result", {}).get("proposed_action")]}
     for key in ("openai_response_id", "pending_tool_outputs", "pending_tool_calls"):
         final_receipt.pop(key, None)
     with DB_LOCK, database() as db:
+        current_command = db.execute(
+            "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,),
+        ).fetchone()
+        if current_command and current_command["status"] == "completed":
+            return _coach_command_receipt(current_command["receipt"])
         final_receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
         set_kv("last_coach_ai_provider", ai_provider or selected_ai_provider(), db)
         db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
@@ -15217,6 +15245,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
             receipt.get("request_kind") == "morning_checkin"
             and result.get("status") == "completed"
             and result.get("message")
+            and not result.get("awaiting_clarification")
         ):
             with DB_LOCK, database() as db:
                 set_kv("morning_checkin_date", local_now().date().isoformat(), db)

@@ -347,6 +347,42 @@ class CoachDialogueTests(unittest.TestCase):
             row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id='morning-quick'").fetchone()
         self.assertFalse(json.loads(row["receipt"])["coach_quick_actions"]["morning_checkin"])
 
+    def test_morning_quick_action_stays_pending_while_coach_awaits_clarification(self):
+        server.enqueue_background_coach_job(
+            "Natural wording without a fixed trigger", "morning-question", "synthetic-session",
+            request_kind="morning_checkin",
+        )
+        job = server._claim_background_coach_job()
+
+        def complete_with_question(*args, **kwargs):
+            with server.database() as db:
+                db.execute("UPDATE coach_commands SET status='completed' WHERE client_turn_id='morning-question'")
+            return {"status": "completed", "message": {"id": 1}, "awaiting_clarification": True}
+
+        with patch.object(server, "_restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
+            server, "chat_with_coach", side_effect=complete_with_question,
+        ):
+            server._run_background_coach_job(job)
+        self.assertNotEqual(server.get_kv("morning_checkin_status"), "ready")
+        self.assertTrue(server.coach_quick_actions_state()["morning_checkin"])
+
+    def test_chat_reset_cancels_queued_background_turn_without_reappearing_message(self):
+        job = server.enqueue_background_coach_job(
+            "Plan something", "queued-before-reset", "synthetic-session",
+            operation_id="operation-before-reset",
+        )
+        self.assertEqual(job["status"], "queued")
+        server.reset_coach_chat()
+        self.assertIsNone(server._claim_background_coach_job())
+        self.assertEqual(server.list_messages(), [])
+        with server.database() as db:
+            command = db.execute(
+                "SELECT status, receipt FROM coach_commands WHERE client_turn_id='queued-before-reset'"
+            ).fetchone()
+        self.assertEqual(command["status"], "completed")
+        self.assertEqual(json.loads(command["receipt"])["status"], "cancelled")
+        self.assertTrue(server.COACH_JOB_CANCEL_EVENTS["operation-before-reset"].is_set())
+
     def test_same_effect_and_call_are_idempotent_inside_turn(self):
         def save(_):
             return self.call("save_checkin", {"payload": {"notes": "Synthetic tired"}}, ["local_checkin"], call_id="same-call")
