@@ -3674,6 +3674,110 @@ class CoachTests(unittest.TestCase):
         })
         self.assertEqual(normalized["sport"], "Run")
 
+    def test_recovery_extension_bullet_is_rejected_before_plan_storage(self):
+        workout = {
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Run", "name": "Optionaler Recovery Run - 6 bis 8 km",
+            "description": (
+                "Warm-up\n- 8m Gehen und sehr lockeres Einlaufen\n\nMain Set\n"
+                "- 6km sehr locker in Zone 1-2, RPE 1-2/10\n"
+                "- Nur bei wirklich lockerem Schritt und ohne Beschwerden auf maximal 8km verlaengern\n"
+                "- Keine Steigerungen und kein Tempodruck\n\nCooldown\n- 5m Gehen"
+            ),
+            "duration_minutes": 50,
+        }
+        with self.assertRaises(server.AppError) as raised:
+            server.save_workout_library_entries([workout])
+        self.assertIn("Zeile 6", str(raised.exception))
+        self.assertEqual(server.list_dated_local_planned_workouts(), [])
+
+    def test_ambiguous_quantity_bullets_require_explicit_steps_or_plain_notes(self):
+        for description in (
+            "- If feeling fresh extend to 8 km",
+            "- Bei Bedarf insgesamt 8,5km laufen",
+            "- Optional another 10min",
+            "- Walk for 5' if needed",
+            "- 6-8km Z1 HR",
+            "- Recovery 30s 50%",  # Rewrite valid provider cue-first syntax too.
+        ):
+            with self.subTest(description=description), self.assertRaises(server.AppError):
+                server.validate_workout_description({"type": "Run", "description": description})
+
+    def test_quantity_first_steps_and_plain_optional_totals_are_preserved(self):
+        descriptions = (
+            "Optional bis insgesamt 8km verlaengern.\n\n- 6km Z1 HR\n\nBei Beschwerden auslassen.",
+            "Warmup\n- 1km Z1 HR\n\nMain Set\n- 4km Z1-Z2 HR\n\nCooldown\n- 1km Z1 HR",
+            "Warmup\n- 10m Z2\n\nMain Set 6x\n- 4m 100%\n- 30s 50%\n\n- 5m Z1",
+            "- 1h30m Z2\n- 5' Z1\n- 30\" Z1",
+            "- 500mtr Z2 Pace\n- 1mi Z2 Pace",
+        )
+        for description in descriptions:
+            with self.subTest(description=description):
+                workout = server.normalize_workout({
+                    "date": (date.today() + timedelta(days=1)).isoformat(),
+                    "sport": "Run", "description": description, "duration_minutes": 40,
+                })
+                self.assertEqual(workout["description"], description)
+        server.validate_workout_description({
+            "sport": "WeightTraining", "description": "- Squats 3x8, pause 60s",
+        })
+
+    def test_ambiguous_description_blocks_all_workout_export_paths_before_writes(self):
+        client = server.IntervalsClient()
+        workout = {
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "type": "Run", "description": "- 6km Z1 HR\n- Optional bis insgesamt 8km",
+            "duration_minutes": 40,
+        }
+        with patch.object(client, "get_or_create_workout_folder") as folder, \
+                patch.object(client, "post") as post, patch.object(client, "put") as put:
+            for operation in (
+                lambda: client.create_library_workouts([
+                    {"type": "Run", "description": "- 6km Z1 HR"}, workout,
+                ]),
+                lambda: client.update_library_workout("synthetic", workout),
+                lambda: client.plan_library_workout("synthetic", workout, workout["date"]),
+                lambda: server.workout_event_payload("synthetic", workout),
+            ):
+                with self.assertRaises(server.AppError):
+                    operation()
+            folder.assert_not_called()
+            post.assert_not_called()
+            put.assert_not_called()
+
+    def test_recovery_plain_extension_note_survives_library_and_calendar_export(self):
+        description = "Optional bis insgesamt 8km verlaengern.\n\n- 6km Z1 HR"
+        workout = {
+            "type": "Run", "description": description, "name": "Recovery 6-8km",
+            "duration_minutes": 40, "moving_time": 2400,
+        }
+        client = server.IntervalsClient()
+        with patch.object(client, "get_or_create_workout_folder", return_value=1), \
+                patch.object(client, "post", return_value={"id": "synthetic"}) as post, \
+                patch.object(client, "put", return_value={"id": "synthetic"}) as put:
+            client.create_library_workouts([workout])
+            self.assertEqual(post.call_args.args[1]["description"], description)
+            client.update_library_workout("synthetic", workout)
+            self.assertEqual(put.call_args.args[1]["description"], description)
+            post.return_value = [{"id": "synthetic-event"}]
+            client.plan_library_workout("synthetic", workout, (date.today() + timedelta(days=1)).isoformat())
+            payload = post.call_args.args[1][0]
+            self.assertEqual(payload["description"], description)
+            self.assertEqual(payload["moving_time"], 2400)
+
+    def test_local_template_and_planned_edit_reject_ambiguous_extension(self):
+        with self.assertRaises(server.AppError):
+            server.create_local_library_template({
+                "sport": "Run", "description": "- If fresh extend to 8km", "duration_minutes": 40,
+            })
+        entry = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Run", "name": "Recovery", "description": "- 6km Z1 HR", "duration_minutes": 40,
+        }])[0]
+        with self.assertRaises(server.AppError):
+            server.update_local_planned_workout(entry["id"], {"description": "- If fresh extend to 8km"})
+        self.assertEqual(server.list_dated_local_planned_workouts()[0]["description"], "- 6km Z1 HR")
+
     def test_missing_library_workout_stays_local_until_approval(self):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
             entry = server.save_workout_library_entries([{
