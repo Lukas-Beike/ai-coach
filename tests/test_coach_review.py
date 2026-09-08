@@ -71,7 +71,12 @@ class CoachReviewTests(unittest.TestCase):
             result = server.chat_with_coach(message, client_turn_id="latest-analysis", session_csrf_hash="review-session")
             replay = server.chat_with_coach(message, client_turn_id="latest-analysis", session_csrf_hash="review-session")
         self.assertEqual(order, ["refresh", "context"])
-        sync.assert_called_once_with("Chat-Anfrage", activity_days=server.sync_period("intervals"), wait_for_existing=True)
+        sync.assert_called_once_with(
+            "Chat-Anfrage",
+            activity_days=server.sync_period("intervals"),
+            wait_for_existing=True,
+            wait_for_performance=True,
+        )
         enqueue.assert_not_called()
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["pending_operations"], [])
