@@ -675,6 +675,20 @@ download, including after a client disconnect. Export generation enforces a
 starts. The archive is an intentional, athlete-readable export format; it is
 not a database copy.
 
+The export includes every stored check-in, activity-feedback record, library
+entry, training plan, external-calendar event, and public-calendar candidate.
+These collections are streamed without the Coach-context or browser page limits;
+an export that exceeds the archive limits fails instead of claiming completeness.
+Restore requeues interrupted synchronization jobs while retaining their recorded
+item outcomes, and invalidates the sessions captured in the backup.
+
+The Coach keeps an interrupted or incomplete answer visibly recoverable. Unsent
+queued messages trigger the browser's leave-page protection and are never stored
+as athlete text in browser storage. A chat reset is reflected in other open tabs.
+Older chat messages and additional library entries can be loaded one page at a
+time. Profile edits made during a save and active performance-value editors stay
+intact during polling. Microphone capture ends when the login session ends.
+
 The login session has a fixed 30-day lifetime; its cookie `Max-Age` and the
 server-side expiry use the same duration. The cookie is protected with `HttpOnly`
 and `SameSite=Strict` attributes. Activity metadata is written at most once per

@@ -51,6 +51,7 @@ const state = {
   voiceTimer: null,
   voiceStartedAt: 0,
   voiceTranscribing: false,
+  voiceAcquiring: false,
   localSync: { intervals: false, competitions: false, garmin: false, externalCalendar: false, weather: false, performance: false, intervalsFull: false, garminFull: false },
   notificationKeys: new Set(),
   quickTemplatesVisible: false,

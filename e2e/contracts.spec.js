@@ -34,7 +34,7 @@ async function controlled(page) {
           fixture.push("started", { operation_id: "fixture-operation" });
         } }), { status: 200 }));
       }
-      if (path.startsWith("/api/chat/history")) return new Promise((resolve) => fixture.histories.push((messages) => resolve(json({ messages, next_cursor: null, ...(fixture.proposedActions ? { proposed_actions: fixture.proposedActions } : {}) }))));
+      if (path.startsWith("/api/chat/history")) return new Promise((resolve) => fixture.histories.push((messages) => resolve(json({ messages, generation: state.data.messages_generation, next_cursor: null, ...(fixture.proposedActions ? { proposed_actions: fixture.proposedActions } : {}) }))));
       if (path.startsWith("/api/plan")) fixture.planCalls++;
       if (path.startsWith("/api/library")) fixture.libraryCalls++;
       return original(path, options);
@@ -51,7 +51,7 @@ test("chat reset detaches a delayed status poll without releasing its successor"
     window.__statusCalls = [];
     window.fetch = (path, options) => {
       if (path === "/api/chat/status") return new Promise((resolve) => __statusCalls.push((status) => resolve(new Response(JSON.stringify(status), { headers: { "Content-Type": "application/json" } }))));
-      if (path === "/api/chat/reset") return Promise.resolve(new Response('{"status":"ok"}', { headers: { "Content-Type": "application/json" } }));
+      if (path === "/api/chat/reset") return Promise.resolve(new Response(JSON.stringify({ status: 'ok', generation: state.data.messages_generation }), { headers: { "Content-Type": "application/json" } }));
       return original(path, options);
     };
     requestConfirmation = async () => true;
