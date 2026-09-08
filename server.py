@@ -10047,12 +10047,34 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
     # Future planning is local-authoritative, so an approved push uses the
     # preserved local payload without a separate conflict decision.
     if workout.get("local_deleted") or workout.get("archived"):
+        def recheck_removal():
+            with DB_LOCK, database() as db:
+                current = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (normalized_id,)).fetchone()
+                if not current or _library_payload_hash(current["payload"]) != _library_payload_hash(row["payload"]):
+                    raise AppError(409, "Die Planung wurde waehrend der Synchronisation geaendert.", reason="planning_revision_conflict")
+
         remote_id = str(workout.get("remote_event_id") or "").strip()
         if remote_id:
             if not CONFIG.intervals_api_key:
                 raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
-            IntervalsClient().delete_event(remote_id)
-        update_planned_unit_sync_state(normalized_id, "synced")
+            client = IntervalsClient()
+            athlete = quote(client.config.intervals_athlete_id, safe="")
+            try:
+                event = client.get(f"/athlete/{athlete}/events/{quote(remote_id, safe='')}")
+            except AppError as exc:
+                if exc.status != 404 and not (isinstance(exc.__cause__, HTTPError) and exc.__cause__.code == 404):
+                    raise
+            else:
+                if (not isinstance(event, dict) or str(event.get("id") or "") != remote_id
+                        or event.get("category") != "WORKOUT"
+                        or str(event.get("start_date_local") or "")[:10] < local_now().date().isoformat()
+                        or event.get("paired_activity_id") or event.get("paired_event_id")):
+                    raise AppError(409, "Die zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
+                recheck_removal()
+                client.delete_event(remote_id)
+        with DB_LOCK:
+            recheck_removal()
+            update_planned_unit_sync_state(normalized_id, "synced")
         return None
     event_payload = workout_event_payload(normalized_id, workout)
     remote_external_id = str(workout.get("remote_event_external_id") or "").strip()

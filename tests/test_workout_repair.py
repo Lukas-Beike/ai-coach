@@ -20,9 +20,15 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.fail_delete = False
         self.enterContext(patch.object(server, "http_json", side_effect=AssertionError("Unexpected live network")))
         self.enterContext(patch.object(server.IntervalsClient, "get_paged_collection", side_effect=lambda *a, **k: deepcopy(list(self.remote.values()))))
-        self.enterContext(patch.object(server.IntervalsClient, "get", side_effect=server.AppError(404, "Synthetic missing event")))
+        self.enterContext(patch.object(server.IntervalsClient, "get", side_effect=self.get))
         self.enterContext(patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=self.upsert))
         self.enterContext(patch.object(server.IntervalsClient, "delete_event", side_effect=self.delete))
+
+    def get(self, path):
+        identity = path.rsplit("/", 1)[-1]
+        if identity not in self.remote:
+            raise server.AppError(404, "Synthetic missing event")
+        return deepcopy(self.remote[identity])
 
     def upsert(self, payloads):
         results = []
@@ -303,6 +309,27 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(self.repair(local_id)["ok"])
         self.assertEqual(set(self.remote), {"race"})
         self.assertFalse(any(kind == "upsert" for kind, _ in self.mutations))
+
+    def test_normal_archived_sync_protects_paired_past_and_changed_events(self):
+        local_id = self.seed()
+        self.approve_illness_pause()
+        original = deepcopy(self.remote["existing"])
+        for protected in ({"paired_activity_id": "completed"}, {"paired_event_id": "completed"},
+                          {"start_date_local": "2026-09-06T00:00:00"}, {"category": "RACE_A"}):
+            self.remote["existing"] = {**original, **protected}
+            result = server._sync_selected_workout_library({"entries": server._pending_plan_push_entries()})
+            self.assertFalse(result["ok"], {"protected": protected, "result": result, "mutations": self.mutations})
+            self.assertEqual(self.mutations, [])
+        self.remote["existing"] = original
+
+        def restore_during_read(path):
+            server.update_local_planned_workout(local_id, {"action": "restore"})
+            return self.get(path)
+
+        with patch.object(server.IntervalsClient, "get", side_effect=restore_during_read):
+            self.assertFalse(server._sync_selected_workout_library({"entries": server._pending_plan_push_entries()})["ok"])
+        self.assertEqual(self.mutations, [])
+        self.assertFalse(server.list_planned_units()[0]["archived"])
 
     def test_same_title_without_identity_is_a_conflict_before_writing(self):
         local_id = self.seed()
