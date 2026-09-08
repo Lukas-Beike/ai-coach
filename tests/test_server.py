@@ -7282,20 +7282,31 @@ class CoachTests(unittest.TestCase):
     def test_sync_intervals_waits_for_active_sync_and_uses_its_new_snapshot(self):
         server.set_kv("last_sync_at", "old-sync")
         server.SYNC_LOCK.acquire()
+        previous_snapshot_read = threading.Event()
+        original_get_kv = server.get_kv
+
+        def get_kv_after_read(key, *args, **kwargs):
+            value = original_get_kv(key, *args, **kwargs)
+            if key == "last_sync_at":
+                previous_snapshot_read.set()
+            return value
 
         def finish_active_sync():
-            time.sleep(0.1)
+            if not previous_snapshot_read.wait(2):
+                server.SYNC_LOCK.release()
+                return
             server.set_kv("last_sync_at", "new-sync")
             server.SYNC_LOCK.release()
 
         worker = threading.Thread(target=finish_active_sync)
         worker.start()
         try:
-            result = server.sync_intervals(
-                "latest activity test",
-                activity_days=7,
-                wait_for_existing=True,
-            )
+            with patch.object(server, "get_kv", side_effect=get_kv_after_read):
+                result = server.sync_intervals(
+                    "latest activity test",
+                    activity_days=7,
+                    wait_for_existing=True,
+                )
         finally:
             worker.join(timeout=2)
             if server.SYNC_LOCK.locked():
