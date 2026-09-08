@@ -103,6 +103,22 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(result["command_receipts"][0]["resolved"])
         self.assertEqual(server.get_profile()["name"], "Updated")
 
+    def test_profile_conflict_repair_does_not_hide_an_independent_field_failure(self):
+        server.save_profile({"name": "Synthetic", "training_background": "Current facts"})
+        result, _ = self.turn("Bitte speichere beide Profilangaben", [
+            lambda _: self.call("update_profile", {"changes": [
+                {"field": "training_background", "expected_value": "Old facts", "value": "New facts"},
+            ]}, ["local_profile"]),
+            lambda _: self.call("update_profile", {"changes": [
+                {"field": "name", "expected_value": "Synthetic", "value": "Updated"},
+            ]}, ["local_profile"]),
+            {"output_text": "Teilweise gespeichert."},
+        ])
+        self.assertEqual(result["status"], "partial")
+        self.assertFalse(result["command_receipts"][0].get("resolved"))
+        self.assertEqual(server.get_profile()["name"], "Updated")
+        self.assertEqual(server.get_profile()["training_background"], "Current facts")
+
     def test_profile_rejects_unknown_duplicate_invalid_and_unscoped_changes(self):
         good = {"field": "name", "expected_value": "", "value": "Synthetic"}
         cases = [([good], ["local_checkin"]), ([good, good], ["local_profile"]),

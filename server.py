@@ -14806,6 +14806,14 @@ def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any
     def repaired(previous, current):
         if previous["tool"] != current["tool"]:
             return False
+        if previous["tool"] == "update_profile" and previous.get("result", {}).get("reason") == "profile_conflict":
+            # A later profile write repairs a conflict only when it retries the
+            # same fields. Independent updates in the same profile scope must
+            # leave the original failed fact visible and pending.
+            previous_fields = previous.get("repair_key", {}).get("profile_fields")
+            current_fields = current.get("repair_key", {}).get("profile_fields")
+            if not previous_fields or previous_fields != current_fields:
+                return False
         before, after = previous.get("request") or {}, current.get("request") or {}
         if not before:
             return previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
@@ -14824,6 +14832,17 @@ def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any
                       if not repaired(previous, entry)}
         latest[entry.get("step_key") or entry["tool"]] = entry
     return [entry for entry in latest.values() if not entry.get("result", {}).get("ok")]
+
+
+def _coach_repair_key(name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
+    """Identify the affected object fields needed to match a correction."""
+    if name != "update_profile":
+        return None
+    changes = arguments.get("changes")
+    if not isinstance(changes, list):
+        return None
+    fields = sorted({str(item.get("field") or "") for item in changes if isinstance(item, dict) and item.get("field")})
+    return {"profile_fields": fields} if fields else None
 
 
 def _dialogue_effect_key(name: str, arguments: dict[str, Any]) -> str:
@@ -14998,6 +15017,7 @@ def _chat_with_structured_coach_impl(
             action = {"operation": name, "authorization_scope": []}
             effect_key = _coach_action_hash({"tool": name, "arguments": item.get("arguments")})
             step_key = name
+            repair_key = None
             try:
                 if len(command_receipts) >= 40 and not any(entry.get("call_id") == call_id for entry in command_receipts):
                     raise AppError(400, "Der Coach-Auftrag enthält zu viele Schritte.", reason="command_limit")
@@ -15006,11 +15026,13 @@ def _chat_with_structured_coach_impl(
                 arguments = json.loads(item.get("arguments") or "{}")
                 if not isinstance(arguments, dict):
                     raise ValueError("arguments_object")
+                repair_key = _coach_repair_key(name, arguments)
+                step_key = _coach_action_hash({"name": name, "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
+                                               "period": (arguments.get("_request") or {}).get("period"),
+                                               "repair_key": repair_key})
                 effect_key = _dialogue_effect_key(name, arguments)
                 if (question or cancelled) and name not in STRUCTURED_READ_ONLY_TOOLS:
                     raise AppError(409, "Der Auftrag wartet auf deine Antwort oder wurde abgebrochen.", reason="request_paused")
-                step_key = _coach_action_hash({"name": name, "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
-                                               "period": (arguments.get("_request") or {}).get("period")})
                 cached = next((entry for entry in command_receipts if entry.get("call_id") == call_id), None)
                 if cached and cached.get("effect_key") != effect_key:
                     raise AppError(409, "Der wiederholte Werkzeugaufruf wurde verändert.", reason="tool_call_conflict")
@@ -15071,7 +15093,7 @@ def _chat_with_structured_coach_impl(
                         else:
                             result = _structured_coach_tool_result(name, arguments, intent=action, conversation_id=conversation_id,
                                 client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids, cancel_event=cancel_event)
-                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key,
+                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key,
                                                  "request": action.get("request"), "result": result})
                         _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
                     if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
@@ -15086,7 +15108,7 @@ def _chat_with_structured_coach_impl(
                 if not result["reason"]:
                     result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
                 technical_error = _coach_error_metadata(exc)
-                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
+                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
                 LOGGER.warning("Coach step failed", extra={"event": "coach_tool_failed", "context": {"tool": name if name in {tool['name'] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error}})
             outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
             pending = [entry for entry in pending if entry["call_id"] != call_id]
