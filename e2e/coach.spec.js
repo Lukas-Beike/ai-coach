@@ -636,4 +636,5 @@ test("natural Coach clarification survives reload and saves the follow-up", asyn
   expect(history.messages.filter((item) => item.role === "user")).toHaveLength(2);
   const data = await page.evaluate(() => api("/api/feedback"));
   expect(JSON.stringify(data)).toContain("Schwere Beine");
+  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: {} }));
 });
