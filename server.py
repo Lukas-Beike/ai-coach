@@ -44,6 +44,7 @@ from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
+from backend.providers.workout_text import WorkoutTextError, structured_duration, verify_workout_readback
 from backend.providers.garmin import collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 from backend.sync.windows import split_date_windows
@@ -1759,7 +1760,7 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
     if envelope["type"] == "plan_push":
         if envelope["provider"] != "intervals":
             raise AppError(400, "Plan-Push-Jobs sind nur für Intervals.icu zulässig.", reason="invalid_job_request")
-        if set(values) - {"entries", "reason"}:
+        if set(values) - {"entries", "reason", "repair"}:
             raise AppError(400, "Ein Plan-Push-Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
         entries = values.get("entries")
         if not isinstance(entries, list) or not 1 <= len(entries) <= 28:
@@ -1772,7 +1773,10 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
             if not re.fullmatch(r"[0-9a-f]{64}", payload_hash):
                 raise AppError(400, "Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash.", reason="invalid_job_request")
             normalized_entries.append({"library_workout_id": str(entry["library_workout_id"]), "expected_payload_hash": payload_hash})
-        return {"provider": envelope["provider"], "type": envelope["type"], "payload": {"entries": normalized_entries, "reason": str(values.get("reason") or "job").strip()[:80] or "job"}}
+        if "repair" in values and type(values["repair"]) is not bool:
+            raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
+        repair = {"repair": True} if values.get("repair") else {}
+        return {"provider": envelope["provider"], "type": envelope["type"], "payload": {"entries": normalized_entries, "reason": str(values.get("reason") or "job").strip()[:80] or "job", **repair}}
     allowed = {
         "intervals": {"days", "reason", "end_date"},
         "garmin": {"days", "reason", "end_date"},
@@ -2174,7 +2178,7 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
     if job_type == "competition_push" and provider == "intervals":
         return sync_competitions(reason=reason, push_local=True, operation_id=job["id"])
     if job_type == "plan_push" and provider == "intervals":
-        return _sync_selected_workout_library({"entries": payload.get("entries")})
+        return _sync_selected_workout_library({"entries": payload.get("entries"), **({"repair": True} if payload.get("repair") else {})})
     if job_type == "plan_push":
         raise AppError(409, "Plan-Push-Jobs werden erst durch den autorisierten Planungsworkflow ausgeführt.", reason="unsupported_job")
     if provider == "intervals":
@@ -7895,6 +7899,7 @@ class IntervalsClient:
                 "description": str(workout.get("description") or "")[:12000],
                 "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
                 "folder_id": folder_id,
+                "target": workout.get("target") or "AUTO",
             }
             result = self.post(f"/athlete/{athlete}/workouts", payload)
             if not isinstance(result, dict):
@@ -7910,6 +7915,7 @@ class IntervalsClient:
             "name": str(workout.get("name") or "Coach-Einheit")[:200],
             "description": str(workout.get("description") or "")[:12000],
             "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
+            "target": workout.get("target") or "AUTO",
         }
         folder_id = self._folder_id(workout.get("folder_id"))
         # Intervals.icu requires folder_id for workout updates as well as
@@ -7927,12 +7933,13 @@ class IntervalsClient:
             "sport": workout.get("type") or workout.get("sport") or "Ride",
             "name": workout.get("name") or "Bibliotheks-Einheit",
             "description": workout.get("description") or "",
-            "duration_minutes": max(5, round(float(workout.get("moving_time") or 3600) / 60)),
+            "duration_minutes": workout.get("duration_minutes") or max(5, round(float(workout.get("moving_time") or 3600) / 60)),
             "target": workout.get("target") or "AUTO",
         })
         result = self.post(f"/athlete/{athlete}/events/bulk", [payload], {"upsert": "true"})
         if not isinstance(result, list) or not result:
             raise AppError(502, "Intervals.icu hat keine geplante Einheit zurÃ¼ckgegeben.")
+        validate_intervals_workout_result(workout, result[0])
         return result[0]
 
     def fetch_snapshot(
@@ -8164,7 +8171,7 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
     }
 
 
-def validate_workout_description(workout: dict[str, Any]) -> None:
+def validate_workout_description(workout: dict[str, Any]) -> float | None:
     """Require quantity-first endurance steps; never guess intent from prose.
 
     This is a deliberately narrower authoring contract than the provider's
@@ -8183,7 +8190,8 @@ def validate_workout_description(workout: dict[str, Any]) -> None:
         if not step:
             continue
         text = step.group(1)
-        amounts = list(quantity.finditer(text))
+        # Pace denominators (e.g. 2:00/100m Pace) are targets, not steps.
+        amounts = [match for match in quantity.finditer(text) if match.start() == 0 or text[match.start() - 1] != "/"]
         if amounts and amounts[0].start() != 0:
             raise AppError(
                 400,
@@ -8213,9 +8221,26 @@ def validate_workout_description(workout: dict[str, Any]) -> None:
                     reason="ambiguous_workout_step",
                 )
 
+    try:
+        seconds = structured_duration(str(workout.get("description") or "")[:12000], str(workout.get("target") or "AUTO"))
+    except WorkoutTextError as exc:
+        raise AppError(400, str(exc), reason=exc.reason) from exc
+    expected_minutes = as_number(workout.get("duration_minutes"))
+    expected_seconds = expected_minutes * 60 if expected_minutes is not None else as_number(workout.get("moving_time"))
+    # Whole-minute local metadata may round sub-minute steps, but must never
+    # hide missing intervals. Distance durations depend on provider settings.
+    if seconds is not None and expected_seconds is not None and abs(seconds - expected_seconds) > 30:
+        raise AppError(
+            400,
+            f"Trainingsschritte ergeben {seconds / 60:g} Minuten, die angegebene Dauer ist {expected_seconds / 60:g} Minuten. "
+            "Dauer und Workout-Text einschliesslich aller Wiederholungen, Pausen, Warmup und Cooldown abgleichen; keine fehlenden Minuten erfinden.",
+            reason="workout_duration_mismatch",
+        )
+    return seconds
+
 
 def workout_event_payload(workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:
-    validate_workout_description(workout)
+    structured_seconds = validate_workout_description(workout)
     try:
         workout_date = date.fromisoformat(str(workout["date"]))
     except (KeyError, TypeError, ValueError) as exc:
@@ -8231,10 +8256,23 @@ def workout_event_payload(workout_id: str, workout: dict[str, Any]) -> dict[str,
         "type": intervals_workout_sport(workout.get("sport") or workout.get("type")),
         "name": str(workout.get("name") or "Coach workout")[:200],
         "description": str(workout.get("description") or "")[:12000],
-        "moving_time": duration * 60,
+        "moving_time": round(structured_seconds) if structured_seconds is not None else duration * 60,
         "target": workout.get("target") if workout.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
         "external_id": f"{COACH_EVENT_EXTERNAL_PREFIX}{workout_id}",
     }
+
+
+def validate_intervals_workout_result(workout: dict[str, Any], remote: dict[str, Any]) -> None:
+    """A saved provider resource is only synced after its parsed structure agrees."""
+    expected_sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
+    if not isinstance(remote, dict) or remote.get("type") != expected_sport:
+        raise AppError(502, "Intervals.icu hat die Sportart nicht korrekt bestaetigt.", reason="intervals_workout_sport_mismatch")
+    if expected_sport == "WeightTraining":
+        return
+    try:
+        verify_workout_readback(str(workout.get("description") or ""), remote)
+    except WorkoutTextError as exc:
+        raise AppError(502, str(exc), reason=exc.reason) from exc
 
 
 def normalize_workout(workout: Any) -> dict[str, Any]:
@@ -8512,7 +8550,7 @@ def adaptive_recovery_replacement(
         duration_limit = min(duration_limit, int(max_minutes))
     duration = max(15, min(duration_limit, 90))
     if str(sport).casefold() in {"run", "running", "laufen", "lauf"}:
-        description = f"- {duration}m Easy aerobic run at conversational effort"
+        description = f"- {duration}m Z1 HR Easy aerobic run at conversational effort"
     elif str(sport).casefold() in {"weighttraining", "strength", "kraft", "krafttraining"}:
         description = f"- {duration}m Mobility and easy strength; stop if pain increases"
     else:
@@ -9770,6 +9808,99 @@ def update_planned_unit_sync_state(local_id: str, state: str, error: str | None 
         _bump_planning_revision(db)
 
 
+def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str) -> dict[str, Any] | None:
+    """Reconcile one explicitly selected future unit using exact remote identities."""
+    with DB_LOCK:
+        with database() as db:
+            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            other_rows = db.execute(
+                "SELECT local_id, json_extract(payload, '$.remote_event_id') AS remote_id, "
+                "json_extract(payload, '$.remote_event_external_id') AS remote_external_id FROM planned_units WHERE local_id<>?",
+                (local_id,),
+            ).fetchall()
+            other_remote_ids = {str(item["remote_id"]) for item in other_rows if item.get("remote_id")}
+            other_external_ids = {f"{COACH_EVENT_EXTERNAL_PREFIX}{item['local_id']}" for item in other_rows}
+            other_external_ids.update(str(item["remote_external_id"]) for item in other_rows if item.get("remote_external_id"))
+        if not row or _library_payload_hash(row["payload"]) != expected_hash:
+            raise AppError(409, "Die Planung hat sich seit dem Reparaturauftrag geaendert.", reason="planning_revision_conflict")
+        workout = json.loads(row["payload"])
+        today = local_now().date()
+        planned_date = date.fromisoformat(str(workout.get("date") or ""))
+        if planned_date < today:
+            raise AppError(400, "Reparatur-Sync ist nur fuer zukuenftige geplante Einheiten erlaubt.", reason="invalid_plan")
+        removing = bool(workout.get("local_deleted") or workout.get("archived"))
+        payload = None if removing else workout_event_payload(local_id, workout)
+        client = IntervalsClient()
+        athlete = quote(client.config.intervals_athlete_id, safe="")
+        remote_id = str(workout.get("remote_event_id") or "")
+        identities = {f"{COACH_EVENT_EXTERNAL_PREFIX}{local_id}"}
+        if workout.get("remote_event_external_id"):
+            identities.add(str(workout["remote_event_external_id"]))
+        newest = max(planned_date, today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat()
+
+        def related_events():
+            events = client.get_paged_collection(
+                f"/athlete/{athlete}/events", {"oldest": today.isoformat(), "newest": newest, "category": "WORKOUT"}, "repair_workouts",
+            )
+            related = []
+            for event in events:
+                event_id = str(event.get("id") or "")
+                belongs_elsewhere = event_id in other_remote_ids or str(event.get("external_id") or "") in other_external_ids
+                identified = bool(event_id and (event_id == remote_id or str(event.get("external_id") or "") in identities))
+                if identified:
+                    if belongs_elsewhere or event.get("category") != "WORKOUT" or str(event.get("start_date_local") or "")[:10] < today.isoformat() or event.get("paired_activity_id") or event.get("paired_event_id"):
+                        raise AppError(409, "Eine zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
+                    related.append(event)
+                elif (not removing and not belongs_elsewhere and event.get("category") == "WORKOUT" and str(event.get("start_date_local") or "")[:10] == planned_date.isoformat()
+                      and str(event.get("name") or "").strip().casefold() == str(workout.get("name") or "").strip().casefold()):
+                    raise AppError(409, "Eine gleichnamige Remote-Einheit am selben Tag ist nicht eindeutig zugeordnet. Keine automatische Kopie oder Loeschung durchgefuehrt.", reason="intervals_workout_identity_ambiguous")
+            return related
+
+        related = related_events()
+        if remote_id and not any(str(event.get("id")) == remote_id for event in related):
+            # A mapped object outside the fetched window must never be silently
+            # recreated or deleted. Only a confirmed 404 permits recreation.
+            try:
+                client.get(f"/athlete/{athlete}/events/{quote(remote_id, safe='')}")
+            except AppError as exc:
+                if exc.status != 404 and not (isinstance(exc.__cause__, HTTPError) and exc.__cause__.code == 404):
+                    raise
+            else:
+                raise AppError(409, "Die zugeordnete Remote-Einheit liegt ausserhalb des Reparaturzeitraums.", reason="intervals_workout_identity_conflict")
+        keeper = next((event for event in related if str(event.get("id")) == remote_id), related[0] if related else None)
+        result = None
+        if not removing:
+            if keeper:
+                payload["id"] = str(keeper["id"])
+                payload["external_id"] = str(keeper.get("external_id") or payload["external_id"])
+            identities.add(payload["external_id"])
+            response = client.upsert_calendar_events([payload])
+            result = response[0] if isinstance(response, list) and len(response) == 1 else None
+            if not isinstance(result, dict) or not result.get("id"):
+                raise AppError(502, "Intervals.icu hat keine eindeutige reparierte Einheit zurueckgegeben.", reason="intervals_workout_verification_failed")
+            remote_id = str(result["id"])
+            update_planned_unit_sync_state(local_id, "syncing", remote_event={**result, "external_id": payload["external_id"]})
+            if str(result.get("start_date_local") or "")[:10] != planned_date.isoformat() or result.get("name") != workout.get("name"):
+                raise AppError(502, "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestaetigt.", reason="intervals_workout_verification_failed")
+            validate_intervals_workout_result(workout, result)
+        for event in related:
+            if removing or str(event["id"]) != remote_id:
+                client.delete_event(str(event["id"]))
+        remaining = related_events()
+        if removing:
+            if remaining:
+                raise AppError(502, "Die entfernten Remote-Einheiten sind noch vorhanden.", reason="intervals_workout_verification_failed")
+        else:
+            if len(remaining) != 1 or str(remaining[0]["id"]) != remote_id:
+                raise AppError(502, "Der Kalender bestaetigt keine eindeutige reparierte Einheit.", reason="intervals_workout_verification_failed")
+            if str(remaining[0].get("start_date_local") or "")[:10] != planned_date.isoformat() or remaining[0].get("name") != workout.get("name"):
+                raise AppError(502, "Der Kalender bestaetigt Datum oder Namen der reparierten Einheit nicht.", reason="intervals_workout_verification_failed")
+            validate_intervals_workout_result(workout, remaining[0])
+            result = remaining[0]
+        update_planned_unit_sync_state(local_id, "synced", remote_event=result)
+        return result
+
+
 def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | None:
     """Push one approved local calendar unit; this is never called by planning mutations."""
     try:
@@ -9800,7 +9931,7 @@ def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | N
     remote_external_id = str(workout.get("remote_event_external_id") or "").strip()
     if remote_external_id:
         event_payload["external_id"] = remote_external_id
-    elif workout.get("remote_event_id"):
+    if workout.get("remote_event_id"):
         # Provider event IDs are also stable identities. Retain them when a
         # provider event has no external_id.
         event_payload["id"] = str(workout["remote_event_id"])[:120]
@@ -9810,6 +9941,16 @@ def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | N
     event = result[0] if result else None
     if not isinstance(event, dict) or not str(event.get("id") or "").strip():
         raise AppError(502, "Intervals.icu hat keine geplante Einheit zurückgegeben.")
+    try:
+        validate_intervals_workout_result(workout, event)
+    except AppError as exc:
+        # The write happened. Preserve its identity so repair/retry updates the
+        # same event even when provider parsing failed.
+        update_planned_unit_sync_state(
+            normalized_id, "sync_error", str(exc),
+            remote_event={**event, "external_id": event.get("external_id") or event_payload.get("external_id")},
+        )
+        raise
     # Keep the client-generated external identity when the provider omits it
     # from the response. This makes retries idempotent.
     update_planned_unit_sync_state(
@@ -10002,7 +10143,13 @@ def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
             sync_status="local",
         )
         if action == "update":
-            validate_workout_description(normalized)
+            seconds = validate_workout_description(normalized)
+            minutes = as_number(normalized.get("duration_minutes"))
+            if seconds is not None or minutes is not None:
+                normalized["moving_time"] = round(seconds if seconds is not None else minutes * 60)
+            if any(key in values for key in ("description", "duration_minutes", "target", "type", "sport")):
+                for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+                    normalized.pop(key, None)
         for key in ("source", "rationale", "plan_id", "plan_name", "private_calendar_adjustment"):
             if current.get(key) is not None:
                 normalized[key] = current[key]
@@ -10184,10 +10331,11 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
         local_workout = json.loads(row["payload"])
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
-    if row.get("external_id") and row.get("sync_state") not in {"local", "sync_error", "remote_missing"}:
+    if row.get("external_id") and row.get("sync_state") == "synced":
         return local_workout
+    validate_workout_description(local_workout)
     update_workout_library_sync_state(normalized_id, "syncing")
-    if row.get("external_id") and row.get("sync_state") in {"local", "sync_error"}:
+    if row.get("external_id") and row.get("sync_state") != "remote_missing":
         remote_workout = IntervalsClient().update_library_workout(str(row["external_id"]), local_workout)
         remote_workout = {**remote_workout, "id": str(row["external_id"])}
     else:
@@ -10198,6 +10346,14 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
             remote_workout = created[0] if created and isinstance(created[0], dict) else None
     if not remote_workout or not str(remote_workout.get("id") or "").strip():
         raise AppError(502, "Die Bibliothekseinheit konnte nicht zu Intervals.icu übertragen werden.")
+    # Keep a newly created identity even if the provider could not parse its
+    # contents. A retry must update this resource, never create a duplicate.
+    with DB_LOCK, database() as db:
+        db.execute(
+            "UPDATE workout_library SET external_id=?, payload=? WHERE local_id=?",
+            (str(remote_workout["id"]), json.dumps({**local_workout, "external_id": str(remote_workout["id"])}, ensure_ascii=False), normalized_id),
+        )
+    validate_intervals_workout_result(local_workout, remote_workout)
     remote_workout = {**local_workout, **remote_workout}
     external_id = str(remote_workout["id"])
     synced = normalize_library_workout(
@@ -10302,7 +10458,7 @@ def apply_workout_library_plan(
                 "sport": source.get("type") or source.get("sport") or "Ride",
                 "name": source.get("name") or "Bibliotheks-Einheit",
                 "description": source.get("description") or "",
-                "duration_minutes": max(5, round(float(source.get("moving_time") or 300) / 60)),
+                "duration_minutes": source.get("duration_minutes") or max(5, round(float(source.get("moving_time") or 300) / 60)),
                 "target": source.get("target") or "AUTO",
                 "source": "library",
                 "rationale": "Aus der lokalen Trainingsbibliothek übernommen.",
@@ -10392,9 +10548,14 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
             continue
         if is_planned:
             try:
-                event = _sync_local_planned_unit_calendar_entry(item["library_workout_id"])
+                if payload.get("repair"):
+                    event = _repair_local_planned_unit_calendar_entry(item["library_workout_id"], item["expected_payload_hash"])
+                else:
+                    event = _sync_local_planned_unit_calendar_entry(item["library_workout_id"])
                 results.append({"library_workout_id": item["library_workout_id"], "status": "synced", "calendar_synced": event is not None})
             except Exception as exc:
+                if payload.get("repair"):
+                    update_planned_unit_sync_state(item["library_workout_id"], "sync_error", str(exc))
                 results.append({"library_workout_id": item["library_workout_id"], "status": "error", "error": redact_text(str(exc))[:500]})
             continue
         if row.get("sync_state") == "synced":
@@ -13385,7 +13546,7 @@ COACH_STRUCTURED_TOOLS = [
                            "value": {"type": "string", "maxLength": 4000}},
         }},
     }, strict=True),
-    _canonical_coach_tool("read_training_state", "Read the current local training state and references."),
+    _canonical_coach_tool("read_training_state", "Read current local training references. For repair synchronization include inactive entries so removed or superseded workouts can be removed remotely.", {"include_inactive": {"type": "boolean"}}),
     _canonical_coach_tool("list_recent_activities", "Read completed activities from the latest local snapshot without refreshing a provider.", {"days": {"type": "integer"}, "limit": {"type": "integer"}}),
     _canonical_coach_tool("list_workout_library", "Read saved local training templates; local library data is authoritative.", {"limit": {"type": "integer"}, "include_archived": {"type": "boolean"}}),
     _canonical_coach_tool("list_planned_workouts", "Read future locally scheduled workouts.", {"limit": {"type": "integer"}}),
@@ -13495,11 +13656,11 @@ COACH_STRUCTURED_TOOLS = [
     _canonical_coach_tool("delete_competition", "Delete one locally stored target competition.", {"competition_id": {"type": "string"}}),
     _canonical_coach_tool("start_provider_refresh", "Queue an explicitly requested read-only provider refresh.", {"days": {"type": "integer"}, "reason": {"type": "string"}}),
     _canonical_coach_tool("refresh_current_performance", "Queue an explicit Intervals.icu performance-metrics refresh without reloading activities.", {"reason": {"type": "string"}}),
-    _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu push. For selected entries copy local_id and expected_payload_hash from read_training_state into library_workout_id and expected_payload_hash. For all_pending or created omit entries; the server resolves them. A follow-up sync of previously saved workouts uses selected or all_pending; created only refers to additions in THIS turn.", {"entries": {"type": "array", "minItems": 1, "maxItems": LIBRARY_BULK_MAX_ENTRIES, "items": {
+    _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu push. For a repair use repair=true and selected entries, including already-synced and superseded inactive units. First correct local workout text and sport. Repair verifies the remote calendar and removes only exact identity duplicates. For selected entries copy local_id and expected_payload_hash from read_training_state into library_workout_id and expected_payload_hash. For all_pending or created omit entries; the server resolves them. A follow-up sync of previously saved workouts uses selected or all_pending; created only refers to additions in THIS turn.", {"entries": {"type": "array", "minItems": 1, "maxItems": LIBRARY_BULK_MAX_ENTRIES, "items": {
         "type": "object", "additionalProperties": False, "required": ["library_workout_id", "expected_payload_hash"],
         "properties": {"library_workout_id": {"type": "string", "format": "uuid", "description": "Exact local_id of a planned unit, never a remote event ID or a scope token."},
                        "expected_payload_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
-    }}, "reason": {"type": "string"}}),
+    }}, "reason": {"type": "string"}, "repair": {"type": "boolean", "description": "Reconcile selected existing calendar entries and their exact identity duplicates; requires an explicit repair/resync request."}}),
     _canonical_coach_tool("sync_competitions", "Queue an explicitly requested push of local target competitions to Intervals.icu.", {"reason": {"type": "string"}}),
     _canonical_coach_tool("get_sync_job", "Read one local synchronization job.", {"job_id": {"type": "string"}}),
     _canonical_coach_tool("resolve_training_sync_conflict", "Resolve a local conflict using local_id and strategy (keep_local or adopt_remote), with local target. Or retry a failed/partial job using only job_id: read get_sync_job first, use its provider target, and include sync_job:<id> plus intervals_sync for pushes (remote_write=true) or <provider>_refresh for reads.", {"local_id": {"type": "string"}, "job_id": {"type": "string"}, "strategy": {"type": "string", "enum": ["keep_local", "adopt_remote"]}}),
@@ -13569,17 +13730,17 @@ def _require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
         raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.", reason="intent_scope_denied")
 
 
-def _structured_training_state() -> dict[str, Any]:
+def _structured_training_state(*, include_inactive: bool = False) -> dict[str, Any]:
     today = local_now().date().isoformat()
     with DB_LOCK, database() as db:
         revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
         planned_rows = db.execute(
             "SELECT local_id, sync_state, payload FROM planned_units "
-            "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
-            "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
+            "WHERE (? OR (COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
+            "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0)) "
             "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ? "
             "ORDER BY json_extract(payload, '$.date'), lower(json_extract(payload, '$.name')), local_id LIMIT ?",
-            (today, COACH_TRAINING_CHANGE_LIMIT),
+            (int(include_inactive), today, COACH_TRAINING_CHANGE_LIMIT),
         ).fetchall()
         template_rows = db.execute(
             "SELECT local_id, sync_state, payload FROM workout_library "
@@ -14178,12 +14339,14 @@ def _mark_local_competitions_authoritative() -> int:
     return len(rows)
 
 
-def _enqueue_coach_plan_push(entries: list[dict[str, str]], sync_job_ids: list[str], *, reason: str) -> dict[str, Any]:
+def _enqueue_coach_plan_push(entries: list[dict[str, str]], sync_job_ids: list[str], *, reason: str, repair: bool = False) -> dict[str, Any]:
     """Queue a complete explicit Coach plan push in provider-sized chunks."""
     jobs: list[dict[str, Any]] = []
     for offset in range(0, len(entries), 28):
         chunk = entries[offset:offset + 28]
         payload = {"entries": chunk, "reason": reason[:200] or "coach"}
+        if repair:
+            payload["repair"] = True
         item_operations = [
             {
                 "item_key": entry["library_workout_id"],
@@ -14243,7 +14406,7 @@ def _structured_coach_tool_result(
             saved = save_profile(updated)
         return {"ok": True, "stored_locally": True, "updated_fields": sorted(seen), "profile": saved}
     if name == "read_training_state":
-        return {"ok": True, **_structured_training_state()}
+        return {"ok": True, **_structured_training_state(include_inactive=bool(arguments.get("include_inactive")))}
     if name == "list_recent_activities":
         try:
             days = max(1, min(int(arguments.get("days", 30)), 3660))
@@ -14501,6 +14664,10 @@ def _structured_coach_tool_result(
         if "start_intervals_plan_sync" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
             raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
         entries = arguments.get("entries")
+        if "repair" in arguments and type(arguments["repair"]) is not bool:
+            raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
+        if arguments.get("repair") and (not entries or intent.get("_sync_all_pending")):
+            raise AppError(400, "Reparatur-Sync braucht die genaue Auswahl aller zu pruefenden Einheiten einschliesslich bereits synchronisierter Eintraege.", reason="request_sync")
         if entries is None:
             if intent.get("_sync_created_entries_only"):
                 raise AppError(
@@ -14593,6 +14760,10 @@ def _structured_coach_tool_result(
                     row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (entry["library_workout_id"],)).fetchone()
                     if not row or _library_payload_hash(row["payload"]) != entry["expected_payload_hash"]:
                         raise AppError(409, "Die ausgewählte Planung wurde geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
+                    if arguments.get("repair"):
+                        workout = json.loads(row["payload"])
+                        if not workout.get("local_deleted") and not workout.get("archived"):
+                            validate_workout_description(workout)
                 _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
                 # Marking a conflict as locally authoritative changes the payload.
                 # Queue hashes of that validated, updated state.
@@ -14603,6 +14774,7 @@ def _structured_coach_tool_result(
             normalized_entries,
             sync_job_ids,
             reason=str(arguments.get("reason") or "Coach-Anfrage"),
+            **({"repair": True} if arguments.get("repair") else {}),
         )
     if name == "get_sync_job":
         job_id = str(arguments.get("job_id") or "").strip()
@@ -14792,6 +14964,16 @@ def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, An
         if request["sync_scope"] not in {"created", "selected", "all_pending"}:
             raise AppError(400, "Der Umfang der Synchronisierung fehlt.", reason="request_sync")
         action["_sync_all_pending"] = request["sync_scope"] == "all_pending"
+        if arguments.get("repair"):
+            period = request.get("period")
+            if request["sync_scope"] != "selected" or not period:
+                raise AppError(400, "Reparatur-Sync benoetigt eine Auswahl und einen Zeitraum.", reason="request_sync")
+            with DB_LOCK, database() as db:
+                for entry in arguments.get("entries") or []:
+                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (str(entry.get("library_workout_id") or ""),)).fetchone()
+                    day = str(json.loads(row["payload"]).get("date") or "") if row else ""
+                    if not max(period["start"], local_now().date().isoformat()) <= day <= period["end"]:
+                        raise AppError(403, "Die Reparaturauswahl liegt ausserhalb des beauftragten Zeitraums.", reason="request_period")
     if name == "update_training_plan":
         _require_coach_scope(action, "training_plan:" + str((arguments.get("payload") or {}).get("plan_id") or ""))
     if name == "apply_adaptive_replan":

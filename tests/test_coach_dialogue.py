@@ -36,7 +36,7 @@ class DialogueHarness:
         self.counter = 0
 
     def workout(self, day="2026-09-09", name="Oberkörper moderat + Core"):
-        return {"date": day, "name": name, "sport": "WeightTraining", "description": "Synthetic easy workout",
+        return {"date": day, "name": name, "sport": "WeightTraining", "description": "- 30m 60% Synthetic easy workout",
                 "duration_minutes": 30, "target": "AUTO", "rationale": "Synthetic training goal"}
 
     def request(self, scope, target="local", period=None, remote_write=False, sync_scope=None):

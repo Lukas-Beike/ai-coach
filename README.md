@@ -146,6 +146,27 @@ instructions do not delete or convert its data.
 - The explicit planning synchronization transfers dirty local planned units to
   the Intervals.icu calendar with stable upsert identities. It does not replace
   the local plan with later remote edits or deletions.
+- Endurance workouts require structured Intervals.icu steps with a duration or
+  distance and an intensity target (for example `- 15m 50-70%` or `- 6km Z1 HR`).
+  Prose-only descriptions, missing targets and inconsistent timed totals are
+  rejected before saving or exporting. Repeat blocks count every contained
+  step, including recovery; their boundaries need blank lines. Strength
+  descriptions remain free text. Distance-based duration and the resulting
+  training load depend on the athlete's sport/zone settings in Intervals.icu.
+  Synchronization succeeds only when the provider's returned `workout_doc`
+  confirms the individual steps, durations/distances, target types and values,
+  and a calculated training load. An HTTP success alone is insufficient. A
+  failed verification retains the remote identity for correction and retry.
+  Existing invalid units must be corrected through the Coach and explicitly
+  synchronized again; a code update alone does not change the remote calendar.
+- A requested repair synchronization also checks already-synchronized units.
+  The Coach first fixes local text, duration and sport while retaining unit IDs,
+  then selects the affected future units with current hashes, including any
+  superseded inactive entries. Repair updates existing calendar IDs, verifies
+  the provider's sport and workout structure, removes exact-identity duplicates
+  and selected inactive entries, and rereads the calendar before success.
+  Unmapped same-name entries are reported as conflicts instead of being deleted
+  by title. See [workout export examples and repair](docs/workout-export-format.md).
 - If a provider response no longer contains an imported template, it is kept
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by
