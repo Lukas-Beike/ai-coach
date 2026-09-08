@@ -1868,6 +1868,75 @@ def _sync_job_active(provider: str, job_type: str = "refresh") -> bool:
     return bool(row)
 
 
+def _enqueue_automatic_performance_refresh(reason: str) -> dict[str, Any] | None:
+    """Queue the targeted performance read after a complete Intervals refresh."""
+    if not CONFIG.intervals_api_key or PERFORMANCE_LOCK.locked():
+        return None
+    try:
+        return enqueue_sync_job(
+            "intervals",
+            "performance_refresh",
+            {"reason": f"Automatische Folgeaktualisierung nach {str(reason or 'Intervals-Sync')[:80]}"},
+            requested_by="scheduler",
+        )
+    except Exception:
+        # The activity snapshot is already durable and must not be reported as
+        # failed only because its independent performance follow-up could not
+        # be queued. The next scheduled or manual refresh can retry it.
+        LOGGER.warning(
+            "Automatic Intervals performance refresh could not be queued",
+            extra={"event": "automatic_performance_refresh_queue_failed"},
+            exc_info=True,
+        )
+        return None
+
+
+def _wait_for_performance_refresh(
+    job_id: str | None = None,
+    *,
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any] | None:
+    """Wait until the current performance refresh has completed."""
+    deadline = time.monotonic() + INTERVALS_SYNC_WAIT_SECONDS
+    active_job_id = job_id
+    while True:
+        _raise_chat_cancelled(cancel_event)
+        if active_job_id:
+            state = sync_job_state(active_job_id)
+            if state["status"] == "completed":
+                return state
+            if state["status"] in {"failed", "partial"}:
+                raise AppError(
+                    503,
+                    "Die aktuelle Intervals.icu-Leistungsaktualisierung ist fehlgeschlagen.",
+                    reason="provider_refresh_failed",
+                )
+        else:
+            with DB_LOCK, database() as db:
+                row = db.execute(
+                    "SELECT id FROM sync_jobs WHERE provider='intervals' AND type='performance_refresh' "
+                    "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1"
+                ).fetchone()
+            if row:
+                active_job_id = row["id"]
+            elif get_kv("performance_refresh_running") != "1":
+                if get_kv("last_performance_error"):
+                    raise AppError(
+                        503,
+                        "Die aktuelle Intervals.icu-Leistungsaktualisierung ist fehlgeschlagen.",
+                        reason="provider_refresh_failed",
+                    )
+                return None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AppError(
+                503,
+                "Die aktuelle Intervals.icu-Leistungsaktualisierung ist noch nicht abgeschlossen.",
+                reason="provider_busy",
+            )
+        time.sleep(min(SYNC_JOB_POLL_SECONDS, remaining))
+
+
 @maintenance_operation
 def enqueue_sync_job(
     provider: str,
@@ -1892,7 +1961,16 @@ def enqueue_sync_job(
     operations = item_operations or [{"item_key": f"{envelope['provider']}:{envelope['type']}", "operation": envelope["type"]}]
     if not 1 <= len(operations) <= 1000:
         raise AppError(400, "Ein Job muss zwischen 1 und 1000 Operationen enthalten.", reason="invalid_job_request")
+    existing_job_id = None
     with DB_LOCK, database() as db:
+        if envelope["type"] == "performance_refresh":
+            existing = db.execute(
+                "SELECT id FROM sync_jobs WHERE provider='intervals' AND type='performance_refresh' "
+                "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1"
+            ).fetchone()
+            existing_job_id = existing["id"] if existing else None
+        if existing_job_id:
+            return sync_job_state(existing_job_id)
         db.execute(
             "INSERT INTO sync_jobs(id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, available_at, created_at, updated_at) "
             "VALUES (?, ?, ?, 'queued', ?, ?, 0, ?, 0, ?, ?, ?)",
@@ -10666,6 +10744,7 @@ def sync_intervals(
     operation_id: str | None = None,
     end_date: date | None = None,
     wait_for_existing: bool = False,
+    wait_for_performance: bool = False,
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
@@ -10690,6 +10769,8 @@ def sync_intervals(
                             completed_activity_days = int(get_kv("last_sync_activity_days") or 0)
                         except (TypeError, ValueError):
                             completed_activity_days = 0
+                        if wait_for_performance:
+                            _wait_for_performance_refresh(cancel_event=cancel_event)
                         return {
                             "status": "ok", "waited_for_existing": True, "synced_at": current_sync_at,
                             **({"activity_days": completed_activity_days} if completed_activity_days > 0 or completed_activity_days == ALL_SYNC_DAYS else {}),
@@ -10774,8 +10855,12 @@ def sync_intervals(
         set_kv("last_sync_pagination", json.dumps(pagination, ensure_ascii=False, separators=(",", ":")))
         set_sync_operation_state(operation_id, "completed", "complete", 100, "Intervals.icu-Synchronisierung abgeschlossen.")
         set_kv("sync_operation_finished_at", utc_now())
-        return {
-            "status": "partial" if library_error else "ok",
+        result_status = "partial" if library_error else "ok"
+        performance_job = None
+        if end_date is None:
+            performance_job = _enqueue_automatic_performance_refresh(reason)
+        result = {
+            "status": result_status,
             "synced_at": snapshot["synced_at"],
             "activities": len(snapshot["recent_activities"]),
             "wellness": len(snapshot["recent_wellness"]),
@@ -10789,6 +10874,14 @@ def sync_intervals(
             "library_error": library_error,
             "pagination": pagination,
         }
+        if performance_job:
+            result["performance_refresh_job_id"] = performance_job["id"]
+        if wait_for_performance:
+            _wait_for_performance_refresh(
+                performance_job["id"] if performance_job else None,
+                cancel_event=cancel_event,
+            )
+        return result
     except Exception as exc:
         if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
             set_sync_operation_state(operation_id, "cancelled", "cancelled", 100, "Intervals.icu-Synchronisierung abgebrochen.")
@@ -14387,6 +14480,7 @@ def _structured_coach_tool_result(
             sync_kwargs: dict[str, Any] = {"activity_days": activity_days, "wait_for_existing": True}
             if cancel_event is not None:
                 sync_kwargs["cancel_event"] = cancel_event
+            sync_kwargs["wait_for_performance"] = True
             result = sync_intervals("Chat-Anfrage", **sync_kwargs)
             if result.get("status") == "already_running":
                 raise AppError(503, "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.", reason="provider_busy")
@@ -16004,6 +16098,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             preflight_sync_kwargs: dict[str, Any] = {
                 "activity_days": sync_period("intervals"),
                 "wait_for_existing": latest_activity_analysis,
+                "wait_for_performance": True,
             }
             if cancel_event is not None:
                 preflight_sync_kwargs["cancel_event"] = cancel_event
@@ -16372,7 +16467,11 @@ def run_morning_checkin(checkin_date: str) -> None:
                 sync_garmin_morning_body_battery(date.fromisoformat(checkin_date))
             except Exception:
                 LOGGER.warning("Morning Body Battery synchronization failed", extra={"event": "morning_body_battery_sync_failed"}, exc_info=True)
-        sync_result = sync_intervals("Morgen-Check-in", activity_days=sync_period("intervals"))
+        sync_result = sync_intervals(
+            "Morgen-Check-in",
+            activity_days=sync_period("intervals"),
+            wait_for_performance=True,
+        )
         if sync_result.get("status") == "already_running":
             deadline = time.monotonic() + 120
             while get_kv("sync_running") == "1" and time.monotonic() < deadline:

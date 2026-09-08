@@ -714,6 +714,72 @@ class CoachTests(unittest.TestCase):
         performance.assert_called_once_with()
         competitions.assert_called_once_with(reason="Coach request", push_local=True, operation_id="job-competition")
 
+    def test_intervals_job_delegates_performance_follow_up_to_common_sync_path(self):
+        refresh_job = {
+            "id": "job-refresh", "provider": "intervals", "type": "refresh",
+            "payload": json.dumps({"days": 90, "reason": "tägliche automatische Aktualisierung"}),
+        }
+        with patch.object(server, "sync_intervals", return_value={"status": "ok"}) as sync, patch.object(
+            server, "sync_competitions", return_value={"status": "ok"}
+        ), patch.object(
+            server, "enqueue_sync_job", return_value={"id": "job-performance-follow-up"}
+        ) as enqueue:
+            result = server._execute_sync_job(refresh_job)
+        self.assertEqual(result["status"], "ok")
+        sync.assert_called_once()
+        enqueue.assert_not_called()
+
+    def test_performance_refresh_jobs_are_deduplicated_atomically(self):
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config):
+            first = server.enqueue_sync_job(
+                "intervals", "performance_refresh", {"reason": "first"}, requested_by="scheduler"
+            )
+            second = server.enqueue_sync_job(
+                "intervals", "performance_refresh", {"reason": "second"}, requested_by="coach"
+            )
+        self.assertEqual(second["id"], first["id"])
+        self.assertEqual(second["payload"], {"reason": "first"})
+        with server.DB_LOCK, server.database() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) AS count FROM sync_jobs WHERE type='performance_refresh'").fetchone()["count"],
+                1,
+            )
+
+    def test_automatic_performance_follow_up_skips_direct_refresh(self):
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        server.PERFORMANCE_LOCK.acquire()
+        try:
+            with patch.object(server, "CONFIG", config), patch.object(server, "enqueue_sync_job") as enqueue:
+                self.assertIsNone(server._enqueue_automatic_performance_refresh("startup"))
+            enqueue.assert_not_called()
+        finally:
+            server.PERFORMANCE_LOCK.release()
+
+    def test_sync_intervals_queues_performance_follow_up_for_current_refresh(self):
+        snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", return_value=snapshot
+        ), patch.object(server, "refresh_workout_library", return_value={"workouts": 0}), patch.object(
+            server, "_enqueue_automatic_performance_refresh", return_value={"id": "job-performance-follow-up"}
+        ) as enqueue, patch.object(server, "_wait_for_performance_refresh") as wait:
+            result = server.sync_intervals("startup", activity_days=90, wait_for_performance=True)
+        self.assertEqual(result["performance_refresh_job_id"], "job-performance-follow-up")
+        enqueue.assert_called_once_with("startup")
+        wait.assert_called_once_with("job-performance-follow-up", cancel_event=None)
+
+    def test_historical_sync_does_not_queue_performance_follow_up_from_common_path(self):
+        snapshot = {"synced_at": "historical", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        with patch.object(server, "CONFIG", config), patch.object(
+            server.IntervalsClient, "fetch_snapshot", return_value=snapshot
+        ), patch.object(server, "refresh_workout_library", return_value={"workouts": 0}), patch.object(
+            server, "_enqueue_automatic_performance_refresh"
+        ) as enqueue:
+            server.sync_intervals("startup historical backfill", activity_days=90, end_date=date(2026, 1, 1))
+        enqueue.assert_not_called()
+
     def test_explicit_competition_push_preserves_provider_id_for_ordinary_edits(self):
         competition = server.save_coach_competition({
             "name": "Linked Race", "event_date": "2099-01-02", "sport": "Cycling",
