@@ -11,14 +11,16 @@ on:
         type: string
   pull_request:
     types: [closed]
-    branches: [develop, main]
+    branches: [develop]
   workflow_run:
     workflows: ["Test and publish container image"]
     types: [completed]
+    branches: [main, 'chore/release-version-*']
 
 concurrency:
   group: daily-release
   cancel-in-progress: false
+  queue: max
 
 permissions:
   actions: write
@@ -71,18 +73,10 @@ jobs:
           set -euo pipefail
 
           if [[ "$EVENT_NAME" == "workflow_run" && "$WORKFLOW_RUN_BRANCH" == chore/release-version-* ]]; then
-            merged_version_pr=""
-            for attempt in {1..60}; do
-              merged_version_pr="$(gh pr list --repo "$REPOSITORY" --base develop --head "$WORKFLOW_RUN_BRANCH" --state merged --json number --jq '.[0].number // empty')"
-              if [[ -n "$merged_version_pr" ]]; then
-                break
-              fi
-              echo "Waiting for version PR $WORKFLOW_RUN_BRANCH to merge (attempt $attempt/60)."
-              sleep 10
-            done
+            merged_version_pr="$(gh pr list --repo "$REPOSITORY" --base develop --head "$WORKFLOW_RUN_BRANCH" --state merged --json number --jq '.[0].number // empty')"
             if [[ -z "$merged_version_pr" ]]; then
-              echo "Version PR $WORKFLOW_RUN_BRANCH was not merged after the test completed."
-              exit 1
+              echo "Version PR $WORKFLOW_RUN_BRANCH is still awaiting merge; its merged event will resume promotion."
+              exit 0
             fi
             git fetch --no-tags origin refs/heads/develop:refs/remotes/origin/develop
             git reset --hard origin/develop
@@ -137,6 +131,16 @@ jobs:
               --ref "$source_ref" \
               --field "release_tag=$release_tag" \
               --field "publish_container=false"
+          }
+
+          ensure_promotion_gate() {
+            local pull_request_number="$1"
+            # Run the proof of an unchanged develop snapshot from the trusted
+            # integration branch, including when main still has an older gate.
+            gh workflow run codex-code-review.yml \
+              --repo "$REPOSITORY" \
+              --ref develop \
+              --field "pull_request_number=$pull_request_number"
           }
 
           ensure_release_test() {
@@ -238,6 +242,7 @@ jobs:
             existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$promotion_branch" --state open --json number --jq '.[0].number // empty')"
             if [[ -n "$existing_pr" ]]; then
               echo "Release promotion PR #$existing_pr is already open."
+              ensure_promotion_gate "$existing_pr"
               enable_auto_merge "$existing_pr"
               ensure_release_test "$existing_pr" "$promotion_branch" "$app_version"
               exit 0
@@ -262,8 +267,9 @@ jobs:
               --head "$promotion_branch" \
               --title "chore(release): promote $app_version to main" \
               --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container.")"
-            enable_auto_merge "$promotion_pr_url"
             promotion_pr_number="$(gh pr view "$promotion_pr_url" --repo "$REPOSITORY" --json number --jq '.number')"
+            ensure_promotion_gate "$promotion_pr_number"
+            enable_auto_merge "$promotion_pr_url"
             ensure_release_test "$promotion_pr_number" "$promotion_branch" "$app_version"
             exit 0
           fi
@@ -324,25 +330,15 @@ jobs:
           ensure_release_test "$version_pr_number" "$version_branch" "$next_tag"
 
   create-release:
-    # A successful explicit promotion test is the normal release gate. The
-    # publish workflow also validates the merged promotion commit on main;
-    # accept that push result so a merge cannot leave the release stranded
-    # when the pre-merge dispatch's workflow_run event is not delivered with
-    # the promotion branch metadata.
+    # Release only after the merged main commit passes its own tests. Review
+    # and merge may take longer than the pre-merge test run, so no workflow
+    # waits for the promotion PR to merge.
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.name == 'Test and publish container image' &&
       github.event.workflow_run.conclusion == 'success' &&
-      (
-        (
-          github.event.workflow_run.event == 'workflow_dispatch' &&
-          startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-')
-        ) ||
-        (
-          github.event.workflow_run.event == 'push' &&
-          github.event.workflow_run.head_branch == 'main'
-        )
-      )
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Create release GitHub App token
@@ -366,38 +362,17 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
           REPOSITORY: ${{ github.repository }}
-          EVENT_NAME: ${{ github.event_name }}
-          PROMOTION_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.event.workflow_run.head_branch }}
           TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
-            if [[ "$PROMOTION_BRANCH" == chore/release-promotion-* ]]; then
-              for attempt in {1..60}; do
-                merged_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$PROMOTION_BRANCH" --state merged --json number --jq '.[0].number // empty')"
-                if [[ -n "$merged_pr" ]]; then
-                  break
-                fi
-                echo "Waiting for promotion branch $PROMOTION_BRANCH to merge (attempt $attempt/60)."
-                sleep 10
-              done
-              if [[ -z "${merged_pr:-}" ]]; then
-                echo "Promotion branch $PROMOTION_BRANCH was not merged after the test completed."
-                exit 1
-              fi
-            elif [[ "$PROMOTION_BRANCH" != "main" ]]; then
-              echo "Unexpected workflow-run branch $PROMOTION_BRANCH."
-              exit 1
-            fi
-            git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
-            if [[ "$PROMOTION_BRANCH" == "main" ]] && [[ "$(git rev-parse refs/remotes/origin/main)" != "$TESTED_SHA" ]]; then
-              echo "The tested main commit $TESTED_SHA is not the current main commit."
-              exit 1
-            fi
-            git reset --hard origin/main
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          if [[ "$(git rev-parse refs/remotes/origin/main)" != "$TESTED_SHA" ]]; then
+            echo "The tested main commit $TESTED_SHA is not the current main commit."
+            exit 1
           fi
+          git reset --hard origin/main
 
           release_tag="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
           if [[ -z "$release_tag" ]]; then
