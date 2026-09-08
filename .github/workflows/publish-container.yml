@@ -102,6 +102,7 @@ jobs:
           docker run --rm --read-only --security-opt no-new-privileges:true --cap-drop=ALL
           --pids-limit=256 --memory=512m --cpus=1 --tmpfs /tmp
           --volume "${GITHUB_WORKSPACE}/tests:/review/tests:ro"
+          --volume "${GITHUB_WORKSPACE}/docs:/review/docs:ro"
           --volume "${GITHUB_WORKSPACE}/public:/review/public:ro"
           --volume "${GITHUB_WORKSPACE}/server.py:/review/server.py:ro"
           --volume "${GITHUB_WORKSPACE}/playwright.config.cjs:/review/playwright.config.cjs:ro"

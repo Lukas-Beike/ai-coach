@@ -3,6 +3,7 @@ from typing import Any
 
 
 COACH_OPERATION_LABELS = {
+    "update_profile": "Profil aktualisiert",
     "apply_training_patch": "Geplante Einheiten angepasst",
     "stage_training_plan": "Planentwurf gespeichert", "commit_training_plan": "Trainingsplan gespeichert",
     "replace_training_plan": "Trainingsplan ersetzt",
@@ -18,6 +19,7 @@ COACH_OPERATION_LABELS = {
 }
 
 COACH_ACTION_LABELS = {
+    "update_profile": "Profil aktualisieren",
     "apply_training_patch": "Geplante Einheiten anpassen",
     "stage_training_plan": "Planentwurf erstellen", "commit_training_plan": "Trainingsplan speichern",
     "replace_training_plan": "Trainingsplan vollständig ersetzen",
