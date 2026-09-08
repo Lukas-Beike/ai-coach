@@ -92,7 +92,11 @@ instructions do not delete or convert its data.
   tool receipts support recovery after process restarts; interrupted Gemini calls
   are reported without replaying their completed effects. Cancelling or resetting
   the chat closes a pending clarification. A disconnected browser does not cancel
-  the work. Model/provider selection is captured for the entire turn.
+  the work. Model/provider selection is captured for the entire turn. If Coach
+  processing stops after a sync was queued, the receipt distinguishes that
+  interruption from the independent sync job and does not claim the transfer
+  completed or failed without a confirmed result. Failed OpenAI responses retain
+  only recognized error codes in diagnostics, never the provider's error text.
 - Related workout moves, edits and additions use one atomic change set with current
   revision and object hashes. Replanning until a target date changes only that period;
   later units remain intact. Constraints such as two strength sessions per week stay
@@ -104,7 +108,9 @@ instructions do not delete or convert its data.
   actions, conversation flows and the limits of simulated model responses.
   Provider writes require the corresponding synchronization request. Failed steps
   can be corrected within the bounded tool loop; receipts distinguish saved changes,
-  queued syncs and failures. See [the dialogue evaluation catalogue](docs/coach-dialogue-evaluation.md)
+  queued syncs and unresolved failures. A successfully corrected object reference
+  clears that attempt's error from the final answer and status cards; errors for
+  other changes remain visible. See [the dialogue evaluation catalogue](docs/coach-dialogue-evaluation.md)
   for the supported scenarios and the limits of mocked model tests.
 - The Coach start card contains only contextual quick actions, not provider
   connection badges. The morning check-in disappears after it completed for

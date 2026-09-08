@@ -146,6 +146,15 @@ COACH_DEFAULT_MAX_OUTPUT_TOKENS = 6_000
 COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
 COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
+# Provider error messages can echo athlete data; retain only documented codes.
+OPENAI_RESPONSE_ERROR_CODES = frozenset({
+    "server_error", "rate_limit_exceeded", "invalid_prompt", "data_residency_mismatch",
+    "bio_policy", "misalignment_policy_violation", "vector_store_timeout", "invalid_image",
+    "invalid_image_format", "invalid_base64_image", "invalid_image_url", "image_too_large",
+    "image_too_small", "image_parse_error", "image_content_policy_violation", "invalid_image_mode",
+    "image_file_too_large", "unsupported_image_media_type", "empty_image_file",
+    "failed_to_download_image", "image_file_not_found",
+})
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
@@ -2940,6 +2949,9 @@ def _safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     reason = str(getattr(exc, "reason", "") or "").strip()
     if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
         result["reason"] = reason
+    provider_code = getattr(exc, "provider_error_code", None)
+    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+        result["provider_error_code"] = provider_code
     return result
 
 
@@ -6671,6 +6683,9 @@ def record_openai_status(status: dict[str, Any]) -> None:
         "http_status": status.get("http_status"),
         "updated_at": str(status.get("updated_at") or utc_now()),
     }
+    provider_code = status.get("provider_error_code")
+    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+        safe_status["provider_error_code"] = provider_code
     set_kv(OPENAI_STATUS_KEY, json.dumps(safe_status, ensure_ascii=False))
 
 
@@ -12076,8 +12091,14 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise AppError(502, "OpenAI response is not a JSON object.", reason="invalid_response")
     if result.get("error"):
-        record_openai_status({"state": "error", "reason": "response_error", "message": "OpenAI returned an error response.", "http_status": 200})
-        raise AppError(502, "OpenAI returned an error response.", reason="response_error")
+        provider_error = result["error"]
+        code = provider_error.get("code") if isinstance(provider_error, dict) else None
+        code = code if isinstance(code, str) and code in OPENAI_RESPONSE_ERROR_CODES else None
+        record_openai_status({"state": "error", "reason": "response_error", "message": "OpenAI returned an error response.",
+                              "http_status": 200, "provider_error_code": code})
+        error = AppError(502, "OpenAI returned an error response.", reason="response_error")
+        error.provider_error_code = code
+        raise error
     if path == "/responses":
         response_status = str(result.get("status") or "").casefold()
         if response_status in {"failed", "cancelled"}:
@@ -14874,6 +14895,10 @@ def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any
             current_fields = current.get("repair_key", {}).get("profile_fields")
             if not previous_fields or previous_fields != current_fields:
                 return False
+        if (previous.get("result", {}).get("reason") == "request_scope"
+                and previous.get("scope_repair_key")
+                and previous["scope_repair_key"] == current.get("scope_repair_key")):
+            return True
         before, after = previous.get("request") or {}, current.get("request") or {}
         if not before:
             return previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
@@ -14892,6 +14917,19 @@ def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any
                       if not repaired(previous, entry)}
         latest[entry.get("step_key") or entry["tool"]] = entry
     return [entry for entry in latest.values() if not entry.get("result", {}).get("ok")]
+
+
+def _dialogue_scope_repair_key(name: str, arguments: dict[str, Any]) -> str:
+    """Match the same requested effect when only its object scope is repaired."""
+    request = arguments.get("_request") or {}
+    binding = {key: request.get(key) for key in ("target", "period", "constraints", "remote_write", "sync_scope")}
+    payload = {key: value for key, value in arguments.items() if key not in {"_request", "expected_revision"}}
+    if isinstance(payload.get("changes"), list):
+        payload["changes"] = [
+            {key: value for key, value in change.items() if key != "expected_payload_hash"}
+            if isinstance(change, dict) else change for change in payload["changes"]
+        ]
+    return _coach_action_hash({"tool": name, "arguments": payload, "binding": binding})
 
 
 def _coach_repair_key(name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
@@ -15077,6 +15115,7 @@ def _chat_with_structured_coach_impl(
             action = {"operation": name, "authorization_scope": []}
             effect_key = _coach_action_hash({"tool": name, "arguments": item.get("arguments")})
             step_key = name
+            scope_repair_key = None
             repair_key = None
             try:
                 if len(command_receipts) >= 40 and not any(entry.get("call_id") == call_id for entry in command_receipts):
@@ -15087,6 +15126,7 @@ def _chat_with_structured_coach_impl(
                 if not isinstance(arguments, dict):
                     raise ValueError("arguments_object")
                 repair_key = _coach_repair_key(name, arguments)
+                scope_repair_key = _dialogue_scope_repair_key(name, arguments)
                 step_key = _coach_action_hash({"name": name, "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
                                                "period": (arguments.get("_request") or {}).get("period"),
                                                "repair_key": repair_key})
@@ -15153,7 +15193,7 @@ def _chat_with_structured_coach_impl(
                         else:
                             result = _structured_coach_tool_result(name, arguments, intent=action, conversation_id=conversation_id,
                                 client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids, cancel_event=cancel_event)
-                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key,
+                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key,
                                                  "request": action.get("request"), "result": result})
                         _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
                     if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
@@ -15168,7 +15208,7 @@ def _chat_with_structured_coach_impl(
                 if not result["reason"]:
                     result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
                 technical_error = _coach_error_metadata(exc)
-                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
+                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
                 LOGGER.warning("Coach step failed", extra={"event": "coach_tool_failed", "context": {"tool": name if name in {tool['name'] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error}})
             outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
             pending = [entry for entry in pending if entry["call_id"] != call_id]
@@ -15324,7 +15364,14 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         status = "partial" if successes else "cancelled" if cancelled else "failed"
         text = "Die Coach-Verarbeitung wurde abgebrochen." if cancelled else "Der Coach-Auftrag konnte nicht abgeschlossen werden."
         if successes:
+            if not cancelled:
+                text = "Die weitere Coach-Verarbeitung wurde unterbrochen."
+                if isinstance(error, AppError) and error.reason in {"response_error", "response_failed"}:
+                    text = "Die KI-Antwort konnte wegen eines Fehlers beim Antwortdienst nicht abgeschlossen werden."
             text += "\nBereits erfolgreich ausgefuehrt: " + "; ".join(coach_effect_label(step) for step in successes) + ". Diese Schritte bleiben gespeichert."
+            if any(step["tool"] in {"start_intervals_plan_sync", "sync_competitions"}
+                   and step["result"].get("status") == "queued" for step in successes):
+                text += "\nDer Sync-Auftrag bleibt bestehen und wird unabhängig vom Coach verarbeitet. Sein Abschluss ist in dieser Antwort noch nicht bestätigt."
         if failures:
             text += "\n" + coach_failure_lines(failures, set(pending))
         if pending:
@@ -16162,6 +16209,9 @@ def coach_diagnostic_history() -> list[dict[str, Any]]:
             item = value.get(key)
             if isinstance(item, str) and re.fullmatch(r"[A-Za-z_]{1,80}", item):
                 result[key] = item
+        provider_code = value.get("provider_error_code")
+        if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+            result["provider_error_code"] = provider_code
         if isinstance(value.get("status"), int) and 100 <= value["status"] <= 599:
             result["status"] = value["status"]
         frames = []
