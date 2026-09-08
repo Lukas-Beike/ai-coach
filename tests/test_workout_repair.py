@@ -188,6 +188,35 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(set(self.remote), {"race"})
         self.assertFalse(any(kind == "upsert" for kind, _ in self.mutations))
 
+    def approve_illness_pause(self):
+        with patch.object(server, "local_feedback_context", return_value={"today": {"illness": "Synthetic illness"}}), patch.object(
+            server, "weather_state", return_value={}
+        ), patch.object(server, "list_external_calendar_events", return_value=[]):
+            preview = server.adaptive_replan_preview()
+        self.assertEqual(preview["changes"][0]["after"]["duration_minutes"], 0)
+        self.assertEqual(server.apply_adaptive_replan(preview["id"])["updated"], 1)
+        self.assertEqual(server.list_planned_units(), [])
+        self.assertEqual(self.mutations, [])
+
+    def test_approved_illness_pause_all_pending_sync_removes_workout_without_placeholder(self):
+        local_id = self.seed()
+        self.remote.pop("duplicate")
+        self.approve_illness_pause()
+        result = server._sync_selected_workout_library({"entries": server._pending_plan_push_entries()})
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(set(self.remote), {"race"})
+        self.assertEqual(self.mutations, [("delete", "existing")])
+        self.assertEqual(server.list_planned_units(include_archived=True)[0]["id"], local_id)
+        self.assertEqual(server._pending_plan_push_entries(), [])
+
+    def test_approved_illness_pause_repair_removes_all_identified_workout_copies(self):
+        local_id = self.seed()
+        self.approve_illness_pause()
+        self.assertTrue(self.repair(local_id)["ok"])
+        self.assertTrue(self.repair(local_id)["ok"])
+        self.assertEqual(set(self.remote), {"race"})
+        self.assertFalse(any(kind == "upsert" for kind, _ in self.mutations))
+
     def test_same_title_without_identity_is_a_conflict_before_writing(self):
         local_id = self.seed()
         self.remote["unknown"] = {**self.remote["existing"], "id": "unknown", "external_id": "some-other-app"}

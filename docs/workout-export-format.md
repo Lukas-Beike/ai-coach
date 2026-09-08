@@ -116,6 +116,12 @@ Payload hashes are rechecked before remote mutations and before recording
 success. An intervening local edit stays unsynchronized; a remote identity
 created before the edit was detected is retained for the next repair.
 
+An approved illness pause archives the original local units and preserves their
+prescriptions and identities. It creates no placeholder workout or artificial
+training load. A later explicit plan sync removes the mapped calendar workouts;
+repair sync also removes their identified duplicate copies. The separate,
+explicitly selected SICK calendar-event export remains available.
+
 The regression suite executes the real Coach tool and job path with synthetic
 responses for a run incorrectly stored as WeightTraining, two remote copies,
 sport correction, duplicate removal, and a second idempotent repair.

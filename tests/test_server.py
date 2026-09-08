@@ -2693,8 +2693,9 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.list_dated_local_planned_workouts()[0]["description"], "- 5m 115%\n- 40m 55%")
         result = server.apply_adaptive_replan(preview["id"])
         self.assertEqual(result["updated"], 1)
-        self.assertNotEqual(server.list_dated_local_planned_workouts()[0]["description"], "- 5m 115%\n- 40m 55%")
-        self.assertEqual(server.list_dated_local_planned_workouts()[0]["name"], "Krankheitspause")
+        self.assertEqual(server.list_dated_local_planned_workouts(), [])
+        self.assertTrue(server.list_planned_units(include_archived=True)[0]["archived"])
+        self.assertEqual(server.list_planned_units(include_archived=True)[0]["description"], "- 5m 115%\n- 40m 55%")
         checkins = {row["checkin_date"]: row for row in server.list_checkins(30)}
         for offset in range(server.ILLNESS_PAUSE_DEFAULT_DAYS):
             pause_date = (server.local_now().date() + timedelta(days=offset)).isoformat()
@@ -2702,7 +2703,7 @@ class CoachTests(unittest.TestCase):
         repeated_preview = server.adaptive_replan_preview()
         self.assertTrue(repeated_preview["illness_pause"]["approved"])
         self.assertFalse(server.current_adaptive_replan_status()["illness_pause_pending"])
-        self.assertEqual(server.list_dated_local_planned_workouts()[0]["id"], draft["id"])
+        self.assertEqual(server.list_planned_units(include_archived=True)[0]["id"], draft["id"])
 
     def test_illness_pause_can_sync_sick_events_after_confirmation(self):
         server.save_checkin({"illness": "Erkältung"})
@@ -2766,7 +2767,8 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(applied["status"], "ok")
         self.assertGreaterEqual(applied["updated"], 1)
         self.assertEqual(server.apply_adaptive_replan(fresh_preview["id"])["status"], "already_applied")
-        self.assertEqual(server.list_dated_local_planned_workouts()[0]["id"], fresh["id"])
+        self.assertEqual(server.list_dated_local_planned_workouts(), [])
+        self.assertIn(fresh["id"], [item["id"] for item in server.list_planned_units(include_archived=True)])
 
     def test_planned_unit_preserves_private_calendar_adjustment(self):
         context = {

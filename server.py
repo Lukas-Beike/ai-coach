@@ -8718,10 +8718,7 @@ def illness_pause_forecast(feedback: dict[str, Any], today: date) -> dict[str, A
 def illness_pause_replacement(workout: dict[str, Any], reason: str) -> dict[str, Any]:
     return {
         **workout,
-        "name": "Krankheitspause",
-        "duration_minutes": 5,
-        "description": "- 5m Rest / no training while ill",
-        "target": "AUTO",
+        "archived": True,
         "rationale": f"Krankheitspause: {reason}. Die ursprüngliche Einheit bleibt in der lokalen Bibliothekshistorie erhalten.",
     }
 
@@ -8869,7 +8866,10 @@ def adaptive_replan_preview() -> dict[str, Any]:
                 "blocking_triggers": blocking_triggers,
                 "external_events": calendar_events,
                 "before": {"duration_minutes": draft.get("duration_minutes"), "description": draft.get("description")},
-                "after": {"name": replacement.get("name"), "duration_minutes": replacement["duration_minutes"], "description": replacement["description"], "rationale": replacement["rationale"]},
+                "after": {"name": "Krankheitspause" if illness_active else replacement.get("name"),
+                          "duration_minutes": 0 if illness_active else replacement["duration_minutes"],
+                          "description": "Sportpause; die geplante Einheit wird archiviert." if illness_active else replacement["description"],
+                          "rationale": replacement["rationale"]},
                 "source_fingerprint": adaptive_workout_fingerprint(draft),
                 "payload": replacement,
             })
@@ -8972,6 +8972,8 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
                 "moving_time": int(replacement.get("duration_minutes") or 0) * 60,
                 "sync_status": "local",
             }
+            if not replacement.get("archived") and not replacement.get("local_deleted"):
+                validate_workout_description(replacement)
             db.execute(
                 "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
                 (json.dumps(replacement, ensure_ascii=False), now, draft_id),
@@ -9962,7 +9964,7 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
         raise AppError(500, "Die lokale Planung ist beschädigt.")
     # Future planning is local-authoritative, so an approved push uses the
     # preserved local payload without a separate conflict decision.
-    if workout.get("local_deleted"):
+    if workout.get("local_deleted") or workout.get("archived"):
         remote_id = str(workout.get("remote_event_id") or "").strip()
         if remote_id:
             if not CONFIG.intervals_api_key:
