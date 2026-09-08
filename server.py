@@ -14874,6 +14874,10 @@ def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any
             current_fields = current.get("repair_key", {}).get("profile_fields")
             if not previous_fields or previous_fields != current_fields:
                 return False
+        if (previous.get("result", {}).get("reason") == "request_scope"
+                and previous.get("scope_repair_key")
+                and previous["scope_repair_key"] == current.get("scope_repair_key")):
+            return True
         before, after = previous.get("request") or {}, current.get("request") or {}
         if not before:
             return previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
@@ -14892,6 +14896,19 @@ def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any
                       if not repaired(previous, entry)}
         latest[entry.get("step_key") or entry["tool"]] = entry
     return [entry for entry in latest.values() if not entry.get("result", {}).get("ok")]
+
+
+def _dialogue_scope_repair_key(name: str, arguments: dict[str, Any]) -> str:
+    """Match the same requested effect when only its object scope is repaired."""
+    request = arguments.get("_request") or {}
+    binding = {key: request.get(key) for key in ("target", "period", "constraints", "remote_write", "sync_scope")}
+    payload = {key: value for key, value in arguments.items() if key not in {"_request", "expected_revision"}}
+    if isinstance(payload.get("changes"), list):
+        payload["changes"] = [
+            {key: value for key, value in change.items() if key != "expected_payload_hash"}
+            if isinstance(change, dict) else change for change in payload["changes"]
+        ]
+    return _coach_action_hash({"tool": name, "arguments": payload, "binding": binding})
 
 
 def _coach_repair_key(name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
@@ -15077,6 +15094,7 @@ def _chat_with_structured_coach_impl(
             action = {"operation": name, "authorization_scope": []}
             effect_key = _coach_action_hash({"tool": name, "arguments": item.get("arguments")})
             step_key = name
+            scope_repair_key = None
             repair_key = None
             try:
                 if len(command_receipts) >= 40 and not any(entry.get("call_id") == call_id for entry in command_receipts):
@@ -15087,6 +15105,7 @@ def _chat_with_structured_coach_impl(
                 if not isinstance(arguments, dict):
                     raise ValueError("arguments_object")
                 repair_key = _coach_repair_key(name, arguments)
+                scope_repair_key = _dialogue_scope_repair_key(name, arguments)
                 step_key = _coach_action_hash({"name": name, "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
                                                "period": (arguments.get("_request") or {}).get("period"),
                                                "repair_key": repair_key})
@@ -15153,7 +15172,7 @@ def _chat_with_structured_coach_impl(
                         else:
                             result = _structured_coach_tool_result(name, arguments, intent=action, conversation_id=conversation_id,
                                 client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids, cancel_event=cancel_event)
-                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key,
+                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key,
                                                  "request": action.get("request"), "result": result})
                         _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
                     if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
@@ -15168,7 +15187,7 @@ def _chat_with_structured_coach_impl(
                 if not result["reason"]:
                     result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
                 technical_error = _coach_error_metadata(exc)
-                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
+                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
                 LOGGER.warning("Coach step failed", extra={"event": "coach_tool_failed", "context": {"tool": name if name in {tool['name'] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error}})
             outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
             pending = [entry for entry in pending if entry["call_id"] != call_id]

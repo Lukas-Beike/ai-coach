@@ -3,6 +3,8 @@
 These regressions verify execution, not a language model's recognition quality.
 """
 import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
@@ -231,6 +233,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 if tool["name"] not in server.STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}:
                     with self.assertRaises(server.AppError):
                         server._dialogue_action(tool["name"], {}, context, allow_mutations=False)
+    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
+    def test_receipt_cards_show_only_unresolved_failures(self):
+        subprocess.run(["node", "--test", str(Path(__file__).with_name("coach-receipts.test.cjs"))], check=True)
 
     def test_coach_starts_with_tools_and_local_dialogue_without_classifier(self):
         result, model = self.turn("Was hältst du von Mittwoch?", [{"output_text": "Ein lockerer Lauf wäre möglich."}])
@@ -390,6 +395,63 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(model.call_count, 3)
         self.assertTrue(result["command_receipts"][-1]["result"]["ok"])
         self.assertEqual(result["status"], "completed")
+
+    def test_repaired_planning_scope_finishes_without_false_failure_and_replays(self):
+        period = {"start": "2026-09-12", "end": "2026-09-14"}
+        workouts = [
+            {**self.workout("2026-09-12", "100 km flach"), "sport": "Ride"},
+            {**self.workout("2026-09-14", "Recovery 7 km"), "sport": "Run"},
+        ]
+        def apply(scope):
+            return self.call("apply_training_patch", {
+                "workouts": workouts, "changes": [], "expected_revision": self.state()["planning_revision"],
+            }, scope, period)
+        result, _ = self.turn("Samstag 100 km flach, Montag Recoverylauf", [
+            lambda _: apply(["workout:new"]), lambda _: self.call("read_training_state"),
+            lambda _: apply(["local_plan"]), {"output_text": "Beide Einheiten sind gespeichert."},
+        ], turn="scope-repaired")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["pending_operations"], [])
+        self.assertEqual(result["message"]["content"], "Beide Einheiten sind gespeichert.")
+        failed = result["command_receipts"][0]
+        self.assertEqual(failed["result"]["reason"], "request_scope")
+        self.assertTrue(failed["resolved"])
+        self.assertEqual(len(self.state()["planned_units"]), 2)
+        self.assertIsNone(json.loads(server.get_kv("coach_pending_request")))
+        replay, model = self.turn("Samstag 100 km flach, Montag Recoverylauf", [], turn="scope-repaired")
+        model.assert_not_called()
+        self.assertEqual(replay, result)
+        self.assertEqual(len(self.state()["planned_units"]), 2)
+
+    def test_other_workout_success_does_not_resolve_invalid_scope(self):
+        period = {"start": "2026-09-12", "end": "2026-09-14"}
+        def apply(day, scope):
+            return self.call("apply_training_patch", {
+                "workouts": [self.workout(day)], "changes": [],
+                "expected_revision": self.state()["planning_revision"],
+            }, scope, period)
+        result, _ = self.turn("Samstag und Montag planen", [
+            lambda _: apply("2026-09-12", ["workout:new"]),
+            lambda _: apply("2026-09-14", ["local_plan"]), {"output_text": "Alles gespeichert."},
+        ])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["pending_operations"], ["apply_training_patch"])
+        self.assertFalse(result["command_receipts"][0]["resolved"])
+        self.assertIn("Ein Teil des Auftrags", result["message"]["content"])
+        self.assertEqual([unit["date"] for unit in self.state()["planned_units"]], ["2026-09-14"])
+
+    def test_invalid_scope_after_success_remains_an_unresolved_failure(self):
+        period = {"start": "2026-09-12", "end": "2026-09-12"}
+        def apply(scope):
+            return self.call("apply_training_patch", {
+                "workouts": [self.workout("2026-09-12")], "changes": [],
+                "expected_revision": self.state()["planning_revision"],
+            }, scope, period)
+        result, _ = self.turn("Samstag planen", [lambda _: apply(["local_plan"]),
+            lambda _: apply(["workout:new"]), {"output_text": "Gespeichert."}])
+        self.assertEqual(result["status"], "partial")
+        self.assertFalse(result["command_receipts"][-1]["resolved"])
+        self.assertEqual(len(self.state()["planned_units"]), 1)
 
     def test_request_provenance_rejects_assistant_or_missing_current_message(self):
         server.add_message("user", "Synthetic request")

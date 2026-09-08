@@ -104,7 +104,9 @@ instructions do not delete or convert its data.
   actions, conversation flows and the limits of simulated model responses.
   Provider writes require the corresponding synchronization request. Failed steps
   can be corrected within the bounded tool loop; receipts distinguish saved changes,
-  queued syncs and failures. See [the dialogue evaluation catalogue](docs/coach-dialogue-evaluation.md)
+  queued syncs and unresolved failures. A successfully corrected object reference
+  clears that attempt's error from the final answer and status cards; errors for
+  other changes remain visible. See [the dialogue evaluation catalogue](docs/coach-dialogue-evaluation.md)
   for the supported scenarios and the limits of mocked model tests.
 - The Coach start card contains only contextual quick actions, not provider
   connection badges. The morning check-in disappears after it completed for
