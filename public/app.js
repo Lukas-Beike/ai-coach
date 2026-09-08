@@ -1169,6 +1169,7 @@ function addCoachReceipt(receipt) {
 
 function addStructuredCoachReceipts(payload) {
   const labels = {
+    update_profile: "Profil aktualisiert", apply_training_patch: "Geplante Einheiten angepasst",
     stage_training_plan: "Planvorlage vorbereitet", commit_training_plan: "Trainingsplan gespeichert",
     replace_training_plan: "Trainingsplan vollständig ersetzt",
     apply_training_changes: "Lokale Planung geändert", manage_training_templates: "Trainingsvorlagen bearbeitet",
@@ -1191,13 +1192,14 @@ function addStructuredCoachReceipts(payload) {
   state.coachReceipts = [];
   renderCoachReceipts();
   for (const entry of commands) {
+    if (entry.resolved) continue;
     if (planCommitRequested && entry.tool === "stage_training_plan") continue;
     if (entry.tool === "commit_training_plan" && entry !== finalCommit) continue;
     const result = entry?.result || {};
     if (entry.tool === "get_sync_job" && result.job) {
       const job = result.job;
       const status = { queued: "Synchronisierung beauftragt", running: "Synchronisierung läuft", completed: "Synchronisierung abgeschlossen", partial: "Synchronisierung teilweise abgeschlossen", failed: "Synchronisierung fehlgeschlagen" }[job.status] || "Synchronisierungsstatus unklar";
-      addCoachReceipt({ title: status, message: job.error_detail || status, status: ["partial", "failed"].includes(job.status) ? "error" : "success" });
+      addCoachReceipt({ title: status, message: job.error_detail || status, status: ["partial", "failed"].includes(job.status) ? "error" : job.status === "completed" ? "success" : "pending" });
       continue;
     }
     const failed = result.ok === false;
@@ -1207,7 +1209,7 @@ function addStructuredCoachReceipts(payload) {
     const details = [];
     if (Array.isArray(result.library_entry_ids) && result.library_entry_ids.length) details.push(`${result.library_entry_ids.length} lokale Einheit(en) gespeichert`);
     if (result.remote_untouched) details.push("Providerdaten unverändert");
-    addCoachReceipt({ title, message: failed ? (result.error || "Die Aktion konnte nicht ausgeführt werden.") : queued ? "Der Auftrag wird im Hintergrund bearbeitet; das Ergebnis steht noch aus." : "Der lokale Beleg liegt vor.", status: failed ? "error" : "success", details });
+    addCoachReceipt({ title, message: failed ? (result.error || "Die Aktion konnte nicht ausgeführt werden.") : queued ? "Der Auftrag wird im Hintergrund bearbeitet; das Ergebnis steht noch aus." : "Der lokale Beleg liegt vor.", status: failed ? "error" : queued ? "pending" : "success", details });
   }
 }
 

@@ -81,6 +81,11 @@ instructions do not delete or convert its data.
   classifier or trigger-word gate. Short replies, corrections and references to
   earlier messages can complete a request. Real ambiguities produce one concrete
   question whose request context is stored locally across reloads and model changes.
+- Explicit requests to remember permanent facts or preferences update the saved
+  profile directly, including acceptance of a concrete proposal in the dialogue.
+  The Coach reads current field values and applies only the requested changes;
+  concurrent edits require rereading the profile. Daily feedback and temporary
+  planning constraints remain separate from permanent profile facts.
 - Every HTTP chat turn is saved in the durable background queue before processing.
   SSE reports the job identity and the browser polls its durable result. This avoids
   guessing the complexity of a message from its wording. OpenAI response IDs and

@@ -13234,6 +13234,8 @@ def unregister_chat_stream(session_csrf_hash: str, operation_id: str) -> None:
 COACH_TOOL_MAX_ROUNDS = 12
 COACH_COMMAND_STALE_SECONDS = 15 * 60
 COACH_CANONICAL_TOOL_NAMES = (
+    "read_profile",
+    "update_profile",
     "read_training_state",
     "list_recent_activities",
     "list_workout_library",
@@ -13293,6 +13295,15 @@ def _canonical_coach_tool(
 
 
 COACH_STRUCTURED_TOOLS = [
+    _canonical_coach_tool("read_profile", "Read the current durable athlete profile before making a partial profile update."),
+    _canonical_coach_tool("update_profile", "Save explicitly requested permanent athlete facts or preferences. Read the profile first; change only named fields, preserving existing text when adding facts. Temporary planning constraints belong to the plan or check-in.", {
+        "changes": {"type": "array", "minItems": 1, "maxItems": len(DEFAULT_PROFILE), "items": {
+            "type": "object", "additionalProperties": False, "required": ["field", "expected_value", "value"],
+            "properties": {"field": {"type": "string", "enum": list(DEFAULT_PROFILE)},
+                           "expected_value": {"type": "string", "maxLength": 4000},
+                           "value": {"type": "string", "maxLength": 4000}},
+        }},
+    }, strict=True),
     _canonical_coach_tool("read_training_state", "Read the current local training state and references."),
     _canonical_coach_tool("list_recent_activities", "Read completed activities from the latest local snapshot without refreshing a provider.", {"days": {"type": "integer"}, "limit": {"type": "integer"}}),
     _canonical_coach_tool("list_workout_library", "Read saved local training templates; local library data is authoritative.", {"limit": {"type": "integer"}, "include_archived": {"type": "boolean"}}),
@@ -13360,9 +13371,27 @@ COACH_STRUCTURED_TOOLS = [
         strict=True,
     ),
     _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "For complete-plan edits, include the expected_payload_hash returned for every local_id.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string", "enum": ["update", "archive", "restore", "delete"], "description": "Moving a workout uses update with its new date."}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string"}, "type": {"type": "string"}, "sport": {"type": "string"}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
-    _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete a local training template.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {"type": "object"}}}),
-    _canonical_coach_tool("apply_workout_library_plan", "Schedule selected saved library templates locally after conflict checks; never writes remotely.", {"entries": {"type": "array", "items": {"type": "object"}}}),
-    _canonical_coach_tool("save_checkin", "Save the athlete's explicitly stated daily condition, illness, pain, or availability in the local check-in.", {"payload": {"type": "object"}}),
+    _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete undated local templates. Resolve local_id with list_workout_library for edits; creation requires name and workout description. Scheduling is a separate local action.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {
+        "type": "object", "additionalProperties": False, "required": ["action"], "properties": {
+            "action": {"type": "string", "enum": ["create", "update", "archive", "restore", "delete"]},
+            "local_id": {"type": "string", "format": "uuid"}, "name": {"type": "string"},
+            "description": {"type": "string"}, "sport": {"type": "string", "enum": ["Ride", "VirtualRide", "Run", "Swim", "WeightTraining"]},
+            "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 1440},
+            "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]},
+        },
+    }}}),
+    _canonical_coach_tool("apply_workout_library_plan", "Schedule saved templates locally after conflict checks. Resolve the template ID from list_workout_library. Never writes remotely.", {"entries": {"type": "array", "minItems": 1, "maxItems": 14, "items": {
+        "type": "object", "additionalProperties": False, "required": ["library_workout_id", "date"],
+        "properties": {"library_workout_id": {"type": "string", "format": "uuid"}, "date": {"type": "string", "format": "date"}},
+    }}}),
+    _canonical_coach_tool("save_checkin", "Save explicitly stated daily condition, illness, pain or availability. Omit unknown fields; scores are 0-10. checkin_date defaults to the athlete-local today and cannot be in the future. Empty fields preserve existing feedback.", {"payload": {
+        "type": "object", "additionalProperties": False, "properties": {
+            "checkin_date": {"type": "string", "format": "date"},
+            **{field: {"type": "string", "maxLength": limit} for field, limit in CHECKIN_TEXT_LIMITS.items()},
+            **{field: {"type": ["integer", "null"], "minimum": 0, "maximum": 10} for field in CHECKIN_SCORE_FIELDS},
+            "available_minutes": {"type": ["integer", "null"], "minimum": 0, "maximum": 1440},
+        },
+    }}),
     _canonical_coach_tool("save_activity_feedback", "Save the athlete's explicitly stated observations about an existing completed activity. Resolve its exact ID from the local snapshot or list_recent_activities first. Never invent an activity ID or observations. This tool cannot create completed activities.", {"payload": {
         "type": "object", "additionalProperties": False,
         "required": ["activity_id", "activity_name", "activity_date", "notes"],
@@ -13374,22 +13403,40 @@ COACH_STRUCTURED_TOOLS = [
         },
     }}, strict=True),
     _canonical_coach_tool("delete_activity_feedback", "Delete the local feedback record for one completed activity.", {"activity_id": {"type": "string"}}),
-    _canonical_coach_tool("save_competition", "Create or update one locally stored target competition.", {"payload": {"type": "object"}}),
+    _canonical_coach_tool("save_competition", "Create or update one local target competition. Creation needs name, event_date and sport; for edits use competition_id from list_competitions and only changed fields. This does not push to Intervals.icu.", {"payload": {
+        "type": "object", "additionalProperties": False, "properties": {
+            "competition_id": {"type": "string", "format": "uuid"},
+            **{field: {"type": "string"} for field in ("name", "event_date", "start_date_local", "sport", "distance", "target", "course_profile", "notes", "description")},
+            "priority": {"type": "string", "enum": ["A", "B", "C"]},
+            "moving_time_seconds": {"type": ["integer", "null"], "minimum": 0},
+        },
+    }}),
     _canonical_coach_tool("delete_competition", "Delete one locally stored target competition.", {"competition_id": {"type": "string"}}),
     _canonical_coach_tool("start_provider_refresh", "Queue an explicitly requested read-only provider refresh.", {"days": {"type": "integer"}, "reason": {"type": "string"}}),
     _canonical_coach_tool("refresh_current_performance", "Queue an explicit Intervals.icu performance-metrics refresh without reloading activities.", {"reason": {"type": "string"}}),
-    _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu push for all pending local planning, or selected entries.", {"entries": {"type": "array", "items": {"type": "object"}}, "reason": {"type": "string"}}),
+    _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu push. For selected entries copy local_id and expected_payload_hash from read_training_state into library_workout_id and expected_payload_hash. For all_pending or created omit entries; the server resolves them. A follow-up sync of previously saved workouts uses selected or all_pending; created only refers to additions in THIS turn.", {"entries": {"type": "array", "minItems": 1, "maxItems": LIBRARY_BULK_MAX_ENTRIES, "items": {
+        "type": "object", "additionalProperties": False, "required": ["library_workout_id", "expected_payload_hash"],
+        "properties": {"library_workout_id": {"type": "string", "format": "uuid", "description": "Exact local_id of a planned unit, never a remote event ID or a scope token."},
+                       "expected_payload_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    }}, "reason": {"type": "string"}}),
     _canonical_coach_tool("sync_competitions", "Queue an explicitly requested push of local target competitions to Intervals.icu.", {"reason": {"type": "string"}}),
     _canonical_coach_tool("get_sync_job", "Read one local synchronization job.", {"job_id": {"type": "string"}}),
-    _canonical_coach_tool("resolve_training_sync_conflict", "Explicitly keep the local planning version or retry a failed synchronization job.", {"local_id": {"type": "string"}, "job_id": {"type": "string"}, "strategy": {"type": "string", "enum": ["keep_local", "adopt_remote"]}}),
+    _canonical_coach_tool("resolve_training_sync_conflict", "Resolve a local conflict using local_id and strategy (keep_local or adopt_remote), with local target. Or retry a failed/partial job using only job_id: read get_sync_job first, use its provider target, and include sync_job:<id> plus intervals_sync for pushes (remote_write=true) or <provider>_refresh for reads.", {"local_id": {"type": "string"}, "job_id": {"type": "string"}, "strategy": {"type": "string", "enum": ["keep_local", "adopt_remote"]}}),
     _canonical_coach_tool("preview_adaptive_replan", "Calculate a local adaptive planning preview without changing workouts."),
     _canonical_coach_tool("apply_adaptive_replan", "Apply the latest adaptive planning preview after explicit Coach approval.", {"adjustment_id": {"type": "string"}, "sync_illness_to_intervals": {"type": "boolean"}}),
-    _canonical_coach_tool("update_training_plan", "Update or delete local training-plan metadata.", {"payload": {"type": "object"}}),
+    _canonical_coach_tool("update_training_plan", "Update or delete metadata for a plan resolved by list_training_plans. Deletion removes only the plan metadata; scheduled workouts remain. Use apply_training_patch for workout changes.", {"payload": {
+        "type": "object", "additionalProperties": False, "required": ["plan_id"], "properties": {
+            "plan_id": {"type": "string", "format": "uuid"}, "action": {"type": "string", "enum": ["update", "delete"]},
+            **{field: {"type": "string"} for field in ("name", "goal", "start_date", "end_date")},
+            "status": {"type": "string", "enum": sorted(TRAINING_PLAN_STATUSES)},
+        },
+    }}),
     _canonical_coach_tool("undo_training_change", "Return an undo preview for a local change; do not apply it silently.", {"change_id": {"type": "string"}}),
 ]
 
 
 STRUCTURED_READ_ONLY_TOOLS = {
+    "read_profile",
     "read_training_state", "list_recent_activities", "list_workout_library", "list_planned_workouts",
     "list_change_history", "list_competitions", "list_training_plans", "get_sync_job",
 }
@@ -14088,6 +14135,32 @@ def _structured_coach_tool_result(
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     operation = intent.get("operation")
+    if name == "read_profile":
+        return {"ok": True, "profile": get_profile()}
+    if name == "update_profile":
+        if name not in _structured_authorized_operations(intent):
+            raise AppError(403, "Dieser Auftrag erlaubt keine Profiländerung.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "local_profile")
+        changes = arguments.get("changes")
+        if not isinstance(changes, list) or not 1 <= len(changes) <= len(DEFAULT_PROFILE):
+            raise AppError(400, "Die Profiländerung benötigt gültige Felder.", reason="tool_arguments_invalid")
+        with DB_LOCK, database():
+            current = get_profile()
+            updated = dict(current)
+            seen = set()
+            for change in changes:
+                if (not isinstance(change, dict) or set(change) != {"field", "expected_value", "value"}
+                        or not isinstance(change.get("field"), str) or change["field"] not in DEFAULT_PROFILE
+                        or change["field"] in seen
+                        or any(not isinstance(change.get(key), str) or len(change[key]) > 4000 for key in ("expected_value", "value"))):
+                    raise AppError(400, "Die Profiländerung enthält ungültige oder doppelte Felder.", reason="tool_arguments_invalid")
+                field = change["field"]
+                seen.add(field)
+                if current[field] != change["expected_value"]:
+                    raise AppError(409, "Das Profil wurde inzwischen geändert. Lies es erneut und ergänze den aktuellen Stand.", reason="profile_conflict")
+                updated[field] = change["value"]
+            saved = save_profile(updated)
+        return {"ok": True, "stored_locally": True, "updated_fields": sorted(seen), "profile": saved}
     if name == "read_training_state":
         return {"ok": True, **_structured_training_state()}
     if name == "list_recent_activities":
@@ -14434,7 +14507,17 @@ def _structured_coach_tool_result(
                         f"planned_unit:{entry['library_workout_id']}",
                         f"library_workout:{entry['library_workout_id']}",
                     )
-            _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
+            with DB_LOCK, database() as db:
+                for entry in normalized_entries:
+                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (entry["library_workout_id"],)).fetchone()
+                    if not row or _library_payload_hash(row["payload"]) != entry["expected_payload_hash"]:
+                        raise AppError(409, "Die ausgewählte Planung wurde geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
+                _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
+                # Marking a conflict as locally authoritative changes the payload.
+                # Queue hashes of that validated, updated state.
+                for entry in normalized_entries:
+                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (entry["library_workout_id"],)).fetchone()
+                    entry["expected_payload_hash"] = _library_payload_hash(row["payload"])
         return _enqueue_coach_plan_push(
             normalized_entries,
             sync_job_ids,
@@ -14472,7 +14555,14 @@ def _structured_coach_tool_result(
             return {"ok": True, **resolve_competition_conflict(local_id, strategy)}
         job_id = str(arguments.get("job_id") or "").strip()
         _require_coach_scope(intent, f"sync_job:{job_id}")
+        previous_job = sync_job_state(job_id)
+        provider = previous_job["provider"]
+        push = previous_job["type"] in {"plan_push", "competition_push"}
+        _require_coach_scope(intent, "intervals_sync" if push else f"{provider}_refresh")
+        if intent.get("target_system") != provider or bool((intent.get("request") or {}).get("remote_write")) != push:
+            raise AppError(403, "Die Wiederholung benötigt den passenden Anbieterauftrag.", reason="request_target")
         job = resolve_sync_job(job_id, {"action": "retry"})
+        sync_job_ids.append(job_id)
         return {"ok": True, "status": "queued", "job": job}
     if name == "preview_adaptive_replan":
         if "preview_adaptive_replan" not in _structured_authorized_operations(intent):
@@ -14573,8 +14663,16 @@ def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, An
         raise AppError(400, "Der Schritt benötigt einen gültigen Bezug zum aktuellen Auftrag. Prüfe die Werkzeugargumente erneut.", reason="request_invalid") from exc
     target = request["target"]
     scope = set(request["scope"])
-    remote_write = name in {"start_intervals_plan_sync", "sync_competitions"} or (name == "apply_adaptive_replan" and arguments.get("sync_illness_to_intervals"))
-    refresh = name in {"start_provider_refresh", "refresh_current_performance"}
+    retry_job = None
+    if name == "resolve_training_sync_conflict" and arguments.get("job_id"):
+        if arguments.get("local_id"):
+            raise AppError(400, "Wähle entweder einen lokalen Konflikt oder einen Synchronisationsjob.", reason="tool_arguments_invalid")
+        retry_job = sync_job_state(str(arguments["job_id"]))
+        if target != retry_job["provider"]:
+            raise AppError(403, "Die Wiederholung benötigt den Anbieter des ursprünglichen Jobs.", reason="request_target")
+    retry_push = bool(retry_job and retry_job["type"] in {"plan_push", "competition_push"})
+    remote_write = retry_push or name in {"start_intervals_plan_sync", "sync_competitions"} or (name == "apply_adaptive_replan" and arguments.get("sync_illness_to_intervals"))
+    refresh = bool(retry_job and not retry_push) or name in {"start_provider_refresh", "refresh_current_performance"}
     if remote_write and (not request["remote_write"] or target != "intervals" or "intervals_sync" not in scope):
         raise AppError(403, "Für diesen Schritt fehlt der zugehörige Synchronisierungsauftrag.", reason="remote_scope_denied")
     if request["remote_write"] != bool(remote_write) or (not remote_write and not refresh and target != "local"):
@@ -14585,7 +14683,7 @@ def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, An
               "training_plan": ("training_plans", "id"), "competition": ("competitions", "id"),
               "artifact": ("coach_plan_artifacts", "id"), "adaptive_replan": ("plan_adjustments", "id"),
               "change": ("change_history", "id"), "sync_job": ("sync_jobs", "id")}
-    broad = {"local_plan", "local_template", "local_competitions", "local_checkin", "activity_feedback", "adaptive_replan",
+    broad = {"local_profile", "local_plan", "local_template", "local_competitions", "local_checkin", "activity_feedback", "adaptive_replan",
              "intervals_sync", "intervals_refresh", "garmin_refresh", "calendar_refresh", "weather_refresh"}
     with DB_LOCK, database() as db:
         for token in scope:
@@ -14705,11 +14803,25 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
 
 def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Corrections resolve the same step, never a different object with the same tool."""
+    def repaired(previous, current):
+        if previous["tool"] != current["tool"]:
+            return False
+        before, after = previous.get("request") or {}, current.get("request") or {}
+        if not before:
+            return previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
+        if before.get("target") != after.get("target"):
+            return False
+        if (current["tool"] == "start_intervals_plan_sync" and after.get("sync_scope") == "all_pending"
+                and before.get("sync_scope") in {"selected", "all_pending"}):
+            return True
+        return (before.get("period") == after.get("period")
+                and set(before.get("scope") or []) == set(after.get("scope") or []))
+
     latest = {}
     for entry in entries:
         if entry.get("result", {}).get("ok"):
             latest = {key: previous for key, previous in latest.items()
-                      if not (previous["tool"] == entry["tool"] and previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"})}
+                      if not repaired(previous, entry)}
         latest[entry.get("step_key") or entry["tool"]] = entry
     return [entry for entry in latest.values() if not entry.get("result", {}).get("ok")]
 
@@ -14897,7 +15009,7 @@ def _chat_with_structured_coach_impl(
                 effect_key = _dialogue_effect_key(name, arguments)
                 if (question or cancelled) and name not in STRUCTURED_READ_ONLY_TOOLS:
                     raise AppError(409, "Der Auftrag wartet auf deine Antwort oder wurde abgebrochen.", reason="request_paused")
-                step_key = _coach_action_hash({"name": name, "scope": (arguments.get("_request") or {}).get("scope"),
+                step_key = _coach_action_hash({"name": name, "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
                                                "period": (arguments.get("_request") or {}).get("period")})
                 cached = next((entry for entry in command_receipts if entry.get("call_id") == call_id), None)
                 if cached and cached.get("effect_key") != effect_key:
@@ -14971,6 +15083,8 @@ def _chat_with_structured_coach_impl(
             except (AppError, ValueError, TypeError, KeyError) as exc:
                 result = {"ok": False, "reason": getattr(exc, "reason", "tool_arguments_invalid"),
                           "error": str(exc) if isinstance(exc, AppError) else "Die Werkzeugargumente sind ungültig. Prüfe das Schema und den aktuellen Zustand und korrigiere den Aufruf."}
+                if not result["reason"]:
+                    result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
                 technical_error = _coach_error_metadata(exc)
                 command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
                 LOGGER.warning("Coach step failed", extra={"event": "coach_tool_failed", "context": {"tool": name if name in {tool['name'] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error}})
@@ -14992,6 +15106,9 @@ def _chat_with_structured_coach_impl(
         if question or cancelled:
             break
     failures = _unresolved_coach_steps(command_receipts)
+    for entry in command_receipts:
+        if not entry.get("result", {}).get("ok"):
+            entry["resolved"] = not any(entry is failure for failure in failures)
     effects = [entry for entry in command_receipts if entry.get("result", {}).get("ok") and entry["tool"] not in STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}]
     text = question or output_text(response)
     incomplete_answer = response.get("status") == "incomplete"
@@ -15114,6 +15231,9 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         internal = STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
         successes = [step for step in commands if step.get("result", {}).get("ok") and step["tool"] not in internal]
         failures = _unresolved_coach_steps(commands)
+        for step in commands:
+            if not step.get("result", {}).get("ok"):
+                step["resolved"] = not any(step is failure for failure in failures)
         pending = sorted(
             {step["tool"] for step in failures}
             | {step["tool"] for step in receipt.get("pending_tool_calls", []) if step.get("tool")}
