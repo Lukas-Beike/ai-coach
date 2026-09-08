@@ -11318,7 +11318,6 @@ def sync_intervals(
         if cancel_event is not None:
             fetch_kwargs["cancel_event"] = cancel_event
         snapshot = IntervalsClient().fetch_snapshot(**fetch_kwargs)
-        planning_imported_at = get_kv("planned_units_initial_import_at")
         set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
         if end_date is not None:
             snapshot = merge_historical_snapshot(latest_snapshot(), snapshot)
@@ -11327,13 +11326,24 @@ def sync_intervals(
             save_snapshot(snapshot, activity_days=activity_days)
         calendar_window = snapshot.get("provider_sync", {}).get("calendar_window", {}) if isinstance(snapshot.get("provider_sync"), dict) else {}
         planned_import = {"imported": 0, "updated": 0, "conflicts": 0}
-        if end_date is None and not planning_imported_at:
-            planned_import = upsert_remote_planned_units(
-                snapshot.get("upcoming_calendar", []),
-                calendar_start=calendar_window.get("start"),
-                calendar_end=calendar_window.get("end"),
-            )
-            set_kv("planned_units_initial_import_at", snapshot["synced_at"])
+        if end_date is None:
+            with DB_LOCK, database() as db:
+                # The durable queue also protects the gaps between sibling
+                # repair jobs and survives process restarts. Check at import
+                # time: a repair may have been queued while fetching above.
+                pending_repair = db.execute(
+                    "SELECT 1 FROM sync_jobs WHERE provider='intervals' AND type='plan_push' "
+                    "AND status IN ('queued', 'running') AND json_extract(payload, '$.repair')=1 LIMIT 1"
+                ).fetchone()
+                if pending_repair:
+                    planned_import["deferred_for_repair"] = True
+                elif not get_kv("planned_units_initial_import_at"):
+                    planned_import = upsert_remote_planned_units(
+                        snapshot.get("upcoming_calendar", []),
+                        calendar_start=calendar_window.get("start"),
+                        calendar_end=calendar_window.get("end"),
+                    )
+                    set_kv("planned_units_initial_import_at", snapshot["synced_at"])
         mark_daily_sync("intervals")
         # Seed the local template catalog from the provider once. This is a
         # read-only, idempotent import: existing local templates are preserved

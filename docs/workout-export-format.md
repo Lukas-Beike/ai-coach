@@ -126,7 +126,10 @@ failed final read leaves the affected units retryable, retaining remote IDs.
 Provider requests do not hold the database lock, so status polling remains
 available. Repair batches share the provider synchronization lock with snapshot
 refresh/import, preventing intermediate repaired events from creating false
-local conflicts. A per-unit guard excludes simultaneous pushes of the same workout.
+local conflicts. The durable queue also defers planned-unit snapshot imports
+between sibling jobs until all queued/running repair jobs finish, including
+after a restart; activity and wellness refreshes can continue between jobs.
+A per-unit guard excludes simultaneous pushes of the same workout.
 Payload hashes are rechecked before remote mutations and before recording
 success. An intervening local edit stays unsynchronized; a remote identity
 created before the edit was detected is retained for the next repair.

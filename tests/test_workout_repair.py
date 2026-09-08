@@ -158,6 +158,58 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(server.list_planned_units()[0]["sync_status"], "synced")
         self.assertFalse(server.SYNC_LOCK.locked())
 
+    def test_snapshot_import_is_deferred_between_repair_chunks_and_until_final_completion(self):
+        entries = []
+        with server.DB_LOCK, server.database() as db:
+            for offset in range(29):
+                local_id = str(uuid.uuid4())
+                unit = server.normalize_planned_unit({
+                    "date": "2026-09-09", "sport": "Run", "name": "Synthetic queued run",
+                    "description": "- 30m Z1 HR", "duration_minutes": 30,
+                }, local_id=local_id)
+                server._insert_planned_unit(db, unit)
+                row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+                entries.append({"library_workout_id": local_id, "expected_payload_hash": server._library_payload_hash(row["payload"])})
+        server._enqueue_coach_plan_push(entries, [], reason="Synthetic full repair", repair=True)
+        first = server._claim_sync_job()
+        server._sync_job_update_from_result(first["id"], {"ok": True}, fallback_status="completed")
+        snapshot = {"synced_at": "synthetic-after-repair", "athlete": {}, "recent_activities": [],
+                    "recent_wellness": [], "upcoming_calendar": []}
+        with patch.object(server.IntervalsClient, "fetch_snapshot", return_value=snapshot), patch.object(
+            server, "refresh_workout_library", return_value={"workouts": 0}
+        ), patch.object(server, "_enqueue_automatic_performance_refresh", return_value=None), patch.object(
+            server, "upsert_remote_planned_units", return_value={"imported": 0, "updated": 0, "conflicts": 0}
+        ) as imported:
+            for claim in (False, True):
+                if claim:
+                    last = server._claim_sync_job()
+                result = server.sync_intervals("Synthetic between chunks", activity_days=42)
+                self.assertEqual(result["status"], "ok")
+                self.assertTrue(result["planned_import"]["deferred_for_repair"])
+                self.assertIsNone(server.get_kv("planned_units_initial_import_at"))
+                imported.assert_not_called()
+                for entry in entries:
+                    self.assertEqual(self.selection(entry["library_workout_id"]), entry)
+            server._sync_job_update_from_result(last["id"], {"ok": True}, fallback_status="completed")
+            server.sync_intervals("Synthetic after final verification", activity_days=42)
+            imported.assert_called_once()
+            self.assertEqual(server.get_kv("planned_units_initial_import_at"), snapshot["synced_at"])
+
+    def test_repair_queued_during_snapshot_fetch_prevents_import(self):
+        local_id = self.seed()
+        def fetch(**kwargs):
+            server._enqueue_coach_plan_push([self.selection(local_id)], [], reason="Synthetic repair during fetch", repair=True)
+            return {"synced_at": "synthetic-fetch", "athlete": {}, "recent_activities": [],
+                    "recent_wellness": [], "upcoming_calendar": []}
+        with patch.object(server.IntervalsClient, "fetch_snapshot", side_effect=fetch), patch.object(
+            server, "refresh_workout_library", return_value={"workouts": 0}
+        ), patch.object(server, "_enqueue_automatic_performance_refresh", return_value=None), patch.object(
+            server, "upsert_remote_planned_units"
+        ) as imported:
+            self.assertTrue(server.sync_intervals("Synthetic overlapping queue", activity_days=42)["planned_import"]["deferred_for_repair"])
+            imported.assert_not_called()
+            self.assertIsNone(server.get_kv("planned_units_initial_import_at"))
+
     def test_multi_unit_repair_reads_calendar_twice_and_checks_all_final_results(self):
         ids = []
         for offset in range(3):
