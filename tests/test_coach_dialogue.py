@@ -16,7 +16,7 @@ from backend.coach.dialogue import validate_request
 server = fixtures.server
 
 
-class CoachDialogueTests(unittest.TestCase):
+class DialogueHarness:
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="coach-dialogue-test-")
         self.addCleanup(temporary.cleanup)
@@ -65,6 +65,9 @@ class CoachDialogueTests(unittest.TestCase):
 
     def state(self):
         return server._structured_training_state()
+
+
+class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_profile_proposal_acceptance_preserves_existing_fields_and_replays_once(self):
         server.save_profile({"name": "Synthetic Athlete", "training_background": "Regular cycling.", "equipment": "Indoor bike"})

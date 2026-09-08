@@ -98,6 +98,10 @@ instructions do not delete or convert its data.
   later units remain intact. Constraints such as two strength sessions per week stay
   attached to that plan, rather than becoming permanent profile preferences.
   Every write records its source user messages, target and object/period scope.
+  Editing a planned unit's sport preserves its local identity and updates both
+  the canonical sport and the provider projection. The executable
+  [Coach tool coverage matrix](docs/coach-tool-coverage.md) documents tested
+  actions, conversation flows and the limits of simulated model responses.
   Provider writes require the corresponding synchronization request. Failed steps
   can be corrected within the bounded tool loop; receipts distinguish saved changes,
   queued syncs and failures. See [the dialogue evaluation catalogue](docs/coach-dialogue-evaluation.md)

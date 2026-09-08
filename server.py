@@ -10403,7 +10403,7 @@ def update_local_planned_workout(
                     if key in values:
                         candidate[key] = values.get(key)
                 if "type" in values or "sport" in values:
-                    candidate["type"] = values.get("type") or values.get("sport")
+                    candidate["sport"] = values.get("sport") or values.get("type")
             candidate["date"] = str(candidate.get("date") or "").strip()
             try:
                 date.fromisoformat(candidate["date"])

@@ -12,6 +12,12 @@ synthetic model outputs and temporary databases. The browser fixture uses canned
 outputs to test the actual HTTP/background-worker/SQLCipher/reload path. These
 checks establish execution correctness, **not measured language-model accuracy**.
 
+The [executable tool coverage matrix](coach-tool-coverage.md) adds a successful
+chat-loop scenario for every currently exposed tool, including action variants,
+authorization failures and multi-turn recovery. Its catalog check fails when a
+new tool lacks a corresponding success scenario. This execution coverage remains
+separate from the language-understanding rubric below.
+
 ## Dialogue catalogue and acceptance rubric
 
 Use 7 September 2026, Europe/Berlin, as the reference date. Synthetic local data:
