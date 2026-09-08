@@ -1091,6 +1091,8 @@ SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
 SYNC_JOB_POLL_SECONDS = 1.0
 SYNC_JOB_LIST_LIMIT = 50
 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
+MORNING_RETRY_SECONDS = 15 * 60
+MORNING_MAX_ATTEMPTS = 3
 DIAGNOSTIC_CAPTURE_DURATION_SECONDS = 60 * 60
 DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 1500
 DIAGNOSTIC_CAPTURE_STATE_KEY = "diagnostic_capture_state"
@@ -1604,6 +1606,7 @@ def initialise_database() -> None:
         set_kv("morning_checkin_running", "0", db)
         if get_kv("morning_checkin_status", db) == "working":
             set_kv("morning_checkin_status", "waiting", db)
+            set_kv("morning_checkin_attempted", "", db)
         retention_setting = int(getattr(CONFIG, "data_retention_days", -1))
         if retention_setting != ALL_SYNC_DAYS:
             retention_days = max(30, min(retention_setting, 3650))
@@ -2200,6 +2203,8 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
         if historical_end is not None and garmin_fixture_path() is None:
             sync_kwargs["end_date"] = historical_end
         result = sync_garmin(**sync_kwargs)
+        if historical_end is None and days != ALL_SYNC_DAYS and result.get("status") in {"ok", "partial"}:
+            refresh_morning_body_battery()
         if historical_end is not None:
             next_end = historical_end - timedelta(days=days)
             result["historical_next_end"] = next_end.isoformat() if next_end >= SYNC_EARLIEST_DATE else None
@@ -2938,6 +2943,21 @@ def _safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     return result
 
 
+def _coach_error_metadata(exc: BaseException) -> dict[str, Any]:
+    """Keep technical call sites, never exception text, source lines or locals."""
+    result = _safe_diagnostic_error(exc)
+    frames = []
+    trace = exc.__traceback__
+    while trace is not None:
+        filename = Path(trace.tb_frame.f_code.co_filename).resolve()
+        if filename == ROOT / "server.py" or filename.is_relative_to(ROOT / "backend"):
+            frames.append({"file": filename.relative_to(ROOT).as_posix(),
+                           "function": trace.tb_frame.f_code.co_name, "line": trace.tb_lineno})
+        trace = trace.tb_next
+    result["frames"] = frames[-8:]
+    return result
+
+
 def _safe_response_headers(headers: Any) -> dict[str, str]:
     """Retain only transport headers that cannot carry credentials or content."""
     if headers is None:
@@ -3651,15 +3671,32 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
     return result
 
 
+def measurement_age(observed_at: Any) -> dict[str, Any]:
+    """Describe observation age independently of a successful provider read."""
+    try:
+        days = (local_now().date() - date.fromisoformat(str(observed_at)[:10])).days
+    except (TypeError, ValueError):
+        return {"measurement_status": "unknown", "measurement_age_days": None}
+    return {"measurement_status": "today" if days == 0 else "earlier" if days > 0 else "future", "measurement_age_days": days}
+
+
+def garmin_source_freshness(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {source: {**details, **measurement_age(details.get("observed_at"))}
+            for source, details in (snapshot.get("source_freshness") or {}).items() if isinstance(details, dict)}
+
+
 def garmin_metric_freshness(snapshot: dict[str, Any], source: str, value: dict[str, Any]) -> dict[str, Any]:
     """Expose observation and retrieval dates without treating a retained value as a new reading."""
     freshness = (snapshot.get("source_freshness") or {}).get(source) or {}
     status = freshness.get("freshness", "unknown")
     result = {**value, "freshness": status, "fetched_at": freshness.get("fetched_at"),
-              "observed_at": freshness.get("observed_at")}
+              "observed_at": freshness.get("observed_at"), **measurement_age(freshness.get("observed_at"))}
+    if result["measurement_status"] == "earlier":
+        result["note"] = "; ".join(part for part in (str(result.get("note") or ""),
+            f"Messung ist {result['measurement_age_days']} Tage alt; das Abrufdatum ist keine neue Messung.") if part)
     if status in {"stale", "partial"} and value.get("value") is not None:
         label = "Letzter guter Wert; Quelle nicht aktualisiert" if status == "stale" else "Quelle nur teilweise aktualisiert"
-        result["note"] = "; ".join(part for part in (str(value.get("note") or ""), label) if part)
+        result["note"] = "; ".join(part for part in (str(result.get("note") or ""), label) if part)
     return result
 
 
@@ -4013,7 +4050,7 @@ def _morning_body_battery_record(
     *,
     attempted_at: str | None = None,
 ) -> dict[str, Any]:
-    """Derive the evening and current-morning level for one completed sleep."""
+    """Derive the evening and wake-up level for one completed sleep."""
     attempted_at = attempted_at or utc_now()
     sleep_start, sleep_end = _garmin_sleep_bounds(sleep_payload)
     record: dict[str, Any] = {
@@ -4032,11 +4069,12 @@ def _morning_body_battery_record(
     samples = _garmin_body_battery_samples(body_battery_payload)
     before_lower_bound = sleep_start - timedelta(hours=4)
     before = [sample for sample in samples if before_lower_bound <= _garmin_timestamp(sample["observed_at"]) <= sleep_start]
-    morning = [sample for sample in samples if sleep_end <= _garmin_timestamp(sample["observed_at"]) <= attempted]
+    morning_end = min(attempted, sleep_end + timedelta(hours=1))
+    morning = [sample for sample in samples if sleep_end <= _garmin_timestamp(sample["observed_at"]) <= morning_end]
     if before:
         record["before_sleep"] = before[-1]
     if morning:
-        record["morning"] = morning[-1]
+        record["morning"] = morning[0]
     if record["before_sleep"] is not None and record["morning"] is not None:
         record["status"] = "ready"
     return record
@@ -4058,39 +4096,56 @@ def _saved_daily_history(key: str, db: Any | None = None) -> dict[str, Any]:
 @maintenance_operation
 @garmin_operation
 def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
-    """Load Body Battery once with the completed night's exact sleep bounds."""
+    """Keep a successful pair; retry unavailable readings with a bounded cooldown."""
     previous = garmin_snapshot()
     existing = _garmin_morning_body_battery(previous)
-    if existing and existing.get("sleep_date") == checkin_date.isoformat():
-        return {"status": "already_loaded", "sleep_date": checkin_date.isoformat()}
+
+    def cached_result(record: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not record or record.get("sleep_date") != checkin_date.isoformat():
+            return None
+        if record.get("status") == "ready":
+            return {"status": "already_loaded", "sleep_date": checkin_date.isoformat()}
+        attempted = _garmin_timestamp(record.get("attempted_at"))
+        if int(record.get("attempts") or 1) >= MORNING_MAX_ATTEMPTS:
+            return {"status": "attempts_exhausted", "sleep_date": checkin_date.isoformat()}
+        if attempted and (datetime.now(timezone.utc) - attempted).total_seconds() < MORNING_RETRY_SECONDS:
+            return {"status": "retry_wait", "sleep_date": checkin_date.isoformat()}
+        return None
+
+    cached = cached_result(existing)
+    if cached:
+        return cached
 
     def persist(record: dict[str, Any], records: Any = None) -> dict[str, Any]:
-        current = garmin_snapshot()
-        if isinstance(records, list):
-            current["body_battery"] = _merge_garmin_records(records, current.get("body_battery"))
-        current["morning_body_battery"] = record
-        set_kv("garmin_snapshot", json.dumps(current, ensure_ascii=False, separators=(",", ":")))
+        record["attempts"] = 1 + (int(existing.get("attempts") or 1) if existing and existing.get("sleep_date") == checkin_date.isoformat() else 0)
         with DB_LOCK, database() as db:
+            current = garmin_snapshot()
+            if isinstance(records, list):
+                current["body_battery"] = _merge_garmin_records(records, current.get("body_battery"))
+            current["morning_body_battery"] = record
+            set_kv("garmin_snapshot", json.dumps(current, ensure_ascii=False, separators=(",", ":")), db)
             history = _saved_daily_history(MORNING_BATTERY_HISTORY_KEY, db)
             for saved in (existing, record):
                 if isinstance(saved, dict) and saved.get("status") == "ready" and saved.get("sleep_date"):
                     history[saved["sleep_date"]] = saved.get("morning", {}).get("value")
             set_kv(MORNING_BATTERY_HISTORY_KEY, json.dumps(history), db)
         _set_garmin_error_entries(_garmin_core_error_entries())
+        publish_state_event("provider", {"provider": "garmin", "area": "performance", "status": "ready" if record["status"] == "ready" else "degraded"})
         return {"status": record["status"], "sleep_date": record["sleep_date"], "records": len(records) if isinstance(records, list) else 0}
 
-    if garmin_fixture_path() is not None:
-        payload = load_garmin_fixture(2)
-        sleep_payload = {"dailySleepDTO": latest_garmin_record(payload.get("sleep"))}
-        return persist(_morning_body_battery_record(checkin_date, sleep_payload, payload.get("body_battery")), payload.get("body_battery"))
-    if Garmin is None or not (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()):
-        return persist(_morning_body_battery_record(checkin_date, {}, []))
     if not GARMIN_LOCK.acquire(timeout=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS):
-        return persist(_morning_body_battery_record(checkin_date, {}, []))
+        return {"status": "already_running", "sleep_date": checkin_date.isoformat()}
     try:
         existing = _garmin_morning_body_battery(garmin_snapshot())
-        if existing and existing.get("sleep_date") == checkin_date.isoformat():
-            return {"status": "already_loaded", "sleep_date": checkin_date.isoformat()}
+        cached = cached_result(existing)
+        if cached:
+            return cached
+        if garmin_fixture_path() is not None:
+            payload = load_garmin_fixture(2)
+            sleep_payload = {"dailySleepDTO": latest_garmin_record(payload.get("sleep"))}
+            return persist(_morning_body_battery_record(checkin_date, sleep_payload, payload.get("body_battery")), payload.get("body_battery"))
+        if Garmin is None or not (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()):
+            return {"status": "not_configured", "sleep_date": checkin_date.isoformat()}
         client = Garmin(CONFIG.garmin_email or None, CONFIG.garmin_password or None)
         try:
             mfa_status, _ = external_call(
@@ -4119,10 +4174,24 @@ def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
             )
             records = records if isinstance(records, list) else []
             return persist(_morning_body_battery_record(checkin_date, sleep_payload, records), records)
-        except Exception:
-            return persist(_morning_body_battery_record(checkin_date, {}, []))
+        except Exception as exc:
+            record = _morning_body_battery_record(checkin_date, {}, [])
+            record["error"] = _safe_diagnostic_error(exc)
+            return persist(record)
     finally:
         GARMIN_LOCK.release()
+
+
+def refresh_morning_body_battery(checkin_date: date | None = None) -> None:
+    """Refresh optional recovery independently of AI success and full provider syncs."""
+    if checkin_date is None and local_now().hour < 5:
+        return
+    if not (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
+        return
+    try:
+        sync_garmin_morning_body_battery(checkin_date or local_now().date())
+    except Exception as exc:
+        LOGGER.warning("Morning Body Battery refresh failed", extra={"event": "morning_body_battery_sync_failed", "context": _safe_diagnostic_error(exc)})
 
 
 @observed_sync("garmin", "data")
@@ -4311,7 +4380,7 @@ def garmin_public_state() -> dict[str, Any]:
         "last_sync_at": get_kv("last_garmin_sync_at"),
         "last_error": parsed_error,
         "pagination": snapshot.get("provider_sync", {}).get("pagination", {}),
-        "source_freshness": snapshot.get("source_freshness", {}),
+        "source_freshness": garmin_source_freshness(snapshot),
         "activities": len(filtered_activities),
         "duplicate_activities_skipped": skipped,
         "has_sleep": bool(snapshot.get("sleep")),
@@ -4343,7 +4412,7 @@ def garmin_coach_context(include_performance: bool = False) -> dict[str, Any]:
         "synced_at": snapshot.get("synced_at"),
         "start": snapshot.get("start"),
         "end": snapshot.get("end"),
-        "source_freshness": snapshot.get("source_freshness", {}),
+        "source_freshness": garmin_source_freshness(snapshot),
         "recovery": {
             "sleep": compact_garmin_recovery(snapshot.get("sleep")),
             "hrv": compact_garmin_recovery(snapshot.get("hrv")),
@@ -14898,8 +14967,9 @@ def _chat_with_structured_coach_impl(
             except (AppError, ValueError, TypeError, KeyError) as exc:
                 result = {"ok": False, "reason": getattr(exc, "reason", "tool_arguments_invalid"),
                           "error": str(exc) if isinstance(exc, AppError) else "Die Werkzeugargumente sind ungültig. Prüfe das Schema und den aktuellen Zustand und korrigiere den Aufruf."}
-                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "request": action.get("request"), "result": result})
-                LOGGER.warning("Coach step failed", extra={"event": "coach_tool_failed", "context": {"tool": name[:80], "reason": result["reason"]}})
+                technical_error = _coach_error_metadata(exc)
+                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
+                LOGGER.warning("Coach step failed", extra={"event": "coach_tool_failed", "context": {"tool": name if name in {tool['name'] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error}})
             outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
             pending = [entry for entry in pending if entry["call_id"] != call_id]
             _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "pending_tool_calls": pending,
@@ -14951,6 +15021,7 @@ def _chat_with_structured_coach_impl(
     else:
         status = "cancelled" if cancelled else "completed"
     final_receipt = {**receipt, "status": status, "awaiting_clarification": bool(question),
+        "response_status": response.get("status") if response.get("status") in {"completed", "incomplete", "failed", "cancelled"} else None,
         "client_turn_id": client_turn_id, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids,
         "intent": intent, "tool_rounds": rounds, "pending_operations": sorted({entry["tool"] for entry in failures}),
         "proposed_actions": [entry["result"]["proposed_action"] for entry in command_receipts if entry.get("result", {}).get("proposed_action")]}
@@ -15062,7 +15133,7 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
                     "status": "failed", "question": None,
                     "completed_steps": [{"tool": step["tool"], "status": step["result"].get("status")} for step in successes],
                 }, ensure_ascii=False), db)
-        receipt.update({"status": status, "error": safe_error, "client_turn_id": client_turn_id,
+        receipt.update({"status": status, "error": safe_error, "diagnostic_error": _coach_error_metadata(error), "client_turn_id": client_turn_id,
             "command_receipts": commands, "sync_job_ids": receipt.get("sync_job_ids") or [], "intent": intent,
             "pending_operations": pending,
             "proposed_actions": [step["result"]["proposed_action"] for step in commands if step.get("result", {}).get("proposed_action")]})
@@ -15082,7 +15153,7 @@ def _chat_with_structured_coach(*args: Any, **kwargs: Any) -> dict[str, Any]:
     except Exception as exc:
         if isinstance(exc, AppError) and exc.reason in {"command_scope_denied", "client_turn_in_progress"}:
             raise
-        LOGGER.warning("Coach command failed", extra={"event": "coach_command_failed", "context": _safe_diagnostic_error(exc)})
+        LOGGER.warning("Coach command failed", extra={"event": "coach_command_failed", "context": _coach_error_metadata(exc)})
         receipt = _persist_structured_command_failure(client_turn_id, intent, exc)
         if not receipt:
             raise
@@ -15304,6 +15375,8 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
         if not receipt.get("openai_response_id"):
             worker_phase["phase"] = "preparing"
         _merge_coach_command_receipt(client_turn_id, worker_phase)
+        if receipt.get("request_kind") == "morning_checkin":
+            refresh_morning_body_battery(local_now().date())
         result = chat_with_coach(
             message,
             cancel_event=cancel_event,
@@ -15407,7 +15480,18 @@ def mark_daily_sync(source: str, now: datetime | None = None) -> None:
 
 def morning_checkin_date() -> str | None:
     now = local_now()
-    return now.date().isoformat() if 5 <= now.hour < 11 else None
+    return now.date().isoformat() if now.hour >= 5 else None
+
+
+def morning_checkin_state() -> dict[str, Any]:
+    completed_date = get_kv("morning_checkin_date")
+    current = completed_date == local_now().date().isoformat()
+    status = get_kv("morning_checkin_status") or "waiting"
+    if status == "ready" and not current:
+        status = "waiting"
+    return {"status": status, "running": get_kv("morning_checkin_running") == "1",
+            "date": completed_date, "current_for_today": current,
+            "last_error": redact_text(get_kv("morning_checkin_error") or "") or None}
 
 
 MORNING_CHECKIN_PROMPT = (
@@ -15436,10 +15520,7 @@ def run_morning_checkin(checkin_date: str) -> None:
                 sync_garmin(days=sync_period("garmin"), reason="Morgen-Check-in", wait_for_existing=True)
             except Exception:
                 LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
-            try:
-                sync_garmin_morning_body_battery(date.fromisoformat(checkin_date))
-            except Exception:
-                LOGGER.warning("Morning Body Battery synchronization failed", extra={"event": "morning_body_battery_sync_failed"}, exc_info=True)
+            refresh_morning_body_battery(date.fromisoformat(checkin_date))
         sync_result = sync_intervals(
             "Morgen-Check-in",
             activity_days=sync_period("intervals"),
@@ -15449,10 +15530,11 @@ def run_morning_checkin(checkin_date: str) -> None:
             deadline = time.monotonic() + 120
             while get_kv("sync_running") == "1" and time.monotonic() < deadline:
                 time.sleep(1)
+        attempt = int(get_kv("morning_checkin_attempt_count") or 1)
         result = chat_with_coach(
             MORNING_CHECKIN_PROMPT,
             allow_mutations=False,
-            client_turn_id=f"morning:{checkin_date}",
+            client_turn_id=f"morning:{checkin_date}" + (f":attempt:{attempt}" if attempt > 1 else ""),
         )
         if result.get("status") != "completed" or not result.get("message") or result.get("awaiting_clarification"):
             raise AppError(502, "Der Morgen-Check-in konnte nicht abgeschlossen werden.")
@@ -15478,11 +15560,27 @@ def schedule_morning_checkin() -> None:
     checkin_date = morning_checkin_date()
     if not checkin_date or not selected_ai_provider() or not CONFIG.intervals_api_key:
         return
-    if get_kv("morning_checkin_date") == checkin_date or get_kv("morning_checkin_attempted") == checkin_date:
+    if get_kv("morning_checkin_date") == checkin_date:
         return
     if not MORNING_CHECKIN_LOCK.acquire(blocking=False):
         return
-    set_kv("morning_checkin_attempted", checkin_date)
+    try:
+        with DB_LOCK, database() as db:
+            if db.execute("SELECT 1 FROM coach_commands WHERE status IN ('queued', 'running') AND json_extract(receipt, '$.request_kind')='morning_checkin' LIMIT 1").fetchone():
+                MORNING_CHECKIN_LOCK.release()
+                return
+            same_day = get_kv("morning_checkin_attempted", db) == checkin_date
+            attempts = int(get_kv("morning_checkin_attempt_count", db) or 0) if same_day else 0
+            last_attempt = _garmin_timestamp(get_kv("morning_checkin_attempted_at", db)) if same_day else None
+            if attempts >= MORNING_MAX_ATTEMPTS or (last_attempt and (datetime.now(timezone.utc) - last_attempt).total_seconds() < MORNING_RETRY_SECONDS):
+                MORNING_CHECKIN_LOCK.release()
+                return
+            set_kv("morning_checkin_attempted", checkin_date, db)
+            set_kv("morning_checkin_attempted_at", utc_now(), db)
+            set_kv("morning_checkin_attempt_count", str(attempts + 1), db)
+    except Exception:
+        MORNING_CHECKIN_LOCK.release()
+        raise
     generation = MAINTENANCE_GATE.current_generation()
 
     def run_scheduled() -> None:
@@ -15498,7 +15596,11 @@ def schedule_morning_checkin() -> None:
             if not admitted:
                 MORNING_CHECKIN_LOCK.release()
 
-    threading.Thread(target=run_scheduled, daemon=True).start()
+    try:
+        threading.Thread(target=run_scheduled, daemon=True).start()
+    except Exception:
+        MORNING_CHECKIN_LOCK.release()
+        raise
 
 
 def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -15596,10 +15698,7 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
                 "last_refresh_at": get_kv("last_performance_refresh_at"), "last_error": get_kv("last_performance_error") or None,
                 "running": get_kv("performance_refresh_running") == "1",
             },
-            "morning_checkin": {
-                "status": get_kv("morning_checkin_status") or "waiting", "running": get_kv("morning_checkin_running") == "1",
-                "date": get_kv("morning_checkin_date"), "last_error": get_kv("morning_checkin_error") or None,
-            },
+            "morning_checkin": morning_checkin_state(),
             "coach_quick_actions": coach_quick_actions_state(),
             "ai_provider": {"selected": selected_ai_provider(), "options": available_ai_providers()},
             "model": {"selected": selected_model(), "options": available_model_options()},
@@ -15760,12 +15859,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
                 "last_error": get_kv("last_performance_error") or None,
                 "running": get_kv("performance_refresh_running") == "1",
             },
-            "morning_checkin": {
-                "status": get_kv("morning_checkin_status") or "waiting",
-                "running": get_kv("morning_checkin_running") == "1",
-                "date": get_kv("morning_checkin_date"),
-                "last_error": get_kv("morning_checkin_error") or None,
-            },
+            "morning_checkin": morning_checkin_state(),
             "coach_quick_actions": coach_quick_actions_state(),
             "ai_provider": {"selected": selected_ai_provider(), "options": available_ai_providers()},
             "model": {"selected": selected_model(), "options": available_model_options()},
@@ -15847,6 +15941,55 @@ def save_settings(values: Any) -> dict[str, Any]:
     return {"status": "ok", "updated": sorted(updates), "restart_required": True}
 
 
+def coach_diagnostic_history() -> list[dict[str, Any]]:
+    """Project at most 20 durable commands without dialogue, arguments or results."""
+    with DB_LOCK, database() as db:
+        rows = db.execute("SELECT client_turn_id, receipt, created_at, updated_at FROM coach_commands ORDER BY created_at DESC, client_turn_id DESC LIMIT 20").fetchall()
+    tools = {tool["name"] for tool in COACH_DIALOGUE_TOOLS}
+    statuses = {"queued", "running", "completed", "partial", "failed", "cancelled"}
+
+    def error_metadata(value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        result = {}
+        for key in ("type", "reason"):
+            item = value.get(key)
+            if isinstance(item, str) and re.fullmatch(r"[A-Za-z_]{1,80}", item):
+                result[key] = item
+        if isinstance(value.get("status"), int) and 100 <= value["status"] <= 599:
+            result["status"] = value["status"]
+        frames = []
+        for frame in (value.get("frames") or [])[-8:]:
+            if not isinstance(frame, dict):
+                continue
+            filename, function, line = frame.get("file"), frame.get("function"), frame.get("line")
+            if (isinstance(filename, str) and re.fullmatch(r"(?:server\.py|backend/(?:[a-z_]+/)*[a-z_]+\.py)", filename)
+                    and isinstance(function, str) and re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]{0,100}", function)
+                    and isinstance(line, int) and 0 < line < 1_000_000):
+                frames.append({"file": filename, "function": function, "line": line})
+        if frames:
+            result["frames"] = frames
+        return sanitize_log_value(result)
+
+    history = []
+    for row in rows:
+        receipt = _coach_command_receipt(row["receipt"])
+        steps = []
+        for step in (receipt.get("command_receipts") or [])[:40]:
+            if not isinstance(step, dict):
+                continue
+            result = step.get("result") if isinstance(step.get("result"), dict) else {}
+            steps.append({"tool": step.get("tool") if step.get("tool") in tools else "unknown",
+                          "ok": result.get("ok") is True, "error": error_metadata(step.get("diagnostic_error"))})
+        history.append({"id": hashlib.sha256(str(row["client_turn_id"]).encode()).hexdigest()[:12],
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+            "status": receipt.get("status") if receipt.get("status") in statuses else "unknown",
+            "response_status": receipt.get("response_status") if receipt.get("response_status") in statuses | {"incomplete"} else None,
+            "awaiting_clarification": receipt.get("awaiting_clarification") is True,
+            "error": error_metadata(receipt.get("diagnostic_error")), "steps": steps})
+    return history
+
+
 def diagnostic_report() -> dict[str, Any]:
     snapshot = latest_snapshot()
     garmin_status = garmin_public_state()
@@ -15877,6 +16020,7 @@ def diagnostic_report() -> dict[str, Any]:
         },
         "openai": openai_usage_summary(),
         "gemini": gemini_usage_summary(),
+        "coach_commands": coach_diagnostic_history(),
         "sync": {
             "last_success": get_kv("last_sync_at"),
             "last_error": redact_text(get_kv("last_sync_error") or "") or None,
@@ -15901,12 +16045,7 @@ def diagnostic_report() -> dict[str, Any]:
             "running": EXTERNAL_CALENDAR_LOCK.locked(),
             "events": len(list_external_calendar_events()),
         },
-        "morning_checkin": {
-            "status": get_kv("morning_checkin_status") or "waiting",
-            "running": get_kv("morning_checkin_running") == "1",
-            "date": get_kv("morning_checkin_date"),
-            "last_error": redact_text(get_kv("morning_checkin_error") or "") or None,
-        },
+        "morning_checkin": morning_checkin_state(),
         "database": {"messages": message_count, "workout_library": library_count, "workout_library_state": workout_library_sync_summary(), "competitions": competition_count, "athlete_checkins": checkin_count, "activity_feedback": activity_feedback_count, "external_calendar_events": len(list_external_calendar_events())},
         "logs": recent_log_entries(),
         "debug_capture": {**diagnostic_capture_status(), "entries": diagnostic_capture_entries()},
@@ -17242,6 +17381,8 @@ def daily_sync_loop() -> None:
         time.sleep(300)
         try:
             schedule_daily_sync_jobs()
+            schedule_morning_checkin()
+            refresh_morning_body_battery()
         except AppError as exc:
             if exc.reason != "maintenance":
                 LOGGER.error("Daily synchronization scheduling failed", extra={"event": "daily_sync_failed"})
@@ -17313,6 +17454,7 @@ def main() -> None:
     start_sync_job_worker()
     start_coach_job_worker()
     enqueue_startup_sync_jobs()
+    schedule_morning_checkin()
     threading.Thread(target=daily_sync_loop, daemon=True).start()
     LOGGER.info("Intervals Coach listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
     try:

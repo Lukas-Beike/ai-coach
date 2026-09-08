@@ -2734,9 +2734,9 @@ function renderGarmin(garmin) {
       : "Noch kein Garmin-Abruf durchgeführt.";
   if (performanceSources.length) detail.textContent += ` · ${performanceSources.join("/")} aus Garmin`;
   if (morningBodyBattery.status === "ready" && Number.isFinite(beforeSleepBattery) && Number.isFinite(morningBattery)) {
-    detail.textContent += ` · Body Battery morgens: ${beforeSleepBattery} vor dem Schlafen → ${morningBattery} aktuell`;
+    detail.textContent += ` · Body Battery am ${dateLabel(morningBodyBattery.sleep_date)}: ${beforeSleepBattery} vor dem Schlafen → ${morningBattery} nach dem Aufwachen`;
   } else if (morningBodyBattery.sleep_date) {
-    detail.textContent += " · Body Battery: heute Morgen nicht verfügbar";
+    detail.textContent += ` · Body Battery am ${dateLabel(morningBodyBattery.sleep_date)}: nicht verfügbar`;
   }
   if (paginationDetail) detail.textContent += ` · ${paginationDetail}`;
   if (fullButton) {
@@ -2918,7 +2918,11 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   if (freshnessLabel) source.textContent += ` · ${freshnessLabel}`;
   if (metricData?.observed_at) source.textContent += ` · Messung ${dateLabel(String(metricData.observed_at).slice(0, 10))}`;
   else if (freshnessLabel && metricData?.fetched_at) source.textContent += ` · Stand ${formatTime(metricData.fetched_at)}`;
-  source.title = metricData?.note || metricData?.source || "";
+  if (metricData?.measurement_status === "earlier" && Number.isFinite(metricData.measurement_age_days)) {
+    source.textContent += ` · ${metricData.measurement_age_days} ${metricData.measurement_age_days === 1 ? "Tag" : "Tage"} alt`;
+  } else if (metricData?.measurement_status === "unknown") source.textContent += " · Messdatum unbekannt";
+  else if (metricData?.measurement_status === "future") source.textContent += " · Messdatum liegt in der Zukunft";
+  source.title = [metricData?.note || metricData?.source || "", metricData?.fetched_at ? `Abgerufen ${formatTime(metricData.fetched_at)}` : ""].filter(Boolean).join(" · ");
   for (const className of [metricSourceClass(metricData?.source), metricToneClass(label, value)]) {
     if (className) item.classList.add(className);
   }

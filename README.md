@@ -251,19 +251,26 @@ sync reports the fetched page/window counts; incomplete required Garmin ranges
 remain visible as partial provider status instead of being presented as complete.
 After a successful regular Intervals.icu refresh, the targeted current-performance
 data is refreshed automatically as a separate background job.
-Garmin Body Battery is deliberately separate from the regular and historical
-Garmin synchronization. It is fetched once during the morning check-in, only
+Garmin Body Battery is a separate targeted read after regular Garmin refreshes
+and before morning coaching, only
 for the completed sleep window (at most the previous and current calendar
-day). The app stores the last level before sleep and the newest available level
-after waking. A missing optional morning value neither retries in the background
-nor marks the complete Garmin connection as incomplete; the last valid dated
-pair remains available.
+day). The app stores the last level before sleep and the first available level
+within one hour after waking. Missing values are retried at most three times per local day,
+with at least 15 minutes between attempts, including by the background scheduler.
+A successful pair is reused for that day. Historical backfills do not trigger
+this read, and optional recovery failures do not invalidate a successful Garmin
+sync. Stored daily history and original provider records remain intact.
+Metrics expose their observation age separately from retrieval freshness; a
+new fetch of an old measurement does not make that measurement current.
 Open-Meteo uses the profile location, keeps a three-hour server-side forecast
 cache, and refreshes that location in the background every three hours. A
 visible view also refreshes it when the cache has expired. The current forecast
 can be forced manually from the Open-Meteo card in the More tab.
-The morning check-in is generated at most once per local calendar day when its required
-integrations are configured.
+The morning check-in is generated once per local calendar day when its required
+integrations are configured. From 05:00 onward, startup and the background loop
+also catch up on a missed check-in, including after 11:00. Failed attempts may
+retry after 15 minutes, up to three attempts per day. Yesterday's completed
+check-in is not reported as today's completed check-in.
 
 The four main views use stable hash links: `#coach`, `#plan`, `#analysis`,
 and `#more`. Navigation is implemented with real
@@ -702,6 +709,13 @@ five minutes, while expired sessions and stale in-memory rate-limit buckets are
 cleaned up periodically in bounded batches. Synchronization logs correlate a
 technical operation ID across trigger, provider, phase, duration, counts, and
 safe error codes; they do not log provider payloads or athlete content.
+The normal diagnostic export also includes technical summaries of the 20 most
+recent saved Coach commands: completion state, tool names, classified errors,
+and application file/line locations. These summaries remain available if the
+optional capture was enabled only after a failure. They exclude dialogue,
+tool arguments, result contents, exception messages, session identifiers and
+credentials. Existing commands without captured error locations cannot recover
+those locations retroactively.
 In **Betrieb & Diagnose**, the athlete can explicitly enable a one-hour
 technical capture. It records response shapes and technical metadata only for
 that period so an export can diagnose provider schema failures. It never records
