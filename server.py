@@ -12968,10 +12968,14 @@ def enqueue_background_coach_job(
     *,
     operation_id: str | None = None,
     cancel_event: threading.Event | None = None,
+    request_kind: str | None = None,
 ) -> dict[str, Any]:
     """Persist a long Coach turn before returning control to the browser."""
     message = str(message or "").strip()
     client_turn_id = str(client_turn_id or "").strip()
+    request_kind = str(request_kind or "").strip() or None
+    if request_kind not in {None, "morning_checkin"}:
+        raise AppError(400, "Unbekannte Coach-Schnellaktion.", reason="invalid_request_kind")
     scope = coach_execution_scope()
     if not message or len(message) > 12_000:
         raise AppError(400, "Die Coach-Nachricht ist leer oder zu lang.", reason="invalid_chat_message")
@@ -13016,6 +13020,7 @@ def enqueue_background_coach_job(
             "ai_provider": ai_provider,
             "model": model,
             "thinking_level": thinking_level,
+            "request_kind": request_kind,
         }
         db.execute(
             "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) "
@@ -14229,7 +14234,11 @@ def _structured_coach_tool_result(
                     )
                 normalized_entries = [pending_by_id[local_id] for local_id in sorted(changed_ids)]
                 for entry in normalized_entries:
-                    _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
+                    _require_coach_scope(
+                        intent,
+                        f"planned_unit:{entry['library_workout_id']}",
+                        f"library_workout:{entry['library_workout_id']}",
+                    )
                 _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
             else:
                 _require_coach_scope(intent, "local_plan")
@@ -14279,7 +14288,11 @@ def _structured_coach_tool_result(
                 _require_coach_scope(intent, "local_plan")
             else:
                 for entry in normalized_entries:
-                    _require_coach_scope(intent, f"library_workout:{entry['library_workout_id']}")
+                    _require_coach_scope(
+                        intent,
+                        f"planned_unit:{entry['library_workout_id']}",
+                        f"library_workout:{entry['library_workout_id']}",
+                    )
             _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
         return _enqueue_coach_plan_push(
             normalized_entries,
@@ -15193,13 +15206,33 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
         if not receipt.get("openai_response_id"):
             worker_phase["phase"] = "preparing"
         _merge_coach_command_receipt(client_turn_id, worker_phase)
-        chat_with_coach(
+        result = chat_with_coach(
             message,
             cancel_event=cancel_event,
             session_csrf_hash=session_csrf_hash,
             client_turn_id=client_turn_id,
             background_job=True,
         )
+        if (
+            receipt.get("request_kind") == "morning_checkin"
+            and result.get("status") == "completed"
+            and result.get("message")
+        ):
+            with DB_LOCK, database() as db:
+                set_kv("morning_checkin_date", local_now().date().isoformat(), db)
+                set_kv("morning_checkin_status", "ready", db)
+                set_kv("morning_checkin_error", "", db)
+            quick_actions = coach_quick_actions_state()
+            with DB_LOCK, database() as db:
+                row = db.execute(
+                    "SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,),
+                ).fetchone()
+                completed_receipt = _coach_command_receipt((row or {}).get("receipt"))
+                completed_receipt["coach_quick_actions"] = quick_actions
+                db.execute(
+                    "UPDATE coach_commands SET receipt=?, updated_at=? WHERE client_turn_id=? AND status='completed'",
+                    (json.dumps(completed_receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+                )
     except AppError as exc:
         if exc.reason in {"chat_queue_full", "chat_request_timeout"}:
             _requeue_background_coach_job(client_turn_id, exc.reason)
@@ -16780,6 +16813,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         payload = self.read_json()
         message = str(payload.get("message", ""))
         client_turn_id = str(payload.get("client_turn_id") or "").strip()
+        request_kind = payload.get("request_kind")
         if not client_turn_id:
             raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
         operation_id, cancel_event = register_chat_stream(session["csrf_hash"])
@@ -16806,7 +16840,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 client_connected = False
             job = enqueue_background_coach_job(
                 message, client_turn_id, session["csrf_hash"],
-                operation_id=operation_id, cancel_event=cancel_event,
+                operation_id=operation_id, cancel_event=cancel_event, request_kind=request_kind,
             )
             send_event("background", job)
         except AppError as exc:
@@ -16859,7 +16893,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if not client_turn_id:
                     raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
                 message = str(payload.get("message", ""))
-                self.send_json(202, enqueue_background_coach_job(message, client_turn_id, session["csrf_hash"]))
+                self.send_json(202, enqueue_background_coach_job(
+                    message, client_turn_id, session["csrf_hash"], request_kind=payload.get("request_kind"),
+                ))
             elif path == "/api/sync":
                 payload = self.read_json()
                 days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))

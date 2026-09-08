@@ -79,6 +79,17 @@ class CoachDialogueTests(unittest.TestCase):
         self.assertFalse(hasattr(server, "request_coach_intent"))
         self.assertEqual(self.state()["planned_units"], [])
 
+    def test_request_period_matches_existing_730_day_plan_contract(self):
+        request = {
+            "summary": "Sparse long plan", "source_message_ids": [1], "target": "local",
+            "scope": ["local_plan"], "period": {"start": "2026-09-07", "end": "2028-09-06"},
+            "constraints": [], "remote_write": False, "sync_scope": None,
+        }
+        self.assertEqual(validate_request(request, {1}, 1)["period"]["end"], "2028-09-06")
+        request["period"]["end"] = "2028-09-07"
+        with self.assertRaises(ValueError):
+            validate_request(request, {1}, 1)
+
     def test_screenshot_followup_moves_and_adds_atomically_without_literal_name(self):
         existing = server.save_workout_library_entries([self.workout()], plan_name="September")[0]
         def question(_):
@@ -303,6 +314,38 @@ class CoachDialogueTests(unittest.TestCase):
             ["intervals_sync", "local_plan"], target="intervals", remote_write=True, sync_scope="all_pending"), {"output_text": "Alle beauftragt."}])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["command_receipts"][0]["result"]["entries"], 2)
+
+    def test_selected_existing_planned_unit_sync_accepts_planned_unit_scope(self):
+        planned = server.save_workout_library_entries([self.workout("2026-09-08")])[0]
+        entry = server._pending_plan_push_entries()[0]
+        result, _ = self.turn("Nur diese Einheit übertragen", [lambda _: self.call(
+            "start_intervals_plan_sync", {"entries": [entry]},
+            ["intervals_sync", f"planned_unit:{planned['id']}"], target="intervals",
+            remote_write=True, sync_scope="selected",
+        ), {"output_text": "Synchronisierung beauftragt."}])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(result["sync_job_ids"]), 1)
+
+    def test_successful_morning_quick_action_is_marked_complete_without_word_matching(self):
+        server.enqueue_background_coach_job(
+            "Natural wording without a fixed trigger", "morning-quick", "synthetic-session",
+            request_kind="morning_checkin",
+        )
+        job = server._claim_background_coach_job()
+        def complete_command(*args, **kwargs):
+            with server.database() as db:
+                db.execute("UPDATE coach_commands SET status='completed' WHERE client_turn_id='morning-quick'")
+            return {"status": "completed", "message": {"id": 1}}
+        with patch.object(server, "_restore_coach_session_csrf_hash", return_value="synthetic-session"), patch.object(
+            server, "chat_with_coach", side_effect=complete_command,
+        ):
+            server._run_background_coach_job(job)
+        self.assertEqual(server.get_kv("morning_checkin_date"), "2026-09-07")
+        self.assertEqual(server.get_kv("morning_checkin_status"), "ready")
+        self.assertFalse(server.coach_quick_actions_state()["morning_checkin"])
+        with server.database() as db:
+            row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id='morning-quick'").fetchone()
+        self.assertFalse(json.loads(row["receipt"])["coach_quick_actions"]["morning_checkin"])
 
     def test_same_effect_and_call_are_idempotent_inside_turn(self):
         def save(_):

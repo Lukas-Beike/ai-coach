@@ -125,7 +125,7 @@ def validate_request(value: Any, user_ids: set[int], current_user_id: int) -> di
         if not isinstance(period, dict) or set(period) != {"start", "end"}:
             raise ValueError("request_period")
         start, end = date.fromisoformat(period["start"]), date.fromisoformat(period["end"])
-        if start.isoformat() != period["start"] or end.isoformat() != period["end"] or not 0 <= (end - start).days <= 365:
+        if start.isoformat() != period["start"] or end.isoformat() != period["end"] or not 0 <= (end - start).days <= 730:
             raise ValueError("request_period")
     return deepcopy(value)
 
