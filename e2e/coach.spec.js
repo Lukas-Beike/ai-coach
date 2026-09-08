@@ -50,7 +50,7 @@ async function installControlledChatStream(page) {
     };
     chatTest.finish = () => chatTest.controller.close();
     chatTest.releaseHistory = () => {
-      const body = JSON.stringify({ messages: chatTest.historyMessages, next_cursor: null });
+      const body = JSON.stringify({ messages: chatTest.historyMessages, generation: state.data.messages_generation, next_cursor: null });
       chatTest.historyResolvers.splice(0).forEach((resolve) => resolve(new Response(body, {
         status: 200,
         headers: { "Content-Type": "application/json" },

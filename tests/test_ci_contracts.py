@@ -39,15 +39,17 @@ class WorkflowSourceTests(unittest.TestCase):
     def test_main_push_test_can_create_the_release_after_promotion_merge(self):
         workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/weekly-release.yml").read_text(encoding="utf-8")
         create_release = workflow.split("  create-release:", 1)[1].split("    runs-on:", 1)[0]
-        self.assertIn("github.event.workflow_run.event == 'workflow_dispatch'", create_release)
-        self.assertIn("startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-')", create_release)
+        self.assertNotIn("workflow_dispatch", create_release)
+        self.assertNotIn("chore/release-promotion-", create_release)
         self.assertIn("github.event.workflow_run.event == 'push'", create_release)
         self.assertIn("github.event.workflow_run.head_branch == 'main'", create_release)
         self.assertIn("TESTED_SHA: ${{ github.event.workflow_run.head_sha }}", workflow)
-        self.assertIn('if [[ "$PROMOTION_BRANCH" == chore/release-promotion-* ]]; then', workflow)
-        self.assertIn('if [[ "$PROMOTION_BRANCH" == "main" ]] && [[ "$(git rev-parse refs/remotes/origin/main)" != "$TESTED_SHA" ]]', workflow)
+        self.assertIn('if [[ "$(git rev-parse refs/remotes/origin/main)" != "$TESTED_SHA" ]]', workflow)
         self.assertNotIn('git merge-base --is-ancestor "$TESTED_SHA" refs/remotes/origin/main', workflow)
-        self.assertNotIn('gh pr list --repo "$REPOSITORY" --base main --head "$PROMOTION_BRANCH"', workflow.split('elif [[ "$PROMOTION_BRANCH" != "main" ]]', 1)[1].split('fi', 1)[0])
+        self.assertNotIn('PROMOTION_BRANCH', workflow)
+        self.assertNotIn('sleep 10', workflow)
+        self.assertIn('queue: max', workflow)
+        self.assertIn("branches: [main, 'chore/release-version-*']", workflow)
 
 
 class CodexReviewWorkflowTests(unittest.TestCase):
@@ -179,6 +181,15 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         subprocess.run(
             ["node", "--test", str(root / "tests/codex-review-gate.test.cjs")],
+            cwd=root,
+            check=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
+    def test_release_promotion_gate(self):
+        root = Path(__file__).resolve().parents[1]
+        subprocess.run(
+            ["node", "--test", str(root / "tests/release-promotion-gate.test.cjs")],
             cwd=root,
             check=True,
         )

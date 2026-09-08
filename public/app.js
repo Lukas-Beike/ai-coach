@@ -229,6 +229,9 @@ function cookie(name) {
 
 function showLogin() {
   state.sessionGeneration += 1;
+  state.voiceAcquiring = false;
+  stopVoiceRecording();
+  stopVoiceCapture();
   state.chatGeneration += 1;
   state.loadSequence += 1;
   state.pendingLoads.clear();
@@ -762,6 +765,7 @@ async function transcribeVoice(blob) {
   updateVoiceButton();
   try {
     const result = await apiAudio("/api/transcribe", blob);
+    if (generation !== state.sessionGeneration) return;
     const transcript = String(result.transcript || "").trim();
     if (!transcript) throw new Error("OpenAI hat kein Transkript zurückgegeben.");
     const input = $("#messageInput");
@@ -784,7 +788,7 @@ async function transcribeVoice(blob) {
 }
 
 async function toggleVoiceInput() {
-  if (state.busy || state.voiceTranscribing) return;
+  if (state.busy || state.voiceTranscribing || state.voiceAcquiring) return;
   if (voiceIsRecording()) {
     stopVoiceRecording();
     return;
@@ -795,27 +799,36 @@ async function toggleVoiceInput() {
     toast(message, true);
     return;
   }
+  const generation = state.sessionGeneration;
+  state.voiceAcquiring = true;
   setVoiceStatus("Mikrofon wird aktiviert …");
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
+    if (generation !== state.sessionGeneration) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    state.voiceAcquiring = false;
+    state.voiceStream = stream;
     const mimeType = typeof MediaRecorder.isTypeSupported === "function"
       ? VOICE_MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) || ""
       : "";
     const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
     const chunks = [];
-    state.voiceStream = stream;
     state.voiceRecorder = recorder;
     state.voiceStartedAt = Date.now();
     recorder.addEventListener("dataavailable", (event) => {
       if (event.data?.size) chunks.push(event.data);
     });
     recorder.addEventListener("error", () => {
+      if (generation !== state.sessionGeneration) return;
       stopVoiceCapture(recorder);
       setVoiceStatus("Die Audioaufnahme ist fehlgeschlagen.", true);
     });
     recorder.addEventListener("stop", () => {
+      if (generation !== state.sessionGeneration) return;
       const recordedType = recorder.mimeType || mimeType || "audio/webm";
       const blob = new Blob(chunks, { type: recordedType });
       stopVoiceCapture(recorder);
@@ -831,6 +844,8 @@ async function toggleVoiceInput() {
       if (Date.now() - state.voiceStartedAt >= VOICE_MAX_DURATION_MS) stopVoiceRecording();
     }, 250);
   } catch (error) {
+    if (generation !== state.sessionGeneration) return;
+    state.voiceAcquiring = false;
     stopVoiceCapture();
     const message = error.name === "NotAllowedError"
       ? "Der Mikrofonzugriff wurde nicht erlaubt."
@@ -1208,7 +1223,7 @@ function formatTime(value) {
 function hasUnsavedChanges({ includeChatDraft = true } = {}) {
   return state.profileDirty
     || state.checkinDirty
-    || (includeChatDraft && (state.chatDraftDirty || Boolean($("#messageInput")?.value.trim())));
+    || (includeChatDraft && (state.chatQueue.length > 0 || state.rejectedMessages.length > 0 || state.chatDraftDirty || Boolean($("#messageInput")?.value.trim())));
 }
 
 function setDirtyIndicator(id, dirty) {
@@ -1406,7 +1421,6 @@ function renderActivities(activities) {
       ? state.activityFromDate || state.activityToDate ? "Passe den Zeitraum an oder setze den Filter zurück." : "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück."
       : "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen."));
     root.append(empty);
-    return;
   }
   displayedActivities.slice(0, state.activityVisibleCount).forEach((activity) => {
     const card = document.createElement("article");
@@ -1701,6 +1715,38 @@ function applyChatReceipt(receipt) {
   renderMessages(state.data?.messages || [], false);
 }
 
+function appendHistoryPageButton(root, area) {
+  const chat = area === "chat";
+  const cursor = state.data?.[chat ? "messages_next_cursor" : "library_next_cursor"];
+  if (!cursor) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary-button";
+  button.dataset.pageArea = area;
+  button.textContent = chat ? "Weitere Nachrichten laden" : "Weitere Bibliothekseinheiten laden";
+  button.addEventListener("click", async () => {
+    const generation = state.sessionGeneration;
+    const chatGeneration = state.chatGeneration;
+    button.disabled = true;
+    try {
+      const result = await api(`${chat ? "/api/chat/history" : "/api/library"}?limit=100&cursor=${encodeURIComponent(cursor)}`);
+      if (generation !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
+      if (chat) {
+        if (result.generation !== state.data.messages_generation) { await loadChatHistoryFresh(); return; }
+        state.data.messages = mergeChatMessages(result.messages || []);
+        state.data.messages_next_cursor = result.next_cursor;
+        renderMessages(state.data.messages, false, true);
+      } else {
+        const all = [...(state.data.library || []), ...(result.workouts || [])];
+        state.data.library = [...new Map(all.map((entry) => [entry.id, entry])).values()];
+        state.data.library_next_cursor = result.next_cursor;
+        renderLibrary(state.data.library);
+      }
+    } catch (error) { toast(error.message, true); button.disabled = false; }
+  });
+  root.append(button);
+}
+
 function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   const root = $("#messages");
   const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
@@ -1710,6 +1756,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   const signature = JSON.stringify([
     visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.error]),
     appShellLoading,
+    state.data?.messages_next_cursor,
     state.chatStreamText,
     state.chatServerOperationId,
     state.chatResponseStarted,
@@ -1727,6 +1774,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   const shouldScroll = !preserveScroll && (forceScroll || chatIsNearBottom());
   root.dataset.signature = signature;
   root.replaceChildren();
+  appendHistoryPageButton(root, "chat");
   if (!visibleMessages.length && !state.chatRequest && !state.chatQueue.length) {
     if (appShellLoading) root.append(createSkeletonStack(4));
     else root.append(createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest oder starte mit einer Schnellaktion."));
@@ -2233,6 +2281,9 @@ function focusPlannedToday() {
   if (week) week.open = true;
   state.plannedTodayFocusPending = false;
   today.scrollIntoView({ block: "start", behavior: "auto" });
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (baseRoute(state.route) === "plan" && today.isConnected) today.scrollIntoView({ block: "start", behavior: "auto" });
+  }));
   return true;
 }
 
@@ -2492,6 +2543,7 @@ function renderLibrary(workouts) {
   const root = $("#library");
   if (!root) return;
   root.replaceChildren();
+  appendHistoryPageButton(root, "library");
   const allWorkouts = Array.isArray(workouts) ? workouts : [];
   const visible = allWorkouts.filter((workout) => !workout.archived && !workout.date);
   const librarySummary = $("#librarySummary");
@@ -2941,6 +2993,7 @@ function performanceSection(root, title, items, detail = "") {
 
 function renderPerformance(performance) {
   const root = $("#performanceSummary");
+  if (root.querySelector(".metric-editable.editing")) return;
   root.replaceChildren();
   const syncNotices = [];
   if (state.data?.sync?.running || state.localSync.intervals) syncNotices.push(state.data?.sync?.status || "Intervals.icu wird synchronisiert…");
@@ -3457,7 +3510,32 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       if (area === "chat") {
         if (!Array.isArray(result.messages)) throw new Error("Die Nachrichtenbestätigung fehlt.");
         const previousAssistantKey = latestAssistantMessageKey(payload.messages);
-        const messages = mergeChatMessages(result.messages);
+        const generationChanged = state.data?.messages_generation !== undefined && result.generation !== state.data.messages_generation;
+        const currentTurn = state.chatRequest?.clientTurnId;
+        const currentTurnRetained = currentTurn && result.messages.some((message) => message.client_turn_id === currentTurn);
+        if (generationChanged) {
+          state.coachActionProposals = [];
+          state.coachReceipts = [];
+          if (!currentTurnRetained) {
+            if (state.chatRequest?.message) {
+              state.rejectedMessages.push({ role: "user", content: state.chatRequest.message, client_turn_id: currentTurn,
+                error: "Der Chat wurde zurückgesetzt. Prüfe den Verlauf, bevor du diese Nachricht erneut sendest." });
+            }
+            state.chatGeneration += 1;
+            state.chatStream?.controller.abort();
+            state.chatStream = null;
+            state.chatRequest = null;
+            state.chatServerOperationId = null;
+            state.busy = false;
+            rememberChatTurn(null);
+          }
+        }
+        const retainedMessages = generationChanged
+          ? (state.data?.messages || []).filter((message) => currentTurnRetained && message.client_turn_id === currentTurn)
+          : undefined;
+        const messages = mergeChatMessages(result.messages, retainedMessages);
+        payload.messages_generation = result.generation;
+
         const nextAssistantKey = latestAssistantMessageKey(messages);
         if (state.initialStateLoaded && baseRoute() !== "coach" && nextAssistantKey && nextAssistantKey !== previousAssistantKey) {
           state.chatResponseScrollPending = true;
@@ -3614,7 +3692,14 @@ async function pollChatStatus() {
         }
       } catch (error) {
         if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-        if ([403, 404].includes(error.status)) rememberChatTurn(null);
+        if ([403, 404].includes(error.status)) {
+          rememberChatTurn(null);
+          const request = state.chatRequest;
+          if (request?.message) {
+            state.rejectedMessages.push({ role: "user", content: request.message, client_turn_id: pendingTurn,
+              error: "Die Nachricht wurde nicht angenommen. Bitte erneut senden." });
+          }
+        }
         else throw error;
       }
     }
@@ -3762,6 +3847,7 @@ async function requestCoachResponse(message, requestKind = null) {
         stream.operationId = payload.operation_id || null;
         request.operationId = stream.operationId;
         state.chatServerOperationId = stream.operationId;
+        if (stream.cancelRequested) void cancelChat();
       }
       else if (event === "delta") {
         const responseJustStarted = !state.chatStreamText;
@@ -3899,8 +3985,9 @@ async function drainChatQueue(firstMessage, requestKind = null) {
 async function cancelChat() {
   const stream = state.chatStream;
   const operationId = stream?.operationId || state.chatServerOperationId;
-  if (!operationId) return;
   if (stream) stream.cancelRequested = true;
+  if (state.chatRequest) state.chatRequest.cancelRequested = true;
+  if (!operationId) { updateChatControls(); return; }
   if (state.chatRequest) {
     state.chatRequest.cancelRequested = true;
     state.chatRequest.phase = "recovering";
@@ -4085,7 +4172,8 @@ async function resetCoachChat() {
     button.textContent = "Wird zurückgesetzt…";
   });
   try {
-    await api("/api/chat/reset", { method: "POST", body: "{}" });
+    const reset = await api("/api/chat/reset", { method: "POST", body: "{}" });
+    if (state.data) state.data.messages_generation = reset.generation;
     state.chatGeneration += 1;
     state.chatStatusPollInFlight = null;
     scheduleChatStatusPoll(0);
@@ -4105,6 +4193,9 @@ async function resetCoachChat() {
       cancelScheduledChatStreamRender();
       renderMessages([], true);
     }
+    state.busy = false;
+    updateChatControls();
+    updateVoiceButton();
     toast("Neuer Coach-Chat gestartet");
   } catch (error) { toast(error.message, true); }
   finally {
@@ -4124,7 +4215,10 @@ async function saveProfile(event) {
     button.setAttribute("aria-busy", "true");
     button.textContent = "Athletenkontext wird gespeichert…";
   }
-  const formData = new FormData(event.currentTarget);
+  const form = event.currentTarget;
+  const generation = state.sessionGeneration;
+  const submittedForm = JSON.stringify([...new FormData(form)]);
+  const formData = new FormData(form);
   const profile = {
     ...(state.data?.profile || {}),
     ...Object.fromEntries(formData),
@@ -4135,8 +4229,9 @@ async function saveProfile(event) {
     if (!Object.keys(profile).every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string")) {
       throw new Error("Die Profilbestätigung ist unvollständig. Der Entwurf bleibt erhalten.");
     }
-    state.profileDirty = false;
-    setDirtyIndicator("profileDirtyIndicator", false);
+    if (generation !== state.sessionGeneration) return;
+    state.profileDirty = JSON.stringify([...new FormData(form)]) !== submittedForm;
+    setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
     invalidateContextPreview();
     toast("Athletenprofil gespeichert und für den Coach aktiviert");
     // Do not keep the successful save action in its loading state while the

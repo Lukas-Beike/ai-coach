@@ -283,7 +283,10 @@ runs:
             const matchingRuns = checkRuns
               .filter((run) => run.name === checkName)
               .sort((left, right) => right.id - left.id);
-            const resumableRun = matchingRuns.find((run) => run.status !== 'completed');
+            // A new request must supersede the latest completed result. Reusing
+            // an older unfinished run would leave a newer exemption effective.
+            const latestRun = matchingRuns[0];
+            const resumableRun = latestRun?.status !== 'completed' ? latestRun : undefined;
 
             if (resumableRun) {
               await updateCheck(

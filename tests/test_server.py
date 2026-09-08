@@ -18,6 +18,10 @@ from unittest.mock import Mock, patch
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
+    "AI_PROVIDER": "openai",
+    "GEMINI_API_KEY": "",
+    "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
+    "GEMINI_MODEL": "gemini-3.8-flash",
     "OPENAI_API_KEY": "test-openai-key",
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_MODEL": "gpt-5.6-luna",
@@ -35,11 +39,16 @@ os.environ.update({
 })
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import server
+# Deny dotenv access before importing the application, including optional values.
+_original_read_text = Path.read_text
+def _isolated_read_text(path, *args, **kwargs):
+    if path.name == ".env":
+        return ""
+    return _original_read_text(path, *args, **kwargs)
 
-# load_local_env intentionally fills empty optional variables from a local
-# .env. Replace the imported configuration so tests remain isolated even when
-# the repository root contains a developer environment file.
+with patch.object(Path, "read_text", _isolated_read_text):
+    import server
+
 server.CONFIG = replace(
     server.CONFIG,
     garmin_email="",
@@ -2095,19 +2104,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("window.AppApi.audio(path, blob, () =>", app)
         self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
-        self.assertIn('/api.js?v=199', index)
-        self.assertIn('/navigation.js?v=199', index)
-        self.assertIn('/state.js?v=199', index)
-        self.assertIn('/views.js?v=199', index)
-        self.assertIn('/forms.js?v=199', index)
-        self.assertIn('/components.js?v=199', index)
-        self.assertIn('/app.js?v=199', index)
-        self.assertIn('intervals-coach-v199', service_worker)
-        self.assertIn('"/navigation.js?v=199"', service_worker)
-        self.assertIn('"/state.js?v=199"', service_worker)
-        self.assertIn('"/views.js?v=199"', service_worker)
-        self.assertIn('"/forms.js?v=199"', service_worker)
-        self.assertIn('"/components.js?v=199"', service_worker)
+        self.assertIn('/api.js?v=200', index)
+        self.assertIn('/navigation.js?v=200', index)
+        self.assertIn('/state.js?v=200', index)
+        self.assertIn('/views.js?v=200', index)
+        self.assertIn('/forms.js?v=200', index)
+        self.assertIn('/components.js?v=200', index)
+        self.assertIn('/app.js?v=200', index)
+        self.assertIn('intervals-coach-v200', service_worker)
+        self.assertIn('"/navigation.js?v=200"', service_worker)
+        self.assertIn('"/state.js?v=200"', service_worker)
+        self.assertIn('"/views.js?v=200"', service_worker)
+        self.assertIn('"/forms.js?v=200"', service_worker)
+        self.assertIn('"/components.js?v=200"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -2134,8 +2143,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=199'), index.index('/components.js?v=199'))
-        self.assertLess(index.index('/components.js?v=199'), index.index('/app.js?v=199'))
+        self.assertLess(index.index('/forms.js?v=200'), index.index('/components.js?v=200'))
+        self.assertLess(index.index('/components.js?v=200'), index.index('/app.js?v=200'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -6022,7 +6031,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.latest_snapshot()["synced_at"], "new")
         self.assertEqual(
             {competition["name"] for competition in server.list_competitions()},
-            {"Old local race", "Cloud race"},
+            {"Old local race"},
         )
         with server.DB_LOCK, server.database() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()["count"], 1)
@@ -6960,16 +6969,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=199"', source)
-        self.assertIn('"/navigation.js?v=199"', source)
-        self.assertIn('"/state.js?v=199"', source)
-        self.assertIn('"/views.js?v=199"', source)
-        self.assertIn('"/forms.js?v=199"', source)
-        self.assertIn('"/components.js?v=199"', source)
+        self.assertIn('"/api.js?v=200"', source)
+        self.assertIn('"/navigation.js?v=200"', source)
+        self.assertIn('"/state.js?v=200"', source)
+        self.assertIn('"/views.js?v=200"', source)
+        self.assertIn('"/forms.js?v=200"', source)
+        self.assertIn('"/components.js?v=200"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=199"', source)
-        self.assertIn('"/icon.svg?v=199"', source)
-        self.assertIn('"/styles.css?v=199"', source)
+        self.assertIn('"/app.js?v=200"', source)
+        self.assertIn('"/icon.svg?v=200"', source)
+        self.assertIn('"/styles.css?v=200"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -8015,7 +8024,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=199', index)
+        self.assertIn('v=200', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
