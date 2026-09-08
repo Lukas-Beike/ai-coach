@@ -26,10 +26,10 @@ def decode_payload(value: Any) -> Any:
 
 
 def iter_workout_library(db: Any, *, decode: PayloadDecoder = decode_payload) -> Iterable[dict[str, Any]]:
-    """Yield bounded workout-library payloads in the established order."""
+    """Yield all workout-library payloads in the established order."""
     for row in db.execute(
         "SELECT payload FROM workout_library "
-        "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT 1000"
+        "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name'))"
     ):
         payload = decode(row["payload"])
         if isinstance(payload, dict):

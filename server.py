@@ -1234,7 +1234,7 @@ def observed_sync(provider: str, area: str = "default"):
                         _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
                     raise
                 result_status = result.get("status") if isinstance(result, dict) else None
-                refresh_status = "skipped" if result_status == "not_configured" else "partial" if result_status == "partial" else "success"
+                refresh_status = "skipped" if result_status == "not_configured" else "error" if result_status in {"stale", "error", "failed"} else "partial" if result_status == "partial" else "success"
                 _provider_refresh_finish(refresh_id, refresh_status, "complete")
                 log_operation_event(
                     "operation_count", scope["operation_id"], scope["trigger"],
@@ -5190,20 +5190,20 @@ def _ical_event_instances(
         end = start + (timedelta(days=1) if current.get("all_day") else timedelta(minutes=30))
     duration = end - start
     if not current.get("rrules"):
-        starts = [start] if window_start <= start.date() <= window_end else []
+        starts = [start] if start.date() <= window_end and (end - timedelta(microseconds=1)).date() >= window_start else []
     else:
         if current.get("unsupported_recurrence"):
             raise AppError(400, "Diese Kalender-Wiederholung wird nicht unterstützt.")
         starts = []
         for raw_rule in current["rrules"]:
-            starts.extend(_ical_recurrence_starts(current, _ical_rrule(raw_rule), window_start, window_end))
+            starts.extend(_ical_recurrence_starts(current, _ical_rrule(raw_rule), window_start - timedelta(days=duration.days + 1), window_end))
         starts = sorted(set(starts))
     starts.extend(
         value for value in current.get("rdates", [])
-        if window_start <= value.date() <= window_end and value not in starts
+        if value.date() <= window_end and (value + duration - timedelta(microseconds=1)).date() >= window_start and value not in starts
     )
     excluded = set(current.get("exdates", [])) | set(excluded_starts or ())
-    return [_ical_event_record(current, occurrence, duration) for occurrence in starts if occurrence not in excluded]
+    return [_ical_event_record(current, occurrence, duration) for occurrence in starts if occurrence not in excluded and (occurrence + duration - timedelta(microseconds=1)).date() >= window_start]
 
 
 def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, window_end: date | None = None) -> list[dict[str, Any]]:
@@ -5215,10 +5215,18 @@ def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, win
     events_by_key: dict[tuple[str, str], dict[str, Any]] = {}
     parsed_events: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
+    nested_depth = 0
     for line in unfold_ical(payload, max_bytes=MAX_EXTERNAL_CALENDAR_BYTES, error=lambda status, message: AppError(status, message)):
         upper = line.upper()
         if upper == "BEGIN:VEVENT":
             current = {}
+            continue
+        if current is not None and upper.startswith("BEGIN:"):
+            nested_depth += 1
+            continue
+        if nested_depth:
+            if upper.startswith("END:"):
+                nested_depth -= 1
             continue
         if upper == "END:VEVENT":
             if current and current.get("status", "").upper() != "CANCELLED" and not (current.get("uid") and current.get("start")):
@@ -5327,8 +5335,8 @@ def list_external_calendar_events(limit: int = 300, training_relevant_only: bool
         relevance_filter = " AND training_relevant = 1" if training_relevant_only else ""
         rows = db.execute(
             "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, short_only, updated_at "
-            f"FROM external_calendar_events WHERE event_date >= ?{relevance_filter} ORDER BY start_local LIMIT ?",
-            (local_now().date().isoformat(), max(1, min(int(limit), 1000))),
+            f"FROM external_calendar_events WHERE end_local > ?{relevance_filter} ORDER BY start_local LIMIT ?",
+            (local_now().date().isoformat() + "T00:00:00", max(1, min(int(limit), 1000))),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -5394,8 +5402,23 @@ def sync_external_calendar(reason: str = "manual", operation_id: str | None = No
         EXTERNAL_CALENDAR_LOCK.release()
 
 
+def external_calendar_event_dates(event: dict[str, Any]) -> list[str]:
+    """Project overlapping local dates; DTEND is exclusive, including midnight."""
+    try:
+        start = datetime.fromisoformat(str(event.get("start_local") or event["event_date"]))
+        end = datetime.fromisoformat(str(event.get("end_local") or start.isoformat()))
+    except (ValueError, KeyError):
+        return []
+    first = start.date()
+    last = (end - timedelta(microseconds=1)).date() if end > start else first
+    today = local_now().date()
+    first = max(first, today - timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS))
+    last = min(last, today + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS))
+    return [(first + timedelta(days=offset)).isoformat() for offset in range(max(0, (last - first).days + 1))]
+
+
 def external_calendar_events_for_date(target_date: str) -> list[dict[str, Any]]:
-    return [event for event in list_external_calendar_events(1000) if event.get("event_date") == target_date]
+    return [event for event in list_external_calendar_events(1000) if target_date in external_calendar_event_dates(event)]
 
 
 PLANNING_CONTEXT_CHECKIN_FIELDS = (
@@ -5652,8 +5675,7 @@ def daily_planning_context(
     for event in calendar_events:
         if not isinstance(event, dict):
             continue
-        day = _planning_context_date(event.get("event_date") or event.get("start_local"))
-        if day:
+        for day in external_calendar_event_dates(event):
             day_for(day)["appointments"].append(selected(event, PLANNING_CONTEXT_APPOINTMENT_FIELDS))
     for feedback in list_activity_feedback(500):
         if not isinstance(feedback, dict):
@@ -6283,7 +6305,8 @@ def sync_competitions(
             client.bulk_delete_events(plan["delete_identifiers"])
             deleted_remote = len(plan["delete_identifiers"])
             with DB_LOCK, database() as db:
-                db.execute("DELETE FROM competition_sync_tombstones")
+                db.executemany("DELETE FROM competition_sync_tombstones WHERE id=? AND created_at=?",
+                               [(row["id"], row["created_at"]) for row in tombstones])
         pushed = client.upsert_competition_events(outbound) if push_local and outbound else []
         pushed_by_external = {str(event.get("external_id")): event for event in pushed if event.get("external_id")}
         pushed_by_id = {str(event.get("id")): event for event in pushed if event.get("id")}
@@ -6297,6 +6320,9 @@ def sync_competitions(
         conflicts = 0
         with DB_LOCK, database() as db:
             for row in local_rows:
+                current = db.execute("SELECT * FROM competitions WHERE id=?", (row["id"],)).fetchone()
+                if current is None or dict(current) != row:
+                    continue  # A newer local edit or deletion is authoritative.
                 external_id = str(row.get("external_id") or competition_external_id(str(row["id"])))
                 remote = pushed_by_external.get(external_id) or remote_by_external.get(external_id)
                 if not remote and row.get("intervals_event_id"):
@@ -6359,7 +6385,12 @@ def sync_competitions(
                     conflicts += 1
 
             existing = {str(row["id"]): row for row in db.execute("SELECT * FROM competitions").fetchall()}
+            suppressed = tombstones + [dict(row) for row in db.execute("SELECT * FROM competition_sync_tombstones")]
+            suppressed_ids = {str(row["intervals_event_id"]) for row in suppressed if row.get("intervals_event_id")}
+            suppressed_external = {str(row["external_id"]) for row in suppressed if row.get("external_id")}
             for remote in remote_events:
+                if str(remote.get("id") or "") in suppressed_ids or str(remote.get("external_id") or "") in suppressed_external:
+                    continue
                 data = remote_competition_data(remote)
                 if not data:
                     continue
@@ -7153,6 +7184,7 @@ def _fetch_weather_forecast(query: str) -> dict[str, Any]:
     return {"query": query[:200], "location": location, "model": model, "forecast": forecast, "fetched_at": utc_now()}
 
 
+@maintenance_operation
 def weather_state(
     planned: list[dict[str, Any]] | None = None,
     refresh: bool = True,
@@ -7183,7 +7215,7 @@ def weather_state(
         cache_age = (datetime.now(timezone.utc) - datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))).total_seconds()
     except (TypeError, ValueError):
         cache_age = float("inf")
-    error = None
+    error = "Wetterdaten sind veraltet." if cache_matches and (cache_age >= WEATHER_CACHE_SECONDS or failure) else None
     refreshed = False
     if refresh and (force or not cache_matches or cache_age >= WEATHER_CACHE_SECONDS):
         retry_at = str(failure.get("retry_at") or "")
@@ -7204,12 +7236,18 @@ def weather_state(
             try:
                 with WEATHER_LOCK:
                     refreshed_cache = _fetch_weather_forecast(query)
-                    _remember_calendar_weather(cached if cache_matches else {}, refreshed_cache)
-                    cached = refreshed_cache
-                    set_kv(WEATHER_CACHE_KEY, json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
-                    set_kv(WEATHER_FAILURE_KEY, "")
-                    cache_matches = True
-                    refreshed = True
+                    with DB_LOCK, database():
+                        if get_profile().get("weather_location", "").strip()[:200] != query:
+                            if refresh_id:
+                                _provider_refresh_finish(refresh_id, "skipped", "location_changed")
+                            return weather_state(planned, refresh=False)
+                        _remember_calendar_weather(cached if cache_matches else {}, refreshed_cache)
+                        cached = refreshed_cache
+                        set_kv(WEATHER_CACHE_KEY, json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
+                        set_kv(WEATHER_FAILURE_KEY, "")
+                        cache_matches = True
+                        refreshed = True
+                        error = None
                 if refresh_id:
                     _provider_refresh_finish(refresh_id, "success", "complete")
             except AppError as exc:
@@ -8569,7 +8607,8 @@ def adaptive_replan_preview() -> dict[str, Any]:
     for event in external_events:
         if not bool(event.get("training_relevant", True)):
             continue
-        events_by_date.setdefault(str(event.get("event_date") or ""), []).append(event)
+        for day in external_calendar_event_dates(event):
+            events_by_date.setdefault(day, []).append(event)
     for event_date, events in events_by_date.items():
         if event_date >= today:
             signals.append(f"family calendar on {event_date}: {len(events)} event(s)")
@@ -9329,9 +9368,11 @@ def paged_chat_history(cursor: Any = None, limit: Any = None, search: Any = None
             f"SELECT id, role, content, client_turn_id, created_at FROM messages{where} ORDER BY id DESC LIMIT ?",
             (*params, page_size + 1),
         ).fetchall()
+        generation = get_kv("chat_generation", db) or "initial"
     has_more = len(rows) > page_size
     rows = rows[:page_size]
     return {
+        "generation": generation,
         "messages": [{key: value for key, value in row.items() if key != "client_turn_id" or value is not None} for row in reversed(rows)],
         "proposed_actions": current_coach_proposals(session_csrf_hash),
         "next_cursor": encode_page_cursor(int(rows[-1]["id"])) if has_more and rows else None,
@@ -9341,26 +9382,29 @@ def paged_chat_history(cursor: Any = None, limit: Any = None, search: Any = None
 
 
 def paged_library(cursor: Any = None, limit: Any = None) -> dict[str, Any]:
-    workouts = list_workout_library(limit=1000)
-    workouts.sort(key=lambda item: (
-        str(item.get("type") or "").casefold(),
-        str(item.get("name") or "").casefold(),
-        str(item.get("id") or ""),
-    ))
+    """Page active templates directly, with identical SQL ordering and cursor keys."""
     decoded = decode_page_cursor(cursor)
+    after_clause = ""
+    params: list[Any] = []
     if isinstance(decoded, list) and len(decoded) == 3:
-        after = tuple(str(part) for part in decoded)
-        workouts = [item for item in workouts if (
-            str(item.get("type") or "").casefold(),
-            str(item.get("name") or "").casefold(),
-            str(item.get("id") or ""),
-        ) > after]
+        after_clause = "WHERE (sport_key, name_key, id) > (?, ?, ?)"
+        params.extend(str(part) for part in decoded)
     page_size = api_page_limit(limit, API_PAGE_DEFAULT, LIBRARY_PAGE_MAX)
-    page = workouts[:page_size]
-    key = lambda item: (str(item.get("type") or "").casefold(), str(item.get("name") or "").casefold(), str(item.get("id") or ""))
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "WITH templates AS ("
+            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.type'), '')) AS sport_key, "
+            "lower(COALESCE(json_extract(payload, '$.name'), '')) AS name_key "
+            "FROM workout_library WHERE json_valid(payload) AND json_type(payload)='object' "
+            "AND json_extract(payload, '$.date') IS NULL AND COALESCE(json_extract(payload, '$.archived'), 0)=0) "
+            f"SELECT id, payload, sport_key, name_key FROM templates {after_clause} "
+            "ORDER BY sport_key, name_key, id LIMIT ?",
+            (*params, page_size + 1),
+        ).fetchall()
+    page = rows[:page_size]
     return {
-        "workouts": page,
-        "next_cursor": encode_page_cursor(key(page[-1])) if len(workouts) > len(page) and page else None,
+        "workouts": [json.loads(row["payload"]) for row in page],
+        "next_cursor": encode_page_cursor([page[-1][key] for key in ("sport_key", "name_key", "id")]) if len(rows) > page_size else None,
         "limit": page_size,
     }
 
@@ -12695,6 +12739,7 @@ def reset_coach_chat() -> dict[str, Any]:
                     (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, command["client_turn_id"]),
                 )
             db.execute("DELETE FROM messages")
+            set_kv("chat_generation", uuid.uuid4().hex, db)
             db.execute(
                 "UPDATE coach_plan_artifacts SET status='superseded', updated_at=? WHERE status='draft'",
                 (utc_now(),),
@@ -12708,7 +12753,7 @@ def reset_coach_chat() -> dict[str, Any]:
         set_kv("gemini_conversation_history", "[]")
         set_kv("gemini_call_names", "{}")
         set_kv("last_chat_reset_at", utc_now())
-    return {"status": "ok", "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
+    return {"status": "ok", "generation": get_kv("chat_generation"), "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
 
 
 def output_text(response: dict[str, Any]) -> str:
@@ -14376,6 +14421,11 @@ def _structured_coach_tool_result(
         latest = latest_replan_preview()
         if not latest or str(latest.get("id")) != adjustment_id or latest.get("status") != "preview":
             raise AppError(409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen.")
+        with DB_LOCK, database() as db:
+            current_user = db.execute("SELECT id FROM messages WHERE client_turn_id=? AND role='user'", (client_turn_id,)).fetchone()
+            publication = db.execute("SELECT id FROM messages WHERE id=? AND role='assistant'", (latest.get("published_message_id"),)).fetchone()
+        if not current_user or not publication or current_user["id"] <= publication["id"] or current_user["id"] not in (intent.get("request") or {}).get("source_message_ids", []):
+            raise AppError(403, "Die Vorschau muss zuerst angezeigt und in einer folgenden Nachricht freigegeben werden.", reason="adaptive_approval_required")
         return {"ok": True, **apply_adaptive_replan(adjustment_id, sync_illness_to_intervals=sync_illness)}
     if name == "update_training_plan":
         if "update_training_plan" not in _structured_authorized_operations(intent):
@@ -14839,7 +14889,7 @@ def _chat_with_structured_coach_impl(
                         command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key,
                                                  "request": action.get("request"), "result": result})
                         _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
-                    if result.get("synchronous_refresh"):
+                    if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
                         model_instructions = build_training_context() + "\n\n" + COACH_DIALOGUE_INSTRUCTIONS
                     if action.get("period"):
                         scope = coach_execution_scope(action)
@@ -14870,7 +14920,10 @@ def _chat_with_structured_coach_impl(
     failures = _unresolved_coach_steps(command_receipts)
     effects = [entry for entry in command_receipts if entry.get("result", {}).get("ok") and entry["tool"] not in STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}]
     text = question or output_text(response)
-    missing_answer = not text
+    incomplete_answer = response.get("status") == "incomplete"
+    missing_answer = not text or incomplete_answer
+    if incomplete_answer:
+        text += "\nDie Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."
     if failures and not question:
         text = "Ein Teil des Auftrags konnte noch nicht ausgeführt werden." if effects else "Der Auftrag konnte noch nicht ausgeführt werden."
         text += "\n" + coach_failure_lines(failures, {entry["tool"] for entry in failures})
@@ -14878,7 +14931,7 @@ def _chat_with_structured_coach_impl(
             text += "\nGespeichert beziehungsweise beauftragt: " + "; ".join(coach_effect_label(entry) for entry in effects) + "."
     if not text:
         text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Antwort konnte nicht abgeschlossen werden. Bitte versuche es erneut."
-    if failures and allow_mutations and not cancelled and not question:
+    if (failures or incomplete_answer) and allow_mutations and not cancelled and not question:
         last_request = next((entry.get("request") for entry in reversed(command_receipts) if entry.get("request")), None)
         pending_request = context.get("pending_request") or {}
         set_kv("coach_pending_request", json.dumps({
@@ -14887,9 +14940,16 @@ def _chat_with_structured_coach_impl(
             "status": "failed", "question": None,
             "completed_steps": [{"tool": entry["tool"], "status": entry["result"].get("status")} for entry in effects],
         }, ensure_ascii=False))
-    if effects and not question and not failures and allow_mutations:
+    if effects and not question and not failures and not incomplete_answer and allow_mutations:
         set_kv("coach_pending_request", "null")
-    status = "completed" if question else "partial" if (failures or missing_answer) and effects else "failed" if failures or missing_answer else "cancelled" if cancelled else "completed"
+    if question:
+        status = "completed"
+    elif incomplete_answer or ((failures or missing_answer) and effects):
+        status = "partial"
+    elif failures or missing_answer:
+        status = "failed"
+    else:
+        status = "cancelled" if cancelled else "completed"
     final_receipt = {**receipt, "status": status, "awaiting_clarification": bool(question),
         "client_turn_id": client_turn_id, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids,
         "intent": intent, "tool_rounds": rounds, "pending_operations": sorted({entry["tool"] for entry in failures}),
@@ -14903,6 +14963,14 @@ def _chat_with_structured_coach_impl(
         if current_command and current_command["status"] == "completed":
             return _coach_command_receipt(current_command["receipt"])
         final_receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
+        for step in command_receipts:
+            if step["tool"] == "preview_adaptive_replan" and step.get("result", {}).get("ok"):
+                preview_id = step["result"].get("id")
+                preview_row = db.execute("SELECT payload FROM plan_adjustments WHERE id=? AND status='preview'", (preview_id,)).fetchone()
+                if preview_row:
+                    preview_payload = json.loads(preview_row["payload"])
+                    preview_payload["published_message_id"] = final_receipt["message"]["id"]
+                    db.execute("UPDATE plan_adjustments SET payload=? WHERE id=?", (json.dumps(preview_payload, ensure_ascii=False), preview_id))
         set_kv("last_coach_ai_provider", ai_provider or selected_ai_provider(), db)
         db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
                    (json.dumps(final_receipt, ensure_ascii=False), utc_now(), client_turn_id))
@@ -15224,7 +15292,9 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
     session_csrf_hash = _restore_coach_session_csrf_hash(receipt.get("session_key"))
     with CHAT_STREAM_LOCK:
         cancel_event = COACH_JOB_CANCEL_EVENTS.setdefault(operation_id, threading.Event())
-    if receipt.get("cancel_requested"):
+    with DB_LOCK, database() as db:
+        current = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+    if current and _coach_command_receipt(current["receipt"]).get("cancel_requested"):
         cancel_event.set()
     try:
         if not session_csrf_hash:
@@ -15379,11 +15449,13 @@ def run_morning_checkin(checkin_date: str) -> None:
             deadline = time.monotonic() + 120
             while get_kv("sync_running") == "1" and time.monotonic() < deadline:
                 time.sleep(1)
-        chat_with_coach(
+        result = chat_with_coach(
             MORNING_CHECKIN_PROMPT,
             allow_mutations=False,
             client_turn_id=f"morning:{checkin_date}",
         )
+        if result.get("status") != "completed" or not result.get("message") or result.get("awaiting_clarification"):
+            raise AppError(502, "Der Morgen-Check-in konnte nicht abgeschlossen werden.")
         set_kv("morning_checkin_date", checkin_date)
         set_kv("morning_checkin_status", "ready")
     except Exception as exc:
@@ -15894,6 +15966,11 @@ def privacy_export() -> dict[str, Any]:
 
 PRIVACY_EXPORT_FORMAT_VERSION = 1
 PRIVACY_EXPORT_JSONL_FILES = {
+    "athlete_checkins.jsonl",
+    "activity_feedback.jsonl",
+    "external_calendar_events.jsonl",
+    "public_event_sources.jsonl",
+    "public_event_candidates.jsonl",
     "competitions.jsonl",
     "competition_sync_tombstones.jsonl",
     "messages.jsonl",
@@ -16015,7 +16092,7 @@ def _privacy_export_file() -> Path:
                 "training_plans.jsonl",
                 (dict(row) for row in db.execute(
                     "SELECT id, name, goal, start_date, end_date, status, created_at, updated_at "
-                    "FROM training_plans ORDER BY created_at DESC LIMIT 30"
+                    "FROM training_plans ORDER BY created_at DESC"
                 )),
                 deadline,
             )
@@ -16055,11 +16132,9 @@ def _privacy_export_file() -> Path:
                 (dict(row) for row in db.execute("SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors ORDER BY provider, stream")),
                 deadline,
             )
-            archive.writestr("local_feedback.json", json.dumps(local_feedback_context(), ensure_ascii=False, separators=(",", ":")))
-            archive.writestr("activity_feedback.json", json.dumps(activity_feedback_context(), ensure_ascii=False, separators=(",", ":")))
+            for table in ("athlete_checkins", "activity_feedback", "external_calendar_events", "public_event_sources", "public_event_candidates"):
+                _export_jsonl_rows(archive, table + ".jsonl", (dict(row) for row in db.execute(f"SELECT * FROM {table}")), deadline)
             archive.writestr("planning.json", json.dumps(planning_state(), ensure_ascii=False, separators=(",", ":")))
-            archive.writestr("external_calendar.json", json.dumps(list_external_calendar_events(), ensure_ascii=False, separators=(",", ":")))
-            archive.writestr("public_calendar.json", json.dumps(public_calendar_state(db), ensure_ascii=False, separators=(",", ":")))
             archive.writestr("garmin_snapshot.json", json.dumps(_export_payload(get_kv("garmin_snapshot", db)), ensure_ascii=False, separators=(",", ":")))
             archive.writestr("weather_cache.json", json.dumps(_export_payload(get_kv(WEATHER_CACHE_KEY, db)), ensure_ascii=False, separators=(",", ":")))
             if time.monotonic() > deadline:
@@ -16261,6 +16336,10 @@ def _restore_database_backup(payload: bytes) -> dict[str, Any]:
                     except FileNotFoundError:
                         pass
                 os.replace(temporary_path, DB_PATH)
+        resume_interrupted_sync_jobs()
+        resume_interrupted_coach_jobs()
+        SYNC_JOB_WAKE.set()
+        COACH_JOB_WAKE.set()
         return {"status": "ok", "restored": True, "previous_database_backup": previous_backup_name}
     except AppError:
         raise
@@ -17173,12 +17252,10 @@ def schedule_daily_sync_jobs() -> None:
     if get_profile().get("weather_location", "").strip():
         if not _sync_job_active("weather"):
             enqueue_sync_job("weather", "refresh", {"force": False, "reason": "dreistündliche automatische Aktualisierung"}, requested_by="scheduler")
-    if not (CONFIG.intervals_api_key or CONFIG.calendar_ical_url):
-        return
     if CONFIG.calendar_ical_url and daily_sync_due("calendar"):
         if not _sync_job_active("calendar"):
             enqueue_sync_job("calendar", "refresh", {"reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
-    if CONFIG.intervals_api_key and (garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))):
+    if garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())):
         if daily_sync_due("garmin"):
             if not _sync_job_active("garmin"):
                 enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
