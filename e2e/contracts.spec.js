@@ -236,7 +236,7 @@ test("reload recovers a partial write receipt and executable undo proposal", asy
     proposed_actions: [{ id: "fixture-undo", action_type: "undo_change", status: "preview", target_system: "local", diff: [] }],
   } }));
   await page.reload();
-  await expect(page.locator(".message.assistant")).toContainText("Check-in saved; summary unavailable.");
+  await expect(page.locator(".message.assistant").filter({ hasText: "Check-in saved; summary unavailable." })).toBeVisible();
   await expect(page.locator("#coachReceipts")).toContainText("Tages-Check-in gespeichert");
   await expect(page.getByRole("button", { name: "Änderung zurücknehmen", exact: true })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem("coachPendingTurn"))).toBe(null);

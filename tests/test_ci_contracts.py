@@ -36,6 +36,19 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn('--field "publish_container=false"', dispatch)
         self.assertNotIn('--field "source_ref=', dispatch)
 
+    def test_main_push_test_can_create_the_release_after_promotion_merge(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/weekly-release.yml").read_text(encoding="utf-8")
+        create_release = workflow.split("  create-release:", 1)[1].split("    runs-on:", 1)[0]
+        self.assertIn("github.event.workflow_run.event == 'workflow_dispatch'", create_release)
+        self.assertIn("startsWith(github.event.workflow_run.head_branch, 'chore/release-promotion-')", create_release)
+        self.assertIn("github.event.workflow_run.event == 'push'", create_release)
+        self.assertIn("github.event.workflow_run.head_branch == 'main'", create_release)
+        self.assertIn("TESTED_SHA: ${{ github.event.workflow_run.head_sha }}", workflow)
+        self.assertIn('if [[ "$PROMOTION_BRANCH" == chore/release-promotion-* ]]; then', workflow)
+        self.assertIn('if [[ "$PROMOTION_BRANCH" == "main" ]] && [[ "$(git rev-parse refs/remotes/origin/main)" != "$TESTED_SHA" ]]', workflow)
+        self.assertNotIn('git merge-base --is-ancestor "$TESTED_SHA" refs/remotes/origin/main', workflow)
+        self.assertNotIn('gh pr list --repo "$REPOSITORY" --base main --head "$PROMOTION_BRANCH"', workflow.split('elif [[ "$PROMOTION_BRANCH" != "main" ]]', 1)[1].split('fi', 1)[0])
+
 
 class CodexReviewWorkflowTests(unittest.TestCase):
     def test_dependabot_automerge_is_limited_to_develop(self):
@@ -136,7 +149,10 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("codex-pull-request-review-summary", action)
         self.assertIn("parseCodeReviewSummary", action)
         self.assertIn("commitMatchesHead", action)
-        self.assertIn("repos.getCommit", action)
+        self.assertIn("repos.compareCommits", action)
+        self.assertIn("commitBelongsToHead", action)
+        self.assertIn("reviewThreads(first: 100", action)
+        self.assertIn("getUnresolvedCodexReviewIds", action)
         self.assertIn("isAtOrAfterTimestamp", action)
         self.assertNotIn("parseCodexSummaryMetadata", action)
         self.assertIn("summaryStatus === 'completed'", action)
@@ -150,7 +166,8 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("/\\[P[0-3]\\]/gi", action)
         self.assertIn("Math.min(currentPollSeconds * 2, 120)", action)
         self.assertIn("pull_request_review_id", action)
-        self.assertIn("review.commit_id === headSha", action)
+        self.assertIn("commitBelongsToHead(review.commit_id, headSha)", action)
+        self.assertIn("carriedForward && comments.length > 0 && !unresolvedReviewIds.has(review.id)", action)
         self.assertNotIn("comment.commit_id === headSha", action)
         self.assertIn("reaction.content === '+1'", action)
         self.assertIn("waiting for a submitted review or clean reaction", action)
@@ -173,7 +190,7 @@ class DiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = subprocess.check_output([sys.executable, str(runner), "--list"], cwd=directory, text=True, stderr=subprocess.PIPE)
         ids = output.splitlines()
-        self.assertTrue(any(test_id.startswith("test_coach_intent.") for test_id in ids))
+        self.assertTrue(any(test_id.startswith("test_coach_dialogue.") for test_id in ids))
         self.assertTrue(any(test_id.startswith("test_db_manager.") for test_id in ids))
         self.assertEqual(ids, sorted(set(ids)))
 

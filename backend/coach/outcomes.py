@@ -3,6 +3,7 @@ from typing import Any
 
 
 COACH_OPERATION_LABELS = {
+    "apply_training_patch": "Geplante Einheiten angepasst",
     "stage_training_plan": "Planentwurf gespeichert", "commit_training_plan": "Trainingsplan gespeichert",
     "replace_training_plan": "Trainingsplan ersetzt",
     "manage_training_templates": "Trainingsvorlagen bearbeitet", "apply_training_changes": "Geplante Einheiten bearbeitet",
@@ -17,6 +18,7 @@ COACH_OPERATION_LABELS = {
 }
 
 COACH_ACTION_LABELS = {
+    "apply_training_patch": "Geplante Einheiten anpassen",
     "stage_training_plan": "Planentwurf erstellen", "commit_training_plan": "Trainingsplan speichern",
     "replace_training_plan": "Trainingsplan vollständig ersetzen",
     "manage_training_templates": "Trainingsvorlagen bearbeiten", "apply_training_changes": "Geplante Einheiten bearbeiten",
@@ -40,6 +42,8 @@ def coach_failure_lines(commands: list[dict[str, Any]], pending_operations: set[
             continue
         label = COACH_ACTION_LABELS.get(item.get("tool"), "Angeforderter Schritt")
         detail = " ".join(str(result.get("error") or "Die Aktion konnte nicht ausgefuehrt werden.").split())
+        if result.get("reason") in {"request_invalid", "request_target", "request_scope", "intent_scope_denied", "tool_scope_denied", "tool_arguments_invalid"}:
+            detail = "Diese Änderung konnte nicht zuverlässig ausgeführt werden; dafür wurde nichts gespeichert."
         line = f"- {label}: {detail}"
         if line not in lines:
             lines.append(line)

@@ -1540,7 +1540,7 @@ function updateChatQueueStatus() {
 }
 
 function coachWorkingLabel() {
-  if (state.chatRequest?.background) return "Längerer Plan läuft im Hintergrund · du kannst die Seite neu laden…";
+  if (state.chatRequest?.background) return "Der Coach arbeitet · du kannst die Seite neu laden…";
   if (state.chatRequest?.phase === "recovering") return "Verbindung unterbrochen · die Antwort wird im Hintergrund fertiggestellt…";
   if (state.chatRequest?.phase === "reconciling") return "Antwort wird sicher übernommen…";
   return "Coach arbeitet an deiner Antwort…";
@@ -3685,11 +3685,12 @@ async function loadInitialState() {
   scheduleChatStatusPoll(0);
 }
 
-function queueChatMessage(message, mode) {
+function queueChatMessage(message, mode, requestKind = null) {
   state.chatQueue[mode === "steer" ? "unshift" : "push"]({
     id: ++state.chatQueueSequence,
     message,
     mode,
+    requestKind,
   });
   const input = $("#messageInput");
   input.value = "";
@@ -3699,7 +3700,7 @@ function queueChatMessage(message, mode) {
   updateChatControls();
 }
 
-async function requestCoachResponse(message) {
+async function requestCoachResponse(message, requestKind = null) {
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
   const clientTurnId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `turn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -3723,7 +3724,7 @@ async function requestCoachResponse(message) {
       credentials: "same-origin",
       signal: stream.controller.signal,
       headers: { "Content-Type": "application/json", "X-CSRF-Token": cookie("ic_csrf") },
-      body: JSON.stringify({ message, client_turn_id: clientTurnId }),
+      body: JSON.stringify({ message, client_turn_id: clientTurnId, request_kind: requestKind }),
     });
     if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
     if (!response.ok) {
@@ -3884,13 +3885,13 @@ async function requestCoachResponse(message) {
   }
 }
 
-async function drainChatQueue(firstMessage) {
-  const firstResult = await requestCoachResponse(firstMessage);
+async function drainChatQueue(firstMessage, requestKind = null) {
+  const firstResult = await requestCoachResponse(firstMessage, requestKind);
   if (firstResult !== "completed") return firstResult;
   while (state.chatQueue.length) {
     const next = state.chatQueue.shift();
     renderMessages(state.data?.messages || [], true);
-    if (await requestCoachResponse(next.message) !== "completed") return;
+    if (await requestCoachResponse(next.message, next.requestKind) !== "completed") return;
   }
   return "completed";
 }
@@ -3916,25 +3917,27 @@ async function sendMessage(event) {
   event.preventDefault();
   const input = $("#messageInput");
   const message = input.value.trim();
+  const requestKind = input.dataset.requestKind || null;
   if (!message || voiceIsRecording() || state.voiceTranscribing) return;
   if (state.chatRequest || state.chatServerOperationId) {
-    if (state.busy) queueChatMessage(message, "queue");
+    if (state.busy) queueChatMessage(message, "queue", requestKind);
     return;
   }
   if (state.busy) {
-    queueChatMessage(message, "queue");
+    queueChatMessage(message, "queue", requestKind);
     return;
   }
   state.busy = true;
   state.quickTemplatesVisible = false;
   renderQuickMessageTemplates();
   input.value = "";
+  delete input.dataset.requestKind;
   state.chatDraftDirty = false;
   input.style.height = "auto";
   updateChatControls();
   updateVoiceButton();
   try {
-    await drainChatQueue(message);
+    await drainChatQueue(message, requestKind);
   } finally {
     if (!state.chatRequest && !state.chatServerOperationId) state.busy = false;
     updateChatControls();
@@ -4458,6 +4461,8 @@ $("#quickMessageTemplates").addEventListener("click", (event) => {
   if (!button || state.busy) return;
   const input = $("#messageInput");
   input.value = button.dataset.message || "";
+  if (button.dataset.requestKind) input.dataset.requestKind = button.dataset.requestKind;
+  else delete input.dataset.requestKind;
   input.dispatchEvent(new Event("input"));
   $("#chatForm").requestSubmit();
 });
