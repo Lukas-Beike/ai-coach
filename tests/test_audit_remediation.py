@@ -1,5 +1,6 @@
 """Regression cases from the full audit; providers and athlete data are synthetic."""
 import json
+import http.client
 import threading
 import tempfile
 import subprocess
@@ -9,6 +10,7 @@ import zipfile
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlencode
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
@@ -173,6 +175,45 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
                 self.assertEqual(json.loads(archive.read("manifest.json"))["status"], "complete")
         finally:
             temporary.unlink()
+
+    def test_library_http_pagination_reaches_every_active_template_beyond_1000(self):
+        records = [{"id": f"template-{i:04}", "name": f"Synthetic {i:04}", "type": "Ride"} for i in range(1001)]
+        records += [{"id": "archived", "name": "Archived", "archived": True}, {"id": "dated", "name": "Dated", "date": "2026-09-09"}]
+        with server.DB_LOCK, server.database() as db:
+            db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
+                           [(item["id"], item["id"], json.dumps(item), server.utc_now()) for item in records])
+        token = dialogue.fixtures.CoachTests.create_test_session(self)
+        # This temporary SQLite fixture exercises pagination and real session
+        # authentication; secure startup has separate SQLCipher integration tests.
+        startup = patch.object(server, "security_configuration_error", return_value=None)
+        startup.start()
+        self.addCleanup(startup.stop)
+        httpd = server.CoachHTTPServer(("127.0.0.1", 0), server.RequestHandler)
+        worker = threading.Thread(target=httpd.serve_forever, daemon=True)
+        worker.start()
+        connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
+        ids, cursor = [], None
+        try:
+            for _ in range(12):
+                query = {"limit": 100}
+                if cursor:
+                    query["cursor"] = cursor
+                connection.request("GET", "/api/library?" + urlencode(query), headers={"Cookie": f"ic_session={token}"})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                page = json.loads(response.read())
+                self.assertLessEqual(len(page["workouts"]), 100)
+                ids.extend(item["id"] for item in page["workouts"])
+                cursor = page["next_cursor"]
+                if not cursor:
+                    break
+        finally:
+            connection.close()
+            httpd.shutdown()
+            worker.join(5)
+            httpd.server_close()
+        self.assertIsNone(cursor)
+        self.assertEqual(ids, [f"template-{i:04}" for i in range(1001)])
 
     def test_adaptive_apply_requires_a_published_preview_and_later_user_turn(self):
         def preview(_):

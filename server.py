@@ -9382,26 +9382,29 @@ def paged_chat_history(cursor: Any = None, limit: Any = None, search: Any = None
 
 
 def paged_library(cursor: Any = None, limit: Any = None) -> dict[str, Any]:
-    workouts = list_workout_library(limit=1000)
-    workouts.sort(key=lambda item: (
-        str(item.get("type") or "").casefold(),
-        str(item.get("name") or "").casefold(),
-        str(item.get("id") or ""),
-    ))
+    """Page active templates directly, with identical SQL ordering and cursor keys."""
     decoded = decode_page_cursor(cursor)
+    after_clause = ""
+    params: list[Any] = []
     if isinstance(decoded, list) and len(decoded) == 3:
-        after = tuple(str(part) for part in decoded)
-        workouts = [item for item in workouts if (
-            str(item.get("type") or "").casefold(),
-            str(item.get("name") or "").casefold(),
-            str(item.get("id") or ""),
-        ) > after]
+        after_clause = "WHERE (sport_key, name_key, id) > (?, ?, ?)"
+        params.extend(str(part) for part in decoded)
     page_size = api_page_limit(limit, API_PAGE_DEFAULT, LIBRARY_PAGE_MAX)
-    page = workouts[:page_size]
-    key = lambda item: (str(item.get("type") or "").casefold(), str(item.get("name") or "").casefold(), str(item.get("id") or ""))
+    with DB_LOCK, database() as db:
+        rows = db.execute(
+            "WITH templates AS ("
+            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.type'), '')) AS sport_key, "
+            "lower(COALESCE(json_extract(payload, '$.name'), '')) AS name_key "
+            "FROM workout_library WHERE json_valid(payload) AND json_type(payload)='object' "
+            "AND json_extract(payload, '$.date') IS NULL AND COALESCE(json_extract(payload, '$.archived'), 0)=0) "
+            f"SELECT id, payload, sport_key, name_key FROM templates {after_clause} "
+            "ORDER BY sport_key, name_key, id LIMIT ?",
+            (*params, page_size + 1),
+        ).fetchall()
+    page = rows[:page_size]
     return {
-        "workouts": page,
-        "next_cursor": encode_page_cursor(key(page[-1])) if len(workouts) > len(page) and page else None,
+        "workouts": [json.loads(row["payload"]) for row in page],
+        "next_cursor": encode_page_cursor([page[-1][key] for key in ("sport_key", "name_key", "id")]) if len(rows) > page_size else None,
         "limit": page_size,
     }
 

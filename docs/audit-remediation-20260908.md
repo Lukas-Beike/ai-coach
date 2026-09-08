@@ -14,7 +14,7 @@ restore and same-build restart remain supported.
 | F06 | Queued unsent messages participate in leave-page protection without browser text persistence. | Browser beforeunload/storage test. |
 | F07 | A missing acceptance receipt retains the message with an error and draft recovery action. | Browser missing-receipt test. |
 | F08 | Cancellation requested before the operation ID arrives is applied to that same operation. | Delayed SSE identity test. |
-| F09 | Authoritative chat generations invalidate history deleted by another tab. | API generation and browser cross-tab reset tests. |
+| F09 | Authoritative chat generations invalidate history deleted by another tab while retaining rejected drafts and newly accepted turns. | API generation and browser cross-tab reset/recovery tests. |
 | F10 | Profile saves acknowledge only the submitted form snapshot; later edits remain dirty. | Delayed profile PUT test. |
 | F11 | Performance polling preserves the active inline metric editor. | Browser editor identity/value test. |
 | F12 | Session changes invalidate pending microphone acquisition, stop capture, and discard late transcription. | Late microphone permission test and existing delayed-transcription contract. |
@@ -27,7 +27,7 @@ restore and same-build restart remain supported.
 | F19 | Privacy exports stream all stored records without Coach/UI collection limits. | 20-check-in and 1001-library-record export test. |
 | F20 | Incomplete provider answers produce partial receipts and retain continuation context. | Truncated-answer test. |
 | F21 | Failed or unfinished morning answers are not marked ready. | Failed morning-answer test. |
-| F22 | Chat and library expose bounded cursor pagination. | Browser append/deduplication test. |
+| F22 | Chat and library expose bounded cursor pagination; library pages query the database without a total collection ceiling. | Browser append/deduplication and 1,001-template HTTP pagination tests. |
 | F23 | Empty activity filter results still expose the next server page. | Empty-filter pagination test. |
 | F24 | Garmin daily scheduling is independent of Intervals configuration. | Garmin-only configuration test. |
 | F25 | Test bootstrap intercepts dotenv reads before importing the server and supplies explicit provider configuration. | Subprocess import with denied dotenv reads and synthetic inherited credentials. |

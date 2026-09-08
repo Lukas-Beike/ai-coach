@@ -3514,7 +3514,6 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
         const currentTurn = state.chatRequest?.clientTurnId;
         const currentTurnRetained = currentTurn && result.messages.some((message) => message.client_turn_id === currentTurn);
         if (generationChanged) {
-          state.rejectedMessages = [];
           state.coachActionProposals = [];
           state.coachReceipts = [];
           if (!currentTurnRetained) {

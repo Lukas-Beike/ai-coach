@@ -144,6 +144,23 @@ test("cross-tab reset retains a new turn already accepted in the new history", a
   expect(result).toEqual({ ids: [200], turn: "new-turn" });
 });
 
+test("cross-tab reset retains a rejected unsent draft and its recovery action", async ({ page }) => {
+  await page.evaluate(async () => {
+    const original = window.fetch.bind(window);
+    window.fetch = (url, options) => String(url).startsWith("/api/chat/history")
+      ? Promise.resolve(new Response('{"messages":[],"generation":"new-generation","next_cursor":null}'))
+      : original(url, options);
+    state.data.messages_generation = "old-generation";
+    state.data.messages = [{ id: 100, role: "assistant", content: "Deleted old reply" }];
+    state.rejectedMessages = [{ role: "user", content: "Unsent rejected draft", client_turn_id: "rejected-turn", error: "Synthetic rejection" }];
+    await loadChatHistoryFresh();
+  });
+  await expect(page.locator("#messages")).not.toContainText("Deleted old reply");
+  await expect(page.locator("#messages")).toContainText("Unsent rejected draft");
+  await page.getByRole("button", { name: "Als Entwurf übernehmen" }).click();
+  await expect(page.locator("#messageInput")).toHaveValue("Unsent rejected draft");
+});
+
 test("history and library cursors expose and append another page once", async ({ page }) => {
   await page.evaluate(() => {
     const original = window.fetch.bind(window);
