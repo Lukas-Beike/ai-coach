@@ -264,6 +264,7 @@ function showLogin() {
   state.chatServerOperationId = null;
   state.chatResponseStarted = false;
   state.chatResponseScrollPending = false;
+  state.chatResponseMessageId = null;
   state.chatProposalRefreshPending = false;
   state.chatProposalRefreshInFlight = false;
   state.chatProposalRefreshQueued = false;
@@ -1901,7 +1902,7 @@ function scrollChatToResponseStart() {
       return;
     }
     const assistants = [...root.querySelectorAll(".message.assistant")];
-    const responseId = state.chatRequest?.responseMessageId;
+    const responseId = state.chatRequest?.responseMessageId ?? state.chatResponseMessageId;
     const target = root.querySelector(".message.assistant.streaming")
       || (responseId == null ? null : assistants.find((node) => node.dataset.messageId === String(responseId)))
       || (!state.chatRequest ? assistants[assistants.length - 1] : null);
@@ -1911,6 +1912,7 @@ function scrollChatToResponseStart() {
     }
     const topGap = 16;
     window.scrollTo({ top: Math.max(0, window.scrollY + target.getBoundingClientRect().top - topGap), behavior: "auto" });
+    state.chatResponseMessageId = null;
     requestAnimationFrame(updateChatComposerVisibility);
   });
 }
@@ -3574,6 +3576,8 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
         const nextAssistantKey = latestAssistantMessageKey(messages);
         if (state.initialStateLoaded && baseRoute() !== "coach" && nextAssistantKey && nextAssistantKey !== previousAssistantKey) {
           state.chatResponseScrollPending = true;
+          const nextAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+          state.chatResponseMessageId = nextAssistant?.id ?? null;
         }
         Object.assign(payload, { messages, messages_next_cursor: result.next_cursor });
         if (chatContentVersion === state.chatContentVersion && Array.isArray(result.proposed_actions)) {
@@ -3926,6 +3930,7 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
         rememberChatTurn(null);
         request.phase = "reconciling";
         request.responseMessageId = payload.message?.id || null;
+        state.chatResponseMessageId = request.responseMessageId;
         request.responseMessageReceived = reconcileCompletedChatMessage(payload.message ? { ...payload.message, client_turn_id: clientTurnId } : null);
         if (request.responseMessageReceived) state.chatStreamText = "";
         request.hadOutstandingProposals = Array.isArray(state.coachActionProposals) && state.coachActionProposals.length > 0;
@@ -4016,6 +4021,7 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
       state.chatStreamText = "";
     }
     if (!completed && request.phase !== "recovering") state.chatResponseScrollPending = false;
+    if (!completed && request.phase !== "recovering") state.chatResponseMessageId = null;
     state.chatResponseStarted = false;
     if (state.chatRequest === request && request.phase !== "recovering") state.chatRequest = null;
     if (request.phase !== "recovering") state.chatServerOperationId = null;
@@ -4247,6 +4253,7 @@ async function resetCoachChat() {
       state.chatServerOperationId = null;
       state.chatResponseStarted = false;
       state.chatResponseScrollPending = false;
+      state.chatResponseMessageId = null;
       state.chatScrollY = null;
       cancelScheduledChatStreamRender();
       renderMessages([], true);
