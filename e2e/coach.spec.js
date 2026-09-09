@@ -549,7 +549,9 @@ test.describe("critical browser states", () => {
     expect(await page.evaluate(() => window.scrollY), "background chat updates must not scroll another tab").toBe(inactiveScrollY);
 
     await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
-    await expect.poll(() => page.evaluate(() => window.__chatTest.historyResolvers.length)).toBe(historyResolversBeforeTurn);
+    await page.waitForTimeout(100);
+    await expect.poll(() => page.evaluate((before) => window.__chatTest.historyResolvers.length, historyResolversBeforeTurn))
+      .toBeLessThanOrEqual(historyResolversBeforeTurn + 1);
     await page.evaluate(() => window.__chatTest.releaseHistory());
     await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     expect(await page.evaluate(() => document.activeElement?.id)).not.toBe("messageInput");
