@@ -15974,6 +15974,10 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
             "command_receipts": commands, "sync_job_ids": receipt.get("sync_job_ids") or [], "intent": intent,
             "pending_operations": pending,
             "proposed_actions": [step["result"]["proposed_action"] for step in commands if step.get("result", {}).get("proposed_action")]})
+        # A terminal failure is no longer resumable. Drop provider checkpoints,
+        # which may contain inline image data, before persisting the receipt.
+        for key in ("openai_response_id", "pending_tool_outputs", "pending_tool_calls", "response_input", "previous_response_id"):
+            receipt.pop(key, None)
         receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
         db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
                    (json.dumps(receipt, ensure_ascii=False), utc_now(), client_turn_id))
