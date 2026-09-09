@@ -163,6 +163,7 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
     else if (state.chatInitialScrollPending) scrollChatToLatest();
     else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest(true);
+    if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground(state.chatContentVersion);
   } else requestAnimationFrame(() => {
     if (!shouldFocusPlannedToday || !focusPlannedToday()) window.scrollTo({ top: 0, behavior: "auto" });
   });
@@ -3647,6 +3648,7 @@ async function loadChatHistoryFresh() {
 }
 
 async function refreshChatProposalsInBackground(expectedContentVersion) {
+  if (baseRoute() !== "coach") return;
   if (state.chatProposalRefreshInFlight) {
     state.chatProposalRefreshQueued = true;
     return;
@@ -3670,7 +3672,7 @@ async function refreshChatProposalsInBackground(expectedContentVersion) {
     state.chatProposalRefreshInFlight = false;
     const retryAtLatestVersion = state.chatProposalRefreshPending && state.chatProposalRefreshQueued;
     state.chatProposalRefreshQueued = false;
-    if (retryAtLatestVersion) void refreshChatProposalsInBackground(state.chatContentVersion);
+    if (retryAtLatestVersion && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
   }
 }
 
@@ -3955,7 +3957,7 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
     // Do not keep the composer in "reconciling" while unrelated/pending loads
     // finish; refresh the authoritative proposal list in the background.
     if (completed && request.responseMessageReceived) {
-      if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground(state.chatContentVersion);
+      if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
     } else {
       await loadChatHistoryFresh();
     }
