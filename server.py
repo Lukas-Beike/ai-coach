@@ -8297,7 +8297,10 @@ def normalize_workout(workout: Any) -> dict[str, Any]:
         "date": str(workout.get("date") or "").strip(),
         "sport": intervals_workout_sport(workout.get("sport")),
         "name": str(workout.get("name") or "Coach-Einheit").strip()[:200],
-        "description": canonical_workout_zones(str(workout.get("description") or "").strip()[:12000]),
+        "description": canonical_workout_zones(
+            str(workout.get("description") or "").strip()[:12000],
+            endurance=intervals_workout_sport(workout.get("sport")) in INTERVALS_ENDURANCE_WORKOUT_TYPES,
+        ),
         "duration_minutes": workout.get("duration_minutes"),
         "target": workout.get("target") if workout.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
         "rationale": str(workout.get("rationale") or "Manuell geplante Einheit").strip()[:2000],
@@ -10855,7 +10858,10 @@ def update_local_planned_workout(
             normalized["source"] = str(current.get("source") or "library")[:40]
             if action == "update":
                 if "description" in values:
-                    normalized["description"] = canonical_workout_zones(normalized["description"])
+                    normalized["description"] = canonical_workout_zones(
+                        normalized["description"],
+                        endurance=intervals_workout_sport(normalized.get("sport")) in INTERVALS_ENDURANCE_WORKOUT_TYPES,
+                    )
                 seconds = validate_workout_description(normalized)
                 minutes = as_number(normalized.get("duration_minutes"))
                 if seconds is not None or minutes is not None:

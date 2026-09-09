@@ -126,6 +126,15 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
                 self.assertEqual(workout["description"], "- 8km Z1-Z2 HR")
         self.assertEqual(canonical_workout_zones("- 8km locker\nHinweis: Zone 1-2 HR"), "- 8km locker\nHinweis: Zone 1-2 HR")
 
+    def test_zone_normalization_does_not_rewrite_cues_or_non_endurance_prose(self):
+        description = "- 10m Zone 1 HR stay below Zone 2\n- 5m Zone 2 Pace"
+        self.assertEqual(
+            canonical_workout_zones(description),
+            "- 10m Z1 HR stay below Zone 2\n- 5m Z2 Pace",
+        )
+        strength = "- 10m Zone 1 HR mobility circuit"
+        self.assertEqual(canonical_workout_zones(strength, endurance=False), strength)
+
     def test_exhausted_workout_repair_does_not_ask_athlete_for_syntax(self):
         result = server.coach_failure_lines([{"tool": "apply_training_patch", "result": {
             "ok": False, "reason": "missing_workout_target", "error": "Use Z1 HR; locker is not valid"}}], {"apply_training_patch"})

@@ -28,7 +28,7 @@ _TARGET = re.compile(
 )
 
 
-def canonical_workout_zones(description: str) -> str:
+def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
     """Normalize explicit zone notation only, never infer effort from prose.
 
     The Coach selects the intensity semantically. This serializer tolerates
@@ -44,8 +44,22 @@ def canonical_workout_zones(description: str) -> str:
         r"(?:\s*[-–—]\s*(?:Zone\s*|Z\s*)?(?P<end>[1-9]))?"
         r"(?:\s+(?P<kind>HR|Pace))?(?=$|\s)", re.IGNORECASE,
     )
-    return "\n".join(pattern.sub(zone, line) if line.lstrip().startswith("- ") else line
-                     for line in description.split("\n"))
+    if not endurance:
+        return description
+    normalized = []
+    for line in description.split("\n"):
+        stripped = line.lstrip()
+        if not stripped.startswith("- "):
+            normalized.append(line)
+            continue
+        # Only the target immediately following the first duration/distance is
+        # executable workout syntax. Cues later in the line must remain prose.
+        step = re.match(r"^(?P<prefix>\s*-\s+\S+\s+)(?P<target>.*)$", line)
+        if not step:
+            normalized.append(line)
+            continue
+        normalized.append(step["prefix"] + pattern.sub(zone, step["target"], count=1))
+    return "\n".join(normalized)
 
 
 def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
