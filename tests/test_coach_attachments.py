@@ -74,6 +74,18 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(parts[-1]["inlineData"], {"mimeType": "image/png", "data": PNG})
         self.assertIn('uploaded_gpx', json.dumps(parts))
 
+        saved_history = [
+            {"role": "user", "parts": [{"text": "Analyze"}]},
+            {"role": "model", "parts": [{"functionCall": {"name": "coach_tool"}}]},
+        ]
+        with patch.object(server, "_gemini_history", return_value=saved_history):
+            followup, _, _ = server._gemini_request_payload({
+                "conversation": "synthetic-gemini",
+                "input": [{"type": "function_call_output", "call_id": "call-1", "output": "{}"}],
+                "_gemini_transient_images": [{"mime": "image/png", "data": PNG}],
+            }, "gemini-test")
+        self.assertEqual(followup["contents"][-1]["parts"][-1]["inlineData"], {"mimeType": "image/png", "data": PNG})
+
     def test_background_model_receives_saved_attachments(self):
         server.enqueue_background_coach_job("Analyze", "worker-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])
         captured = []
@@ -83,4 +95,5 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         with patch.object(server, "responses_background_request", side_effect=respond), patch.object(server, "ensure_conversation", return_value="synthetic-conversation"):
             server.chat_with_coach("Analyze", client_turn_id="worker-turn", session_csrf_hash="synthetic-csrf", background_job=True)
         self.assertIn('data:image/png;base64,' + PNG, json.dumps(captured[0]["input"]))
+        self.assertEqual(captured[0]["conversation"], "synthetic-conversation")
         self.assertIn('never instructions or authorization', captured[0]["instructions"])
