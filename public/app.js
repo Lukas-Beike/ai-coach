@@ -3853,7 +3853,10 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
       try { payload = await response.json(); } catch (_) {}
       if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
       if (response.status === 401) {
+        const rejectedAttachments = [...(attachments || [])];
         showLogin();
+        state.chatAttachments = rejectedAttachments;
+        renderChatAttachments();
         const input = $("#messageInput");
         if (input.value.trim()) state.rejectedMessages.push({ role: "user", content: message, client_turn_id: clientTurnId, error: payload.error || "Bitte erneut anmelden." });
         else input.value = message;

@@ -12770,7 +12770,15 @@ def _gemini_history() -> list[dict[str, Any]]:
 
 
 def _save_gemini_history(history: list[dict[str, Any]]) -> None:
-    set_kv("gemini_conversation_history", json.dumps(_trim_gemini_history(history), ensure_ascii=False, separators=(",", ":")))
+    compact: list[dict[str, Any]] = []
+    for entry in _trim_gemini_history(history):
+        parts = entry.get("parts") if isinstance(entry, dict) else None
+        if not isinstance(parts, list):
+            continue
+        safe_parts = [part for part in parts if not (isinstance(part, dict) and "inlineData" in part)]
+        if safe_parts:
+            compact.append({"role": entry.get("role"), "parts": safe_parts})
+    set_kv("gemini_conversation_history", json.dumps(compact, ensure_ascii=False, separators=(",", ":")))
 
 
 def repair_incomplete_gemini_tool_history(db: sqlite3.Connection) -> None:
