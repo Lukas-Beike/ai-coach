@@ -9,6 +9,7 @@ const SYNC_POLL_ACTIVE_MS = 1_500;
 const SYNC_POLL_IDLE_MS = 60_000;
 const SYNC_POLL_RETRY_MS = 5_000;
 const SYNC_POLL_LEASE_MS = 4_000;
+const MAX_QUEUED_ATTACHMENT_BYTES = 16_000_000;
 let mobileViewportFrame = null;
 const mobileViewportBaselines = { portrait: 0, landscape: 0 };
 
@@ -3806,6 +3807,14 @@ async function loadInitialState() {
 }
 
 function queueChatMessage(message, mode, requestKind = null, attachments = []) {
+  const queuedAttachmentBytes = state.chatQueue.reduce((total, entry) => total + (entry.attachments || []).reduce((bytes, item) => bytes + String(item.data || "").length, 0), 0);
+  const attachmentBytes = attachments.reduce((total, item) => total + String(item.data || "").length, 0);
+  if (queuedAttachmentBytes + attachmentBytes > MAX_QUEUED_ATTACHMENT_BYTES) {
+    state.chatAttachments = attachments;
+    renderChatAttachments();
+    toast("Die Warteschlange enthält bereits zu viele Bilddaten. Warte auf die laufende Coach-Antwort.", true);
+    return false;
+  }
   state.chatQueue[mode === "steer" ? "unshift" : "push"]({
     id: ++state.chatQueueSequence,
     message,
@@ -3819,6 +3828,7 @@ function queueChatMessage(message, mode, requestKind = null, attachments = []) {
   input.style.height = "auto";
   renderMessages(state.data?.messages || [], true);
   updateChatControls();
+  return true;
 }
 
 async function requestCoachResponse(message, requestKind = null, attachments = []) {

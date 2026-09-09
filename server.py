@@ -1,5 +1,7 @@
 from __future__ import annotations
-from backend.coach.attachments import validate_attachments, model_input, MAX_REQUEST_BYTES, MAX_ATTACHMENT_STORAGE_BYTES
+from backend.coach.attachments import (MAX_ATTACHMENT_STORAGE_BYTES, MAX_GEMINI_INLINE_IMAGE_BYTES,
+                                      MAX_REQUEST_BYTES, gemini_inline_image_bytes, model_input,
+                                      validate_attachments)
 
 import base64
 import calendar as calendar_module
@@ -12873,9 +12875,11 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
             except (TypeError, json.JSONDecodeError):
                 output = {"error": "Tool output was not JSON."}
             parts.append({"functionResponse": {"name": call_names.get(call_id, "coach_tool"), "response": output if isinstance(output, dict) else {"result": output}}})
-        for image in payload.get("_gemini_transient_images") or []:
-            if isinstance(image, dict) and image.get("mime") and image.get("data"):
-                parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
+        has_input_image = any(isinstance(part, dict) and "inlineData" in part for part in parts)
+        if not has_input_image:
+            for image in payload.get("_gemini_transient_images") or []:
+                if isinstance(image, dict) and image.get("mime") and image.get("data"):
+                    parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
         if parts:
             history.append({"role": "user", "parts": parts})
     history = _trim_gemini_history(history)
@@ -13673,6 +13677,8 @@ def enqueue_background_coach_job(
     ai_provider = selected_ai_provider()
     model = selected_model(ai_provider)
     thinking_level = selected_thinking_level()
+    if ai_provider == "gemini" and gemini_inline_image_bytes(attachments) > MAX_GEMINI_INLINE_IMAGE_BYTES:
+        raise AppError(413, "Die ausgewählten Bilder sind für eine Gemini-Anfrage zusammen zu groß. Sende weniger Bilder oder wähle OpenAI.", reason="gemini_attachment_request_too_large")
     with DB_LOCK, database() as db:
         existing = db.execute(
             "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)
@@ -15602,17 +15608,23 @@ def _chat_with_structured_coach_impl(
         else:
             user = CHAT_REPOSITORY.add(db, "user", message, client_turn_id=client_turn_id)
             receipt = {"client_turn_id": client_turn_id, "session_key": _coach_session_key(session_csrf_hash),
-                       "user_message_id": user["id"], "status": "running", "command_receipts": []}
+                       "user_message_id": user["id"], "status": "running", "command_receipts": [],
+                       "ai_provider": ai_provider, "model": model}
             db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, 'none', 'running', ?, ?, ?)",
                        (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent), json.dumps(receipt), utc_now(), utc_now()))
     with DB_LOCK, database() as db:
         attachment_row = db.execute("SELECT attachments FROM messages WHERE id=?", (receipt.get("user_message_id"),)).fetchone()
-        has_prior_attachments = bool(db.execute(
-            "SELECT 1 FROM messages WHERE id<? AND attachments!='[]' LIMIT 1",
-            (receipt.get("user_message_id") or 0,),
+        openai_attachment_message_ids = set()
+        for row in db.execute("SELECT receipt FROM coach_commands WHERE receipt IS NOT NULL").fetchall():
+            prior_receipt = _coach_command_receipt(row["receipt"])
+            if prior_receipt.get("ai_provider") == "openai" and isinstance(prior_receipt.get("user_message_id"), int):
+                openai_attachment_message_ids.add(prior_receipt["user_message_id"])
+        has_prior_openai_attachments = bool(openai_attachment_message_ids and db.execute(
+            "SELECT 1 FROM messages WHERE id<? AND attachments!='[]' AND id IN (%s) LIMIT 1" % ",".join("?" for _ in openai_attachment_message_ids),
+            (receipt.get("user_message_id") or 0, *openai_attachment_message_ids),
         ).fetchone())
     attachments = json.loads(attachment_row["attachments"]) if attachment_row else []
-    retain_openai_attachment_context = ai_provider == "openai" and bool(attachments or has_prior_attachments)
+    retain_openai_attachment_context = ai_provider == "openai" and bool(attachments or has_prior_openai_attachments)
     background_owned = background_job and receipt.get("mode") == "background"
     context = coach_dialogue_context(client_turn_id)
     allow_mutations = intent.get("allow_mutations", True)
@@ -15623,7 +15635,7 @@ def _chat_with_structured_coach_impl(
     if not allow_mutations:
         model_instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
     dialogue_input = {"dialogue": context, "current_message": message, "confirmed_steps": command_receipts}
-    if retain_openai_attachment_context and has_prior_attachments:
+    if retain_openai_attachment_context and has_prior_openai_attachments:
         dialogue_input = {"current_message": message, "confirmed_steps": command_receipts}
     request_payload = {
         "_ai_provider": ai_provider or selected_ai_provider(), "model": model or selected_model(ai_provider),

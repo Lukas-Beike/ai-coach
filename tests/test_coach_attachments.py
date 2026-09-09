@@ -65,6 +65,13 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(error.exception.reason, "attachment_storage_quota")
         self.assertEqual(server.list_messages(), [])
 
+    def test_gemini_rejects_images_that_exceed_its_inline_request_budget(self):
+        with patch.object(server, "selected_ai_provider", return_value="gemini"), patch.object(server, "MAX_GEMINI_INLINE_IMAGE_BYTES", 1):
+            with self.assertRaises(server.AppError) as error:
+                server.enqueue_background_coach_job("Analyze", "gemini-size-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])
+        self.assertEqual(error.exception.reason, "gemini_attachment_request_too_large")
+        self.assertEqual(server.list_messages(), [])
+
     def test_both_provider_formats_include_image_and_gpx(self):
         attachments = validate_attachments([self.upload(), {"name": "chart.png", "data": PNG}])
         value = model_input("Analyze the route and chart", attachments)
@@ -73,6 +80,8 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         parts = payload["contents"][-1]["parts"]
         self.assertEqual(parts[-1]["inlineData"], {"mimeType": "image/png", "data": PNG})
         self.assertIn('uploaded_gpx', json.dumps(parts))
+        payload, _, _ = server._gemini_request_payload({"input": value, "_gemini_transient_images": [{"mime": "image/png", "data": PNG}]}, "gemini-test")
+        self.assertEqual(sum("inlineData" in part for part in payload["contents"][-1]["parts"]), 1)
 
         saved_history = [
             {"role": "user", "parts": [{"text": "Analyze"}]},

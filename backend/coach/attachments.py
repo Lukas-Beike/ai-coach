@@ -8,6 +8,9 @@ import xml.etree.ElementTree as ET
 MAX_FILE_BYTES = 5_000_000
 MAX_FILES = 4
 MAX_REQUEST_BYTES = 28_000_000
+# Gemini accepts at most 20 MB per inline request.  Leave room for the route
+# summary, instructions and the surrounding JSON framing.
+MAX_GEMINI_INLINE_IMAGE_BYTES = 16_000_000
 # Keep encrypted database backups usable even when many turns contain images.
 # This leaves headroom below the application's 100 MB backup limit.
 # Keep room for provider conversation copies and SQLite page overhead inside
@@ -108,3 +111,7 @@ def model_input(text, attachments):
         if item["type"] == "image":
             parts.append({"type": "input_image", "image_url": f"data:{item['mime']};base64,{item['data']}", "detail": "auto"})
     return [{"role": "user", "content": parts}]
+
+
+def gemini_inline_image_bytes(attachments):
+    return sum(len(str(item.get("data") or "")) for item in attachments if item.get("type") == "image")
