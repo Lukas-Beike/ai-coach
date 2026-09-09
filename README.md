@@ -92,7 +92,11 @@ instructions do not delete or convert its data.
   tool receipts support recovery after process restarts; interrupted Gemini calls
   are reported without replaying their completed effects. Cancelling or resetting
   the chat closes a pending clarification. A disconnected browser does not cancel
-  the work. Model/provider selection is captured for the entire turn.
+  the work. Model/provider selection is captured for the entire turn. If Coach
+  processing stops after a sync was queued, the receipt distinguishes that
+  interruption from the independent sync job and does not claim the transfer
+  completed or failed without a confirmed result. Failed OpenAI responses retain
+  only recognized error codes in diagnostics, never the provider's error text.
 - Related workout moves, edits and additions use one atomic change set with current
   revision and object hashes. Replanning until a target date changes only that period;
   later units remain intact. Constraints such as two strength sessions per week stay
@@ -104,7 +108,9 @@ instructions do not delete or convert its data.
   actions, conversation flows and the limits of simulated model responses.
   Provider writes require the corresponding synchronization request. Failed steps
   can be corrected within the bounded tool loop; receipts distinguish saved changes,
-  queued syncs and failures. See [the dialogue evaluation catalogue](docs/coach-dialogue-evaluation.md)
+  queued syncs and unresolved failures. A successfully corrected object reference
+  clears that attempt's error from the final answer and status cards; errors for
+  other changes remain visible. See [the dialogue evaluation catalogue](docs/coach-dialogue-evaluation.md)
   for the supported scenarios and the limits of mocked model tests.
 - The Coach start card contains only contextual quick actions, not provider
   connection badges. The morning check-in disappears after it completed for
@@ -140,6 +146,27 @@ instructions do not delete or convert its data.
 - The explicit planning synchronization transfers dirty local planned units to
   the Intervals.icu calendar with stable upsert identities. It does not replace
   the local plan with later remote edits or deletions.
+- Endurance workouts require structured Intervals.icu steps with a duration or
+  distance and an intensity target (for example `- 15m 50-70%` or `- 6km Z1 HR`).
+  Prose-only descriptions, missing targets and inconsistent timed totals are
+  rejected before saving or exporting. Repeat blocks count every contained
+  step, including recovery; their boundaries need blank lines. Strength
+  descriptions remain free text. Distance-based duration and the resulting
+  training load depend on the athlete's sport/zone settings in Intervals.icu.
+  Synchronization succeeds only when the provider's returned `workout_doc`
+  confirms the individual steps, durations/distances, target types and values,
+  and a calculated training load. An HTTP success alone is insufficient. A
+  failed verification retains the remote identity for correction and retry.
+  Existing invalid units must be corrected through the Coach and explicitly
+  synchronized again; a code update alone does not change the remote calendar.
+- A requested repair synchronization also checks already-synchronized units.
+  The Coach first fixes local text, duration and sport while retaining unit IDs,
+  then selects the affected future units with current hashes, including any
+  superseded inactive entries. Repair updates existing calendar IDs, verifies
+  the provider's sport and workout structure, removes exact-identity duplicates
+  and selected inactive entries, and rereads the calendar before success.
+  Unmapped same-name entries are reported as conflicts instead of being deleted
+  by title. See [workout export examples and repair](docs/workout-export-format.md).
 - If a provider response no longer contains an imported template, it is kept
   locally and marked as missing remotely. A later library synchronization
   reconciles it before creating it again; local templates are never removed by
@@ -340,6 +367,15 @@ active workout templates grouped by sport. Neither segment contains planning,
 deletion, editing, or synchronization controls. Planning, template management,
 competitions, multi-week plans, and explicit remote synchronization are handled
 through the Coach.
+
+Endurance workout steps start with an explicit duration or distance, for example
+`- 6km Z1 HR`. Conditions, optional extensions and safety advice belong in plain
+paragraphs without a leading dash: Intervals.icu can count quantities inside
+dash bullets as additional workout steps. For a 6-8 km run, the Coach plans the
+lower total (including warmup/cooldown) and describes the optional upper total
+separately. Ambiguous quantity-bearing bullets are rejected on local authoring
+and before workout export with a correction hint. Cue-first steps such as
+`- Recovery 30s 50%` must be written as `- 30s 50% Recovery` in this app.
 
 The More view is organized into the deep-linked segments `#more/profile`,
 `#more/connections`, `#more/coach`, `#more/privacy`, and `#more/operations`.

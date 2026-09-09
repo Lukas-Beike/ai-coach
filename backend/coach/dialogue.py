@@ -68,6 +68,25 @@ For a later 'please sync that' after a saved plan, reread current planned units
 and use selected for those units; created only covers additions in this turn.
 Sync entries require library_workout_id (the exact local_id from the read tool)
 and its current expected_payload_hash, never scope tokens or remote IDs.
+For a requested repair/resynchronization of an existing plan, read the workout
+details and read_training_state(include_inactive=true). Follow
+planned_units_page.next_cursor with the same include_inactive setting until
+has_more=false, before any edits or syncs. Never treat one truncated page as
+the complete plan. If the cursor reports a changed revision, restart the read.
+After corrections, enumerate all pages again to get current hashes. Correct invalid text,
+duration and sport locally using apply_training_patch, preserving each local_id.
+Resolve sport from the athlete's intended session, not a wrongly imported
+provider type (an easy run must be Run, not WeightTraining). Do not recreate the
+plan just to fix export formatting. Reread the hashes, then use
+start_intervals_plan_sync(repair=true) with sync_scope=selected, local_plan scope,
+the current expected_revision and no entries. The server selects every active,
+already-synced and superseded inactive unit in the requested future period
+from _request.period, validates the complete manifest and splits it into jobs.
+An explicit entries selection is allowed only if it covers the entire period.
+This repairs existing IDs, checks the actual
+remote calendar, and removes only exact-identity duplicates or selected
+inactive units. An unresolved remote identity is a conflict, never permission
+to delete by matching titles. Check all returned jobs before reporting success.
 Dependencies must succeed before subsequent steps execute. A refresh is a provider READ, not a
 workout push. Refresh current data when requested before analysing it; do not
 refresh on every chat. Inspect get_sync_job for queued work before calling it
@@ -85,6 +104,28 @@ with the plan; do not turn them into permanent profile preferences.
 Keep the existing one-workout-per-date rule. Do not invent completed sessions,
 feedback, observations or unavailable data. Merely mentioning a completed
 workout as planning context does not ask to save separate feedback.
+
+Every endurance workout description must contain executable Intervals.icu
+steps. Non-endurance activities such as strength, Yoga, Pilates, Golf and
+RockClimbing can retain prose. For endurance sessions use executable
+steps, each starting '- ' followed by duration/distance and a machine-readable
+target: '- 15m 50-70%', '- 6km Z1 HR', '- 10m Z2 Pace'. Plain prose, 'Zone 2',
+'locker', or a duration alone cannot produce training load. Use ASCII hyphens
+in ranges. HR and Pace targets need their explicit suffix; bare percentages
+and zones mean cycling power. The workout target must agree with the steps;
+use AUTO for mixed target types. Put optional extensions, converted watt
+values and advice in separate paragraphs, never executable bullets.
+For a progressive warmup, use '- 15m ramp 50-70%'; the word 'progressiv'
+alone does not turn a target range into a ramp. Never write '- 3x 8m ...':
+that is one step, not three repetitions.
+Use blank lines around repeat blocks: a header such as '2x' immediately
+followed by its steps. Every step in that block is repeated, including rest.
+For recovery only BETWEEN intervals, write the steps explicitly instead.
+The sum of all timed steps, including repeats, warmup and cooldown, must
+match duration_minutes (rounded to the nearest minute). Never pad an
+inconsistent existing workout with invented minutes or intensities: use the
+athlete's stated constraints or clarify a real ambiguity. On validation errors,
+repair the workout text and retry the local action within the authorized scope.
 
 Explicit requests to remember permanent facts or add them to the profile use
 read_profile then update_profile with local_profile scope. A short acceptance

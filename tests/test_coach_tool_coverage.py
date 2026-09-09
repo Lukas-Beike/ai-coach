@@ -131,7 +131,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "list_training_plans:success", "list_competitions:success", "list_change_history:success", "list_recent_activities:success")
     def test_read_tools_return_seeded_objects_without_mutating_them(self):
         planned = server.save_workout_library_entries([self.workout()], plan_name="Synthetic plan")[0]
-        server.create_local_library_template({"name": "Synthetic template", "sport": "Run", "description": "Easy", "duration_minutes": 30})
+        server.create_local_library_template({"name": "Synthetic template", "sport": "Run", "description": "- 30m 60% Easy", "duration_minutes": 30})
         server.save_coach_competition({"name": "Synthetic race", "event_date": "2026-10-03", "sport": "Run", "priority": "A"})
         self.seed_activity()
         before = self.athlete_state()
@@ -148,11 +148,11 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "manage_training_templates:restore", "manage_training_templates:delete", "apply_workout_library_plan:success")
     def test_template_lifecycle_and_scheduling_preserve_the_scheduled_copy(self):
         self.run_tool("manage_training_templates", {"templates": [{"action": "create", "name": "Synthetic easy run", "sport": "Run",
-            "description": "Synthetic easy instructions", "duration_minutes": 30}]}, ["local_template"], message="Speichere das als wiederverwendbare Vorlage.")
+            "description": "- 30m 60% Synthetic easy instructions", "duration_minutes": 30}]}, ["local_template"], message="Speichere das als wiederverwendbare Vorlage.")
         template = server.list_workout_library()[0]
         local_id = template["id"]
         self.assertFalse(template.get("date"))
-        self.run_tool("manage_training_templates", {"templates": [{"action": "update", "local_id": local_id, "duration_minutes": 40}]}, ["library_workout:" + local_id])
+        self.run_tool("manage_training_templates", {"templates": [{"action": "update", "local_id": local_id, "duration_minutes": 40, "description": "- 40m 60%"}]}, ["library_workout:" + local_id])
         self.assertEqual(server.list_workout_library()[0]["duration_minutes"], 40)
         self.run_tool("apply_workout_library_plan", {"entries": [{"library_workout_id": local_id, "date": "2026-09-09"}]},
                       ["library_workout:" + local_id], period={"start": "2026-09-09", "end": "2026-09-09"}, message="Plane diese Vorlage am Mittwoch ein.")
@@ -342,7 +342,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     @covers("undo_training_change:success")
     def test_undo_is_a_bound_preview_until_explicit_confirmation(self):
-        server.create_local_library_template({"name": "Synthetic undo template", "description": "Easy", "duration_minutes": 30})
+        server.create_local_library_template({"name": "Synthetic undo template", "description": "- 30m 60% Easy", "duration_minutes": 30})
         change = server.list_change_history()[0]
         before = server.list_workout_library()
         result = self.run_tool("undo_training_change", {"change_id": change["id"]}, ["change:" + change["id"]], message="Das möchte ich rückgängig machen.")
@@ -419,7 +419,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         sunday_before = next(u for u in initial["planned_units"] if u["local_id"] == sunday)
         period = {"start": "2026-09-11", "end": "2026-09-13"}
         change = {"local_id": friday, "action": "update", "sport": "Run", "name": "Synthetic easy 8 km run",
-                  "description": "Synthetic very easy run", "duration_minutes": 50,
+                  "description": "- 50m Z1 HR Synthetic very easy run", "duration_minutes": 50,
                   "expected_payload_hash": next(u["expected_payload_hash"] for u in initial["planned_units"] if u["local_id"] == friday)}
         corrected = {}
         def repair(payload):
@@ -485,7 +485,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     def test_invalid_arguments_and_missing_objects_do_not_partially_write(self):
         unit = server.save_workout_library_entries([self.workout()], plan_name="Synthetic validation plan")[0]
-        server.create_local_library_template({"name": "Synthetic template", "description": "Easy", "duration_minutes": 30})
+        server.create_local_library_template({"name": "Synthetic template", "description": "- 30m 60% Easy", "duration_minutes": 30})
         template_id = server.list_workout_library()[0]["id"]
         plan_id = server.list_training_plans()[0]["id"]
         period = {"start": "2026-09-09", "end": "2026-09-09"}

@@ -103,6 +103,14 @@ class IntervalsRequestRecorder:
         return [call for call in self.calls if call["method"] in {"POST", "PUT", "DELETE"}]
 
 
+def parsed_workout_fixture(duration=1800, *, sport="Ride", kind="power", units="%ftp", value=85, distance=None):
+    """One synthetic provider-parsed step using the documented response schema."""
+    step = {"duration": duration, kind: {"units": units, "value": value}}
+    if distance is not None:
+        step["distance"] = distance
+    return {"type": sport, "moving_time": duration, "icu_training_load": 20, "workout_doc": {"duration": duration, "steps": [step]}}
+
+
 class RecordedIntervalsClient:
     """Small provider fake shared by remote-mutation contract tests."""
 
@@ -352,7 +360,7 @@ class CoachTests(unittest.TestCase):
 
     def test_structured_commit_rejects_model_artifact_outside_classified_scope(self):
         artifact = server._stage_coach_artifact(
-            "conversation-scope", "turn-scope", {"plan_name": "Scoped", "workouts": [{"date": "2099-01-01", "sport": "Ride", "description": "Easy session", "duration_minutes": 30}]}
+            "conversation-scope", "turn-scope", {"plan_name": "Scoped", "workouts": [{"date": "2099-01-01", "sport": "Ride", "description": "- 30m 60% Easy session", "duration_minutes": 30}]}
         )
         intent = {
             "intent": "local_action",
@@ -383,7 +391,7 @@ class CoachTests(unittest.TestCase):
                 "plan_name": "Foreign",
                 "workouts": [{
                     "date": "2099-01-04", "sport": "Ride", "name": "Foreign ride",
-                    "description": "- 30m easy", "duration_minutes": 30,
+                    "description": "- 30m 60% easy", "duration_minutes": 30,
                 }],
             },
         )
@@ -406,7 +414,7 @@ class CoachTests(unittest.TestCase):
     def test_structured_plan_push_declares_and_uses_bounded_entries(self):
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Run", "name": "Synthetic selected run",
-            "description": "Synthetic easy session", "duration_minutes": 30,
+            "description": "- 30m 60% Synthetic easy session", "duration_minutes": 30,
         })
         local_id = planned["id"]
         entry = next(item for item in server._pending_plan_push_entries() if item["library_workout_id"] == local_id)
@@ -436,7 +444,7 @@ class CoachTests(unittest.TestCase):
     def test_replacement_follow_up_sync_accepts_complete_plan_size(self):
         planned = server.save_workout_library_entries([
             {"date": (date.today() + timedelta(days=index + 1)).isoformat(), "sport": "Run",
-             "name": "Synthetic replacement run", "description": "Synthetic easy session", "duration_minutes": 30}
+             "name": "Synthetic replacement run", "description": "- 30m 60% Synthetic easy session", "duration_minutes": 30}
             for index in range(server.LIBRARY_BULK_MAX_ENTRIES + 1)
         ])
         local_ids = [item["id"] for item in planned]
@@ -519,7 +527,7 @@ class CoachTests(unittest.TestCase):
 
     def test_structured_coach_reads_local_detail_and_schedules_library_templates(self):
         template = server.create_local_library_template({
-            "sport": "Ride", "name": "Local tempo", "description": "20m tempo", "moving_time": 3600,
+            "sport": "Ride", "name": "Local tempo", "description": "- 60m 85%", "duration_minutes": 60,
         })
         tomorrow = (server.local_now().date() + server.timedelta(days=1)).isoformat()
         intent = {
@@ -676,7 +684,7 @@ class CoachTests(unittest.TestCase):
     def test_structured_coach_can_keep_a_planning_conflict_local_before_push(self):
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "Local",
-            "description": "- 30m easy",
+            "description": "- 30m 60% easy",
         })
         with server.DB_LOCK, server.database() as db:
             db.execute(
@@ -699,7 +707,7 @@ class CoachTests(unittest.TestCase):
     def test_structured_state_exposes_current_local_targets_and_hashes(self):
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Run", "name": "Easy run", "description": "- 30m easy",
+            "sport": "Run", "name": "Easy run", "description": "- 30m 60% easy",
         })
         template = server.create_local_library_template({
             "sport": "Ride", "name": "Endurance", "description": "- 45m Z2", "duration_minutes": 45,
@@ -716,7 +724,7 @@ class CoachTests(unittest.TestCase):
     def test_structured_coach_deletes_local_planned_unit_without_ui_preview(self):
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Ride", "name": "Remove me", "description": "- 20m easy",
+            "sport": "Ride", "name": "Remove me", "description": "- 20m 60% easy",
         })
         state = server._structured_training_state()
         target = next(item for item in state["planned_units"] if item["local_id"] == planned["id"])
@@ -742,11 +750,11 @@ class CoachTests(unittest.TestCase):
     def test_mixed_edit_scope_cannot_authorize_unrelated_existing_unit(self):
         first = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Ride", "name": "First", "description": "- 20m easy",
+            "sport": "Ride", "name": "First", "description": "- 20m 60% easy",
         })
         second = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=2)).isoformat(),
-            "sport": "Run", "name": "Second", "description": "- 20m easy",
+            "sport": "Run", "name": "Second", "description": "- 20m 60% easy",
         })
         intent = {
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
@@ -758,7 +766,7 @@ class CoachTests(unittest.TestCase):
                 "apply_training_changes",
                 {"changes": [{"local_id": second["id"], "action": "archive"}, {
                     "action": "create", "date": (date.today() + timedelta(days=3)).isoformat(),
-                    "sport": "Run", "name": "Recovery", "description": "- 20m easy",
+                    "sport": "Run", "name": "Recovery", "description": "- 20m 60% easy",
                     "duration_minutes": 20, "target": "AUTO", "rationale": "Recovery",
                 }]},
                 intent=intent, conversation_id="conversation-mixed-scope", client_turn_id="turn-mixed-scope",
@@ -777,7 +785,7 @@ class CoachTests(unittest.TestCase):
                 "apply_training_changes",
                 {"changes": [{
                     "action": "create", "date": (date.today() + timedelta(days=4)).isoformat(),
-                    "sport": "Run", "name": "Bad target", "description": "- 20m easy",
+                    "sport": "Run", "name": "Bad target", "description": "- 20m 60% easy",
                     "duration_minutes": 20, "target": "CADENCE", "rationale": "Test",
                 }]},
                 intent=intent, conversation_id="conversation-target", client_turn_id="turn-target",
@@ -789,7 +797,7 @@ class CoachTests(unittest.TestCase):
         original_date = (date.today() + timedelta(days=5)).isoformat()
         created = server.save_workout_library_entries([{
             "date": original_date, "sport": "Ride", "name": "Plan start",
-            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
             "rationale": "Base",
         }], plan_name="Bounds plan", goal="Consistency")
         plan_id = created[0]["plan_id"]
@@ -807,7 +815,7 @@ class CoachTests(unittest.TestCase):
             {"changes": [{"local_id": existing_id, "action": "update", "date": original_date,
                            "expected_payload_hash": target["expected_payload_hash"]}, {
                 "action": "create", "date": later_date, "sport": "Run", "name": "Recovery",
-                "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO",
+                "description": "- 20m 60% easy", "duration_minutes": 20, "target": "AUTO",
                 "rationale": "Recovery",
             }]},
             intent=intent, conversation_id="conversation-bounds", client_turn_id="turn-bounds",
@@ -822,7 +830,7 @@ class CoachTests(unittest.TestCase):
         original_date = (date.today() + timedelta(days=8)).isoformat()
         created = server.save_workout_library_entries([{
             "date": original_date, "sport": "Ride", "name": "Plan workout",
-            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
             "rationale": "Base",
         }], plan_name="Metadata plan", goal="Consistency")
         plan_id = created[0]["plan_id"]
@@ -849,7 +857,7 @@ class CoachTests(unittest.TestCase):
     def test_apply_result_deduplicates_changed_ids_for_sync(self):
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=9)).isoformat(),
-            "sport": "Ride", "name": "Repeated", "description": "- 20m easy",
+            "sport": "Ride", "name": "Repeated", "description": "- 20m 60% easy",
         })
         intent = {
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
@@ -869,11 +877,11 @@ class CoachTests(unittest.TestCase):
     def test_changed_batch_sync_is_limited_to_changed_entries(self):
         changed = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=6)).isoformat(),
-            "sport": "Ride", "name": "Changed", "description": "- 20m easy",
+            "sport": "Ride", "name": "Changed", "description": "- 20m 60% easy",
         })
         untouched = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=7)).isoformat(),
-            "sport": "Run", "name": "Untouched", "description": "- 20m easy",
+            "sport": "Run", "name": "Untouched", "description": "- 20m 60% easy",
         })
         pending = {item["library_workout_id"]: item for item in server._pending_plan_push_entries()}
         intent = {
@@ -897,7 +905,7 @@ class CoachTests(unittest.TestCase):
         for index in range(101):
             server.create_local_planned_unit({
                 "date": (date.today() + timedelta(days=index + 10)).isoformat(),
-                "sport": "Ride", "name": f"Changed {index}", "description": "- 20m easy",
+                "sport": "Ride", "name": f"Changed {index}", "description": "- 20m 60% easy",
             })
         pending = server._pending_plan_push_entries()
         selected = pending[:101]
@@ -945,7 +953,7 @@ class CoachTests(unittest.TestCase):
         })
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Run", "name": "Planned", "description": "- 30m easy",
+            "sport": "Run", "name": "Planned", "description": "- 30m 60% easy",
         })
         intent = {
             "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
@@ -967,10 +975,10 @@ class CoachTests(unittest.TestCase):
 
     def test_structured_coach_all_pending_sync_rejects_a_subset(self):
         first = server.create_local_workout_library_entry({
-            "sport": "Ride", "name": "First pending", "description": "- 30m easy", "duration_minutes": 30,
+            "sport": "Ride", "name": "First pending", "description": "- 30m 60% easy", "duration_minutes": 30,
         })
         second = server.create_local_workout_library_entry({
-            "sport": "Run", "name": "Second pending", "description": "- 20m easy", "duration_minutes": 20,
+            "sport": "Run", "name": "Second pending", "description": "- 20m 60% easy", "duration_minutes": 20,
         })
         intent = {
             "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
@@ -1403,7 +1411,7 @@ class CoachTests(unittest.TestCase):
     def test_privacy_export_contains_archived_and_provider_state_without_sessions_or_credentials(self):
         archived = server.upsert_workout_library([{
             "id": "remote-template-1", "name": "Archived template", "type": "Ride",
-            "description": "local", "duration_minutes": 60,
+            "description": "- 60m 60% local", "duration_minutes": 60,
         }])[0]
         server.update_workout_library_entry(archived["id"], {"action": "archive"})
         server.set_kv("garmin_snapshot", json.dumps({"source": "Garmin", "days": []}))
@@ -1559,7 +1567,7 @@ class CoachTests(unittest.TestCase):
         tomorrow = (server.local_now().date() + timedelta(days=1)).isoformat()
         draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "Lange Ausfahrt",
-            "description": "Easy endurance ride", "duration_minutes": 240, "target": "POWER",
+            "description": "- 240m 60% Easy endurance ride", "duration_minutes": 240, "target": "POWER",
         }])[0]
         with patch.object(server, "weather_state", return_value={"days": [{
             "date": tomorrow, "weather_code": 63, "precipitation_probability_max": 100,
@@ -1575,8 +1583,8 @@ class CoachTests(unittest.TestCase):
         tomorrow = server.local_now().date() + timedelta(days=1)
         day_three = server.local_now().date() + timedelta(days=3)
         drafts = server.save_workout_library_entries([
-            {"date": tomorrow.isoformat(), "sport": "VirtualRide", "name": "Indoor lang", "description": "Indoor endurance ride", "duration_minutes": 240},
-            {"date": day_three.isoformat(), "sport": "Ride", "name": "Spätere Ausfahrt", "description": "Outdoor endurance ride", "duration_minutes": 240},
+            {"date": tomorrow.isoformat(), "sport": "VirtualRide", "name": "Indoor lang", "description": "- 240m 60% Indoor endurance ride", "duration_minutes": 240},
+            {"date": day_three.isoformat(), "sport": "Ride", "name": "Spätere Ausfahrt", "description": "- 240m 60% Outdoor endurance ride", "duration_minutes": 240},
         ])
         with patch.object(server, "weather_state", return_value={"days": [{
             "date": tomorrow.isoformat(), "weather_code": 63, "precipitation_probability_max": 100,
@@ -2576,7 +2584,7 @@ class CoachTests(unittest.TestCase):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "Short threshold",
-            "description": "- 5m 110%", "duration_minutes": 45, "target": "POWER",
+            "description": "- 5m 110%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
         with server.DB_LOCK, server.database() as db:
             db.execute(
@@ -2655,7 +2663,7 @@ class CoachTests(unittest.TestCase):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "Threshold intervals",
-            "description": "- 5m 110%", "duration_minutes": 120, "target": "POWER",
+            "description": "- 5m 110%\n- 115m 55%", "duration_minutes": 120, "target": "POWER",
         }])[0]
         with server.DB_LOCK, server.database() as db:
             db.execute(
@@ -2675,18 +2683,19 @@ class CoachTests(unittest.TestCase):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "VO2 intervals",
-            "description": "- 5m 115%", "duration_minutes": 45, "target": "POWER",
+            "description": "- 5m 115%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
         server.save_checkin({"illness": "Fever", "soreness": 8})
         preview = server.adaptive_replan_preview()
         self.assertEqual(preview["illness_pause"]["recommended_pause_days"], server.ILLNESS_PAUSE_DEFAULT_DAYS)
         self.assertEqual(preview["illness_pause"]["start_date"], server.local_now().date().isoformat())
         self.assertEqual(len(preview["changes"]), 1)
-        self.assertEqual(server.list_dated_local_planned_workouts()[0]["description"], "- 5m 115%")
+        self.assertEqual(server.list_dated_local_planned_workouts()[0]["description"], "- 5m 115%\n- 40m 55%")
         result = server.apply_adaptive_replan(preview["id"])
         self.assertEqual(result["updated"], 1)
-        self.assertNotEqual(server.list_dated_local_planned_workouts()[0]["description"], "- 5m 115%")
-        self.assertEqual(server.list_dated_local_planned_workouts()[0]["name"], "Krankheitspause")
+        self.assertEqual(server.list_dated_local_planned_workouts(), [])
+        self.assertTrue(server.list_planned_units(include_archived=True)[0]["archived"])
+        self.assertEqual(server.list_planned_units(include_archived=True)[0]["description"], "- 5m 115%\n- 40m 55%")
         checkins = {row["checkin_date"]: row for row in server.list_checkins(30)}
         for offset in range(server.ILLNESS_PAUSE_DEFAULT_DAYS):
             pause_date = (server.local_now().date() + timedelta(days=offset)).isoformat()
@@ -2694,7 +2703,7 @@ class CoachTests(unittest.TestCase):
         repeated_preview = server.adaptive_replan_preview()
         self.assertTrue(repeated_preview["illness_pause"]["approved"])
         self.assertFalse(server.current_adaptive_replan_status()["illness_pause_pending"])
-        self.assertEqual(server.list_dated_local_planned_workouts()[0]["id"], draft["id"])
+        self.assertEqual(server.list_planned_units(include_archived=True)[0]["id"], draft["id"])
 
     def test_illness_pause_can_sync_sick_events_after_confirmation(self):
         server.save_checkin({"illness": "Erkältung"})
@@ -2721,7 +2730,7 @@ class CoachTests(unittest.TestCase):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "VO2 intervals",
-            "description": "- 5m 115%", "duration_minutes": 45, "target": "POWER",
+            "description": "- 5m 115%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
         server.save_checkin({"illness": "Fever", "soreness": 8})
         preview = server.adaptive_replan_preview()
@@ -2740,7 +2749,7 @@ class CoachTests(unittest.TestCase):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "VO2 intervals",
-            "description": "- 5m 115%", "duration_minutes": 45, "target": "POWER",
+            "description": "- 5m 115%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
         server.save_checkin({"illness": "Fever", "soreness": 8})
         preview = server.adaptive_replan_preview()
@@ -2751,14 +2760,15 @@ class CoachTests(unittest.TestCase):
 
         fresh = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "Tempo",
-            "description": "- 5m 110%", "duration_minutes": 45, "target": "POWER",
+            "description": "- 5m 110%\n- 40m 55%", "duration_minutes": 45, "target": "POWER",
         }])[0]
         fresh_preview = server.adaptive_replan_preview()
         applied = server.apply_adaptive_replan(fresh_preview["id"])
         self.assertEqual(applied["status"], "ok")
         self.assertGreaterEqual(applied["updated"], 1)
         self.assertEqual(server.apply_adaptive_replan(fresh_preview["id"])["status"], "already_applied")
-        self.assertEqual(server.list_dated_local_planned_workouts()[0]["id"], fresh["id"])
+        self.assertEqual(server.list_dated_local_planned_workouts(), [])
+        self.assertIn(fresh["id"], [item["id"] for item in server.list_planned_units(include_archived=True)])
 
     def test_planned_unit_preserves_private_calendar_adjustment(self):
         context = {
@@ -2772,7 +2782,7 @@ class CoachTests(unittest.TestCase):
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Ride",
             "name": "Locker",
-            "description": "- 60m easy",
+            "description": "- 60m 60% easy",
             "duration_minutes": 60,
             "private_calendar_adjustment": context,
         })
@@ -2782,7 +2792,7 @@ class CoachTests(unittest.TestCase):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         draft = server.save_workout_library_entries([{
             "date": tomorrow, "sport": "Ride", "name": "Threshold intervals",
-            "description": "- 5m 110%", "duration_minutes": 120, "target": "POWER",
+            "description": "- 5m 110%\n- 115m 55%", "duration_minutes": 120, "target": "POWER",
         }])[0]
         with server.DB_LOCK, server.database() as db:
             db.execute(
@@ -3045,7 +3055,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(imported["type"], "Run")
         self.assertEqual(imported["sport"], "Run")
         payload = server.workout_event_payload("local-run", {
-            "date": tomorrow, "type": "Run", "name": "Lauf", "description": "Easy", "duration_minutes": 30,
+            "date": tomorrow, "type": "Run", "name": "Lauf", "description": "- 30m 60% Easy", "duration_minutes": 30,
         })
         self.assertEqual(payload["type"], "Run")
 
@@ -3502,7 +3512,7 @@ class CoachTests(unittest.TestCase):
     def test_calendar_conflicts_ignore_archived_planned_units(self):
         day = (date.today() + timedelta(days=4)).isoformat()
         existing = server.create_local_planned_unit({
-            "date": day, "sport": "Run", "name": "Archived", "description": "- 20m easy",
+            "date": day, "sport": "Run", "name": "Archived", "description": "- 20m 60% easy",
         })
         server.update_local_planned_workout(existing["id"], {"action": "archive"})
         self.assertEqual(server.calendar_conflicts({"date": day}), [])
@@ -3572,9 +3582,9 @@ class CoachTests(unittest.TestCase):
 
     def test_local_library_template_can_be_edited_archived_restored_and_deleted(self):
         entry = server.create_local_workout_library_entry({
-            "sport": "Ride", "name": "Lokale Vorlage", "description": "Easy ride", "duration_minutes": 45,
+            "sport": "Ride", "name": "Lokale Vorlage", "description": "- 45m 60% Easy ride", "duration_minutes": 45,
         })
-        updated = server.update_workout_library_entry(entry["id"], {"action": "update", "name": "Neue Vorlage", "description": "Recovery ride"})
+        updated = server.update_workout_library_entry(entry["id"], {"action": "update", "name": "Neue Vorlage", "description": "- 45m 55% Recovery ride"})
         self.assertEqual(updated["library_entry"]["name"], "Neue Vorlage")
         self.assertEqual(server.list_workout_library()[0]["name"], "Neue Vorlage")
         server.update_workout_library_entry(entry["id"], {"action": "archive"})
@@ -3620,7 +3630,7 @@ class CoachTests(unittest.TestCase):
         ))
         self.assertEqual(post.call_args_list[1].args, (
             "/athlete/athlete-1/workouts",
-            {"name": "Tempo", "description": "- 30m 85%", "type": "Ride", "folder_id": 12345},
+            {"name": "Tempo", "description": "- 30m 85%", "type": "Ride", "folder_id": 12345, "target": "AUTO"},
         ))
 
     def test_existing_intervals_coach_folder_is_reused(self):
@@ -3631,7 +3641,7 @@ class CoachTests(unittest.TestCase):
             client.create_library_workouts([{"name": "Easy", "description": "- 30m Z2", "sport": "Ride"}])
         post.assert_called_once_with(
             "/athlete/athlete-1/workouts",
-            {"name": "Easy", "description": "- 30m Z2", "type": "Ride", "folder_id": 77},
+            {"name": "Easy", "description": "- 30m Z2", "type": "Ride", "folder_id": 77, "target": "AUTO"},
         )
 
     def test_library_update_always_sends_required_folder(self):
@@ -3650,6 +3660,7 @@ class CoachTests(unittest.TestCase):
             "description": "- 30m Z2",
             "type": "Ride",
             "folder_id": 12345,
+            "target": "AUTO",
         })
 
     def test_unknown_workout_sport_falls_back_to_provider_other_type(self):
@@ -3659,7 +3670,7 @@ class CoachTests(unittest.TestCase):
         ) as post:
             client.create_library_workouts([{
                 "name": "Regeneration",
-                "description": "Locker bewegen",
+                "description": "- 30m Z1 HR Locker bewegen",
                 "sport": "Recovery Session",
             }])
         self.assertEqual(post.call_args_list[1].args[1]["type"], "Other")
@@ -3673,6 +3684,160 @@ class CoachTests(unittest.TestCase):
             "duration_minutes": 30,
         })
         self.assertEqual(normalized["sport"], "Run")
+
+    def test_recovery_extension_bullet_is_rejected_before_plan_storage(self):
+        workout = {
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Run", "name": "Optionaler Recovery Run - 6 bis 8 km",
+            "description": (
+                "Warm-up\n- 8m Gehen und sehr lockeres Einlaufen\n\nMain Set\n"
+                "- 6km sehr locker in Zone 1-2, RPE 1-2/10\n"
+                "- Nur bei wirklich lockerem Schritt und ohne Beschwerden auf maximal 8km verlaengern\n"
+                "- Keine Steigerungen und kein Tempodruck\n\nCooldown\n- 5m Gehen"
+            ),
+            "duration_minutes": 50,
+        }
+        with self.assertRaises(server.AppError) as raised:
+            server.save_workout_library_entries([workout])
+        self.assertIn("Zeile 6", str(raised.exception))
+        self.assertEqual(server.list_dated_local_planned_workouts(), [])
+
+    def test_ambiguous_quantity_bullets_require_explicit_steps_or_plain_notes(self):
+        for description in (
+            "- If feeling fresh extend to 8 km",
+            "- Bei Bedarf insgesamt 8,5km laufen",
+            "- Optional another 10min",
+            "- Walk for 5' if needed",
+            "- 6-8km Z1 HR",
+            "- 6km Z1 HR; if fresh extend to 8km",
+            "- 6km-8km Z1 HR",
+            "- Recovery 30s 50%",  # Rewrite valid provider cue-first syntax too.
+        ):
+            with self.subTest(description=description), self.assertRaises(server.AppError):
+                server.validate_workout_description({"type": "Run", "description": description})
+
+    def test_quantity_first_steps_and_plain_optional_totals_are_preserved(self):
+        descriptions = (
+            "Optional bis insgesamt 8km verlaengern.\n\n- 6km Z1 HR\n\nBei Beschwerden auslassen.",
+            "Warmup\n- 1km Z1 HR\n\nMain Set\n- 4km Z1-Z2 HR\n\nCooldown\n- 1km Z1 HR",
+            "Warmup\n- 10m Z2\n\nMain Set 6x\n- 4m 100%\n- 30s 50%\n\n- 5m Z1",
+            "- 1h30m Z2\n- 5' Z1\n- 30\" Z1",
+            "- 500mtr Z2 Pace\n- 1mi Z2 Pace",
+        )
+        for description, minutes in zip(descriptions, (40, 40, 42, 96, 40)):
+            with self.subTest(description=description):
+                workout = server.normalize_workout({
+                    "date": (date.today() + timedelta(days=1)).isoformat(),
+                    "sport": "Run", "description": description, "duration_minutes": minutes,
+                })
+                self.assertEqual(workout["description"], description)
+        server.validate_workout_description({
+            "sport": "WeightTraining", "description": "- Squats 3x8, pause 60s",
+        })
+
+    def test_ambiguous_description_blocks_all_workout_export_paths_before_writes(self):
+        client = server.IntervalsClient()
+        workout = {
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "type": "Run", "description": "- 6km Z1 HR\n- Optional bis insgesamt 8km",
+            "duration_minutes": 40,
+        }
+        with patch.object(client, "get_or_create_workout_folder") as folder, \
+                patch.object(client, "post") as post, patch.object(client, "put") as put:
+            for operation in (
+                lambda: client.create_library_workouts([
+                    {"type": "Run", "description": "- 6km Z1 HR"}, workout,
+                ]),
+                lambda: client.update_library_workout("synthetic", workout),
+                lambda: client.plan_library_workout("synthetic", workout, workout["date"]),
+                lambda: server.workout_event_payload("synthetic", workout),
+            ):
+                with self.assertRaises(server.AppError):
+                    operation()
+            folder.assert_not_called()
+            post.assert_not_called()
+            put.assert_not_called()
+
+    def test_recovery_plain_extension_note_survives_library_and_calendar_export(self):
+        description = "Optional bis insgesamt 8km verlaengern.\n\n- 6km Z1 HR"
+        workout = {
+            "type": "Run", "description": description, "name": "Recovery 6-8km",
+            "duration_minutes": 40, "moving_time": 2400,
+        }
+        client = server.IntervalsClient()
+        with patch.object(client, "get_or_create_workout_folder", return_value=1), \
+                patch.object(client, "post", return_value={"id": "synthetic"}) as post, \
+                patch.object(client, "put", return_value={"id": "synthetic"}) as put:
+            client.create_library_workouts([workout])
+            self.assertEqual(post.call_args.args[1]["description"], description)
+            client.update_library_workout("synthetic", workout)
+            self.assertEqual(put.call_args.args[1]["description"], description)
+            post.return_value = [{"id": "synthetic-event", **parsed_workout_fixture(2400, sport="Run", kind="hr", units="hr_zone", value=1, distance=6000)}]
+            client.plan_library_workout("synthetic", workout, (date.today() + timedelta(days=1)).isoformat())
+            payload = post.call_args.args[1][0]
+            self.assertEqual(payload["description"], description)
+            self.assertEqual(payload["moving_time"], 2400)
+
+    def test_local_template_and_planned_edit_reject_ambiguous_extension(self):
+        with self.assertRaises(server.AppError):
+            server.create_local_library_template({
+                "sport": "Run", "description": "- If fresh extend to 8km", "duration_minutes": 40,
+            })
+        entry = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(),
+            "sport": "Run", "name": "Recovery", "description": "- 6km Z1 HR", "duration_minutes": 40,
+        }])[0]
+        with self.assertRaises(server.AppError):
+            server.update_local_planned_workout(entry["id"], {"description": "- If fresh extend to 8km"})
+        self.assertEqual(server.list_dated_local_planned_workouts()[0]["description"], "- 6km Z1 HR")
+
+    def test_unparsed_library_export_keeps_identity_and_retries_as_update(self):
+        entry = server.create_local_workout_library_entry({
+            "sport": "Ride", "name": "Synthetic", "description": "- 30m 85%", "duration_minutes": 30,
+        })
+        with patch.object(server.IntervalsClient, "get_workout_library", return_value=[]), \
+                patch.object(server.IntervalsClient, "create_library_workouts", return_value=[{"id": "synthetic-remote", "type": "Ride"}]) as create, \
+                patch.object(server.IntervalsClient, "update_library_workout", return_value={"id": "synthetic-remote", **parsed_workout_fixture()}) as update:
+            with self.assertRaises(server.AppError) as raised:
+                server.sync_local_workout_library_entry(entry["id"])
+            self.assertEqual(raised.exception.reason, "intervals_workout_verification_failed")
+            failed = server.list_workout_library()[0]
+            self.assertEqual(failed["sync_status"], "sync_error")
+            self.assertEqual(failed["external_id"], "synthetic-remote")
+            self.assertEqual(failed["description"], "- 30m 85%")
+            synced = server.sync_local_workout_library_entry(entry["id"])
+            self.assertEqual(synced["sync_status"], "synced")
+            create.assert_called_once()
+            self.assertEqual(update.call_args.args[0], "synthetic-remote")
+
+    def test_unparsed_calendar_export_is_not_marked_synced_and_retry_reuses_identity(self):
+        entry = server.save_workout_library_entries([{
+            "date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride",
+            "name": "Synthetic", "description": "- 30m 85%", "duration_minutes": 30,
+        }])[0]
+        with patch.object(server.IntervalsClient, "upsert_calendar_events", side_effect=[
+            [{"id": "synthetic-event", "workout_doc": {"steps": []}}],
+            [{"id": "synthetic-event", **parsed_workout_fixture()}],
+        ]) as upsert:
+            with self.assertRaises(server.AppError):
+                server._sync_local_planned_unit_calendar_entry(entry["id"])
+            failed = server.list_planned_units()[0]
+            self.assertEqual(failed["sync_status"], "sync_error")
+            self.assertEqual(failed["remote_event_id"], "synthetic-event")
+            server._sync_local_planned_unit_calendar_entry(entry["id"])
+            self.assertEqual(server.list_planned_units()[0]["sync_status"], "synced")
+            self.assertEqual(upsert.call_args_list[0].args[0][0]["external_id"], upsert.call_args_list[1].args[0][0]["external_id"])
+
+    def test_invalid_workout_totals_cannot_be_saved_or_partially_applied(self):
+        day = (date.today() + timedelta(days=1)).isoformat()
+        valid = {"date": day, "sport": "Ride", "name": "Synthetic", "description": "- 30m 85%", "duration_minutes": 30}
+        with self.assertRaises(server.AppError):
+            server.save_workout_library_entries([valid, {**valid, "date": (date.today() + timedelta(days=2)).isoformat(), "duration_minutes": 65}])
+        self.assertEqual(server.list_planned_units(), [])
+        entry = server.save_workout_library_entries([valid])[0]
+        with self.assertRaises(server.AppError):
+            server.update_local_planned_workout(entry["id"], {"duration_minutes": 65})
+        self.assertEqual(server.list_planned_units()[0]["duration_minutes"], 30)
 
     def test_missing_library_workout_stays_local_until_approval(self):
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")):
@@ -3692,7 +3857,7 @@ class CoachTests(unittest.TestCase):
         entry = server.create_local_workout_library_entry({
             "sport": "Ride", "name": "Coach Tempo", "description": "- 30m 85%", "duration_minutes": 30,
         })
-        remote = {"id": "remote-recovered", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", "moving_time": 1800}
+        remote = {"id": "remote-recovered", "name": "Coach Tempo", "type": "Ride", "description": "- 30m 85%", **parsed_workout_fixture()}
         with patch.object(server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")), patch.object(
             server.IntervalsClient, "get_workout_library", return_value=[remote]
         ), patch.object(server.IntervalsClient, "create_library_workouts") as create:
@@ -4058,7 +4223,7 @@ class CoachTests(unittest.TestCase):
     def test_library_plan_is_local_only(self):
         server.upsert_workout_library([{
             "id": 44, "name": "Intervall", "type": "Ride",
-            "description": "4x 5m 105%", "moving_time": 2400,
+            "description": "4x\n- 5m 105%\n- 5m 55%", "moving_time": 2400,
         }])
         library = server.list_workout_library()[0]
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -4563,7 +4728,7 @@ class CoachTests(unittest.TestCase):
                 "changes": [
                     {"local_id": upper_body["id"], "action": "update", "date": tuesday},
                     {"action": "create", "date": wednesday, "sport": "Run", "name": "Lockerer Lauf",
-                     "description": "- 30m locker", "duration_minutes": 30, "target": "AUTO", "rationale": "Test"},
+                     "description": "- 30m 60% locker", "duration_minutes": 30, "target": "AUTO", "rationale": "Test"},
                 ],
             })
         self.assertTrue(any(
@@ -4581,7 +4746,7 @@ class CoachTests(unittest.TestCase):
         result = server._apply_structured_training_changes({
             "changes": [{
                 "action": "create", "date": workout_date, "sport": "Run", "name": "Clean Run",
-                "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+                "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
                 "rationale": "Test", "id": "foreign-id", "local_id": None,
                 "external_id": "foreign-external-id", "remote_event_id": "foreign-remote-id",
                 "remote_event_external_id": "foreign-remote-external-id", "archived": True,
@@ -4603,7 +4768,7 @@ class CoachTests(unittest.TestCase):
             server._apply_structured_training_changes({
                 "changes": [{
                     "action": "create", "date": (date.today() + timedelta(days=22)).isoformat(),
-                    "sport": "Run", "name": "Missing rationale", "description": "- 30m easy",
+                    "sport": "Run", "name": "Missing rationale", "description": "- 30m 60% easy",
                     "duration_minutes": 30, "target": "AUTO",
                 }],
             })
@@ -4612,7 +4777,7 @@ class CoachTests(unittest.TestCase):
     def test_structured_training_allows_repeated_updates_for_same_unit(self):
         workout = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=23)).isoformat(), "sport": "Run",
-            "name": "Repeated update", "description": "- 30m easy", "duration_minutes": 30,
+            "name": "Repeated update", "description": "- 30m 60% easy", "duration_minutes": 30,
             "target": "AUTO",
         })
         result = server._apply_structured_training_changes({
@@ -4629,14 +4794,14 @@ class CoachTests(unittest.TestCase):
         moved_date = original_date + timedelta(days=1)
         workout = server.create_local_planned_unit({
             "date": original_date.isoformat(), "sport": "Run", "name": "Move then create",
-            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
         })
         result = server._apply_structured_training_changes({
             "changes": [
                 {"local_id": workout["id"], "action": "update", "name": "Renamed"},
                 {"local_id": workout["id"], "action": "update", "date": moved_date.isoformat()},
                 {"action": "create", "date": original_date.isoformat(), "sport": "Run", "name": "New Wednesday",
-                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
+                 "description": "- 20m 60% easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
             ],
         })
         self.assertEqual(result["status"], "applied")
@@ -4647,14 +4812,14 @@ class CoachTests(unittest.TestCase):
         original_date = date.today() + timedelta(days=26)
         workout = server.create_local_planned_unit({
             "date": original_date.isoformat(), "sport": "Run", "name": "Archive then update",
-            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
         })
         result = server._apply_structured_training_changes({
             "changes": [
                 {"local_id": workout["id"], "action": "archive"},
                 {"local_id": workout["id"], "action": "update", "name": "Still archived"},
                 {"action": "create", "date": original_date.isoformat(), "sport": "Run", "name": "Replacement",
-                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
+                 "description": "- 20m 60% easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
             ],
         })
         self.assertEqual(result["status"], "applied")
@@ -4665,7 +4830,7 @@ class CoachTests(unittest.TestCase):
     def test_structured_training_restore_rechecks_original_calendar_date(self):
         workout = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=25)).isoformat(), "sport": "Run",
-            "name": "Restore conflict", "description": "- 30m easy", "duration_minutes": 30,
+            "name": "Restore conflict", "description": "- 30m 60% easy", "duration_minutes": 30,
             "target": "AUTO",
         })
         server.update_local_planned_workout(workout["id"], {"action": "archive"})
@@ -4686,14 +4851,14 @@ class CoachTests(unittest.TestCase):
             )
         existing = server.create_local_planned_unit({
             "date": "2099-01-01", "sport": "Run", "name": "Existing plan unit",
-            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
             "plan_id": plan_id, "plan_name": plan_name,
         })
         result = server._apply_structured_training_changes({
             "changes": [
                 {"local_id": existing["id"], "action": "update", "name": "Updated"},
                 {"action": "create", "date": "2099-01-02", "sport": "Run", "name": "Added plan unit",
-                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
+                 "description": "- 20m 60% easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
             ],
         })
         created_id = next(item["local_id"] for item in result["changes"] if item["local_id"] != existing["id"])
@@ -4709,14 +4874,14 @@ class CoachTests(unittest.TestCase):
             )
         existing = server.create_local_planned_unit({
             "date": "2099-03-01", "sport": "Run", "name": "Plan reference",
-            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
             "plan_id": plan_id, "plan_name": "Explicit standalone",
         })
         result = server._apply_structured_training_changes({
             "changes": [
                 {"local_id": existing["id"], "action": "update", "name": "Updated"},
                 {"action": "create", "date": "2099-03-02", "sport": "Run", "name": "Standalone walk",
-                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test",
+                 "description": "- 20m 60% easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test",
                  "plan_id": ""},
             ],
         })
@@ -4738,7 +4903,7 @@ class CoachTests(unittest.TestCase):
         result = server._structured_coach_tool_result(
             "apply_training_changes",
             {"changes": [{"action": "create", "date": "2099-04-02", "sport": "Run",
-                          "name": "Plan addition", "description": "- 20m easy", "duration_minutes": 20,
+                          "name": "Plan addition", "description": "- 20m 60% easy", "duration_minutes": 20,
                           "target": "AUTO", "rationale": "Test"}]},
             intent=intent, conversation_id="conversation-plan-create", client_turn_id="turn-plan-create",
             session_csrf_hash="", sync_job_ids=[],
@@ -4753,13 +4918,13 @@ class CoachTests(unittest.TestCase):
                 db, plan_id, "Standalone bounds", "Build", "2099-05-01", "2099-05-31", "planned", server.utc_now(),
             )
         existing = server.create_local_planned_unit({
-            "date": "2099-05-10", "sport": "Run", "name": "Plan unit", "description": "- 30m easy",
+            "date": "2099-05-10", "sport": "Run", "name": "Plan unit", "description": "- 30m 60% easy",
             "duration_minutes": 30, "target": "AUTO", "plan_id": plan_id, "plan_name": "Standalone bounds",
         })
         server._apply_structured_training_changes({"changes": [
             {"local_id": existing["id"], "action": "update", "name": "Renamed plan unit"},
             {"action": "create", "date": "2099-06-10", "sport": "Run", "name": "Standalone",
-             "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test",
+             "description": "- 20m 60% easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test",
              "plan_id": ""},
         ]})
         with server.DB_LOCK, server.database() as db:
@@ -4776,7 +4941,7 @@ class CoachTests(unittest.TestCase):
         units = [
             server.create_local_planned_unit({
                 "date": f"2099-06-{10 + index:02d}", "sport": "Run", "name": f"Plan {index}",
-                "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+                "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
                 "plan_id": plan_id, "plan_name": f"Mixed {index}",
             })
             for index, plan_id in enumerate(plan_ids)
@@ -4799,14 +4964,14 @@ class CoachTests(unittest.TestCase):
             )
         planned = server.create_local_planned_unit({
             "date": "2099-02-01", "sport": "Run", "name": "Planned reference",
-            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
             "plan_id": plan_id, "plan_name": "Membership Boundary",
         })
         replacement = server._apply_structured_training_changes({
             "changes": [
                 {"local_id": planned["id"], "action": "archive"},
                 {"action": "create", "date": "2099-02-02", "sport": "Run", "name": "Plan replacement",
-                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
+                 "description": "- 20m 60% easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
             ],
         })
         replacement_id = next(item["local_id"] for item in replacement["changes"] if item["local_id"] != planned["id"])
@@ -4815,14 +4980,14 @@ class CoachTests(unittest.TestCase):
 
         standalone = server.create_local_planned_unit({
             "date": "2099-02-03", "sport": "Run", "name": "Standalone reference",
-            "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO",
+            "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO",
         })
         mixed = server._apply_structured_training_changes({
             "changes": [
                 {"local_id": replacement_id, "action": "update", "name": "Plan update"},
                 {"local_id": standalone["id"], "action": "update", "name": "Standalone update"},
                 {"action": "create", "date": "2099-02-04", "sport": "Run", "name": "Ambiguous membership",
-                 "description": "- 20m easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
+                 "description": "- 20m 60% easy", "duration_minutes": 20, "target": "AUTO", "rationale": "Test"},
             ],
         })
         mixed_id = next(item["local_id"] for item in mixed["changes"] if item["local_id"] not in {replacement_id, standalone["id"]})
@@ -4932,7 +5097,7 @@ class CoachTests(unittest.TestCase):
             "icu_intensity": 0.92,
             "status": "planned",
             "sync_status": "local",
-            "description": "private provider detail " + "x" * 20_000,
+            "description": "- 60m 92%\n\nprivate provider detail " + "x" * 20_000,
             "athlete_detail": "must not be projected",
         }
         server.create_local_planned_unit({**event, "sport": event["type"]})
@@ -4948,7 +5113,7 @@ class CoachTests(unittest.TestCase):
             "date": (today + timedelta(days=1)).isoformat(),
             "sport": "Ride",
             "name": "Local plan fixture",
-            "description": "long description " + "x" * 20_000,
+            "description": "- 60m 60%\n\nlong description " + "x" * 20_000,
             "duration_minutes": 60,
             "target": "easy",
             "source": "coach",
@@ -5095,7 +5260,7 @@ class CoachTests(unittest.TestCase):
     def test_complete_plan_replace_can_create_more_sessions_and_archive_old_ones(self):
         old = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Ride", "name": "Old", "description": "- 30m easy",
+            "sport": "Ride", "name": "Old", "description": "- 30m 60% easy",
         })
         state = server._structured_training_state()
         intent = {
@@ -5108,8 +5273,8 @@ class CoachTests(unittest.TestCase):
             {
                 "expected_revision": state["planning_revision"],
                 "payload": {"plan_name": "Replacement", "goal": "Base", "workouts": [
-                    {"date": (date.today() + timedelta(days=2)).isoformat(), "sport": "Ride", "name": "New 1", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Base"},
-                    {"date": (date.today() + timedelta(days=3)).isoformat(), "sport": "Run", "name": "New 2", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Base"},
+                    {"date": (date.today() + timedelta(days=2)).isoformat(), "sport": "Ride", "name": "New 1", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Base"},
+                    {"date": (date.today() + timedelta(days=3)).isoformat(), "sport": "Run", "name": "New 2", "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Base"},
                 ]},
             },
             intent=intent, conversation_id="conversation-replace", client_turn_id="turn-replace",
@@ -5126,7 +5291,7 @@ class CoachTests(unittest.TestCase):
     def test_complete_plan_replace_ignores_archived_units_in_date_conflicts(self):
         archived = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=2)).isoformat(),
-            "sport": "Ride", "name": "Archived", "description": "- 30m easy",
+            "sport": "Ride", "name": "Archived", "description": "- 30m 60% easy",
         })
         with server.DB_LOCK, server.database() as db:
             row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (archived["id"],)).fetchone()
@@ -5142,7 +5307,7 @@ class CoachTests(unittest.TestCase):
         result = server._structured_coach_tool_result(
             "replace_training_plan",
             {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Replacement", "goal": "", "workouts": [
-                {"date": archived["date"], "sport": "Ride", "name": "New", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+                {"date": archived["date"], "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
             ]}},
             intent=intent, conversation_id="conversation-archived", client_turn_id="turn-archived",
             session_csrf_hash="", sync_job_ids=[],
@@ -5153,7 +5318,7 @@ class CoachTests(unittest.TestCase):
     def test_training_plan_metadata_changes_advance_planning_revision(self):
         plan_entry = server.save_workout_library_entries([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Ride", "name": "Metadata", "description": "- 30m easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
+            "sport": "Ride", "name": "Metadata", "description": "- 30m 60% easy", "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
         }], plan_name="Metadata Plan")[0]
         plan = next(item for item in server.list_training_plans() if item["id"] == plan_entry["plan_id"])
         before = server._structured_training_state()["planning_revision"]
@@ -5163,7 +5328,7 @@ class CoachTests(unittest.TestCase):
     def test_training_plan_metadata_undo_advances_planning_revision(self):
         plan_entry = server.save_workout_library_entries([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Ride", "name": "Metadata", "description": "- 30m easy",
+            "sport": "Ride", "name": "Metadata", "description": "- 30m 60% easy",
             "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
         }], plan_name="Metadata Plan")[0]
         plan = next(item for item in server.list_training_plans() if item["id"] == plan_entry["plan_id"])
@@ -5191,7 +5356,7 @@ class CoachTests(unittest.TestCase):
     def test_complete_plan_replacement_rejects_oversized_history_atomically(self):
         old = server.save_workout_library_entries([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Ride", "name": "Old", "description": "- 30m easy",
+            "sport": "Ride", "name": "Old", "description": "- 30m 60% easy",
             "duration_minutes": 30, "target": "AUTO", "rationale": "Test",
         }], plan_name="Old Plan")[0]
         old_plan = next(plan for plan in server.list_training_plans() if plan["id"] == old["plan_id"])
@@ -5202,7 +5367,7 @@ class CoachTests(unittest.TestCase):
                 "expected_revision": state["planning_revision"],
                 "payload": {"plan_name": "Replacement", "goal": "", "workouts": [{
                     "date": (date.today() + timedelta(days=2)).isoformat(),
-                    "sport": "Ride", "name": "New", "description": "- 40m easy",
+                    "sport": "Ride", "name": "New", "description": "- 40m 60% easy",
                     "duration_minutes": 40, "target": "AUTO", "rationale": "Test",
                 }]},
             })
@@ -5227,7 +5392,7 @@ class CoachTests(unittest.TestCase):
         result = server._structured_coach_tool_result(
             "replace_training_plan",
             {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Past Plan", "goal": "", "workouts": [
-                {"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "New", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+                {"date": (date.today() + timedelta(days=1)).isoformat(), "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
             ]}},
             intent=intent, conversation_id="conversation-past-plan", client_turn_id="turn-past-plan",
             session_csrf_hash="", sync_job_ids=[],
@@ -5249,7 +5414,7 @@ class CoachTests(unittest.TestCase):
             "expected_revision": state["planning_revision"],
             "payload": {"plan_name": "Replacement", "goal": "", "workouts": [{
                 "date": (date.today() + timedelta(days=2)).isoformat(),
-                "sport": "Ride", "name": "New", "description": "- 40m easy",
+                "sport": "Ride", "name": "New", "description": "- 40m 60% easy",
                 "duration_minutes": 40, "target": "AUTO", "rationale": "Test",
             }]},
         })
@@ -5277,7 +5442,7 @@ class CoachTests(unittest.TestCase):
             "expected_revision": state["planning_revision"],
             "payload": {"plan_name": "Coach replacement", "goal": "", "workouts": [{
                 "date": (date.today() + timedelta(days=1)).isoformat(),
-                "sport": "Ride", "name": "New", "description": "- 40m easy",
+                "sport": "Ride", "name": "New", "description": "- 40m 60% easy",
                 "duration_minutes": 40, "target": "AUTO", "rationale": "Test",
             }]},
         })
@@ -5290,7 +5455,7 @@ class CoachTests(unittest.TestCase):
         old = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "start_date_local": (date.today() + timedelta(days=1)).isoformat() + "T07:30:00",
-            "sport": "Ride", "name": "Old", "description": "- 30m easy",
+            "sport": "Ride", "name": "Old", "description": "- 30m 60% easy",
         })
         state = server._structured_training_state()
         intent = {
@@ -5301,7 +5466,7 @@ class CoachTests(unittest.TestCase):
         server._structured_coach_tool_result(
             "replace_training_plan",
             {"expected_revision": state["planning_revision"], "payload": {"plan_name": "Conflict Replacement", "goal": "", "workouts": [
-                {"date": old["date"], "sport": "Ride", "name": "New", "description": "- 40m easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
+                {"date": old["date"], "sport": "Ride", "name": "New", "description": "- 40m 60% easy", "duration_minutes": 40, "target": "AUTO", "rationale": "Test"},
             ]}},
             intent=intent, conversation_id="conversation-undo-conflict", client_turn_id="turn-undo-conflict",
             session_csrf_hash="", sync_job_ids=[],
@@ -5319,7 +5484,7 @@ class CoachTests(unittest.TestCase):
         for index in range(server.COACH_TRAINING_CHANGE_LIMIT):
             server.create_local_planned_unit({
                 "date": (date(2098, 1, 1) + timedelta(days=index)).isoformat(),
-                "sport": "Ride", "name": f"Session {index}", "description": "- 30m easy",
+                "sport": "Ride", "name": f"Session {index}", "description": "- 30m 60% easy",
             })
         intent = {"intent": "local_action", "operation": "read_training_state", "target_system": "local", "authorization_scope": []}
         state = server._structured_coach_tool_result(
@@ -5337,12 +5502,12 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "COACH_TRAINING_CHANGE_LIMIT", 2):
             archived = server.create_local_planned_unit({
                 "date": (date.today() + timedelta(days=1)).isoformat(),
-                "sport": "Ride", "name": "Archived", "description": "- 30m easy",
+                "sport": "Ride", "name": "Archived", "description": "- 30m 60% easy",
             })
             server.update_local_planned_workout(archived["id"], {"action": "archive"})
             active = [server.create_local_planned_unit({
                 "date": (date.today() + timedelta(days=index)).isoformat(),
-                "sport": "Ride", "name": f"Active {index}", "description": "- 30m easy",
+                "sport": "Ride", "name": f"Active {index}", "description": "- 30m 60% easy",
             }) for index in (2, 3)]
             state = server._structured_training_state()
         self.assertEqual([item["local_id"] for item in state["planned_units"]], [item["id"] for item in active])
@@ -5350,7 +5515,7 @@ class CoachTests(unittest.TestCase):
     def test_bulk_training_changes_require_revision_and_hashes(self):
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
-            "sport": "Ride", "name": "Bulk target", "description": "- 30m easy",
+            "sport": "Ride", "name": "Bulk target", "description": "- 30m 60% easy",
         })
         intent = {
             "intent": "local_action", "operation": "apply_training_changes", "target_system": "local",
@@ -5368,10 +5533,10 @@ class CoachTests(unittest.TestCase):
         first_date = date.today() + timedelta(days=1)
         second_date = date.today() + timedelta(days=2)
         first = server.create_local_planned_unit({
-            "date": first_date.isoformat(), "sport": "Ride", "name": "First", "description": "- 30m easy",
+            "date": first_date.isoformat(), "sport": "Ride", "name": "First", "description": "- 30m 60% easy",
         })
         second = server.create_local_planned_unit({
-            "date": second_date.isoformat(), "sport": "Ride", "name": "Second", "description": "- 30m easy",
+            "date": second_date.isoformat(), "sport": "Ride", "name": "Second", "description": "- 30m 60% easy",
         })
         state = server._structured_training_state()
         refs = {item["local_id"]: item for item in state["planned_units"]}
@@ -5657,7 +5822,7 @@ class CoachTests(unittest.TestCase):
             "id": "remote-template-1",
             "name": "Remote Vorlage",
             "type": "Run",
-            "description": "- 30m locker",
+            "description": "- 30m 60% locker",
             "moving_time": 1800,
         }]
         config = replace(server.CONFIG, intervals_api_key="test-key")
@@ -5741,7 +5906,7 @@ class CoachTests(unittest.TestCase):
         local = server.create_local_workout_library_entry({
             "sport": "Ride",
             "name": "Lokale Vorlage",
-            "description": "- 20m locker",
+            "description": "- 20m 60% locker", "duration_minutes": 20,
         })
         snapshot = {"synced_at": "now", "athlete": {}, "recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
         config = replace(server.CONFIG, intervals_api_key="test-key")
@@ -5796,14 +5961,14 @@ class CoachTests(unittest.TestCase):
             "id": "remote-template-1",
             "name": "Locker Lauf",
             "type": "Run",
-            "description": "- 30m locker",
+            "description": "- 30m 60% Pace locker",
             "moving_time": 1800,
         }])[0]
         planned = server.save_workout_library_entries([{
             "date": (date.today() + timedelta(days=1)).isoformat(),
             "sport": "Run",
             "name": "Locker Lauf",
-            "description": "- 30m locker",
+            "description": "- 30m 60% Pace locker",
             "duration_minutes": 30,
             "target": "PACE",
             "rationale": "Grundlage",
@@ -5978,7 +6143,7 @@ class CoachTests(unittest.TestCase):
     def test_local_sync_error_and_remote_missing_entries_are_not_retried_by_read_sync(self):
         recorder = IntervalsRequestRecorder()
         entries = [
-            server.create_local_workout_library_entry({"sport": "Ride", "name": state, "description": "- 20m Z2"})
+            server.create_local_workout_library_entry({"sport": "Ride", "name": state, "description": "- 20m Z2", "duration_minutes": 20})
             for state in ("local", "sync_error", "remote_missing")
         ]
         for entry, state in zip(entries[1:], ("sync_error", "remote_missing")):
@@ -7117,20 +7282,31 @@ class CoachTests(unittest.TestCase):
     def test_sync_intervals_waits_for_active_sync_and_uses_its_new_snapshot(self):
         server.set_kv("last_sync_at", "old-sync")
         server.SYNC_LOCK.acquire()
+        previous_snapshot_read = threading.Event()
+        original_get_kv = server.get_kv
+
+        def get_kv_after_read(key, *args, **kwargs):
+            value = original_get_kv(key, *args, **kwargs)
+            if key == "last_sync_at":
+                previous_snapshot_read.set()
+            return value
 
         def finish_active_sync():
-            time.sleep(0.1)
+            if not previous_snapshot_read.wait(2):
+                server.SYNC_LOCK.release()
+                return
             server.set_kv("last_sync_at", "new-sync")
             server.SYNC_LOCK.release()
 
         worker = threading.Thread(target=finish_active_sync)
         worker.start()
         try:
-            result = server.sync_intervals(
-                "latest activity test",
-                activity_days=7,
-                wait_for_existing=True,
-            )
+            with patch.object(server, "get_kv", side_effect=get_kv_after_read):
+                result = server.sync_intervals(
+                    "latest activity test",
+                    activity_days=7,
+                    wait_for_existing=True,
+                )
         finally:
             worker.join(timeout=2)
             if server.SYNC_LOCK.locked():
@@ -7959,7 +8135,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(replay.exception.status, 409)
 
     def test_deleted_local_library_entry_can_be_undone_without_provider_write(self):
-        entry = server.create_local_workout_library_entry({"name": "Easy", "sport": "Ride", "duration_minutes": 30})
+        entry = server.create_local_workout_library_entry({"name": "Easy", "sport": "Ride", "duration_minutes": 30, "description": "- 30m 60%"})
         created = next(item for item in server.list_change_history() if item["entity_id"] == entry["id"] and item["action"] == "create")
         preview = server._history_preview(created["id"], "session-csrf-hash")
         confirmed = server.confirm_coach_action_preview(preview["proposed_action"]["id"], "session-csrf-hash")
@@ -8046,7 +8222,7 @@ class CoachTests(unittest.TestCase):
 
     def test_selected_library_sync_is_exact_and_reports_per_object(self):
         first = server.create_local_workout_library_entry({"sport": "Ride", "name": "Remote eins", "description": "- 30m Z2", "duration_minutes": 30})
-        second = server.create_local_workout_library_entry({"sport": "Run", "name": "Remote zwei", "description": "- 20m Easy", "duration_minutes": 20})
+        second = server.create_local_workout_library_entry({"sport": "Run", "name": "Remote zwei", "description": "- 20m 60% Easy", "duration_minutes": 20})
         config = replace(server.CONFIG, intervals_api_key="fake-intervals-key")
         with patch.object(server, "CONFIG", config), patch.object(
             server, "sync_local_workout_library_entry",
