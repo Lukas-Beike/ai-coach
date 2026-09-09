@@ -16293,9 +16293,13 @@ def run_morning_checkin(checkin_date: str) -> None:
                 LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
             if not garmin_sleep_ready_for_checkin(date.fromisoformat(checkin_date)):
                 set_kv("morning_checkin_status", "waiting")
-                set_kv("morning_checkin_attempt_count", "0")
+                if not get_kv("morning_checkin_attempt_count"):
+                    set_kv("morning_checkin_attempt_count", "0")
                 publish_state_event("coach", {"status": "changed"})
                 return
+        attempt = int(get_kv("morning_checkin_attempt_count") or 0) + 1
+        set_kv("morning_checkin_attempt_count", str(attempt))
+        if garmin_configured:
             refresh_morning_body_battery(date.fromisoformat(checkin_date))
         sync_result = sync_intervals(
             "Morgen-Check-in",
@@ -16306,7 +16310,6 @@ def run_morning_checkin(checkin_date: str) -> None:
             deadline = time.monotonic() + 120
             while get_kv("sync_running") == "1" and time.monotonic() < deadline:
                 time.sleep(1)
-        attempt = int(get_kv("morning_checkin_attempt_count") or 1)
         result = chat_with_coach(
             MORNING_CHECKIN_PROMPT,
             allow_mutations=False,
@@ -16353,7 +16356,6 @@ def schedule_morning_checkin() -> None:
                 return
             set_kv("morning_checkin_attempted", checkin_date, db)
             set_kv("morning_checkin_attempted_at", utc_now(), db)
-            set_kv("morning_checkin_attempt_count", str(attempts + 1), db)
     except Exception:
         MORNING_CHECKIN_LOCK.release()
         raise
