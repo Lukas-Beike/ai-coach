@@ -5,14 +5,14 @@ import json
 import math
 import xml.etree.ElementTree as ET
 
-MAX_FILE_BYTES = 2_000_000
+MAX_FILE_BYTES = 5_000_000
 MAX_FILES = 4
-MAX_REQUEST_BYTES = 11_000_000
+MAX_REQUEST_BYTES = 28_000_000
 # Keep encrypted database backups usable even when many turns contain images.
 # This leaves headroom below the application's 100 MB backup limit.
 # Keep room for provider conversation copies and SQLite page overhead inside
 # the existing 100 MB encrypted-backup limit.
-MAX_ATTACHMENT_STORAGE_BYTES = 20_000_000
+MAX_ATTACHMENT_STORAGE_BYTES = 40_000_000
 
 
 def gpx_summary(data):

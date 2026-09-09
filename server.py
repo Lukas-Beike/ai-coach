@@ -13651,7 +13651,7 @@ def enqueue_background_coach_job(
     try:
         attachments = validate_attachments(attachments)
     except ValueError:
-        raise AppError(400, "Ungültiger Anhang. Erlaubt: bis zu 4 GPX-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 2 MB.", reason="invalid_attachment") from None
+        raise AppError(400, "Ungültiger Anhang. Erlaubt: bis zu 4 GPX-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 5 MB.", reason="invalid_attachment") from None
     if attachments and not message:
         message = "Bitte analysiere die angehängten Dateien."
     scope = coach_execution_scope()

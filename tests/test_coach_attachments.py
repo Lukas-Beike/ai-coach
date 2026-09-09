@@ -27,7 +27,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                    self.upload(b'<gpx><rte><rtept lat="nan" lon="0"/></rte></gpx>'),
                    self.upload(b'<gpx/>'), self.upload(b'garbage', 'fake.png'),
                    self.upload(name='../route.gpx'), {"name": "x.gpx", "data": "%%%"},
-                   self.upload(b'x' * 2_000_001)]
+                   self.upload(b'x' * 5_000_001)]
         for item in invalid:
             with self.assertRaises(ValueError):
                 validate_attachments([item])
