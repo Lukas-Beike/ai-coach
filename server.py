@@ -3863,12 +3863,55 @@ def load_garmin_fixture(days: int) -> dict[str, Any]:
     today = local_now().date()
     start = SYNC_EARLIEST_DATE if days == ALL_SYNC_DAYS else today - timedelta(days=max(1, min(days, 90)) - 1)
     payload = dict(value)
+    payload["sleep"] = _normalize_fixture_sleep_dates(payload.get("sleep"), today)
     payload.setdefault("start", start.isoformat())
     payload.setdefault("end", today.isoformat())
     payload["synced_at"] = utc_now()
     payload.setdefault("errors", [])
     payload["source"] = "fixture"
     return payload
+
+
+def _normalize_fixture_sleep_dates(value: Any, today: date) -> Any:
+    """Make the latest static sleep record represent the simulated current night."""
+    fixture_dates = _fixture_sleep_dates(value)
+    if not fixture_dates:
+        return value
+    shift = today - max(fixture_dates)
+    return _shift_fixture_sleep_dates(value, shift)
+
+
+def _fixture_sleep_dates(value: Any) -> list[date]:
+    dates: list[date] = []
+    if isinstance(value, list):
+        for item in value:
+            dates.extend(_fixture_sleep_dates(item))
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if key in ("calendarDate", "summaryDate") and isinstance(item, str):
+                try:
+                    dates.append(date.fromisoformat(item[:10]))
+                except ValueError:
+                    pass
+            elif isinstance(item, (dict, list)):
+                dates.extend(_fixture_sleep_dates(item))
+    return dates
+
+
+def _shift_fixture_sleep_dates(value: Any, shift: timedelta) -> Any:
+    if isinstance(value, list):
+        return [_shift_fixture_sleep_dates(item, shift) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized = {key: _shift_fixture_sleep_dates(item, shift) for key, item in value.items()}
+    for key in ("calendarDate", "summaryDate"):
+        raw = normalized.get(key)
+        if isinstance(raw, str):
+            try:
+                normalized[key] = (date.fromisoformat(raw[:10]) + shift).isoformat()
+            except ValueError:
+                continue
+    return normalized
 
 
 def persist_garmin_error(message: Any, source: str = "sync") -> None:
@@ -3981,6 +4024,28 @@ def merge_garmin_sources(payload: dict[str, Any], previous: dict[str, Any]) -> N
         payload["morning_body_battery"] = previous["morning_body_battery"]
     if previous.get("start") and payload.get("start"):
         payload["start"] = min(str(previous["start"]), str(payload["start"]))
+
+
+def garmin_sleep_observation_date(snapshot: dict[str, Any] | None = None) -> str | None:
+    """Return the latest date represented by the persisted Garmin sleep data."""
+    snapshot = snapshot if isinstance(snapshot, dict) else garmin_snapshot()
+    freshness = snapshot.get("source_freshness")
+    if isinstance(freshness, dict):
+        sleep_freshness = freshness.get("sleep")
+        if isinstance(sleep_freshness, dict) and sleep_freshness.get("observed_at"):
+            return str(sleep_freshness["observed_at"])[:10]
+    return garmin_source_observed_at(snapshot.get("sleep"))
+
+
+def garmin_sleep_ready_for_checkin(checkin_date: date, snapshot: dict[str, Any] | None = None) -> bool:
+    """Only allow the morning check-in after Garmin has the current night's sleep."""
+    snapshot = snapshot if isinstance(snapshot, dict) else garmin_snapshot()
+    if garmin_sleep_observation_date(snapshot) != checkin_date.isoformat():
+        return False
+    freshness = snapshot.get("source_freshness")
+    if not isinstance(freshness, dict) or not isinstance(freshness.get("sleep"), dict):
+        return True
+    return freshness["sleep"].get("freshness") in {"current", "partial"}
 
 
 def _garmin_error_entries() -> list[dict[str, Any]]:
@@ -16231,6 +16296,7 @@ MORNING_CHECKIN_PROMPT = (
     "eine vorsichtige Prognose für die notwendige Sportpause in ganzen Tagen als Vorschlag aus und stelle klar, "
     "dass der Athlet sie bestätigen muss."
 )
+MORNING_GARMIN_SYNC_DAYS = 2
 
 
 @maintenance_operation
@@ -16240,11 +16306,21 @@ def run_morning_checkin(checkin_date: str) -> None:
         set_kv("morning_checkin_status", "working")
         set_kv("morning_checkin_error", "")
         publish_state_event("coach", {"status": "changed"})
-        if garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())):
+        garmin_configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
+        if garmin_configured:
             try:
-                sync_garmin(days=sync_period("garmin"), reason="Morgen-Check-in", wait_for_existing=True)
+                sync_garmin(days=MORNING_GARMIN_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
             except Exception:
                 LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
+            if not garmin_sleep_ready_for_checkin(date.fromisoformat(checkin_date)):
+                set_kv("morning_checkin_status", "waiting")
+                if not get_kv("morning_checkin_attempt_count"):
+                    set_kv("morning_checkin_attempt_count", "0")
+                publish_state_event("coach", {"status": "changed"})
+                return
+        attempt = int(get_kv("morning_checkin_attempt_count") or 0) + 1
+        set_kv("morning_checkin_attempt_count", str(attempt))
+        if garmin_configured:
             refresh_morning_body_battery(date.fromisoformat(checkin_date))
         sync_result = sync_intervals(
             "Morgen-Check-in",
@@ -16255,7 +16331,6 @@ def run_morning_checkin(checkin_date: str) -> None:
             deadline = time.monotonic() + 120
             while get_kv("sync_running") == "1" and time.monotonic() < deadline:
                 time.sleep(1)
-        attempt = int(get_kv("morning_checkin_attempt_count") or 1)
         result = chat_with_coach(
             MORNING_CHECKIN_PROMPT,
             allow_mutations=False,
@@ -16300,9 +16375,10 @@ def schedule_morning_checkin() -> None:
             if attempts >= MORNING_MAX_ATTEMPTS or (last_attempt and (datetime.now(timezone.utc) - last_attempt).total_seconds() < MORNING_RETRY_SECONDS):
                 MORNING_CHECKIN_LOCK.release()
                 return
+            if not same_day:
+                set_kv("morning_checkin_attempt_count", "0", db)
             set_kv("morning_checkin_attempted", checkin_date, db)
             set_kv("morning_checkin_attempted_at", utc_now(), db)
-            set_kv("morning_checkin_attempt_count", str(attempts + 1), db)
     except Exception:
         MORNING_CHECKIN_LOCK.release()
         raise
