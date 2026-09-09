@@ -16354,6 +16354,8 @@ def schedule_morning_checkin() -> None:
             if attempts >= MORNING_MAX_ATTEMPTS or (last_attempt and (datetime.now(timezone.utc) - last_attempt).total_seconds() < MORNING_RETRY_SECONDS):
                 MORNING_CHECKIN_LOCK.release()
                 return
+            if not same_day:
+                set_kv("morning_checkin_attempt_count", "0", db)
             set_kv("morning_checkin_attempted", checkin_date, db)
             set_kv("morning_checkin_attempted_at", utc_now(), db)
     except Exception:

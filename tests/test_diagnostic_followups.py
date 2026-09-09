@@ -144,6 +144,17 @@ class DiagnosticFollowupTests(unittest.TestCase):
 
         self.assertEqual(chat.call_args.kwargs["client_turn_id"], f"morning:{day.isoformat()}:attempt:2")
 
+    def test_morning_attempt_count_resets_on_a_new_day(self):
+        server.set_kv("morning_checkin_attempted", "2026-09-06")
+        server.set_kv("morning_checkin_attempt_count", "3")
+        server.set_kv("morning_checkin_attempted_at", (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat())
+        with patch.object(server.threading, "Thread") as thread:
+            server.schedule_morning_checkin()
+        thread.assert_called_once()
+        self.assertEqual(server.get_kv("morning_checkin_attempt_count"), "0")
+        self.assertEqual(server.get_kv("morning_checkin_attempted"), "2026-09-07")
+        server.MORNING_CHECKIN_LOCK.release()
+
     def test_static_garmin_fixture_sleep_is_normalized_to_simulated_today(self):
         with tempfile.TemporaryDirectory() as temp_root:
             fixture = Path(temp_root) / "garmin.json"
