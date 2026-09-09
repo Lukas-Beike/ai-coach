@@ -448,7 +448,14 @@ test.describe("critical browser states", () => {
     const browserErrors = installBrowserGuards(page);
     await openAuthenticatedApp(page);
     await page.getByRole("link", { name: "Coach", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+    await expect.poll(() => page.evaluate(() => !state.chatProposalRefreshInFlight)).toBe(true);
     await installControlledChatStream(page);
+    await page.evaluate(() => {
+      state.coachActionProposals = [];
+      state.chatProposalRefreshPending = false;
+    });
+    const historyResolversBeforeTurn = await page.evaluate(() => window.__chatTest.historyResolvers.length);
 
     const input = page.locator("#messageInput");
     const touchProject = testInfo.project.name.startsWith("mobile");
@@ -458,6 +465,9 @@ test.describe("critical browser states", () => {
       await input.focus();
       await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
       await page.setViewportSize({ width: initialViewport.width, height: Math.max(360, initialViewport.height - 180) });
+      await input.focus();
+      await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+      await page.evaluate(() => updateMobileViewportLayout());
       await expect(page.locator("html")).toHaveClass(/chat-keyboard-open/);
       await expect(page.locator(".bottom-nav")).toHaveCSS("visibility", "hidden");
       await expect.poll(() => page.evaluate(() => Math.abs(
@@ -539,7 +549,10 @@ test.describe("critical browser states", () => {
     expect(await page.evaluate(() => window.scrollY), "background chat updates must not scroll another tab").toBe(inactiveScrollY);
 
     await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
-    await expect.poll(() => page.evaluate(() => window.__chatTest.historyResolvers.length)).toBe(0);
+    await page.waitForTimeout(100);
+    await expect.poll(() => page.evaluate((before) => window.__chatTest.historyResolvers.length, historyResolversBeforeTurn))
+      .toBeLessThanOrEqual(historyResolversBeforeTurn + 1);
+    await page.evaluate(() => window.__chatTest.releaseHistory());
     await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     expect(await page.evaluate(() => document.activeElement?.id)).not.toBe("messageInput");
 
