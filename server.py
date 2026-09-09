@@ -3983,6 +3983,28 @@ def merge_garmin_sources(payload: dict[str, Any], previous: dict[str, Any]) -> N
         payload["start"] = min(str(previous["start"]), str(payload["start"]))
 
 
+def garmin_sleep_observation_date(snapshot: dict[str, Any] | None = None) -> str | None:
+    """Return the latest date represented by the persisted Garmin sleep data."""
+    snapshot = snapshot if isinstance(snapshot, dict) else garmin_snapshot()
+    freshness = snapshot.get("source_freshness")
+    if isinstance(freshness, dict):
+        sleep_freshness = freshness.get("sleep")
+        if isinstance(sleep_freshness, dict) and sleep_freshness.get("observed_at"):
+            return str(sleep_freshness["observed_at"])[:10]
+    return garmin_source_observed_at(snapshot.get("sleep"))
+
+
+def garmin_sleep_ready_for_checkin(checkin_date: date, snapshot: dict[str, Any] | None = None) -> bool:
+    """Only allow the morning check-in after Garmin has the current night's sleep."""
+    snapshot = snapshot if isinstance(snapshot, dict) else garmin_snapshot()
+    if garmin_sleep_observation_date(snapshot) != checkin_date.isoformat():
+        return False
+    freshness = snapshot.get("source_freshness")
+    if not isinstance(freshness, dict) or not isinstance(freshness.get("sleep"), dict):
+        return True
+    return freshness["sleep"].get("freshness") in {"current", "partial"}
+
+
 def _garmin_error_entries() -> list[dict[str, Any]]:
     try:
         errors = json.loads(get_kv("last_garmin_error") or "[]")
@@ -16240,11 +16262,17 @@ def run_morning_checkin(checkin_date: str) -> None:
         set_kv("morning_checkin_status", "working")
         set_kv("morning_checkin_error", "")
         publish_state_event("coach", {"status": "changed"})
-        if garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())):
+        garmin_configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
+        if garmin_configured:
             try:
                 sync_garmin(days=sync_period("garmin"), reason="Morgen-Check-in", wait_for_existing=True)
             except Exception:
                 LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
+            if not garmin_sleep_ready_for_checkin(date.fromisoformat(checkin_date)):
+                set_kv("morning_checkin_status", "waiting")
+                set_kv("morning_checkin_attempt_count", "0")
+                publish_state_event("coach", {"status": "changed"})
+                return
             refresh_morning_body_battery(date.fromisoformat(checkin_date))
         sync_result = sync_intervals(
             "Morgen-Check-in",

@@ -1,6 +1,7 @@
 """Synthetic regressions for the September diagnostic findings."""
 import json
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -59,6 +60,50 @@ class DiagnosticFollowupTests(unittest.TestCase):
             server.schedule_morning_checkin()
             thread.assert_not_called()
         self.assertFalse(server.MORNING_CHECKIN_LOCK.locked())
+
+    def test_morning_waits_for_current_garmin_sleep_before_using_any_snapshot(self):
+        day = server.local_now().date()
+        server.set_kv("garmin_snapshot", json.dumps({
+            "sleep": [{"calendarDate": (day - timedelta(days=1)).isoformat(), "sleepScore": 80}],
+            "source_freshness": {"sleep": {"freshness": "current", "observed_at": (day - timedelta(days=1)).isoformat()}},
+        }))
+        config = replace(server.CONFIG, garmin_email="athlete@example.invalid")
+        with patch.object(server, "CONFIG", config), \
+                patch.object(server, "garmin_fixture_path", return_value=Path("synthetic.json")), \
+                patch.object(server, "sync_garmin", return_value={"status": "ok"}) as sync, \
+                patch.object(server, "sync_intervals") as intervals, \
+                patch.object(server, "refresh_morning_body_battery") as recovery, \
+                patch.object(server, "chat_with_coach") as chat:
+            server.MORNING_CHECKIN_LOCK.acquire()
+            server.run_morning_checkin(day.isoformat())
+
+        sync.assert_called_once()
+        intervals.assert_not_called()
+        recovery.assert_not_called()
+        chat.assert_not_called()
+        self.assertEqual(server.get_kv("morning_checkin_status"), "waiting")
+        self.assertEqual(server.get_kv("morning_checkin_attempt_count"), "0")
+        self.assertNotEqual(server.get_kv("morning_checkin_date"), day.isoformat())
+
+    def test_morning_runs_after_garmin_sleep_for_today_is_available(self):
+        day = server.local_now().date()
+        server.set_kv("garmin_snapshot", json.dumps({
+            "sleep": [{"calendarDate": day.isoformat(), "sleepScore": 88}],
+            "source_freshness": {"sleep": {"freshness": "current", "observed_at": day.isoformat()}},
+        }))
+        config = replace(server.CONFIG, garmin_email="athlete@example.invalid")
+        with patch.object(server, "CONFIG", config), \
+                patch.object(server, "garmin_fixture_path", return_value=Path("synthetic.json")), \
+                patch.object(server, "sync_garmin", return_value={"status": "ok"}), \
+                patch.object(server, "sync_intervals", return_value={"status": "ok"}), \
+                patch.object(server, "refresh_morning_body_battery"), \
+                patch.object(server, "chat_with_coach", return_value={"status": "completed", "message": {"id": "morning"}}) as chat:
+            server.MORNING_CHECKIN_LOCK.acquire()
+            server.run_morning_checkin(day.isoformat())
+
+        chat.assert_called_once()
+        self.assertEqual(server.get_kv("morning_checkin_status"), "ready")
+        self.assertEqual(server.get_kv("morning_checkin_date"), day.isoformat())
 
     def test_interrupted_morning_run_is_eligible_after_restart(self):
         server.set_kv("morning_checkin_status", "working")
