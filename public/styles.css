@@ -1016,3 +1016,10 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .chat-operation-status { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; background: var(--surface); border-radius: 12px; }
 .chat-operation-status[hidden] { display: none; }
 .chat-operation-status button { min-height: 44px; }
+
+.chat-attachments { display: flex; gap: .4rem; flex-wrap: wrap; }
+.chat-attachments[hidden] { display: none; }
+.chat-attachments button { max-width: 100%; overflow-wrap: anywhere; font-size: .8rem; }
+
+.chat-attachments { grid-column: 1 / -1; }
+.composer-actions { flex-wrap: wrap; }

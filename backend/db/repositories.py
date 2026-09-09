@@ -169,9 +169,9 @@ class ChatRepository:
 
     def list(self, db: Any, limit: int = 100) -> list[dict[str, Any]]:
         rows = db.execute(
-            "SELECT id, role, content, client_turn_id, created_at FROM messages ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT id, role, content, client_turn_id, created_at, (SELECT json_group_array(json_extract(value, '$.name')) FROM json_each(messages.attachments)) AS attachment_names FROM messages ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [{key: value for key, value in row.items() if key != "client_turn_id" or value is not None} for row in reversed(rows)]
+        return [{key: value for key, value in row.items() if (key != "client_turn_id" or value is not None) and (key != "attachment_names" or value != "[]")} for row in reversed(rows)]
 
 
 class CheckinRepository:
