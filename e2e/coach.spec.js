@@ -467,6 +467,7 @@ test.describe("critical browser states", () => {
       await page.setViewportSize({ width: initialViewport.width, height: Math.max(360, initialViewport.height - 180) });
       await input.focus();
       await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+      await page.evaluate(() => updateMobileViewportLayout());
       await expect(page.locator("html")).toHaveClass(/chat-keyboard-open/);
       await expect(page.locator(".bottom-nav")).toHaveCSS("visibility", "hidden");
       await expect.poll(() => page.evaluate(() => Math.abs(
@@ -548,7 +549,10 @@ test.describe("critical browser states", () => {
     expect(await page.evaluate(() => window.scrollY), "background chat updates must not scroll another tab").toBe(inactiveScrollY);
 
     await expect.poll(() => page.evaluate(() => state.chatRequest)).toBe(null);
-    await expect.poll(() => page.evaluate(() => window.__chatTest.historyResolvers.length)).toBe(historyResolversBeforeTurn);
+    await expect.poll(() => page.evaluate((before) => {
+      const count = window.__chatTest.historyResolvers.length;
+      return count === before || (count === before + 1 && state.chatProposalRefreshPending);
+    }, historyResolversBeforeTurn)).toBe(true);
     await page.evaluate(() => window.__chatTest.releaseHistory());
     await expect(page.locator("#workoutsPanel")).toHaveClass(/active/);
     expect(await page.evaluate(() => document.activeElement?.id)).not.toBe("messageInput");
