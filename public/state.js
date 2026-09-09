@@ -18,6 +18,7 @@ const state = {
   chatStatusPollInFlight: null,
   chatResponseStarted: false,
   chatResponseScrollPending: false,
+  chatResponseMessageId: null,
   chatProposalRefreshPending: false,
   chatProposalRefreshInFlight: false,
   chatProposalRefreshQueued: false,
