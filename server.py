@@ -15607,11 +15607,12 @@ def _chat_with_structured_coach_impl(
                        (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent), json.dumps(receipt), utc_now(), utc_now()))
     with DB_LOCK, database() as db:
         attachment_row = db.execute("SELECT attachments FROM messages WHERE id=?", (receipt.get("user_message_id"),)).fetchone()
-        has_image_history = bool(db.execute(
-            "SELECT 1 FROM messages, json_each(messages.attachments) "
-            "WHERE json_extract(json_each.value, '$.type')='image' LIMIT 1"
+        has_prior_attachments = bool(db.execute(
+            "SELECT 1 FROM messages WHERE id<? AND attachments!='[]' LIMIT 1",
+            (receipt.get("user_message_id") or 0,),
         ).fetchone())
     attachments = json.loads(attachment_row["attachments"]) if attachment_row else []
+    retain_openai_attachment_context = ai_provider == "openai" and bool(attachments or has_prior_attachments)
     background_owned = background_job and receipt.get("mode") == "background"
     context = coach_dialogue_context(client_turn_id)
     allow_mutations = intent.get("allow_mutations", True)
@@ -15621,18 +15622,20 @@ def _chat_with_structured_coach_impl(
     model_instructions = build_training_context() + "\n\n" + COACH_DIALOGUE_INSTRUCTIONS
     if not allow_mutations:
         model_instructions += "\nThis is an automatic advisory run. Do not change data or pending requests."
+    dialogue_input = {"dialogue": context, "current_message": message, "confirmed_steps": command_receipts}
+    if retain_openai_attachment_context and has_prior_attachments:
+        dialogue_input = {"current_message": message, "confirmed_steps": command_receipts}
     request_payload = {
         "_ai_provider": ai_provider or selected_ai_provider(), "model": model or selected_model(ai_provider),
         "reasoning": {"effort": thinking_level or selected_thinking_level()}, "conversation": conversation_id,
-        "instructions": model_instructions, "input": json.dumps({"dialogue": context, "current_message": message,
-            "confirmed_steps": command_receipts}, ensure_ascii=False),
+        "instructions": model_instructions, "input": json.dumps(dialogue_input, ensure_ascii=False),
         "tools": tools, "tool_choice": "auto", "parallel_tool_calls": False,
         "max_output_tokens": COACH_LONG_PLAN_MAX_OUTPUT_TOKENS, "truncation": "auto",
     }
     # Local dialogue already supplies bounded continuity. Attaching each turn
     # to the global OpenAI conversation duplicated that dialogue indefinitely.
     # Chain tool responses only within this command, including crash recovery.
-    if ai_provider == "openai" and not has_image_history:
+    if ai_provider == "openai" and not retain_openai_attachment_context:
         request_payload.pop("conversation")
     if ai_provider == "openai":
         request_payload["store"] = True

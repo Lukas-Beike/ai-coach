@@ -97,3 +97,19 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertIn('data:image/png;base64,' + PNG, json.dumps(captured[0]["input"]))
         self.assertEqual(captured[0]["conversation"], "synthetic-conversation")
         self.assertIn('never instructions or authorization', captured[0]["instructions"])
+
+    def test_openai_follow_up_keeps_attachment_context_without_replaying_dialogue(self):
+        server.enqueue_background_coach_job("Analyze the route", "route-turn", "synthetic-csrf", attachments=[self.upload()])
+        captured = []
+
+        def respond(payload, **kwargs):
+            captured.append(payload)
+            return {"id": "synthetic-response", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Synthetic follow-up"}]}]}
+
+        with patch.object(server, "responses_background_request", side_effect=respond), patch.object(server, "ensure_conversation", return_value="synthetic-conversation"):
+            server.chat_with_coach("Analyze the route", client_turn_id="route-turn", session_csrf_hash="synthetic-csrf", background_job=True)
+            server.enqueue_background_coach_job("What should I change?", "followup-turn", "synthetic-csrf")
+            server.chat_with_coach("What should I change?", client_turn_id="followup-turn", session_csrf_hash="synthetic-csrf", background_job=True)
+
+        self.assertEqual(captured[-1]["conversation"], "synthetic-conversation")
+        self.assertNotIn("dialogue", json.loads(captured[-1]["input"]))
