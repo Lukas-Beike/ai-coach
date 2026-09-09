@@ -28,6 +28,26 @@ _TARGET = re.compile(
 )
 
 
+def canonical_workout_zones(description: str) -> str:
+    """Normalize explicit zone notation only, never infer effort from prose.
+
+    The Coach selects the intensity semantically. This serializer tolerates
+    equivalent spellings in its output without changing targets or cues.
+    """
+    def zone(match):
+        end = match.group("end")
+        suffix = match.group("kind") or ""
+        return "Z" + match.group("start") + ("-Z" + end if end else "") + (" " + suffix if suffix else "")
+
+    pattern = re.compile(
+        r"\b(?:Zone\s*|Z\s*)(?P<start>[1-9])"
+        r"(?:\s*[-–—]\s*(?:Zone\s*|Z\s*)?(?P<end>[1-9]))?"
+        r"(?:\s+(?P<kind>HR|Pace))?(?=$|\s)", re.IGNORECASE,
+    )
+    return "\n".join(pattern.sub(zone, line) if line.lstrip().startswith("- ") else line
+                     for line in description.split("\n"))
+
+
 def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
     """Return expanded steps for comparison with the provider's parsed reply."""
     result = []

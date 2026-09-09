@@ -46,6 +46,10 @@ def coach_failure_lines(commands: list[dict[str, Any]], pending_operations: set[
         detail = " ".join(str(result.get("error") or "Die Aktion konnte nicht ausgefuehrt werden.").split())
         if result.get("reason") in {"request_invalid", "request_target", "request_scope", "intent_scope_denied", "tool_scope_denied", "tool_arguments_invalid"}:
             detail = "Diese Änderung konnte nicht zuverlässig ausgeführt werden; dafür wurde nichts gespeichert."
+        if result.get("reason") in {"missing_workout_target", "invalid_workout_step", "missing_workout_steps",
+                                   "ambiguous_workout_step", "ambiguous_workout_target", "workout_target_mismatch",
+                                   "invalid_workout_repeat", "workout_duration_mismatch"}:
+            detail = "Der Coach konnte die Einheit noch nicht korrekt in ein ausführbares Workout übersetzen. Die Änderung wurde nicht gespeichert."
         line = f"- {label}: {detail}"
         if line not in lines:
             lines.append(line)
@@ -59,3 +63,21 @@ def coach_effect_label(item: dict[str, Any]) -> str:
         label = "Daten aktualisiert"
     count = len(result.get("library_entry_ids") or result.get("templates") or result.get("changes") or [])
     return f"{label} ({count})" if count else label
+
+
+def coach_observed_sync_lines(commands: list[dict[str, Any]]) -> str:
+    """Retain the last confirmed status of each inspected plan-sync job."""
+    jobs = {}
+    for command in commands:
+        result = command.get("result") or {}
+        job = result.get("job") or {}
+        if (command.get("tool") == "get_sync_job" and result.get("ok")
+                and job.get("provider") == "intervals" and job.get("type") == "plan_push" and job.get("id")):
+            jobs[job["id"]] = job
+    labels = {
+        "queued": "wartet auf Verarbeitung", "running": "läuft noch",
+        "completed": "erfolgreich abgeschlossen", "partial": "nur teilweise abgeschlossen",
+        "failed": "fehlgeschlagen", "cancelled": "abgebrochen",
+    }
+    return "\n".join(f"Zuletzt bestätigter Stand des geprüften Plan-Sync-Auftrags: {labels.get(job.get('status'), 'Abschluss noch nicht bestätigt')}."
+                     for job in jobs.values())

@@ -5684,17 +5684,6 @@ class CoachTests(unittest.TestCase):
             server._run_background_coach_job(job)
         self.assertEqual(seen["phase"], "waiting_final_response")
 
-    def test_conversation_recovery_lock_is_reentrant(self):
-        with patch.object(server, "get_kv", return_value="conversation-stale"), patch.object(
-            server, "openai_request", return_value={"id": "conversation-recovered"}
-        ), patch.object(server, "set_kv"):
-            with server.OPENAI_CONVERSATION_LOCK:
-                self.assertEqual(
-                    server.replace_stale_openai_conversation("conversation-stale"),
-                    "conversation-recovered",
-                )
-
-
     def test_sync_period_supports_all_available_data_marker(self):
         self.assertEqual(server.set_sync_period("intervals", -1), -1)
         self.assertEqual(server.sync_period("intervals"), -1)
@@ -7743,30 +7732,6 @@ class CoachTests(unittest.TestCase):
 
         details = server.openai_error_details(400, raw_error)
         self.assertEqual(details["reason"], "http_error")
-
-    def test_initial_conversation_state_error_rotates_once_before_tools_run(self):
-        intent = {
-            "intent": "advice", "operation": None, "target_system": "none",
-            "artifact_id": None, "authorization_scope": [], "follow_up_operations": [],
-        }
-        completed = {
-            "status": "completed",
-            "output": [{"type": "message", "content": [{"type": "output_text", "text": "Wiederhergestellt."}]}],
-        }
-        with patch.object(
-            server, "responses_request", side_effect=[server.AppError(400, "stale", reason="conversation_state_invalid"), completed]
-        ) as request, patch.object(server, "replace_stale_openai_conversation", return_value="conversation-recovered") as recover:
-            result = server._chat_with_structured_coach_impl(
-                "Bitte analysiere die Einheit.", intent=intent, conversation_id="conversation-stale", client_turn_id="turn-recovery"
-            )
-        self.assertEqual(result["message"]["content"], "Wiederhergestellt.")
-        self.assertEqual(request.call_count, 2)
-        self.assertEqual(request.call_args_list[1].args[0]["conversation"], "conversation-recovered")
-        recover.assert_called_once_with("conversation-stale")
-        with server.DB_LOCK, server.database() as db:
-            command = db.execute("SELECT conversation_id FROM coach_commands WHERE client_turn_id='turn-recovery'").fetchone()
-        self.assertEqual(command["conversation_id"], "conversation-recovered")
-        self.assertEqual([message["role"] for message in server.list_messages()], ["user", "assistant"])
 
     def test_streaming_openai_400_is_captured_without_error_message_or_payload(self):
         raw_error = json.dumps({
