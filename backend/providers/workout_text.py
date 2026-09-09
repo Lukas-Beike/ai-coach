@@ -28,6 +28,46 @@ _TARGET = re.compile(
 )
 
 
+def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
+    """Normalize explicit zone notation only, never infer effort from prose.
+
+    The Coach selects the intensity semantically. This serializer tolerates
+    equivalent spellings in its output without changing targets or cues.
+    """
+    def zone(match):
+        end = match.group("end")
+        suffix = match.group("kind") or ""
+        return "Z" + match.group("start") + ("-Z" + end if end else "") + (" " + suffix if suffix else "")
+
+    pattern = re.compile(
+        r"^(?P<ramp>ramp\s+)?(?:Zone\s*|Z\s*)(?P<start>[1-9])"
+        r"(?:\s*[-–—]\s*(?:Zone\s*|Z\s*)?(?P<end>[1-9]))?"
+        r"(?:\s+(?P<kind>HR|Pace))?(?=$|\s)", re.IGNORECASE,
+    )
+    if not endurance:
+        return description
+    normalized = []
+    for line in description.split("\n"):
+        stripped = line.lstrip()
+        if not stripped.startswith("- "):
+            normalized.append(line)
+            continue
+        # Only the target immediately following the first duration/distance is
+        # executable workout syntax. Cues later in the line must remain prose.
+        step = re.match(r"^(?P<prefix>\s*-\s+\S+\s+)(?P<target>.*)$", line)
+        if not step:
+            normalized.append(line)
+            continue
+        target = step["target"]
+        match = pattern.match(target)
+        if not match:
+            normalized.append(line)
+            continue
+        prefix = match["ramp"] or ""
+        normalized.append(step["prefix"] + prefix + zone(match) + target[match.end():])
+    return "\n".join(normalized)
+
+
 def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
     """Return expanded steps for comparison with the provider's parsed reply."""
     result = []

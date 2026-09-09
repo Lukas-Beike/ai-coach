@@ -12,6 +12,22 @@ synthetic model outputs and temporary databases. The browser fixture uses canned
 outputs to test the actual HTTP/background-worker/SQLCipher/reload path. These
 checks establish execution correctness, **not measured language-model accuracy**.
 
+The 9 September incident adds mandatory acceptance cases: a Monday run changed
+to 8 km very easy, easy, or conversational equivalents must use the athlete's
+recovery/easy HR zones, including warmup and cooldown inside the total distance.
+An explicit HR zone range or Pace target overrides that default. Equivalent
+cycling requests must use power zones/watt targets derived from the saved FTP,
+never the running HR defaults. Evaluate paraphrases, negation, corrections and
+both sports; do not score canned tool calls as semantic-understanding evidence.
+
+`test_coach_language_recovery.py` verifies local repair in the same turn, explicit
+zone-range serialization, bounded per-command Responses chains, rate-limit
+retries, cancellation, restart recovery and preserved sync observations using
+mocked providers. A live language-quality evaluation is still required before
+claiming measured model accuracy; repository tests never access real accounts.
+The response-chain contract follows the official
+[OpenAI conversation-state documentation](https://developers.openai.com/api/docs/guides/conversation-state).
+
 The [executable tool coverage matrix](coach-tool-coverage.md) adds a successful
 chat-loop scenario for every currently exposed tool, including action variants,
 authorization failures and multi-turn recovery. Its catalog check fails when a

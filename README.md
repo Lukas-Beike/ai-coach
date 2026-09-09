@@ -261,14 +261,23 @@ instructions do not delete or convert its data.
   and the classified status of the last API call. Account dollar balances are
   available through the OpenAI billing dashboard or authorized organization
   access, not through this application.
-- Chat requests use a bounded queue, retry only structured conversation-lock
-  failures, and persist tool-call results so retried follow-ups do not repeat
+- Chat requests use a bounded queue, retry transient rate limits up to twice
+  (with cancellable waits), and persist tool-call results so retried follow-ups do not repeat
   local mutations. The application does not impose a local daily request or
   token budget; requests continue until OpenAI rejects them because the
   account or project quota is exhausted. An explicitly cancelled stream never
   executes a partial tool call; a lost browser connection leaves the request
   running so its completed answer can be recovered after reload. All HTTP turns
   return a durable job immediately and are polled from local state.
+  Each OpenAI command starts with bounded local dialogue and current athlete
+  context. Tool rounds chain Responses only within that command, avoiding an
+  ever-growing remote conversation containing repeated copies of local history.
+  A failed answer reports the provider limit and any confirmed sync status;
+  an already queued sync continues independently.
+  Ordinary effort descriptions are translated by the Coach: easy/recovery runs
+  use the athlete's heart-rate zones, cycling uses power zones and watt targets
+  derived from current FTP. Explicit athlete targets take precedence. Athletes
+  do not need to write Intervals.icu workout syntax.
 
 ## Loading and synchronization
 
@@ -570,6 +579,9 @@ endpoint such as `https://<resource>.openai.azure.com/openai/v1`. Keep
 provider's deployment/model name. The configured service must support the
 Responses API, SSE streaming, and Conversations API used by the app; voice
 input additionally requires `/audio/transcriptions`.
+Coach tool rounds use `previous_response_id` within one command; no previous
+command's response chain is reused. Stored Responses follow the provider's
+response retention policy, separately from the stored conversation object.
 
 Gemini can be configured as an alternative with `GEMINI_API_KEY`. When both
 providers are configured, select the active provider in **More → Coach & Model**

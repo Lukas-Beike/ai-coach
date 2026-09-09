@@ -733,7 +733,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             server.chat_with_coach("Weiter", client_turn_id="owned-turn", session_csrf_hash="other-session")
         self.assertEqual(raised.exception.reason, "command_scope_denied")
 
-    def test_local_draft_commit_survives_provider_conversation_recovery(self):
+    def test_local_draft_commit_uses_local_dialogue_with_fresh_response_chain(self):
         server.add_message("user", "Ein Entwurf bitte")
         with server.database() as db:
             origin = server.CHAT_REPOSITORY.add(db, "user", "Synthetic draft", client_turn_id="draft-source")
@@ -745,15 +745,12 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             args["_request"]["source_message_ids"].append(origin["id"])
             call["output"][0]["arguments"] = json.dumps(args)
             return call
-        def stale(_):
-            raise server.AppError(400, "Synthetic stale conversation", reason="conversation_state_invalid")
-        with patch.object(server, "replace_stale_openai_conversation", return_value="new-conversation"):
-            result, _ = self.turn("Ja, so übernehmen", [stale, commit, {"output_text": "Gespeichert."}])
+        result, _ = self.turn("Ja, so ?bernehmen", [commit, {"output_text": "Gespeichert."}])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(self.state()["planned_units"]), 1)
         with server.database() as db:
             row = db.execute("SELECT conversation_id FROM coach_plan_artifacts WHERE id=?", (draft["artifact_id"],)).fetchone()
-        self.assertEqual(row["conversation_id"], "new-conversation")
+        self.assertEqual(row["conversation_id"], "synthetic-conversation")
 
     def test_garmin_refresh_and_job_read_use_current_tool_results(self):
         def job(_):

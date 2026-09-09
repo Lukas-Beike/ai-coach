@@ -44,7 +44,7 @@ from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
-from backend.providers.workout_text import WorkoutTextError, structured_duration, verify_workout_readback
+from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 from backend.sync.windows import split_date_windows
@@ -71,7 +71,7 @@ from backend.coach.context import (
     compact_coach_planned_event as compact_coach_planned_event_value,
 )
 from backend.coach.dialogue import INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
-from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines
+from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines, coach_observed_sync_lines
 from backend.http_api.responses import (
     header_items as response_header_items,
     json_bytes as response_json_bytes,
@@ -8297,7 +8297,10 @@ def normalize_workout(workout: Any) -> dict[str, Any]:
         "date": str(workout.get("date") or "").strip(),
         "sport": intervals_workout_sport(workout.get("sport")),
         "name": str(workout.get("name") or "Coach-Einheit").strip()[:200],
-        "description": str(workout.get("description") or "").strip()[:12000],
+        "description": canonical_workout_zones(
+            str(workout.get("description") or "").strip()[:12000],
+            endurance=intervals_workout_sport(workout.get("sport")) in INTERVALS_ENDURANCE_WORKOUT_TYPES,
+        ),
         "duration_minutes": workout.get("duration_minutes"),
         "target": workout.get("target") if workout.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
         "rationale": str(workout.get("rationale") or "Manuell geplante Einheit").strip()[:2000],
@@ -10854,6 +10857,11 @@ def update_local_planned_workout(
             )
             normalized["source"] = str(current.get("source") or "library")[:40]
             if action == "update":
+                if "description" in values:
+                    normalized["description"] = canonical_workout_zones(
+                        normalized["description"],
+                        endurance=intervals_workout_sport(normalized.get("sport")) in INTERVALS_ENDURANCE_WORKOUT_TYPES,
+                    )
                 seconds = validate_workout_description(normalized)
                 minutes = as_number(normalized.get("duration_minutes"))
                 if seconds is not None or minutes is not None:
@@ -12332,7 +12340,7 @@ def context_preview() -> dict[str, Any]:
             "KI-Anbieter-Konversation: Dialogkontinuität; nicht autoritativ für dauerhafte Athletenfakten",
         ],
         "conversation": {
-            "mode": "Gemini local conversation history" if selected_ai_provider() == "gemini" else "OpenAI Responses Conversation",
+            "mode": "Gemini local conversation history" if selected_ai_provider() == "gemini" else "Bounded local dialogue with per-command Responses chain",
             "included_separately": True,
             "note": "Der bisherige Dialog wird für Kontinuität mitgeführt. Dauerhafte Athletenfakten stammen ausschließlich aus Profil, Wettkämpfen und aktuellem Datensnapshot.",
         },
@@ -13209,28 +13217,6 @@ def ensure_conversation(provider: str | None = None) -> str:
         raise AppError(502, "OpenAI hat keine Konversations-ID zurückgegeben.")
     set_kv("openai_conversation_id", conversation_id)
     return conversation_id
-
-
-def replace_stale_openai_conversation(expected_conversation_id: str) -> str:
-    """Create a new remote conversation without deleting local chat history.
-
-    This is deliberately only used before a turn has executed any coach tool.
-    The old conversation is left untouched: it can still be active remotely and
-    deleting it would make recovery less safe.
-    """
-    with OPENAI_CONVERSATION_LOCK:
-        current = str(get_kv("openai_conversation_id") or "")
-        if current and current != expected_conversation_id:
-            return current
-        result = openai_request("/conversations", {
-            "metadata": {"app": "intervals-coach", "purpose": "personal-coach", "recovered": "true"},
-        })
-        conversation_id = result.get("id") if isinstance(result, dict) else None
-        if not isinstance(conversation_id, str) or not conversation_id.strip():
-            raise AppError(502, "OpenAI hat keine Konversations-ID für die Wiederherstellung zurückgegeben.")
-        set_kv("openai_conversation_id", conversation_id)
-        set_kv("openai_conversation_recovered_at", utc_now())
-        return conversation_id
 
 
 def reset_coach_chat() -> dict[str, Any]:
@@ -15155,8 +15141,12 @@ def coach_dialogue_context(client_turn_id: str) -> dict[str, Any]:
         for row in recent_rows:
             previous = _coach_command_receipt(row["receipt"])
             recent_results.append({"client_turn_id": row["client_turn_id"], "status": previous.get("status"),
+                "sync_job_ids": (previous.get("sync_job_ids") or [])[:40],
                 "steps": [{"tool": step.get("tool"), "ok": step.get("result", {}).get("ok"),
-                           "status": step.get("result", {}).get("status"), "reason": step.get("result", {}).get("reason")}
+                           "status": step.get("result", {}).get("status"), "reason": step.get("result", {}).get("reason"),
+                           "scope": ((step.get("request") or {}).get("scope") or [])[:40],
+                           "scope_truncated": len((step.get("request") or {}).get("scope") or []) > 40,
+                           "artifact_id": step.get("result", {}).get("artifact_id")}
                           for step in previous.get("command_receipts", [])[:40]]})
     now = local_now()
     return {
@@ -15522,34 +15512,55 @@ def _chat_with_structured_coach_impl(
         "tools": tools, "tool_choice": "auto", "parallel_tool_calls": False,
         "max_output_tokens": COACH_LONG_PLAN_MAX_OUTPUT_TOKENS, "truncation": "auto",
     }
+    # Local dialogue already supplies bounded continuity. Attaching each turn
+    # to the global OpenAI conversation duplicated that dialogue indefinitely.
+    # Chain tool responses only within this command, including crash recovery.
+    if ai_provider == "openai":
+        request_payload.pop("conversation")
+        request_payload["store"] = True
     initial_delta_emitted = False
     def on_delta(delta: str) -> None:
         nonlocal initial_delta_emitted
         initial_delta_emitted = True
         if on_text_delta is not None:
             on_text_delta(delta)
-    def checkpoint(response_id: str) -> None:
-        _merge_coach_command_receipt(client_turn_id, {"status": "running", "phase": "waiting_openai", "openai_response_id": response_id, "pending_tool_outputs": []})
     def request_response(payload: dict[str, Any], resume_id: str = "") -> dict[str, Any]:
-        if background_owned:
-            return responses_background_request(payload, response_id=resume_id or None, on_response_id=checkpoint, cancel_event=cancel_event)
-        return responses_stream_request(payload, on_delta, cancel_event) if on_text_delta is not None else responses_request(payload)
+        def checkpoint(response_id: str) -> None:
+            _merge_coach_command_receipt(client_turn_id, {
+                "status": "running", "phase": "waiting_openai", "openai_response_id": response_id,
+                "pending_tool_outputs": [], "response_input": payload["input"] if isinstance(payload["input"], list) else None,
+                "previous_response_id": payload.get("previous_response_id"),
+            })
+        for attempt in range(3):
+            _raise_chat_cancelled(cancel_event)
+            try:
+                if background_owned:
+                    return responses_background_request(payload, response_id=resume_id or None, on_response_id=checkpoint, cancel_event=cancel_event)
+                return responses_stream_request(payload, on_delta, cancel_event) if on_text_delta is not None else responses_request(payload)
+            except AppError as exc:
+                rate_limited = exc.reason == "rate_limit_exceeded" or getattr(exc, "provider_error_code", None) == "rate_limit_exceeded"
+                if ai_provider != "openai" or not rate_limited or attempt == 2 or initial_delta_emitted:
+                    raise
+                # Retry the response, never an already committed tool effect.
+                resume_id = ""
+                delay = 5 * (attempt + 1)
+                LOGGER.warning("Coach response rate limited; retrying", extra={"event": "coach_response_retry", "context": {"attempt": attempt + 1, "retry_in_seconds": delay}})
+                if cancel_event is not None:
+                    cancel_event.wait(delay)
+                else:
+                    time.sleep(delay)
     resume_id = str(receipt.get("openai_response_id") or "") if background_owned and ai_provider == "openai" else ""
+    if resume_id and receipt.get("response_input"):
+        request_payload["input"] = receipt["response_input"]
+        if receipt.get("previous_response_id"):
+            request_payload["previous_response_id"] = receipt["previous_response_id"]
     # Persisted outputs are replayed after a crash between effects and the next request.
     if background_owned and receipt.get("pending_tool_outputs"):
         request_payload["input"] = receipt["pending_tool_outputs"]
+        if ai_provider == "openai" and resume_id:
+            request_payload["previous_response_id"] = resume_id
         resume_id = ""
-    try:
-        response = request_response(request_payload, resume_id)
-    except AppError as exc:
-        if ai_provider != "openai" or exc.reason != "conversation_state_invalid" or initial_delta_emitted:
-            raise
-        conversation_id = replace_stale_openai_conversation(conversation_id)
-        request_payload["conversation"] = conversation_id
-        request_payload["input"] = json.dumps({"dialogue": context, "current_message": message, "confirmed_steps": command_receipts}, ensure_ascii=False)
-        with DB_LOCK, database() as db:
-            db.execute("UPDATE coach_commands SET conversation_id=? WHERE client_turn_id=?", (conversation_id, client_turn_id))
-        response = request_response(request_payload)
+    response = request_response(request_payload, resume_id)
     rounds = int(receipt.get("tool_rounds") or 0)
     question = ""
     cancelled = False
@@ -15675,6 +15686,8 @@ def _chat_with_structured_coach_impl(
         _merge_coach_command_receipt(client_turn_id, {"tool_rounds": rounds})
         followup = {**request_payload, "instructions": model_instructions, "input": outputs,
                     "tool_choice": "none" if question or cancelled or rounds >= COACH_TOOL_MAX_ROUNDS else "auto"}
+        if ai_provider == "openai" and response.get("id"):
+            followup["previous_response_id"] = response["id"]
         # Clear replay outputs only after the next response has been checkpointed.
         response = request_response(followup)
         _merge_coach_command_receipt(client_turn_id, {"pending_tool_outputs": []})
@@ -15721,7 +15734,7 @@ def _chat_with_structured_coach_impl(
         "client_turn_id": client_turn_id, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids,
         "intent": intent, "tool_rounds": rounds, "pending_operations": sorted({entry["tool"] for entry in failures}),
         "proposed_actions": [entry["result"]["proposed_action"] for entry in command_receipts if entry.get("result", {}).get("proposed_action")]}
-    for key in ("openai_response_id", "pending_tool_outputs", "pending_tool_calls"):
+    for key in ("openai_response_id", "pending_tool_outputs", "pending_tool_calls", "response_input", "previous_response_id"):
         final_receipt.pop(key, None)
     with DB_LOCK, database() as db:
         current_command = db.execute(
@@ -15816,8 +15829,11 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         )
         status = "partial" if successes else "cancelled" if cancelled else "failed"
         text = "Die Coach-Verarbeitung wurde abgebrochen." if cancelled else "Der Coach-Auftrag konnte nicht abgeschlossen werden."
+        rate_limited = isinstance(error, AppError) and (error.reason == "rate_limit_exceeded" or getattr(error, "provider_error_code", None) == "rate_limit_exceeded")
+        if rate_limited:
+            text = "Der KI-Dienst hat sein Anfragelimit erreicht. Die Antwort konnte noch nicht abgeschlossen werden. Bitte versuche es in Kürze erneut."
         if successes:
-            if not cancelled:
+            if not cancelled and not rate_limited:
                 text = "Die weitere Coach-Verarbeitung wurde unterbrochen."
                 if isinstance(error, AppError) and error.reason in {"response_error", "response_failed"}:
                     text = "Die KI-Antwort konnte wegen eines Fehlers beim Antwortdienst nicht abgeschlossen werden."
@@ -15827,6 +15843,9 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
                 text += "\nDer Sync-Auftrag bleibt bestehen und wird unabhängig vom Coach verarbeitet. Sein Abschluss ist in dieser Antwort noch nicht bestätigt."
         if failures:
             text += "\n" + coach_failure_lines(failures, set(pending))
+        observed_sync = coach_observed_sync_lines(commands)
+        if observed_sync:
+            text += "\n" + observed_sync
         if pending:
             text += "\nNoch offen: " + ", ".join(COACH_ACTION_LABELS.get(name, "Angeforderter Schritt") for name in pending) + "."
         if cancelled:
