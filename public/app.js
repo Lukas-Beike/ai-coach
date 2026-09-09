@@ -3973,6 +3973,11 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
     // finish; refresh the authoritative proposal list in the background.
     if (completed && request.responseMessageReceived) {
       if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
+    } else if (completed && payload.message?.content && state.data) {
+      // A valid completed SSE receipt already contains the persisted assistant
+      // message. Keep the receipt authoritative even if reconciliation was
+      // skipped by a transient state transition; do not refetch chat history.
+      if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
     } else {
       await loadChatHistoryFresh();
     }
