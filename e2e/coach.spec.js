@@ -449,6 +449,7 @@ test.describe("critical browser states", () => {
     await openAuthenticatedApp(page);
     await page.getByRole("link", { name: "Coach", exact: true }).click();
     await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+    await expect.poll(() => page.evaluate(() => !state.chatProposalRefreshInFlight)).toBe(true);
     await installControlledChatStream(page);
     await page.evaluate(() => {
       state.coachActionProposals = [];
@@ -464,6 +465,7 @@ test.describe("critical browser states", () => {
       await input.focus();
       await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
       await page.setViewportSize({ width: initialViewport.width, height: Math.max(360, initialViewport.height - 180) });
+      await input.focus();
       await page.evaluate(() => window.dispatchEvent(new Event("resize")));
       await expect(page.locator("html")).toHaveClass(/chat-keyboard-open/);
       await expect(page.locator(".bottom-nav")).toHaveCSS("visibility", "hidden");
