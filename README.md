@@ -1088,3 +1088,16 @@ privacy export first if the data may be needed later.
 
 Intervals Coach is licensed under the GNU Affero General Public License v3.0.
 See [`LICENSE`](LICENSE) for the full license text.
+
+### Dateien im Coach-Chat
+
+Über **Anhängen** lassen sich bis zu vier GPX-Dateien oder Bilder (PNG, JPEG,
+WebP) mit jeweils höchstens 5 MB auswählen und vor dem Senden entfernen.
+Eine zusätzliche Frage ist optional. GPX-Tracks und Routen werden lokal zu
+Distanz, ungeglätteten Höhenmetern und einer Stichprobe der Koordinaten
+aufbereitet; fehlende Höhen und GPS-Ungenauigkeiten begrenzen die Aussagekraft.
+Bilder werden zur Analyse an den ausgewählten KI-Anbieter gesendet.
+Die Anhänge werden in der verschlüsselten Chat-Datenbank gespeichert und sind
+in Datenschutzexport und Backup enthalten. Bei GPX wird nur die aufbereitete
+Streckeninformation gespeichert. Chat zurücksetzen entfernt auch die lokalen
+Anhänge. Nicht gesendete Dateien bleiben nur im Arbeitsspeicher des Browsers.

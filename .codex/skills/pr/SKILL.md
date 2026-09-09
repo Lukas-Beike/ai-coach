@@ -44,6 +44,7 @@ Use this skill only when the user's message consists of the standalone command `
 
    - If the branch is behind `develop` or has merge conflicts, fetch `develop`, rebase again, resolve and test the conflicts, validate commit subjects, and push with `--force-with-lease`. Re-enable auto-merge only after the clean-feedback gate passes for the new head.
    - If required checks fail, inspect the failed job and logs, fix the underlying code or configuration, run the relevant local checks, create a compliant commit, push it, and continue monitoring. Do not retry indefinitely without diagnosing the failure.
+   - Request a Codex review once for the pull request. After resolving its feedback or fixing any later CI failure, do not manually request another Codex review unless the user explicitly asks for one. Continue to inspect automatic checks and review feedback created by GitHub after each push.
    - If checks are pending, wait and poll. If GitHub reports a required review, permission, unavailable runner, merge queue, or policy requirement that the agent cannot satisfy, report it clearly and stop rather than bypassing it.
    - If the PR is closed without merging, stop and report that outcome; do not reopen or create a replacement without user direction.
 
