@@ -40,7 +40,7 @@ def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
         return "Z" + match.group("start") + ("-Z" + end if end else "") + (" " + suffix if suffix else "")
 
     pattern = re.compile(
-        r"\b(?:Zone\s*|Z\s*)(?P<start>[1-9])"
+        r"^(?P<ramp>ramp\s+)?(?:Zone\s*|Z\s*)(?P<start>[1-9])"
         r"(?:\s*[-–—]\s*(?:Zone\s*|Z\s*)?(?P<end>[1-9]))?"
         r"(?:\s+(?P<kind>HR|Pace))?(?=$|\s)", re.IGNORECASE,
     )
@@ -58,7 +58,13 @@ def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
         if not step:
             normalized.append(line)
             continue
-        normalized.append(step["prefix"] + pattern.sub(zone, step["target"], count=1))
+        target = step["target"]
+        match = pattern.match(target)
+        if not match:
+            normalized.append(line)
+            continue
+        prefix = match["ramp"] or ""
+        normalized.append(step["prefix"] + prefix + zone(match) + target[match.end():])
     return "\n".join(normalized)
 
 

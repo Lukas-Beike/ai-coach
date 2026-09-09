@@ -132,6 +132,10 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
             canonical_workout_zones(description),
             "- 10m Z1 HR stay below Zone 2\n- 5m Z2 Pace",
         )
+        for target in ("50% stay below Zone 2", "150w stay below Zone 2"):
+            with self.subTest(target=target):
+                description = f"- 10m {target}"
+                self.assertEqual(canonical_workout_zones(description), description)
         strength = "- 10m Zone 1 HR mobility circuit"
         self.assertEqual(canonical_workout_zones(strength, endurance=False), strength)
 
