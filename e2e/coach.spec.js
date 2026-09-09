@@ -464,6 +464,7 @@ test.describe("critical browser states", () => {
       await input.focus();
       await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
       await page.setViewportSize({ width: initialViewport.width, height: Math.max(360, initialViewport.height - 180) });
+      await page.evaluate(() => window.dispatchEvent(new Event("resize")));
       await expect(page.locator("html")).toHaveClass(/chat-keyboard-open/);
       await expect(page.locator(".bottom-nav")).toHaveCSS("visibility", "hidden");
       await expect.poll(() => page.evaluate(() => Math.abs(
