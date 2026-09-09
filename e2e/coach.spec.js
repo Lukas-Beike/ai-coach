@@ -450,6 +450,10 @@ test.describe("critical browser states", () => {
     await page.getByRole("link", { name: "Coach", exact: true }).click();
     await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
     await installControlledChatStream(page);
+    await page.evaluate(() => {
+      state.coachActionProposals = [];
+      state.chatProposalRefreshPending = false;
+    });
 
     const input = page.locator("#messageInput");
     const touchProject = testInfo.project.name.startsWith("mobile");
