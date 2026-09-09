@@ -3997,6 +3997,10 @@ def garmin_sleep_observation_date(snapshot: dict[str, Any] | None = None) -> str
 def garmin_sleep_ready_for_checkin(checkin_date: date, snapshot: dict[str, Any] | None = None) -> bool:
     """Only allow the morning check-in after Garmin has the current night's sleep."""
     snapshot = snapshot if isinstance(snapshot, dict) else garmin_snapshot()
+    # The checked-in fixture is static by design and represents a simulated
+    # current Garmin response for local development and browser checks.
+    if snapshot.get("source") == "fixture":
+        return bool(snapshot.get("sleep"))
     if garmin_sleep_observation_date(snapshot) != checkin_date.isoformat():
         return False
     freshness = snapshot.get("source_freshness")

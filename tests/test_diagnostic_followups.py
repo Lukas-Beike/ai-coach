@@ -105,6 +105,15 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(server.get_kv("morning_checkin_status"), "ready")
         self.assertEqual(server.get_kv("morning_checkin_date"), day.isoformat())
 
+    def test_static_garmin_fixture_is_usable_for_simulated_morning_checkin(self):
+        day = server.local_now().date()
+        snapshot = {
+            "source": "fixture",
+            "sleep": [{"calendarDate": "2026-08-29", "sleepScore": 82}],
+            "source_freshness": {"sleep": {"freshness": "current", "observed_at": "2026-08-29"}},
+        }
+        self.assertTrue(server.garmin_sleep_ready_for_checkin(day, snapshot))
+
     def test_interrupted_morning_run_is_eligible_after_restart(self):
         server.set_kv("morning_checkin_status", "working")
         server.set_kv("morning_checkin_attempted", "2026-09-07")
