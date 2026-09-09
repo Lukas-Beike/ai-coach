@@ -183,6 +183,22 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 payload = server.load_garmin_fixture(2)
         self.assertEqual(payload["sleep"][0]["calendarDate"], server.local_now().date().isoformat())
 
+    def test_static_garmin_fixture_preserves_relative_sleep_dates(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            fixture = Path(temp_root) / "garmin.json"
+            fixture.write_text(json.dumps({"sleep": [
+                {"calendarDate": "2026-08-28", "sleepScore": 79},
+                {"calendarDate": "2026-08-29", "sleepScore": 82},
+            ]}), encoding="utf-8")
+            config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
+            with patch.object(server, "CONFIG", config):
+                payload = server.load_garmin_fixture(2)
+        today = server.local_now().date()
+        self.assertEqual([record["calendarDate"] for record in payload["sleep"]], [
+            (today - timedelta(days=1)).isoformat(),
+            today.isoformat(),
+        ])
+
     def test_interrupted_morning_run_is_eligible_after_restart(self):
         server.set_kv("morning_checkin_status", "working")
         server.set_kv("morning_checkin_attempted", "2026-09-07")

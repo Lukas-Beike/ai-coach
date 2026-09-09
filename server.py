@@ -3873,20 +3873,44 @@ def load_garmin_fixture(days: int) -> dict[str, Any]:
 
 
 def _normalize_fixture_sleep_dates(value: Any, today: date) -> Any:
-    """Make the static sleep fixture represent the simulated current night."""
+    """Make the latest static sleep record represent the simulated current night."""
+    fixture_dates = _fixture_sleep_dates(value)
+    if not fixture_dates:
+        return value
+    shift = today - max(fixture_dates)
+    return _shift_fixture_sleep_dates(value, shift)
+
+
+def _fixture_sleep_dates(value: Any) -> list[date]:
+    dates: list[date] = []
     if isinstance(value, list):
-        return [_normalize_fixture_sleep_dates(item, today) for item in value]
+        for item in value:
+            dates.extend(_fixture_sleep_dates(item))
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if key in ("calendarDate", "summaryDate") and isinstance(item, str):
+                try:
+                    dates.append(date.fromisoformat(item[:10]))
+                except ValueError:
+                    pass
+            elif isinstance(item, (dict, list)):
+                dates.extend(_fixture_sleep_dates(item))
+    return dates
+
+
+def _shift_fixture_sleep_dates(value: Any, shift: timedelta) -> Any:
+    if isinstance(value, list):
+        return [_shift_fixture_sleep_dates(item, shift) for item in value]
     if not isinstance(value, dict):
         return value
-    normalized = {key: _normalize_fixture_sleep_dates(item, today) for key, item in value.items()}
+    normalized = {key: _shift_fixture_sleep_dates(item, shift) for key, item in value.items()}
     for key in ("calendarDate", "summaryDate"):
         raw = normalized.get(key)
         if isinstance(raw, str):
             try:
-                date.fromisoformat(raw[:10])
+                normalized[key] = (date.fromisoformat(raw[:10]) + shift).isoformat()
             except ValueError:
                 continue
-            normalized[key] = today.isoformat()
     return normalized
 
 
