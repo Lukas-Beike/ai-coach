@@ -13688,9 +13688,10 @@ def enqueue_background_coach_job(
         user_message = CHAT_REPOSITORY.add(db, "user", message, client_turn_id=client_turn_id)
         attachment_json = json.dumps(attachments, ensure_ascii=False, separators=(",", ":"))
         stored_attachment_bytes = db.execute("SELECT COALESCE(SUM(length(attachments)), 0) AS total FROM messages").fetchone()["total"]
-        stored_gemini_history_bytes = db.execute(
+        stored_gemini_history_row = db.execute(
             "SELECT COALESCE(length(value), 0) AS total FROM kv WHERE key='gemini_conversation_history'"
-        ).fetchone()["total"]
+        ).fetchone()
+        stored_gemini_history_bytes = stored_gemini_history_row["total"] if stored_gemini_history_row else 0
         if int(stored_attachment_bytes or 0) + int(stored_gemini_history_bytes or 0) + len(attachment_json.encode("utf-8")) > MAX_ATTACHMENT_STORAGE_BYTES:
             raise AppError(413, "Der lokale Speicher für Chat-Anhänge ist ausgeschöpft. Entferne alte Chat-Daten, bevor du weitere Bilder sendest.", reason="attachment_storage_quota")
         db.execute("UPDATE messages SET attachments=? WHERE id=?", (attachment_json, user_message["id"]))
