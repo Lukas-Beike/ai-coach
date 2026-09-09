@@ -3863,12 +3863,31 @@ def load_garmin_fixture(days: int) -> dict[str, Any]:
     today = local_now().date()
     start = SYNC_EARLIEST_DATE if days == ALL_SYNC_DAYS else today - timedelta(days=max(1, min(days, 90)) - 1)
     payload = dict(value)
+    payload["sleep"] = _normalize_fixture_sleep_dates(payload.get("sleep"), today)
     payload.setdefault("start", start.isoformat())
     payload.setdefault("end", today.isoformat())
     payload["synced_at"] = utc_now()
     payload.setdefault("errors", [])
     payload["source"] = "fixture"
     return payload
+
+
+def _normalize_fixture_sleep_dates(value: Any, today: date) -> Any:
+    """Make the static sleep fixture represent the simulated current night."""
+    if isinstance(value, list):
+        return [_normalize_fixture_sleep_dates(item, today) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized = {key: _normalize_fixture_sleep_dates(item, today) for key, item in value.items()}
+    for key in ("calendarDate", "summaryDate"):
+        raw = normalized.get(key)
+        if isinstance(raw, str):
+            try:
+                date.fromisoformat(raw[:10])
+            except ValueError:
+                continue
+            normalized[key] = today.isoformat()
+    return normalized
 
 
 def persist_garmin_error(message: Any, source: str = "sync") -> None:
@@ -3997,10 +4016,6 @@ def garmin_sleep_observation_date(snapshot: dict[str, Any] | None = None) -> str
 def garmin_sleep_ready_for_checkin(checkin_date: date, snapshot: dict[str, Any] | None = None) -> bool:
     """Only allow the morning check-in after Garmin has the current night's sleep."""
     snapshot = snapshot if isinstance(snapshot, dict) else garmin_snapshot()
-    # The checked-in fixture is static by design and represents a simulated
-    # current Garmin response for local development and browser checks.
-    if snapshot.get("source") == "fixture":
-        return bool(snapshot.get("sleep"))
     if garmin_sleep_observation_date(snapshot) != checkin_date.isoformat():
         return False
     freshness = snapshot.get("source_freshness")
@@ -16257,6 +16272,7 @@ MORNING_CHECKIN_PROMPT = (
     "eine vorsichtige Prognose für die notwendige Sportpause in ganzen Tagen als Vorschlag aus und stelle klar, "
     "dass der Athlet sie bestätigen muss."
 )
+MORNING_GARMIN_SYNC_DAYS = 2
 
 
 @maintenance_operation
@@ -16269,7 +16285,10 @@ def run_morning_checkin(checkin_date: str) -> None:
         garmin_configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
         if garmin_configured:
             try:
-                sync_garmin(days=sync_period("garmin"), reason="Morgen-Check-in", wait_for_existing=True)
+                garmin_days = sync_period("garmin")
+                if garmin_days == ALL_SYNC_DAYS:
+                    garmin_days = MORNING_GARMIN_SYNC_DAYS
+                sync_garmin(days=garmin_days, reason="Morgen-Check-in", wait_for_existing=True)
             except Exception:
                 LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
             if not garmin_sleep_ready_for_checkin(date.fromisoformat(checkin_date)):

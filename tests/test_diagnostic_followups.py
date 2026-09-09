@@ -1,5 +1,6 @@
 """Synthetic regressions for the September diagnostic findings."""
 import json
+import tempfile
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -87,6 +88,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
 
     def test_morning_runs_after_garmin_sleep_for_today_is_available(self):
         day = server.local_now().date()
+        server.set_kv("garmin_sync_days", str(server.ALL_SYNC_DAYS))
         server.set_kv("garmin_snapshot", json.dumps({
             "sleep": [{"calendarDate": day.isoformat(), "sleepScore": 88}],
             "source_freshness": {"sleep": {"freshness": "current", "observed_at": day.isoformat()}},
@@ -94,25 +96,27 @@ class DiagnosticFollowupTests(unittest.TestCase):
         config = replace(server.CONFIG, garmin_email="athlete@example.invalid")
         with patch.object(server, "CONFIG", config), \
                 patch.object(server, "garmin_fixture_path", return_value=Path("synthetic.json")), \
-                patch.object(server, "sync_garmin", return_value={"status": "ok"}), \
+                patch.object(server, "sync_garmin", return_value={"status": "ok"}) as sync, \
                 patch.object(server, "sync_intervals", return_value={"status": "ok"}), \
                 patch.object(server, "refresh_morning_body_battery"), \
                 patch.object(server, "chat_with_coach", return_value={"status": "completed", "message": {"id": "morning"}}) as chat:
             server.MORNING_CHECKIN_LOCK.acquire()
             server.run_morning_checkin(day.isoformat())
 
+        sync.assert_called_once()
+        self.assertEqual(sync.call_args.kwargs["days"], server.MORNING_GARMIN_SYNC_DAYS)
         chat.assert_called_once()
         self.assertEqual(server.get_kv("morning_checkin_status"), "ready")
         self.assertEqual(server.get_kv("morning_checkin_date"), day.isoformat())
 
-    def test_static_garmin_fixture_is_usable_for_simulated_morning_checkin(self):
-        day = server.local_now().date()
-        snapshot = {
-            "source": "fixture",
-            "sleep": [{"calendarDate": "2026-08-29", "sleepScore": 82}],
-            "source_freshness": {"sleep": {"freshness": "current", "observed_at": "2026-08-29"}},
-        }
-        self.assertTrue(server.garmin_sleep_ready_for_checkin(day, snapshot))
+    def test_static_garmin_fixture_sleep_is_normalized_to_simulated_today(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            fixture = Path(temp_root) / "garmin.json"
+            fixture.write_text(json.dumps({"sleep": [{"calendarDate": "2026-08-29", "sleepScore": 82}]}), encoding="utf-8")
+            config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
+            with patch.object(server, "CONFIG", config):
+                payload = server.load_garmin_fixture(2)
+        self.assertEqual(payload["sleep"][0]["calendarDate"], server.local_now().date().isoformat())
 
     def test_interrupted_morning_run_is_eligible_after_restart(self):
         server.set_kv("morning_checkin_status", "working")
