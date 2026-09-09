@@ -16285,10 +16285,7 @@ def run_morning_checkin(checkin_date: str) -> None:
         garmin_configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
         if garmin_configured:
             try:
-                garmin_days = sync_period("garmin")
-                if garmin_days == ALL_SYNC_DAYS:
-                    garmin_days = MORNING_GARMIN_SYNC_DAYS
-                sync_garmin(days=garmin_days, reason="Morgen-Check-in", wait_for_existing=True)
+                sync_garmin(days=MORNING_GARMIN_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
             except Exception:
                 LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
             if not garmin_sleep_ready_for_checkin(date.fromisoformat(checkin_date)):
