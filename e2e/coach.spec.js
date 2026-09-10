@@ -448,6 +448,9 @@ test.describe("critical browser states", () => {
   test("coach streaming, tab changes, long markdown and scrolling stay stable", async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);
     await openAuthenticatedApp(page);
+    await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: {} }));
+    await page.reload();
+    await expect(page.locator("#appShell")).toBeVisible();
     await page.getByRole("link", { name: "Coach", exact: true }).click();
     await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
     await expect.poll(() => page.evaluate(() => !state.chatProposalRefreshInFlight)).toBe(true);
