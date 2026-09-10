@@ -24,7 +24,13 @@ _TARGET_PATTERNS = (
     re.compile(r"\d+(?:\.\d+)?%-\d+(?:\.\d+)?%(?:\s+(?:HR|LTHR|Pace|FTP))?(?=$|\s)", re.IGNORECASE),
     re.compile(r"\d++(?:-\d++)?+(?:w|bpm)(?=$|\s)", re.IGNORECASE),
     re.compile(r"\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?\s+Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?-\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?\s+Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d+:[0-5]\d(?:/km)?-\d+:[0-5]\d(?:/km)?\s+Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d+:[0-5]\d(?:/mi)?-\d+:[0-5]\d(?:/mi)?\s+Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d+:[0-5]\d(?:/100m)?-\d+:[0-5]\d(?:/100m)?\s+Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d+:[0-5]\d(?:/100y)?-\d+:[0-5]\d(?:/100y)?\s+Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d+:[0-5]\d(?:/500m)?-\d+:[0-5]\d(?:/500m)?\s+Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d+:[0-5]\d(?:/400m)?-\d+:[0-5]\d(?:/400m)?\s+Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d+:[0-5]\d(?:/250m)?-\d+:[0-5]\d(?:/250m)?\s+Pace(?=$|\s)", re.IGNORECASE),
 )
 
 
@@ -49,23 +55,30 @@ def _time_parts(value: str) -> list[tuple[str, str]] | None:
     position = 0
     parts = []
     while position < len(value):
-        amount_start = position
+        parsed = _read_time_part(value, position)
+        if parsed is None:
+            return None
+        position, amount, unit = parsed
+        parts.append((amount, unit))
+    return parts or None
+
+
+def _read_time_part(value: str, position: int) -> tuple[int, str, str] | None:
+    amount_start = position
+    while position < len(value) and value[position].isdigit():
+        position += 1
+    if position == amount_start:
+        return None
+    if position < len(value) and value[position] == ".":
+        position += 1
+        fraction_start = position
         while position < len(value) and value[position].isdigit():
             position += 1
-        if position == amount_start:
+        if position == fraction_start:
             return None
-        if position < len(value) and value[position] == ".":
-            position += 1
-            fraction_start = position
-            while position < len(value) and value[position].isdigit():
-                position += 1
-            if position == fraction_start:
-                return None
-        if position >= len(value) or value[position] not in _TIME_UNITS:
-            return None
-        parts.append((value[amount_start:position], value[position]))
-        position += 1
-    return parts or None
+    if position >= len(value) or value[position] not in _TIME_UNITS:
+        return None
+    return position + 1, value[amount_start:position], value[position]
 
 
 def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:

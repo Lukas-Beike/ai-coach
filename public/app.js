@@ -13,7 +13,7 @@ const MAX_QUEUED_ATTACHMENT_BYTES = 16_000_000;
 let mobileViewportFrame = null;
 const mobileViewportBaselines = { portrait: 0, landscape: 0 };
 
-if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
+if ("scrollRestoration" in globalThis.history) globalThis.history.scrollRestoration = "manual";
 
 function hasTouchFirstInput() {
   return Boolean(globalThis.navigator?.maxTouchPoints > 0
@@ -21,26 +21,26 @@ function hasTouchFirstInput() {
 }
 
 function shouldRestoreChatInputFocus() {
-  return Boolean(window.matchMedia?.("(hover: hover) and (pointer: fine)").matches);
+  return Boolean(globalThis.matchMedia?.("(hover: hover) and (pointer: fine)").matches);
 }
 
 function updateMobileViewportLayout() {
   mobileViewportFrame = null;
-  const viewport = window.visualViewport;
+  const viewport = globalThis.visualViewport;
   // Playwright and some embedded browsers resize layoutViewport before
   // visualViewport. Use the smaller measurement so keyboard detection does
   // not miss a real visible-area reduction during that transition.
-  const viewportHeight = Math.max(1, Math.round(viewport ? Math.min(viewport.height, window.innerHeight) : window.innerHeight));
-  const viewportWidth = Math.max(1, Math.round(viewport?.width || window.innerWidth));
+  const viewportHeight = Math.max(1, Math.round(viewport ? Math.min(viewport.height, globalThis.innerHeight) : globalThis.innerHeight));
+  const viewportWidth = Math.max(1, Math.round(viewport?.width || globalThis.innerWidth));
   document.documentElement.style.setProperty("--app-viewport-height", `${viewportHeight}px`);
   const input = $("#messageInput");
   const inputFocused = document.activeElement === input;
-  const screenOrientation = window.screen?.orientation?.type || "";
+  const screenOrientation = globalThis.screen?.orientation?.type || "";
   let orientation;
   if (screenOrientation) {
     orientation = screenOrientation.startsWith("landscape") ? "landscape" : "portrait";
   } else {
-    orientation = (window.screen?.width || viewportWidth) > (window.screen?.height || viewportHeight) ? "landscape" : "portrait";
+    orientation = (globalThis.screen?.width || viewportWidth) > (globalThis.screen?.height || viewportHeight) ? "landscape" : "portrait";
   }
   if (!inputFocused || !mobileViewportBaselines[orientation]) mobileViewportBaselines[orientation] = viewportHeight;
   const keyboardOpen = hasTouchFirstInput()
@@ -136,7 +136,7 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   }
   const returningToChat = currentPanel !== "chatPanel" && mainRoute === "coach";
   if (state.data && !state.chatInitialScrollPending && historyMode === "push" && currentPanel === "chatPanel" && mainRoute !== "coach") {
-    state.chatScrollY = window.scrollY;
+    state.chatScrollY = globalThis.scrollY;
   }
   if (currentPanel === "chatPanel" && mainRoute !== "coach" && (state.chatRequest || state.chatServerOperationId)) {
     state.chatResponseScrollPending = true;
@@ -157,9 +157,9 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
   if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
   const targetHash = `#${panelRoute}`;
-  if (window.location.hash !== targetHash) {
-    if (historyMode === "push") window.history.pushState({ route: panelRoute }, "", targetHash);
-    else if (historyMode === "replace") window.history.replaceState({ route: panelRoute }, "", targetHash);
+  if (globalThis.location.hash !== targetHash) {
+    if (historyMode === "push") globalThis.history.pushState({ route: panelRoute }, "", targetHash);
+    else if (historyMode === "replace") globalThis.history.replaceState({ route: panelRoute }, "", targetHash);
   }
   if (state.data) renderStatus(state.data);
   updateHeaderAction();
@@ -172,7 +172,7 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
     else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest();
     if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground(state.chatContentVersion);
   } else requestAnimationFrame(() => {
-    if (!shouldFocusPlannedToday || !focusPlannedToday()) window.scrollTo({ top: 0, behavior: "auto" });
+    if (!shouldFocusPlannedToday || !focusPlannedToday()) globalThis.scrollTo({ top: 0, behavior: "auto" });
   });
   ensureRouteData(panelRoute);
   if (focus && !$("#appShell")?.hidden) {
@@ -187,7 +187,7 @@ async function syncNavigationRoute() {
   const applied = await applyNavigationRoute(route, {
     historyMode: !hashContainsKnownRoute() ? "replace" : "none",
   });
-  if (!applied && state.route) window.history.replaceState({ route: state.route }, "", `#${state.route}`);
+  if (!applied && state.route) globalThis.history.replaceState({ route: state.route }, "", `#${state.route}`);
 }
 
 function readLastPwaActivity() {
@@ -355,7 +355,7 @@ function finishAppShellLoading() {
 
 async function api(path, options = {}) {
   const generation = state.sessionGeneration;
-  const result = await window.AppApi.request(path, options, () => {
+  const result = await globalThis.AppApi.request(path, options, () => {
     if (generation === state.sessionGeneration) showLogin();
   });
   if (generation !== state.sessionGeneration) throw new DOMException("Session ended", "AbortError");
@@ -423,7 +423,7 @@ function disconnectStateEvents() {
 }
 
 function connectStateEvents() {
-  if (!state.data || !("EventSource" in window) || state.stateEventSource || state.stateEventReconnectTimer
+  if (!state.data || !("EventSource" in globalThis) || state.stateEventSource || state.stateEventReconnectTimer
       || !navigator.onLine || document.visibilityState !== "visible") return;
   const source = new EventSource(`/api/state/events?since=${encodeURIComponent(state.stateEventLastId)}`, { withCredentials: true });
   state.stateEventSource = source;
@@ -568,7 +568,7 @@ async function pollSyncStatus() {
 }
 
 function setupSyncStatusMonitoring() {
-  if ("BroadcastChannel" in window) {
+  if ("BroadcastChannel" in globalThis) {
     state.syncPoll.channel = new BroadcastChannel(SYNC_POLL_CHANNEL);
     state.syncPoll.channel.addEventListener("message", (event) => {
       const message = event.data || {};
@@ -591,7 +591,7 @@ function handleSyncVisibility() {
 
 async function apiAudio(path, blob) {
   const generation = state.sessionGeneration;
-  const result = await window.AppApi.audio(path, blob, () => {
+  const result = await globalThis.AppApi.audio(path, blob, () => {
     if (generation === state.sessionGeneration) showLogin();
   });
   if (generation !== state.sessionGeneration) throw new DOMException("Session ended", "AbortError");
@@ -613,6 +613,7 @@ async function bootstrapAuth() {
       await loadInitialState();
     } else showLogin();
   } catch (_) {
+    // A failed auth bootstrap is shown in the login dialog; no recovery action is available here.
     $("#loginError").textContent = "Server nicht erreichbar.";
     showLogin();
   } finally { clearTimeout(timeout); }
@@ -662,10 +663,10 @@ function renderConnectivityStatus(online = navigator.onLine) {
 
 function setupConnectivityStatus() {
   renderConnectivityStatus();
-  window.addEventListener("online", () => renderConnectivityStatus(true));
-  window.addEventListener("offline", () => renderConnectivityStatus(false));
-  window.addEventListener("offline", disconnectStateEvents);
-  window.addEventListener("online", () => connectStateEvents());
+  globalThis.addEventListener("online", () => renderConnectivityStatus(true));
+  globalThis.addEventListener("offline", () => renderConnectivityStatus(false));
+  globalThis.addEventListener("offline", disconnectStateEvents);
+  globalThis.addEventListener("online", () => connectStateEvents());
 }
 
 async function waitForSyncJob(jobId) {
@@ -821,7 +822,7 @@ async function toggleVoiceInput() {
     stopVoiceRecording();
     return;
   }
-  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+  if (!globalThis.isSecureContext || !navigator.mediaDevices?.getUserMedia || !globalThis.MediaRecorder) {
     const message = "Spracheingabe benötigt eine HTTPS-Verbindung und einen unterstützten Browser.";
     setVoiceStatus(message, true);
     toast(message, true);
@@ -884,7 +885,7 @@ async function toggleVoiceInput() {
 }
 
 function notificationPermission() {
-  return "Notification" in window ? Notification.permission : "unsupported";
+  return "Notification" in globalThis ? Notification.permission : "unsupported";
 }
 
 function renderNotificationStatus() {
@@ -901,7 +902,7 @@ function renderNotificationStatus() {
 }
 
 async function enableNotifications() {
-  if (!("Notification" in window)) { toast("Dieser Browser unterstützt keine PWA-Benachrichtigungen", true); return; }
+  if (!("Notification" in globalThis)) { toast("Dieser Browser unterstützt keine PWA-Benachrichtigungen", true); return; }
   const permission = await Notification.requestPermission();
   renderNotificationStatus();
   if (permission === "granted") toast("PWA-Benachrichtigungen aktiviert");
@@ -1222,7 +1223,6 @@ function addStructuredCoachReceipts(payload) {
   renderCoachReceipts();
   for (const entry of commands) {
     if (entry.resolved) continue;
-    // if (hiddenChatReceiptTools.has(entry.tool)) continue;
     const failedSync = entry.tool === "start_intervals_plan_sync" && entry.result?.ok === false;
     const failedSyncJob = entry.tool === "get_sync_job" && entry.result?.job?.status === "failed";
     if (hiddenChatReceiptTools.has(entry.tool) && !failedSync && !failedSyncJob) continue;
@@ -1568,7 +1568,7 @@ let chatStreamStartScrollPending = false;
 let chatComposerRevealPending = false;
 
 function chatIsNearBottom() {
-  return document.documentElement.scrollHeight - (window.scrollY + window.innerHeight) <= 48;
+  return document.documentElement.scrollHeight - (globalThis.scrollY + globalThis.innerHeight) <= 48;
 }
 
 function updateChatComposerVisibility() {
@@ -1597,7 +1597,7 @@ function jumpToChatComposer() {
   input.focus({ preventScroll: true });
   composer?.scrollIntoView({ block: "end", behavior: "auto" });
   requestAnimationFrame(() => {
-    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
+    globalThis.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
     input.focus({ preventScroll: true });
     chatComposerRevealPending = false;
     updateChatComposerVisibility();
@@ -1964,7 +1964,7 @@ function scrollChatToResponseStart() {
       return;
     }
     const topGap = 16;
-    window.scrollTo({ top: Math.max(0, window.scrollY + target.getBoundingClientRect().top - topGap), behavior: "auto" });
+    globalThis.scrollTo({ top: Math.max(0, globalThis.scrollY + target.getBoundingClientRect().top - topGap), behavior: "auto" });
     state.chatResponseMessageId = null;
     requestAnimationFrame(updateChatComposerVisibility);
   });
@@ -1984,10 +1984,10 @@ function scrollChatToLatest() {
     const composerTop = composer?.getBoundingClientRect().top;
     const targetGap = 12;
     const desiredBottom = Math.min(
-      window.innerHeight,
-      Number.isFinite(composerTop) ? composerTop : window.innerHeight,
+      globalThis.innerHeight,
+      Number.isFinite(composerTop) ? composerTop : globalThis.innerHeight,
     ) - targetGap;
-    window.scrollTo({ top: Math.max(0, window.scrollY + targetBottom - desiredBottom), behavior: "auto" });
+    globalThis.scrollTo({ top: Math.max(0, globalThis.scrollY + targetBottom - desiredBottom), behavior: "auto" });
     requestAnimationFrame(updateChatComposerVisibility);
   });
 }
@@ -2002,9 +2002,9 @@ function restoreChatScrollPosition() {
       state.chatScrollRestoring = false;
       return;
     }
-    window.scrollTo({ top: scrollY, behavior: "auto" });
+    globalThis.scrollTo({ top: scrollY, behavior: "auto" });
     requestAnimationFrame(() => {
-      if (panel.classList.contains("active")) window.scrollTo({ top: scrollY, behavior: "auto" });
+      if (panel.classList.contains("active")) globalThis.scrollTo({ top: scrollY, behavior: "auto" });
       state.chatScrollRestoring = false;
       updateChatComposerVisibility();
     });
@@ -2014,7 +2014,7 @@ function restoreChatScrollPosition() {
 
 function handleWindowScroll() {
   if (!state.chatInitialScrollPending && !state.chatScrollRestoring && $("#chatPanel")?.classList.contains("active")) {
-    state.chatScrollY = window.scrollY;
+    state.chatScrollY = globalThis.scrollY;
   }
   updateChatComposerVisibility();
 }
@@ -3968,7 +3968,7 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
         state.chatDraftDirty = true;
         toast(payload.error || "Bitte erneut anmelden; der Entwurf bleibt erhalten.", true);
       }
-      throw window.AppApi.responseError(response, typeof payload.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`, payload.reason || "http_error");
+      throw globalThis.AppApi.responseError(response, typeof payload.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`, payload.reason || "http_error");
     }
     if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
     if (!response.body) throw new Error("Der Browser unterstützt keinen Antwort-Stream.");
@@ -4704,7 +4704,7 @@ document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEvent
   applyNavigationRoute(`more/${link.dataset.moreSegment}`, { historyMode: "push" });
 }));
 document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("close", () => restoreDialogFocus(dialog)));
-window.addEventListener("hashchange", syncNavigationRoute);
+globalThis.addEventListener("hashchange", syncNavigationRoute);
 
 $("#loginForm").addEventListener("submit", login);
 function renderChatAttachments() {
@@ -4824,7 +4824,7 @@ $("#messageInput").addEventListener("input", (event) => {
   updateChatControls();
   if (keepComposerVisible) {
     requestAnimationFrame(() => {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
+      globalThis.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
       updateChatComposerVisibility();
     });
   }
@@ -4864,19 +4864,19 @@ document.addEventListener("visibilitychange", () => {
 document.addEventListener("pointerdown", handlePwaInteraction, { passive: true });
 document.addEventListener("focusin", scheduleMobileViewportLayout);
 document.addEventListener("focusout", scheduleMobileViewportLayout);
-window.addEventListener("scroll", handleWindowScroll, { passive: true });
-window.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
-window.addEventListener("orientationchange", scheduleMobileViewportLayout, { passive: true });
-window.addEventListener("pageshow", () => {
+globalThis.addEventListener("scroll", handleWindowScroll, { passive: true });
+globalThis.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
+globalThis.addEventListener("orientationchange", scheduleMobileViewportLayout, { passive: true });
+globalThis.addEventListener("pageshow", () => {
   connectStateEvents();
   scheduleMobileViewportLayout();
   if (state.chatInitialScrollPending && baseRoute() === "coach") scrollChatToLatest();
 }, { passive: true });
-window.visualViewport?.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
-window.visualViewport?.addEventListener("scroll", scheduleMobileViewportLayout, { passive: true });
-window.addEventListener("pagehide", savePwaActivity);
-window.addEventListener("pagehide", disconnectStateEvents);
-window.addEventListener("beforeunload", (event) => {
+globalThis.visualViewport?.addEventListener("resize", scheduleMobileViewportLayout, { passive: true });
+globalThis.visualViewport?.addEventListener("scroll", scheduleMobileViewportLayout, { passive: true });
+globalThis.addEventListener("pagehide", savePwaActivity);
+globalThis.addEventListener("pagehide", disconnectStateEvents);
+globalThis.addEventListener("beforeunload", (event) => {
   if (!hasUnsavedChanges()) return;
   event.preventDefault();
 });
