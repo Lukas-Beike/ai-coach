@@ -468,6 +468,10 @@ test.describe("critical browser states", () => {
       expect(await page.evaluate(() => navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches)).toBe(true);
       await input.focus();
       await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
+      const initialViewportHeight = await page.evaluate(() => Math.min(
+        window.visualViewport?.height || window.innerHeight,
+        window.innerHeight,
+      ));
       await page.setViewportSize({ width: initialViewport.width, height: Math.max(360, initialViewport.height - 180) });
       await input.focus();
       await page.evaluate(() => window.dispatchEvent(new Event("resize")));
@@ -475,9 +479,10 @@ test.describe("critical browser states", () => {
       // Headless Chromium does not shrink the visual viewport for every emulated
       // mobile height. Exercise the keyboard layout assertions only when the
       // resize is observable; the remaining composer behavior is still covered.
-      const keyboardResizeObserved = await page.evaluate(() => {
-        return document.documentElement.classList.contains("chat-keyboard-open");
-      });
+      const keyboardResizeObserved = await page.evaluate((beforeHeight) => beforeHeight - Math.min(
+        window.visualViewport?.height || window.innerHeight,
+        window.innerHeight,
+      ) >= 100, initialViewportHeight);
       if (keyboardResizeObserved) {
         await expect(page.locator("html")).toHaveClass(/chat-keyboard-open/);
         await expect(page.locator(".bottom-nav")).toHaveCSS("visibility", "hidden");
@@ -497,7 +502,7 @@ test.describe("critical browser states", () => {
     await input.fill("Analysiere meine letzte Einheit gründlich.");
     await page.getByRole("button", { name: "Senden", exact: true }).click();
     if (touchProject) await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
-    await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", /Coach arbeitet/);
+    await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", "Coach arbeitet an deiner Antwort…");
     await expect(page.locator("#messages")).toHaveAttribute("aria-busy", "true");
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     if (!await input.isVisible()) {
@@ -602,7 +607,7 @@ test.describe("critical browser states", () => {
     });
     await expect.poll(() => page.evaluate(() => state.chatRequest?.phase)).toBe("recovering");
     await expect(page.locator(".message.assistant.streaming")).toContainText("Teilantwort bleibt sichtbar");
-    await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", /Verbindung unterbrochen/);
+    await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", "Verbindung unterbrochen · die Antwort wird im Hintergrund fertiggestellt…");
     await expect(page.locator("#chatForm")).toHaveClass(/is-recovering/);
     await expect(page.locator("#sendButton")).toHaveText("Coach antwortet…");
     await expect(page.locator("#sendButton")).toBeDisabled();

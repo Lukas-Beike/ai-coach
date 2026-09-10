@@ -16,12 +16,21 @@ class WorkoutTextError(ValueError):
 
 _DISTANCE = re.compile(r"\d+(?:\.\d+)?(?P<unit>[a-z]+)")
 _DISTANCE_UNITS = frozenset({"km", "mtr", "mi", "yd"})
-_TIME_PART = re.compile(r"(\d++(?:\.\d++)?+)([hms'\"])")
+_TIME_UNITS = frozenset("hms'\"")
 _TARGET_PATTERNS = (
     re.compile(r"Z\d++(?:-Z\d++)?+(?:\s++(?:HR|Pace))?+(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++(?:\.\d++)?+(?:%?+-\d++(?:\.\d++)?+)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++(?:\.\d++)?+-\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++(?:\.\d++)?+%-\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
     re.compile(r"\d++(?:-\d++)?+(?:w|bpm)(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+(?:-\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/km)?+-\d++:[0-5]\d(?:/km)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/mi)?+-\d++:[0-5]\d(?:/mi)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/100m)?+-\d++:[0-5]\d(?:/100m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/100y)?+-\d++:[0-5]\d(?:/100y)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/500m)?+-\d++:[0-5]\d(?:/500m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/400m)?+-\d++:[0-5]\d(?:/400m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/250m)?+-\d++:[0-5]\d(?:/250m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
 )
 
 
@@ -39,13 +48,37 @@ def _distance_match(value: str):
 
 
 def _is_time(value: str) -> bool:
+    return bool(_time_parts(value))
+
+
+def _time_parts(value: str) -> list[tuple[str, str]] | None:
     position = 0
+    parts = []
     while position < len(value):
-        match = _TIME_PART.match(value, position)
-        if not match:
-            return False
-        position = match.end()
-    return bool(value)
+        parsed = _read_time_part(value, position)
+        if parsed is None:
+            return None
+        position, amount, unit = parsed
+        parts.append((amount, unit))
+    return parts or None
+
+
+def _read_time_part(value: str, position: int) -> tuple[int, str, str] | None:
+    amount_start = position
+    while position < len(value) and value[position].isdecimal():
+        position += 1
+    if position == amount_start:
+        return None
+    if position < len(value) and value[position] == ".":
+        position += 1
+        fraction_start = position
+        while position < len(value) and value[position].isdecimal():
+            position += 1
+        if position == fraction_start:
+            return None
+    if position >= len(value) or value[position] not in _TIME_UNITS:
+        return None
+    return position + 1, value[amount_start:position], value[position]
 
 
 def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
@@ -162,7 +195,8 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
             unit = value[len(amount):]
             expected["distance"] = float(amount) * {"km": 1000, "mtr": 1, "mi": 1609.344, "yd": 0.9144}[unit]
         else:
-            seconds = sum(float(amount) * {"h": 3600, "m": 60, "s": 1, "'": 60, '"': 1}[unit] for amount, unit in _TIME_PART.findall(value))
+            parts = _time_parts(value)
+            seconds = sum(float(amount) * {"h": 3600, "m": 60, "s": 1, "'": 60, '"': 1}[unit] for amount, unit in parts or ())
             if not math.isfinite(seconds) or seconds <= 0:
                 raise WorkoutTextError("invalid_workout_step", "Eine Trainingsdauer muss positiv sein.")
             expected["duration"] = seconds
