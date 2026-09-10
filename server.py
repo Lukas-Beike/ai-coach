@@ -13174,7 +13174,7 @@ def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str, c
     return result
 
 
-def _gemini_responses_result(
+def _gemini_responses_result(  # NOSONAR - provider response normalization must preserve tool and history ordering atomically
     payload: dict[str, Any], history: list[dict[str, Any]], persistent: bool, result: dict[str, Any],
 ) -> dict[str, Any]:
     candidates = result.get("candidates") if isinstance(result.get("candidates"), list) else []
@@ -16163,10 +16163,13 @@ def _chat_with_structured_coach_impl(
             try:
                 if background_owned and on_text_delta is None:
                     return responses_background_request(payload, response_id=resume_id or None, on_response_id=checkpoint, cancel_event=cancel_event)
+                if on_text_delta is None:
+                    return responses_request(payload)
+                checkpoint_callback = checkpoint if background_owned and ai_provider == "openai" else None
                 return responses_stream_request(
                     payload, request_on_delta, cancel_event,
-                    on_response_id=checkpoint if background_owned and ai_provider == "openai" else None,
-                ) if on_text_delta is not None else responses_request(payload)
+                    on_response_id=checkpoint_callback,
+                )
             except AppError as exc:
                 if (ai_provider == "openai" and exc.reason == "conversation_state_invalid"
                         and not conversation_recovered and not request_delta_emitted and attempt < 2):
