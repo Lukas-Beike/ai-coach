@@ -19,18 +19,18 @@ _DISTANCE_UNITS = frozenset({"km", "mtr", "mi", "yd"})
 _TIME_UNITS = frozenset("hms'\"")
 _TARGET_PATTERNS = (
     re.compile(r"Z\d++(?:-Z\d++)?+(?:\s++(?:HR|Pace))?+(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+(?:\.\d+)?%(?:\s+(?:HR|LTHR|Pace|FTP))?(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+(?:\.\d+)?-\d+(?:\.\d+)?%(?:\s+(?:HR|LTHR|Pace|FTP))?(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+(?:\.\d+)?%-\d+(?:\.\d+)?%(?:\s+(?:HR|LTHR|Pace|FTP))?(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++(?:\.\d++)?+-\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++(?:\.\d++)?+%-\d++(?:\.\d++)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
     re.compile(r"\d++(?:-\d++)?+(?:w|bpm)(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?\s+Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+:[0-5]\d(?:/km)?-\d+:[0-5]\d(?:/km)?\s+Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+:[0-5]\d(?:/mi)?-\d+:[0-5]\d(?:/mi)?\s+Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+:[0-5]\d(?:/100m)?-\d+:[0-5]\d(?:/100m)?\s+Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+:[0-5]\d(?:/100y)?-\d+:[0-5]\d(?:/100y)?\s+Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+:[0-5]\d(?:/500m)?-\d+:[0-5]\d(?:/500m)?\s+Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+:[0-5]\d(?:/400m)?-\d+:[0-5]\d(?:/400m)?\s+Pace(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+:[0-5]\d(?:/250m)?-\d+:[0-5]\d(?:/250m)?\s+Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/km)?+-\d++:[0-5]\d(?:/km)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/mi)?+-\d++:[0-5]\d(?:/mi)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/100m)?+-\d++:[0-5]\d(?:/100m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/100y)?+-\d++:[0-5]\d(?:/100y)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/500m)?+-\d++:[0-5]\d(?:/500m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/400m)?+-\d++:[0-5]\d(?:/400m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/250m)?+-\d++:[0-5]\d(?:/250m)?+\s++Pace(?=$|\s)", re.IGNORECASE),
 )
 
 
