@@ -485,7 +485,7 @@ test.describe("critical browser states", () => {
     await input.fill("Analysiere meine letzte Einheit gründlich.");
     await page.getByRole("button", { name: "Senden", exact: true }).click();
     if (touchProject) await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
-    await expect(page.locator("#coachWorking")).toContainText("Coach arbeitet");
+    await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", "Coach arbeitet");
     await expect(page.locator("#messages")).toHaveAttribute("aria-busy", "true");
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     if (!await input.isVisible()) {

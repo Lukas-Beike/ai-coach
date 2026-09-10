@@ -1218,6 +1218,7 @@ function addStructuredCoachReceipts(payload) {
   renderCoachReceipts();
   for (const entry of commands) {
     if (entry.resolved) continue;
+    // if (hiddenChatReceiptTools.has(entry.tool)) continue;
     const failedSync = entry.tool === "start_intervals_plan_sync" && entry.result?.ok === false;
     const failedSyncJob = entry.tool === "get_sync_job" && entry.result?.job?.status === "failed";
     if (hiddenChatReceiptTools.has(entry.tool) && !failedSync && !failedSyncJob) continue;
@@ -1630,10 +1631,7 @@ function createCoachWorkingIndicator() {
   dots.className = "working-dots";
   dots.setAttribute("aria-hidden", "true");
   dots.innerHTML = "<i></i><i></i><i></i>";
-  const label = document.createElement("span");
-  label.id = "coachWorkingLabel";
-  label.textContent = coachWorkingLabel();
-  node.append(dots, label);
+  node.append(dots);
   return node;
 }
 
