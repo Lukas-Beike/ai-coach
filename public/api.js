@@ -10,7 +10,8 @@
       const seconds = /^\d+$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - Date.now()) / 1000);
       if (Number.isFinite(seconds)) retryAfter = Math.max(0, seconds);
     }
-    const error = new Error(`${message}${retryAfter != null ? ` Bitte in ${retryAfter} Sekunden erneut versuchen.` : ""}`);
+    const retryMessage = retryAfter != null ? ` Bitte in ${retryAfter} Sekunden erneut versuchen.` : "";
+    const error = new Error(`${message}${retryMessage}`);
     error.status = response.status;
     error.reason = reason;
     error.retryAfter = retryAfter;

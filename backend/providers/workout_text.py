@@ -16,15 +16,20 @@ class WorkoutTextError(ValueError):
 
 _DISTANCE = re.compile(r"\d+(?:\.\d+)?(?:km|mtr|mi|yd)")
 _TIME_PART = re.compile(r"(\d+(?:\.\d+)?)([hms'\"])")
-_TARGET = re.compile(
-    r"(?:"
-    r"Z\d+(?:-Z\d+)?(?:\s+(?:HR|Pace))?"
-    r"|\d+(?:\.\d+)?(?:%?-\d+(?:\.\d+)?)?%(?:\s+(?:HR|LTHR|Pace|FTP))?"
-    r"|\d+(?:-\d+)?(?:w|bpm)"
-    r"|\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?"
-    r"(?:-\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?)?\s+Pace"
-    r")(?=$|\s)", re.IGNORECASE,
+_TARGET_PATTERNS = (
+    re.compile(r"Z\d+(?:-Z\d+)?(?:\s+(?:HR|Pace))?(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d+(?:\.\d+)?(?:%?-\d+(?:\.\d+)?)?%(?:\s+(?:HR|LTHR|Pace|FTP))?(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d+(?:-\d+)?(?:w|bpm)(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?(?:-\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?\s+Pace)?(?=$|\s)", re.IGNORECASE),
 )
+
+
+def _target_match(value: str, *, search: bool = False):
+    for pattern in _TARGET_PATTERNS:
+        match = pattern.search(value) if search else pattern.match(value)
+        if match:
+            return match
+    return None
 
 
 def _is_time(value: str) -> bool:
@@ -112,11 +117,11 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
         value, rest = quantity.groups()
         ramp = bool(re.match(r"^ramp\s+", rest, flags=re.IGNORECASE))
         rest = re.sub(r"^ramp\s+", "", rest, flags=re.IGNORECASE)
-        intensity = _TARGET.match(rest)
+        intensity = _target_match(rest)
         if not intensity:
             raise WorkoutTextError("missing_workout_target", f"Workout-Zeile {number}: Auswertbares Intensitaetsziel fehlt. Nutze z.B. '50-70%', 'Z1 HR' oder 'Z2 Pace'; Freitext wie 'locker' reicht nicht.")
         cue = re.sub(r"[(),;]", " ", rest[intensity.end():])
-        if _TARGET.search(cue):
+        if _target_match(cue, search=True):
             raise WorkoutTextError("ambiguous_workout_target", f"Workout-Zeile {number}: Mehrere Intensitaetsziele im selben Schritt. Nur ein Ziel angeben; umgerechnete Wattwerte und alternative Ziele als separaten Absatz ohne '- ' schreiben.")
         parsed_target = intensity[0].upper()
         if "PACE" in parsed_target:

@@ -112,23 +112,82 @@ PUBLIC_DIR = ROOT / "public"
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
+ASSET_INDEX_HTML = "index.html"
+ASSET_API_JS = "api.js"
+ASSET_APP_JS = "app.js"
+ASSET_NAVIGATION_JS = "navigation.js"
+ASSET_STATE_JS = "state.js"
+ASSET_VIEWS_JS = "views.js"
+ASSET_FORMS_JS = "forms.js"
+ASSET_COMPONENTS_JS = "components.js"
+ASSET_STYLES_CSS = "styles.css"
+ASSET_SERVICE_WORKER_JS = "service-worker.js"
+ASSET_MANIFEST = "manifest.webmanifest"
+ASSET_LOGO = "logo.png"
+ASSET_ICON = "icon.svg"
 STATIC_TARGETS = {
-    "index.html": PUBLIC_DIR / "index.html",
-    "api.js": PUBLIC_DIR / "api.js",
-    "app.js": PUBLIC_DIR / "app.js",
-    "navigation.js": PUBLIC_DIR / "navigation.js",
-    "state.js": PUBLIC_DIR / "state.js",
-    "views.js": PUBLIC_DIR / "views.js",
-    "forms.js": PUBLIC_DIR / "forms.js",
-    "components.js": PUBLIC_DIR / "components.js",
-    "styles.css": PUBLIC_DIR / "styles.css",
-    "service-worker.js": PUBLIC_DIR / "service-worker.js",
-    "manifest.webmanifest": PUBLIC_DIR / "manifest.webmanifest",
-    "logo.png": PUBLIC_DIR / "logo.png",
-    "icon.svg": PUBLIC_DIR / "icon.svg",
+    ASSET_INDEX_HTML: PUBLIC_DIR / ASSET_INDEX_HTML,
+    ASSET_API_JS: PUBLIC_DIR / ASSET_API_JS,
+    ASSET_APP_JS: PUBLIC_DIR / ASSET_APP_JS,
+    ASSET_NAVIGATION_JS: PUBLIC_DIR / ASSET_NAVIGATION_JS,
+    ASSET_STATE_JS: PUBLIC_DIR / ASSET_STATE_JS,
+    ASSET_VIEWS_JS: PUBLIC_DIR / ASSET_VIEWS_JS,
+    ASSET_FORMS_JS: PUBLIC_DIR / ASSET_FORMS_JS,
+    ASSET_COMPONENTS_JS: PUBLIC_DIR / ASSET_COMPONENTS_JS,
+    ASSET_STYLES_CSS: PUBLIC_DIR / ASSET_STYLES_CSS,
+    ASSET_SERVICE_WORKER_JS: PUBLIC_DIR / ASSET_SERVICE_WORKER_JS,
+    ASSET_MANIFEST: PUBLIC_DIR / ASSET_MANIFEST,
+    ASSET_LOGO: PUBLIC_DIR / ASSET_LOGO,
+    ASSET_ICON: PUBLIC_DIR / ASSET_ICON,
 }
-VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
-STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
+VERSIONED_STATIC_ASSETS = {ASSET_API_JS, ASSET_NAVIGATION_JS, ASSET_STATE_JS, ASSET_VIEWS_JS, ASSET_FORMS_JS, ASSET_COMPONENTS_JS, ASSET_APP_JS, ASSET_STYLES_CSS, ASSET_LOGO, ASSET_ICON}
+STATIC_REVALIDATE_ASSETS = {ASSET_INDEX_HTML, ASSET_SERVICE_WORKER_JS, ASSET_MANIFEST}
+PROVIDER_INTERVALS_NAME = "Intervals.icu"
+PROVIDER_GARMIN_NAME = "Garmin Connect"
+PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
+UTC_OFFSET_SUFFIX = "+00:00"
+ISO_MIDNIGHT_SUFFIX = "T00:00:00"
+JSON_MEDIA_TYPE = "application/json"
+OPENAI_RESPONSES_PATH = "/responses"
+INTERVALS_API_KEY_ERROR = "INTERVALS_API_KEY ist nicht konfiguriert."
+OPENAI_API_KEY_ERROR = "OPENAI_API_KEY ist nicht konfiguriert."
+VO2MAX_UNIT = "ml/kg/min"
+GARMIN_RUN_PREDICTION_SOURCE = "Garmin Connect Laufprognose"
+EXTERNAL_HTTP_STARTED_EVENT = "External HTTP request started"
+EXTERNAL_HTTP_COMPLETED_EVENT = "External HTTP request completed"
+COACH_PLAN_CONSTRAINTS_PREFIX = "coach_plan_constraints:"
+TRAINING_PLAN_SCOPE_PREFIX = "training_plan:"
+LOCAL_INTERVALS_SCOPE = "local+intervals"
+WORKDAY_TIME_LABEL = "vor der Arbeit"
+PLANNED_WORKOUT_LABEL = "Geplante Einheit"
+FULL_RESYNC_LABEL = "Vollständiger Resync"
+NOT_FOUND_ERROR = "Nicht gefunden."
+INTERNAL_SERVER_ERROR = "Interner Serverfehler."
+DAILY_AUTO_UPDATE_LABEL = "tägliche automatische Aktualisierung"
+COMPETITION_NOT_FOUND_ERROR = "Wettkampf nicht gefunden."
+COACH_ABORTED_ERROR = "Die Coach-Anfrage wurde abgebrochen."
+APP_NAME = "Intervals Coach"
+REDACTED_PATH = "[REDACTED_PATH]"
+UUID_PATTERN = r"[0-9a-f-]{36}"
+PAYLOAD_HASH_PATTERN = r"[0-9a-f]{64}"
+DATE_ONLY_PATTERN = r"\d{4}-\d{2}-\d{2}"
+SELECT_COMPETITION_SQL = "SELECT * FROM competitions WHERE id=?"
+SELECT_ACTION_PROPOSAL_SQL = "SELECT * FROM coach_action_proposals WHERE id=?"
+INSERT_LIBRARY_SQL = "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)"
+UPDATE_PLANNED_UNIT_SQL = "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?"
+UPDATE_COMPETITION_CONFLICT_SQL = "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?"
+SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
+SELECT_LIBRARY_PAYLOAD_SQL = "SELECT payload FROM workout_library WHERE local_id = ?"
+UPDATE_COMMAND_RECEIPT_SQL = "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?"
+SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
+SELECT_PLANNING_REVISION_SQL = "SELECT revision FROM planning_state WHERE id=1"
+SELECT_USER_MESSAGE_SQL = "SELECT id FROM messages WHERE client_turn_id=? AND role='user'"
+STRUCTURED_AUTHORIZATION_ERROR = "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht."
+INVALID_PLANNING_ID_ERROR = "Ungültige lokale Planungs-ID."
+CORRUPT_PLANNING_ERROR = "Die lokale Planung ist beschädigt."
+INVALID_LIBRARY_ID_ERROR = "Ungültige lokale Bibliothekseinheiten-ID."
+CORRUPT_LIBRARY_ERROR = "Die lokale Bibliothekseinheit ist beschädigt."
+INVALID_PLANNING_DATE_ERROR = "Das Planungsdatum muss das Format JJJJ-MM-TT haben."
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 APP_VERSION = "1.10.1"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -378,7 +437,7 @@ class ProviderResyncGate:
             return self.resetting
 
 
-INTERVALS_RESYNC_GATE = ProviderResyncGate("Intervals.icu")
+INTERVALS_RESYNC_GATE = ProviderResyncGate(PROVIDER_INTERVALS_NAME)
 GARMIN_RESYNC_GATE = ProviderResyncGate("Garmin")
 
 
@@ -647,12 +706,12 @@ def _safe_provider_path(path: str) -> str:
         decoded = unquote(segment)
         was_redacted = redact_next
         if was_redacted:
-            safe_segments.append("[REDACTED_PATH]")
+            safe_segments.append(REDACTED_PATH)
             redact_next = False
         elif re.fullmatch(r"(?:api|v\d+|[a-z][a-z_-]{0,31})", decoded):
             safe_segments.append(decoded)
         else:
-            safe_segments.append("[REDACTED_PATH]")
+            safe_segments.append(REDACTED_PATH)
         if not was_redacted and decoded.casefold() in {
             "athlete", "activities", "activity", "event", "events", "profile", "user", "workout", "workouts",
         }:
@@ -682,7 +741,7 @@ def _redact_url(match: re.Match[str]) -> str:
             return match.group(0)
         path_segments = []
         for segment in parsed.path.split("/"):
-            path_segments.append("[REDACTED_PATH]" if _unguessable_url_path_segment(segment) else segment)
+            path_segments.append(REDACTED_PATH if _unguessable_url_path_segment(segment) else segment)
         path = "/".join(path_segments)
         query_pairs = []
         for key, item in parse_qsl(parsed.query, keep_blank_values=True):
@@ -795,7 +854,7 @@ def provider_error(service: str | None, category: str, *, status: int | None = N
     """Create a short, classified provider error without forwarding exception text."""
     label = {
         "garmin": "Garmin",
-        "intervals": "Intervals.icu",
+        "intervals": PROVIDER_INTERVALS_NAME,
         "openai": "OpenAI",
         "calendar": "Der externe Kalender",
     }.get(str(service or "").casefold(), "Der externe Dienst")
@@ -1784,10 +1843,10 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
             raise AppError(400, "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten.", reason="invalid_job_request")
         normalized_entries = []
         for entry in entries:
-            if not isinstance(entry, dict) or not re.fullmatch(r"[0-9a-f-]{36}", str(entry.get("library_workout_id") or "")):
+            if not isinstance(entry, dict) or not re.fullmatch(UUID_PATTERN, str(entry.get("library_workout_id") or "")):
                 raise AppError(400, "Jede Plan-Push-Einheit benötigt eine lokale UUID.", reason="invalid_job_request")
             payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
-            if not re.fullmatch(r"[0-9a-f]{64}", payload_hash):
+            if not re.fullmatch(PAYLOAD_HASH_PATTERN, payload_hash):
                 raise AppError(400, "Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash.", reason="invalid_job_request")
             normalized_entries.append({"library_workout_id": str(entry["library_workout_id"]), "expected_payload_hash": payload_hash})
         if "repair" in values and type(values["repair"]) is not bool:
@@ -1986,7 +2045,7 @@ def enqueue_sync_job(
     scheduled_at = now
     if available_at is not None:
         try:
-            scheduled_at = datetime.fromisoformat(str(available_at).replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+            scheduled_at = datetime.fromisoformat(str(available_at).replace("Z", UTC_OFFSET_SUFFIX)).astimezone(timezone.utc).isoformat()
         except (TypeError, ValueError) as exc:
             raise AppError(400, "Der Startzeitpunkt des Synchronisationsjobs ist ungültig.", reason="invalid_job_request") from exc
     job_id = uuid.uuid4().hex
@@ -2353,7 +2412,7 @@ def _scheduled_provider_retry_at(db: Any, provider: str) -> str | None:
     ).fetchall()
     for row in rows:
         try:
-            available_at = datetime.fromisoformat(str(row["available_at"]).replace("Z", "+00:00")).astimezone(timezone.utc)
+            available_at = datetime.fromisoformat(str(row["available_at"]).replace("Z", UTC_OFFSET_SUFFIX)).astimezone(timezone.utc)
         except (TypeError, ValueError):
             continue
         if available_at > now:
@@ -2421,7 +2480,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
                 state = "partial"
             elif configured[key] and last_good:
                 try:
-                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_good.replace("Z", "+00:00"))).total_seconds()
+                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_good.replace("Z", UTC_OFFSET_SUFFIX))).total_seconds()
                 except (TypeError, ValueError):
                     age = float("inf")
                 state = "stale" if age > PROVIDER_REFRESH_STALE_SECONDS[key] else "fresh"
@@ -2639,7 +2698,7 @@ def _history_current(db: Any, entity_type: str, entity_id: str) -> tuple[dict[st
         value = dict(row) if row else None
         return value, _audit_projection(entity_type, value)
     if entity_type == "competition":
-        row = db.execute("SELECT * FROM competitions WHERE id=?", (entity_id,)).fetchone()
+        row = db.execute(SELECT_COMPETITION_SQL, (entity_id,)).fetchone()
         value = dict(row) if row else None
         return value, _audit_projection(entity_type, value)
     if entity_type == "training_plan":
@@ -2667,7 +2726,7 @@ def _history_target(row: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[st
 
 def _history_preview(change_id: Any, session_csrf_hash: str) -> dict[str, Any]:
     normalized_id = str(change_id or "").strip()
-    if not re.fullmatch(r"[0-9a-f-]{36}", normalized_id):
+    if not re.fullmatch(UUID_PATTERN, normalized_id):
         raise AppError(400, "Ungültige Änderungshistorie-ID.")
     with DB_LOCK, database() as db:
         row = db.execute("SELECT * FROM change_history WHERE id=?", (normalized_id,)).fetchone()
@@ -2694,7 +2753,7 @@ def _history_preview(change_id: Any, session_csrf_hash: str) -> dict[str, Any]:
                 json.dumps(payload, separators=(",", ":")), _coach_action_hash(payload), expires_at, utc_now(),
             ),
         )
-        proposal = db.execute("SELECT * FROM coach_action_proposals WHERE id=?", (proposal_id,)).fetchone()
+        proposal = db.execute(SELECT_ACTION_PROPOSAL_SQL, (proposal_id,)).fetchone()
     return {
         "status": "preview",
         "change": _change_history_view(history),
@@ -2705,7 +2764,7 @@ def _history_preview(change_id: Any, session_csrf_hash: str) -> dict[str, Any]:
 
 def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
     change_id = str(payload.get("change_id") or "").strip()
-    if not re.fullmatch(r"[0-9a-f-]{36}", change_id):
+    if not re.fullmatch(UUID_PATTERN, change_id):
         raise AppError(400, "Ungültige Änderungshistorie-ID.")
     with DB_LOCK, database() as db:
         row = db.execute("SELECT * FROM change_history WHERE id=?", (change_id,)).fetchone()
@@ -2742,7 +2801,7 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
             else:
                 restored = normalize_library_workout(target, local_id=entity_id, external_id=None, sync_status="local")
                 now = utc_now()
-                db.execute("INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)", (entity_id, entity_id, json.dumps(restored, ensure_ascii=False), now))
+                db.execute(INSERT_LIBRARY_SQL, (entity_id, entity_id, json.dumps(restored, ensure_ascii=False), now))
                 after = restored
         elif entity_type == "competition":
             if target is None:
@@ -2792,7 +2851,7 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                 restored_target = dict(target)
                 if restore_date:
                     previous_start = str(current_payload.get("start_date_local") or "")
-                    time_suffix = previous_start[10:] if len(previous_start) > 10 and previous_start[10] == "T" else "T00:00:00"
+                    time_suffix = previous_start[10:] if len(previous_start) > 10 and previous_start[10] == "T" else ISO_MIDNIGHT_SUFFIX
                     restored_target["start_date_local"] = restore_date + time_suffix
                 restored = normalize_planned_unit(
                     {
@@ -2806,7 +2865,7 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                     sync_status="local",
                 )
                 db.execute(
-                    "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                    UPDATE_PLANNED_UNIT_SQL,
                     (json.dumps(restored, ensure_ascii=False), utc_now(), entity_id),
                 )
                 after = restored
@@ -3041,7 +3100,7 @@ def diagnostic_capture_status() -> dict[str, Any]:
     state = _diagnostic_capture_state()
     expires_at = str(state.get("expires_at") or "")
     try:
-        active = datetime.fromisoformat(expires_at.replace("Z", "+00:00")) > datetime.now(timezone.utc)
+        active = datetime.fromisoformat(expires_at.replace("Z", UTC_OFFSET_SUFFIX)) > datetime.now(timezone.utc)
     except (TypeError, ValueError):
         active = False
     if not active and state:
@@ -3122,7 +3181,7 @@ def activity_datetime(value: Any) -> datetime | None:
     if not value:
         return None
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value).replace("Z", UTC_OFFSET_SUFFIX))
     except ValueError:
         return None
     if parsed.tzinfo is not None:
@@ -3371,7 +3430,7 @@ GARMIN_CONTEXT_FIELDS = {
 }
 
 
-GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
+GARMIN_PERFORMANCE_SOURCE = PROVIDER_GARMIN_NAME
 
 
 def _garmin_key(value: Any) -> str:
@@ -3454,7 +3513,7 @@ def _garmin_record_date(value: Any) -> str | None:
         except (OverflowError, OSError, ValueError):
             return None
     try:
-        return str(value).replace("Z", "+00:00")[:10]
+        return str(value).replace("Z", UTC_OFFSET_SUFFIX)[:10]
     except (AttributeError, TypeError):
         return None
 
@@ -3712,12 +3771,12 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         "weight_kg": (weight["value"], "kg", "Garmin Connect KÃ¶rpergewicht"),
         "cycling_max_hr_bpm": (max(max_hr_values["cycling"], default=None), "bpm", "Garmin Connect Herzfrequenzzonen" if profile_max_hr else "Garmin Connect RadaktivitÃ¤ten"),
         "running_max_hr_bpm": (max(max_hr_values["running"], default=None), "bpm", "Garmin Connect Herzfrequenzzonen" if profile_max_hr else "Garmin Connect LaufaktivitÃ¤ten"),
-        "cycling_vo2max_ml_kg_min": (cycling_vo2, "ml/kg/min", "Garmin Connect max metrics"),
-        "running_vo2max_ml_kg_min": (running_vo2, "ml/kg/min", "Garmin Connect max metrics"),
-        "run_5k_seconds": (race_values["run_5k_seconds"], "s", "Garmin Connect Laufprognose"),
-        "run_10k_seconds": (race_values["run_10k_seconds"], "s", "Garmin Connect Laufprognose"),
-        "run_half_marathon_seconds": (race_values["run_half_marathon_seconds"], "s", "Garmin Connect Laufprognose"),
-        "run_marathon_seconds": (race_values["run_marathon_seconds"], "s", "Garmin Connect Laufprognose"),
+        "cycling_vo2max_ml_kg_min": (cycling_vo2, VO2MAX_UNIT, "Garmin Connect max metrics"),
+        "running_vo2max_ml_kg_min": (running_vo2, VO2MAX_UNIT, "Garmin Connect max metrics"),
+        "run_5k_seconds": (race_values["run_5k_seconds"], "s", GARMIN_RUN_PREDICTION_SOURCE),
+        "run_10k_seconds": (race_values["run_10k_seconds"], "s", GARMIN_RUN_PREDICTION_SOURCE),
+        "run_half_marathon_seconds": (race_values["run_half_marathon_seconds"], "s", GARMIN_RUN_PREDICTION_SOURCE),
+        "run_marathon_seconds": (race_values["run_marathon_seconds"], "s", GARMIN_RUN_PREDICTION_SOURCE),
         "cycling_ftp_watts": (cycling_ftp, "W", "Garmin Connect FTP"),
         "run_threshold_watts": (running_power, "W", "Garmin Connect Lauf-Schwellenleistung"),
         "run_threshold_pace_seconds_per_km": (running_pace, "s/km", "Garmin Connect Lauf-Schwellenpace"),
@@ -4003,7 +4062,7 @@ def _garmin_capability_allowed(source: str) -> bool:
     state = _garmin_capability_state(source)
     paused_until = str(state.get("paused_until") or "")
     try:
-        return datetime.fromisoformat(paused_until.replace("Z", "+00:00")) <= datetime.now(timezone.utc)
+        return datetime.fromisoformat(paused_until.replace("Z", UTC_OFFSET_SUFFIX)) <= datetime.now(timezone.utc)
     except (TypeError, ValueError):
         return True
 
@@ -4145,7 +4204,7 @@ def _garmin_timestamp(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", UTC_OFFSET_SUFFIX))
     except ValueError:
         return None
     return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
@@ -4214,7 +4273,7 @@ def _morning_body_battery_record(
         "status": "not_available_today",
         "before_sleep": None,
         "morning": None,
-        "source": "Garmin Connect",
+        "source": PROVIDER_GARMIN_NAME,
     }
     if sleep_start is None or sleep_end is None:
         return record
@@ -4849,9 +4908,9 @@ def competition_start(value: Any, fallback_date: Any = None) -> tuple[str, str]:
     raw = str(value or "").strip()
     fallback = str(fallback_date or "").strip()
     if not raw:
-        raw = fallback + "T00:00:00"
+        raw = fallback + ISO_MIDNIGHT_SUFFIX
     try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(raw.replace("Z", UTC_OFFSET_SUFFIX))
     except ValueError as exc:
         raise AppError(400, "Der Startzeitpunkt des Wettkampfs muss ein gültiges Datum sein.") from exc
     if parsed.tzinfo is not None:
@@ -4993,7 +5052,7 @@ def fetch_calendar_feed(url: str) -> bytes:
         "path": "/redacted",
         "timeout_seconds": CALENDAR_FETCH_TIMEOUT_SECONDS,
     }
-    LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": request_context})
+    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
     timed_out = False
     try:
         addresses = _resolve_calendar_addresses(hostname, status=502)
@@ -5029,7 +5088,7 @@ def fetch_calendar_feed(url: str) -> bytes:
                 if len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
                     raise AppError(413, "Der Kalender-Feed ist zu groß.")
                 LOGGER.info(
-                    "External HTTP request completed",
+                    EXTERNAL_HTTP_COMPLETED_EVENT,
                     extra={
                         "event": "external_request_completed",
                         "context": {
@@ -5562,7 +5621,7 @@ def list_external_calendar_events(limit: int = 300, training_relevant_only: bool
         rows = db.execute(
             "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, short_only, updated_at "
             f"FROM external_calendar_events WHERE end_local > ?{relevance_filter} ORDER BY start_local LIMIT ?",
-            (local_now().date().isoformat() + "T00:00:00", max(1, min(int(limit), 1000))),
+            (local_now().date().isoformat() + ISO_MIDNIGHT_SUFFIX, max(1, min(int(limit), 1000))),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -5664,7 +5723,7 @@ PLANNING_CONTEXT_APPOINTMENT_FIELDS = (
 
 
 def _planning_context_date(value: Any) -> str:
-    raw = str(value or "").replace("Z", "+00:00")[:10]
+    raw = str(value or "").replace("Z", UTC_OFFSET_SUFFIX)[:10]
     try:
         return date.fromisoformat(raw).isoformat()
     except ValueError:
@@ -5814,20 +5873,20 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                 sleep_hours = round(float(sleep_seconds) / 3600, 1)
             except (TypeError, ValueError):
                 sleep_hours = None
-        _add_planning_recovery_value(recovery, "sleep_hours", sleep_hours, "Intervals.icu Wellness")
-        _add_planning_recovery_value(recovery, "sleep_score", first_present(row, ("sleepScore", "overallSleepScore")), "Intervals.icu Wellness")
-        _add_planning_recovery_value(recovery, "hrv", first_present(row, ("hrv", "hrv_ms")), "Intervals.icu Wellness")
-        _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(row, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness"))), "Intervals.icu Wellness")
-        _add_planning_recovery_value(recovery, "resting_hr", first_present(row, ("restingHR", "resting_hr")), "Intervals.icu Wellness")
+        _add_planning_recovery_value(recovery, "sleep_hours", sleep_hours, PROVIDER_INTERVALS_WELLNESS_NAME)
+        _add_planning_recovery_value(recovery, "sleep_score", first_present(row, ("sleepScore", "overallSleepScore")), PROVIDER_INTERVALS_WELLNESS_NAME)
+        _add_planning_recovery_value(recovery, "hrv", first_present(row, ("hrv", "hrv_ms")), PROVIDER_INTERVALS_WELLNESS_NAME)
+        _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(row, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness"))), PROVIDER_INTERVALS_WELLNESS_NAME)
+        _add_planning_recovery_value(recovery, "resting_hr", first_present(row, ("restingHR", "resting_hr")), PROVIDER_INTERVALS_WELLNESS_NAME)
         for metric_name, keys in (("ctl", ("ctl", "ctLoad")), ("atl", ("atl", "atlLoad")), ("tsb", ("tsb", "form"))):
-            _add_planning_recovery_value(recovery, metric_name, first_present(row, keys), "Intervals.icu Wellness")
+            _add_planning_recovery_value(recovery, metric_name, first_present(row, keys), PROVIDER_INTERVALS_WELLNESS_NAME)
 
     garmin = garmin_snapshot()
     for section, source_name in (
-        ("sleep", "Garmin Connect"),
-        ("hrv", "Garmin Connect"),
-        ("resting_hr", "Garmin Connect"),
-        ("readiness", "Garmin Connect"),
+        ("sleep", PROVIDER_GARMIN_NAME),
+        ("hrv", PROVIDER_GARMIN_NAME),
+        ("resting_hr", PROVIDER_GARMIN_NAME),
+        ("readiness", PROVIDER_GARMIN_NAME),
     ):
         for record_date, record in _dated_garmin_recovery_records(garmin.get(section)):
             recovery = recovery_by_date.setdefault(record_date, {})
@@ -5856,14 +5915,14 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
     for day, value in _saved_daily_history(MORNING_BATTERY_HISTORY_KEY).items():
         record_date = _planning_context_date(day)
         if record_date and as_number(value) is not None:
-            _add_planning_recovery_value(recovery_by_date.setdefault(record_date, {}), "body_battery", value, "Garmin Connect")
+            _add_planning_recovery_value(recovery_by_date.setdefault(record_date, {}), "body_battery", value, PROVIDER_GARMIN_NAME)
     morning_body_battery = _garmin_morning_body_battery(garmin)
     if morning_body_battery and morning_body_battery.get("status") == "ready":
         record_date = _planning_context_date(morning_body_battery.get("sleep_date"))
         morning = morning_body_battery.get("morning")
         if record_date and isinstance(morning, dict):
             recovery = recovery_by_date.setdefault(record_date, {})
-            _add_planning_recovery_value(recovery, "body_battery", morning.get("value"), "Garmin Connect", overwrite=True)
+            _add_planning_recovery_value(recovery, "body_battery", morning.get("value"), PROVIDER_GARMIN_NAME, overwrite=True)
     return recovery_by_date
 
 
@@ -6094,7 +6153,7 @@ def save_coach_competition(arguments: Any) -> dict[str, Any]:
         with DB_LOCK, database() as db:
             existing_row = COMPETITION_REPOSITORY.get(db, competition_id)
         if not existing_row:
-            raise AppError(404, "Wettkampf nicht gefunden.")
+            raise AppError(404, COMPETITION_NOT_FOUND_ERROR)
         for field in ("name", "event_date", "sport", "priority"):
             if field not in arguments:
                 value[field] = existing_row.get(field)
@@ -6150,11 +6209,11 @@ def delete_coach_competition(competition_id: Any) -> dict[str, Any]:
     now = utc_now()
     with DB_LOCK, database() as db:
         row = db.execute(
-            "SELECT * FROM competitions WHERE id=?",
+            SELECT_COMPETITION_SQL,
             (normalized_id,),
         ).fetchone()
         if not row:
-            raise AppError(404, "Wettkampf nicht gefunden.")
+            raise AppError(404, COMPETITION_NOT_FOUND_ERROR)
         remote_sync_pending = bool(row.get("intervals_event_id") or row.get("external_id"))
         if remote_sync_pending:
             db.execute(
@@ -6280,7 +6339,7 @@ def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
         category = f"RACE_{competition.get('priority') if competition.get('priority') in {'A', 'B', 'C'} else 'B'}"
     payload = {
         "category": category,
-        "start_date_local": str(competition.get("start_date_local") or f"{competition['event_date']}T00:00:00"),
+        "start_date_local": str(competition.get("start_date_local") or f"{competition['event_date']}{ISO_MIDNIGHT_SUFFIX}"),
         "type": intervals_competition_sport(competition.get("sport")),
         "name": str(competition.get("name") or "Zielwettkampf")[:200],
         "description": str(competition.get("description") or competition.get("notes") or "")[:12000],
@@ -6323,7 +6382,7 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
         return None
     category = str(event.get("category") or "RACE_B").upper()
     priority = category.rsplit("_", 1)[-1] if category.rsplit("_", 1)[-1] in {"A", "B", "C"} else "B"
-    start_date_local = str(event.get("start_date_local") or f"{event_date}T00:00:00")[:19]
+    start_date_local = str(event.get("start_date_local") or f"{event_date}{ISO_MIDNIGHT_SUFFIX}")[:19]
     try:
         moving_time = competition_moving_time(event.get("moving_time"))
     except AppError:
@@ -6384,7 +6443,7 @@ def resolve_competition_conflict(competition_id: Any, strategy: Any) -> dict[str
     with DB_LOCK, database() as db:
         row = COMPETITION_REPOSITORY.get(db, normalized_id)
         if not row:
-            raise AppError(404, "Wettkampf nicht gefunden.")
+            raise AppError(404, COMPETITION_NOT_FOUND_ERROR)
         if row.get("sync_state") != "conflict" or not row.get("sync_conflict"):
             raise AppError(409, "Für diesen Wettkampf liegt kein offener Synchronisierungskonflikt vor.")
         try:
@@ -6523,7 +6582,7 @@ def sync_competitions(
     operation_id: str | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     if not COMPETITION_SYNC_LOCK.acquire(blocking=False):
         return {"status": "already_running"}
     try:
@@ -6562,7 +6621,7 @@ def sync_competitions(
         conflicts = 0
         with DB_LOCK, database() as db:
             for row in local_rows:
-                current = db.execute("SELECT * FROM competitions WHERE id=?", (row["id"],)).fetchone()
+                current = db.execute(SELECT_COMPETITION_SQL, (row["id"],)).fetchone()
                 if current is None or dict(current) != row:
                     continue  # A newer local edit or deletion is authoritative.
                 external_id = str(row.get("external_id") or competition_external_id(str(row["id"])))
@@ -6572,7 +6631,7 @@ def sync_competitions(
                 identity_remote = remote_by_identity.get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
                 if row.get("sync_dirty") and identity_remote and not remote and row.get("sync_state") != "local_override":
                     db.execute(
-                        "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                        UPDATE_COMPETITION_CONFLICT_SQL,
                         (competition_conflict_payload(row, identity_remote, "identity_only"), now, row["id"]),
                     )
                     conflicts += 1
@@ -6583,13 +6642,13 @@ def sync_competitions(
                     if not push_local:
                         if remote:
                             db.execute(
-                                "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                                UPDATE_COMPETITION_CONFLICT_SQL,
                                 (competition_conflict_payload(row, remote, "remote_changed"), now, row["id"]),
                             )
                             conflicts += 1
                         elif row.get("intervals_event_id"):
                             db.execute(
-                                "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                                UPDATE_COMPETITION_CONFLICT_SQL,
                                 (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
                             )
                             conflicts += 1
@@ -6601,7 +6660,7 @@ def sync_competitions(
                         )
                     elif row.get("intervals_event_id"):
                         db.execute(
-                            "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                            UPDATE_COMPETITION_CONFLICT_SQL,
                             (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
                         )
                         conflicts += 1
@@ -6621,7 +6680,7 @@ def sync_competitions(
                         updated += 1
                 elif row.get("intervals_event_id") and push_local:
                     db.execute(
-                        "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                        UPDATE_COMPETITION_CONFLICT_SQL,
                         (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
                     )
                     conflicts += 1
@@ -6957,9 +7016,9 @@ def http_json(
         body = json.dumps(payload).encode("utf-8")
     else:
         body = None
-    request_headers = {"Accept": "application/json", "User-Agent": f"IntervalsCoach/{APP_VERSION}"}
+    request_headers = {"Accept": JSON_MEDIA_TYPE, "User-Agent": f"IntervalsCoach/{APP_VERSION}"}
     if body is not None:
-        request_headers["Content-Type"] = content_type or "application/json"
+        request_headers["Content-Type"] = content_type or JSON_MEDIA_TYPE
     request_headers.update(headers or {})
     request = Request(url, data=body, headers=request_headers, method=method)
     parsed_url = urlparse(url)
@@ -6977,7 +7036,7 @@ def http_json(
     if parsed_url.query:
         request_context["query_keys"] = sorted(parse_qs(parsed_url.query, keep_blank_values=True))
     started = time.perf_counter()
-    LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": request_context})
+    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
     capture_diagnostic_event("external_http_started", {
         "service": request_context["service"],
         "method": request_context["method"],
@@ -7008,7 +7067,7 @@ def http_json(
                 record_openai_rate_limits(getattr(response, "headers", None))
                 record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
             LOGGER.info(
-                "External HTTP request completed",
+                EXTERNAL_HTTP_COMPLETED_EVENT,
                 extra={
                     "event": "external_request_completed",
                     "context": {
@@ -7074,7 +7133,7 @@ def http_json(
         raise AppError(502, upstream_http_error_message(exc.code, raw_error, service), reason="provider_http_error") from exc
     except (URLError, TimeoutError, OSError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
-            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         if service == "openai":
             record_openai_status({
                 "state": "error",
@@ -7192,7 +7251,7 @@ def _weather_daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:
     dates = daily.get("time") if isinstance(daily.get("time"), list) else []
     result: list[dict[str, Any]] = []
     for index, raw_date in enumerate(dates[:WEATHER_FORECAST_DAYS]):
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(raw_date)):
+        if not re.fullmatch(DATE_ONLY_PATTERN, str(raw_date)):
             continue
         code = _weather_array_value(daily.get("weather_code"), index)
         hours = sorted((row for row in _weather_hourly_rows(forecast, str(raw_date))
@@ -7262,15 +7321,15 @@ def _weather_training_windows(target_date: date) -> list[tuple[int, int, str]]:
     """
     weekday = target_date.weekday()
     if weekday <= 3:  # Monday–Thursday: 06:00–15:30
-        return [(5, 6, "vor der Arbeit"), (12, 13, "Mittagspause"), (16, 22, "nach der Arbeit")]
+        return [(5, 6, WORKDAY_TIME_LABEL), (12, 13, "Mittagspause"), (16, 22, "nach der Arbeit")]
     if weekday == 4:  # Friday: 06:00–14:00
-        return [(5, 6, "vor der Arbeit"), (12, 13, "Mittagspause"), (14, 22, "nach der Arbeit")]
+        return [(5, 6, WORKDAY_TIME_LABEL), (12, 13, "Mittagspause"), (14, 22, "nach der Arbeit")]
     return [(6, 21, "Wochenende")]
 
 
 def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> dict[str, Any] | None:
     event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", event_date):
+    if not re.fullmatch(DATE_ONLY_PATTERN, event_date):
         return None
     try:
         target_date = date.fromisoformat(event_date)
@@ -7316,7 +7375,7 @@ def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> 
             )
             # When the forecast is equally good, prefer a practical daytime slot
             # over the narrow pre-work window. Weather remains the dominant factor.
-            convenience_penalty = 2 if availability == "vor der Arbeit" else 0
+            convenience_penalty = 2 if availability == WORKDAY_TIME_LABEL else 0
             candidates.append((score + convenience_penalty, start_hour, interval, availability))
     if not candidates:
         return None
@@ -7337,7 +7396,7 @@ def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> 
     recommendation = {
         "date": event_date,
         "event_id": str(event.get("id")) if event.get("id") is not None else None,
-        "event_name": str(event.get("name") or "Geplante Einheit")[:200],
+        "event_name": str(event.get("name") or PLANNED_WORKOUT_LABEL)[:200],
         "suggested_time": f"{start_hour:02d}:00–{min(23, end_hour):02d}:00 Uhr",
         "availability": availability,
         "weather_code": best_code,
@@ -7462,7 +7521,7 @@ def weather_state(
     cache_matches = isinstance(cached, dict) and cached.get("query") == query and isinstance(cached.get("forecast"), dict)
     fetched_at = str(cached.get("fetched_at") or "") if cache_matches else ""
     try:
-        cache_age = (datetime.now(timezone.utc) - datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))).total_seconds()
+        cache_age = (datetime.now(timezone.utc) - datetime.fromisoformat(fetched_at.replace("Z", UTC_OFFSET_SUFFIX))).total_seconds()
     except (TypeError, ValueError):
         cache_age = float("inf")
     error = "Wetterdaten sind veraltet." if cache_matches and (cache_age >= WEATHER_CACHE_SECONDS or failure) else None
@@ -7470,7 +7529,7 @@ def weather_state(
     if refresh and (force or not cache_matches or cache_age >= WEATHER_CACHE_SECONDS):
         retry_at = str(failure.get("retry_at") or "")
         try:
-            retry_wait = (datetime.fromisoformat(retry_at.replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()
+            retry_wait = (datetime.fromisoformat(retry_at.replace("Z", UTC_OFFSET_SUFFIX)) - datetime.now(timezone.utc)).total_seconds()
         except (TypeError, ValueError):
             retry_wait = 0
         if retry_wait > 0 and not force:
@@ -7677,7 +7736,7 @@ def add_weather_to_planned(planned: list[dict[str, Any]], weather: dict[str, Any
     enriched = []
     for event in planned:
         copy = dict(event)
-        recommendation = by_id.get(str(event.get("id"))) or by_date_name.get((str(event.get("start_date_local") or event.get("date") or "")[:10], str(event.get("name") or "Geplante Einheit")[:200]))
+        recommendation = by_id.get(str(event.get("id"))) or by_date_name.get((str(event.get("start_date_local") or event.get("date") or "")[:10], str(event.get("name") or PLANNED_WORKOUT_LABEL)[:200]))
         if recommendation:
             copy["weather_recommendation"] = recommendation
         enriched.append(copy)
@@ -8033,7 +8092,7 @@ class IntervalsClient:
         pending = [item for item in folders if isinstance(item, dict)]
         while pending:
             folder = pending.pop(0)
-            if str(folder.get("name") or "").strip() == "Intervals Coach":
+            if str(folder.get("name") or "").strip() == APP_NAME:
                 matching.append(folder)
             children = folder.get("children")
             if isinstance(children, list):
@@ -8043,7 +8102,7 @@ class IntervalsClient:
             if folder_id is not None:
                 self._workout_folder_id = folder_id
                 return folder_id
-        created = self.post(f"/athlete/{athlete}/folders", {"name": "Intervals Coach"})
+        created = self.post(f"/athlete/{athlete}/folders", {"name": APP_NAME})
         folder_id = self._folder_id(created.get("id") if isinstance(created, dict) else None)
         if folder_id is None:
             raise AppError(502, "Intervals.icu hat keinen gültigen Ordner zurückgegeben.")
@@ -8424,7 +8483,7 @@ def workout_event_payload(workout_id: str, workout: dict[str, Any]) -> dict[str,
         raise AppError(400, "Die Trainingsdauer muss zwischen 5 und 600 Minuten liegen.")
     return {
         "category": "WORKOUT",
-        "start_date_local": str(workout.get("start_date_local") or workout_date.isoformat() + "T00:00:00")[:40],
+        "start_date_local": str(workout.get("start_date_local") or workout_date.isoformat() + ISO_MIDNIGHT_SUFFIX)[:40],
         "type": intervals_workout_sport(workout.get("sport") or workout.get("type")),
         "name": str(workout.get("name") or "Coach workout")[:200],
         "description": str(workout.get("description") or "")[:12000],
@@ -8483,7 +8542,7 @@ def _calendar_interval(value: dict[str, Any], default_minutes: int = 60) -> tupl
         if len(raw_start) == 10:
             start = datetime.combine(date.fromisoformat(raw_start[:10]), datetime.min.time())
             return start, start + timedelta(days=1), False
-        start = datetime.fromisoformat(raw_start.replace("Z", "+00:00"))
+        start = datetime.fromisoformat(raw_start.replace("Z", UTC_OFFSET_SUFFIX))
     except (TypeError, ValueError):
         return None
     if start.tzinfo is not None:
@@ -8492,7 +8551,7 @@ def _calendar_interval(value: dict[str, Any], default_minutes: int = 60) -> tupl
     end = None
     if raw_end not in (None, ""):
         try:
-            end = datetime.fromisoformat(str(raw_end).strip().replace("Z", "+00:00"))
+            end = datetime.fromisoformat(str(raw_end).strip().replace("Z", UTC_OFFSET_SUFFIX))
             if end.tzinfo is not None:
                 end = end.replace(tzinfo=None)
         except (TypeError, ValueError):
@@ -8628,7 +8687,7 @@ def list_training_plans(limit: int = 30) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
         plans = TRAINING_PLAN_REPOSITORY.list(db, limit)
         for plan in plans:
-            plan["constraints"] = json.loads(get_kv("coach_plan_constraints:" + plan["id"]) or "[]")
+            plan["constraints"] = json.loads(get_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan["id"]) or "[]")
         return plans
 
 
@@ -8825,7 +8884,7 @@ def coach_quick_actions_state() -> dict[str, Any]:
             if today <= change_date <= horizon and relevant:
                 blockers.append({
                     "date": change_date.isoformat(),
-                    "name": str(change.get("name") or "Geplante Einheit")[:200],
+                    "name": str(change.get("name") or PLANNED_WORKOUT_LABEL)[:200],
                     "triggers": relevant,
                 })
     return {
@@ -8909,7 +8968,7 @@ def illness_calendar_events(pause: dict[str, Any], illness: str) -> list[dict[st
         date_key = current.isoformat()
         events.append({
             "category": ILLNESS_CALENDAR_CATEGORY,
-            "start_date_local": f"{date_key}T00:00:00",
+            "start_date_local": f"{date_key}{ISO_MIDNIGHT_SUFFIX}",
             "name": "Krankheit",
             "description": str(illness or "Krankheit").strip()[:12000],
             "external_id": f"{ILLNESS_EVENT_EXTERNAL_PREFIX}{date_key}",
@@ -8920,7 +8979,7 @@ def illness_calendar_events(pause: dict[str, Any], illness: str) -> list[dict[st
 
 def sync_illness_pause_to_intervals(pause: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     illness = str(pause.get("illness") or "Krankheit").strip()[:CHECKIN_TEXT_LIMITS["illness"]]
     client = IntervalsClient()
     pushed = client.upsert_calendar_events(illness_calendar_events(pause, illness))
@@ -9162,7 +9221,7 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
                 for key in ("workout_doc", "icu_training_load", "icu_intensity"):
                     replacement.pop(key, None)
             db.execute(
-                "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                UPDATE_PLANNED_UNIT_SQL,
                 (json.dumps(replacement, ensure_ascii=False), now, draft_id),
             )
             _record_change(db, "planned_unit", draft_id, "update", before, {**replacement, "sync_status": "local"}, source="adaptive_replan")
@@ -9553,14 +9612,14 @@ def create_local_workout_library_entry(workout: dict[str, Any], db: Any | None =
     now = utc_now()
     if db is not None:
         db.execute(
-            "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)",
+            INSERT_LIBRARY_SQL,
             (local_id, local_id, json.dumps(entry, ensure_ascii=False), now),
         )
         _record_change(db, "workout_library", local_id, "create", None, entry)
     else:
         with DB_LOCK, database() as own_db:
             own_db.execute(
-                "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)",
+                INSERT_LIBRARY_SQL,
                 (local_id, local_id, json.dumps(entry, ensure_ascii=False), now),
             )
             _record_change(own_db, "workout_library", local_id, "create", None, entry)
@@ -9899,10 +9958,10 @@ def canonical_planned_workouts(
             "remote_library_id": str(entry.get("external_id") or "") or None,
             "external_id": remote_external_id or None,
             "category": "WORKOUT",
-            "start_date_local": str(entry.get("start_date_local") or (event_date + "T00:00:00" if event_date else ""))[:40] or None,
+            "start_date_local": str(entry.get("start_date_local") or (event_date + ISO_MIDNIGHT_SUFFIX if event_date else ""))[:40] or None,
             "is_local": True,
             "is_remote": bool(linked),
-            "sync_source": "local+intervals" if linked else "local",
+            "sync_source": LOCAL_INTERVALS_SCOPE if linked else "local",
             # A stale provider snapshot must not hide a local dirty or
             # conflict state. The local store remains the source of truth.
             "sync_status": sync_status,
@@ -9968,13 +10027,13 @@ def local_calendar_events(
         result.append({
             **competition,
             "date": str(competition.get("event_date") or "")[:10],
-            "start_date_local": competition.get("start_date_local") or f"{str(competition.get('event_date') or '')[:10]}T00:00:00",
+            "start_date_local": competition.get("start_date_local") or f"{str(competition.get('event_date') or '')[:10]}{ISO_MIDNIGHT_SUFFIX}",
             "type": competition.get("sport") or "Competition",
             "category": competition.get("category") or "RACE_B",
             "is_competition": True,
             "is_local": True,
             "is_remote": bool(competition.get("external_id")),
-            "sync_source": "local+intervals" if competition.get("external_id") else "local",
+            "sync_source": LOCAL_INTERVALS_SCOPE if competition.get("external_id") else "local",
             "sync_status": competition.get("sync_state") or "local",
         })
     for event in external_events if external_events is not None else list_external_calendar_events(1000, training_relevant_only=True):
@@ -10111,7 +10170,7 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
     """Reconcile one explicitly selected future unit using exact remote identities."""
     with _planned_unit_sync_guard(local_id):
         with DB_LOCK, database() as db:
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
             other_rows = db.execute(
                 "SELECT local_id, json_extract(payload, '$.remote_event_id') AS remote_id, "
                 "json_extract(payload, '$.remote_event_external_id') AS remote_external_id FROM planned_units WHERE local_id<>?",
@@ -10125,7 +10184,7 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
 
         def recheck():
             with DB_LOCK, database() as db:
-                current = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+                current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
                 if not current or _library_payload_hash(current["payload"]) != expected_hash:
                     raise AppError(409, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.", reason="planning_revision_conflict")
 
@@ -10199,7 +10258,7 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
                     raise
                 update_planned_unit_sync_state(local_id, "syncing", remote_event={**result, "external_id": payload["external_id"]})
                 with database() as db:
-                    current = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+                    current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
                     expected_hash = _library_payload_hash(current["payload"])
             if not str(result.get("start_date_local") or "").startswith(planned_date.isoformat()) or result.get("name") != workout.get("name"):
                 raise AppError(502, "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestaetigt.", reason="intervals_workout_verification_failed")
@@ -10246,7 +10305,7 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Planungs-ID.") from exc
+        raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
     with DB_LOCK, database() as db:
         row = db.execute("SELECT payload, sync_state FROM planned_units WHERE local_id=?", (normalized_id,)).fetchone()
     if not row:
@@ -10254,22 +10313,22 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
     try:
         workout = json.loads(row["payload"] or "{}")
     except (TypeError, ValueError) as exc:
-        raise AppError(500, "Die lokale Planung ist beschädigt.") from exc
+        raise AppError(500, CORRUPT_PLANNING_ERROR) from exc
     if not isinstance(workout, dict):
-        raise AppError(500, "Die lokale Planung ist beschädigt.")
+        raise AppError(500, CORRUPT_PLANNING_ERROR)
     # Future planning is local-authoritative, so an approved push uses the
     # preserved local payload without a separate conflict decision.
     if workout.get("local_deleted") or workout.get("archived"):
         def recheck_removal():
             with DB_LOCK, database() as db:
-                current = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (normalized_id,)).fetchone()
+                current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (normalized_id,)).fetchone()
                 if not current or _library_payload_hash(current["payload"]) != _library_payload_hash(row["payload"]):
                     raise AppError(409, "Die Planung wurde waehrend der Synchronisation geaendert.", reason="planning_revision_conflict")
 
         remote_id = str(workout.get("remote_event_id") or "").strip()
         if remote_id:
             if not CONFIG.intervals_api_key:
-                raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+                raise AppError(503, INTERVALS_API_KEY_ERROR)
             client = IntervalsClient()
             athlete = quote(client.config.intervals_athlete_id, safe="")
             try:
@@ -10298,7 +10357,7 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
         # provider event has no external_id.
         event_payload["id"] = str(workout["remote_event_id"])[:120]
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     result = IntervalsClient().upsert_calendar_events([event_payload])
     event = result[0] if result else None
     if not isinstance(event, dict) or not str(event.get("id") or "").strip():
@@ -10386,7 +10445,7 @@ def refresh_workout_library(
 ) -> dict[str, Any]:
     """Seed the local library once without performing any remote writes."""
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     _raise_chat_cancelled(cancel_event)
     if get_kv("last_library_sync_at"):
         return {
@@ -10437,7 +10496,7 @@ def _sync_local_workout_calendar_entry(local_id: str, synced: dict[str, Any]) ->
     if not isinstance(event, dict) or not str(event.get("id") or "").strip():
         raise AppError(502, "Intervals.icu hat keine geplante Bibliothekseinheit zurückgegeben.")
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (local_id,)).fetchone()
+        row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
         if row:
             try:
                 payload = json.loads(row["payload"] or "{}")
@@ -10477,9 +10536,9 @@ def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
         try:
             current = json.loads(row["payload"])
         except (TypeError, ValueError) as exc:
-            raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
+            raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
         if not isinstance(current, dict):
-            raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.")
+            raise AppError(500, CORRUPT_LIBRARY_ERROR)
         if current.get("date"):
             raise AppError(409, "Geplante lokale Einheiten werden im Kalender bearbeitet.")
         before = {**current, "sync_status": row.get("sync_state") or current.get("sync_status")}
@@ -10531,7 +10590,7 @@ def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
 def update_workout_library_sync_state(local_id: str, state: str, error: str | None = None) -> None:
     """Persist sync progress separately from the provider payload."""
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (local_id,)).fetchone()
+        row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
         if not row:
             return
         try:
@@ -10684,7 +10743,7 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Bibliothekseinheiten-ID.") from exc
+        raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
     with DB_LOCK, database() as db:
         row = db.execute(
             "SELECT id, local_id, external_id, sync_state, payload FROM workout_library WHERE local_id = ?",
@@ -10695,7 +10754,7 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
     try:
         local_workout = json.loads(row["payload"])
     except (TypeError, ValueError) as exc:
-        raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
+        raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
     if row.get("external_id") and row.get("sync_state") == "synced":
         return local_workout
     validate_workout_description(local_workout)
@@ -10744,9 +10803,9 @@ def sync_local_workout_library_entry(local_id: str) -> dict[str, Any]:
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Bibliothekseinheiten-ID.") from exc
+        raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     with WORKOUT_LIBRARY_SYNC_LOCK:
         try:
             return _sync_local_workout_library_entry_unlocked(normalized_id)
@@ -10771,21 +10830,21 @@ def apply_workout_library_plan(
             try:
                 workout_id = str(uuid.UUID(str(item.get("library_workout_id") or "")))
             except (ValueError, AttributeError) as exc:
-                raise AppError(400, "Ungültige lokale Bibliothekseinheiten-ID.") from exc
+                raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
             plan_date = str(item.get("date") or "").strip()
             try:
                 date.fromisoformat(plan_date)
             except (TypeError, ValueError) as exc:
-                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.") from exc
-            row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (workout_id,)).fetchone()
+                raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
+            row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (workout_id,)).fetchone()
             if not row:
                 raise AppError(404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.")
             try:
                 workout = json.loads(row["payload"])
             except (TypeError, ValueError) as exc:
-                raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
+                raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
             if not isinstance(workout, dict):
-                raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.")
+                raise AppError(500, CORRUPT_LIBRARY_ERROR)
             requested.append({"library_workout_id": workout_id, "date": plan_date, "workout": workout})
 
     conflicts: list[dict[str, Any]] = []
@@ -10873,10 +10932,10 @@ def _library_bulk_request_entries(
                 raise AppError(400, "Das Bulk-Datum muss das Format JJJJ-MM-TT haben.") from exc
             selected["date"] = plan_date[:10]
         expected_hash = str(item.get("expected_payload_hash") or "").strip().lower()
-        if require_hash and not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        if require_hash and not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
             raise AppError(400, "Die Bulk-Aktion benötigt aktuelle Payload-Hashes.")
         if expected_hash:
-            if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+            if not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
                 raise AppError(400, "Ungültiger Payload-Hash in der Bulk-Auswahl.")
             selected["expected_payload_hash"] = expected_hash
         result.append(selected)
@@ -10902,7 +10961,7 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     requested = _library_bulk_request_entries(payload.get("entries"), require_hash=True)
     repair_batch = _RepairCalendarBatch(requested) if payload.get("repair") else None
     results: list[dict[str, Any]] = []
@@ -10990,7 +11049,7 @@ def update_local_planned_workout(
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Planungs-ID.") from exc
+        raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
     if not isinstance(values, dict):
         raise AppError(400, "Die lokale Planung muss als Objekt gesendet werden.")
     action = str(values.get("action") or "update").strip().casefold()
@@ -11001,7 +11060,7 @@ def update_local_planned_workout(
         try:
             current = json.loads(row["payload"])
         except (TypeError, ValueError) as exc:
-            raise AppError(500, "Die lokale Planung ist beschädigt.") from exc
+            raise AppError(500, CORRUPT_PLANNING_ERROR) from exc
         if not isinstance(current, dict) or not current.get("date"):
             raise AppError(403, "Nur lokale geplante Einheiten können bearbeitet werden.")
         before = {**current, "sync_status": row.get("sync_state") or current.get("sync_status")}
@@ -11033,10 +11092,10 @@ def update_local_planned_workout(
             try:
                 date.fromisoformat(candidate["date"])
             except (TypeError, ValueError) as exc:
-                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.") from exc
+                raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
             if candidate["date"][:10] != str(current.get("date") or "")[:10]:
                 old_start = str(current.get("start_date_local") or "")
-                time_suffix = old_start[10:] if len(old_start) > 10 and old_start[10] == "T" else "T00:00:00"
+                time_suffix = old_start[10:] if len(old_start) > 10 and old_start[10] == "T" else ISO_MIDNIGHT_SUFFIX
                 candidate["start_date_local"] = candidate["date"][:10] + time_suffix
             if not skip_calendar_conflict and candidate["date"][:10] != str(current.get("date") or "")[:10]:
                 conflicts = calendar_conflicts({"date": candidate["date"][:10]}, {normalized_id})
@@ -11067,7 +11126,7 @@ def update_local_planned_workout(
                     normalized[key] = current[key]
             now = utc_now()
             db.execute(
-                "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                UPDATE_PLANNED_UNIT_SQL,
                 (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
             )
             _record_change(db, "planned_unit", normalized_id, "update", before, {**normalized, "sync_status": "local"})
@@ -11088,7 +11147,7 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Planungs-ID.") from exc
+        raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
     selected = str(strategy or "").strip().casefold()
     if selected not in {"keep_local", "adopt_remote"}:
         raise AppError(400, "Ungültige Konfliktstrategie.")
@@ -11107,12 +11166,12 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
             try:
                 payload = json.loads(row["payload"] or "{}")
             except (TypeError, ValueError) as exc:
-                raise AppError(409, "Die lokale Planung ist beschädigt.") from exc
+                raise AppError(409, CORRUPT_PLANNING_ERROR) from exc
             if not isinstance(payload, dict):
-                raise AppError(409, "Die lokale Planung ist beschädigt.")
+                raise AppError(409, CORRUPT_PLANNING_ERROR)
             payload["sync_status"] = "local"
             db.execute(
-                "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                UPDATE_PLANNED_UNIT_SQL,
                 (json.dumps(payload, ensure_ascii=False), now, normalized_id),
             )
         elif remote is None:
@@ -11121,9 +11180,9 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
             try:
                 payload = json.loads(row["payload"] or "{}")
             except (TypeError, ValueError) as exc:
-                raise AppError(409, "Die lokale Planung ist beschädigt.") from exc
+                raise AppError(409, CORRUPT_PLANNING_ERROR) from exc
             if not isinstance(payload, dict):
-                raise AppError(409, "Die lokale Planung ist beschädigt.")
+                raise AppError(409, CORRUPT_PLANNING_ERROR)
             payload["local_deleted"] = True
             payload["archived"] = True
             payload["sync_status"] = "remote_deleted"
@@ -11239,7 +11298,7 @@ def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any],
         duration_minutes = 30
     payload = {
         "date": event_date,
-        "start_date_local": event.get("start_date_local") or event.get("start") or event_date + "T00:00:00",
+        "start_date_local": event.get("start_date_local") or event.get("start") or event_date + ISO_MIDNIGHT_SUFFIX,
         "sport": event.get("type") or event.get("sport") or "Ride",
         "type": event.get("type") or event.get("sport") or "Ride",
         "name": event.get("name") or "Intervals.icu-Einheit",
@@ -11338,16 +11397,16 @@ def upsert_remote_planned_units(
         # The provider request is a bounded calendar window. Only interpret a
         # missing event as a remote deletion when the row falls inside the
         # successfully received window; never tombstone units beyond it.
-        valid_dates = [value for value in incoming_dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)]
+        valid_dates = [value for value in incoming_dates if re.fullmatch(DATE_ONLY_PATTERN, value)]
         calendar_start_value = str(calendar_start or "")[:10]
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", calendar_start_value):
+        if re.fullmatch(DATE_ONLY_PATTERN, calendar_start_value):
             window_start = calendar_start_value
         elif valid_dates:
             window_start = min(valid_dates)
         else:
             window_start = None
         calendar_end_value = str(calendar_end or "")[:10]
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", calendar_end_value):
+        if re.fullmatch(DATE_ONLY_PATTERN, calendar_end_value):
             window_end = calendar_end_value
         elif valid_dates:
             window_end = max(valid_dates)
@@ -11412,7 +11471,7 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
     if provider not in PROVIDER_RESYNC_KEYS:
         raise AppError(400, "Unbekannte Anbindung.")
     if provider == "intervals" and not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     if provider == "garmin" and not (
         garmin_fixture_path() is not None
         or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
@@ -11423,7 +11482,7 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
     if not gate.begin_reset():
         return {"status": "already_running", "source": provider}
     keys = PROVIDER_RESYNC_KEYS[provider]
-    label = "Intervals.icu" if provider == "intervals" else "Garmin"
+    label = PROVIDER_INTERVALS_NAME if provider == "intervals" else "Garmin"
     operation_id = operation_id or uuid.uuid4().hex
     operation_token = OPERATION_CONTEXT.set({"operation_id": operation_id, "trigger": "full_resync"})
     operation_started = time.perf_counter()
@@ -11440,14 +11499,14 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
         # good snapshot and all athlete-owned records remain recoverable.
         set_kv(keys["status"], f"{label}: vollständiger Resync läuft…")
         if provider == "intervals":
-            result = sync_intervals("Vollständiger Resync", activity_days=ALL_SYNC_DAYS, operation_id=operation_id)
-            competition_result = sync_competitions("Vollständiger Resync", push_local=False, operation_id=operation_id)
+            result = sync_intervals(FULL_RESYNC_LABEL, activity_days=ALL_SYNC_DAYS, operation_id=operation_id)
+            competition_result = sync_competitions(FULL_RESYNC_LABEL, push_local=False, operation_id=operation_id)
             result = {
                 **result,
                 "competitions": competition_result,
             }
         else:
-            result = sync_garmin(days=ALL_SYNC_DAYS, operation_id=operation_id, reason="Vollständiger Resync")
+            result = sync_garmin(days=ALL_SYNC_DAYS, operation_id=operation_id, reason=FULL_RESYNC_LABEL)
         finished_at = utc_now()
         set_kv(keys["last_at"], finished_at)
         set_kv(keys["error"], "")
@@ -11489,7 +11548,7 @@ def sync_intervals(
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     if activity_days is None:
         activity_days = sync_period("intervals")
     _raise_chat_cancelled(cancel_event)
@@ -11659,7 +11718,7 @@ def sync_intervals(
 @intervals_operation
 def refresh_current_performance() -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     if not PERFORMANCE_LOCK.acquire(blocking=False):
         return {"status": "already_running"}
     try:
@@ -11970,8 +12029,8 @@ def intervals_max_hr_metric(
     """Return sport-specific max heart rate with an explicit source."""
     max_hr_keys = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
     candidates: list[tuple[Any, str]] = [
-        (first_present(setting, max_hr_keys), "Intervals.icu"),
-        (first_present(wellness_setting, max_hr_keys), "Intervals.icu Wellness"),
+        (first_present(setting, max_hr_keys), PROVIDER_INTERVALS_NAME),
+        (first_present(wellness_setting, max_hr_keys), PROVIDER_INTERVALS_WELLNESS_NAME),
     ]
     activity_values: list[float | int] = []
     for activity in activities:
@@ -11981,9 +12040,9 @@ def intervals_max_hr_metric(
         if value is not None and 80 <= float(value) <= 260:
             activity_values.append(value)
     if activity_values:
-        candidates.append((max(activity_values), "Intervals.icu"))
+        candidates.append((max(activity_values), PROVIDER_INTERVALS_NAME))
     candidates.extend([
-        (first_present(athlete, max_hr_keys), "Intervals.icu"),
+        (first_present(athlete, max_hr_keys), PROVIDER_INTERVALS_NAME),
     ])
     for value, source in candidates:
         number = as_number(value)
@@ -12032,18 +12091,18 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         running_max_hr = garmin_metrics["running_max_hr_bpm"]
     body_sources = (
         (garmin_metrics["weight_kg"]["value"], GARMIN_PERFORMANCE_SOURCE),
-        (first_present(latest_wellness, ("weight",)), "Intervals.icu Wellness"),
-        (first_present(athlete, ("weight",)), "Intervals.icu"),
+        (first_present(latest_wellness, ("weight",)), PROVIDER_INTERVALS_WELLNESS_NAME),
+        (first_present(athlete, ("weight",)), PROVIDER_INTERVALS_NAME),
         (profile.get("weight_kg"), "Manuell"),
     )
     weight_value, weight_source = next(((value, source) for value, source in body_sources if as_number(value) is not None), (None, None))
     body_fat_value, body_fat_source = next(((value, source) for value, source in (
-        (first_present(latest_wellness, ("bodyFat", "body_fat")), "Intervals.icu Wellness"),
-        (first_present(athlete, ("bodyFat", "body_fat")), "Intervals.icu"),
+        (first_present(latest_wellness, ("bodyFat", "body_fat")), PROVIDER_INTERVALS_WELLNESS_NAME),
+        (first_present(athlete, ("bodyFat", "body_fat")), PROVIDER_INTERVALS_NAME),
         (profile.get("body_fat_pct"), "Manuell"),
     ) if as_number(value) is not None), (None, None))
     height_value, height_source = next(((value, source) for value, source in (
-        (first_present(athlete, ("height_cm", "height")), "Intervals.icu"),
+        (first_present(athlete, ("height_cm", "height")), PROVIDER_INTERVALS_NAME),
         (profile.get("height_cm"), "Manuell"),
     ) if as_number(value) is not None), (None, None))
     def preferred_metric(key: str, fallback: dict[str, Any]) -> dict[str, Any]:
@@ -12055,23 +12114,23 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
     garmin_threshold_metrics = {
         "cycling_ftp_watts": preferred_metric("cycling_ftp_watts", metric(
             first_present(ride, ("ftp", "indoor_ftp")) or first_present(wellness_ride, ("ftp", "indoor_ftp")) or first_present(athlete, ("icu_ftp",)),
-            "W", "Intervals.icu",
+            "W", PROVIDER_INTERVALS_NAME,
         )),
         "run_threshold_watts": preferred_metric("run_threshold_watts", metric(
             first_present(run, ("ftp", "indoor_ftp")) or first_present(wellness_run, ("ftp", "indoor_ftp")),
-            "W", "Intervals.icu",
+            "W", PROVIDER_INTERVALS_NAME,
         )),
         "run_threshold_pace_seconds_per_km": preferred_metric("run_threshold_pace_seconds_per_km", metric(
             threshold_pace_seconds(first_present(run, ("threshold_pace",)) or first_present(wellness_run, ("threshold_pace",))),
-            "s/km", "Intervals.icu",
+            "s/km", PROVIDER_INTERVALS_NAME,
         )),
         "bike_threshold_hr_bpm": preferred_metric("bike_threshold_hr_bpm", metric(
             bike_lthr or generic_lthr,
-            "bpm", "Intervals.icu" if bike_lthr else "Intervals.icu (allgemein)",
+            "bpm", PROVIDER_INTERVALS_NAME if bike_lthr else "Intervals.icu (allgemein)",
         )),
         "run_threshold_hr_bpm": preferred_metric("run_threshold_hr_bpm", metric(
             run_lthr or generic_lthr,
-            "bpm", "Intervals.icu" if run_lthr else "Intervals.icu (allgemein)",
+            "bpm", PROVIDER_INTERVALS_NAME if run_lthr else "Intervals.icu (allgemein)",
         )),
     }
     return {
@@ -12082,11 +12141,11 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         # never be populated from Intervals.icu eFTP; the fallback only uses an
         # explicitly labelled FTP field.
         **garmin_threshold_metrics,
-        "cycling_eftp_watts": metric(current_ride_eftp or latest_ride_eftp, "W", "Intervals.icu"),
+        "cycling_eftp_watts": metric(current_ride_eftp or latest_ride_eftp, "W", PROVIDER_INTERVALS_NAME),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
-        "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
-        "running_vo2max_ml_kg_min": garmin_metrics["running_vo2max_ml_kg_min"] if garmin_metrics["running_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(wellness_run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(athlete, ("running_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
+        "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), VO2MAX_UNIT, PROVIDER_INTERVALS_NAME),
+        "running_vo2max_ml_kg_min": garmin_metrics["running_vo2max_ml_kg_min"] if garmin_metrics["running_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(wellness_run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(athlete, ("running_vo2max", "vo2max", "vo2_max")), VO2MAX_UNIT, PROVIDER_INTERVALS_NAME),
         "run_5k_seconds": garmin_metrics["run_5k_seconds"] if garmin_metrics["run_5k_seconds"]["value"] is not None else metric(None, "s", None),
         "run_10k_seconds": garmin_metrics["run_10k_seconds"] if garmin_metrics["run_10k_seconds"]["value"] is not None else metric(None, "s", None),
         "run_half_marathon_seconds": garmin_metrics["run_half_marathon_seconds"] if garmin_metrics["run_half_marathon_seconds"]["value"] is not None else metric(None, "s", None),
@@ -12097,7 +12156,7 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
 def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     snapshot = snapshot if snapshot is not None else latest_snapshot()
     if not snapshot:
-        return {"available": False, "source": "Intervals.icu", "as_of": None, "metrics": {}}
+        return {"available": False, "source": PROVIDER_INTERVALS_NAME, "as_of": None, "metrics": {}}
     athlete = snapshot.get("athlete") if isinstance(snapshot.get("athlete"), dict) else {}
     activities = snapshot.get("recent_activities") if isinstance(snapshot.get("recent_activities"), list) else []
     wellness_rows = [row for row in snapshot.get("recent_wellness", []) if isinstance(row, dict)] if isinstance(snapshot.get("recent_wellness"), list) else []
@@ -12127,7 +12186,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
             sleep_hours = round(float(sleep_seconds) / 3600, 1) if sleep_seconds is not None else None
         except (TypeError, ValueError):
             sleep_hours = None
-        sleep_source = "Intervals.icu Wellness" if sleep_hours is not None else None
+        sleep_source = PROVIDER_INTERVALS_WELLNESS_NAME if sleep_hours is not None else None
         sleep_average = wellness_average(wellness_rows, ("sleepSecs", "sleep_seconds"), 7, local_now().date(), 3600)
         if sleep_average is None:
             sleep_average = wellness_average(wellness_rows, ("sleep_hours",), 7, local_now().date())
@@ -12135,7 +12194,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
     if garmin_sleep_score is not None:
         sleep_score_source = GARMIN_PERFORMANCE_SOURCE
     elif sleep_score is not None:
-        sleep_score_source = "Intervals.icu Wellness"
+        sleep_score_source = PROVIDER_INTERVALS_WELLNESS_NAME
     else:
         sleep_score_source = None
     garmin_resting_hr, garmin_resting_hr_date = garmin_recovery_metric(
@@ -12151,7 +12210,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         )
     else:
         resting_hr = first_present(latest_wellness, ("restingHR", "resting_hr"))
-        resting_hr_source = "Intervals.icu Wellness" if resting_hr is not None else None
+        resting_hr_source = PROVIDER_INTERVALS_WELLNESS_NAME if resting_hr is not None else None
         resting_hr_average = wellness_average(wellness_rows, ("restingHR", "resting_hr"), 7, local_now().date())
     garmin_hrv, garmin_hrv_date = garmin_recovery_metric(
         garmin, "hrv", ("hrvLastNight", "lastNightAvg", "hrvWeeklyAvg", "weeklyAvg", "hrv", "hrv_ms"),
@@ -12166,7 +12225,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         )
     else:
         hrv = first_present(latest_wellness, ("hrv", "hrv_ms"))
-        hrv_source = "Intervals.icu Wellness" if hrv is not None else None
+        hrv_source = PROVIDER_INTERVALS_WELLNESS_NAME if hrv is not None else None
         hrv_average = wellness_average(wellness_rows, ("hrv", "hrv_ms"), 7, local_now().date())
     metrics = api_performance_metrics(snapshot)
     load = {
@@ -12192,7 +12251,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
     # Garmin recovery metrics are the authoritative values when available;
     # Intervals.icu remains a fallback for accounts without those Garmin data.
     readiness_current = readiness_score_value(first_present(latest_wellness, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness")))
-    readiness_source = "Intervals.icu Wellness" if readiness_current is not None else None
+    readiness_source = PROVIDER_INTERVALS_WELLNESS_NAME if readiness_current is not None else None
     if readiness_current is None:
         readiness_current = readiness_score_value(garmin_snapshot().get("readiness"))
         readiness_source = GARMIN_PERFORMANCE_SOURCE if readiness_current is not None else None
@@ -12240,8 +12299,8 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         "run_threshold_watts_30d": trend("run_threshold_watts", "W"),
         "run_threshold_pace_seconds_per_km_30d": trend("run_threshold_pace_seconds_per_km", "s/km", False),
         "run_threshold_hr_bpm_30d": trend("run_threshold_hr_bpm", "bpm"),
-        "cycling_vo2max_ml_kg_min_30d": trend("cycling_vo2max_ml_kg_min", "ml/kg/min"),
-        "running_vo2max_ml_kg_min_30d": trend("running_vo2max_ml_kg_min", "ml/kg/min"),
+        "cycling_vo2max_ml_kg_min_30d": trend("cycling_vo2max_ml_kg_min", VO2MAX_UNIT),
+        "running_vo2max_ml_kg_min_30d": trend("running_vo2max_ml_kg_min", VO2MAX_UNIT),
         "run_5k_seconds_30d": trend("run_5k_seconds", "s", False),
         "run_10k_seconds_30d": trend("run_10k_seconds", "s", False),
         "run_half_marathon_seconds_30d": trend("run_half_marathon_seconds", "s", False),
@@ -12716,7 +12775,7 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
         error = AppError(502, "OpenAI returned an error response.", reason="response_error")
         error.provider_error_code = code
         raise error
-    if path == "/responses":
+    if path == OPENAI_RESPONSES_PATH:
         response_status = str(result.get("status") or "").casefold()
         if response_status in {"failed", "cancelled"}:
             record_openai_status({"state": "error", "reason": "response_failed", "message": "OpenAI did not complete the coach response.", "http_status": 200})
@@ -12746,9 +12805,9 @@ def openai_endpoint(path: str) -> str:
 
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
-        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, OPENAI_API_KEY_ERROR)
     request_payload = dict(payload)
-    if path == "/responses":
+    if path == OPENAI_RESPONSES_PATH:
         request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     result = http_json(
         "POST",
@@ -12763,7 +12822,7 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise AppError(502, "OpenAI hat eine unerwartete Antwort zurückgegeben.")
     # Background Responses are billed/observed when their final result is
     # retrieved; counting the queued creation would double-count one turn.
-    if not (path == "/responses" and request_payload.get("background") is True):
+    if not (path == OPENAI_RESPONSES_PATH and request_payload.get("background") is True):
         record_openai_usage(result, path.strip("/") or "request")
     return result
 
@@ -12834,7 +12893,7 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
             raise AppError(502, "Gemini hat kein Transkript zurückgegeben.")
         return {"transcript": transcript}
     if not CONFIG.openai_api_key:
-        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, OPENAI_API_KEY_ERROR)
     body, multipart_type = multipart_form_data(
         [
             ("model", "gpt-transcribe"),
@@ -13073,7 +13132,7 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
     text_format = payload.get("text") if isinstance(payload.get("text"), dict) else {}
     format_config = text_format.get("format") if isinstance(text_format.get("format"), dict) else {}
     if format_config.get("type") == "json_schema" and isinstance(format_config.get("schema"), dict):
-        request["generationConfig"].update({"responseMimeType": "application/json", "responseJsonSchema": format_config["schema"]})
+        request["generationConfig"].update({"responseMimeType": JSON_MEDIA_TYPE, "responseJsonSchema": format_config["schema"]})
     explicit_reasoning = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else {}
     thinking_level = str(explicit_reasoning.get("effort") or selected_thinking_level()).casefold()
     if thinking_level not in {"low", "medium", "high"}:
@@ -13160,7 +13219,7 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     for attempt in range(3):
         try:
-            return openai_request("/responses", request_payload)
+            return openai_request(OPENAI_RESPONSES_PATH, request_payload)
         except AppError as exc:
             if exc.reason != "conversation_locked" or attempt == 2:
                 raise
@@ -13186,7 +13245,7 @@ def _openai_response_id(value: Any) -> str:
 def retrieve_openai_response(response_id: str) -> dict[str, Any]:
     """Retrieve one background response without exposing its identifier in logs."""
     if not CONFIG.openai_api_key:
-        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, OPENAI_API_KEY_ERROR)
     response_id = _openai_response_id(response_id)
     result = http_json(
         "GET",
@@ -13195,7 +13254,7 @@ def retrieve_openai_response(response_id: str) -> dict[str, Any]:
         timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
         service="openai",
     )
-    return _validate_openai_response("/responses", result)
+    return _validate_openai_response(OPENAI_RESPONSES_PATH, result)
 
 
 def cancel_openai_response(response_id: str) -> None:
@@ -13243,19 +13302,19 @@ def responses_background_request(
     while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
         if cancel_event is not None and cancel_event.wait(OPENAI_BACKGROUND_POLL_SECONDS):
             cancel_openai_response(active_response_id)
-            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled")
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
         if time.monotonic() - started >= OPENAI_BACKGROUND_MAX_SECONDS:
             cancel_openai_response(active_response_id)
             raise AppError(504, "Die Hintergrundplanung hat das Zeitlimit überschritten.", reason="provider_timeout")
         current = retrieve_openai_response(active_response_id)
-    current = _validate_openai_response("/responses", current)
+    current = _validate_openai_response(OPENAI_RESPONSES_PATH, current)
     record_openai_usage(current, "responses_background")
     return current
 
 
 def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
     if cancel_event is not None and cancel_event.is_set():
-        raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled")
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
 def openai_stream_request(
@@ -13264,19 +13323,19 @@ def openai_stream_request(
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
-        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, OPENAI_API_KEY_ERROR)
     request_payload = {**payload, "stream": True}
     request_payload.pop("_ai_provider", None)
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     body = json.dumps(request_payload).encode("utf-8")
-    endpoint = openai_endpoint("/responses")
+    endpoint = openai_endpoint(OPENAI_RESPONSES_PATH)
     parsed_endpoint = urlparse(endpoint)
     request = Request(
         endpoint,
         data=body,
         headers={
             "Accept": "text/event-stream",
-            "Content-Type": "application/json",
+            "Content-Type": JSON_MEDIA_TYPE,
             "Authorization": f"Bearer {CONFIG.openai_api_key}",
             "User-Agent": f"IntervalsCoach/{APP_VERSION}",
         },
@@ -13291,7 +13350,7 @@ def openai_stream_request(
         "timeout_seconds": OPENAI_RESPONSE_TIMEOUT_SECONDS,
         "request_bytes": len(body),
     }
-    LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": context})
+    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": context})
     capture_diagnostic_event("openai_stream_started", {
         "service": "openai",
         "method": "POST",
@@ -13369,7 +13428,7 @@ def openai_stream_request(
         _raise_chat_cancelled(cancel_event)
         if final_response is None:
             raise AppError(502, "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.", reason="invalid_response")
-        final_response = _validate_openai_response("/responses", final_response)
+        final_response = _validate_openai_response(OPENAI_RESPONSES_PATH, final_response)
         record_openai_usage(final_response, "responses_stream")
         capture_diagnostic_event("openai_stream_completed", {
             "service": "openai", "status": 200,
@@ -13377,7 +13436,7 @@ def openai_stream_request(
             "response_bytes": stream_bytes,
         })
         LOGGER.info(
-            "External HTTP request completed",
+            EXTERNAL_HTTP_COMPLETED_EVENT,
             extra={"event": "external_request_completed", "context": {**context, "status": 200, "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes}},
         )
         return final_response
@@ -13415,7 +13474,7 @@ def openai_stream_request(
         if cancel_event is not None and cancel_event.is_set():
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
             log_failure("chat_cancelled", 499, level=logging.INFO)
-            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         details = {"state": "error", "reason": "provider_timeout", "message": "OpenAI hat nicht rechtzeitig geantwortet.", "http_status": 504}
         record_openai_status(details)
         log_failure("provider_timeout", 504)
@@ -13428,7 +13487,7 @@ def openai_stream_request(
         if cancel_event is not None and cancel_event.is_set():
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
             log_failure("chat_cancelled", 499, level=logging.INFO)
-            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         record_openai_status({"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503})
         log_failure("provider_unavailable", 503)
         capture_diagnostic_event("openai_stream_failed", {
@@ -13513,7 +13572,7 @@ def reset_coach_chat() -> dict[str, Any]:
                     "message": None,
                 })
                 db.execute(
-                    "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
+                    UPDATE_COMMAND_RECEIPT_SQL,
                     (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, command["client_turn_id"]),
                 )
             db.execute("DELETE FROM messages")
@@ -13652,7 +13711,7 @@ def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str
     if action_type not in COACH_ACTION_TYPES:
         raise AppError(400, "Unbekannter Coach-Aktionstyp.")
     target_system = str(values.get("target_system") or "").strip()
-    if target_system not in {"local", "intervals", "local+intervals"}:
+    if target_system not in {"local", "intervals", LOCAL_INTERVALS_SCOPE}:
         raise AppError(400, "Die Aktionsvorschau benötigt ein gültiges Zielsystem.")
     object_ids = values.get("object_ids")
     diff = values.get("diff")
@@ -13683,13 +13742,13 @@ def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str
                 _coach_action_hash(payload), expires_at, now,
             ),
         )
-        row = db.execute("SELECT * FROM coach_action_proposals WHERE id=?", (proposal_id,)).fetchone()
+        row = db.execute(SELECT_ACTION_PROPOSAL_SQL, (proposal_id,)).fetchone()
     return {"status": "preview", "proposed_action": _coach_action_view(dict(row))}
 
 
 def confirm_coach_action_preview(proposal_id: Any, session_csrf_hash: str) -> dict[str, Any]:
     normalized_id = str(proposal_id or "").strip()
-    if not re.fullmatch(r"[0-9a-f-]{36}", normalized_id):
+    if not re.fullmatch(UUID_PATTERN, normalized_id):
         raise AppError(400, "Ungültige Aktionsvorschau.")
     token = secrets.token_urlsafe(32)
     now = time.time()
@@ -13707,7 +13766,7 @@ def confirm_coach_action_preview(proposal_id: Any, session_csrf_hash: str) -> di
         ).rowcount
         if confirmed != 1:
             raise AppError(409, "Die Aktionsvorschau wurde bereits bestÃ¤tigt.")
-        updated = db.execute("SELECT * FROM coach_action_proposals WHERE id=?", (normalized_id,)).fetchone()
+        updated = db.execute(SELECT_ACTION_PROPOSAL_SQL, (normalized_id,)).fetchone()
     return {"status": "ready", "action_token": token, "proposed_action": _coach_action_view(dict(updated))}
 
 
@@ -13780,7 +13839,7 @@ def _coach_command_receipt(value: Any) -> dict[str, Any]:
 
 def _merge_coach_command_receipt(client_turn_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        row = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
         receipt = _coach_command_receipt((row or {}).get("receipt"))
         receipt.update(updates)
         db.execute(
@@ -14219,7 +14278,7 @@ def _structured_training_state(*, include_inactive: bool = False, cursor: Any = 
                    or len(decoded["key"]) != 3 or not all(isinstance(value, str) for value in decoded["key"])):
         raise AppError(400, "Ungueltiger Planungscursor.", reason="invalid_page_cursor")
     with DB_LOCK, database() as db:
-        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         revision_number = int((revision or {}).get("revision") or 0)
         if decoded and (decoded.get("revision") != revision_number or decoded.get("include_inactive") != include_inactive or decoded.get("today") != today):
             raise AppError(409, "Die Planung hat sich waehrend des Lesens geaendert. Alle Seiten erneut lesen.", reason="planning_revision_conflict")
@@ -14319,7 +14378,7 @@ def _validate_plan_calendar(workouts: list[dict[str, Any]]) -> None:
 
 def _stage_coach_artifact(conversation_id: str, client_turn_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     with DB_LOCK, database() as db:
-        revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         base_revision = int((revision_row or {}).get("revision") or 0)
         artifact_id = str(uuid.uuid4())
         now = utc_now()
@@ -14349,13 +14408,13 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
             try:
                 date.fromisoformat(candidate_date)
             except ValueError as exc:
-                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
+                raise AppError(400, INVALID_PLANNING_DATE_ERROR, reason="invalid_change") from exc
             final_active[change_identity] = True
             final_dates[change_identity] = candidate_date
             continue
         if action == "restore":
             restore_identities.add(change_identity)
-        row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+        row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
         if not row:
             continue
         try:
@@ -14384,7 +14443,7 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
         try:
             date.fromisoformat(candidate_date)
         except ValueError as exc:
-            raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
+            raise AppError(400, INVALID_PLANNING_DATE_ERROR, reason="invalid_change") from exc
         final_dates[change_identity] = candidate_date
     occupied_dates: dict[str, str] = {}
     for change_identity, candidate_date in final_dates.items():
@@ -14460,7 +14519,7 @@ def _apply_structured_training_changes(
             prepared_changes.append(change)
     changes = prepared_changes
     with DB_LOCK, database() as db:
-        revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
         expected_revision = arguments.get("expected_revision")
         if require_revision and expected_revision is None:
@@ -14474,10 +14533,10 @@ def _apply_structured_training_changes(
             if not change.get("local_id"):
                 raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
             expected_hash = str(change.get("expected_payload_hash") or "").strip().lower()
-            if require_revision and not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+            if require_revision and not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
                 raise AppError(400, "Eine vollständige Planänderung benötigt aktuelle Payload-Hashes.", reason="payload_hash_required")
             if expected_hash:
-                row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (str(change["local_id"]),)).fetchone()
+                row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (str(change["local_id"]),)).fetchone()
                 if not row or _library_payload_hash(row["payload"]) != expected_hash:
                     raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
         _validate_training_change_batch(changes, db)
@@ -14488,7 +14547,7 @@ def _apply_structured_training_changes(
             local_id = str(change.get("local_id") or "").strip()
             if action == "create" or not local_id:
                 continue
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
             if not row:
                 continue
             try:
@@ -14606,7 +14665,7 @@ def _apply_structured_training_changes(
                         updated_plan,
                         source="coach_apply",
                     )
-        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
     publish_state_event("planning", {"status": "changed"})
     result_changes = [
         {"local_id": item.get("local_id"), "status": item.get("status")}
@@ -14646,7 +14705,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
             raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {workout_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
         dates.add(workout_date)
     with DB_LOCK, database() as db:
-        revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
         if expected_revision != current_revision:
             raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
@@ -14734,10 +14793,10 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
         if plan_id:
             constraints = arguments.get("constraints") or list(dict.fromkeys(
                 item for old_id in sorted(superseded_plan_ids)
-                for item in json.loads(get_kv("coach_plan_constraints:" + old_id) or "[]")
+                for item in json.loads(get_kv(COACH_PLAN_CONSTRAINTS_PREFIX + old_id) or "[]")
             ))
             if constraints:
-                set_kv("coach_plan_constraints:" + plan_id, json.dumps(constraints, ensure_ascii=False), db)
+                set_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id, json.dumps(constraints, ensure_ascii=False), db)
         created: list[dict[str, Any]] = []
         for workout in workouts:
             entry_payload = {**workout, "source": "coach"}
@@ -14749,7 +14808,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
             created.append(entry)
         if rows or created or plan_id:
             _bump_planning_revision(db)
-        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
     return {
         "ok": True,
         "status": "replaced",
@@ -14799,7 +14858,7 @@ def _mark_local_planning_authoritative(local_ids: list[str] | None = None) -> in
                 continue
             payload["sync_status"] = "local"
             db.execute(
-                "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                UPDATE_PLANNED_UNIT_SQL,
                 (json.dumps(payload, ensure_ascii=False), now, row["local_id"]),
             )
             changed += 1
@@ -14853,7 +14912,7 @@ def _coach_repair_manifest(arguments: dict[str, Any], intent: dict[str, Any]) ->
         entries = [{"library_workout_id": row["local_id"], "expected_payload_hash": _library_payload_hash(row["payload"])} for row in rows]
         if supplied is None:
             _require_coach_scope(intent, "local_plan")
-            revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+            revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
             expected = arguments.get("expected_revision")
             if type(expected) is not int or expected != int((revision or {}).get("revision") or 0):
                 raise AppError(409, "Lies die aktuelle Planung vor der vollstaendigen Reparatur erneut.", reason="planning_revision_conflict")
@@ -14873,7 +14932,7 @@ def _coach_repair_manifest(arguments: dict[str, Any], intent: dict[str, Any]) ->
         if rows:
             _mark_local_planning_authoritative([row["local_id"] for row in rows])
         for entry in entries:
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (entry["library_workout_id"],)).fetchone()
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
             entry["expected_payload_hash"] = _library_payload_hash(row["payload"])
     return entries
 
@@ -14976,7 +15035,7 @@ def _structured_coach_tool_result(
         return {"ok": True, "training_plans": list_training_plans(100)}
     if name == "stage_training_plan":
         if "stage_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         _require_coach_scope(intent, "local_plan")
         payload = _structured_artifact_payload(arguments)
         _validate_structured_plan_limits(payload)
@@ -14985,7 +15044,7 @@ def _structured_coach_tool_result(
         return _stage_coach_artifact(conversation_id, client_turn_id, payload)
     if name == "commit_training_plan":
         if "commit_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         artifact_id = str(intent.get("artifact_id") or "").strip()
         if not artifact_id:
             raise AppError(400, "Zum Speichern wird ein lokales Planartefakt benötigt.", reason="artifact_required")
@@ -15007,7 +15066,7 @@ def _structured_coach_tool_result(
                     "UPDATE coach_plan_artifacts SET conversation_id=?, updated_at=? WHERE id=? AND status='draft'",
                     (conversation_id, utc_now(), artifact_id),
                 )
-            revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+            revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
             current_revision = int((revision_row or {}).get("revision") or 0)
             if int(artifact["base_revision"] or 0) != current_revision:
                 raise AppError(409, "Der lokale Plan wurde inzwischen geändert.", reason="planning_revision_conflict")
@@ -15027,8 +15086,8 @@ def _structured_coach_tool_result(
             return {"ok": True, "status": "committed", "artifact_id": artifact_id, "library_entry_ids": [entry["id"] for entry in entries]}
     if name == "replace_training_plan":
         if "replace_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        selected_plan_ids = sorted(token.split(":", 1)[1] for token in _coach_scope_values(intent) if token.startswith("training_plan:") and token.split(":", 1)[1])
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+        selected_plan_ids = sorted(token.split(":", 1)[1] for token in _coach_scope_values(intent) if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1])
         if len(selected_plan_ids) > 1:
             raise AppError(400, "Ein Planersatz darf nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
         if not selected_plan_ids and "local_plan" not in _coach_scope_values(intent):
@@ -15036,13 +15095,13 @@ def _structured_coach_tool_result(
         return _replace_structured_training_plan({**arguments, "period": intent.get("period"), "constraints": (intent.get("request") or {}).get("constraints", [])}, selected_plan_id=selected_plan_ids[0] if selected_plan_ids else None)
     if name == "apply_training_changes":
         if "apply_training_changes" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         changes = arguments.get("changes")
         if not isinstance(changes, list):
             raise AppError(400, "Coach-Änderungen müssen als Liste gesendet werden.", reason="invalid_change")
         selected_plan_ids = sorted(
             token.split(":", 1)[1] for token in _coach_scope_values(intent)
-            if token.startswith("training_plan:") and token.split(":", 1)[1]
+            if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1]
         )
         if len(selected_plan_ids) > 1:
             raise AppError(400, "Die Änderungen dürfen nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
@@ -15068,7 +15127,7 @@ def _structured_coach_tool_result(
         )
     if name == "manage_training_templates":
         if "manage_training_templates" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         templates = arguments.get("templates")
         if not isinstance(templates, list) or not 1 <= len(templates) <= 28 or not all(isinstance(item, dict) for item in templates):
             raise AppError(400, "Ein Coach-Kommando darf 1 bis 28 Vorlagenänderungen enthalten.", reason="template_limit")
@@ -15089,7 +15148,7 @@ def _structured_coach_tool_result(
         return {"ok": True, "stored_locally": True, "templates": results, "template": results[0] if len(results) == 1 else None}
     if name == "apply_workout_library_plan":
         if "apply_workout_library_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         entries = arguments.get("entries")
         if not isinstance(entries, list):
             raise AppError(400, "Bibliothekseinheiten müssen als Liste gesendet werden.", reason="invalid_library_plan")
@@ -15142,7 +15201,7 @@ def _structured_coach_tool_result(
         return {"ok": True, **delete_coach_competition(competition_id)}
     if name == "start_provider_refresh":
         if "start_provider_refresh" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         provider = str(intent.get("target_system") or "")
         _require_coach_scope(intent, f"{provider}_refresh")
         if arguments.pop("_wait_for_completion", False):
@@ -15200,7 +15259,7 @@ def _structured_coach_tool_result(
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
     if name == "start_intervals_plan_sync":
         if "start_intervals_plan_sync" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         entries = arguments.get("entries")
         if "repair" in arguments and type(arguments["repair"]) is not bool:
             raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
@@ -15296,7 +15355,7 @@ def _structured_coach_tool_result(
                     )
             with DB_LOCK, database() as db:
                 for entry in normalized_entries:
-                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (entry["library_workout_id"],)).fetchone()
+                    row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
                     if not row or _library_payload_hash(row["payload"]) != entry["expected_payload_hash"]:
                         raise AppError(409, "Die ausgewählte Planung wurde geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
                     if arguments.get("repair"):
@@ -15307,7 +15366,7 @@ def _structured_coach_tool_result(
                 # Marking a conflict as locally authoritative changes the payload.
                 # Queue hashes of that validated, updated state.
                 for entry in normalized_entries:
-                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (entry["library_workout_id"],)).fetchone()
+                    row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
                     entry["expected_payload_hash"] = _library_payload_hash(row["payload"])
         return _enqueue_coach_plan_push(
             normalized_entries,
@@ -15334,7 +15393,7 @@ def _structured_coach_tool_result(
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
     if name == "resolve_training_sync_conflict":
         if "resolve_training_sync_conflict" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         payload = arguments
         local_id = str(payload.get("local_id") or "").strip()
         strategy = str(payload.get("strategy") or "keep_local").strip().casefold()
@@ -15358,12 +15417,12 @@ def _structured_coach_tool_result(
         return {"ok": True, "status": "queued", "job": job}
     if name == "preview_adaptive_replan":
         if "preview_adaptive_replan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         _require_coach_scope(intent, "adaptive_replan")
         return {"ok": True, **adaptive_replan_preview()}
     if name == "apply_adaptive_replan":
         if "apply_adaptive_replan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         payload = arguments
         adjustment_id = str(payload.get("adjustment_id") or "").strip()
         _require_coach_scope(intent, f"adaptive_replan:{adjustment_id}", "adaptive_replan")
@@ -15377,21 +15436,21 @@ def _structured_coach_tool_result(
         if not latest or str(latest.get("id")) != adjustment_id or latest.get("status") != "preview":
             raise AppError(409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen.")
         with DB_LOCK, database() as db:
-            current_user = db.execute("SELECT id FROM messages WHERE client_turn_id=? AND role='user'", (client_turn_id,)).fetchone()
+            current_user = db.execute(SELECT_USER_MESSAGE_SQL, (client_turn_id,)).fetchone()
             publication = db.execute("SELECT id FROM messages WHERE id=? AND role='assistant'", (latest.get("published_message_id"),)).fetchone()
         if not current_user or not publication or current_user["id"] <= publication["id"] or current_user["id"] not in (intent.get("request") or {}).get("source_message_ids", []):
             raise AppError(403, "Die Vorschau muss zuerst angezeigt und in einer folgenden Nachricht freigegeben werden.", reason="adaptive_approval_required")
         return {"ok": True, **apply_adaptive_replan(adjustment_id, sync_illness_to_intervals=sync_illness)}
     if name == "update_training_plan":
         if "update_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         payload = _structured_action_payload(arguments)
         plan_id = str(payload.get("plan_id") or "").strip()
-        _require_coach_scope(intent, f"training_plan:{plan_id}", "local_plan")
+        _require_coach_scope(intent, f"{TRAINING_PLAN_SCOPE_PREFIX}{plan_id}", "local_plan")
         return {"ok": True, **update_training_plan(plan_id, payload)}
     if name == "undo_training_change":
         if "undo_training_change" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         change_id = str(arguments.get("change_id") or "").strip()
         _require_coach_scope(intent, f"change:{change_id}")
         return {"ok": True, **_history_preview(change_id, session_csrf_hash)}
@@ -15411,7 +15470,7 @@ def coach_dialogue_context(client_turn_id: str) -> dict[str, Any]:
     """Local dialogue survives provider switches; remote conversations are not authority."""
     messages = list_messages(24)
     with DB_LOCK, database() as db:
-        current = db.execute("SELECT id FROM messages WHERE client_turn_id=? AND role='user'", (client_turn_id,)).fetchone()
+        current = db.execute(SELECT_USER_MESSAGE_SQL, (client_turn_id,)).fetchone()
         pending = json.loads(get_kv("coach_pending_request") or "null")
         if pending:
             for message_id in pending.get("source_message_ids", []):
@@ -15514,12 +15573,12 @@ def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, An
             action["_repair_period"] = {**period, "start": max(period["start"], local_now().date().isoformat())}
             with DB_LOCK, database() as db:
                 for entry in arguments.get("entries") or []:
-                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (str(entry.get("library_workout_id") or ""),)).fetchone()
+                    row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (str(entry.get("library_workout_id") or ""),)).fetchone()
                     day = str(json.loads(row["payload"]).get("date") or "") if row else ""
                     if not max(period["start"], local_now().date().isoformat()) <= day <= period["end"]:
                         raise AppError(403, "Die Reparaturauswahl liegt ausserhalb des beauftragten Zeitraums.", reason="request_period")
     if name == "update_training_plan":
-        _require_coach_scope(action, "training_plan:" + str((arguments.get("payload") or {}).get("plan_id") or ""))
+        _require_coach_scope(action, TRAINING_PLAN_SCOPE_PREFIX + str((arguments.get("payload") or {}).get("plan_id") or ""))
     if name == "apply_adaptive_replan":
         _require_coach_scope(action, "adaptive_replan:" + str(arguments.get("adjustment_id") or ""))
     return action
@@ -15537,7 +15596,7 @@ def _validate_dialogue_plan_scope(name: str, arguments: dict[str, Any], action: 
         for change in arguments.get("changes", []):
             local_id = str(change.get("local_id") or "")
             _require_coach_scope(action, f"planned_unit:{local_id}")
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
             if not row:
                 raise AppError(404, "Die ausgewählte Einheit fehlt.", reason="request_object_missing")
             check(json.loads(row["payload"]).get("date"))
@@ -15545,7 +15604,7 @@ def _validate_dialogue_plan_scope(name: str, arguments: dict[str, Any], action: 
                 check(change["date"])
         if name == "commit_training_plan":
             artifact = db.execute("SELECT client_turn_id, payload FROM coach_plan_artifacts WHERE id=?", (action.get("artifact_id"),)).fetchone()
-            origin = db.execute("SELECT id FROM messages WHERE client_turn_id=? AND role='user'", (artifact["client_turn_id"],)).fetchone() if artifact else None
+            origin = db.execute(SELECT_USER_MESSAGE_SQL, (artifact["client_turn_id"],)).fetchone() if artifact else None
             if not origin or origin["id"] not in action["request"]["source_message_ids"]:
                 raise AppError(409, "Dieser Entwurf gehört nicht zum aktuellen lokalen Gespräch.", reason="artifact_conversation_conflict")
             for workout in json.loads(artifact["payload"]).get("workouts", []):
@@ -15580,14 +15639,14 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
     if len(set(ids)) != len(ids):
         raise AppError(400, "Eine Einheit darf nur einmal im Änderungssatz vorkommen.", reason="invalid_change")
     with DB_LOCK, database() as db:
-        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()["revision"]
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
         if type(arguments.get("expected_revision")) is not int or arguments["expected_revision"] != revision:
             raise AppError(409, "Der Plan wurde inzwischen geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
         _validate_training_change_batch(changes, db)
         final_dates = set()
         for change in changes:
             if change.get("action") not in {"delete", "archive"}:
-                row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (change["local_id"],)).fetchone()
+                row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (change["local_id"],)).fetchone()
                 final_dates.add(str(change.get("date") or json.loads(row["payload"])["date"])[:10])
         for workout in workouts:
             day = workout["date"][:10]
@@ -15599,12 +15658,12 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
         created = save_workout_library_entries(workouts, plan_name, str(arguments.get("goal") or "")) if workouts else []
         plan_ids = {str(item.get("plan_id") or "") for item in created}
         for local_id in ids:
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
             plan_ids.add(str(json.loads(row["payload"]).get("plan_id") or ""))
         for plan_id in plan_ids - {""}:
             if action["request"]["constraints"]:
-                set_kv("coach_plan_constraints:" + plan_id, json.dumps(action["request"]["constraints"], ensure_ascii=False), db)
-        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()["revision"]
+                set_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id, json.dumps(action["request"]["constraints"], ensure_ascii=False), db)
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
     return {"ok": True, "status": "applied", "planning_revision": revision, "changes": changed["changes"], "library_entry_ids": [item["id"] for item in created]}
 
 
@@ -15707,7 +15766,7 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
         intent["authorization_scope"].append(f"artifact:{artifact_id}")
         expected_revision = payload.get("expected_revision")
         with DB_LOCK, database() as db:
-            row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+            row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         if expected_revision is not None and int(expected_revision) != int((row or {}).get("revision") or 0):
             raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
         arguments = {**arguments, "artifact_id": artifact_id}
@@ -15768,7 +15827,7 @@ def _chat_with_structured_coach_impl(
 ) -> dict[str, Any]:
     ai_provider = ai_provider or selected_ai_provider()
     with DB_LOCK, database() as db:
-        existing = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        existing = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
         receipt = _coach_command_receipt(existing["receipt"]) if existing else {}
         if existing:
             _require_command_owner(receipt, session_csrf_hash)
@@ -15953,7 +16012,7 @@ def _chat_with_structured_coach_impl(
                 if cached and name == "stage_training_plan" and cached.get("result", {}).get("ok"):
                     with DB_LOCK, database() as db:
                         row = db.execute("SELECT status, base_revision FROM coach_plan_artifacts WHERE id=?", (cached["result"].get("artifact_id"),)).fetchone()
-                        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()["revision"]
+                        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
                     if not row or (row["status"] == "draft" and row["base_revision"] != revision):
                         cached = None
                 if cached:
@@ -16100,7 +16159,7 @@ def _chat_with_structured_coach_impl(
                     preview_payload["published_message_id"] = final_receipt["message"]["id"]
                     db.execute("UPDATE plan_adjustments SET payload=? WHERE id=?", (json.dumps(preview_payload, ensure_ascii=False), preview_id))
         set_kv("last_coach_ai_provider", ai_provider or selected_ai_provider(), db)
-        db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
+        db.execute(UPDATE_COMMAND_RECEIPT_SQL,
                    (json.dumps(final_receipt, ensure_ascii=False), utc_now(), client_turn_id))
     publish_state_event("coach", {"message_id": final_receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
     return final_receipt
@@ -16234,7 +16293,7 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         for key in ("openai_response_id", "pending_tool_outputs", "pending_tool_calls", "response_input", "previous_response_id"):
             receipt.pop(key, None)
         receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
-        db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
+        db.execute(UPDATE_COMMAND_RECEIPT_SQL,
                    (json.dumps(receipt, ensure_ascii=False), utc_now(), client_turn_id))
     publish_state_event("coach", {"message_id": receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
     return receipt
@@ -16418,7 +16477,7 @@ def _claim_background_coach_job() -> dict[str, Any] | None:
 def _requeue_background_coach_job(client_turn_id: str, reason: str) -> None:
     """Return a job to the durable queue after transient Coach contention."""
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        row = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
         if not row:
             return
         receipt = _coach_command_receipt(row.get("receipt"))
@@ -16460,7 +16519,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
     with CHAT_STREAM_LOCK:
         cancel_event = COACH_JOB_CANCEL_EVENTS.setdefault(operation_id, threading.Event())
     with DB_LOCK, database() as db:
-        current = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        current = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
     if current and _coach_command_receipt(current["receipt"]).get("cancel_requested"):
         cancel_event.set()
     try:
@@ -16493,7 +16552,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
             quick_actions = coach_quick_actions_state()
             with DB_LOCK, database() as db:
                 row = db.execute(
-                    "SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,),
+                    SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,),
                 ).fetchone()
                 completed_receipt = _coach_command_receipt((row or {}).get("receipt"))
                 completed_receipt["coach_quick_actions"] = quick_actions
@@ -16763,7 +16822,7 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
             "schema_version": 3,
             "state_versions": state_version_values,
             "plan_revision": state_version_values.get("plan"),
-            "app": {"name": "Intervals Coach", "version": APP_VERSION},
+            "app": {"name": APP_NAME, "version": APP_VERSION},
             "skeleton": dict.fromkeys(("chat", "activities", "plan", "library", "performance", "feedback", "profile"), True),
             "messages": list_messages(limit=100),
             "messages_next_cursor": None,
@@ -16908,7 +16967,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         sync = sync_browser_state(freshness=freshness)
         return {
             "app": {
-                "name": "Intervals Coach",
+                "name": APP_NAME,
                 "version": APP_VERSION,
             },
             "messages": list_messages(),
@@ -17112,7 +17171,7 @@ def diagnostic_report() -> dict[str, Any]:
         activity_feedback_count = db.execute("SELECT COUNT(*) AS count FROM activity_feedback").fetchone()["count"]
     return {
         "generated_at": utc_now(),
-        "app": {"name": "Intervals Coach", "version": APP_VERSION},
+        "app": {"name": APP_NAME, "version": APP_VERSION},
         "runtime": {
             "python": platform.python_version(),
             "platform": platform.platform(),
@@ -17745,7 +17804,7 @@ def session_token_hash(token: str) -> str:
 
 def session_timestamp(value: Any) -> float | None:
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value).replace("Z", UTC_OFFSET_SUFFIX))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.timestamp()
@@ -18032,7 +18091,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 require_auth(self)
                 stream_database_backup(self)
             elif path.startswith("/api/"):
-                raise AppError(404, "Nicht gefunden.")
+                raise AppError(404, NOT_FOUND_ERROR)
             else:
                 self.send_static(path)
         except AppError as exc:
@@ -18049,7 +18108,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 extra={"event": "http_unhandled_error", "context": {"method": "GET", "path": self.path, "request_id": self.request_id}},
                 exc_info=True,
             )
-            self.send_json(500, {"error": "Interner Serverfehler."})
+            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
 
     def do_POST(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
@@ -18105,7 +18164,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 extra={"event": "http_unhandled_error", "context": {"method": "POST", "path": self.path, "request_id": self.request_id}},
                 exc_info=True,
             )
-            self.send_json(500, {"error": "Interner Serverfehler."})
+            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
 
     def send_sse_headers(self, *, persistent: bool = True) -> None:
         try:
@@ -18209,7 +18268,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 extra={"event": "chat_stream_error", "context": {"request_id": self.request_id}},
                 exc_info=True,
             )
-            send_event("error", {"reason": "internal_error", "message": "Interner Serverfehler."})
+            send_event("error", {"reason": "internal_error", "message": INTERNAL_SERVER_ERROR})
         finally:
             unregister_chat_stream(session["csrf_hash"], operation_id)
             self.close_connection = True
@@ -18292,7 +18351,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/change-history/undo":
                 self.send_json(200, _apply_change_undo(self.read_json()))
             else:
-                raise AppError(404, "Nicht gefunden.")
+                raise AppError(404, NOT_FOUND_ERROR)
 
     def do_PUT(self) -> None:
         try:
@@ -18324,7 +18383,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, save_athlete_context(payload.get("profile"), payload.get("competitions")))
                 return
             if path != "/api/profile":
-                raise AppError(404, "Nicht gefunden.")
+                raise AppError(404, NOT_FOUND_ERROR)
             self.send_json(200, save_profile(self.read_json()))
         except AppError as exc:
             if exc.status >= 500:
@@ -18340,7 +18399,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 extra={"event": "http_unhandled_error", "context": {"method": "PUT", "path": self.path, "request_id": self.request_id}},
                 exc_info=True,
             )
-            self.send_json(500, {"error": "Interner Serverfehler."})
+            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
 
     def read_body(self, max_bytes: int = MAX_BODY_BYTES) -> bytes:
         return read_request_body(
@@ -18442,12 +18501,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.log_client_disconnect()
 
     def send_static(self, path: str) -> None:
-        asset_name = "index.html" if path in {"", "/"} else path.lstrip("/")
+        asset_name = ASSET_INDEX_HTML if path in {"", "/"} else path.lstrip("/")
         if any(marker in asset_name for marker in ("/", "\\", ":")) or asset_name.startswith(".."):
             raise AppError(403, "Forbidden.")
-        target = STATIC_TARGETS.get(asset_name, STATIC_TARGETS["index.html"])
+        target = STATIC_TARGETS.get(asset_name, STATIC_TARGETS[ASSET_INDEX_HTML])
         if not target.is_file():
-            target = STATIC_TARGETS["index.html"]
+            target = STATIC_TARGETS[ASSET_INDEX_HTML]
         data = target.read_bytes()
         mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         etag = f'"{hashlib.sha256(data).hexdigest()[:24]}"'
@@ -18506,15 +18565,15 @@ def schedule_daily_sync_jobs() -> None:
             enqueue_sync_job("weather", "refresh", {"force": False, "reason": "dreistündliche automatische Aktualisierung"}, requested_by="scheduler")
     if CONFIG.calendar_ical_url and daily_sync_due("calendar"):
         if not _sync_job_active("calendar"):
-            enqueue_sync_job("calendar", "refresh", {"reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
+            enqueue_sync_job("calendar", "refresh", {"reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
     if garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())):
         if daily_sync_due("garmin"):
             if not _sync_job_active("garmin"):
-                enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
+                enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
     if not CONFIG.intervals_api_key or not daily_sync_due("intervals") or get_kv("sync_running") == "1" or INTERVALS_RESYNC_GATE.is_resetting():
         return
     if not _sync_job_active("intervals"):
-        enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
+        enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
 
 
 def enqueue_startup_sync_jobs() -> None:
@@ -18558,7 +18617,7 @@ def main() -> None:
     if configuration_error:
         LOGGER.critical("Secure startup refused", extra={"event": "secure_startup_refused", "context": {"reason": configuration_error}})
         raise SystemExit(configuration_error)
-    LOGGER.info("Intervals Coach starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
+    LOGGER.info(f"{APP_NAME} starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
     initialise_database()
     server = CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
     server.allow_reuse_address = True
@@ -18567,7 +18626,7 @@ def main() -> None:
     enqueue_startup_sync_jobs()
     schedule_morning_checkin()
     threading.Thread(target=daily_sync_loop, daemon=True).start()
-    LOGGER.info("Intervals Coach listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
+    LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
     try:
         server.serve_forever()
     except KeyboardInterrupt:

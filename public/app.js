@@ -194,7 +194,7 @@ function readLastPwaActivity() {
 }
 
 function savePwaActivity() {
-  try { localStorage.setItem(LAST_PWA_ACTIVITY_KEY, String(Date.now())); } catch (_) {}
+  try { localStorage.setItem(LAST_PWA_ACTIVITY_KEY, String(Date.now())); } catch (error) { void error; }
 }
 
 function notePwaActivity() {
@@ -451,11 +451,11 @@ function releaseSyncPollLease() {
   try {
     const current = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
     if (current?.token === state.syncPoll.leaseToken) localStorage.removeItem(SYNC_POLL_LEASE_KEY);
-  } catch (_) {}
+  } catch (error) { void error; }
 }
 
 function broadcastSyncMessage(message) {
-  try { state.syncPoll.channel?.postMessage(message); } catch (_) {}
+  try { state.syncPoll.channel?.postMessage(message); } catch (error) { void error; }
 }
 
 function changedSyncAreas(nextVersions) {
@@ -909,7 +909,7 @@ async function showPwaNotification(title, options, key) {
   try {
     const registration = await navigator.serviceWorker.ready;
     await registration.showNotification(title, { icon: "/icon.svg", badge: "/icon.svg", ...options });
-  } catch (_) {}
+  } catch (error) { void error; }
 }
 
 function notifyState(data) {
@@ -1758,7 +1758,7 @@ function rememberChatTurn(clientTurnId) {
   try {
     if (clientTurnId) sessionStorage.setItem("coachPendingTurn", clientTurnId);
     else sessionStorage.removeItem("coachPendingTurn");
-  } catch (_) {}
+  } catch (error) { void error; }
 }
 
 function applyChatReceipt(receipt) {
@@ -2220,8 +2220,8 @@ function plannedDayInsights(context, weather, dateKey, todayKey) {
       && Number(weather.wind_direction_dominant) <= 360 ? weatherDirection(weather.wind_direction_dominant) : "";
     const peakTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(weather.rain_peak_time || "") ? weather.rain_peak_time : "";
     const values = [
-      calendarMetricNumber(weather.precipitation_probability_max, ` % Regen${peakTime ? ` (max. ${peakTime} Uhr)` : ""}`),
-      calendarMetricNumber(weather.wind_speed_max, ` km/h Wind${direction ? ` ${direction}` : ""}`),
+      calendarMetricNumber(weather.precipitation_probability_max, ` % Regen${peakTime ? " (max. " + peakTime + " Uhr)" : ""}`),
+      calendarMetricNumber(weather.wind_speed_max, ` km/h Wind${direction ? " " + direction : ""}`),
       calendarMetricNumber(weather.wind_gusts_max, " km/h Böen"),
     ].filter(Boolean);
     if (peakTime && weather.precipitation_probability_max == null) values.unshift(`Regen am ehesten ${peakTime} Uhr`);
@@ -2954,7 +2954,8 @@ function comparisonText(comparison) {
   if (comparison.direction === "up") arrow = "↑";
   else if (comparison.direction === "down") arrow = "↓";
   else arrow = "→";
-  return { text: `${arrow} ${sign}${amount}${unit}`, className: comparison.color || "neutral", title: `Vergleich zum ${comparison.label || `${comparison.days}-Tage-Durchschnitt`}` };
+  const comparisonLabel = comparison.label || `${comparison.days}-Tage-Durchschnitt`;
+  return { text: `${arrow} ${sign}${amount}${unit}`, className: comparison.color || "neutral", title: `Vergleich zum ${comparisonLabel}` };
 }
 
 function metricSourceClass(source) {
@@ -2981,7 +2982,7 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   const unit = metricData && typeof metricData === "object" ? metricData.unit : "";
   if (value == null) metric.textContent = "—";
   else if (formatter) metric.textContent = formatter(value);
-  else metric.textContent = `${value}${unit ? ` ${unit}` : ""}`;
+  else metric.textContent = `${value}${unit ? " " + unit : ""}`;
   caption.textContent = label;
   source.textContent = metricData?.source || "Nicht verfügbar";
   const freshnessLabel = { stale: "Veraltet", partial: "Teilweise aktualisiert", unknown: "Aktualität unbekannt" }[metricData?.freshness];
@@ -2989,7 +2990,8 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   if (metricData?.observed_at) source.textContent += ` · Messung ${dateLabel(String(metricData.observed_at).slice(0, 10))}`;
   else if (freshnessLabel && metricData?.fetched_at) source.textContent += ` · Stand ${formatTime(metricData.fetched_at)}`;
   if (metricData?.measurement_status === "earlier" && Number.isFinite(metricData.measurement_age_days)) {
-    source.textContent += ` · ${metricData.measurement_age_days} ${metricData.measurement_age_days === 1 ? "Tag" : "Tage"} alt`;
+    const ageLabel = metricData.measurement_age_days === 1 ? "Tag" : "Tage";
+    source.textContent += ` · ${metricData.measurement_age_days} ${ageLabel} alt`;
   } else if (metricData?.measurement_status === "unknown") source.textContent += " · Messdatum unbekannt";
   else if (metricData?.measurement_status === "future") source.textContent += " · Messdatum liegt in der Zukunft";
   source.title = [metricData?.note || metricData?.source || "", metricData?.fetched_at ? `Abgerufen ${formatTime(metricData.fetched_at)}` : ""].filter(Boolean).join(" · ");
@@ -3262,56 +3264,59 @@ function renderSettings(data) {
     node.className = ok ? "configured" : "not-configured";
   };
   const openaiHealthy = configured.openai && (activeProvider !== "openai" || openaiStatus.state !== "error");
+  let openaiStatusLabel = "Konfiguriert";
+  if (!configured.openai) openaiStatusLabel = "Nicht konfiguriert";
+  else if (activeProvider === "openai" && openaiStatus.state === "error") openaiStatusLabel = "Fehler bei letzter Anfrage";
   setStatus(
     "#openaiConnectionStatus",
     openaiHealthy,
-    !configured.openai ? "Nicht konfiguriert" : activeProvider === "openai" && openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
+    openaiStatusLabel,
   );
   const openaiDetail = $("#openaiConnectionDetail");
   if (openaiDetail) {
     openaiDetail.classList.toggle("error", Boolean(configured.openai && activeProvider === "openai" && openaiStatus.state === "error"));
-    openaiDetail.textContent = !configured.openai
-      ? "API-Schlüssel nicht konfiguriert"
-      : activeProvider === "openai" && openaiStatus.state === "error"
-        ? `${openaiStatus.message || "OpenAI-Anfrage fehlgeschlagen."}${openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : ""}`
-        : activeProvider === "openai" && openaiStatus.state === "ok"
-          ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
-          : "Als alternativer Anbieter konfiguriert";
+    if (!configured.openai) openaiDetail.textContent = "API-Schlüssel nicht konfiguriert";
+    else if (activeProvider === "openai" && openaiStatus.state === "error") {
+      const updated = openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : "";
+      openaiDetail.textContent = `${openaiStatus.message || "OpenAI-Anfrage fehlgeschlagen."}${updated}`;
+    } else if (activeProvider === "openai" && openaiStatus.state === "ok") {
+      openaiDetail.textContent = `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`;
+    } else openaiDetail.textContent = "Als alternativer Anbieter konfiguriert";
   }
   const geminiHealthy = configured.gemini && (activeProvider !== "gemini" || openaiStatus.state !== "error");
+  let geminiStatusLabel = "Konfiguriert";
+  if (!configured.gemini) geminiStatusLabel = "Nicht konfiguriert";
+  else if (activeProvider === "gemini" && openaiStatus.state === "error") geminiStatusLabel = "Fehler bei letzter Anfrage";
   setStatus(
     "#geminiConnectionStatus",
     geminiHealthy,
-    !configured.gemini ? "Nicht konfiguriert" : activeProvider === "gemini" && openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
+    geminiStatusLabel,
   );
   const geminiDetail = $("#geminiConnectionDetail");
   if (geminiDetail) {
     geminiDetail.classList.toggle("error", Boolean(configured.gemini && activeProvider === "gemini" && openaiStatus.state === "error"));
-    geminiDetail.textContent = !configured.gemini
-      ? "GEMINI_API_KEY nicht konfiguriert"
-      : activeProvider === "gemini" && openaiStatus.state === "error"
-        ? `${openaiStatus.message || "Gemini-Anfrage fehlgeschlagen."}${openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : ""}`
-        : activeProvider === "gemini" && openaiStatus.state === "ok"
-          ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
-          : "Als alternativer Anbieter konfiguriert";
+    if (!configured.gemini) geminiDetail.textContent = "GEMINI_API_KEY nicht konfiguriert";
+    else if (activeProvider === "gemini" && openaiStatus.state === "error") {
+      const updated = openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : "";
+      geminiDetail.textContent = `${openaiStatus.message || "Gemini-Anfrage fehlgeschlagen."}${updated}`;
+    } else if (activeProvider === "gemini" && openaiStatus.state === "ok") {
+      geminiDetail.textContent = `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`;
+    } else geminiDetail.textContent = "Als alternativer Anbieter konfiguriert";
   }
   const intervals = data.intervals || {
     configured: Boolean(configured.intervals),
     state: configured.intervals ? "configured" : "not_configured",
   };
   const intervalsHealthy = intervals.configured && intervals.state !== "error";
+  let intervalsStatusLabel = "Konfiguriert · noch nicht getestet";
+  if (!intervals.configured) intervalsStatusLabel = "Nicht konfiguriert";
+  else if (intervals.state === "syncing") intervalsStatusLabel = "Synchronisierung läuft…";
+  else if (intervals.state === "error") intervalsStatusLabel = "Fehler bei letzter Aktualisierung";
+  else if (intervals.state === "connected") intervalsStatusLabel = "Verbunden";
   setStatus(
     "#intervalsConnectionStatus",
     intervalsHealthy,
-    !intervals.configured
-      ? "Nicht konfiguriert"
-      : intervals.state === "syncing"
-        ? "Synchronisierung läuft…"
-        : intervals.state === "error"
-          ? "Fehler bei letzter Aktualisierung"
-          : intervals.state === "connected"
-            ? "Verbunden"
-            : "Konfiguriert · noch nicht getestet",
+    intervalsStatusLabel,
   );
   const intervalsDetail = $("#intervalsConnectionDetail");
   if (intervalsDetail) {
@@ -3323,29 +3328,34 @@ function renderSettings(data) {
       .map(([name, value]) => `${name}: ${value.records || 0} Datensätze auf ${value.pages || 0} Seiten${value.complete === false ? " · unvollständig" : ""}`)
       .join(" · ");
     intervalsDetail.classList.toggle("error", Boolean(intervals.last_error));
-    intervalsDetail.textContent = !intervals.configured
-      ? "API-Schlüssel nicht konfiguriert"
-      : intervals.state === "syncing"
-        ? intervals.status || "Intervals.icu wird synchronisiert."
-        : intervals.last_error
-          ? intervals.last_error
-          : intervals.last_sync_at || librarySync.last_sync_at
-            ? `Letzte Aktualisierung: ${formatTime(intervals.last_sync_at || librarySync.last_sync_at)}${libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : ""}${paginationDetail ? ` · ${paginationDetail}` : ""}`
-            : "Noch keine Synchronisierung durchgeführt";
+    if (!intervals.configured) intervalsDetail.textContent = "API-Schlüssel nicht konfiguriert";
+    else if (intervals.state === "syncing") intervalsDetail.textContent = intervals.status || "Intervals.icu wird synchronisiert.";
+    else if (intervals.last_error) intervalsDetail.textContent = intervals.last_error;
+    else if (intervals.last_sync_at || librarySync.last_sync_at) {
+      const updated = formatTime(intervals.last_sync_at || librarySync.last_sync_at);
+      const counts = libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : "";
+      const pagination = paginationDetail ? ` · ${paginationDetail}` : "";
+      intervalsDetail.textContent = `Letzte Aktualisierung: ${updated}${counts}${pagination}`;
+    } else intervalsDetail.textContent = "Noch keine Synchronisierung durchgeführt";
   }
   const garminSyncRunning = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-  setStatus("#garminConnectionStatus", garmin.configured, !garmin.configured
-    ? "Nicht konfiguriert"
-    : garminSyncRunning
-      ? "Synchronisierung läuft…"
-      : garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert");
+  let garminStatusLabel = "Konfiguriert";
+  if (!garmin.configured) garminStatusLabel = "Nicht konfiguriert";
+  else if (garminSyncRunning) garminStatusLabel = "Synchronisierung läuft…";
+  else if (garmin.source === "fixture") garminStatusLabel = "Lokale Testdatei aktiv";
+  setStatus("#garminConnectionStatus", garmin.configured, garminStatusLabel);
   const weatherLocation = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
-  setStatus("#weatherConnectionStatus", weather.configured, weather.configured ? (weather.loading ? "Wird geladen" : "Konfiguriert") : "Nicht konfiguriert");
+  let weatherStatusLabel = "Nicht konfiguriert";
+  if (weather.configured) weatherStatusLabel = weather.loading ? "Wird geladen" : "Konfiguriert";
+  setStatus("#weatherConnectionStatus", weather.configured, weatherStatusLabel);
   const weatherDetail = $("#weatherConnectionDetail");
   if (weatherDetail) {
-    weatherDetail.textContent = weather.configured
-      ? `${weatherLocation ? `Standort: ${weatherLocation} · ` : ""}${weather.fetched_at ? `letzte Abfrage: ${formatTime(weather.fetched_at)}` : "Standort im Profil hinterlegen"}`
-      : "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
+    if (!weather.configured) weatherDetail.textContent = "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
+    else {
+      const location = weatherLocation ? `Standort: ${weatherLocation} · ` : "";
+      const fetched = weather.fetched_at ? `letzte Abfrage: ${formatTime(weather.fetched_at)}` : "Standort im Profil hinterlegen";
+      weatherDetail.textContent = `${location}${fetched}`;
+    }
   }
   const weatherSyncButton = $("#weatherSyncButton");
   if (weatherSyncButton) {
@@ -3393,13 +3403,10 @@ function renderSettings(data) {
   }
   if (intervalsFullStatus) {
     intervalsFullStatus.classList.toggle("error", Boolean(intervalsFullResync.last_error));
-    intervalsFullStatus.textContent = intervalsFullRunning && intervalsFullResync.status
-      ? intervalsFullResync.status
-      : intervalsFullResync.last_error
-        ? intervalsFullResync.last_error
-        : intervalsFullResync.last_resync_at
-          ? `Letzter vollständiger Resync: ${formatTime(intervalsFullResync.last_resync_at)}`
-          : "Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.";
+    if (intervalsFullRunning && intervalsFullResync.status) intervalsFullStatus.textContent = intervalsFullResync.status;
+    else if (intervalsFullResync.last_error) intervalsFullStatus.textContent = intervalsFullResync.last_error;
+    else if (intervalsFullResync.last_resync_at) intervalsFullStatus.textContent = `Letzter vollständiger Resync: ${formatTime(intervalsFullResync.last_resync_at)}`;
+    else intervalsFullStatus.textContent = "Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.";
   }
   const garminSyncButton = $("#garminSyncButton");
   if (garminSyncButton) {
@@ -3446,7 +3453,10 @@ function renderChangeHistory(changes = []) {
     const header = document.createElement("div");
     header.className = "change-history-item-header";
     const title = document.createElement("strong");
-    const action = change.action === "create" ? "erstellt" : change.action === "delete" ? "gelöscht" : change.action === "undo" ? "zurückgenommen" : "geändert";
+    let action = "geändert";
+    if (change.action === "create") action = "erstellt";
+    else if (change.action === "delete") action = "gelöscht";
+    else if (change.action === "undo") action = "zurückgenommen";
     title.textContent = `${CHANGE_HISTORY_LABELS[change.entity_type] || "Lokales Objekt"} ${action}`;
     const time = document.createElement("time");
     time.dateTime = change.created_at || "";
@@ -3454,7 +3464,8 @@ function renderChangeHistory(changes = []) {
     header.append(title, time);
     const detail = document.createElement("span");
     const fields = Object.keys(change.diff?.fields || {});
-    detail.textContent = `${fields.length ? `Felder: ${fields.join(", ")}` : "Keine Felddetails"} · Nur lokal · Quelle: ${change.source || "local"}`;
+    const fieldLabel = fields.length ? `Felder: ${fields.join(", ")}` : "Keine Felddetails";
+    detail.textContent = `${fieldLabel} · Nur lokal · Quelle: ${change.source || "local"}`;
     item.append(header, detail);
     if (change.action !== "undo") {
       const button = document.createElement("button");
@@ -3772,7 +3783,7 @@ async function pollChatStatus() {
   const chatGeneration = state.chatGeneration;
   try {
     let pendingTurn = state.chatRequest?.clientTurnId;
-    if (!pendingTurn) { try { pendingTurn = sessionStorage.getItem("coachPendingTurn"); } catch (_) {} }
+    if (!pendingTurn) { try { pendingTurn = sessionStorage.getItem("coachPendingTurn"); } catch (error) { void error; } }
     if (pendingTurn && !state.chatStream) {
       try {
         const receipt = await api(`/api/chat/receipt?client_turn_id=${encodeURIComponent(pendingTurn)}`);
@@ -3920,7 +3931,7 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
       stream.serverError = true;
       stream.rejected = true;
       let payload = {};
-      try { payload = await response.json(); } catch (_) {}
+      try { payload = await response.json(); } catch (error) { void error; }
       if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
       if (response.status === 401) {
         const rejectedAttachments = [...(attachments || [])];
@@ -4621,7 +4632,7 @@ async function deletePrivacyData() {
 
 async function logout() {
   if (!await confirmDiscardChanges()) return;
-  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
+  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (error) { void error; }
   showLogin();
 }
 
