@@ -964,7 +964,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   }
   html.chat-keyboard-open #chatPanel { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   html.chat-keyboard-open .chat-jump { bottom: calc(16px + env(safe-area-inset-bottom)); }
-  html.chat-keyboard-open .coach-working { bottom: calc(16px + env(safe-area-inset-bottom)); }
+  html.chat-keyboard-open .coach-working { bottom: calc(148px + env(safe-area-inset-bottom)); }
 }
 @media (max-height: 500px) and (min-width: 560px) {
   #chatPanel .composer { position: relative; bottom: auto; }
