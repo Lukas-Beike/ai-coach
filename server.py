@@ -13229,7 +13229,7 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
         raise AppError(503, GEMINI_API_KEY_ERROR)
     model = str(payload.get("model") or selected_model("gemini"))
     if not re.fullmatch(r"(?a:[\w.-]{1,128})", model):
-        raise AppError(400, "UngÃ¼ltiges Gemini-Modell.")
+        raise AppError(400, "Ung\\u00fcltiges Gemini-Modell.")
     request_payload, history, persistent = _gemini_request_payload(payload, model)
     body = json.dumps(request_payload).encode("utf-8")
     endpoint = f"{GEMINI_API_BASE_URL}/models/{model}:streamGenerateContent?alt=sse"
@@ -13259,7 +13259,7 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
 
     def merge_chunk(chunk: Any) -> None:
         if not isinstance(chunk, dict):
-            raise AppError(502, "Gemini hat ein ungÃ¼ltiges Streaming-Ereignis zurÃ¼ckgegeben.", reason="invalid_response")
+            raise AppError(502, "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben.", reason="invalid_response")
         usage = chunk.get("usageMetadata")
         if isinstance(usage, dict):
             aggregate["usageMetadata"] = usage
@@ -13309,7 +13309,7 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
         try:
             merge_chunk(json.loads(raw))
         except json.JSONDecodeError as exc:
-            raise AppError(502, "Gemini hat ein ungÃ¼ltiges Streaming-Ereignis zurÃ¼ckgegeben.", reason="invalid_response") from exc
+            raise AppError(502, "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben.", reason="invalid_response") from exc
 
     try:
         _raise_chat_cancelled(cancel_event)
@@ -13321,7 +13321,7 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
                     _raise_chat_cancelled(cancel_event)
                     stream_bytes += len(raw_line)
                     if stream_bytes > MAX_EXTERNAL_RESPONSE_BYTES:
-                        raise AppError(502, "Die Streaming-Antwort von Gemini ist zu groÃŸ.", reason="response_too_large")
+                        raise AppError(502, "Die Streaming-Antwort von Gemini ist zu\\u00df.", reason="response_too_large")
                     line = raw_line.decode("utf-8").rstrip("\r\n")
                     if not line:
                         handle_event()
@@ -13334,7 +13334,7 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
         _raise_chat_cancelled(cancel_event)
         if not aggregate["candidates"]:
             raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
-        _record_gemini_status("ok", "Gemini ist verfÃ¼gbar.", status=200)
+        _record_gemini_status("ok", "Gemini ist verf\\u00fcgbar.", status=200)
         _record_gemini_usage(aggregate, "generate_content_stream")
         LOGGER.info(EXTERNAL_HTTP_COMPLETED_EVENT, extra={"event": "external_request_completed", "context": {
             **context, "status": 200, "duration_ms": round((time.perf_counter() - started) * 1000, 1),
@@ -13357,8 +13357,8 @@ def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellati
     except (URLError, OSError, UnicodeDecodeError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        _record_gemini_status("error", "Gemini ist vorÃ¼bergehend nicht verfÃ¼gbar.", reason="provider_unavailable", status=503)
-        raise AppError(503, "Gemini ist vorÃ¼bergehend nicht verfÃ¼gbar.", reason="provider_unavailable") from exc
+        _record_gemini_status("error", "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar.", reason="provider_unavailable", status=503)
+        raise AppError(503, "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar.", reason="provider_unavailable") from exc
 
 
 def request_ai_provider(payload: dict[str, Any]) -> str:
@@ -18538,6 +18538,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 message, client_turn_id, session["csrf_hash"],
                 operation_id=operation_id, cancel_event=cancel_event, request_kind=request_kind, attachments=payload.get("attachments"),
             )
+            persisted_operation_id = str(job.get("operation_id") or "")
+            if persisted_operation_id and persisted_operation_id != operation_id:
+                # A retry after restart may resolve to the original durable
+                # operation. The new finite stream cannot own that queue, so
+                # return its receipt and let the client resume via polling.
+                send_event("background", job)
+                return
             events = chat_stream_events(session["csrf_hash"], operation_id)
             if events is None:
                 send_event("background", job)
