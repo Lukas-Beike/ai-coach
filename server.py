@@ -3052,6 +3052,9 @@ def _safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     reason = str(getattr(exc, "reason", "") or "").strip()
     if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
         result["reason"] = reason
+    validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
+    if validation_reason and re.fullmatch(r"[a-z_]{1,80}", validation_reason):
+        result["validation_reason"] = validation_reason
     provider_code = getattr(exc, "provider_error_code", None)
     if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
         result["provider_error_code"] = provider_code
@@ -15519,7 +15522,9 @@ def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, An
     try:
         request = validate_request(arguments.pop("_request", None), user_ids, context["current_user_message_id"])
     except (TypeError, ValueError) as exc:
-        raise AppError(400, "Der Schritt benötigt einen gültigen Bezug zum aktuellen Auftrag. Prüfe die Werkzeugargumente erneut.", reason="request_invalid") from exc
+        error = AppError(400, "Der Schritt benötigt einen gültigen Bezug zum aktuellen Auftrag. Prüfe die Werkzeugargumente erneut.", reason="request_invalid")
+        error.validation_reason = str(exc)
+        raise error from exc
     target = request["target"]
     scope = set(request["scope"])
     retry_job = None
@@ -15675,7 +15680,15 @@ def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any
     """Corrections resolve the same step, never a different object with the same tool."""
     def repaired(previous, current):
         if previous["tool"] != current["tool"]:
-            return False
+            planning_alternatives = {"apply_training_patch", "replace_training_plan"}
+            return (
+                {previous["tool"], current["tool"]} == planning_alternatives
+                and previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
+                and previous.get("request_binding_key")
+                and previous["request_binding_key"] == current.get("request_binding_key")
+                and previous.get("plan_effect_key")
+                and previous["plan_effect_key"] == current.get("plan_effect_key")
+            )
         if previous["tool"] == "update_profile" and previous.get("result", {}).get("reason") == "profile_conflict":
             # A later profile write repairs a conflict only when it retries the
             # same fields. Independent updates in the same profile scope must
@@ -15719,6 +15732,50 @@ def _dialogue_scope_repair_key(name: str, arguments: dict[str, Any]) -> str:
             if isinstance(change, dict) else change for change in payload["changes"]
         ]
     return _coach_action_hash({"tool": name, "arguments": payload, "binding": binding})
+
+
+def _dialogue_request_binding_key(arguments: dict[str, Any]) -> str | None:
+    """Identify one request without trusting its message provenance or prose."""
+    request = arguments.get("_request")
+    if not isinstance(request, dict):
+        return None
+    scope, constraints = request.get("scope"), request.get("constraints")
+    if not isinstance(scope, list) or not all(isinstance(value, str) for value in scope):
+        return None
+    if not isinstance(constraints, list) or not all(isinstance(value, str) for value in constraints):
+        return None
+    binding = {
+        "target": request.get("target"),
+        "scope": sorted(scope),
+        "period": request.get("period"),
+        "constraints": sorted(constraints),
+        "remote_write": request.get("remote_write"),
+        "sync_scope": request.get("sync_scope"),
+    }
+    return _coach_action_hash(binding)
+
+
+def _dialogue_plan_effect_key(name: str, arguments: dict[str, Any]) -> str | None:
+    """Match cross-tool repairs only when the planned workout payload is exact."""
+    if name == "apply_training_patch":
+        if arguments.get("changes"):
+            # Existing-unit edits cannot be proven equivalent to a complete
+            # replacement without retaining and comparing every prior object.
+            return None
+        workouts = arguments.get("workouts")
+    elif name == "replace_training_plan":
+        workouts = (arguments.get("payload") or {}).get("workouts")
+    else:
+        return None
+    if not isinstance(workouts, list) or not workouts:
+        return None
+    signatures = []
+    for workout in workouts:
+        if not isinstance(workout, dict):
+            return None
+        signatures.append({key: workout.get(key) for key in
+                           ("date", "sport", "name", "description", "duration_minutes", "target", "rationale")})
+    return _coach_action_hash({"workouts": signatures})
 
 
 def _coach_repair_key(name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
@@ -15991,6 +16048,8 @@ def _chat_with_structured_coach_impl(
             effect_key = _coach_action_hash({"tool": name, "arguments": item.get("arguments")})
             step_key = name
             scope_repair_key = None
+            request_binding_key = None
+            plan_effect_key = None
             repair_key = None
             try:
                 if len(command_receipts) >= 40 and not any(entry.get("call_id") == call_id for entry in command_receipts):
@@ -16002,6 +16061,8 @@ def _chat_with_structured_coach_impl(
                     raise ValueError("arguments_object")
                 repair_key = _coach_repair_key(name, arguments)
                 scope_repair_key = _dialogue_scope_repair_key(name, arguments)
+                request_binding_key = _dialogue_request_binding_key(arguments)
+                plan_effect_key = _dialogue_plan_effect_key(name, arguments)
                 step_key = _coach_action_hash({"name": name, "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
                                                "period": (arguments.get("_request") or {}).get("period"),
                                                "repair_key": repair_key})
@@ -16068,7 +16129,7 @@ def _chat_with_structured_coach_impl(
                         else:
                             result = _structured_coach_tool_result(name, arguments, intent=action, conversation_id=conversation_id,
                                 client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids, cancel_event=cancel_event)
-                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key,
+                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key,
                                                  "request": action.get("request"), "result": result})
                         _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
                     if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
@@ -16080,10 +16141,13 @@ def _chat_with_structured_coach_impl(
             except (AppError, ValueError, TypeError, KeyError) as exc:
                 result = {"ok": False, "reason": getattr(exc, "reason", "tool_arguments_invalid"),
                           "error": str(exc) if isinstance(exc, AppError) else "Die Werkzeugargumente sind ungültig. Prüfe das Schema und den aktuellen Zustand und korrigiere den Aufruf."}
+                validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
+                if validation_reason and re.fullmatch(r"request_[a-z_]{1,72}", validation_reason):
+                    result["validation_reason"] = validation_reason
                 if not result["reason"]:
                     result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
                 technical_error = _coach_error_metadata(exc)
-                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
+                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
                 LOGGER.warning("Coach step failed", extra={"event": "coach_tool_failed", "context": {"tool": name if name in {tool['name'] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error}})
             outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
             pending = [entry for entry in pending if entry["call_id"] != call_id]
@@ -17122,7 +17186,7 @@ def coach_diagnostic_history() -> list[dict[str, Any]]:
         if not isinstance(value, dict):
             return None
         result = {}
-        for key in ("type", "reason"):
+        for key in ("type", "reason", "validation_reason"):
             item = value.get(key)
             if isinstance(item, str) and re.fullmatch(r"(?a:[A-Za-z_]{1,80})", item):
                 result[key] = item

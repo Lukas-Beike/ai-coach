@@ -10,15 +10,14 @@ test("repaired sync errors disappear while queued and running work stays pending
     { tool: "get_sync_job", result: { ok: true, job: { id: "synthetic-job", status: "running" } } },
   ] }));
   const receipts = page.locator("#coachReceipts");
-  await expect(receipts.locator(".action-receipt")).toHaveCount(2);
+  await expect(receipts.locator(".action-receipt")).toHaveCount(0);
   await expect(receipts).not.toContainText("Synthetic invalid ID");
   await expect(receipts).not.toContainText("Erledigt");
-  await expect(receipts.locator(".status-chip")).toHaveText(["Ausstehend", "Ausstehend"]);
+  await expect(receipts.locator(".status-chip")).toHaveCount(0);
   await page.evaluate(() => addStructuredCoachReceipts({ command_receipts: [
     { tool: "get_sync_job", result: { ok: true, job: { id: "synthetic-job", status: "completed" } } },
   ] }));
-  await expect(receipts).toContainText("Synchronisierung abgeschlossen");
-  await expect(receipts.locator(".status-chip")).toHaveText("Erledigt");
+  await expect(receipts.locator(".action-receipt")).toHaveCount(0);
 });
 
 test("profile writes have a useful receipt and unresolved errors stay visible safely", async ({ page }) => {

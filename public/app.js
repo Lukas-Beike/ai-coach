@@ -26,7 +26,10 @@ function shouldRestoreChatInputFocus() {
 function updateMobileViewportLayout() {
   mobileViewportFrame = null;
   const viewport = window.visualViewport;
-  const viewportHeight = Math.max(1, Math.round(viewport?.height || window.innerHeight));
+  // Playwright and some embedded browsers resize layoutViewport before
+  // visualViewport. Use the smaller measurement so keyboard detection does
+  // not miss a real visible-area reduction during that transition.
+  const viewportHeight = Math.max(1, Math.round(viewport ? Math.min(viewport.height, window.innerHeight) : window.innerHeight));
   const viewportWidth = Math.max(1, Math.round(viewport?.width || window.innerWidth));
   document.documentElement.style.setProperty("--app-viewport-height", `${viewportHeight}px`);
   const input = $("#messageInput");
@@ -1215,7 +1218,10 @@ function addStructuredCoachReceipts(payload) {
   renderCoachReceipts();
   for (const entry of commands) {
     if (entry.resolved) continue;
-    if (hiddenChatReceiptTools.has(entry.tool)) continue;
+    // if (hiddenChatReceiptTools.has(entry.tool)) continue;
+    const failedSync = entry.tool === "start_intervals_plan_sync" && entry.result?.ok === false;
+    const failedSyncJob = entry.tool === "get_sync_job" && entry.result?.job?.status === "failed";
+    if (hiddenChatReceiptTools.has(entry.tool) && !failedSync && !failedSyncJob) continue;
     if (planCommitRequested && entry.tool === "stage_training_plan") continue;
     if (entry.tool === "commit_training_plan" && entry !== finalCommit) continue;
     const result = entry?.result || {};
