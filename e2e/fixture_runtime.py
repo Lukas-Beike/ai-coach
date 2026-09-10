@@ -59,6 +59,9 @@ def fixture_coach_response(payload, **kwargs):
 
 server.responses_request = fixture_coach_response
 server.responses_background_request = fixture_coach_response
+# The application uses the streaming path for browser chat. Reuse the canned
+# response so the fixture remains provider-free while exercising the UI flow.
+server.responses_stream_request = lambda payload, on_text_delta, cancel_event=None, on_response_id=None: fixture_coach_response(payload)
 initialise = server.initialise_database
 artifact = {}
 
