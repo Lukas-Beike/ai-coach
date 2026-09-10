@@ -66,8 +66,7 @@ initialise = server.initialise_database
 artifact = {}
 
 
-def initialise_fixture():
-    initialise()
+def stage_fixture_artifact():
     today = server.local_now().date()
     artifact.update(server._stage_coach_artifact("fixture-conversation", "fixture-stage", {
         "plan_name": "Fixture sport contract",
@@ -78,11 +77,20 @@ def initialise_fixture():
     }))
 
 
+def initialise_fixture():
+    initialise()
+    stage_fixture_artifact()
+
+
 class FixtureHandler(server.RequestHandler):
     def do_GET(self):
         if self.path == "/api/fixture/plan":
             try:
                 server.require_auth(self)
+                with server.DB_LOCK, server.database() as db:
+                    current = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact.get("artifact_id"),)).fetchone()
+                if not current or current["status"] != "draft":
+                    stage_fixture_artifact()
                 self.send_json(200, artifact)
             except server.AppError as error:
                 self.send_json(error.status, {"error": error.message})
