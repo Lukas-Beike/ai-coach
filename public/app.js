@@ -194,7 +194,7 @@ function readLastPwaActivity() {
   try {
     const value = Number(localStorage.getItem(LAST_PWA_ACTIVITY_KEY));
     return Number.isFinite(value) && value > 0 ? value : 0;
-  } catch (_) {
+  } catch {
     // Browsers may deny storage access; the activity marker is optional.
     return 0;
   }
@@ -612,7 +612,7 @@ async function bootstrapAuth() {
       notePwaActivity();
       await loadInitialState();
     } else showLogin();
-  } catch (_) {
+  } catch {
     // A failed auth bootstrap is shown in the login dialog; no recovery action is available here.
     $("#loginError").textContent = "Server nicht erreichbar.";
     showLogin();
