@@ -2199,7 +2199,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('id="coachReceipts"', index)
         self.assertIn('function renderCoachOverview(data)', app)
         self.assertIn('function renderCoachReceipts()', app)
-        self.assertIn('if (hiddenChatReceiptTools.has(entry.tool)) continue;', app)
+        self.assertIn('if (hiddenChatReceiptTools.has(entry.tool) && !failedSync && !failedSyncJob) continue;', app)
         self.assertIn('"get_sync_job"', app)
         self.assertIn('"start_intervals_plan_sync"', app)
         self.assertNotIn('id="chatOperationLabel"', index)
