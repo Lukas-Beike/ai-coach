@@ -150,6 +150,7 @@ COACH_DEFAULT_MAX_OUTPUT_TOKENS = 6_000
 COACH_LONG_PLAN_MAX_OUTPUT_TOKENS = 32_000
 COACH_FOLLOWUP_MAX_OUTPUT_TOKENS = 2_500
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
+MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
 # Provider error messages can echo athlete data; retain only documented codes.
 OPENAI_RESPONSE_ERROR_CODES = frozenset({
     "server_error", "rate_limit_exceeded", "invalid_prompt", "data_residency_mismatch",
@@ -12807,7 +12808,7 @@ def _gemini_local_chat_history() -> list[dict[str, Any]]:
         if content:
             parts = [{"text": content}]
             with DB_LOCK, database() as db:
-                row = db.execute("SELECT attachments FROM messages WHERE id=?", (message["id"],)).fetchone()
+                row = db.execute(MESSAGE_ATTACHMENTS_QUERY, (message["id"],)).fetchone()
             for attachment in json.loads(row["attachments"]) if row else []:
                 if attachment["type"] == "gpx":
                     parts.append({"text": json.dumps({"untrusted_gpx": attachment["summary"]}, ensure_ascii=False)})
@@ -15613,7 +15614,7 @@ def _chat_with_structured_coach_impl(
             db.execute("INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, 'none', 'running', ?, ?, ?)",
                        (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent), json.dumps(receipt), utc_now(), utc_now()))
     with DB_LOCK, database() as db:
-        attachment_row = db.execute("SELECT attachments FROM messages WHERE id=?", (receipt.get("user_message_id"),)).fetchone()
+        attachment_row = db.execute(MESSAGE_ATTACHMENTS_QUERY, (receipt.get("user_message_id"),)).fetchone()
         openai_attachment_message_ids = set()
         for row in db.execute("SELECT receipt FROM coach_commands WHERE receipt IS NOT NULL").fetchall():
             prior_receipt = _coach_command_receipt(row["receipt"])
@@ -15634,7 +15635,7 @@ def _chat_with_structured_coach_impl(
     with DB_LOCK, database() as db:
         context["attachment_evidence"] = []
         for item in context["messages"]:
-            row = db.execute("SELECT attachments FROM messages WHERE id=?", (item["id"],)).fetchone()
+            row = db.execute(MESSAGE_ATTACHMENTS_QUERY, (item["id"],)).fetchone()
             for attachment in json.loads(row["attachments"] or "[]") if row else []:
                 context["attachment_evidence"].append({
                     "source_message_id": item["id"], "type": attachment.get("type"),
