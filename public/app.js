@@ -12,6 +12,7 @@ const SYNC_POLL_LEASE_MS = 4_000;
 const MAX_QUEUED_ATTACHMENT_BYTES = 16_000_000;
 let mobileViewportFrame = null;
 const mobileViewportBaselines = { portrait: 0, landscape: 0 };
+let mobileViewportInputWasFocused = false;
 
 if ("scrollRestoration" in globalThis.history) globalThis.history.scrollRestoration = "manual";
 
@@ -42,10 +43,16 @@ function updateMobileViewportLayout() {
   } else {
     orientation = (globalThis.screen?.width || viewportWidth) > (globalThis.screen?.height || viewportHeight) ? "landscape" : "portrait";
   }
-  if (!inputFocused || !mobileViewportBaselines[orientation]) mobileViewportBaselines[orientation] = viewportHeight;
+  // A viewport resize can transiently blur the input in mobile emulation even
+  // though the keyboard interaction is still active. Preserve the previous
+  // baseline for that transition so the next focused measurement detects it.
+  if (!mobileViewportBaselines[orientation] || (!inputFocused && !mobileViewportInputWasFocused)) {
+    mobileViewportBaselines[orientation] = viewportHeight;
+  }
   const keyboardOpen = hasTouchFirstInput()
     && inputFocused
     && mobileViewportBaselines[orientation] - viewportHeight >= 100;
+  mobileViewportInputWasFocused = inputFocused;
   document.documentElement.classList.toggle("chat-keyboard-open", keyboardOpen);
   if (keyboardOpen && $("#chatPanel")?.classList.contains("active")) {
     const composer = $("#chatForm");
