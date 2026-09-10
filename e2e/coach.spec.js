@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { randomUUID } = require("node:crypto");
 const { AxeBuilder } = require("@axe-core/playwright");
 
 const navigation = [
@@ -496,7 +497,7 @@ test.describe("critical browser states", () => {
     await input.fill("Analysiere meine letzte Einheit gründlich.");
     await page.getByRole("button", { name: "Senden", exact: true }).click();
     if (touchProject) await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
-    await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", "Coach arbeitet");
+    await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", /Coach arbeitet/);
     await expect(page.locator("#messages")).toHaveAttribute("aria-busy", "true");
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     if (!await input.isVisible()) {
@@ -601,7 +602,7 @@ test.describe("critical browser states", () => {
     });
     await expect.poll(() => page.evaluate(() => state.chatRequest?.phase)).toBe("recovering");
     await expect(page.locator(".message.assistant.streaming")).toContainText("Teilantwort bleibt sichtbar");
-    await expect(page.locator("#coachWorking")).toContainText("Verbindung unterbrochen");
+    await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", /Verbindung unterbrochen/);
     await expect(page.locator("#chatForm")).toHaveClass(/is-recovering/);
     await expect(page.locator("#sendButton")).toHaveText("Coach antwortet…");
     await expect(page.locator("#sendButton")).toBeDisabled();
@@ -618,16 +619,17 @@ test.describe("critical browser states", () => {
 
 });
 
-test("authorized HTTP plan commit preserves sport through SQLCipher and calendar rendering", async ({ page }) => {
+test("authorized HTTP plan commit preserves sport through SQLCipher and calendar rendering", async ({ page }, testInfo) => {
   await openAuthenticatedApp(page);
-  const result = await page.evaluate(async () => {
+  const clientTurnId = `fixture-http-commit-${testInfo.project.name}-${randomUUID()}`;
+  const result = await page.evaluate(async (clientTurnId) => {
     const staged = await api("/api/fixture/plan");
-    const body = { client_turn_id: "fixture-http-commit", operation: "commit_training_plan", artifact_id: staged.artifact_id, arguments: {} };
+    const body = { client_turn_id: clientTurnId, operation: "commit_training_plan", artifact_id: staged.artifact_id, arguments: {} };
     const first = await api("/api/planning/commands", { method: "POST", body: JSON.stringify(body) });
     const repeated = await api("/api/planning/commands", { method: "POST", body: JSON.stringify(body) });
     const plan = await api("/api/plan?local=1");
     return { first: first.status, repeated: repeated.status, entries: plan.training_calendar.filter((entry) => entry.name?.startsWith("HTTP fixture ")).map(({ name, type }) => ({ name, type })) };
-  });
+  }, clientTurnId);
   expect(result.first).toBe("completed");
   expect(result.repeated).toBe("completed");
   expect(result.entries).toHaveLength(4);
