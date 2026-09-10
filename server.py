@@ -8413,10 +8413,12 @@ def validate_workout_description(workout: dict[str, Any]) -> float | None:
         "h", "m", "s", "'", '"',
     }
     for line_number, line in enumerate(str(workout.get("description") or "")[:12000].splitlines(), 1):
-        step = re.match(r"^[ \t]*-[ \t]+([^\r\n]+)$", line)
-        if not step:
+        stripped = line.lstrip(" \t")
+        if not stripped.startswith("-"):
             continue
-        text = step.group(1)
+        text = stripped[1:].lstrip(" \t")
+        if not text:
+            continue
         # Pace denominators (e.g. 2:00/100m Pace) are targets, not steps.
         amounts = [
             match for match in quantity.finditer(text)

@@ -60,31 +60,42 @@ def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
         return "Z" + match.group("start") + ("-Z" + end if end else "") + (" " + suffix if suffix else "")
 
     pattern = re.compile(
-        r"^(?P<ramp>ramp\s+)?(?:Zone\s*|Z\s*)(?P<start>[1-9])"
+        r"^(?P<ramp>ramp\s++)?+(?:Zone\s*+|Z\s*+)(?P<start>[1-9])"
         r"(?:\s*[-–—]\s*(?:Zone\s*|Z\s*)?(?P<end>[1-9]))?"
-        r"(?:\s+(?P<kind>HR|Pace))?(?=$|\s)", re.IGNORECASE,
+        r"(?:\s++(?P<kind>HR|Pace))?(?=$|\s)", re.IGNORECASE,
     )
     if not endurance:
         return description
     normalized = []
     for line in description.split("\n"):
-        stripped = line.lstrip()
+        stripped = line.lstrip(" \t")
         if not stripped.startswith("- "):
             normalized.append(line)
             continue
         # Only the target immediately following the first duration/distance is
         # executable workout syntax. Cues later in the line must remain prose.
-        step = re.match(r"^(?P<prefix>[ \t]*-[ \t]+\S+[ \t]+)(?P<target>[^\r\n]*)$", line)
-        if not step:
+        cursor = len(line) - len(stripped) + 1
+        while cursor < len(line) and line[cursor] in " \t":
+            cursor += 1
+        quantity_start = cursor
+        while cursor < len(line) and line[cursor] not in " \t":
+            cursor += 1
+        if cursor == quantity_start:
             normalized.append(line)
             continue
-        target = step["target"]
+        while cursor < len(line) and line[cursor] in " \t":
+            cursor += 1
+        if cursor == len(line):
+            normalized.append(line)
+            continue
+        step_prefix = line[:cursor]
+        target = line[cursor:]
         match = pattern.match(target)
         if not match:
             normalized.append(line)
             continue
         prefix = match["ramp"] or ""
-        normalized.append(step["prefix"] + prefix + zone(match) + target[match.end():])
+        normalized.append(step_prefix + prefix + zone(match) + target[match.end():])
     return "\n".join(normalized)
 
 
@@ -116,13 +127,16 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
             elif repeat_pending or previous_step:
                 raise WorkoutTextError("invalid_workout_repeat", "Hinweise und neue Abschnitte durch eine Leerzeile von Trainingsschritten trennen.")
             continue
-        step = re.match(r"^-[ \t]+([^\r\n]+)$", line)
-        quantity = re.match(r"(\S+)[ \t]+([^\r\n]+)$", step[1]) if step else None
-        if not quantity or not (_is_time(quantity[1]) or _distance_match(quantity[1])):
+        step_text = line[1:].lstrip(" \t") if line.startswith("-") else ""
+        separator = next((index for index, character in enumerate(step_text) if character in " \t"), -1)
+        quantity = (step_text[:separator], step_text[separator:].lstrip(" \t")) if separator > 0 else None
+        if not quantity or not (_is_time(quantity[0]) or _distance_match(quantity[0])):
             raise WorkoutTextError("invalid_workout_step", f"Workout-Zeile {number}: Dauer oder Distanz in Workout-Syntax angeben, z.B. '- 15m 50-70%' oder '- 6km Z1 HR'. Hinweise ohne '- ' schreiben.")
-        value, rest = quantity.groups()
-        ramp = bool(re.match(r"^ramp\s+", rest, flags=re.IGNORECASE))
-        rest = re.sub(r"^ramp\s+", "", rest, flags=re.IGNORECASE)
+        value, rest = quantity
+        ramp_prefix = rest[:4].casefold() == "ramp" and len(rest) > 4 and rest[4] in " \t"
+        ramp = bool(ramp_prefix)
+        if ramp_prefix:
+            rest = rest[4:].lstrip(" \t")
         intensity = _target_match(rest)
         if not intensity:
             raise WorkoutTextError("missing_workout_target", f"Workout-Zeile {number}: Auswertbares Intensitaetsziel fehlt. Nutze z.B. '50-70%', 'Z1 HR' oder 'Z2 Pace'; Freitext wie 'locker' reicht nicht.")
@@ -140,10 +154,10 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
             raise WorkoutTextError("workout_target_mismatch", f"Workout-Zeile {number}: Schrittziel {kind} passt nicht zum Einheitenziel {target}. Ziel oder Schritt korrigieren; fuer gemischte Ziele AUTO verwenden.")
         expected = {"kind": kind.lower(), "target": parsed_target, "ramp": ramp}
         if _distance_match(value):
-            distance = float(re.match(r"[\d.]+", value)[0])
+            amount_match = re.match(r"\d+(?:\.\d+)?", value)
+            distance = float(amount_match[0])
             if not math.isfinite(distance) or distance <= 0:
                 raise WorkoutTextError("invalid_workout_step", "Eine Trainingsdistanz muss positiv sein.")
-            amount_match = re.match(r"\d+(?:\.\d+)?", value)
             amount = amount_match[0]
             unit = value[len(amount):]
             expected["distance"] = float(amount) * {"km": 1000, "mtr": 1, "mi": 1609.344, "yd": 0.9144}[unit]
