@@ -527,6 +527,7 @@ jobs:
         if: matrix.skipCodexReview != true && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ github.repository }}
           ref: develop
           fetch-depth: 1
           persist-credentials: false
@@ -535,6 +536,7 @@ jobs:
         if: matrix.skipCodexReview != true && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ github.repository }}
           ref: main
           fetch-depth: 1
           persist-credentials: false

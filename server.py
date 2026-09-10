@@ -3431,7 +3431,7 @@ GARMIN_CONTEXT_FIELDS = {
     "hrvStatus", "hrvWeeklyAvg", "weeklyAvg", "hrvLastNight", "lastNightAvg", "bodyBattery", "body_battery", "charged", "drained", "qualifier",
     "racePredictionTime", "distance", "activityId", "activityName", "activityType", "startTimeLocal", "duration",
     "averageHR", "maxHR", "maxHeartRate", "calories", "trainingEffect", "vO2MaxValue", "trainingReadiness", "recoveryTime",
-    "weight", "weightKg", "weight_kg", "summaryDate", "latestWeight", "calendarDate",
+    "weight", "weightKg", "weight_kg", "summaryDate", "latestWeight",
     "restingHeartRate", "restingHR", "functionalThresholdPower", "ftp", "power", "speed",
     "heartRate", "hearRate", "heartRateCycling", "heartRateRunning",
 }
@@ -6416,7 +6416,7 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def competition_conflict_payload(local: dict[str, Any], remote: dict[str, Any], conflict_type: str) -> str:
+def competition_conflict_payload(remote: dict[str, Any], conflict_type: str) -> str:
     data = remote_competition_data(remote) or {}
     data["external_id"] = str(remote.get("external_id") or data.get("external_id") or "").strip()[:COMPETITION_TEXT_LIMITS["external_id"]]
     return json.dumps({"type": conflict_type, "remote": data, "detected_at": utc_now()}, ensure_ascii=False)
@@ -6639,7 +6639,7 @@ def sync_competitions(
                 if row.get("sync_dirty") and identity_remote and not remote and row.get("sync_state") != "local_override":
                     db.execute(
                         UPDATE_COMPETITION_CONFLICT_SQL,
-                        (competition_conflict_payload(row, identity_remote, "identity_only"), now, row["id"]),
+                        (competition_conflict_payload(identity_remote, "identity_only"), now, row["id"]),
                     )
                     conflicts += 1
                     continue
@@ -6650,7 +6650,7 @@ def sync_competitions(
                         if remote:
                             db.execute(
                                 UPDATE_COMPETITION_CONFLICT_SQL,
-                                (competition_conflict_payload(row, remote, "remote_changed"), now, row["id"]),
+                                (competition_conflict_payload(remote, "remote_changed"), now, row["id"]),
                             )
                             conflicts += 1
                         elif row.get("intervals_event_id"):
@@ -7138,7 +7138,7 @@ def http_json(
             status = exc.code if service == "gemini" or exc.code == 429 else 502
             raise AppError(status, error_details["message"], reason=error_details["reason"]) from exc
         raise AppError(502, upstream_http_error_message(exc.code, raw_error, service), reason="provider_http_error") from exc
-    except (URLError, TimeoutError, OSError, ValueError) as exc:
+    except (URLError, TimeoutError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         if service == "openai":
@@ -13645,7 +13645,7 @@ def openai_stream_request(
             "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
         })
         raise AppError(504, details["message"], reason="provider_timeout") from exc
-    except (URLError, OSError, ValueError) as exc:
+    except (URLError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
             log_failure("chat_cancelled", 499, level=logging.INFO)
@@ -14747,7 +14747,7 @@ def _apply_structured_training_changes(
                 referenced_memberships.add(membership)
                 changes_bounds = action in {"delete", "archive", "restore"} or (
                     action == "update" and "date" in change
-                    and str(change.get("date") or "")[:10] != str(current.get("date") or "")[:10]
+                    and not str(change.get("date") or "").startswith(str(current.get("date") or "")[:10])
                 )
                 if membership and changes_bounds:
                     plans_needing_bounds.add(membership)

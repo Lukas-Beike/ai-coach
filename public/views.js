@@ -85,7 +85,7 @@ function markdownToHtml(markdown) {
   };
 
   for (const line of lines) {
-    if (/^\s*```/.test(line)) {
+    if (line.trimStart().startsWith("```")) {
       flushParagraph(); closeList();
       if (inCode) {
         output.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
@@ -136,7 +136,9 @@ function timezoneDateKey(timeZone, instant = new Date()) {
     const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(instant);
     const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
     return `${values.year}-${values.month}-${values.day}`;
-  } catch (error) { void error; return localDateKey(instant); }
+  } catch {
+    return localDateKey(instant);
+  }
 }
 
 function dateFromKey(value) {

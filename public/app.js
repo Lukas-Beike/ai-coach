@@ -194,11 +194,14 @@ function readLastPwaActivity() {
   try {
     const value = Number(localStorage.getItem(LAST_PWA_ACTIVITY_KEY));
     return Number.isFinite(value) && value > 0 ? value : 0;
-  } catch (_) { return 0; }
+  } catch (_) {
+    // Browsers may deny storage access; the activity marker is optional.
+    return 0;
+  }
 }
 
 function savePwaActivity() {
-  try { localStorage.setItem(LAST_PWA_ACTIVITY_KEY, String(Date.now())); } catch (error) { void error; }
+  try { localStorage.setItem(LAST_PWA_ACTIVITY_KEY, String(Date.now())); } catch { }
 }
 
 function notePwaActivity() {
@@ -455,11 +458,11 @@ function releaseSyncPollLease() {
   try {
     const current = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
     if (current?.token === state.syncPoll.leaseToken) localStorage.removeItem(SYNC_POLL_LEASE_KEY);
-  } catch (error) { void error; }
+  } catch { }
 }
 
 function broadcastSyncMessage(message) {
-  try { state.syncPoll.channel?.postMessage(message); } catch (error) { void error; }
+  try { state.syncPoll.channel?.postMessage(message); } catch { }
 }
 
 function changedSyncAreas(nextVersions) {
@@ -910,7 +913,7 @@ async function showPwaNotification(title, options, key) {
   try {
     const registration = await navigator.serviceWorker.ready;
     await registration.showNotification(title, { icon: "/icon.svg", badge: "/icon.svg", ...options });
-  } catch (error) { void error; }
+  } catch { }
 }
 
 function notifyState(data) {
@@ -1315,12 +1318,19 @@ function renderStatus(data) {
   const hasProblem = Boolean(missing.length || error);
   statusCard.hidden = !hasProblem || activePanel === "settingsPanel";
   statusCard.classList.toggle("warning", hasProblem);
-  $("#statusTitle").textContent = missing.length
-    ? `Einrichtung nötig: ${missing.join(" + ")}`
-    : error ? "Coach benötigt Aufmerksamkeit" : "Coach ist bereit";
-  $("#statusDetail").textContent = missing.length
-    ? "Ergänze die fehlende Serverkonfiguration"
-    : error || (morning.status === "ready" ? `Morgen-Check-in abgeschlossen: ${dateLabel(morning.date)}` : "Bereit für deine nächste Frage");
+  let statusTitle = "Coach ist bereit";
+  let statusDetail = "Bereit für deine nächste Frage";
+  if (missing.length) {
+    statusTitle = `Einrichtung nötig: ${missing.join(" + ")}`;
+    statusDetail = "Ergänze die fehlende Serverkonfiguration";
+  } else if (error) {
+    statusTitle = "Coach benötigt Aufmerksamkeit";
+    statusDetail = error;
+  } else if (morning.status === "ready") {
+    statusDetail = `Morgen-Check-in abgeschlossen: ${dateLabel(morning.date)}`;
+  }
+  $("#statusTitle").textContent = statusTitle;
+  $("#statusDetail").textContent = statusDetail;
   statusCard.classList.remove("working");
 }
 
@@ -1446,9 +1456,9 @@ function renderActivities(activities) {
   if (state.data?.sync?.running || state.localSync.intervals) syncNotices.push(state.data?.sync?.status || "Intervals.icu wird synchronisiert…");
   if (syncDetail) {
     const refreshedAt = state.data?.sync?.last_sync_at;
-    syncDetail.textContent = syncNotices.length
-      ? syncNotices.join(" · ")
-      : refreshedAt ? `Letzte Aktualisierung: ${formatTime(refreshedAt)}` : "Noch nicht aktualisiert";
+    let refreshedText = "Noch nicht aktualisiert";
+    if (refreshedAt) refreshedText = `Letzte Aktualisierung: ${formatTime(refreshedAt)}`;
+    syncDetail.textContent = syncNotices.length ? syncNotices.join(" · ") : refreshedText;
   }
   renderActivityFilters(list);
   const dateFilteredActivities = list.filter((activity) => {
@@ -1768,7 +1778,7 @@ function rememberChatTurn(clientTurnId) {
   try {
     if (clientTurnId) sessionStorage.setItem("coachPendingTurn", clientTurnId);
     else sessionStorage.removeItem("coachPendingTurn");
-  } catch (error) { void error; }
+  } catch { }
 }
 
 function applyChatReceipt(receipt) {
@@ -2794,13 +2804,16 @@ function renderGarmin(garmin) {
     .filter(([, value]) => value && (Number(value.windows) > 1 || value.complete === false))
     .map(([name, value]) => `${name}: ${value.records || 0} Datensätze in ${value.windows || 0} Zeitfenstern${value.complete === false ? " · unvollständig" : ""}`)
     .join(" · ");
-  status.textContent = garmin.source === "fixture"
-    ? "Lokale Garmin-Testdaten aktiv"
-    : garmin.last_error ? "Mit Fehlern synchronisiert" : "Optionaler Direktabruf aktiv";
-  detail.textContent = garmin.last_sync_at
-    ? `Letzter Abruf: ${formatTime(garmin.last_sync_at)} · ${garmin.activities || 0} Aktivitäten · Schlaf/HRV/Readiness ${[garmin.has_sleep, garmin.has_hrv, garmin.has_readiness].filter(Boolean).length}/3`
-    : garmin.source === "fixture" ? "Testdatei ist konfiguriert; synchronisiere sie mit dem Button."
-      : "Noch kein Garmin-Abruf durchgeführt.";
+  if (garmin.source === "fixture") status.textContent = "Lokale Garmin-Testdaten aktiv";
+  else if (garmin.last_error) status.textContent = "Mit Fehlern synchronisiert";
+  else status.textContent = "Optionaler Direktabruf aktiv";
+  if (garmin.last_sync_at) {
+    detail.textContent = `Letzter Abruf: ${formatTime(garmin.last_sync_at)} · ${garmin.activities || 0} Aktivitäten · Schlaf/HRV/Readiness ${[garmin.has_sleep, garmin.has_hrv, garmin.has_readiness].filter(Boolean).length}/3`;
+  } else if (garmin.source === "fixture") {
+    detail.textContent = "Testdatei ist konfiguriert; synchronisiere sie mit dem Button.";
+  } else {
+    detail.textContent = "Noch kein Garmin-Abruf durchgeführt.";
+  }
   if (performanceSources.length) detail.textContent += ` · ${performanceSources.join("/")} aus Garmin`;
   if (morningBodyBattery.status === "ready" && Number.isFinite(beforeSleepBattery) && Number.isFinite(morningBattery)) {
     detail.textContent += ` · Body Battery am ${dateLabel(morningBodyBattery.sleep_date)}: ${beforeSleepBattery} vor dem Schlafen → ${morningBattery} nach dem Aufwachen`;
@@ -2814,13 +2827,10 @@ function renderGarmin(garmin) {
   }
   if (fullStatus) {
     fullStatus.classList.toggle("error", Boolean(fullResync.last_error));
-    fullStatus.textContent = fullRunning && fullResync.status
-      ? fullResync.status
-      : fullResync.last_error
-        ? fullResync.last_error
-        : fullResync.last_resync_at
-          ? `Letzter vollständiger Resync: ${formatTime(fullResync.last_resync_at)}`
-          : "Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.";
+    if (fullRunning && fullResync.status) fullStatus.textContent = fullResync.status;
+    else if (fullResync.last_error) fullStatus.textContent = fullResync.last_error;
+    else if (fullResync.last_resync_at) fullStatus.textContent = `Letzter vollständiger Resync: ${formatTime(fullResync.last_resync_at)}`;
+    else fullStatus.textContent = "Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.";
   }
 }
 
@@ -3177,9 +3187,13 @@ function updateHeaderAction() {
       button.dataset.action = "performance";
       button.title = "Aktuelle Leistungsdaten von Intervals.icu aktualisieren";
       button.disabled = Boolean(state.data?.performance_refresh?.running || state.data?.sync?.running || state.data?.garmin_sync?.running || state.data?.provider_resync?.intervals?.running || state.data?.provider_resync?.garmin?.running || state.localSync.performance || state.localSync.intervals || state.localSync.garmin || state.localSync.intervalsFull || state.localSync.garminFull);
-      button.textContent = state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin
-        ? "Synchronisierung läuft…"
-        : button.disabled ? "Leistungsdaten werden aktualisiert…" : "Leistungsdaten aktualisieren";
+      if (state.data?.sync?.running || state.data?.garmin_sync?.running || state.localSync.intervals || state.localSync.garmin) {
+        button.textContent = "Synchronisierung läuft…";
+      } else if (button.disabled) {
+        button.textContent = "Leistungsdaten werden aktualisiert…";
+      } else {
+        button.textContent = "Leistungsdaten aktualisieren";
+      }
     } else {
       button.dataset.action = "activities";
       button.title = "Aktivitäten der letzten 90 Tage von Intervals.icu laden";
@@ -3793,7 +3807,7 @@ async function pollChatStatus() {
   const chatGeneration = state.chatGeneration;
   try {
     let pendingTurn = state.chatRequest?.clientTurnId;
-    if (!pendingTurn) { try { pendingTurn = sessionStorage.getItem("coachPendingTurn"); } catch (error) { void error; } }
+    if (!pendingTurn) { try { pendingTurn = sessionStorage.getItem("coachPendingTurn"); } catch { } }
     if (pendingTurn && !state.chatStream) {
       try {
         const receipt = await api(`/api/chat/receipt?client_turn_id=${encodeURIComponent(pendingTurn)}`);
@@ -3941,7 +3955,7 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
       stream.serverError = true;
       stream.rejected = true;
       let payload = {};
-      try { payload = await response.json(); } catch (error) { void error; }
+      try { payload = await response.json(); } catch { }
       if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
       if (response.status === 401) {
         const rejectedAttachments = [...(attachments || [])];
@@ -4642,7 +4656,7 @@ async function deletePrivacyData() {
 
 async function logout() {
   if (!await confirmDiscardChanges()) return;
-  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (error) { void error; }
+  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch { }
   showLogin();
 }
 
