@@ -17,7 +17,7 @@ if ("scrollRestoration" in window.history) window.history.scrollRestoration = "m
 
 function hasTouchFirstInput() {
   return Boolean(globalThis.navigator?.maxTouchPoints > 0
-    && window.matchMedia?.("(pointer: coarse)").matches);
+    && globalThis.matchMedia?.("(pointer: coarse)").matches);
 }
 
 function shouldRestoreChatInputFocus() {
