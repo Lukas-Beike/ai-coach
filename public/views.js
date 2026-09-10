@@ -32,7 +32,7 @@ function inlineMarkdown(value) {
   let html = escapeHtml(value);
   const codeSpans = [];
   html = html.replace(/`([^`\n]+)`/g, (_, code) => {
-    const token = `__COACH_CODE_SPAN_${codeSpans.length}__`;
+    const token = `\uE000COACHCODESPAN${codeSpans.length}\uE001`;
     codeSpans.push(`<code>${code}</code>`);
     return token;
   });
@@ -41,7 +41,7 @@ function inlineMarkdown(value) {
   html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
   html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
   html = html.replace(/_([^_\n]+)_/g, "<em>$1</em>");
-  return html.replace(/__COACH_CODE_SPAN_(\d+)__/g, (_, index) => codeSpans[Number(index)]);
+  return html.replace(/\uE000COACHCODESPAN(\d+)\uE001/g, (_, index) => codeSpans[Number(index)]);
 }
 
 function headingFromMarkdownLine(line) {

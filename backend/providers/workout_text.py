@@ -21,7 +21,7 @@ _TARGET_PATTERNS = (
     re.compile(r"Z\d++(?:-Z\d++)?+(?:\s++(?:HR|Pace))?+(?=$|\s)", re.IGNORECASE),
     re.compile(r"\d++(?:\.\d++)?+(?:%?+-\d++(?:\.\d++)?+)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
     re.compile(r"\d++(?:-\d++)?+(?:w|bpm)(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+(?:-\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+\s++Pace)?+(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+(?:-\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+)?+\s++Pace(?=$|\s)", re.IGNORECASE),
 )
 
 
