@@ -16153,6 +16153,8 @@ def _chat_with_structured_coach_impl(
             request_delta_emitted = True
             on_delta(delta)
         def checkpoint(response_id: str) -> None:
+            nonlocal resume_id
+            resume_id = response_id
             _merge_coach_command_receipt(client_turn_id, {
                 "status": "running", "phase": "waiting_openai", "openai_response_id": response_id,
                 "pending_tool_outputs": [], "response_input": payload["input"] if isinstance(payload["input"], list) else None,
@@ -16171,6 +16173,18 @@ def _chat_with_structured_coach_impl(
                     on_response_id=checkpoint_callback,
                 )
             except AppError as exc:
+                if (
+                    background_owned and ai_provider == "openai" and resume_id
+                    and exc.reason in {"provider_unavailable", "provider_timeout", "invalid_response"}
+                    and not cancel_event.is_set()
+                ):
+                    # The provider may have completed after its SSE transport
+                    # failed. Retrieve the checkpointed response before ever
+                    # starting a second billed generation.
+                    return responses_background_request(
+                        payload, response_id=resume_id,
+                        on_response_id=checkpoint, cancel_event=cancel_event,
+                    )
                 if (ai_provider == "openai" and exc.reason == "conversation_state_invalid"
                         and not conversation_recovered and not request_delta_emitted and attempt < 2):
                     conversation_recovered = True
