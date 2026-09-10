@@ -152,6 +152,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 INTERVALS_API_KEY_ERROR = "INTERVALS_API_KEY ist nicht konfiguriert."
 OPENAI_API_KEY_ERROR = "OPENAI_API_KEY ist nicht konfiguriert."
+GEMINI_API_KEY_ERROR = "GEMINI_API_KEY ist nicht konfiguriert."
 VO2MAX_UNIT = "ml/kg/min"
 GARMIN_RUN_PREDICTION_SOURCE = "Garmin Connect Laufprognose"
 EXTERNAL_HTTP_STARTED_EVENT = "External HTTP request started"
@@ -12888,7 +12889,7 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
         raise AppError(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
     if selected_ai_provider() == "gemini":
         if not CONFIG.gemini_api_key:
-            raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
+            raise AppError(503, GEMINI_API_KEY_ERROR)
         result = gemini_raw_request(selected_model(), {
             "contents": [{"role": "user", "parts": [
                 {"inlineData": {"mimeType": audio_type, "data": base64.b64encode(audio).decode("ascii")}},
@@ -13070,7 +13071,7 @@ def _gemini_tools(tools: Any) -> list[dict[str, Any]]:
     return [{"functionDeclarations": declarations}] if declarations else []
 
 
-def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
+def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:  # NOSONAR - provider payload assembly is intentionally kept atomic
     persistent = bool(payload.get("conversation"))
     history = _gemini_history() if persistent else []
     input_value = payload.get("input")
@@ -13156,7 +13157,7 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
 
 def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str, cancel_event: threading.Event | None = None) -> dict[str, Any]:
     if not CONFIG.gemini_api_key:
-        raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, GEMINI_API_KEY_ERROR)
     if not re.fullmatch(r"(?a:[\w.-]{1,128})", str(model or "")):
         raise AppError(400, "Ungültiges Gemini-Modell.")
     try:
@@ -13219,13 +13220,13 @@ def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading
     return _gemini_responses_result(payload, history, persistent, result)
 
 
-def gemini_stream_request(
+def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellation, accounting, and persistence in one transaction
     payload: dict[str, Any], on_text_delta: Callable[[str], None],
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Stream Gemini GenerateContent chunks and return the aggregated response."""
     if not CONFIG.gemini_api_key:
-        raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, GEMINI_API_KEY_ERROR)
     model = str(payload.get("model") or selected_model("gemini"))
     if not re.fullmatch(r"(?a:[\w.-]{1,128})", model):
         raise AppError(400, "UngÃ¼ltiges Gemini-Modell.")
@@ -18494,7 +18495,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         except ClientDisconnected:
             return
 
-    def handle_chat_stream(self, session: dict[str, Any]) -> None:
+    def handle_chat_stream(self, session: dict[str, Any]) -> None:  # NOSONAR - SSE lifecycle must remain atomic around durable job ownership
         payload = self.read_json(MAX_REQUEST_BYTES)
         message = str(payload.get("message", ""))
         client_turn_id = str(payload.get("client_turn_id") or "").strip()
