@@ -758,10 +758,7 @@ function updateChatControls() {
   }
   const progress = $("#chatOperationStatus");
   if (progress) {
-    progress.hidden = !state.busy;
-    if (chatIsReconciling) $("#chatOperationLabel").textContent = "Antwort wird übernommen";
-    else if (chatIsResuming) $("#chatOperationLabel").textContent = "Coach-Auftrag wird fortgesetzt";
-    else $("#chatOperationLabel").textContent = "Coach arbeitet";
+    progress.hidden = !state.busy || chatIsReconciling;
   }
   updateChatQueueStatus();
 }
@@ -1186,6 +1183,13 @@ function addCoachReceipt(receipt) {
 }
 
 function addStructuredCoachReceipts(payload) {
+  const hiddenChatReceiptTools = new Set([
+    "get_sync_job",
+    "refresh_current_performance",
+    "start_intervals_plan_sync",
+    "start_provider_refresh",
+    "sync_competitions",
+  ]);
   const labels = {
     update_profile: "Profil aktualisiert", apply_training_patch: "Geplante Einheiten angepasst",
     stage_training_plan: "Planvorlage vorbereitet", commit_training_plan: "Trainingsplan gespeichert",
@@ -1211,6 +1215,7 @@ function addStructuredCoachReceipts(payload) {
   renderCoachReceipts();
   for (const entry of commands) {
     if (entry.resolved) continue;
+    if (hiddenChatReceiptTools.has(entry.tool)) continue;
     if (planCommitRequested && entry.tool === "stage_training_plan") continue;
     if (entry.tool === "commit_training_plan" && entry !== finalCommit) continue;
     const result = entry?.result || {};
@@ -1615,14 +1620,12 @@ function createCoachWorkingIndicator() {
   node.id = "coachWorking";
   node.className = "coach-working";
   node.setAttribute("role", "status");
+  node.setAttribute("aria-label", coachWorkingLabel());
   const dots = document.createElement("span");
   dots.className = "working-dots";
   dots.setAttribute("aria-hidden", "true");
   dots.innerHTML = "<i></i><i></i><i></i>";
-  const label = document.createElement("span");
-  label.id = "coachWorkingLabel";
-  label.textContent = coachWorkingLabel();
-  node.append(dots, label);
+  node.append(dots);
   return node;
 }
 

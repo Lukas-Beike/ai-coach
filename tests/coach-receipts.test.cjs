@@ -39,3 +39,12 @@ test("a different unresolved failure remains visible beside the saved workout", 
   assert.equal(cards[0].message, "Synthetic failure");
   assert.equal(cards[1].status, "success");
 });
+
+test("synchronization progress does not create chat cards", () => {
+  const cards = render([
+    { tool: "start_intervals_plan_sync", result: { ok: true, status: "queued", sync_job_id: "sync-1" } },
+    { tool: "get_sync_job", result: { job: { id: "sync-1", status: "running" } } },
+    { tool: "start_provider_refresh", result: { ok: true, status: "queued", sync_job_id: "sync-2" } },
+  ]);
+  assert.deepEqual(cards, []);
+});
