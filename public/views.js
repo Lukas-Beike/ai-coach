@@ -2,6 +2,32 @@ function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
 }
 
+function replaceMarkdownLinks(value) {
+  let html = "";
+  let cursor = 0;
+  while (cursor < value.length) {
+    const labelStart = value.indexOf("[", cursor);
+    if (labelStart < 0) return html + value.slice(cursor);
+    const linkStart = value.indexOf("](", labelStart + 1);
+    if (linkStart < 0) return html + value.slice(cursor);
+    const urlEnd = value.indexOf(")", linkStart + 2);
+    if (urlEnd < 0) return html + value.slice(cursor);
+    const label = value.slice(labelStart + 1, linkStart);
+    const url = value.slice(linkStart + 2, urlEnd);
+    const validScheme = url.startsWith("https://") || url.startsWith("http://");
+    const validUrl = validScheme && label && ![...url].some((character) => "()\r\n\t ".includes(character));
+    if (!validUrl) {
+      html += value.slice(cursor, labelStart + 1);
+      cursor = labelStart + 1;
+      continue;
+    }
+    html += value.slice(cursor, labelStart);
+    html += `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    cursor = urlEnd + 1;
+  }
+  return html;
+}
+
 function inlineMarkdown(value) {
   let html = escapeHtml(value);
   const codeSpans = [];
@@ -10,12 +36,33 @@ function inlineMarkdown(value) {
     codeSpans.push(`<code>${code}</code>`);
     return token;
   });
-  html = html.replace(/\[([^\]\r\n]+)\]\((https?:\/\/[^()\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  html = replaceMarkdownLinks(html);
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
   html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
   html = html.replace(/_([^_\n]+)_/g, "<em>$1</em>");
   return html.replace(/__COACH_CODE_SPAN_(\d+)__/g, (_, index) => codeSpans[Number(index)]);
+}
+
+function headingFromMarkdownLine(line) {
+  const trimmed = line.trimStart();
+  let level = 0;
+  while (level < trimmed.length && trimmed[level] === "#") level += 1;
+  if (!level || level > 3 || !trimmed[level] || trimmed[level].trim()) return null;
+  return { level, text: trimmed.slice(level).trim() };
+}
+
+function listItemFromMarkdownLine(line) {
+  const trimmed = line.trimStart();
+  const marker = trimmed[0];
+  if (marker && "-*+".includes(marker) && trimmed[1] && !trimmed[1].trim()) {
+    return { type: "ul", text: trimmed.slice(2).trimStart() };
+  }
+  let digitCount = 0;
+  while (digitCount < trimmed.length && trimmed[digitCount] >= "0" && trimmed[digitCount] <= "9") digitCount += 1;
+  const orderedMarker = trimmed[digitCount];
+  if (!digitCount || !orderedMarker || !".)".includes(orderedMarker) || !trimmed[digitCount + 1] || trimmed[digitCount + 1].trim()) return null;
+  return { type: "ol", text: trimmed.slice(digitCount + 1).trimStart() };
 }
 
 function markdownToHtml(markdown) {
@@ -49,16 +96,15 @@ function markdownToHtml(markdown) {
     }
     if (inCode) { codeLines.push(line); continue; }
     if (!line.trim()) { flushParagraph(); closeList(); continue; }
-    const heading = /^\s*(#{1,3})\s+(.+?)\s*$/.exec(line);
-    if (heading) { flushParagraph(); closeList(); output.push(`<h${heading[1].length}>${inlineMarkdown(heading[2].replace(/#+$/, "").trim())}</h${heading[1].length}>`); continue; }
+    const heading = headingFromMarkdownLine(line);
+    if (heading) { flushParagraph(); closeList(); output.push(`<h${heading.level}>${inlineMarkdown(heading.text.replace(/#+$/, "").trim())}</h${heading.level}>`); continue; }
     if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) { flushParagraph(); closeList(); output.push("<hr>"); continue; }
-    const unordered = /^\s*[-*+]\s+([^\r\n]+)$/.exec(line);
-    const ordered = /^\s*\d+[.)]\s+([^\r\n]+)$/.exec(line);
-    if (unordered || ordered) {
+    const listItem = listItemFromMarkdownLine(line);
+    if (listItem) {
       flushParagraph();
-      const nextType = unordered ? "ul" : "ol";
+      const nextType = listItem.type;
       if (listType !== nextType) { closeList(); output.push(`<${nextType}>`); listType = nextType; }
-      output.push(`<li>${inlineMarkdown((unordered || ordered)[1])}</li>`);
+      output.push(`<li>${inlineMarkdown(listItem.text)}</li>`);
       continue;
     }
     const quote = /^\s*>\s?(.*)$/.exec(line);
