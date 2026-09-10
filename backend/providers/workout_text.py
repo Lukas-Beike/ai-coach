@@ -14,7 +14,6 @@ class WorkoutTextError(ValueError):
         self.reason = reason
 
 
-_TIME = re.compile(r"(?:\d+(?:\.\d+)?(?:h|m|s|'|\"))+")
 _DISTANCE = re.compile(r"\d+(?:\.\d+)?(?:km|mtr|mi|yd)")
 _TIME_PART = re.compile(r"(\d+(?:\.\d+)?)([hms'\"])")
 _TARGET = re.compile(
@@ -26,6 +25,16 @@ _TARGET = re.compile(
     r"(?:-\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?)?\s+Pace"
     r")(?=$|\s)", re.IGNORECASE,
 )
+
+
+def _is_time(value: str) -> bool:
+    position = 0
+    while position < len(value):
+        match = _TIME_PART.match(value, position)
+        if not match:
+            return False
+        position = match.end()
+    return bool(value)
 
 
 def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
@@ -54,7 +63,7 @@ def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
             continue
         # Only the target immediately following the first duration/distance is
         # executable workout syntax. Cues later in the line must remain prose.
-        step = re.match(r"^(?P<prefix>\s*-\s+\S+\s+)(?P<target>.*)$", line)
+        step = re.match(r"^(?P<prefix>[ \t]*-[ \t]+\S+[ \t]+)(?P<target>[^\r\n]*)$", line)
         if not step:
             normalized.append(line)
             continue
@@ -96,9 +105,9 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
             elif repeat_pending or previous_step:
                 raise WorkoutTextError("invalid_workout_repeat", "Hinweise und neue Abschnitte durch eine Leerzeile von Trainingsschritten trennen.")
             continue
-        step = re.match(r"^-\s+(.+)$", line)
-        quantity = re.match(r"(\S+)\s+(.+)$", step[1]) if step else None
-        if not quantity or not (_TIME.fullmatch(quantity[1]) or _DISTANCE.fullmatch(quantity[1])):
+        step = re.match(r"^-[ \t]+([^\r\n]+)$", line)
+        quantity = re.match(r"(\S+)[ \t]+([^\r\n]+)$", step[1]) if step else None
+        if not quantity or not (_is_time(quantity[1]) or _DISTANCE.fullmatch(quantity[1])):
             raise WorkoutTextError("invalid_workout_step", f"Workout-Zeile {number}: Dauer oder Distanz in Workout-Syntax angeben, z.B. '- 15m 50-70%' oder '- 6km Z1 HR'. Hinweise ohne '- ' schreiben.")
         value, rest = quantity.groups()
         ramp = bool(re.match(r"^ramp\s+", rest, flags=re.IGNORECASE))
@@ -110,7 +119,12 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
         if _TARGET.search(cue):
             raise WorkoutTextError("ambiguous_workout_target", f"Workout-Zeile {number}: Mehrere Intensitaetsziele im selben Schritt. Nur ein Ziel angeben; umgerechnete Wattwerte und alternative Ziele als separaten Absatz ohne '- ' schreiben.")
         parsed_target = intensity[0].upper()
-        kind = "PACE" if "PACE" in parsed_target else "HR" if re.search(r"HR|BPM", parsed_target) else "POWER"
+        if "PACE" in parsed_target:
+            kind = "PACE"
+        elif re.search(r"HR|BPM", parsed_target):
+            kind = "HR"
+        else:
+            kind = "POWER"
         if target in {"POWER", "HR", "PACE"} and target != kind:
             raise WorkoutTextError("workout_target_mismatch", f"Workout-Zeile {number}: Schrittziel {kind} passt nicht zum Einheitenziel {target}. Ziel oder Schritt korrigieren; fuer gemischte Ziele AUTO verwenden.")
         expected = {"kind": kind.lower(), "target": parsed_target, "ramp": ramp}
@@ -118,7 +132,9 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
             distance = float(re.match(r"[\d.]+", value)[0])
             if not math.isfinite(distance) or distance <= 0:
                 raise WorkoutTextError("invalid_workout_step", "Eine Trainingsdistanz muss positiv sein.")
-            amount, unit = re.fullmatch(r"([\d.]+)(.+)", value).groups()
+            amount_match = re.match(r"\d+(?:\.\d+)?", value)
+            amount = amount_match[0]
+            unit = value[len(amount):]
             expected["distance"] = float(amount) * {"km": 1000, "mtr": 1, "mi": 1609.344, "yd": 0.9144}[unit]
         else:
             seconds = sum(float(amount) * {"h": 3600, "m": 60, "s": 1, "'": 60, '"': 1}[unit] for amount, unit in _TIME_PART.findall(value))
@@ -194,7 +210,7 @@ def verify_workout_readback(description: str, remote: dict) -> None:
             fail()
         text = wanted["target"]
         if ":" in text:
-            values = [int(m) * 60 + int(s) for m, s in re.findall(r"(\d+):([0-5]\d)", text)]
+            values = [int(m) * 60 + int(s) for m, s in re.findall(r"(\d{1,3}):([0-5]\d)", text)]
             denominators = re.findall(r"/(KM|MI|100M|100Y|500M|400M|250M)", text)
             units = "secs/" + denominators[0].lower() if denominators else str(intensity.get("units") or "")
             if not units.startswith("secs/") or len(set(denominators)) > 1:

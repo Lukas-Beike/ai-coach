@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
@@ -20,6 +21,12 @@ StatusCallback = Callable[[str], None]
 CapabilityAllowed = Callable[[str], bool]
 CapabilityFailure = Callable[[str, BaseException], None]
 CapabilitySuccess = Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class GarminCollectionOptions:
+    include_recovery: bool = True
+    include_current_metrics: bool = True
 
 
 def normalize_range_records(source: str, value: Any) -> list[dict[str, Any]]:
@@ -45,8 +52,7 @@ def collect_garmin_data(
     capability_allowed: CapabilityAllowed | None = None,
     capability_failure: CapabilityFailure | None = None,
     capability_success: CapabilitySuccess | None = None,
-    include_recovery: bool = True,
-    include_current_metrics: bool = True,
+    options: GarminCollectionOptions | None = None,
 ) -> dict[str, Any]:
     """Collect Garmin ranges through injected application boundaries.
 
@@ -55,6 +61,9 @@ def collect_garmin_data(
     bounded messages so callers can persist the result safely.
     """
     windows = list(windows)
+    collection_options = options or GarminCollectionOptions()
+    include_recovery = collection_options.include_recovery
+    include_current_metrics = collection_options.include_current_metrics
     payload: dict[str, Any] = {
         "synced_at": synced_at,
         "start": start.isoformat(),

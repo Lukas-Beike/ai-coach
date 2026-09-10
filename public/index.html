@@ -9,8 +9,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach für Intervals.icu.">
   <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" href="/icon.svg?v=206" type="image/svg+xml">
-    <link rel="stylesheet" href="/styles.css?v=206">
+    <link rel="icon" href="/icon.svg?v=207" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css?v=207">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -41,18 +41,18 @@
         <div><span class="pulse"></span><strong id="statusTitle">Verbindung wird hergestellt…</strong></div>
         <span id="statusDetail">Trainingsbereich wird geprüft</span>
       </section>
-      <section id="connectivityNotice" class="connectivity-notice" role="status" aria-live="polite" hidden></section>
+      <section id="connectivityNotice" class="connectivity-notice" aria-live="polite" hidden></section>
       <section id="providerAttentionBanner" class="provider-attention-banner" role="alert" aria-live="assertive" hidden>
         <div><strong>Anbindung benötigt Aufmerksamkeit</strong><span id="providerAttentionDetail"></span></div>
         <a href="#more/connections">Anbindungen öffnen</a>
       </section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
-        <div id="coachAdaptivePlanningNotice" class="adaptive-planning-notice coach-adaptive-planning-notice" hidden role="status">
+        <div id="coachAdaptivePlanningNotice" class="adaptive-planning-notice coach-adaptive-planning-notice" hidden aria-live="polite">
           <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
         </div>
-        <div id="chatOperationStatus" class="chat-operation-status" role="status" hidden><span id="chatOperationLabel"></span><button type="button" id="cancelChatButton" class="secondary-button" hidden>Abbrechen</button></div>
+        <div id="chatOperationStatus" class="chat-operation-status" aria-live="polite" hidden><span id="chatOperationLabel"></span><button type="button" id="cancelChatButton" class="secondary-button" hidden>Abbrechen</button></div>
         <div id="messages" class="messages" aria-live="polite" aria-atomic="false"></div>
         <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
           <div class="coach-action-review-heading">
@@ -71,7 +71,8 @@
           </div>
           <div id="chatQueueStatus" class="chat-queue-status" hidden aria-live="polite"></div>
           <div id="chatAttachments" class="chat-attachments" hidden aria-live="polite"></div>
-          <input id="attachmentInput" type="file" accept=".gpx,.png,.jpg,.jpeg,.webp" multiple hidden>
+          <label for="attachmentInput" class="sr-only">GPX-Dateien oder Bilder auswählen</label>
+          <input id="attachmentInput" type="file" accept=".gpx,.png,.jpg,.jpeg,.webp" multiple hidden aria-label="GPX-Dateien oder Bilder auswählen">
           <textarea id="messageInput" rows="1" maxlength="12000" placeholder="Frage deinen Coach…" aria-label="Nachricht an deinen Coach"></textarea>
           <div class="composer-actions">
             <button type="button" id="attachmentButton" class="secondary-button" aria-label="GPX-Dateien oder Bilder anhängen">Anhängen</button>
@@ -292,10 +293,10 @@
             <div><strong>Lokale Änderungshistorie</strong><span>Nur sichere strukturierte Änderungen; Undo bleibt lokal und löst keinen Remote-Sync aus.</span></div>
             <button id="changeHistoryRefreshButton" type="button" class="secondary-button">Historie laden</button>
           </div>
-          <div id="changeHistoryStatus" class="fine-print" role="status">Noch nicht geladen.</div>
+          <div id="changeHistoryStatus" class="fine-print" aria-live="polite">Noch nicht geladen.</div>
           <div id="changeHistoryList" class="change-history-list" aria-live="polite"></div>
           <div id="privacyDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
-          <div id="privacyDeleteResult" class="fine-print" hidden role="status"></div>
+          <div id="privacyDeleteResult" class="fine-print" hidden aria-live="polite"></div>
           <div class="settings-inline-action backup-actions">
             <div><strong>Verschlüsseltes Datenbank-Backup</strong><span>Die Datei kann nur mit demselben APP_PASSWORD wiederhergestellt werden.</span></div>
             <button id="backupDownloadButton" type="button" class="secondary-button">Backup herunterladen</button>
@@ -332,8 +333,8 @@
     </nav>
   </div>
 
-  <div id="toast" class="toast" role="status"></div>
-  <div id="authLoading" class="auth-loading" role="status" aria-live="polite">Trainingsbereich wird gepr&uuml;ft&hellip;</div>
+  <div id="toast" class="toast" aria-live="polite"></div>
+  <div id="authLoading" class="auth-loading" aria-live="polite">Trainingsbereich wird gepr&uuml;ft&hellip;</div>
   <dialog id="loginDialog" aria-labelledby="loginTitle">
     <form id="loginForm" method="dialog">
       <h2 id="loginTitle">Anmelden</h2>
@@ -360,12 +361,12 @@
       </div>
     </form>
   </dialog>
-  <script src="/api.js?v=206" defer></script>
-  <script src="/navigation.js?v=206" defer></script>
-  <script src="/state.js?v=206" defer></script>
-  <script src="/views.js?v=206" defer></script>
-  <script src="/forms.js?v=206" defer></script>
-  <script src="/components.js?v=206" defer></script>
-  <script src="/app.js?v=206" defer></script>
+  <script src="/api.js?v=207" defer></script>
+  <script src="/navigation.js?v=207" defer></script>
+  <script src="/state.js?v=207" defer></script>
+  <script src="/views.js?v=207" defer></script>
+  <script src="/forms.js?v=207" defer></script>
+  <script src="/components.js?v=207" defer></script>
+  <script src="/app.js?v=207" defer></script>
 </body>
 </html>

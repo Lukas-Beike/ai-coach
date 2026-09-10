@@ -6,20 +6,20 @@ function inlineMarkdown(value) {
   let html = escapeHtml(value);
   const codeSpans = [];
   html = html.replace(/`([^`\n]+)`/g, (_, code) => {
-    const token = `\u0000code${codeSpans.length}\u0000`;
+    const token = `__COACH_CODE_SPAN_${codeSpans.length}__`;
     codeSpans.push(`<code>${code}</code>`);
     return token;
   });
-  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  html = html.replace(/\[([^\]\r\n]+)\]\((https?:\/\/[^()\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
   html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
   html = html.replace(/_([^_\n]+)_/g, "<em>$1</em>");
-  return html.replace(/\u0000code(\d+)\u0000/g, (_, index) => codeSpans[Number(index)]);
+  return html.replace(/__COACH_CODE_SPAN_(\d+)__/g, (_, index) => codeSpans[Number(index)]);
 }
 
 function markdownToHtml(markdown) {
-  const lines = String(markdown || "").replace(/\r/g, "").split("\n");
+  const lines = String(markdown || "").replaceAll("\r", "").split("\n");
   const output = [];
   let paragraph = [];
   let listType = null;
@@ -32,7 +32,7 @@ function markdownToHtml(markdown) {
   };
   const flushParagraph = () => {
     if (paragraph.length) {
-      output.push(`<p>${inlineMarkdown(paragraph.join("\n")).replace(/\n/g, "<br>")}</p>`);
+      output.push(`<p>${inlineMarkdown(paragraph.join("\n")).replaceAll("\n", "<br>")}</p>`);
       paragraph = [];
     }
   };
@@ -49,11 +49,11 @@ function markdownToHtml(markdown) {
     }
     if (inCode) { codeLines.push(line); continue; }
     if (!line.trim()) { flushParagraph(); closeList(); continue; }
-    const heading = line.match(/^\s*(#{1,3})\s+(.+?)\s*#*\s*$/);
-    if (heading) { flushParagraph(); closeList(); output.push(`<h${heading[1].length}>${inlineMarkdown(heading[2])}</h${heading[1].length}>`); continue; }
+    const heading = /^\s*(#{1,3})\s+(.+?)\s*$/.exec(line);
+    if (heading) { flushParagraph(); closeList(); output.push(`<h${heading[1].length}>${inlineMarkdown(heading[2].replace(/#+$/, "").trim())}</h${heading[1].length}>`); continue; }
     if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) { flushParagraph(); closeList(); output.push("<hr>"); continue; }
-    const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
-    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    const unordered = /^\s*[-*+]\s+([^\r\n]+)$/.exec(line);
+    const ordered = /^\s*\d+[.)]\s+([^\r\n]+)$/.exec(line);
     if (unordered || ordered) {
       flushParagraph();
       const nextType = unordered ? "ul" : "ol";
@@ -61,7 +61,7 @@ function markdownToHtml(markdown) {
       output.push(`<li>${inlineMarkdown((unordered || ordered)[1])}</li>`);
       continue;
     }
-    const quote = line.match(/^\s*>\s?(.*)$/);
+    const quote = /^\s*>\s?(.*)$/.exec(line);
     if (quote) { flushParagraph(); closeList(); output.push(`<blockquote>${inlineMarkdown(quote[1])}</blockquote>`); continue; }
     closeList(); paragraph.push(line);
   }
@@ -94,8 +94,8 @@ function timezoneDateKey(timeZone, instant = new Date()) {
 }
 
 function dateFromKey(value) {
-  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date(NaN);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date(Number.NaN);
 }
 
 function addDateKey(value, days) {

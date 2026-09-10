@@ -48,7 +48,7 @@ from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, 
 from backend.db.manager import DatabaseManager
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
-from backend.providers.garmin import collect_garmin_data
+from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 from backend.sync.windows import split_date_windows
 from backend.sync.status import persist_sync_operation_state, project_sync_status
@@ -418,7 +418,7 @@ def load_local_env() -> None:
                 line = line[7:].lstrip()
             key, separator, value = line.partition("=")
             key = key.strip()
-            if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            if not separator or not re.fullmatch(r"(?a:(?!\d)\w+)", key):
                 continue
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
@@ -649,7 +649,7 @@ def _safe_provider_path(path: str) -> str:
         if was_redacted:
             safe_segments.append("[REDACTED_PATH]")
             redact_next = False
-        elif re.fullmatch(r"(?:api|v[0-9]+|[a-z][a-z_-]{0,31})", decoded):
+        elif re.fullmatch(r"(?:api|v\d+|[a-z][a-z_-]{0,31})", decoded):
             safe_segments.append(decoded)
         else:
             safe_segments.append("[REDACTED_PATH]")
@@ -847,7 +847,7 @@ def external_call(
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "error_code": operation_error_code(exc),
         }
-        LOGGER.error("External call failed", extra={"event": "external_call_failed", "context": failure_context}, exc_info=True)
+        LOGGER.exception("External call failed", extra={"event": "external_call_failed", "context": failure_context}, exc_info=True)
         capture_diagnostic_event("external_call_failed", {
             "service": service,
             "operation": operation,
@@ -1252,7 +1252,14 @@ def observed_sync(provider: str, area: str = "default"):
                         _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
                     raise
                 result_status = result.get("status") if isinstance(result, dict) else None
-                refresh_status = "skipped" if result_status == "not_configured" else "error" if result_status in {"stale", "error", "failed"} else "partial" if result_status == "partial" else "success"
+                if result_status == "not_configured":
+                    refresh_status = "skipped"
+                elif result_status in {"stale", "error", "failed"}:
+                    refresh_status = "error"
+                elif result_status == "partial":
+                    refresh_status = "partial"
+                else:
+                    refresh_status = "success"
                 _provider_refresh_finish(refresh_id, refresh_status, "complete")
                 log_operation_event(
                     "operation_count", scope["operation_id"], scope["trigger"],
@@ -1273,9 +1280,8 @@ def database_manager() -> DatabaseManager:
         DATABASE_MANAGER = None
         DATABASE_MANAGER_SIGNATURE = None
     if DATABASE_MANAGER is None:
-        if CONFIG.app_password:
-            if not SQLCIPHER_AVAILABLE:
-                raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
+        if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
+            raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
         DATABASE_MANAGER = DatabaseManager(
             DB_PATH,
             sqlite_backend if CONFIG.app_password else sqlite3,
@@ -1302,7 +1308,6 @@ def database():
             yield db
         finally:
             DATABASE_CONTEXT.reset(context_token)
-    return
 
 
 def initialise_database() -> None:
@@ -1712,7 +1717,12 @@ def _provider_refresh_finish(
         )
         _provider_refresh_cleanup(db)
     if provider and area:
-        public_status = "ready" if status == "success" else "degraded" if status == "partial" else "error"
+        if status == "success":
+            public_status = "ready"
+        elif status == "partial":
+            public_status = "degraded"
+        else:
+            public_status = "error"
         publish_state_event("provider", {"provider": provider, "area": area, "status": public_status})
 
 
@@ -1819,7 +1829,7 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
 def _decode_sync_job_payload(value: Any) -> dict[str, Any]:
     try:
         payload = json.loads(value or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -2244,7 +2254,12 @@ def _run_claimed_sync_job(job: dict[str, Any]) -> None:
         result_status = result.get("status") if isinstance(result, dict) else "ok"
         if result_status == "already_running":
             raise AppError(409, "Der Provider ist noch beschäftigt.", reason="temporary_error")
-        fallback_status = "partial" if result_status == "partial" else "failed" if result_status in {"error", "failed"} else "completed"
+        if result_status == "partial":
+            fallback_status = "partial"
+        elif result_status in {"error", "failed"}:
+            fallback_status = "failed"
+        else:
+            fallback_status = "completed"
         _sync_job_update_from_result(job_id, result, fallback_status=fallback_status)
         if job.get("type") == "historical_backfill" and fallback_status == "completed" and isinstance(result, dict) and result.get("historical_next_end"):
             enqueue_sync_job(
@@ -2367,7 +2382,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
         cached_weather = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
         if isinstance(cached_weather, dict):
             fallbacks[("weather", "forecast")] = cached_weather.get("fetched_at")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         pass
     configured = {
         ("intervals", "activities"): bool(CONFIG.intervals_api_key),
@@ -2412,6 +2427,12 @@ def provider_freshness_state() -> list[dict[str, Any]]:
                 state = "stale" if age > PROVIDER_REFRESH_STALE_SECONDS[key] else "fresh"
             elif configured[key] and fallback_error:
                 state = "stale" if last_good else "error"
+            if row and row["status"] == "error":
+                error_code = row.get("error_code")
+            elif fallback_error:
+                error_code = "provider_error"
+            else:
+                error_code = None
             result.append({
                 "provider": provider,
                 "area": area,
@@ -2422,7 +2443,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
                 "phase": row.get("phase") if row else None,
                 "last_attempt_at": last_attempt,
                 "last_success_at": last_good,
-                "error_code": row.get("error_code") if row and row["status"] == "error" else "provider_error" if fallback_error else None,
+                "error_code": error_code,
                 "next_retry_at": scheduled_retry,
                 "stale": state == "stale",
                 "has_last_good": bool(last_good),
@@ -2441,7 +2462,7 @@ def _audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:
         if isinstance(value, dict) and isinstance(value.get("payload"), str):
             try:
                 payload = json.loads(value["payload"])
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 payload = {}
             value = {**payload, "sync_status": value.get("sync_state") or payload.get("sync_status")}
     elif entity_type == "planned_unit":
@@ -2449,7 +2470,7 @@ def _audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:
         if isinstance(value, dict) and isinstance(value.get("payload"), str):
             try:
                 payload = json.loads(value["payload"])
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 payload = {}
             value = {**payload, "sync_status": value.get("sync_state") or payload.get("sync_status")}
     elif entity_type == "competition":
@@ -2561,7 +2582,7 @@ def _record_change(
 def _change_history_view(row: dict[str, Any]) -> dict[str, Any]:
     try:
         diff = json.loads(row.get("diff") or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         diff = {"fields": {}}
     safe_fields = {
         field: {"changed": True}
@@ -2631,7 +2652,7 @@ def _history_current(db: Any, entity_type: str, entity_id: str) -> tuple[dict[st
 def _history_target(row: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     try:
         diff = json.loads(row.get("diff") or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (TypeError, ValueError) as exc:
         raise AppError(409, "Die Änderungshistorie ist beschädigt.") from exc
     fields = diff.get("fields") if isinstance(diff, dict) else None
     if not isinstance(fields, dict):
@@ -2714,7 +2735,7 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
             elif current:
                 try:
                     restored = normalize_library_workout({**json.loads(current["payload"]), **target}, local_id=entity_id, external_id=current.get("external_id"), sync_status="local")
-                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                except (TypeError, ValueError) as exc:
                     raise AppError(409, "Die Bibliothekseinheit kann nicht wiederhergestellt werden.") from exc
                 db.execute("UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?", (json.dumps(restored, ensure_ascii=False), utc_now(), entity_id))
                 after = {**restored, "sync_status": "local"}
@@ -2743,15 +2764,25 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
             elif current:
                 try:
                     current_payload = json.loads(current.get("payload") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                except (TypeError, ValueError) as exc:
                     raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.") from exc
                 if not isinstance(current_payload, dict):
                     raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.")
                 restore_date = str(target.get("date") or current_payload.get("date") or "")[:10]
                 current_date = str(current_payload.get("date") or "")[:10]
                 restoring_deletion = history.get("action") == "delete"
-                target_archived = bool(target["archived"]) if "archived" in target else (False if restoring_deletion else bool(current_payload.get("archived")))
-                target_local_deleted = bool(target["local_deleted"]) if "local_deleted" in target else (False if restoring_deletion else bool(current_payload.get("local_deleted")))
+                if "archived" in target:
+                    target_archived = bool(target["archived"])
+                elif restoring_deletion:
+                    target_archived = False
+                else:
+                    target_archived = bool(current_payload.get("archived"))
+                if "local_deleted" in target:
+                    target_local_deleted = bool(target["local_deleted"])
+                elif restoring_deletion:
+                    target_local_deleted = False
+                else:
+                    target_local_deleted = bool(current_payload.get("local_deleted"))
                 schedule_change = restore_date != current_date or (
                     (bool(current_payload.get("archived")) or bool(current_payload.get("local_deleted")))
                     and not target_archived and not target_local_deleted
@@ -3001,7 +3032,7 @@ def _safe_response_headers(headers: Any) -> dict[str, str]:
 def _diagnostic_capture_state() -> dict[str, Any]:
     try:
         value = json.loads(get_kv(DIAGNOSTIC_CAPTURE_STATE_KEY) or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         value = {}
     return value if isinstance(value, dict) else {}
 
@@ -3017,7 +3048,7 @@ def diagnostic_capture_status() -> dict[str, Any]:
         set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, "")
     try:
         entries = json.loads(get_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY) or "[]")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         entries = []
     return {
         "active": active,
@@ -3031,7 +3062,7 @@ def diagnostic_capture_status() -> dict[str, Any]:
 def diagnostic_capture_entries() -> list[dict[str, Any]]:
     try:
         entries = json.loads(get_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY) or "[]")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return []
     if not isinstance(entries, list):
         return []
@@ -3529,7 +3560,12 @@ def _garmin_pace_seconds(value: Any) -> float | int | None:
     # running threshold speed in a decimetre-per-second-like scale (for
     # example 0.35833233 represents roughly 3.58 m/s, or 4:40/km). The
     # fixture and some API variants expose the regular m/s value instead.
-    pace = 100 / number if scaled_garmin_speed else 1000 / number if number < 20 else number
+    if scaled_garmin_speed:
+        pace = 100 / number
+    elif number < 20:
+        pace = 1000 / number
+    else:
+        pace = number
     if scaled_garmin_speed:
         # Garmin displays this profile pace in five-second steps.
         pace = round(pace / 5) * 5
@@ -3546,7 +3582,12 @@ def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:
             max_hr = as_number(first_present(value, ("maxHeartRateUsed", "maxHeartRate", "maxHR")))
             if max_hr is not None and 80 <= float(max_hr) <= 260:
                 sport = _garmin_key(first_present(value, ("sport", "sportType", "activityType")))
-                kind = "cycling" if any(term in sport for term in ("cycling", "cycl", "bike", "ride")) else "running" if any(term in sport for term in ("running", "run")) else "generic"
+                if any(term in sport for term in ("cycling", "cycl", "bike", "ride")):
+                    kind = "cycling"
+                elif any(term in sport for term in ("running", "run")):
+                    kind = "running"
+                else:
+                    kind = "generic"
                 values[kind].append(max_hr)
             for child in value.values():
                 visit(child)
@@ -3572,7 +3613,12 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                     number = _garmin_vo2_value(item)
                     if number is not None:
                         context = _garmin_key(" ".join((*path, str(key))))
-                        category = "cycling" if any(term in context for term in ("cycling", "cycl", "bike", "ride")) else "running" if any(term in context for term in ("running", "run")) else "generic"
+                        if any(term in context for term in ("cycling", "cycl", "bike", "ride")):
+                            category = "cycling"
+                        elif any(term in context for term in ("running", "run")):
+                            category = "running"
+                        else:
+                            category = "generic"
                         vo2_values[category].append(number)
                 visit_vo2(item, (*path, str(key)))
         elif isinstance(value, list):
@@ -3580,7 +3626,12 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                 visit_vo2(item, path)
 
     visit_vo2(max_metrics)
-    running_vo2 = vo2_values["running"][-1] if vo2_values["running"] else (vo2_values["generic"][-1] if vo2_values["generic"] else None)
+    if vo2_values["running"]:
+        running_vo2 = vo2_values["running"][-1]
+    elif vo2_values["generic"]:
+        running_vo2 = vo2_values["generic"][-1]
+    else:
+        running_vo2 = None
     cycling_vo2 = vo2_values["cycling"][-1] if vo2_values["cycling"] else None
 
     race_values: dict[str, float | int | None] = {
@@ -3689,12 +3740,18 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                               if isinstance(activity, dict) and activity_kind(activity) == kind
                               and as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate"))) == result[key]["value"]]
             result[key]["observed_at"] = max((value for value in observed_dates if value), default=None)
-    return {
-        key: garmin_metric_freshness(snapshot, source_keys.get(key) or (
-            "max_metrics" if "vo2max" in key else "race_predictions" if key in race_values else "running_threshold"
-        ), value)
-        for key, value in result.items()
-    }
+    freshness = {}
+    for key, value in result.items():
+        source = source_keys.get(key)
+        if not source:
+            if "vo2max" in key:
+                source = "max_metrics"
+            elif key in race_values:
+                source = "race_predictions"
+            else:
+                source = "running_threshold"
+        freshness[key] = garmin_metric_freshness(snapshot, source, value)
+    return freshness
 
 
 def measurement_age(observed_at: Any) -> dict[str, Any]:
@@ -3703,7 +3760,13 @@ def measurement_age(observed_at: Any) -> dict[str, Any]:
         days = (local_now().date() - date.fromisoformat(str(observed_at)[:10])).days
     except (TypeError, ValueError):
         return {"measurement_status": "unknown", "measurement_age_days": None}
-    return {"measurement_status": "today" if days == 0 else "earlier" if days > 0 else "future", "measurement_age_days": days}
+    if days == 0:
+        measurement_status = "today"
+    elif days > 0:
+        measurement_status = "earlier"
+    else:
+        measurement_status = "future"
+    return {"measurement_status": measurement_status, "measurement_age_days": days}
 
 
 def garmin_source_freshness(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -3931,7 +3994,7 @@ GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
 def _garmin_capability_state(source: str) -> dict[str, Any]:
     try:
         value = json.loads(get_kv(f"garmin_capability_{source}") or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         value = {}
     return value if isinstance(value, dict) else {}
 
@@ -4056,7 +4119,7 @@ def garmin_sleep_ready_for_checkin(checkin_date: date, snapshot: dict[str, Any] 
 def _garmin_error_entries() -> list[dict[str, Any]]:
     try:
         errors = json.loads(get_kv("last_garmin_error") or "[]")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         errors = []
     return [entry for entry in errors if isinstance(entry, dict)] if isinstance(errors, list) else []
 
@@ -4406,8 +4469,10 @@ def sync_garmin(
             capability_allowed=_garmin_capability_allowed,
             capability_failure=_garmin_capability_failure,
             capability_success=_garmin_capability_success,
-            include_recovery=end_date is None and days != ALL_SYNC_DAYS,
-            include_current_metrics=end_date is None and days != ALL_SYNC_DAYS,
+            options=GarminCollectionOptions(
+                include_recovery=end_date is None and days != ALL_SYNC_DAYS,
+                include_current_metrics=end_date is None and days != ALL_SYNC_DAYS,
+            ),
         )
         merge_garmin_sources(payload, previous)
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
@@ -4875,7 +4940,7 @@ def normalize_competition(value: Any) -> dict[str, str]:
     return result
 
 
-def list_competitions(include_sync: bool = False, limit: int | None = None) -> list[dict[str, Any]]:
+def list_competitions(limit: int | None = None) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
         return COMPETITION_REPOSITORY.list(db, max(1, min(int(limit), 500)) if limit is not None else None)
 
@@ -4994,7 +5059,7 @@ def fetch_calendar_feed(url: str) -> bytes:
             raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.")
         raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.") from last_network_error
     except AppError as exc:
-        LOGGER.error(
+        LOGGER.exception(
             "External calendar request failed",
             extra={
                 "event": "external_request_failed",
@@ -5054,18 +5119,18 @@ def ical_training_impact(description: Any) -> bool:
     return any(_ical_description_contains(description, marker) for marker in ICAL_TRAINING_MARKERS)
 
 
-def ical_training_relevant(name: Any, description: Any) -> bool:
+def ical_training_relevant(_name: Any, description: Any) -> bool:
     """Treat only described events as training-relevant calendar constraints."""
     description_text = str(description or "").strip()
     return bool(description_text) and not _ical_description_contains(description_text, ICAL_NO_TRAINING_MARKER)
 
 
-def ical_no_intensity(name: Any, description: Any) -> bool:
+def ical_no_intensity(_name: Any, description: Any) -> bool:
     """Treat only the explicit marker as a no-intensity training constraint."""
     return _ical_description_contains(description, ICAL_NO_INTENSITY_MARKER)
 
 
-def ical_short_only(name: Any, description: Any) -> bool:
+def ical_short_only(_name: Any, description: Any) -> bool:
     """Treat only the explicit marker as a short-session training constraint."""
     return _ical_description_contains(description, ICAL_SHORT_ONLY_MARKER)
 
@@ -5551,12 +5616,12 @@ def sync_external_calendar(reason: str = "manual", operation_id: str | None = No
         return {"status": "ok", "synced_at": now, "events": len(events), "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS, **replan}
     except AppError as exc:
         set_kv("last_external_calendar_sync_error", redact_text(exc.message)[:1000])
-        LOGGER.error("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
+        LOGGER.exception("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
         raise
     except Exception as exc:
         safe_error = provider_error("calendar", "client")
         set_kv("last_external_calendar_sync_error", safe_error.message)
-        LOGGER.error("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason, "error_type": type(exc).__name__}}, exc_info=True)
+        LOGGER.exception("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason, "error_type": type(exc).__name__}}, exc_info=True)
         raise safe_error from exc
     finally:
         set_kv("external_calendar_sync_status", "")
@@ -5631,8 +5696,8 @@ def garmin_recovery_metric(
     transform: Callable[[Any], float | int | None] | None = None,
 ) -> tuple[float | int | None, str | None]:
     normalized_keys = {_garmin_key(key) for key in keys}
-    records = sorted(_dated_garmin_recovery_records(snapshot.get(section)), key=lambda item: item[0])
-    for record_date, record in reversed(records):
+    records = sorted(_dated_garmin_recovery_records(snapshot.get(section)), key=lambda item: item[0], reverse=True)
+    for record_date, record in records:
         value = _garmin_last_numeric(record, normalized_keys)
         if transform:
             value = transform(value)
@@ -5705,15 +5770,20 @@ def garmin_daily_health_metrics(snapshot: dict[str, Any], days: int, end_date: d
             if number is not None:
                 values[metric_name].append(float(number))
     units = {"steps": "Schritte/Tag", "floors": "Stockwerke/Tag", "calories": "kcal/Tag"}
-    return {
-        f"{metric_name}_7d": garmin_metric_freshness(snapshot, "daily_stats", metric(
-            int(round(sum(numbers) / len(numbers))) if numbers and metric_name in {"steps", "floors"} else round(sum(numbers) / len(numbers), 2) if numbers else None,
-            units[metric_name],
-            GARMIN_PERFORMANCE_SOURCE,
-            "Durchschnitt der letzten 7 Tage",
-        ))
-        for metric_name, numbers in values.items()
-    }
+    result = {}
+    for metric_name, numbers in values.items():
+        if not numbers:
+            average = None
+        elif metric_name in {"steps", "floors"}:
+            average = int(round(sum(numbers) / len(numbers)))
+        else:
+            average = round(sum(numbers) / len(numbers), 2)
+        result[f"{metric_name}_7d"] = garmin_metric_freshness(
+            snapshot,
+            "daily_stats",
+            metric(average, units[metric_name], GARMIN_PERFORMANCE_SOURCE, "Durchschnitt der letzten 7 Tage"),
+        )
+    return result
 
 
 def _add_planning_recovery_value(
@@ -6071,8 +6141,8 @@ def save_coach_competition(arguments: Any) -> dict[str, Any]:
             status = "updated"
             before = existing
         _record_change(db, "competition", normalized["id"], "create" if status == "created" else "update", before, {**normalized, "sync_state": "local"})
-    saved = next(item for item in list_competitions(include_sync=True) if item["id"] == normalized["id"])
-    return {"status": status, "competition": saved, "competitions": list_competitions(include_sync=True)}
+    saved = next(item for item in list_competitions() if item["id"] == normalized["id"])
+    return {"status": status, "competition": saved, "competitions": list_competitions()}
 
 
 def delete_coach_competition(competition_id: Any) -> dict[str, Any]:
@@ -6101,7 +6171,7 @@ def delete_coach_competition(competition_id: Any) -> dict[str, Any]:
         "status": "deleted",
         "competition_id": normalized_id,
         "remote_sync_pending": remote_sync_pending,
-        "competitions": list_competitions(include_sync=True),
+        "competitions": list_competitions(),
     }
 
 
@@ -6319,7 +6389,7 @@ def resolve_competition_conflict(competition_id: Any, strategy: Any) -> dict[str
             raise AppError(409, "Für diesen Wettkampf liegt kein offener Synchronisierungskonflikt vor.")
         try:
             conflict = json.loads(row["sync_conflict"])
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (TypeError, ValueError) as exc:
             raise AppError(409, "Der gespeicherte Synchronisierungskonflikt ist nicht mehr gültig.") from exc
         remote = conflict.get("remote") if isinstance(conflict, dict) else None
         remote = remote if isinstance(remote, dict) else {}
@@ -6341,8 +6411,8 @@ def resolve_competition_conflict(competition_id: Any, strategy: Any) -> dict[str
                 "UPDATE competitions SET sync_dirty=1, sync_state='local_override', sync_conflict='', updated_at=? WHERE id=?",
                 (now, normalized_id),
             )
-    saved = next(item for item in list_competitions(include_sync=True) if item["id"] == normalized_id)
-    return {"status": "resolved", "strategy": selected, "competition": saved, "competitions": list_competitions(include_sync=True)}
+    saved = next(item for item in list_competitions() if item["id"] == normalized_id)
+    return {"status": "resolved", "strategy": selected, "competition": saved, "competitions": list_competitions()}
 
 
 def _competition_sync_plan(
@@ -6609,7 +6679,7 @@ def sync_competitions(
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
         set_kv("last_competition_sync_error", error)
-        LOGGER.error("Competition synchronization failed", extra={"event": "competition_sync_failed", "context": {"reason": reason}}, exc_info=True)
+        LOGGER.exception("Competition synchronization failed", extra={"event": "competition_sync_failed", "context": {"reason": reason}}, exc_info=True)
         raise
     finally:
         try:
@@ -6853,7 +6923,7 @@ def _urlopen_interruptibly(request: Request, timeout: int, cancel_event: threadi
                 response.close()
             else:
                 result["response"] = response
-        except BaseException as exc:
+        except Exception as exc:
             result["error"] = exc
         finally:
             completed.set()
@@ -6881,7 +6951,12 @@ def http_json(
     initialise_logging()
     if raw_body is not None and payload is not None:
         raise ValueError("payload and raw_body are mutually exclusive")
-    body = raw_body if raw_body is not None else (None if payload is None else json.dumps(payload).encode("utf-8"))
+    if raw_body is not None:
+        body = raw_body
+    elif payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+    else:
+        body = None
     request_headers = {"Accept": "application/json", "User-Agent": f"IntervalsCoach/{APP_VERSION}"}
     if body is not None:
         request_headers["Content-Type"] = content_type or "application/json"
@@ -6967,7 +7042,7 @@ def http_json(
             error_details = gemini_error_details(exc.code, raw_error)
         else:
             error_details = None
-        LOGGER.error(
+        LOGGER.exception(
             "Upstream HTTP request failed",
             extra={
                 "event": "upstream_http_error",
@@ -7008,7 +7083,7 @@ def http_json(
                 "http_status": None,
                 "updated_at": utc_now(),
             })
-        LOGGER.error(
+        LOGGER.exception(
             "Upstream service is unavailable",
             extra={
                 "event": "upstream_network_error",
@@ -7049,7 +7124,7 @@ def http_json(
                 "http_status": None,
                 "updated_at": utc_now(),
             })
-        LOGGER.error(
+        LOGGER.exception(
             "External HTTP request failed while processing response",
             extra={
                 "event": "external_request_failed",
@@ -7376,7 +7451,7 @@ def weather_state(
         cached = {}
     try:
         failure = json.loads(get_kv(WEATHER_FAILURE_KEY) or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         failure = {}
     if not isinstance(failure, dict):
         failure = {}
@@ -7668,7 +7743,7 @@ def calendar_activity_identity(activity: Any) -> tuple[Any, ...] | None:
         return None
     activity_id = first_present(activity, ("id", "activityId", "external_id"))
     if activity_id not in (None, ""):
-        return ("id", str(activity_id))
+        return ("id", str(activity_id), "", "", "")
     start = first_present(activity, ("start_date_local", "start_date", "date"))
     if start in (None, ""):
         return None
@@ -7735,7 +7810,12 @@ def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[in
 
 def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, today: date) -> dict[str, Any]:
     event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
-    status = "completed" if activity is not None else "missed" if event_date < today.isoformat() else "planned"
+    if activity is not None:
+        status = "completed"
+    elif event_date < today.isoformat():
+        status = "missed"
+    else:
+        status = "planned"
     planned_load = _workout_load(event)
     actual_load = _workout_load(activity)
     planned_duration = _workout_duration(event)
@@ -8265,16 +8345,23 @@ def validate_workout_description(workout: dict[str, Any]) -> float | None:
     sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
     if sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:
         return
-    quantity = re.compile(
-        r"\d+(?:[.,]\d+)?\s*(?P<unit>km|mtr|mi|yd|yards?|meters?|metres?|minutes?|mins?|seconds?|secs?|hours?|hrs?|(?<!\s)[hms]|['\"])(?![a-z])",
-    )
+    quantity = re.compile(r"\d+(?:[.,]\d+)?\s*(?P<unit>[A-Za-z'\"]+)")
+    quantity_units = {
+        "km", "mtr", "mi", "yd", "yard", "yards", "meter", "meters", "metre", "metres",
+        "minute", "minutes", "min", "mins", "second", "seconds", "sec", "secs", "hour", "hours", "hr", "hrs",
+        "h", "m", "s", "'", '"',
+    }
     for line_number, line in enumerate(str(workout.get("description") or "")[:12000].splitlines(), 1):
-        step = re.match(r"^\s*-\s+(.+)$", line)
+        step = re.match(r"^[ \t]*-[ \t]+([^\r\n]+)$", line)
         if not step:
             continue
         text = step.group(1)
         # Pace denominators (e.g. 2:00/100m Pace) are targets, not steps.
-        amounts = [match for match in quantity.finditer(text) if match.start() == 0 or text[match.start() - 1] != "/"]
+        amounts = [
+            match for match in quantity.finditer(text)
+            if match.group("unit") in quantity_units
+            and (match.start() == 0 or text[match.start() - 1] != "/")
+        ]
         if amounts and amounts[0].start() != 0:
             raise AppError(
                 400,
@@ -8464,7 +8551,7 @@ def calendar_conflicts(
             continue
         try:
             library_entry = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             continue
         if not isinstance(library_entry, dict) or library_entry.get("source") not in {"coach", "library", "intervals"}:
             continue
@@ -8756,7 +8843,7 @@ def latest_illness_pause_state() -> tuple[str, dict[str, Any]] | None:
     for row in rows:
         try:
             payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             continue
         pause = payload.get("illness_pause") if isinstance(payload, dict) else None
         if isinstance(pause, dict):
@@ -8900,7 +8987,12 @@ def adaptive_replan_preview() -> dict[str, Any]:
             total_event_minutes = sum(int(event.get("duration_minutes") or 0) for event in calendar_events)
             longest_event = max(calendar_events, key=lambda event: int(event.get("duration_minutes") or 0))
             all_day = any(bool(event.get("all_day")) for event in calendar_events)
-            calendar_limit = 45 if all_day or total_event_minutes >= 240 else 60 if total_event_minutes >= 120 else 75
+            if all_day or total_event_minutes >= 240:
+                calendar_limit = 45
+            elif total_event_minutes >= 120:
+                calendar_limit = 60
+            else:
+                calendar_limit = 75
             calendar_reason = (
                 f"family calendar has {len(calendar_events)} event(s), including "
                 f"'{longest_event.get('name') or 'calendar event'}' for about {total_event_minutes} minutes"
@@ -8941,12 +9033,15 @@ def adaptive_replan_preview() -> dict[str, Any]:
                     WEATHER_ADAPTIVE_MAX_MINUTES if weather_reason else None,
                 ) if limit is not None
             ]
-            replacement = illness_pause_replacement(draft, reason) if illness_active else adaptive_recovery_replacement(
-                draft,
-                reason,
-                available_minutes if limited else None,
-                min(adaptive_limits) if adaptive_limits else None,
-            )
+            if illness_active:
+                replacement = illness_pause_replacement(draft, reason)
+            else:
+                replacement = adaptive_recovery_replacement(
+                    draft,
+                    reason,
+                    available_minutes if limited else None,
+                    min(adaptive_limits) if adaptive_limits else None,
+                )
             if calendar_limited:
                 replacement["private_calendar_adjustment"] = private_calendar_adjustment_context(
                     draft, calendar_events, replacement, calendar_reason,
@@ -9043,7 +9138,7 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
                 continue
             try:
                 current = json.loads(draft["payload"])
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 current = None
             expected_fingerprint = str(change.get("source_fingerprint") or "")
             if not isinstance(current, dict) or current.get("local_deleted") or current.get("archived") or not expected_fingerprint or adaptive_workout_fingerprint(current) != expected_fingerprint:
@@ -9077,7 +9172,12 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
         if active_illness_pause:
             updated_checkins = _fill_illness_checkins(db, active_illness_pause, now)
             payload["illness_pause"] = {**active_illness_pause, "approved": True}
-        status = "stale" if stale and not updated else "partial" if stale else "applied"
+        if stale and not updated:
+            status = "stale"
+        elif stale:
+            status = "partial"
+        else:
+            status = "applied"
         PLAN_ADJUSTMENT_REPOSITORY.mark_applied(
             db, normalized_id, json.dumps(payload, ensure_ascii=False), status, now
         )
@@ -9114,7 +9214,16 @@ def season_plan_summary() -> dict[str, Any]:
         except (KeyError, TypeError, ValueError):
             continue
         days = (event_date - today).days
-        phase = "completed" if days < 0 else "taper" if days <= 14 else "peak" if days <= 42 else "build" if days <= 84 else "base"
+        if days < 0:
+            phase = "completed"
+        elif days <= 14:
+            phase = "taper"
+        elif days <= 42:
+            phase = "peak"
+        elif days <= 84:
+            phase = "build"
+        else:
+            phase = "base"
         events.append({**competition, "days_until": days, "phase": phase})
     events.sort(key=lambda item: (item["event_date"], item["priority"], item["name"]))
     return {"as_of": today.isoformat(), "events": events, "next_event": next((event for event in events if event["days_until"] >= 0), None)}
@@ -9412,7 +9521,7 @@ def list_planned_units(limit: int = 500, include_archived: bool = False, *, futu
     for row in rows:
         try:
             payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             continue
         if not isinstance(payload, dict) or (not include_archived and payload.get("archived")):
             continue
@@ -9424,7 +9533,7 @@ def list_planned_units(limit: int = 500, include_archived: bool = False, *, futu
         if row.get("sync_conflict"):
             try:
                 payload["sync_conflict"] = json.loads(row["sync_conflict"])
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 payload["sync_conflict"] = {"raw": str(row["sync_conflict"])[:1000]}
         result.append(payload)
     return result
@@ -9500,7 +9609,7 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
             if existing and int(existing.get("sync_dirty") or 0) and existing.get("sync_state") in {"local", "sync_error"}:
                 try:
                     local_payload = json.loads(existing.get("payload") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
+                except (TypeError, ValueError):
                     local_payload = {}
                 if isinstance(local_payload, dict):
                     normalized.append(normalize_library_workout(
@@ -9522,7 +9631,7 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
                     existing_payload = json.loads(
                         db.execute("SELECT payload FROM workout_library WHERE id = ?", (existing["id"],)).fetchone()["payload"]
                     )
-                except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+                except (TypeError, ValueError, KeyError):
                     existing_payload = {}
                 if isinstance(existing_payload, dict):
                     for metadata_key in ("date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_marked", "local_deleted"):
@@ -9547,7 +9656,7 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
                     continue
                 try:
                     payload = json.loads(row.get("payload") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
+                except (TypeError, ValueError):
                     payload = {}
                 if not isinstance(payload, dict):
                     payload = {}
@@ -9572,7 +9681,7 @@ def list_workout_library(limit: int = 500, include_archived: bool = False) -> li
             payload = json.loads(row["payload"])
             if isinstance(payload, dict) and (include_archived or not payload.get("archived")):
                 result.append(payload)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             continue
     return result
 
@@ -9601,7 +9710,7 @@ def decode_page_cursor(value: Any) -> Any | None:
     try:
         padding = "=" * (-len(str(value)) % 4)
         return json.loads(base64.urlsafe_b64decode(f"{value}{padding}"))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return None
 
 
@@ -9774,6 +9883,12 @@ def canonical_planned_workouts(
         local_status = str(entry.get("sync_status") or "local")
         remote_id = str(linked.get("id") or entry.get("remote_event_id") or "") if linked else str(entry.get("remote_event_id") or "")
         remote_external_id = str(linked.get("external_id") or entry.get("remote_event_external_id") or "") if linked else str(entry.get("remote_event_external_id") or "")
+        if local_status not in {"", "synced"}:
+            sync_status = local_status
+        elif linked:
+            sync_status = "synced"
+        else:
+            sync_status = local_status
         result_event = {
             **entry,
             "id": remote_id or local_id,
@@ -9790,7 +9905,7 @@ def canonical_planned_workouts(
             "sync_source": "local+intervals" if linked else "local",
             # A stale provider snapshot must not hide a local dirty or
             # conflict state. The local store remains the source of truth.
-            "sync_status": local_status if local_status not in {"", "synced"} else "synced" if linked else local_status,
+            "sync_status": sync_status,
         }
         if linked:
             for key in ("compliance",):
@@ -9877,7 +9992,7 @@ def update_planned_unit_sync_state(local_id: str, state: str, error: str | None 
             return
         try:
             payload = json.loads(row["payload"] or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
@@ -9981,7 +10096,7 @@ class _RepairCalendarBatch:
         try:
             final_events = self.read()
         except Exception as exc:
-            return {local_id: exc for local_id, _ in self.completions}
+            return dict.fromkeys((local_id for local_id, _ in self.completions), exc)
         for local_id, complete in self.completions:
             try:
                 with _planned_unit_sync_guard(local_id):
@@ -10043,7 +10158,7 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
                     if belongs_elsewhere or event.get("category") != "WORKOUT" or str(event.get("start_date_local") or "")[:10] < today.isoformat() or event.get("paired_activity_id") or event.get("paired_event_id"):
                         raise AppError(409, "Eine zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
                     related.append(event)
-                elif (not removing and not belongs_elsewhere and event.get("category") == "WORKOUT" and str(event.get("start_date_local") or "")[:10] == planned_date.isoformat()
+                elif (not removing and not belongs_elsewhere and event.get("category") == "WORKOUT" and str(event.get("start_date_local") or "").startswith(planned_date.isoformat())
                       and str(event.get("name") or "").strip().casefold() == str(workout.get("name") or "").strip().casefold()):
                     raise AppError(409, "Eine gleichnamige Remote-Einheit am selben Tag ist nicht eindeutig zugeordnet. Keine automatische Kopie oder Loeschung durchgefuehrt.", reason="intervals_workout_identity_ambiguous")
             return related
@@ -10086,7 +10201,7 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
                 with database() as db:
                     current = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
                     expected_hash = _library_payload_hash(current["payload"])
-            if str(result.get("start_date_local") or "")[:10] != planned_date.isoformat() or result.get("name") != workout.get("name"):
+            if not str(result.get("start_date_local") or "").startswith(planned_date.isoformat()) or result.get("name") != workout.get("name"):
                 raise AppError(502, "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestaetigt.", reason="intervals_workout_verification_failed")
             validate_intervals_workout_result(workout, result)
         for event in related:
@@ -10105,7 +10220,7 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
             else:
                 if len(remaining) != 1 or str(remaining[0]["id"]) != remote_id:
                     raise AppError(502, "Der Kalender bestaetigt keine eindeutige reparierte Einheit.", reason="intervals_workout_verification_failed")
-                if str(remaining[0].get("start_date_local") or "")[:10] != planned_date.isoformat() or remaining[0].get("name") != workout.get("name"):
+                if not str(remaining[0].get("start_date_local") or "").startswith(planned_date.isoformat()) or remaining[0].get("name") != workout.get("name"):
                     raise AppError(502, "Der Kalender bestaetigt Datum oder Namen der reparierten Einheit nicht.", reason="intervals_workout_verification_failed")
                 validate_intervals_workout_result(workout, remaining[0])
                 verified = remaining[0]
@@ -10138,7 +10253,7 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
         raise AppError(404, "Lokale Planung nicht gefunden.")
     try:
         workout = json.loads(row["payload"] or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (TypeError, ValueError) as exc:
         raise AppError(500, "Die lokale Planung ist beschädigt.") from exc
     if not isinstance(workout, dict):
         raise AppError(500, "Die lokale Planung ist beschädigt.")
@@ -10229,17 +10344,20 @@ def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any
         payload = str(row.get("payload") or "")
         try:
             payload_data = json.loads(payload)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             payload_data = {}
         planned_date = str(payload_data.get("date") or "").strip()[:10] if isinstance(payload_data, dict) else ""
         is_planned = str(row.get("local_id") or "") in planned_local_ids
-        category = (
-            "conflict" if state == "conflict"
-            else "missing" if state == "remote_missing"
-            else "planned" if is_planned
-            else "error_retry" if state == "sync_error"
-            else "changed" if row.get("external_id") else "new"
-        )
+        if state == "conflict":
+            category = "conflict"
+        elif state == "remote_missing":
+            category = "missing"
+        elif is_planned:
+            category = "planned"
+        elif state == "sync_error":
+            category = "error_retry"
+        else:
+            category = "changed" if row.get("external_id") else "new"
         if is_planned:
             summary["planned"] += 1
         if category != "planned":
@@ -10323,7 +10441,7 @@ def _sync_local_workout_calendar_entry(local_id: str, synced: dict[str, Any]) ->
         if row:
             try:
                 payload = json.loads(row["payload"] or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 payload = {}
             if isinstance(payload, dict):
                 payload["remote_event_id"] = str(event["id"])
@@ -10358,7 +10476,7 @@ def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
             raise AppError(404, "Bibliothekseinheit nicht gefunden.")
         try:
             current = json.loads(row["payload"])
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (TypeError, ValueError) as exc:
             raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
         if not isinstance(current, dict):
             raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.")
@@ -10418,7 +10536,7 @@ def update_workout_library_sync_state(local_id: str, state: str, error: str | No
             return
         try:
             payload = json.loads(row["payload"])
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
@@ -10454,7 +10572,7 @@ def intervals_public_state(snapshot: dict[str, Any] | None = None) -> dict[str, 
     last_library_sync_error = get_kv("last_library_sync_error") or None
     try:
         pagination = json.loads(get_kv("last_sync_pagination") or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         pagination = {}
     if not isinstance(pagination, dict):
         pagination = {}
@@ -10576,7 +10694,7 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
         raise AppError(404, "Lokale Bibliothekseinheit nicht gefunden.")
     try:
         local_workout = json.loads(row["payload"])
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (TypeError, ValueError) as exc:
         raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
     if row.get("external_id") and row.get("sync_state") == "synced":
         return local_workout
@@ -10664,7 +10782,7 @@ def apply_workout_library_plan(
                 raise AppError(404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.")
             try:
                 workout = json.loads(row["payload"])
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            except (TypeError, ValueError) as exc:
                 raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
             if not isinstance(workout, dict):
                 raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.")
@@ -10822,7 +10940,7 @@ def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str
         if row.get("sync_state") == "synced":
             try:
                 synced = json.loads(row["payload"] or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 synced = {}
             if not isinstance(synced, dict) or not synced.get("date") or synced.get("remote_event_id"):
                 results.append({"library_workout_id": item["library_workout_id"], "status": "already_synced"})
@@ -10852,7 +10970,12 @@ def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str
                 update_planned_unit_sync_state(item["library_workout_id"], "sync_error", str(error))
                 item.update(status="error", error=redact_text(str(error))[:500], calendar_synced=False)
     failed = [item["library_workout_id"] for item in results if item["status"] in {"error", "conflict"}]
-    status = "ok" if not failed else "partial" if len(failed) < len(results) else "error"
+    if not failed:
+        status = "ok"
+    elif len(failed) < len(results):
+        status = "partial"
+    else:
+        status = "error"
     return {"ok": not failed, "status": status, "results": results, "failed_object_ids": failed, "retry_scope": "Nur fehlgeschlagene Objekte erneut auswählen." if failed else None}
 
 
@@ -10877,7 +11000,7 @@ def update_local_planned_workout(
             raise AppError(404, "Lokale Planung nicht gefunden.")
         try:
             current = json.loads(row["payload"])
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (TypeError, ValueError) as exc:
             raise AppError(500, "Die lokale Planung ist beschädigt.") from exc
         if not isinstance(current, dict) or not current.get("date"):
             raise AppError(403, "Nur lokale geplante Einheiten können bearbeitet werden.")
@@ -10976,14 +11099,14 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
             raise AppError(409, "Für diese Planung liegt kein offener Synchronisierungskonflikt vor.")
         try:
             conflict = json.loads(row["sync_conflict"] or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (TypeError, ValueError) as exc:
             raise AppError(409, "Der gespeicherte Synchronisierungskonflikt ist nicht mehr gültig.") from exc
         conflict = conflict if isinstance(conflict, dict) else {}
         remote = conflict.get("remote") if isinstance(conflict.get("remote"), dict) else None
         if selected == "keep_local":
             try:
                 payload = json.loads(row["payload"] or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            except (TypeError, ValueError) as exc:
                 raise AppError(409, "Die lokale Planung ist beschädigt.") from exc
             if not isinstance(payload, dict):
                 raise AppError(409, "Die lokale Planung ist beschädigt.")
@@ -10997,7 +11120,7 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
             # but keeps an auditable tombstone and never recreates it on sync.
             try:
                 payload = json.loads(row["payload"] or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            except (TypeError, ValueError) as exc:
                 raise AppError(409, "Die lokale Planung ist beschädigt.") from exc
             if not isinstance(payload, dict):
                 raise AppError(409, "Die lokale Planung ist beschädigt.")
@@ -11009,7 +11132,7 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
                 (json.dumps(payload, ensure_ascii=False), now, normalized_id),
             )
         else:
-            incoming, remote_id, identity = _remote_planned_unit_payload(remote) or (None, "", "")
+            incoming, _, identity = _remote_planned_unit_payload(remote) or (None, "", "")
             if not incoming:
                 raise AppError(409, "Das Remote-Event kann nicht übernommen werden.")
             incoming["id"] = normalized_id
@@ -11174,7 +11297,7 @@ def upsert_remote_planned_units(
                 continue
             try:
                 current = json.loads(current_row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 current = {}
             if not isinstance(current, dict):
                 current = {}
@@ -11216,12 +11339,24 @@ def upsert_remote_planned_units(
         # missing event as a remote deletion when the row falls inside the
         # successfully received window; never tombstone units beyond it.
         valid_dates = [value for value in incoming_dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)]
-        window_start = str(calendar_start or "")[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(calendar_start or "")[:10]) else (min(valid_dates) if valid_dates else None)
-        window_end = str(calendar_end or "")[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(calendar_end or "")[:10]) else (max(valid_dates) if valid_dates else None)
+        calendar_start_value = str(calendar_start or "")[:10]
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", calendar_start_value):
+            window_start = calendar_start_value
+        elif valid_dates:
+            window_start = min(valid_dates)
+        else:
+            window_start = None
+        calendar_end_value = str(calendar_end or "")[:10]
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", calendar_end_value):
+            window_end = calendar_end_value
+        elif valid_dates:
+            window_end = max(valid_dates)
+        else:
+            window_end = None
         for row in rows:
             try:
                 payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 continue
             remote_id = str(payload.get("remote_event_id") or "")
             if not remote_id or remote_id in seen_ids:
@@ -11322,7 +11457,7 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
     except Exception as exc:
         operation_failure_code = operation_error_code(exc)
         set_kv(keys["error"], redact_text(str(exc))[:1000])
-        LOGGER.error(
+        LOGGER.exception(
             "Full provider resynchronization failed",
             extra={"event": "provider_full_resync_failed", "context": {"provider": provider}},
             exc_info=True,
@@ -11458,7 +11593,6 @@ def sync_intervals(
         # A successful full sync supersedes a transient morning-check-in
         # network error that may otherwise keep the global status in warning.
         set_kv("morning_checkin_error", "")
-        period_label = "alle verfügbaren Daten" if activity_days == ALL_SYNC_DAYS else f"letzte {activity_days} Tage"
         sync_window = sync_date_windows(activity_days, end_date)
         update_provider_sync_cursor("intervals", "activities", sync_window[-1][1].isoformat(), snapshot["synced_at"])
         update_provider_sync_cursor("intervals", "wellness", sync_window[-1][1].isoformat(), snapshot["synced_at"])
@@ -11506,7 +11640,7 @@ def sync_intervals(
         set_kv("last_sync_error", redact_text(str(exc))[:1000])
         set_sync_operation_state(operation_id, "error", "error", 100, "Intervals.icu-Synchronisierung fehlgeschlagen.", str(exc))
         set_kv("sync_operation_finished_at", utc_now())
-        LOGGER.error(
+        LOGGER.exception(
             "Intervals.icu synchronization failed",
             extra={"event": "sync_failed", "context": {"reason": reason, "last_success": get_kv("last_sync_at")}},
             exc_info=True,
@@ -11540,7 +11674,7 @@ def refresh_current_performance() -> dict[str, Any]:
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
         set_kv("last_performance_error", error)
-        LOGGER.error("Performance refresh failed", extra={"event": "performance_refresh_failed"}, exc_info=True)
+        LOGGER.exception("Performance refresh failed", extra={"event": "performance_refresh_failed"}, exc_info=True)
         raise
     finally:
         set_kv("performance_refresh_running", "0")
@@ -11687,9 +11821,24 @@ def comparison_value(current: Any, average: Any, unit: str, days: int, higher_is
     if current_number is None or average_number is None:
         return None
     delta = round(float(current_number) - float(average_number), 2)
-    direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
-    good = ((delta > 0) if higher_is_better else (delta < 0)) if higher_is_better is not None else False
-    color = "good" if good else "bad" if delta and higher_is_better is not None else "neutral"
+    if delta > 0:
+        direction = "up"
+    elif delta < 0:
+        direction = "down"
+    else:
+        direction = "flat"
+    if higher_is_better is None:
+        good = False
+    elif higher_is_better:
+        good = delta > 0
+    else:
+        good = delta < 0
+    if good:
+        color = "good"
+    elif delta and higher_is_better is not None:
+        color = "bad"
+    else:
+        color = "neutral"
     return {
         "current": current_number,
         "average": average_number,
@@ -11764,7 +11913,7 @@ def as_number(value: Any) -> float | int | None:
         number = float(str(value).replace(",", "."))
     except (TypeError, ValueError):
         return None
-    if number != number or number in {float("inf"), float("-inf")}:
+    if not math.isfinite(number):
         return None
     return int(number) if number.is_integer() else round(number, 2)
 
@@ -11897,27 +12046,33 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         (first_present(athlete, ("height_cm", "height")), "Intervals.icu"),
         (profile.get("height_cm"), "Manuell"),
     ) if as_number(value) is not None), (None, None))
+    def preferred_metric(key: str, fallback: dict[str, Any]) -> dict[str, Any]:
+        current = garmin_metrics[key]
+        return current if current["value"] is not None else fallback
+
+    bike_lthr = first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",))
+    run_lthr = first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",))
     garmin_threshold_metrics = {
-        "cycling_ftp_watts": garmin_metrics["cycling_ftp_watts"] if garmin_metrics["cycling_ftp_watts"]["value"] is not None else metric(
+        "cycling_ftp_watts": preferred_metric("cycling_ftp_watts", metric(
             first_present(ride, ("ftp", "indoor_ftp")) or first_present(wellness_ride, ("ftp", "indoor_ftp")) or first_present(athlete, ("icu_ftp",)),
             "W", "Intervals.icu",
-        ),
-        "run_threshold_watts": garmin_metrics["run_threshold_watts"] if garmin_metrics["run_threshold_watts"]["value"] is not None else metric(
+        )),
+        "run_threshold_watts": preferred_metric("run_threshold_watts", metric(
             first_present(run, ("ftp", "indoor_ftp")) or first_present(wellness_run, ("ftp", "indoor_ftp")),
             "W", "Intervals.icu",
-        ),
-        "run_threshold_pace_seconds_per_km": garmin_metrics["run_threshold_pace_seconds_per_km"] if garmin_metrics["run_threshold_pace_seconds_per_km"]["value"] is not None else metric(
+        )),
+        "run_threshold_pace_seconds_per_km": preferred_metric("run_threshold_pace_seconds_per_km", metric(
             threshold_pace_seconds(first_present(run, ("threshold_pace",)) or first_present(wellness_run, ("threshold_pace",))),
             "s/km", "Intervals.icu",
-        ),
-        "bike_threshold_hr_bpm": garmin_metrics["bike_threshold_hr_bpm"] if garmin_metrics["bike_threshold_hr_bpm"]["value"] is not None else metric(
-            first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) or generic_lthr,
-            "bpm", "Intervals.icu" if first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) else "Intervals.icu (allgemein)",
-        ),
-        "run_threshold_hr_bpm": garmin_metrics["run_threshold_hr_bpm"] if garmin_metrics["run_threshold_hr_bpm"]["value"] is not None else metric(
-            first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) or generic_lthr,
-            "bpm", "Intervals.icu" if first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) else "Intervals.icu (allgemein)",
-        ),
+        )),
+        "bike_threshold_hr_bpm": preferred_metric("bike_threshold_hr_bpm", metric(
+            bike_lthr or generic_lthr,
+            "bpm", "Intervals.icu" if bike_lthr else "Intervals.icu (allgemein)",
+        )),
+        "run_threshold_hr_bpm": preferred_metric("run_threshold_hr_bpm", metric(
+            run_lthr or generic_lthr,
+            "bpm", "Intervals.icu" if run_lthr else "Intervals.icu (allgemein)",
+        )),
     }
     return {
         "weight_kg": garmin_metrics["weight_kg"] if weight_source == GARMIN_PERFORMANCE_SOURCE else metric(weight_value, "kg", weight_source),
@@ -11977,7 +12132,12 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         if sleep_average is None:
             sleep_average = wellness_average(wellness_rows, ("sleep_hours",), 7, local_now().date())
     sleep_score = garmin_sleep_score if garmin_sleep_score is not None else first_present(latest_wellness, ("sleepScore",))
-    sleep_score_source = GARMIN_PERFORMANCE_SOURCE if garmin_sleep_score is not None else ("Intervals.icu Wellness" if sleep_score is not None else None)
+    if garmin_sleep_score is not None:
+        sleep_score_source = GARMIN_PERFORMANCE_SOURCE
+    elif sleep_score is not None:
+        sleep_score_source = "Intervals.icu Wellness"
+    else:
+        sleep_score_source = None
     garmin_resting_hr, garmin_resting_hr_date = garmin_recovery_metric(
         garmin, "resting_hr", ("restingHeartRate", "restingHR", "resting_heart_rate"),
         lambda value: _garmin_bounded_metric(value, 30, 230),
@@ -12252,6 +12412,13 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
         checkins.get("recent", []),
         list_external_calendar_events(limit=50, training_relevant_only=True),
     )
+    def calendar_source(item: dict[str, Any]) -> str:
+        if item.get("is_external_calendar"):
+            return "external-calendar"
+        if item.get("is_competition"):
+            return "competition"
+        return "local-plan"
+
     return {
         "durable_profile": get_profile(),
         "target_competitions": list_competitions(),
@@ -12265,7 +12432,7 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
                 "date": item.get("date") or item.get("event_date"),
                 "name": str(item.get("name") or "")[:200],
                 "type": item.get("category") or item.get("type"),
-                "source": "external-calendar" if item.get("is_external_calendar") else "competition" if item.get("is_competition") else "local-plan",
+                "source": calendar_source(item),
                 "training_relevant": item.get("training_relevant", True),
                 "no_intensity": item.get("no_intensity", False),
                 "short_only": item.get("short_only", False),
@@ -13606,7 +13773,7 @@ def _restore_coach_session_csrf_hash(session_key: str) -> str:
 def _coach_command_receipt(value: Any) -> dict[str, Any]:
     try:
         receipt = json.loads(value or "{}") if not isinstance(value, dict) else dict(value)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         receipt = {}
     return receipt if isinstance(receipt, dict) else {}
 
@@ -14075,7 +14242,7 @@ def _structured_training_state(*, include_inactive: bool = False, cursor: Any = 
     def target_ref(row: dict[str, Any], *, planned: bool) -> dict[str, Any] | None:
         try:
             payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             return None
         if not isinstance(payload, dict):
             return None
@@ -14099,7 +14266,7 @@ def _structured_training_state(*, include_inactive: bool = False, cursor: Any = 
     return {
         "planning_revision": revision_number,
         "artifact_refs": coach_dialogue_artifact_refs(),
-        "competitions": list_competitions(include_sync=True),
+        "competitions": list_competitions(),
         "training_plans": list_training_plans(100),
         "planned_units": [ref for row in planned_rows if (ref := target_ref(row, planned=True)) is not None],
         "planned_units_page": {"has_more": has_more, "next_cursor": next_cursor, "limit": page_size},
@@ -14193,7 +14360,7 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
             continue
         try:
             current = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             current = {}
         if not isinstance(current, dict):
             continue
@@ -14326,7 +14493,7 @@ def _apply_structured_training_changes(
                 continue
             try:
                 current = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 current = {}
             if isinstance(current, dict):
                 membership = str(current.get("plan_id") or "").strip()
@@ -14405,7 +14572,7 @@ def _apply_structured_training_changes(
             for row in member_rows:
                 try:
                     payload = json.loads(row.get("payload") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
+                except (TypeError, ValueError):
                     payload = {}
                 if isinstance(payload, dict) and str(payload.get("date") or "")[:10]:
                     member_dates.append(str(payload["date"])[:10])
@@ -14516,7 +14683,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
         for row in rows:
             try:
                 current = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            except (TypeError, ValueError) as exc:
                 raise AppError(409, "Eine bestehende lokale Planung ist beschädigt.", reason="invalid_plan") from exc
             if not isinstance(current, dict):
                 raise AppError(409, "Eine bestehende lokale Planung ist beschädigt.", reason="invalid_plan")
@@ -14626,7 +14793,7 @@ def _mark_local_planning_authoritative(local_ids: list[str] | None = None) -> in
         for row in rows:
             try:
                 payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 payload = {}
             if not isinstance(payload, dict) or payload.get("local_deleted"):
                 continue
@@ -14653,7 +14820,7 @@ def _mark_local_competitions_authoritative() -> int:
             try:
                 conflict = json.loads(row.get("sync_conflict") or "{}")
                 conflict_type = str(conflict.get("type") or "") if isinstance(conflict, dict) else ""
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 pass
             # Preserve a known provider id for ordinary local edits so the
             # explicit Coach sync updates the existing remote event. Only a
@@ -14750,7 +14917,6 @@ def _structured_coach_tool_result(
     sync_job_ids: list[str],
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
-    operation = intent.get("operation")
     if name == "read_profile":
         return {"ok": True, "profile": get_profile()}
     if name == "update_profile":
@@ -14805,7 +14971,7 @@ def _structured_coach_tool_result(
             raise AppError(400, "Historienlimit ist ungültig.", reason="invalid_list_request") from exc
         return {"ok": True, "changes": list_change_history(limit)}
     if name == "list_competitions":
-        return {"ok": True, "competitions": list_competitions(include_sync=True)}
+        return {"ok": True, "competitions": list_competitions()}
     if name == "list_training_plans":
         return {"ok": True, "training_plans": list_training_plans(100)}
     if name == "stage_training_plan":
@@ -16009,7 +16175,12 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
             | {step["tool"] for step in receipt.get("pending_tool_calls", []) if step.get("tool")}
             | (_structured_authorized_operations(intent) - {step["tool"] for step in successes} - {""})
         )
-        status = "partial" if successes else "cancelled" if cancelled else "failed"
+        if successes:
+            status = "partial"
+        elif cancelled:
+            status = "cancelled"
+        else:
+            status = "failed"
         reason = getattr(error, "reason", None)
         explanations = {
             "conversation_state_invalid": "Der KI-Dienst konnte den Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten.",
@@ -16143,7 +16314,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             if not background_owned and float((age or {}).get("age") or 0) > COACH_COMMAND_STALE_SECONDS:
                 try:
                     recovered = json.loads(existing_command.get("receipt") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
+                except (TypeError, ValueError):
                     recovered = {}
                 if not isinstance(recovered, dict):
                     recovered = {}
@@ -16153,7 +16324,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
         try:
             return coach_command_receipt(client_turn_id, session_csrf_hash)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             pass
     if existing_command and not background_owned:
         raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
@@ -16342,7 +16513,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
 
     except Exception as exc:
         _persist_structured_command_failure(client_turn_id, {}, exc)
-        LOGGER.error(
+        LOGGER.exception(
             "Persistent Coach background job failed",
             extra={"event": "coach_background_job_failed", "context": {"operation_id": operation_id, "error_code": operation_error_code(exc)}},
         )
@@ -16480,7 +16651,7 @@ def run_morning_checkin(checkin_date: str) -> None:
         set_kv("morning_checkin_status", "error")
         set_kv("morning_checkin_error", error)
         publish_state_event("coach", {"status": "changed"})
-        LOGGER.error(
+        LOGGER.exception(
             "Morning check-in failed",
             extra={"event": "morning_checkin_failed", "context": {"date": checkin_date}},
             exc_info=True,
@@ -16575,6 +16746,7 @@ def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict
 
 def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
     """Return bounded local state without waiting for any provider network call."""
+    _ = local_only
     # The startup screen waits for this response. Keep all of its local reads
     # on one connection so SQLCipher is keyed once instead of once per helper.
     # The nested helpers reuse the active DATABASE_CONTEXT connection.
@@ -16592,7 +16764,7 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
             "state_versions": state_version_values,
             "plan_revision": state_version_values.get("plan"),
             "app": {"name": "Intervals Coach", "version": APP_VERSION},
-            "skeleton": {key: True for key in ("chat", "activities", "plan", "library", "performance", "feedback", "profile")},
+            "skeleton": dict.fromkeys(("chat", "activities", "plan", "library", "performance", "feedback", "profile"), True),
             "messages": list_messages(limit=100),
             "messages_next_cursor": None,
             "plans": list_training_plans(limit=30),
@@ -16728,7 +16900,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         check_adaptive_replan("weather")
     planned_with_weather = add_weather_to_planned(planned, weather)
 
-    with DB_LOCK, database() as db:
+    with DB_LOCK, database():
         checkins = list_checkins(30)
         external_calendar = external_calendar_state()
         daily_context = daily_planning_context(snapshot, planned, weather, checkins, list_external_calendar_events(50, training_relevant_only=True))
@@ -16857,7 +17029,7 @@ def save_settings(values: Any) -> dict[str, Any]:
     seen: set[str] = set()
     rewritten: list[str] = []
     for line in lines:
-        match = re.match(r"^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s*=).*$", line)
+        match = re.match(r"^(\s*(?:export\s+)?)(?a:((?!\d)\w+))(\s*=).*$", line)
         key = match.group(2) if match else None
         if key in updates and match:
             rewritten.append(f"{match.group(1)}{key}={updates[key]}")
@@ -16903,7 +17075,7 @@ def coach_diagnostic_history() -> list[dict[str, Any]]:
                 continue
             filename, function, line = frame.get("file"), frame.get("function"), frame.get("line")
             if (isinstance(filename, str) and re.fullmatch(r"(?:server\.py|backend/(?:[a-z_]+/)*[a-z_]+\.py)", filename)
-                    and isinstance(function, str) and re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]{0,100}", function)
+                    and isinstance(function, str) and re.fullmatch(r"(?a:(?!\d)\w{1,101})", function)
                     and isinstance(line, int) and 0 < line < 1_000_000):
                 frames.append({"file": filename, "function": function, "line": line})
         if frames:
@@ -17011,15 +17183,15 @@ def privacy_export() -> dict[str, Any]:
         value = row["value"]
         try:
             application_state[key] = json.loads(value)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             application_state[key] = value
     try:
         garmin_data = json.loads(get_kv("garmin_snapshot") or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         garmin_data = {}
     try:
         weather_data = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         weather_data = {}
     return {
         "exported_at": utc_now(),
@@ -17539,7 +17711,7 @@ def allow_rate(key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
     with RATE_LIMIT_LOCK:
         if now - RATE_LIMIT_LAST_CLEANUP_MONOTONIC >= RATE_LIMIT_CLEANUP_INTERVAL_SECONDS:
             inspected = 0
-            for bucket_key in list(RATE_LIMITS):
+            for bucket_key in tuple(RATE_LIMITS):
                 if inspected >= RATE_LIMIT_CLEANUP_BATCH_SIZE:
                     break
                 inspected += 1
@@ -17865,14 +18037,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_static(path)
         except AppError as exc:
             if exc.status >= 500:
-                LOGGER.error(
+                LOGGER.exception(
                     exc.message,
                     extra={"event": "http_app_error", "context": {"method": "GET", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
             self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
         except Exception as exc:
-            LOGGER.error(
+            LOGGER.exception(
                 "Unhandled GET error",
                 extra={"event": "http_unhandled_error", "context": {"method": "GET", "path": self.path, "request_id": self.request_id}},
                 exc_info=True,
@@ -17919,7 +18091,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         self.handle_authenticated_post(path, session)
         except AppError as exc:
             if exc.status >= 500:
-                LOGGER.error(
+                LOGGER.exception(
                     exc.message,
                     extra={"event": "http_app_error", "context": {"method": "POST", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
@@ -17928,7 +18100,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             headers = {"WWW-Authenticate": "Session"} if status == 401 else None
             self.send_json(status, {"error": redact_text(exc.message)[:1000]}, headers)
         except Exception as exc:
-            LOGGER.error(
+            LOGGER.exception(
                 "Unhandled POST error",
                 extra={"event": "http_unhandled_error", "context": {"method": "POST", "path": self.path, "request_id": self.request_id}},
                 exc_info=True,
@@ -18032,7 +18204,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         except AppError as exc:
             send_event("error", {"reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000]})
         except Exception:
-            LOGGER.error(
+            LOGGER.exception(
                 "Unhandled coach stream error",
                 extra={"event": "chat_stream_error", "context": {"request_id": self.request_id}},
                 exc_info=True,
@@ -18156,14 +18328,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, save_profile(self.read_json()))
         except AppError as exc:
             if exc.status >= 500:
-                LOGGER.error(
+                LOGGER.exception(
                     exc.message,
                     extra={"event": "http_app_error", "context": {"method": "PUT", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
             self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
         except Exception as exc:
-            LOGGER.error(
+            LOGGER.exception(
                 "Unhandled PUT error",
                 extra={"event": "http_unhandled_error", "context": {"method": "PUT", "path": self.path, "request_id": self.request_id}},
                 exc_info=True,
@@ -18281,12 +18453,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         etag = f'"{hashlib.sha256(data).hexdigest()[:24]}"'
         query = parse_qs(urlparse(getattr(self, "path", "")).query)
         versioned = target.name in VERSIONED_STATIC_ASSETS and bool(str(query.get("v", [""])[0]).strip())
-        cache_control = (
-            f"public, max-age={STATIC_IMMUTABLE_MAX_AGE}, immutable"
-            if versioned
-            else "no-cache" if target.name in STATIC_REVALIDATE_ASSETS
-            else "public, max-age=3600"
-        )
+        if versioned:
+            cache_control = f"public, max-age={STATIC_IMMUTABLE_MAX_AGE}, immutable"
+        elif target.name in STATIC_REVALIDATE_ASSETS:
+            cache_control = "no-cache"
+        else:
+            cache_control = "public, max-age=3600"
         if getattr(self, "headers", {}).get("If-None-Match") == etag:
             self.send_response(304)
             self.send_header("ETag", etag)
@@ -18406,3 +18578,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
