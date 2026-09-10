@@ -122,3 +122,32 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
 
         self.assertEqual(captured[-1]["conversation"], "synthetic-conversation")
         self.assertNotIn("dialogue", json.loads(captured[-1]["input"]))
+        current = [item for item in server.list_messages() if item["role"] == "user"][-1]
+        self.assertEqual(json.loads(captured[-1]["input"])["current_user_message_id"], current["id"])
+
+    def test_attachment_tool_rounds_use_only_conversation(self):
+        server.enqueue_background_coach_job("Plan the route", "route-tools", "synthetic-session", attachments=[self.upload()])
+        def read(_):
+            return {**self.call("read_training_state"), "id": "response-read"}
+        result, model = self.turn("Plan the route", [read, read, {"output_text": "Ready"}],
+                                  turn="route-tools", background_job=True)
+        self.assertEqual(result["status"], "completed")
+        for call in model.call_args_list:
+            self.assertEqual(call.args[0]["conversation"], "synthetic-conversation")
+            self.assertNotIn("previous_response_id", call.args[0])
+
+    def test_invalid_attachment_conversation_recovers_gpx_and_future_turns(self):
+        server.enqueue_background_coach_job("Analyze route", "broken-route", "synthetic-session", attachments=[self.upload()])
+        self.turn("Analyze route", [{"output_text": "Synthetic route advice"}], turn="broken-route", background_job=True)
+        def broken(_):
+            raise server.AppError(502, "Synthetic provider failure", reason="conversation_state_invalid")
+        def recovered(payload):
+            self.assertNotIn("conversation", payload)
+            self.assertNotIn("previous_response_id", payload)
+            evidence = json.loads(payload["input"])["dialogue"]["attachment_evidence"]
+            self.assertEqual(evidence[0]["gpx"]["ascent_m_raw"], 10)
+            return {"output_text": "Recovered"}
+        result, model = self.turn("Plan that for Saturday", [broken, recovered])
+        self.assertEqual(model.call_count, 2)
+        self.assertEqual(result["status"], "completed")
+        self.turn("And Sunday?", [recovered])

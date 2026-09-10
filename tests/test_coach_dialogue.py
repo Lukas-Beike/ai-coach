@@ -71,6 +71,49 @@ class DialogueHarness:
 
 class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
+    def test_question_survives_final_provider_failure_and_reply_continues(self):
+        def question(_):
+            return self.call("clarify_coach_request", {
+                "source_message_ids": [server.list_messages()[-1]["id"]],
+                "summary": "Plan the route", "question": "Samstag oder Sonntag?"})
+        def broken(_):
+            raise server.AppError(502, "Synthetic internal detail", reason="response_failed")
+        result, _ = self.turn("Plane die Strecke ein", [question, broken])
+        self.assertTrue(result["awaiting_clarification"])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["message"]["content"], "Samstag oder Sonntag?")
+        def continuation(payload):
+            pending = json.loads(payload["input"])["dialogue"]["pending_request"]
+            self.assertEqual(pending["question"], "Samstag oder Sonntag?")
+            return {"output_text": "Saturday understood"}
+        self.turn("Samstag", [continuation])
+
+    def test_invalid_state_recovery_does_not_repeat_committed_effect(self):
+        def save(_):
+            return {**self.call("update_profile", {"changes": [
+                {"field": "name", "expected_value": "", "value": "Synthetic"}]}, ["local_profile"]),
+                "id": "response-save"}
+        def broken(_):
+            raise server.AppError(502, "Synthetic", reason="conversation_state_invalid")
+        def retry(payload):
+            self.assertNotIn("previous_response_id", payload)
+            self.assertTrue(json.loads(payload["input"])["confirmed_steps"][0]["result"]["ok"])
+            return save(payload)
+        with patch.object(server, "_structured_coach_tool_result", wraps=server._structured_coach_tool_result) as execute:
+            result, _ = self.turn("Speichere meinen Namen", [save, broken, retry, {"output_text": "Saved"}])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(sum(call.args[0] == "update_profile" for call in execute.call_args_list), 1)
+
+    def test_repeated_invalid_state_is_bounded_and_explained_without_raw_error(self):
+        def broken(_):
+            raise server.AppError(502, "Synthetic private upstream detail", reason="conversation_state_invalid")
+        result, model = self.turn("Plane Samstag", [broken, broken])
+        self.assertEqual(model.call_count, 2)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("Gesprächszustand", result["message"]["content"])
+        self.assertIn("erneut", result["message"]["content"])
+        self.assertNotIn("private upstream", result["message"]["content"])
+
     def test_profile_proposal_acceptance_preserves_existing_fields_and_replays_once(self):
         server.save_profile({"name": "Synthetic Athlete", "training_background": "Regular cycling.", "equipment": "Indoor bike"})
         self.turn("Ich gehe täglich spazieren.", [{"output_text": "Soll ich die tägliche Alltagsbewegung dauerhaft im Profil ergänzen?"}])
@@ -561,7 +604,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["pending_operations"], [])
         self.assertEqual(result["diagnostic_error"]["reason"], "provider_unavailable")
         text = result["message"]["content"]
-        self.assertIn("Die weitere Coach-Verarbeitung wurde unterbrochen", text)
+        self.assertIn("KI-Dienst ist vorübergehend nicht verfügbar", text)
+        self.assertIn("erneut", text)
         self.assertIn("Plansynchronisierung beauftragt", text)
         self.assertIn("unabhängig vom Coach", text)
         self.assertIn("noch nicht bestätigt", text)
