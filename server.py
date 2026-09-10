@@ -7138,7 +7138,7 @@ def http_json(
             status = exc.code if service == "gemini" or exc.code == 429 else 502
             raise AppError(status, error_details["message"], reason=error_details["reason"]) from exc
         raise AppError(502, upstream_http_error_message(exc.code, raw_error, service), reason="provider_http_error") from exc
-    except (URLError, TimeoutError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         if service == "openai":
@@ -13645,7 +13645,7 @@ def openai_stream_request(
             "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
         })
         raise AppError(504, details["message"], reason="provider_timeout") from exc
-    except (URLError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
             log_failure("chat_cancelled", 499, level=logging.INFO)

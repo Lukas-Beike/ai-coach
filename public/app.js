@@ -359,6 +359,7 @@ async function api(path, options = {}) {
     if (generation === state.sessionGeneration) showLogin();
   });
   if (generation !== state.sessionGeneration) throw new DOMException("Session ended", "AbortError");
+  renderConnectivityStatus(true);
   return result;
 }
 
