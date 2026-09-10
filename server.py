@@ -3019,7 +3019,7 @@ def diagnostic_response_shape(value: Any, depth: int = 0) -> dict[str, Any]:
         keys = []
         for key in list(value)[:50]:
             text = str(key)
-            keys.append(text[:80] if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,79}", text) else "[nonstandard]")
+            keys.append(text[:80] if re.fullmatch(r"(?a:[A-Za-z][\w-]{0,79})", text) else "[nonstandard]")
         result: dict[str, Any] = {"type": "object", "field_count": len(value), "fields": keys}
         if depth < 1 and value:
             result["sample"] = diagnostic_response_shape(next(iter(value.values())), depth + 1)
@@ -13153,7 +13153,7 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
 def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str, cancel_event: threading.Event | None = None) -> dict[str, Any]:
     if not CONFIG.gemini_api_key:
         raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", str(model or "")):
+    if not re.fullmatch(r"(?a:[\w.-]{1,128})", str(model or "")):
         raise AppError(400, "Ungültiges Gemini-Modell.")
     try:
         result = http_json("POST", f"{GEMINI_API_BASE_URL}/models/{model}:generateContent", payload,
@@ -13241,7 +13241,7 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _openai_response_id(value: Any) -> str:
     response_id = str(value or "").strip()
-    if not re.fullmatch(r"resp_[A-Za-z0-9_-]{1,200}", response_id):
+    if not re.fullmatch(r"(?a:resp_[\w-]{1,200})", response_id):
         raise AppError(502, "OpenAI hat keine gültige Response-ID zurückgegeben.", reason="invalid_response")
     return response_id
 
@@ -17124,7 +17124,7 @@ def coach_diagnostic_history() -> list[dict[str, Any]]:
         result = {}
         for key in ("type", "reason"):
             item = value.get(key)
-            if isinstance(item, str) and re.fullmatch(r"[A-Za-z_]{1,80}", item):
+            if isinstance(item, str) and re.fullmatch(r"(?a:[A-Za-z_]{1,80})", item):
                 result[key] = item
         provider_code = value.get("provider_error_code")
         if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:

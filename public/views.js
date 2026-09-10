@@ -15,7 +15,7 @@ function replaceMarkdownLinks(value) {
     const label = value.slice(labelStart + 1, linkStart);
     const url = value.slice(linkStart + 2, urlEnd);
     const validScheme = url.startsWith("https://") || url.startsWith("http://");
-    const validUrl = validScheme && label && ![...url].some((character) => "()\r\n\t ".includes(character));
+    const validUrl = validScheme && label && !url.includes("(") && !url.includes(")") && url === url.trim();
     if (!validUrl) {
       html += value.slice(cursor, labelStart + 1);
       cursor = labelStart + 1;
