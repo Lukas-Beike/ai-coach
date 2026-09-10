@@ -4273,6 +4273,43 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(function_response["name"], "save_checkin")
         self.assertEqual(server.output_text(followup), "Check-in gespeichert.")
 
+    def test_gemini_stream_forwards_chunks_and_aggregates_the_final_response(self):
+        captured = {}
+
+        class StreamResponse:
+            status = 200
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def __iter__(self):
+                yield b'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hallo "}]}}]}\n'
+                yield b'\n'
+                yield b'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Welt"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7}}\n'
+                yield b'\n'
+
+        def fake_urlopen(request, **_kwargs):
+            captured["request"] = request
+            return StreamResponse()
+
+        deltas = []
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=fake_urlopen):
+            result = server.responses_stream_request(
+                {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "BegrÃ¼ÃŸe mich."},
+                deltas.append,
+            )
+
+        self.assertEqual(deltas, ["Hallo ", "Welt"])
+        self.assertEqual(server.output_text(result), "Hallo Welt")
+        self.assertEqual(result["usage"]["total_tokens"], 7)
+        self.assertEqual(captured["request"].full_url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse")
+        self.assertEqual(captured["request"].headers["X-goog-api-key"], "test-gemini-key")
+
     def test_gemini_persists_tool_response_before_a_failed_followup(self):
         responses = [
             {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "save_checkin", "args": {}}}]}}]},
@@ -5628,6 +5665,66 @@ class CoachTests(unittest.TestCase):
         with patch.object(server, "chat_with_coach", side_effect=lambda *args, **kwargs: seen.update(kwargs) or {}):
             server._run_background_coach_job(job)
         self.assertEqual(seen["session_csrf_hash"], csrf_hash)
+
+    def test_background_worker_forwards_live_deltas_and_completion_to_attached_stream(self):
+        csrf_hash = server.session_token_hash("csrf-background-streamed")
+        with server.SESSION_LOCK, server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+                (server.session_token_hash("session-background-streamed"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
+            )
+        operation_id, _cancel_event = server.register_chat_stream(csrf_hash)
+        try:
+            server.enqueue_background_coach_job(
+                "Wie soll ich heute trainieren?", "turn-background-streamed", csrf_hash,
+                operation_id=operation_id,
+            )
+            job = server._claim_background_coach_job()
+
+            def complete_chat(*_args, **kwargs):
+                kwargs["on_text_delta"]("Erster ")
+                kwargs["on_text_delta"]("Teil")
+                return {"status": "completed", "session_key": "must-not-leave-server", "message": {"id": 42, "role": "assistant", "content": "Erster Teil"}}
+
+            with patch.object(server, "chat_with_coach", side_effect=complete_chat):
+                server._run_background_coach_job(job)
+
+            events = server.chat_stream_events(csrf_hash, operation_id)
+            self.assertEqual(events.get_nowait(), ("delta", {"text": "Erster "}))
+            self.assertEqual(events.get_nowait(), ("delta", {"text": "Teil"}))
+            event, receipt = events.get_nowait()
+            self.assertEqual(event, "completed")
+            self.assertEqual(receipt["message"]["content"], "Erster Teil")
+            self.assertNotIn("session_key", receipt)
+        finally:
+            server.unregister_chat_stream(csrf_hash, operation_id)
+
+    def test_attached_durable_job_uses_provider_stream_instead_of_background_polling(self):
+        csrf_hash = "csrf-attached-provider-stream"
+        server.set_kv("openai_conversation_id", "conv-attached-provider-stream")
+        server.enqueue_background_coach_job(
+            "Wie soll ich heute trainieren?", "turn-attached-provider-stream", csrf_hash,
+            operation_id="operation-attached-provider-stream",
+        )
+        self.assertIsNotNone(server._claim_background_coach_job())
+        deltas = []
+
+        def streamed_response(_payload, on_delta, _cancel_event):
+            on_delta("Heute locker.")
+            return {"id": "resp_attached_stream", "status": "completed", "output_text": "Heute locker."}
+
+        with patch.object(server, "responses_stream_request", side_effect=streamed_response) as streamed, patch.object(
+            server, "responses_background_request"
+        ) as background:
+            result = server.chat_with_coach(
+                "Wie soll ich heute trainieren?", client_turn_id="turn-attached-provider-stream",
+                session_csrf_hash=csrf_hash, background_job=True, on_text_delta=deltas.append,
+            )
+
+        streamed.assert_called_once()
+        background.assert_not_called()
+        self.assertEqual(deltas, ["Heute locker."])
+        self.assertEqual(result["message"]["content"], "Heute locker.")
 
     def test_background_worker_requeues_transient_coach_contention(self):
         server.enqueue_background_coach_job(
@@ -7905,23 +8002,21 @@ class CoachTests(unittest.TestCase):
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock(side_effect=[None, server.ClientDisconnected()])
-
-        def complete_chat(*args, **kwargs):
-            kwargs["on_text_delta"]("Antwort bleibt gespeichert")
-            return {"message": {"id": 2}}
+        events = server.queue.Queue()
+        events.put(("delta", {"text": "Antwort bleibt gespeichert"}))
+        events.put(("completed", {"message": {"id": 2}}))
 
         with patch.object(server, "register_chat_stream", return_value=(operation_id, cancel_event)), \
                 patch.object(server, "unregister_chat_stream") as unregister, \
-                patch.object(server, "chat_with_coach", side_effect=complete_chat) as chat:
+                patch.object(server, "chat_stream_events", return_value=events):
             handler.handle_chat_stream({"csrf_hash": session_key})
 
-        chat.assert_not_called()
         with server.database() as db:
             self.assertIsNotNone(db.execute("SELECT 1 FROM coach_commands WHERE client_turn_id='turn-disconnect-test' AND status='queued'").fetchone())
         self.assertFalse(cancel_event.is_set())
         unregister.assert_called_once_with(session_key, operation_id)
 
-    def test_long_plan_stream_is_queued_without_holding_sse_open(self):
+    def test_durable_chat_stream_relays_worker_deltas_and_completion(self):
         session_key = "session-background-stream-test"
         operation_id = "operation-background-stream-test"
         cancel_event = threading.Event()
@@ -7933,17 +8028,20 @@ class CoachTests(unittest.TestCase):
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock()
+        events = server.queue.Queue()
+        events.put(("delta", {"text": "Dein Plan "}))
+        events.put(("delta", {"text": "ist fertig."}))
+        events.put(("completed", {"status": "completed", "message": {"id": 2, "content": "Dein Plan ist fertig."}}))
 
         with patch.object(server, "register_chat_stream", return_value=(operation_id, cancel_event)), patch.object(
             server, "unregister_chat_stream"
-        ) as unregister, patch.object(server, "chat_with_coach") as chat:
+        ) as unregister, patch.object(server, "chat_stream_events", return_value=events):
             handler.handle_chat_stream({"csrf_hash": session_key})
 
         events = [call.args[0] for call in handler.send_sse_event.call_args_list]
-        self.assertEqual(events, ["started", "background"])
+        self.assertEqual(events, ["started", "delta", "delta", "completed"])
         handler.send_sse_headers.assert_called_once_with(persistent=False)
         self.assertTrue(handler.close_connection)
-        chat.assert_not_called()
         unregister.assert_called_once_with(session_key, operation_id)
 
     def test_chat_stream_cancel_closes_the_active_provider_response(self):

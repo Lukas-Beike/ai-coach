@@ -16,6 +16,7 @@ import math
 import mimetypes
 import os
 import platform
+import queue
 import re
 import secrets
 import shutil
@@ -13172,10 +13173,9 @@ def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str, c
     return result
 
 
-def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading.Event | None = None) -> dict[str, Any]:
-    model = str(payload.get("model") or selected_model("gemini"))
-    request, history, persistent = _gemini_request_payload(payload, model)
-    result = gemini_raw_request(model, request, operation="generate_content", cancel_event=cancel_event)
+def _gemini_responses_result(
+    payload: dict[str, Any], history: list[dict[str, Any]], persistent: bool, result: dict[str, Any],
+) -> dict[str, Any]:
     candidates = result.get("candidates") if isinstance(result.get("candidates"), list) else []
     candidate = candidates[0] if candidates and isinstance(candidates[0], dict) else None
     content = candidate.get("content") if isinstance(candidate, dict) and isinstance(candidate.get("content"), dict) else None
@@ -13210,6 +13210,154 @@ def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading
     usage = result.get("usageMetadata") if isinstance(result.get("usageMetadata"), dict) else {}
     return {"id": "gemini_" + uuid.uuid4().hex, "status": "completed", "output": output, "output_text": text,
             "usage": {"input_tokens": usage.get("promptTokenCount", 0), "output_tokens": usage.get("candidatesTokenCount", 0), "total_tokens": usage.get("totalTokenCount", 0)}}
+
+
+def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading.Event | None = None) -> dict[str, Any]:
+    model = str(payload.get("model") or selected_model("gemini"))
+    request, history, persistent = _gemini_request_payload(payload, model)
+    result = gemini_raw_request(model, request, operation="generate_content", cancel_event=cancel_event)
+    return _gemini_responses_result(payload, history, persistent, result)
+
+
+def gemini_stream_request(
+    payload: dict[str, Any], on_text_delta: Callable[[str], None],
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Stream Gemini GenerateContent chunks and return the aggregated response."""
+    if not CONFIG.gemini_api_key:
+        raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
+    model = str(payload.get("model") or selected_model("gemini"))
+    if not re.fullmatch(r"(?a:[\w.-]{1,128})", model):
+        raise AppError(400, "UngÃ¼ltiges Gemini-Modell.")
+    request_payload, history, persistent = _gemini_request_payload(payload, model)
+    body = json.dumps(request_payload).encode("utf-8")
+    endpoint = f"{GEMINI_API_BASE_URL}/models/{model}:streamGenerateContent?alt=sse"
+    request = Request(
+        endpoint,
+        data=body,
+        headers={
+            "Accept": "text/event-stream",
+            "Content-Type": JSON_MEDIA_TYPE,
+            "x-goog-api-key": CONFIG.gemini_api_key,
+            "User-Agent": f"IntervalsCoach/{APP_VERSION}",
+        },
+        method="POST",
+    )
+    parsed_endpoint = urlparse(endpoint)
+    context = {
+        "service": "gemini", "method": "POST", "host": parsed_endpoint.netloc,
+        "path": _safe_provider_path(parsed_endpoint.path),
+        "timeout_seconds": OPENAI_RESPONSE_TIMEOUT_SECONDS, "request_bytes": len(body),
+        "query_keys": ["alt"],
+    }
+    started = time.perf_counter()
+    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": context})
+    aggregate: dict[str, Any] = {"candidates": []}
+    stream_bytes = 0
+    data_lines: list[str] = []
+
+    def merge_chunk(chunk: Any) -> None:
+        if not isinstance(chunk, dict):
+            raise AppError(502, "Gemini hat ein ungÃ¼ltiges Streaming-Ereignis zurÃ¼ckgegeben.", reason="invalid_response")
+        usage = chunk.get("usageMetadata")
+        if isinstance(usage, dict):
+            aggregate["usageMetadata"] = usage
+        for key in ("modelVersion", "promptFeedback"):
+            if key in chunk:
+                aggregate[key] = chunk[key]
+        candidates = chunk.get("candidates") if isinstance(chunk.get("candidates"), list) else []
+        for index, candidate in enumerate(candidates):
+            if not isinstance(candidate, dict):
+                continue
+            while len(aggregate["candidates"]) <= index:
+                aggregate["candidates"].append({"content": {"role": "model", "parts": []}})
+            target = aggregate["candidates"][index]
+            for key in ("finishReason", "finishMessage", "safetyRatings", "citationMetadata"):
+                if key in candidate:
+                    target[key] = candidate[key]
+            content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
+            if content.get("role"):
+                target["content"]["role"] = content["role"]
+            target_parts = target["content"]["parts"]
+            for part in content.get("parts") if isinstance(content.get("parts"), list) else []:
+                if not isinstance(part, dict):
+                    continue
+                delta = part.get("text")
+                if isinstance(delta, str) and delta:
+                    if index == 0:
+                        on_text_delta(delta)
+                    metadata = {key: value for key, value in part.items() if key != "text"}
+                    previous = target_parts[-1] if target_parts else None
+                    if isinstance(previous, dict) and set(previous) <= {"text", *metadata} and all(
+                        previous.get(key) == value for key, value in metadata.items()
+                    ):
+                        previous["text"] = str(previous.get("text") or "") + delta
+                    else:
+                        target_parts.append(dict(part))
+                else:
+                    target_parts.append(dict(part))
+
+    def handle_event() -> None:
+        nonlocal data_lines
+        if not data_lines:
+            return
+        raw = "\n".join(data_lines)
+        data_lines = []
+        if raw.strip() == "[DONE]":
+            return
+        try:
+            merge_chunk(json.loads(raw))
+        except json.JSONDecodeError as exc:
+            raise AppError(502, "Gemini hat ein ungÃ¼ltiges Streaming-Ereignis zurÃ¼ckgegeben.", reason="invalid_response") from exc
+
+    try:
+        _raise_chat_cancelled(cancel_event)
+        with _urlopen_interruptibly(request, OPENAI_RESPONSE_TIMEOUT_SECONDS, cancel_event) as response:
+            if cancel_event is not None:
+                cancel_event._provider_response = response
+            try:
+                for raw_line in response:
+                    _raise_chat_cancelled(cancel_event)
+                    stream_bytes += len(raw_line)
+                    if stream_bytes > MAX_EXTERNAL_RESPONSE_BYTES:
+                        raise AppError(502, "Die Streaming-Antwort von Gemini ist zu groÃŸ.", reason="response_too_large")
+                    line = raw_line.decode("utf-8").rstrip("\r\n")
+                    if not line:
+                        handle_event()
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                handle_event()
+            finally:
+                if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
+                    cancel_event._provider_response = None
+        _raise_chat_cancelled(cancel_event)
+        if not aggregate["candidates"]:
+            raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
+        _record_gemini_status("ok", "Gemini ist verfÃ¼gbar.", status=200)
+        _record_gemini_usage(aggregate, "generate_content_stream")
+        LOGGER.info(EXTERNAL_HTTP_COMPLETED_EVENT, extra={"event": "external_request_completed", "context": {
+            **context, "status": 200, "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "response_bytes": stream_bytes,
+        }})
+        return _gemini_responses_result(payload, history, persistent, aggregate)
+    except HTTPError as exc:
+        raw_error = _read_http_error_body(exc)
+        details = gemini_error_details(int(exc.code), raw_error)
+        _record_gemini_status("error", details["message"], reason=details["reason"], status=int(exc.code))
+        raise AppError(int(exc.code), details["message"], reason=details["reason"]) from exc
+    except AppError as exc:
+        _record_gemini_status("error", exc.message, reason=exc.reason or "request_failed", status=exc.status)
+        raise
+    except TimeoutError as exc:
+        if cancel_event is not None and cancel_event.is_set():
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
+        _record_gemini_status("error", "Gemini hat nicht rechtzeitig geantwortet.", reason="provider_timeout", status=504)
+        raise AppError(504, "Gemini hat nicht rechtzeitig geantwortet.", reason="provider_timeout") from exc
+    except (URLError, OSError, UnicodeDecodeError, ValueError) as exc:
+        if cancel_event is not None and cancel_event.is_set():
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
+        _record_gemini_status("error", "Gemini ist vorÃ¼bergehend nicht verfÃ¼gbar.", reason="provider_unavailable", status=503)
+        raise AppError(503, "Gemini ist vorÃ¼bergehend nicht verfÃ¼gbar.", reason="provider_unavailable") from exc
 
 
 def request_ai_provider(payload: dict[str, Any]) -> str:
@@ -13511,11 +13659,8 @@ def responses_stream_request(
 ) -> dict[str, Any]:
     if request_ai_provider(payload) == "gemini":
         _raise_chat_cancelled(cancel_event)
-        result = gemini_responses_request(payload, cancel_event=cancel_event)
+        result = gemini_stream_request(payload, on_text_delta, cancel_event=cancel_event)
         _raise_chat_cancelled(cancel_event)
-        text = output_text(result)
-        if text:
-            on_text_delta(text)
         return result
     request_payload = dict(payload)
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
@@ -13970,8 +14115,36 @@ def register_chat_stream(session_csrf_hash: str) -> tuple[str, threading.Event]:
     with CHAT_STREAM_LOCK:
         if session_csrf_hash in CHAT_STREAMS:
             raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
-        CHAT_STREAMS[session_csrf_hash] = {"operation_id": operation_id, "cancel_event": cancel_event}
+        CHAT_STREAMS[session_csrf_hash] = {
+            "operation_id": operation_id,
+            "cancel_event": cancel_event,
+            "events": queue.Queue(),
+        }
     return operation_id, cancel_event
+
+
+def publish_chat_stream_event(operation_id: str, event: str, data: Any) -> bool:
+    """Forward a worker event to the currently attached finite SSE response."""
+    with CHAT_STREAM_LOCK:
+        stream = next(
+            (candidate for candidate in CHAT_STREAMS.values()
+             if candidate.get("operation_id") == operation_id),
+            None,
+        )
+        events = stream.get("events") if stream else None
+    if not isinstance(events, queue.Queue):
+        return False
+    events.put((event, data))
+    return True
+
+
+def chat_stream_events(session_csrf_hash: str, operation_id: str) -> queue.Queue[Any] | None:
+    with CHAT_STREAM_LOCK:
+        stream = CHAT_STREAMS.get(session_csrf_hash)
+        if not stream or stream.get("operation_id") != operation_id:
+            return None
+        events = stream.get("events")
+    return events if isinstance(events, queue.Queue) else None
 
 
 def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:
@@ -15980,7 +16153,7 @@ def _chat_with_structured_coach_impl(
         for attempt in range(3):
             _raise_chat_cancelled(cancel_event)
             try:
-                if background_owned:
+                if background_owned and on_text_delta is None:
                     return responses_background_request(payload, response_id=resume_id or None, on_response_id=checkpoint, cancel_event=cancel_event)
                 return responses_stream_request(payload, request_on_delta, cancel_event) if on_text_delta is not None else responses_request(payload)
             except AppError as exc:
@@ -16590,6 +16763,16 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
         current = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
     if current and _coach_command_receipt(current["receipt"]).get("cancel_requested"):
         cancel_event.set()
+    stream_attached = chat_stream_events(session_csrf_hash, operation_id) is not None
+
+    def stream_delta(text: str) -> None:
+        publish_chat_stream_event(operation_id, "delta", {"text": text})
+
+    def stream_receipt(value: dict[str, Any]) -> None:
+        publish_chat_stream_event(
+            operation_id, "completed", {key: item for key, item in value.items() if key != "session_key"},
+        )
+
     try:
         if not session_csrf_hash:
             raise AppError(401, "Die Sitzung des Coach-Auftrags ist abgelaufen.", reason="session_expired")
@@ -16602,6 +16785,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
             refresh_morning_body_battery(local_now().date())
         result = chat_with_coach(
             message,
+            on_text_delta=stream_delta if stream_attached and not receipt.get("openai_response_id") else None,
             cancel_event=cancel_event,
             session_csrf_hash=session_csrf_hash,
             client_turn_id=client_turn_id,
@@ -16628,6 +16812,8 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
                     "UPDATE coach_commands SET receipt=?, updated_at=? WHERE client_turn_id=? AND status='completed'",
                     (json.dumps(completed_receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
                 )
+            result = completed_receipt
+        stream_receipt(result)
     except AppError as exc:
         if exc.reason in {"chat_queue_full", "chat_request_timeout"}:
             _requeue_background_coach_job(client_turn_id, exc.reason)
@@ -16635,11 +16821,26 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
                 "Persistent Coach background job requeued after contention",
                 extra={"event": "coach_background_job_requeued", "context": {"operation_id": operation_id, "reason": exc.reason}},
             )
+            publish_chat_stream_event(operation_id, "background", {
+                "status": "queued", "mode": "background", "operation_id": operation_id,
+            })
         else:
-            _persist_structured_command_failure(client_turn_id, {}, exc)
+            failed = _persist_structured_command_failure(client_turn_id, {}, exc)
+            if failed:
+                stream_receipt(failed)
+            else:
+                publish_chat_stream_event(operation_id, "error", {
+                    "reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000],
+                })
 
     except Exception as exc:
-        _persist_structured_command_failure(client_turn_id, {}, exc)
+        failed = _persist_structured_command_failure(client_turn_id, {}, exc)
+        if failed:
+            stream_receipt(failed)
+        else:
+            publish_chat_stream_event(operation_id, "error", {
+                "reason": "internal_error", "message": INTERNAL_SERVER_ERROR,
+            })
         LOGGER.exception(
             "Persistent Coach background job failed",
             extra={"event": "coach_background_job_failed", "context": {"operation_id": operation_id, "error_code": operation_error_code(exc)}},
@@ -18326,7 +18527,26 @@ class RequestHandler(BaseHTTPRequestHandler):
                 message, client_turn_id, session["csrf_hash"],
                 operation_id=operation_id, cancel_event=cancel_event, request_kind=request_kind, attachments=payload.get("attachments"),
             )
-            send_event("background", job)
+            events = chat_stream_events(session["csrf_hash"], operation_id)
+            if events is None:
+                send_event("background", job)
+            else:
+                while True:
+                    try:
+                        event, data = events.get(timeout=15)
+                    except queue.Empty:
+                        active = _active_background_coach_job(session["csrf_hash"], operation_id)
+                        if active:
+                            send_event("heartbeat", {"operation_id": operation_id})
+                            continue
+                        try:
+                            send_event("completed", coach_command_receipt(client_turn_id, session["csrf_hash"]))
+                        except AppError as exc:
+                            send_event("error", {"reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000]})
+                        break
+                    send_event(event, data)
+                    if event in {"completed", "error", "background"}:
+                        break
         except AppError as exc:
             send_event("error", {"reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000]})
         except Exception:
