@@ -8043,7 +8043,7 @@ class CoachTests(unittest.TestCase):
                             with server.DB_LOCK, server.database():
                                 thread.start()
                                 self.assertTrue(database_lock.worker_waiting.wait(timeout=3))
-                                state = state_reader(local_only=True)
+                                state = state_reader()
                                 self.assertIn("usage", state)
                         finally:
                             thread.join(timeout=5)
