@@ -14,7 +14,8 @@ class WorkoutTextError(ValueError):
         self.reason = reason
 
 
-_DISTANCE = re.compile(r"\d+(?:\.\d+)?(?:km|mtr|mi|yd)")
+_DISTANCE = re.compile(r"\d+(?:\.\d+)?(?P<unit>[a-z]+)")
+_DISTANCE_UNITS = frozenset({"km", "mtr", "mi", "yd"})
 _TIME_PART = re.compile(r"(\d+(?:\.\d+)?)([hms'\"])")
 _TARGET_PATTERNS = (
     re.compile(r"Z\d+(?:-Z\d+)?(?:\s+(?:HR|Pace))?(?=$|\s)", re.IGNORECASE),
@@ -30,6 +31,11 @@ def _target_match(value: str, *, search: bool = False):
         if match:
             return match
     return None
+
+
+def _distance_match(value: str):
+    match = _DISTANCE.fullmatch(value)
+    return match if match and match["unit"] in _DISTANCE_UNITS else None
 
 
 def _is_time(value: str) -> bool:
@@ -112,7 +118,7 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
             continue
         step = re.match(r"^-[ \t]+([^\r\n]+)$", line)
         quantity = re.match(r"(\S+)[ \t]+([^\r\n]+)$", step[1]) if step else None
-        if not quantity or not (_is_time(quantity[1]) or _DISTANCE.fullmatch(quantity[1])):
+        if not quantity or not (_is_time(quantity[1]) or _distance_match(quantity[1])):
             raise WorkoutTextError("invalid_workout_step", f"Workout-Zeile {number}: Dauer oder Distanz in Workout-Syntax angeben, z.B. '- 15m 50-70%' oder '- 6km Z1 HR'. Hinweise ohne '- ' schreiben.")
         value, rest = quantity.groups()
         ramp = bool(re.match(r"^ramp\s+", rest, flags=re.IGNORECASE))
@@ -133,7 +139,7 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
         if target in {"POWER", "HR", "PACE"} and target != kind:
             raise WorkoutTextError("workout_target_mismatch", f"Workout-Zeile {number}: Schrittziel {kind} passt nicht zum Einheitenziel {target}. Ziel oder Schritt korrigieren; fuer gemischte Ziele AUTO verwenden.")
         expected = {"kind": kind.lower(), "target": parsed_target, "ramp": ramp}
-        if _DISTANCE.fullmatch(value):
+        if _distance_match(value):
             distance = float(re.match(r"[\d.]+", value)[0])
             if not math.isfinite(distance) or distance <= 0:
                 raise WorkoutTextError("invalid_workout_step", "Eine Trainingsdistanz muss positiv sein.")
