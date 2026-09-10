@@ -16,12 +16,12 @@ class WorkoutTextError(ValueError):
 
 _DISTANCE = re.compile(r"\d+(?:\.\d+)?(?P<unit>[a-z]+)")
 _DISTANCE_UNITS = frozenset({"km", "mtr", "mi", "yd"})
-_TIME_PART = re.compile(r"(\d+(?:\.\d+)?)([hms'\"])")
+_TIME_PART = re.compile(r"(\d++(?:\.\d++)?+)([hms'\"])")
 _TARGET_PATTERNS = (
-    re.compile(r"Z\d+(?:-Z\d+)?(?:\s+(?:HR|Pace))?(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+(?:\.\d+)?(?:%?-\d+(?:\.\d+)?)?%(?:\s+(?:HR|LTHR|Pace|FTP))?(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+(?:-\d+)?(?:w|bpm)(?=$|\s)", re.IGNORECASE),
-    re.compile(r"\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?(?:-\d+:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?\s+Pace)?(?=$|\s)", re.IGNORECASE),
+    re.compile(r"Z\d++(?:-Z\d++)?+(?:\s++(?:HR|Pace))?+(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++(?:\.\d++)?+(?:%?+-\d++(?:\.\d++)?+)?+%(?:\s++(?:HR|LTHR|Pace|FTP))?+(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++(?:-\d++)?+(?:w|bpm)(?=$|\s)", re.IGNORECASE),
+    re.compile(r"\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+(?:-\d++:[0-5]\d(?:/(?:km|mi|100m|100y|500m|400m|250m))?+\s++Pace)?+(?=$|\s)", re.IGNORECASE),
 )
 
 
