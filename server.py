@@ -13477,6 +13477,7 @@ def openai_stream_request(
     payload: dict[str, Any],
     on_text_delta: Any,
     cancel_event: threading.Event | None = None,
+    on_response_id: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
         raise AppError(503, OPENAI_API_KEY_ERROR)
@@ -13550,6 +13551,11 @@ def openai_stream_request(
         except json.JSONDecodeError as exc:
             raise AppError(502, "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.", reason="invalid_response") from exc
         kind = event_name or str(event.get("type") or "")
+        candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+        if kind in {"response.created", "response.in_progress"} and isinstance(candidate, dict):
+            response_id = str(candidate.get("id") or "").strip()
+            if response_id and on_response_id is not None:
+                on_response_id(response_id)
         if kind == "response.output_text.delta":
             delta = event.get("delta")
             if isinstance(delta, str) and delta:
@@ -13657,6 +13663,7 @@ def responses_stream_request(
     payload: dict[str, Any],
     on_text_delta: Any,
     cancel_event: threading.Event | None = None,
+    on_response_id: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     if request_ai_provider(payload) == "gemini":
         _raise_chat_cancelled(cancel_event)
@@ -13667,7 +13674,7 @@ def responses_stream_request(
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     for attempt in range(3):
         try:
-            return openai_stream_request(request_payload, on_text_delta, cancel_event)
+            return openai_stream_request(request_payload, on_text_delta, cancel_event, on_response_id)
         except AppError as exc:
             if exc.reason != "conversation_locked" or attempt == 2:
                 raise
@@ -16156,7 +16163,10 @@ def _chat_with_structured_coach_impl(
             try:
                 if background_owned and on_text_delta is None:
                     return responses_background_request(payload, response_id=resume_id or None, on_response_id=checkpoint, cancel_event=cancel_event)
-                return responses_stream_request(payload, request_on_delta, cancel_event) if on_text_delta is not None else responses_request(payload)
+                return responses_stream_request(
+                    payload, request_on_delta, cancel_event,
+                    on_response_id=checkpoint if background_owned and ai_provider == "openai" else None,
+                ) if on_text_delta is not None else responses_request(payload)
             except AppError as exc:
                 if (ai_provider == "openai" and exc.reason == "conversation_state_invalid"
                         and not conversation_recovered and not request_delta_emitted and attempt < 2):
