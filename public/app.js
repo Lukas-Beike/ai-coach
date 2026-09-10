@@ -613,7 +613,7 @@ async function bootstrapAuth() {
       await loadInitialState();
     } else showLogin();
   } catch {
-    // A failed auth bootstrap is shown in the login dialog; no recovery action is available here.
+    renderConnectivityStatus(false);
     $("#loginError").textContent = "Server nicht erreichbar.";
     showLogin();
   } finally { clearTimeout(timeout); }
