@@ -5709,7 +5709,9 @@ class CoachTests(unittest.TestCase):
         self.assertIsNotNone(server._claim_background_coach_job())
         deltas = []
 
-        def streamed_response(_payload, on_delta, _cancel_event):
+        def streamed_response(_payload, on_delta, _cancel_event, **kwargs):
+            if kwargs.get("on_response_id"):
+                kwargs["on_response_id"]("resp_attached_stream")
             on_delta("Heute locker.")
             return {"id": "resp_attached_stream", "status": "completed", "output_text": "Heute locker."}
 
