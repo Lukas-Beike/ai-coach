@@ -466,6 +466,54 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(replay, result)
         self.assertEqual(len(self.state()["planned_units"]), 2)
 
+    def test_successful_plan_replacement_resolves_invalid_patch_for_same_request(self):
+        period = {"start": "2026-09-12", "end": "2026-09-12"}
+        workout = self.workout("2026-09-12")
+
+        def invalid_patch(_):
+            call = self.call("apply_training_patch", {
+                "workouts": [workout], "changes": [],
+                "expected_revision": self.state()["planning_revision"],
+            }, ["local_plan"], period)
+            arguments = json.loads(call["output"][0]["arguments"])
+            arguments["_request"]["source_message_ids"] = [999999]
+            call["output"][0]["arguments"] = json.dumps(arguments)
+            return call
+
+        def replace_plan(model_payload):
+            repair_output = json.loads(model_payload["input"][0]["output"])
+            self.assertEqual(repair_output["validation_reason"], "request_provenance")
+            return self.call("replace_training_plan", {
+                "payload": {"plan_name": "Synthetic plan", "goal": "Synthetic goal", "workouts": [workout]},
+                "expected_revision": self.state()["planning_revision"],
+            }, ["local_plan"], period)
+
+        result, _ = self.turn("Samstag planen", [invalid_patch, replace_plan, {"output_text": "Plan gespeichert."}])
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["pending_operations"], [])
+        failed = result["command_receipts"][0]
+        self.assertEqual(failed["result"]["validation_reason"], "request_provenance")
+        self.assertEqual(failed["diagnostic_error"]["validation_reason"], "request_provenance")
+        self.assertTrue(failed["resolved"])
+        self.assertTrue(result["command_receipts"][1]["result"]["ok"])
+        self.assertEqual(result["message"]["content"], "Plan gespeichert.")
+        self.assertEqual([unit["date"] for unit in self.state()["planned_units"]], ["2026-09-12"])
+        history = server.coach_diagnostic_history()
+        self.assertEqual(history[0]["steps"][0]["error"]["validation_reason"], "request_provenance")
+
+    def test_plan_replacement_does_not_resolve_invalid_patch_for_other_period(self):
+        first = {
+            "tool": "apply_training_patch", "step_key": "first", "request_binding_key": "period-one",
+            "result": {"ok": False, "reason": "request_invalid"},
+        }
+        second = {
+            "tool": "replace_training_plan", "step_key": "second", "request_binding_key": "period-two",
+            "result": {"ok": True},
+        }
+
+        self.assertEqual(server._unresolved_coach_steps([first, second]), [first])
+
     def test_other_workout_success_does_not_resolve_invalid_scope(self):
         period = {"start": "2026-09-12", "end": "2026-09-14"}
         def apply(day, scope):
