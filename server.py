@@ -5180,18 +5180,18 @@ def ical_training_impact(description: Any) -> bool:
     return any(_ical_description_contains(description, marker) for marker in ICAL_TRAINING_MARKERS)
 
 
-def ical_training_relevant(_name: Any, description: Any) -> bool:
+def ical_training_relevant(description: Any) -> bool:
     """Treat only described events as training-relevant calendar constraints."""
     description_text = str(description or "").strip()
     return bool(description_text) and not _ical_description_contains(description_text, ICAL_NO_TRAINING_MARKER)
 
 
-def ical_no_intensity(_name: Any, description: Any) -> bool:
+def ical_no_intensity(description: Any) -> bool:
     """Treat only the explicit marker as a no-intensity training constraint."""
     return _ical_description_contains(description, ICAL_NO_INTENSITY_MARKER)
 
 
-def ical_short_only(_name: Any, description: Any) -> bool:
+def ical_short_only(description: Any) -> bool:
     """Treat only the explicit marker as a short-session training constraint."""
     return _ical_description_contains(description, ICAL_SHORT_ONLY_MARKER)
 
@@ -5364,9 +5364,9 @@ def _ical_event_record(current: dict[str, Any], start: datetime, duration: timed
         "duration_minutes": duration_minutes,
         "all_day": bool(current.get("all_day")),
         "training_impact": ical_training_impact(current.get("description")),
-        "training_relevant": ical_training_relevant(current.get("name"), current.get("description")),
-        "no_intensity": ical_no_intensity(current.get("name"), current.get("description")),
-        "short_only": ical_short_only(current.get("name"), current.get("description")),
+        "training_relevant": ical_training_relevant(current.get("description")),
+        "no_intensity": ical_no_intensity(current.get("description")),
+        "short_only": ical_short_only(current.get("description")),
     }
 
 

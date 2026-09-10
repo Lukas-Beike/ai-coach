@@ -32,14 +32,14 @@
   }
 
   async function request(path, options, onUnauthorized) {
-    options ||= {};
+    const method = options?.method;
     const response = await fetch(path, {
       credentials: "same-origin",
       ...options,
-      headers: { "Content-Type": "application/json", ...(options.method && options.method !== "GET" && { "X-CSRF-Token": cookie("ic_csrf") }), ...options.headers },
+      headers: { "Content-Type": "application/json", ...(method && method !== "GET" && { "X-CSRF-Token": cookie("ic_csrf") }), ...options?.headers },
     });
     const payload = await readResponse(response, onUnauthorized);
-    if (options.method && options.method !== "GET" && !Object.keys(payload).length) throw responseError(response, "Die Serverbestätigung fehlt. Bitte den gespeicherten Stand prüfen.", "empty_confirmation");
+    if (method && method !== "GET" && !Object.keys(payload).length) throw responseError(response, "Die Serverbestätigung fehlt. Bitte den gespeicherten Stand prüfen.", "empty_confirmation");
     return payload;
   }
 
