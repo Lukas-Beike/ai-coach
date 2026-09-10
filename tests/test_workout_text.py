@@ -98,6 +98,9 @@ class WorkoutTextTests(unittest.TestCase):
                 self.assert_invalid(self.workout(text, 30), "missing_workout_target")
         self.assert_invalid(self.workout("- 30m", 30), "invalid_workout_step")
 
+    def test_time_parser_accepts_only_decimal_digits(self):
+        self.assert_invalid(self.workout("- ²m 60%", 2), "invalid_workout_step")
+
     def test_partially_structured_workout_cannot_hide_missing_time(self):
         self.assert_invalid(self.workout("Lange Ausfahrt fuer 225 Minuten.\n\n- 30m 65%", 225), "workout_duration_mismatch")
 

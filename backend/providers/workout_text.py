@@ -65,14 +65,14 @@ def _time_parts(value: str) -> list[tuple[str, str]] | None:
 
 def _read_time_part(value: str, position: int) -> tuple[int, str, str] | None:
     amount_start = position
-    while position < len(value) and value[position].isdigit():
+    while position < len(value) and value[position].isdecimal():
         position += 1
     if position == amount_start:
         return None
     if position < len(value) and value[position] == ".":
         position += 1
         fraction_start = position
-        while position < len(value) and value[position].isdigit():
+        while position < len(value) and value[position].isdecimal():
             position += 1
         if position == fraction_start:
             return None
