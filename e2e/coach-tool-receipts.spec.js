@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 
-test("synchronization progress does not create chat receipts", async ({ page }) => {
+test("synchronization progress stays outside chat receipts", async ({ page }) => {
   await page.goto("/#coach");
   await expect(page.locator("#appShell")).toBeVisible();
   await expect.poll(() => page.evaluate(() => !state.loadPromise)).toBe(true);
@@ -18,6 +18,7 @@ test("synchronization progress does not create chat receipts", async ({ page }) 
     { tool: "get_sync_job", result: { ok: true, job: { id: "synthetic-job", status: "completed" } } },
   ] }));
   await expect(receipts.locator(".action-receipt")).toHaveCount(0);
+  await expect(receipts).not.toContainText("Synchronisierung abgeschlossen");
 });
 
 test("profile writes have a useful receipt and unresolved errors stay visible safely", async ({ page }) => {
