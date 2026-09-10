@@ -16,7 +16,8 @@ const mobileViewportBaselines = { portrait: 0, landscape: 0 };
 if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
 
 function hasTouchFirstInput() {
-  return Boolean(window.matchMedia?.("(hover: none) and (pointer: coarse)").matches);
+  return Boolean(globalThis.navigator?.maxTouchPoints > 0
+    && globalThis.matchMedia?.("(pointer: coarse)").matches);
 }
 
 function shouldRestoreChatInputFocus() {

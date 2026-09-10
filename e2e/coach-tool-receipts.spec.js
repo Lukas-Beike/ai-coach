@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 
-test("repaired sync errors disappear while queued and running work stays pending", async ({ page }) => {
+test("synchronization progress does not create chat receipts", async ({ page }) => {
   await page.goto("/#coach");
   await expect(page.locator("#appShell")).toBeVisible();
   await expect.poll(() => page.evaluate(() => !state.loadPromise)).toBe(true);
@@ -27,7 +27,7 @@ test("profile writes have a useful receipt and unresolved errors stay visible sa
   await page.evaluate(() => addStructuredCoachReceipts({ command_receipts: [
     { tool: "apply_training_patch", result: { ok: true, status: "applied" } },
     { tool: "update_profile", result: { ok: true, stored_locally: true } },
-    { tool: "start_intervals_plan_sync", resolved: false, result: { ok: false, error: "<img src=x onerror=alert(1)>" } },
+    { tool: "save_checkin", resolved: false, result: { ok: false, error: "<img src=x onerror=alert(1)>" } },
   ] }));
   const receipts = page.locator("#coachReceipts");
   await expect(receipts).toContainText("Profil aktualisiert");
