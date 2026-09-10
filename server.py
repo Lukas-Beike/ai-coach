@@ -188,6 +188,8 @@ CORRUPT_PLANNING_ERROR = "Die lokale Planung ist beschädigt."
 INVALID_LIBRARY_ID_ERROR = "Ungültige lokale Bibliothekseinheiten-ID."
 CORRUPT_LIBRARY_ERROR = "Die lokale Bibliothekseinheit ist beschädigt."
 INVALID_PLANNING_DATE_ERROR = "Das Planungsdatum muss das Format JJJJ-MM-TT haben."
+STALE_PLANNING_REVISION_ERROR = "Die lokale Planrevision ist inzwischen veraltet."
+UNSUPPORTED_BYDAY_ERROR = "BYDAY der Kalender-Wiederholung wird nicht unterstützt."
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 APP_VERSION = "1.10.1"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -5227,15 +5229,15 @@ def _ical_rrule(raw: str) -> dict[str, Any]:
         for token in values["BYDAY"].split(","):
             match = re.fullmatch(r"([+-]?\d{1,2})?([A-Z]{2})", token)
             if not match or match.group(2) not in day_numbers:
-                raise AppError(400, "BYDAY der Kalender-Wiederholung wird nicht unterstützt.")
+                raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
             ordinal = int(match.group(1)) if match.group(1) else None
             if ordinal == 0 or (ordinal is not None and abs(ordinal) > 53):
-                raise AppError(400, "BYDAY der Kalender-Wiederholung wird nicht unterstützt.")
+                raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
             if frequency in {"DAILY", "WEEKLY"} and ordinal is not None:
                 raise AppError(400, "Eine BYDAY-Position wird nur für MONTHLY oder YEARLY unterstützt.")
             item = (day_numbers[match.group(2)], ordinal)
             if item in bydays:
-                raise AppError(400, "BYDAY der Kalender-Wiederholung wird nicht unterstützt.")
+                raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
             bydays.append(item)
 
     def integer_list(name: str, minimum: int, maximum: int, *, allow_negative: bool = False) -> list[int]:
@@ -14525,7 +14527,7 @@ def _apply_structured_training_changes(
         if require_revision and expected_revision is None:
             raise AppError(400, "Eine vollständige Planänderung benötigt die gelesene Planrevision.", reason="planning_revision_required")
         if expected_revision is not None and int(expected_revision) != current_revision:
-            raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
+            raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
         for change in changes:
             action = str(change.get("action") or "update").strip().casefold()
             if action == "create":
@@ -14708,7 +14710,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
         revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
         if expected_revision != current_revision:
-            raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
+            raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
         rows = db.execute(
             "SELECT local_id, payload FROM planned_units "
             "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
@@ -15768,7 +15770,7 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
         with DB_LOCK, database() as db:
             row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         if expected_revision is not None and int(expected_revision) != int((row or {}).get("revision") or 0):
-            raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
+            raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
         arguments = {**arguments, "artifact_id": artifact_id}
     elif operation == "apply_training_changes":
         changes = arguments.get("changes") if isinstance(arguments.get("changes"), list) else []
@@ -18102,7 +18104,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     exc_info=True,
                 )
             self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
-        except Exception as exc:
+        except Exception:
             LOGGER.exception(
                 "Unhandled GET error",
                 extra={"event": "http_unhandled_error", "context": {"method": "GET", "path": self.path, "request_id": self.request_id}},
@@ -18158,7 +18160,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             status = public_app_error_status(exc)
             headers = {"WWW-Authenticate": "Session"} if status == 401 else None
             self.send_json(status, {"error": redact_text(exc.message)[:1000]}, headers)
-        except Exception as exc:
+        except Exception:
             LOGGER.exception(
                 "Unhandled POST error",
                 extra={"event": "http_unhandled_error", "context": {"method": "POST", "path": self.path, "request_id": self.request_id}},
@@ -18393,7 +18395,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     exc_info=True,
                 )
             self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
-        except Exception as exc:
+        except Exception:
             LOGGER.exception(
                 "Unhandled PUT error",
                 extra={"event": "http_unhandled_error", "context": {"method": "PUT", "path": self.path, "request_id": self.request_id}},

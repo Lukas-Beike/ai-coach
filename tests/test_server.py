@@ -883,7 +883,6 @@ class CoachTests(unittest.TestCase):
             "date": (date.today() + timedelta(days=7)).isoformat(),
             "sport": "Run", "name": "Untouched", "description": "- 20m 60% easy",
         })
-        pending = {item["library_workout_id"]: item for item in server._pending_plan_push_entries()}
         intent = {
             "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
             "artifact_id": None, "ambiguities": [],
@@ -3389,7 +3388,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["cycling_max_hr_bpm"]["note"], "Garmin Connect Herzfrequenzzonen")
 
     def test_garmin_threshold_metrics_are_used_without_confusing_ftp_and_eftp(self):
-        today = server.local_now().date().isoformat()
         server.set_kv("garmin_snapshot", json.dumps({
             "cycling_ftp": {"functionalThresholdPower": 302},
             "running_threshold": {
