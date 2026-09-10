@@ -1746,7 +1746,7 @@ class CoachTests(unittest.TestCase):
         })
         for index in range(500):
             server.add_message("user", f"message {index}")
-        bootstrap = server.public_bootstrap(local_only=True)
+        bootstrap = server.public_bootstrap()
         self.assertEqual(bootstrap["schema_version"], 3)
         self.assertEqual(len(bootstrap["messages"]), 100)
         self.assertEqual(bootstrap["activities"], [])
@@ -1760,7 +1760,7 @@ class CoachTests(unittest.TestCase):
 
     def test_bootstrap_never_refreshes_provider_network(self):
         with patch.object(server, "http_json", side_effect=AssertionError("network")), patch.object(server, "external_call", side_effect=AssertionError("network")):
-            bootstrap = server.public_bootstrap(local_only=False)
+            bootstrap = server.public_bootstrap()
         self.assertEqual(bootstrap["schema_version"], 3)
         self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
 
@@ -1787,7 +1787,7 @@ class CoachTests(unittest.TestCase):
 
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
-            server.public_bootstrap(local_only=True)
+            server.public_bootstrap()
         self.assertEqual(connect.call_count, 1)
 
     def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
@@ -1869,7 +1869,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(status["operation_id"], "operation-test")
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["progress"], 35)
-        bootstrap = server.public_bootstrap(local_only=True)
+        bootstrap = server.public_bootstrap()
         self.assertEqual(bootstrap["sync"]["progress"], 35)
         self.assertEqual(bootstrap["sync"]["message"], "Daten werden gelesen…")
 

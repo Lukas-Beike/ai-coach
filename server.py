@@ -16807,9 +16807,8 @@ def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict
     return result
 
 
-def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
+def public_bootstrap() -> dict[str, Any]:
     """Return bounded local state without waiting for any provider network call."""
-    _ = local_only
     # The startup screen waits for this response. Keep all of its local reads
     # on one connection so SQLCipher is keyed once instead of once per helper.
     # The nested helpers reuse the active DATABASE_CONTEXT connection.
@@ -18014,7 +18013,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 require_auth(self)
                 schedule_morning_checkin()
                 query = parse_qs(urlparse(self.path).query)
-                self.send_json(200, public_bootstrap(local_only=query.get("local", ["0"])[0] == "1"))
+                self.send_json(200, public_bootstrap())
             elif path == "/api/state/events":
                 require_auth(self)
                 self.handle_state_events()
