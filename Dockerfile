@@ -10,9 +10,9 @@ COPY server.py /app/server.py
 COPY backend /app/backend
 COPY garmin-login.py /app/garmin-login.py
 COPY public /app/public
-COPY requirements.txt /app/requirements.txt
+COPY requirements.lock /app/requirements.lock
 
-RUN pip install --no-cache-dir -r /app/requirements.txt \
+RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r /app/requirements.lock \
     && addgroup --system app \
     && adduser --system --ingroup app app \
     && mkdir -p /data \

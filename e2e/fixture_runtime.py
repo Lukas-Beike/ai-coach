@@ -6,13 +6,13 @@ from datetime import timedelta
 
 # This file is mounted only in disposable test containers, never normal startup.
 os.environ.update({
-    "DATA_DIR": "/tmp/coach-fixture-data",
+    "DATA_DIR": "/data/coach-fixture-data",
     "APP_PASSWORD": "e2e-fixture-password-1234",
     "OPENAI_API_KEY": "",
     "INTERVALS_API_KEY": "",
     "GARMIN_EMAIL": "",
     "GARMIN_PASSWORD": "",
-    "GARMINTOKENS": "/tmp/fixture-no-tokens",
+    "GARMINTOKENS": "/data/fixture-no-tokens",
     "GARMIN_FIXTURE_PATH": "",
     "CALENDAR_ICAL_URL": "",
     "COOKIE_SECURE": "false",

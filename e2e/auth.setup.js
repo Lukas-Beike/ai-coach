@@ -4,7 +4,7 @@ const { chromium } = require("@playwright/test");
 
 const AUTH_STATE_PATH = path.join(__dirname, "..", "playwright", ".auth", "user.json");
 
-module.exports = async (config) => {
+async function authenticate(config) {
   const password = process.env.E2E_APP_PASSWORD;
   if (!password || password.length < 12) {
     throw new Error("E2E_APP_PASSWORD must be set to a fake password of at least 12 characters.");
@@ -27,4 +27,6 @@ module.exports = async (config) => {
   } finally {
     await browser.close();
   }
-};
+}
+
+module.exports = authenticate;

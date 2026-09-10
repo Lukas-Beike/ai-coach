@@ -1,3 +1,14 @@
+function secureToken(prefix) {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") return `${prefix}-${cryptoApi.randomUUID()}`;
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    cryptoApi.getRandomValues(bytes);
+    return `${prefix}-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  }
+  throw new Error("Secure random generator unavailable");
+}
+
 const state = {
   data: null,
   route: null,
@@ -62,6 +73,6 @@ const state = {
     timer: null,
     operationId: null,
     channel: null,
-    leaseToken: `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    leaseToken: secureToken("tab"),
   },
 };

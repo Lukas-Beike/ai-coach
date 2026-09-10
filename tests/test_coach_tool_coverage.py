@@ -382,7 +382,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         tools = {tool["name"] for tool in server.COACH_DIALOGUE_TOOLS}
         self.assertEqual({case.split(":")[0] for case in declared}, tools)
         for tool, required in REQUIRED_VARIANTS.items():
-            self.assertTrue({tool + ":" + variant for variant in required} <= declared, tool)
+            self.assertLessEqual({tool + ":" + variant for variant in required}, declared, tool)
         document = (Path(__file__).resolve().parents[1] / "docs" / "coach-tool-coverage.md").read_text(encoding="utf-8")
         documented = set()
         for line in document.splitlines():

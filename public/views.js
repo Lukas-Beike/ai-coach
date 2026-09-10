@@ -2,24 +2,71 @@ function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
 }
 
+function replaceMarkdownLinks(value) {
+  let html = "";
+  let cursor = 0;
+  while (cursor < value.length) {
+    const labelStart = value.indexOf("[", cursor);
+    if (labelStart < 0) return html + value.slice(cursor);
+    const linkStart = value.indexOf("](", labelStart + 1);
+    if (linkStart < 0) return html + value.slice(cursor);
+    const urlEnd = value.indexOf(")", linkStart + 2);
+    if (urlEnd < 0) return html + value.slice(cursor);
+    const label = value.slice(labelStart + 1, linkStart);
+    const url = value.slice(linkStart + 2, urlEnd);
+    const validScheme = url.startsWith("https://") || url.startsWith("http://");
+    const validUrl = validScheme && label && !url.includes("(") && !url.includes(")") && url === url.trim();
+    if (!validUrl) {
+      html += value.slice(cursor, labelStart + 1);
+      cursor = labelStart + 1;
+      continue;
+    }
+    html += value.slice(cursor, labelStart);
+    html += `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    cursor = urlEnd + 1;
+  }
+  return html;
+}
+
 function inlineMarkdown(value) {
   let html = escapeHtml(value);
   const codeSpans = [];
   html = html.replace(/`([^`\n]+)`/g, (_, code) => {
-    const token = `\u0000code${codeSpans.length}\u0000`;
+    const token = `\uE000COACHCODESPAN${codeSpans.length}\uE001`;
     codeSpans.push(`<code>${code}</code>`);
     return token;
   });
-  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  html = replaceMarkdownLinks(html);
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
   html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
   html = html.replace(/_([^_\n]+)_/g, "<em>$1</em>");
-  return html.replace(/\u0000code(\d+)\u0000/g, (_, index) => codeSpans[Number(index)]);
+  return html.replace(/\uE000COACHCODESPAN(\d+)\uE001/g, (_, index) => codeSpans[Number(index)]);
+}
+
+function headingFromMarkdownLine(line) {
+  const trimmed = line.trimStart();
+  let level = 0;
+  while (level < trimmed.length && trimmed[level] === "#") level += 1;
+  if (!level || level > 3 || !trimmed[level] || trimmed[level].trim()) return null;
+  return { level, text: trimmed.slice(level).trim() };
+}
+
+function listItemFromMarkdownLine(line) {
+  const trimmed = line.trimStart();
+  const marker = trimmed[0];
+  if (marker && "-*+".includes(marker) && trimmed[1] && !trimmed[1].trim()) {
+    return { type: "ul", text: trimmed.slice(2).trimStart() };
+  }
+  let digitCount = 0;
+  while (digitCount < trimmed.length && trimmed[digitCount] >= "0" && trimmed[digitCount] <= "9") digitCount += 1;
+  const orderedMarker = trimmed[digitCount];
+  if (!digitCount || !orderedMarker || !".)".includes(orderedMarker) || !trimmed[digitCount + 1] || trimmed[digitCount + 1].trim()) return null;
+  return { type: "ol", text: trimmed.slice(digitCount + 1).trimStart() };
 }
 
 function markdownToHtml(markdown) {
-  const lines = String(markdown || "").replace(/\r/g, "").split("\n");
+  const lines = String(markdown || "").replaceAll("\r", "").split("\n");
   const output = [];
   let paragraph = [];
   let listType = null;
@@ -32,7 +79,7 @@ function markdownToHtml(markdown) {
   };
   const flushParagraph = () => {
     if (paragraph.length) {
-      output.push(`<p>${inlineMarkdown(paragraph.join("\n")).replace(/\n/g, "<br>")}</p>`);
+      output.push(`<p>${inlineMarkdown(paragraph.join("\n")).replaceAll("\n", "<br>")}</p>`);
       paragraph = [];
     }
   };
@@ -49,19 +96,18 @@ function markdownToHtml(markdown) {
     }
     if (inCode) { codeLines.push(line); continue; }
     if (!line.trim()) { flushParagraph(); closeList(); continue; }
-    const heading = line.match(/^\s*(#{1,3})\s+(.+?)\s*#*\s*$/);
-    if (heading) { flushParagraph(); closeList(); output.push(`<h${heading[1].length}>${inlineMarkdown(heading[2])}</h${heading[1].length}>`); continue; }
+    const heading = headingFromMarkdownLine(line);
+    if (heading) { flushParagraph(); closeList(); output.push(`<h${heading.level}>${inlineMarkdown(heading.text.replace(/#+$/, "").trim())}</h${heading.level}>`); continue; }
     if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) { flushParagraph(); closeList(); output.push("<hr>"); continue; }
-    const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
-    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
-    if (unordered || ordered) {
+    const listItem = listItemFromMarkdownLine(line);
+    if (listItem) {
       flushParagraph();
-      const nextType = unordered ? "ul" : "ol";
+      const nextType = listItem.type;
       if (listType !== nextType) { closeList(); output.push(`<${nextType}>`); listType = nextType; }
-      output.push(`<li>${inlineMarkdown((unordered || ordered)[1])}</li>`);
+      output.push(`<li>${inlineMarkdown(listItem.text)}</li>`);
       continue;
     }
-    const quote = line.match(/^\s*>\s?(.*)$/);
+    const quote = /^\s*>\s?(.*)$/.exec(line);
     if (quote) { flushParagraph(); closeList(); output.push(`<blockquote>${inlineMarkdown(quote[1])}</blockquote>`); continue; }
     closeList(); paragraph.push(line);
   }
@@ -90,12 +136,12 @@ function timezoneDateKey(timeZone, instant = new Date()) {
     const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(instant);
     const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
     return `${values.year}-${values.month}-${values.day}`;
-  } catch (_) { return localDateKey(instant); }
+  } catch (error) { void error; return localDateKey(instant); }
 }
 
 function dateFromKey(value) {
-  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date(NaN);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date(Number.NaN);
 }
 
 function addDateKey(value, days) {

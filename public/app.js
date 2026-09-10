@@ -32,11 +32,13 @@ function updateMobileViewportLayout() {
   const input = $("#messageInput");
   const inputFocused = document.activeElement === input;
   const screenOrientation = window.screen?.orientation?.type || "";
-  const orientation = screenOrientation
-    ? (screenOrientation.startsWith("landscape") ? "landscape" : "portrait")
-    : ((window.screen?.width || viewportWidth) > (window.screen?.height || viewportHeight) ? "landscape" : "portrait");
-  if (!inputFocused) mobileViewportBaselines[orientation] = viewportHeight;
-  else if (!mobileViewportBaselines[orientation]) mobileViewportBaselines[orientation] = viewportHeight;
+  let orientation;
+  if (screenOrientation) {
+    orientation = screenOrientation.startsWith("landscape") ? "landscape" : "portrait";
+  } else {
+    orientation = (window.screen?.width || viewportWidth) > (window.screen?.height || viewportHeight) ? "landscape" : "portrait";
+  }
+  if (!inputFocused || !mobileViewportBaselines[orientation]) mobileViewportBaselines[orientation] = viewportHeight;
   const keyboardOpen = hasTouchFirstInput()
     && inputFocused
     && mobileViewportBaselines[orientation] - viewportHeight >= 100;
@@ -163,7 +165,7 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   if (mainRoute === "coach") {
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
     else if (state.chatInitialScrollPending) scrollChatToLatest();
-    else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest(true);
+    else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest();
     if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground(state.chatContentVersion);
   } else requestAnimationFrame(() => {
     if (!shouldFocusPlannedToday || !focusPlannedToday()) window.scrollTo({ top: 0, behavior: "auto" });
@@ -192,7 +194,7 @@ function readLastPwaActivity() {
 }
 
 function savePwaActivity() {
-  try { localStorage.setItem(LAST_PWA_ACTIVITY_KEY, String(Date.now())); } catch (_) {}
+  try { localStorage.setItem(LAST_PWA_ACTIVITY_KEY, String(Date.now())); } catch (error) { void error; }
 }
 
 function notePwaActivity() {
@@ -209,7 +211,7 @@ function renderQuickMessageTemplates() {
   if (root) root.hidden = !state.quickTemplatesVisible || state.busy;
 }
 
-function checkPwaReturn() {
+function updatePwaActivity() {
   if (!state.data || document.visibilityState !== "visible") return;
   const lastActivity = readLastPwaActivity();
   if (lastActivity && Date.now() - lastActivity >= QUICK_TEMPLATES_INACTIVITY_MS) state.quickTemplatesVisible = true;
@@ -217,13 +219,8 @@ function checkPwaReturn() {
   renderQuickMessageTemplates();
 }
 
-function handlePwaInteraction() {
-  if (!state.data || document.visibilityState !== "visible") return;
-  const lastActivity = readLastPwaActivity();
-  if (lastActivity && Date.now() - lastActivity >= QUICK_TEMPLATES_INACTIVITY_MS) state.quickTemplatesVisible = true;
-  savePwaActivity();
-  renderQuickMessageTemplates();
-}
+const checkPwaReturn = updatePwaActivity;
+const handlePwaInteraction = updatePwaActivity;
 
 function cookie(name) {
   return document.cookie.split("; ").find((part) => part.startsWith(`${name}=`))?.split("=").slice(1).join("=") || "";
@@ -389,7 +386,10 @@ function handleStateEvent(event) {
   const areas = {
     coach: ["chat"],
     planning: ["plan", "library"],
-    provider: payload.status === "loading" ? [] : payload.area === "performance" ? ["performance"] : ["activities", "performance"],
+    provider: (() => {
+      if (payload.status === "loading") return [];
+      return payload.area === "performance" ? ["performance"] : ["activities", "performance"];
+    })(),
     job: [],
     sync: ["activities", "performance", "plan", "library"],
   }[event.type];
@@ -451,11 +451,11 @@ function releaseSyncPollLease() {
   try {
     const current = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
     if (current?.token === state.syncPoll.leaseToken) localStorage.removeItem(SYNC_POLL_LEASE_KEY);
-  } catch (_) {}
+  } catch (error) { void error; }
 }
 
 function broadcastSyncMessage(message) {
-  try { state.syncPoll.channel?.postMessage(message); } catch (_) {}
+  try { state.syncPoll.channel?.postMessage(message); } catch (error) { void error; }
 }
 
 function changedSyncAreas(nextVersions) {
@@ -482,7 +482,7 @@ function renderSyncStatus(status) {
   renderMaintenanceStatus(status.maintenance);
   if (!state.data) return;
   state.data.sync = {
-    ...(state.data.sync || {}),
+    ...state.data.sync,
     running: Boolean(status.running),
     status: status.message || null,
     message: status.message || null,
@@ -741,7 +741,10 @@ function updateChatControls() {
   }
   if (sendButton) {
     sendButton.disabled = state.chatAttachmentsLoading || !chatReady || !hasDraft || !inputAvailable || chatIsResuming || chatIsReconciling;
-    sendButton.textContent = chatIsReconciling ? "Antwort wird geladen…" : chatIsResuming ? "Coach antwortet…" : state.busy ? "Einreihen" : "Senden";
+    if (chatIsReconciling) sendButton.textContent = "Antwort wird geladen…";
+    else if (chatIsResuming) sendButton.textContent = "Coach antwortet…";
+    else if (state.busy) sendButton.textContent = "Einreihen";
+    else sendButton.textContent = "Senden";
   }
   if (steerButton) {
     steerButton.hidden = !state.busy || chatIsResuming || chatIsReconciling;
@@ -756,7 +759,9 @@ function updateChatControls() {
   const progress = $("#chatOperationStatus");
   if (progress) {
     progress.hidden = !state.busy;
-    $("#chatOperationLabel").textContent = chatIsReconciling ? "Antwort wird übernommen" : chatIsResuming ? "Coach-Auftrag wird fortgesetzt" : "Coach arbeitet";
+    if (chatIsReconciling) $("#chatOperationLabel").textContent = "Antwort wird übernommen";
+    else if (chatIsResuming) $("#chatOperationLabel").textContent = "Coach-Auftrag wird fortgesetzt";
+    else $("#chatOperationLabel").textContent = "Coach arbeitet";
   }
   updateChatQueueStatus();
 }
@@ -883,7 +888,10 @@ function renderNotificationStatus() {
   const button = $("#notificationEnableButton");
   const permission = notificationPermission();
   if (!node || !button) return;
-  node.textContent = permission === "granted" ? "Aktiv" : permission === "denied" ? "Im Browser blockiert" : permission === "unsupported" ? "Von diesem Browser nicht unterstützt" : "Noch nicht aktiviert";
+  if (permission === "granted") node.textContent = "Aktiv";
+  else if (permission === "denied") node.textContent = "Im Browser blockiert";
+  else if (permission === "unsupported") node.textContent = "Von diesem Browser nicht unterstützt";
+  else node.textContent = "Noch nicht aktiviert";
   button.disabled = permission === "granted" || permission === "unsupported";
   button.textContent = permission === "granted" ? "Aktiviert" : "Benachrichtigungen aktivieren";
 }
@@ -901,7 +909,7 @@ async function showPwaNotification(title, options, key) {
   try {
     const registration = await navigator.serviceWorker.ready;
     await registration.showNotification(title, { icon: "/icon.svg", badge: "/icon.svg", ...options });
-  } catch (_) {}
+  } catch (error) { void error; }
 }
 
 function notifyState(data) {
@@ -926,15 +934,14 @@ function renderAdaptivePlanning(data) {
   const changes = Array.isArray(preview?.changes) ? preview.changes : [];
   const illness = String(data.local_feedback?.today?.illness || "").trim();
   const previewIllness = String(preview?.illness_pause?.illness || "").trim();
-  const illnessNeedsForecast = Boolean(illness && (!preview || !preview.illness_pause || previewIllness !== illness || !preview.illness_pause.approved));
+  const illnessNeedsForecast = Boolean(illness && (!preview?.illness_pause || previewIllness !== illness || !preview.illness_pause?.approved));
   const pendingIllnessPause = Boolean(preview?.status === "preview" && preview?.illness_pause && !preview.illness_pause.approved);
   const required = Boolean(planning.needs_replan || illnessNeedsForecast || pendingIllnessPause);
   const count = Number(planning.replan_changes || changes.length);
-  const caption = illnessNeedsForecast || pendingIllnessPause
-    ? "Krankheit gemeldet: Sportpause prognostizieren und bestätigen."
-    : count === 1
-    ? "Ein zukünftiger Entwurf braucht eine Anpassung."
-    : `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
+  let caption;
+  if (illnessNeedsForecast || pendingIllnessPause) caption = "Krankheit gemeldet: Sportpause prognostizieren und bestätigen.";
+  else if (count === 1) caption = "Ein zukünftiger Entwurf braucht eine Anpassung.";
+  else caption = `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
   const coachNotice = $("#coachAdaptivePlanningNotice");
   if (coachNotice) {
     coachNotice.hidden = !required;
@@ -948,7 +955,9 @@ function renderExternalCalendar(data) {
   const status = $("#externalCalendarConnectionStatus");
   const syncButton = $("#externalCalendarSyncButton");
   if (status) {
-    status.textContent = calendar.configured ? (calendar.last_error ? "Fehler bei letzter Aktualisierung" : "Konfiguriert · nur lesend") : "Nicht konfiguriert";
+    if (!calendar.configured) status.textContent = "Nicht konfiguriert";
+    else if (calendar.last_error) status.textContent = "Fehler bei letzter Aktualisierung";
+    else status.textContent = "Konfiguriert · nur lesend";
     status.className = calendar.configured && !calendar.last_error ? "configured" : "not-configured";
   }
   if (syncButton) {
@@ -1017,7 +1026,7 @@ function progressPercentage(value) {
 }
 
 function garminWindowProgress(message) {
-  const match = String(message || "").match(/Zeitraum\s+(\d+)\/(\d+)/i);
+  const match = /Zeitraum\s+(\d+)\/(\d+)/i.exec(String(message || ""));
   if (!match) return null;
   const current = Number(match[1]);
   const total = Number(match[2]);
@@ -1077,9 +1086,13 @@ function renderConnectionsSyncProgress(data) {
       const total = Number(job.progress?.total || 0);
       const progress = total > 0 ? Math.round((completed / total) * 100) : null;
       const label = coachProviderLabel(job.provider);
-      const message = job.status === "queued"
-        ? "Wartet auf den Start der Synchronisierung…"
-        : total > 0 ? `${completed}/${total} Arbeitsschritt${total === 1 ? "" : "e"} abgeschlossen` : "Synchronisierung läuft…";
+      let message;
+      if (job.status === "queued") message = "Wartet auf den Start der Synchronisierung…";
+      else if (total > 0) {
+        const suffix = total === 1 ? "" : "e";
+        message = `${completed}/${total} Arbeitsschritt${suffix} abgeschlossen`;
+      }
+      else message = "Synchronisierung läuft…";
       entries.push(connectionProgressEntry(label, message, progress));
     });
   root.hidden = !entries.length;
@@ -1192,7 +1205,7 @@ function addStructuredCoachReceipts(payload) {
   const planCommitRequested = payload?.intent?.operation === "commit_training_plan"
     || payload?.intent?.follow_up_operations?.includes("commit_training_plan")
     || commands.some((entry) => entry.tool === "commit_training_plan");
-  const finalCommit = commands.filter((entry) => entry.tool === "commit_training_plan").at(-1);
+  const finalCommit = commands.findLast((entry) => entry.tool === "commit_training_plan");
   // Receipts describe this turn's outcome, not its internal draft/retry history.
   state.coachReceipts = [];
   renderCoachReceipts();
@@ -1204,17 +1217,30 @@ function addStructuredCoachReceipts(payload) {
     if (entry.tool === "get_sync_job" && result.job) {
       const job = result.job;
       const status = { queued: "Synchronisierung beauftragt", running: "Synchronisierung läuft", completed: "Synchronisierung abgeschlossen", partial: "Synchronisierung teilweise abgeschlossen", failed: "Synchronisierung fehlgeschlagen" }[job.status] || "Synchronisierungsstatus unklar";
-      addCoachReceipt({ title: status, message: job.error_detail || status, status: ["partial", "failed"].includes(job.status) ? "error" : job.status === "completed" ? "success" : "pending" });
+      let receiptStatus = "pending";
+      if (["partial", "failed"].includes(job.status)) receiptStatus = "error";
+      else if (job.status === "completed") receiptStatus = "success";
+      addCoachReceipt({ title: status, message: job.error_detail || status, status: receiptStatus });
       continue;
     }
     const failed = result.ok === false;
     const queued = Boolean(result.sync_job_id || result.job_id || result.job?.id || result.status === "queued");
     const completedRefresh = entry.tool === "start_provider_refresh" && result.status === "completed";
-    const title = failed ? "Coach-Aktion fehlgeschlagen" : completedRefresh ? "Daten aktualisiert" : labels[entry.tool] || (queued ? "Synchronisierung beauftragt" : "Informationen geladen");
+    let title;
+    if (failed) title = "Coach-Aktion fehlgeschlagen";
+    else if (completedRefresh) title = "Daten aktualisiert";
+    else title = labels[entry.tool] || (queued ? "Synchronisierung beauftragt" : "Informationen geladen");
     const details = [];
     if (Array.isArray(result.library_entry_ids) && result.library_entry_ids.length) details.push(`${result.library_entry_ids.length} lokale Einheit(en) gespeichert`);
     if (result.remote_untouched) details.push("Providerdaten unverändert");
-    addCoachReceipt({ title, message: failed ? (result.error || "Die Aktion konnte nicht ausgeführt werden.") : queued ? "Der Auftrag wird im Hintergrund bearbeitet; das Ergebnis steht noch aus." : "Der lokale Beleg liegt vor.", status: failed ? "error" : queued ? "pending" : "success", details });
+    let message;
+    if (failed) message = result.error || "Die Aktion konnte nicht ausgeführt werden.";
+    else if (queued) message = "Der Auftrag wird im Hintergrund bearbeitet; das Ergebnis steht noch aus.";
+    else message = "Der lokale Beleg liegt vor.";
+    let receiptStatus = "success";
+    if (failed) receiptStatus = "error";
+    else if (queued) receiptStatus = "pending";
+    addCoachReceipt({ title, message, status: receiptStatus, details });
   }
 }
 
@@ -1438,9 +1464,11 @@ function renderActivities(activities) {
     empty.className = "empty";
     const title = document.createElement("strong");
     title.textContent = list.length ? "Keine passenden Einheiten" : "Noch keine absolvierten Einheiten";
-    empty.append(title, document.createTextNode(list.length
-      ? state.activityFromDate || state.activityToDate ? "Passe den Zeitraum an oder setze den Filter zurück." : "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück."
-      : "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen."));
+      let emptyMessage;
+      if (!list.length) emptyMessage = "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen.";
+      else if (state.activityFromDate || state.activityToDate) emptyMessage = "Passe den Zeitraum an oder setze den Filter zurück.";
+      else emptyMessage = "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück.";
+      empty.append(title, document.createTextNode(emptyMessage));
     root.append(empty);
   }
   displayedActivities.slice(0, state.activityVisibleCount).forEach((activity) => {
@@ -1666,16 +1694,21 @@ async function executeCoachActionProposal(proposal, button) {
     renderCoachActionReview();
     const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
     const undo = proposal.action_type === "undo_change";
-    const receiptMessage = undo ? "Die lokale Änderung wurde zurückgenommen." : duplicateDelete
-      ? "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten."
-      : result.local_planned
-      ? `${result.local_planned} Einheit(en) lokal geplant.`
-      : "Planung lokal gespeichert.";
-    addCoachReceipt({
-      title: undo ? "Änderung zurückgenommen" : duplicateDelete ? "Duplikat gelöscht" : "Planung gespeichert",
-      message: receiptMessage,
-      details: duplicateDelete ? ["Wahoo bleibt die kanonische Radaufzeichnung"] : [result.sync_job_ids?.length ? `${result.sync_job_ids.length} Syncjobs eingereiht` : result.sync_job_id ? `Syncjob ${result.sync_job_id} eingereiht` : "Keine implizite Remote-Änderung"],
-    });
+    let receiptMessage;
+    if (undo) receiptMessage = "Die lokale Änderung wurde zurückgenommen.";
+    else if (duplicateDelete) receiptMessage = "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten.";
+    else if (result.local_planned) receiptMessage = `${result.local_planned} Einheit(en) lokal geplant.`;
+    else receiptMessage = "Planung lokal gespeichert.";
+    let receiptTitle;
+    if (undo) receiptTitle = "Änderung zurückgenommen";
+    else if (duplicateDelete) receiptTitle = "Duplikat gelöscht";
+    else receiptTitle = "Planung gespeichert";
+    let receiptDetails;
+    if (duplicateDelete) receiptDetails = ["Wahoo bleibt die kanonische Radaufzeichnung"];
+    else if (result.sync_job_ids?.length) receiptDetails = [`${result.sync_job_ids.length} Syncjobs eingereiht`];
+    else if (result.sync_job_id) receiptDetails = [`Syncjob ${result.sync_job_id} eingereiht`];
+    else receiptDetails = ["Keine implizite Remote-Änderung"];
+    addCoachReceipt({ title: receiptTitle, message: receiptMessage, details: receiptDetails });
     toast(receiptMessage);
     await load("/api/bootstrap?local=1", duplicateDelete ? ["activities"] : ["plan", "library", "profile", "feedback"]);
     if (!duplicateDelete && !undo) applyNavigationRoute("plan", { historyMode: "push" });
@@ -1725,7 +1758,7 @@ function rememberChatTurn(clientTurnId) {
   try {
     if (clientTurnId) sessionStorage.setItem("coachPendingTurn", clientTurnId);
     else sessionStorage.removeItem("coachPendingTurn");
-  } catch (_) {}
+  } catch (error) { void error; }
 }
 
 function applyChatReceipt(receipt) {
@@ -1905,7 +1938,7 @@ function scrollChatToResponseStart() {
     const responseId = state.chatRequest?.responseMessageId ?? state.chatResponseMessageId;
     const target = root.querySelector(".message.assistant.streaming")
       || (responseId == null ? null : assistants.find((node) => node.dataset.messageId === String(responseId)))
-      || (!state.chatRequest ? assistants[assistants.length - 1] : null);
+      || (!state.chatRequest ? assistants.at(-1) : null);
     if (!target) {
       state.chatResponseScrollPending = true;
       return;
@@ -2000,7 +2033,10 @@ function renderContextPreview(preview) {
     content.append(details);
   });
   status.classList.remove("error");
-  status.textContent = `Zuletzt erstellt: ${formatTime(preview.generated_at)}${preview.snapshot_compacted ? " (Snapshot für den Coach kompakt aufbereitet)" : preview.snapshot_truncated ? " (Snapshot im Coach-Kontext gekürzt)" : ""}`;
+  let snapshotNote = "";
+  if (preview.snapshot_compacted) snapshotNote = " (Snapshot für den Coach kompakt aufbereitet)";
+  else if (preview.snapshot_truncated) snapshotNote = " (Snapshot im Coach-Kontext gekürzt)";
+  status.textContent = `Zuletzt erstellt: ${formatTime(preview.generated_at)}${snapshotNote}`;
   content.hidden = false;
 }
 
@@ -2035,7 +2071,7 @@ function renderTrainingPlans(plans, workouts) {
   const root = $("#trainingPlans");
   if (!root) return;
   root.replaceChildren();
-  const entries = (workouts || []).filter((item) => item && item.plan_id && !item.archived);
+  const entries = (workouts || []).filter((item) => item?.plan_id && !item?.archived);
   if (!Array.isArray(plans) || !plans.length) return;
   const heading = document.createElement("h3");
   heading.className = "subsection-title";
@@ -2108,7 +2144,7 @@ function plannedAppointmentLabel(event) {
   if (!event || typeof event !== "object") return "";
   const name = String(event.name || "Trainingstermin").trim() || "Trainingstermin";
   if (event.all_day) return `${name} · ganztägig`;
-  const time = String(event.start_local || "").match(/(?:T|\s)(\d{2}:\d{2})/);
+  const time = /(?:T|\s)(\d{2}:\d{2})/.exec(String(event.start_local || ""));
   return time ? `${name} · ${time[1]}` : name;
 }
 
@@ -2184,8 +2220,8 @@ function plannedDayInsights(context, weather, dateKey, todayKey) {
       && Number(weather.wind_direction_dominant) <= 360 ? weatherDirection(weather.wind_direction_dominant) : "";
     const peakTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(weather.rain_peak_time || "") ? weather.rain_peak_time : "";
     const values = [
-      calendarMetricNumber(weather.precipitation_probability_max, ` % Regen${peakTime ? ` (max. ${peakTime} Uhr)` : ""}`),
-      calendarMetricNumber(weather.wind_speed_max, ` km/h Wind${direction ? ` ${direction}` : ""}`),
+      calendarMetricNumber(weather.precipitation_probability_max, ` % Regen${peakTime ? " (max. " + peakTime + " Uhr)" : ""}`),
+      calendarMetricNumber(weather.wind_speed_max, ` km/h Wind${direction ? " " + direction : ""}`),
       calendarMetricNumber(weather.wind_gusts_max, " km/h Böen"),
     ].filter(Boolean);
     if (peakTime && weather.precipitation_probability_max == null) values.unshift(`Regen am ehesten ${peakTime} Uhr`);
@@ -2270,7 +2306,7 @@ function calendarIntensityLabel(value) {
 }
 
 function calendarStartTime(value) {
-  const match = String(value || "").match(/(?:T|\s)(\d{2}:\d{2})/);
+  const match = /(?:T|\s)(\d{2}:\d{2})/.exec(String(value || ""));
   return match ? match[1] : null;
 }
 
@@ -2337,7 +2373,7 @@ function renderPlanned(trainingCalendar) {
   root.replaceChildren();
   const weeklyCompliance = new Map(
     (Array.isArray(state.data?.planning_compliance) ? state.data.planning_compliance : [])
-      .filter((item) => item && item.week_start)
+      .filter((item) => item?.week_start)
       .map((item) => [String(item.week_start).slice(0, 10), item]),
   );
   const lastDateKey = addDateKey(firstWeekKey, ((pastWeeks + futureWeeks + 1) * 7) - 1);
@@ -2348,7 +2384,7 @@ function renderPlanned(trainingCalendar) {
   if (summary) summary.textContent = calendarCountLabel(entries, todayKey) || "Keine Einheiten im Zeitraum";
   const planningContextByDate = new Map(
     (Array.isArray(state.data?.daily_planning_context) ? state.data.daily_planning_context : [])
-      .filter((item) => item && item.date)
+      .filter((item) => item?.date)
       .map((item) => [String(item.date).slice(0, 10), item]),
   );
   const eventsByDate = new Map();
@@ -2388,7 +2424,7 @@ function renderPlanned(trainingCalendar) {
       const dayEntries = eventsByDate.get(dateKey) || [];
       const dayContext = planningContextByDate.get(dateKey) || {};
       const weather = dayContext.weather || (Array.isArray(state.data?.weather?.days)
-        ? state.data.weather.days.find((item) => item && item.date === dateKey)
+        ? state.data.weather.days.find((item) => item?.date === dateKey)
         : null);
       const day = document.createElement("section");
       day.className = `planned-day${dateKey === todayKey ? " is-today" : ""}`;
@@ -2421,9 +2457,9 @@ function renderPlanned(trainingCalendar) {
         const weatherMissing = document.createElement("span");
         weatherMissing.className = "planned-day-weather is-missing";
         weatherMissing.textContent = "Wetter fehlt";
-        weatherMissing.title = !state.data?.weather?.configured
-          ? "Kein Wetterort im Profil hinterlegt"
-          : dateKey < todayKey ? "Für diesen Tag wurde keine Vorhersage gespeichert" : "Für diesen Tag ist keine Vorhersage verfügbar";
+        if (!state.data?.weather?.configured) weatherMissing.title = "Kein Wetterort im Profil hinterlegt";
+        else if (dateKey < todayKey) weatherMissing.title = "Für diesen Tag wurde keine Vorhersage gespeichert";
+        else weatherMissing.title = "Für diesen Tag ist keine Vorhersage verfügbar";
         dayHeading.append(weatherMissing);
       }
       day.append(dayHeading);
@@ -2474,10 +2510,14 @@ function renderPlanned(trainingCalendar) {
         const meta = document.createElement("span");
         meta.className = "planned-meta";
         const displayed = actual || entry;
+        let durationLabel;
+        if (actual) durationLabel = formatDuration(actual.moving_time ?? actual.elapsed_time);
+        else if (entry.duration_minutes) durationLabel = `${entry.duration_minutes} Min.`;
+        else durationLabel = formatDuration(entry.moving_time);
         meta.textContent = [
           activitySportLabel(displayed),
           calendarStartTime(displayed.start_date_local),
-          actual ? formatDuration(actual.moving_time ?? actual.elapsed_time) : entry.duration_minutes ? `${entry.duration_minutes} Min.` : formatDuration(entry.moving_time),
+          durationLabel,
         ].filter(Boolean).join(" · ");
         cardSummary.append(cardTitle, meta);
         if (status === "completed" || status === "missed") {
@@ -2634,8 +2674,8 @@ function renderProfile(profile) {
     const field = form.elements[key];
     if (!field) continue;
     if (key === "sports" && field.multiple) {
-      const selectedSports = String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
-      [...field.options].forEach((option) => { option.selected = selectedSports.includes(option.value); });
+      const selectedSports = new Set(String(value || "").split(",").map((item) => item.trim()).filter(Boolean));
+      [...field.options].forEach((option) => { option.selected = selectedSports.has(option.value); });
       continue;
     }
     if (key === "timezone" && field.tagName === "SELECT") {
@@ -2839,9 +2879,12 @@ function renderCompetitions(competitions) {
   const summary = $("#plannedCompetitionsSummary");
   if (summary) {
     const next = competitions.filter((competition) => competition.event_date).sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)))[0];
-    summary.textContent = competitions.length
-      ? `${competitions.length} ${competitions.length === 1 ? "Wettkampf" : "Wettkämpfe"}${next ? ` · nächster ${dateLabel(next.event_date)}` : ""}`
-      : "Noch keine Wettkämpfe";
+    if (!competitions.length) summary.textContent = "Noch keine Wettkämpfe";
+    else {
+      const competitionLabel = competitions.length === 1 ? "Wettkampf" : "Wettkämpfe";
+      const nextLabel = next ? ` · nächster ${dateLabel(next.event_date)}` : "";
+      summary.textContent = `${competitions.length} ${competitionLabel}${nextLabel}`;
+    }
   }
   root.replaceChildren();
   if (!competitions.length) {
@@ -2872,7 +2915,7 @@ function askCoachAboutCompetitions() {
 
 function formatLocalCompetitionTime(value) {
   const raw = String(value || "");
-  const match = raw.match(/(?:T|\s)(\d{2}:\d{2})(?::\d{2})?/);
+  const match = /(?:T|\s)(\d{2}:\d{2})(?::\d{2})?/.exec(raw);
   return match ? match[1] : formatTime(value);
 }
 
@@ -2897,15 +2940,22 @@ function formatPace(seconds) {
 }
 
 function comparisonText(comparison) {
-  if (!comparison || comparison.delta == null) return null;
+  if (comparison?.delta == null) return null;
   const delta = Number(comparison.delta);
   if (!Number.isFinite(delta)) return null;
-  const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
+  let sign;
+  if (delta > 0) sign = "+";
+  else if (delta < 0) sign = "−";
+  else sign = "±";
   const precision = comparison.unit === "" || comparison.unit === "bpm" || comparison.unit === "ms" ? 0 : 1;
   const amount = Math.abs(delta).toFixed(precision).replace(".", ",");
   const unit = comparison.unit ? ` ${comparison.unit}` : "";
-  const arrow = comparison.direction === "up" ? "↑" : comparison.direction === "down" ? "↓" : "→";
-  return { text: `${arrow} ${sign}${amount}${unit}`, className: comparison.color || "neutral", title: `Vergleich zum ${comparison.label || `${comparison.days}-Tage-Durchschnitt`}` };
+  let arrow;
+  if (comparison.direction === "up") arrow = "↑";
+  else if (comparison.direction === "down") arrow = "↓";
+  else arrow = "→";
+  const comparisonLabel = comparison.label || `${comparison.days}-Tage-Durchschnitt`;
+  return { text: `${arrow} ${sign}${amount}${unit}`, className: comparison.color || "neutral", title: `Vergleich zum ${comparisonLabel}` };
 }
 
 function metricSourceClass(source) {
@@ -2930,7 +2980,9 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   const source = document.createElement("small");
   const value = metricData && typeof metricData === "object" ? metricData.value : metricData;
   const unit = metricData && typeof metricData === "object" ? metricData.unit : "";
-  metric.textContent = value == null ? "—" : (formatter ? formatter(value) : `${value}${unit ? ` ${unit}` : ""}`);
+  if (value == null) metric.textContent = "—";
+  else if (formatter) metric.textContent = formatter(value);
+  else metric.textContent = `${value}${unit ? " " + unit : ""}`;
   caption.textContent = label;
   source.textContent = metricData?.source || "Nicht verfügbar";
   const freshnessLabel = { stale: "Veraltet", partial: "Teilweise aktualisiert", unknown: "Aktualität unbekannt" }[metricData?.freshness];
@@ -2938,7 +2990,8 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   if (metricData?.observed_at) source.textContent += ` · Messung ${dateLabel(String(metricData.observed_at).slice(0, 10))}`;
   else if (freshnessLabel && metricData?.fetched_at) source.textContent += ` · Stand ${formatTime(metricData.fetched_at)}`;
   if (metricData?.measurement_status === "earlier" && Number.isFinite(metricData.measurement_age_days)) {
-    source.textContent += ` · ${metricData.measurement_age_days} ${metricData.measurement_age_days === 1 ? "Tag" : "Tage"} alt`;
+    const ageLabel = metricData.measurement_age_days === 1 ? "Tag" : "Tage";
+    source.textContent += ` · ${metricData.measurement_age_days} ${ageLabel} alt`;
   } else if (metricData?.measurement_status === "unknown") source.textContent += " · Messdatum unbekannt";
   else if (metricData?.measurement_status === "future") source.textContent += " · Messdatum liegt in der Zukunft";
   source.title = [metricData?.note || metricData?.source || "", metricData?.fetched_at ? `Abgerufen ${formatTime(metricData.fetched_at)}` : ""].filter(Boolean).join(" · ");
@@ -2971,7 +3024,8 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
     input.type = "number";
     input.step = editable.step || "any";
     input.min = editable.min ?? "0";
-    input.value = state.data?.profile?.[editable.key] || (value == null ? "" : value);
+    if (state.data?.profile?.[editable.key]) input.value = state.data.profile[editable.key];
+    else input.value = value == null ? "" : value;
     input.hidden = true;
     edit.addEventListener("click", () => {
       const editing = item.classList.toggle("editing");
@@ -2991,7 +3045,7 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
 }
 
 async function saveInlineMetric(key, value, button) {
-  const profile = { ...(state.data?.profile || {}), [key]: String(value || "").trim() };
+  const profile = { ...state.data?.profile, [key]: String(value || "").trim() };
   button.disabled = true;
   try {
     const saved = await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
@@ -3059,7 +3113,9 @@ function renderPerformance(performance) {
   const comparisons = performance.comparisons || {};
   const week = performance.rolling_training?.last_7_days || {};
   const refreshedAt = performance.as_of || state.data?.performance_refresh?.last_refresh_at || state.data?.sync?.last_sync_at;
-  const performanceDetail = syncNotices.length ? syncNotices.join(" · ") : refreshedAt ? `Letzte Aktualisierung: ${formatTime(refreshedAt)}` : "";
+  let performanceDetail = "";
+  if (syncNotices.length) performanceDetail = syncNotices.join(" · ");
+  else if (refreshedAt) performanceDetail = `Letzte Aktualisierung: ${formatTime(refreshedAt)}`;
   const compared = (value, key) => value && typeof value === "object" ? { ...value, comparison: comparisons[key] } : { value, comparison: comparisons[key] };
   performanceSection(root, "Gesundheitsdaten", [
     ["Gewicht", compared(values.weight_kg, "weight_kg_30d"), null, { key: "weight_kg", step: "0.1" }],
@@ -3208,56 +3264,59 @@ function renderSettings(data) {
     node.className = ok ? "configured" : "not-configured";
   };
   const openaiHealthy = configured.openai && (activeProvider !== "openai" || openaiStatus.state !== "error");
+  let openaiStatusLabel = "Konfiguriert";
+  if (!configured.openai) openaiStatusLabel = "Nicht konfiguriert";
+  else if (activeProvider === "openai" && openaiStatus.state === "error") openaiStatusLabel = "Fehler bei letzter Anfrage";
   setStatus(
     "#openaiConnectionStatus",
     openaiHealthy,
-    !configured.openai ? "Nicht konfiguriert" : activeProvider === "openai" && openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
+    openaiStatusLabel,
   );
   const openaiDetail = $("#openaiConnectionDetail");
   if (openaiDetail) {
     openaiDetail.classList.toggle("error", Boolean(configured.openai && activeProvider === "openai" && openaiStatus.state === "error"));
-    openaiDetail.textContent = !configured.openai
-      ? "API-Schlüssel nicht konfiguriert"
-      : activeProvider === "openai" && openaiStatus.state === "error"
-        ? `${openaiStatus.message || "OpenAI-Anfrage fehlgeschlagen."}${openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : ""}`
-        : activeProvider === "openai" && openaiStatus.state === "ok"
-          ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
-          : "Als alternativer Anbieter konfiguriert";
+    if (!configured.openai) openaiDetail.textContent = "API-Schlüssel nicht konfiguriert";
+    else if (activeProvider === "openai" && openaiStatus.state === "error") {
+      const updated = openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : "";
+      openaiDetail.textContent = `${openaiStatus.message || "OpenAI-Anfrage fehlgeschlagen."}${updated}`;
+    } else if (activeProvider === "openai" && openaiStatus.state === "ok") {
+      openaiDetail.textContent = `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`;
+    } else openaiDetail.textContent = "Als alternativer Anbieter konfiguriert";
   }
   const geminiHealthy = configured.gemini && (activeProvider !== "gemini" || openaiStatus.state !== "error");
+  let geminiStatusLabel = "Konfiguriert";
+  if (!configured.gemini) geminiStatusLabel = "Nicht konfiguriert";
+  else if (activeProvider === "gemini" && openaiStatus.state === "error") geminiStatusLabel = "Fehler bei letzter Anfrage";
   setStatus(
     "#geminiConnectionStatus",
     geminiHealthy,
-    !configured.gemini ? "Nicht konfiguriert" : activeProvider === "gemini" && openaiStatus.state === "error" ? "Fehler bei letzter Anfrage" : "Konfiguriert",
+    geminiStatusLabel,
   );
   const geminiDetail = $("#geminiConnectionDetail");
   if (geminiDetail) {
     geminiDetail.classList.toggle("error", Boolean(configured.gemini && activeProvider === "gemini" && openaiStatus.state === "error"));
-    geminiDetail.textContent = !configured.gemini
-      ? "GEMINI_API_KEY nicht konfiguriert"
-      : activeProvider === "gemini" && openaiStatus.state === "error"
-        ? `${openaiStatus.message || "Gemini-Anfrage fehlgeschlagen."}${openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : ""}`
-        : activeProvider === "gemini" && openaiStatus.state === "ok"
-          ? `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`
-          : "Als alternativer Anbieter konfiguriert";
+    if (!configured.gemini) geminiDetail.textContent = "GEMINI_API_KEY nicht konfiguriert";
+    else if (activeProvider === "gemini" && openaiStatus.state === "error") {
+      const updated = openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : "";
+      geminiDetail.textContent = `${openaiStatus.message || "Gemini-Anfrage fehlgeschlagen."}${updated}`;
+    } else if (activeProvider === "gemini" && openaiStatus.state === "ok") {
+      geminiDetail.textContent = `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`;
+    } else geminiDetail.textContent = "Als alternativer Anbieter konfiguriert";
   }
   const intervals = data.intervals || {
     configured: Boolean(configured.intervals),
     state: configured.intervals ? "configured" : "not_configured",
   };
   const intervalsHealthy = intervals.configured && intervals.state !== "error";
+  let intervalsStatusLabel = "Konfiguriert · noch nicht getestet";
+  if (!intervals.configured) intervalsStatusLabel = "Nicht konfiguriert";
+  else if (intervals.state === "syncing") intervalsStatusLabel = "Synchronisierung läuft…";
+  else if (intervals.state === "error") intervalsStatusLabel = "Fehler bei letzter Aktualisierung";
+  else if (intervals.state === "connected") intervalsStatusLabel = "Verbunden";
   setStatus(
     "#intervalsConnectionStatus",
     intervalsHealthy,
-    !intervals.configured
-      ? "Nicht konfiguriert"
-      : intervals.state === "syncing"
-        ? "Synchronisierung läuft…"
-        : intervals.state === "error"
-          ? "Fehler bei letzter Aktualisierung"
-          : intervals.state === "connected"
-            ? "Verbunden"
-            : "Konfiguriert · noch nicht getestet",
+    intervalsStatusLabel,
   );
   const intervalsDetail = $("#intervalsConnectionDetail");
   if (intervalsDetail) {
@@ -3269,29 +3328,34 @@ function renderSettings(data) {
       .map(([name, value]) => `${name}: ${value.records || 0} Datensätze auf ${value.pages || 0} Seiten${value.complete === false ? " · unvollständig" : ""}`)
       .join(" · ");
     intervalsDetail.classList.toggle("error", Boolean(intervals.last_error));
-    intervalsDetail.textContent = !intervals.configured
-      ? "API-Schlüssel nicht konfiguriert"
-      : intervals.state === "syncing"
-        ? intervals.status || "Intervals.icu wird synchronisiert."
-        : intervals.last_error
-          ? intervals.last_error
-          : intervals.last_sync_at || librarySync.last_sync_at
-            ? `Letzte Aktualisierung: ${formatTime(intervals.last_sync_at || librarySync.last_sync_at)}${libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : ""}${paginationDetail ? ` · ${paginationDetail}` : ""}`
-            : "Noch keine Synchronisierung durchgeführt";
+    if (!intervals.configured) intervalsDetail.textContent = "API-Schlüssel nicht konfiguriert";
+    else if (intervals.state === "syncing") intervalsDetail.textContent = intervals.status || "Intervals.icu wird synchronisiert.";
+    else if (intervals.last_error) intervalsDetail.textContent = intervals.last_error;
+    else if (intervals.last_sync_at || librarySync.last_sync_at) {
+      const updated = formatTime(intervals.last_sync_at || librarySync.last_sync_at);
+      const counts = libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : "";
+      const pagination = paginationDetail ? ` · ${paginationDetail}` : "";
+      intervalsDetail.textContent = `Letzte Aktualisierung: ${updated}${counts}${pagination}`;
+    } else intervalsDetail.textContent = "Noch keine Synchronisierung durchgeführt";
   }
   const garminSyncRunning = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-  setStatus("#garminConnectionStatus", garmin.configured, !garmin.configured
-    ? "Nicht konfiguriert"
-    : garminSyncRunning
-      ? "Synchronisierung läuft…"
-      : garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert");
+  let garminStatusLabel = "Konfiguriert";
+  if (!garmin.configured) garminStatusLabel = "Nicht konfiguriert";
+  else if (garminSyncRunning) garminStatusLabel = "Synchronisierung läuft…";
+  else if (garmin.source === "fixture") garminStatusLabel = "Lokale Testdatei aktiv";
+  setStatus("#garminConnectionStatus", garmin.configured, garminStatusLabel);
   const weatherLocation = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
-  setStatus("#weatherConnectionStatus", weather.configured, weather.configured ? (weather.loading ? "Wird geladen" : "Konfiguriert") : "Nicht konfiguriert");
+  let weatherStatusLabel = "Nicht konfiguriert";
+  if (weather.configured) weatherStatusLabel = weather.loading ? "Wird geladen" : "Konfiguriert";
+  setStatus("#weatherConnectionStatus", weather.configured, weatherStatusLabel);
   const weatherDetail = $("#weatherConnectionDetail");
   if (weatherDetail) {
-    weatherDetail.textContent = weather.configured
-      ? `${weatherLocation ? `Standort: ${weatherLocation} · ` : ""}${weather.fetched_at ? `letzte Abfrage: ${formatTime(weather.fetched_at)}` : "Standort im Profil hinterlegen"}`
-      : "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
+    if (!weather.configured) weatherDetail.textContent = "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
+    else {
+      const location = weatherLocation ? `Standort: ${weatherLocation} · ` : "";
+      const fetched = weather.fetched_at ? `letzte Abfrage: ${formatTime(weather.fetched_at)}` : "Standort im Profil hinterlegen";
+      weatherDetail.textContent = `${location}${fetched}`;
+    }
   }
   const weatherSyncButton = $("#weatherSyncButton");
   if (weatherSyncButton) {
@@ -3339,13 +3403,10 @@ function renderSettings(data) {
   }
   if (intervalsFullStatus) {
     intervalsFullStatus.classList.toggle("error", Boolean(intervalsFullResync.last_error));
-    intervalsFullStatus.textContent = intervalsFullRunning && intervalsFullResync.status
-      ? intervalsFullResync.status
-      : intervalsFullResync.last_error
-        ? intervalsFullResync.last_error
-        : intervalsFullResync.last_resync_at
-          ? `Letzter vollständiger Resync: ${formatTime(intervalsFullResync.last_resync_at)}`
-          : "Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.";
+    if (intervalsFullRunning && intervalsFullResync.status) intervalsFullStatus.textContent = intervalsFullResync.status;
+    else if (intervalsFullResync.last_error) intervalsFullStatus.textContent = intervalsFullResync.last_error;
+    else if (intervalsFullResync.last_resync_at) intervalsFullStatus.textContent = `Letzter vollständiger Resync: ${formatTime(intervalsFullResync.last_resync_at)}`;
+    else intervalsFullStatus.textContent = "Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.";
   }
   const garminSyncButton = $("#garminSyncButton");
   if (garminSyncButton) {
@@ -3392,7 +3453,10 @@ function renderChangeHistory(changes = []) {
     const header = document.createElement("div");
     header.className = "change-history-item-header";
     const title = document.createElement("strong");
-    const action = change.action === "create" ? "erstellt" : change.action === "delete" ? "gelöscht" : change.action === "undo" ? "zurückgenommen" : "geändert";
+    let action = "geändert";
+    if (change.action === "create") action = "erstellt";
+    else if (change.action === "delete") action = "gelöscht";
+    else if (change.action === "undo") action = "zurückgenommen";
     title.textContent = `${CHANGE_HISTORY_LABELS[change.entity_type] || "Lokales Objekt"} ${action}`;
     const time = document.createElement("time");
     time.dateTime = change.created_at || "";
@@ -3400,7 +3464,8 @@ function renderChangeHistory(changes = []) {
     header.append(title, time);
     const detail = document.createElement("span");
     const fields = Object.keys(change.diff?.fields || {});
-    detail.textContent = `${fields.length ? `Felder: ${fields.join(", ")}` : "Keine Felddetails"} · Nur lokal · Quelle: ${change.source || "local"}`;
+    const fieldLabel = fields.length ? `Felder: ${fields.join(", ")}` : "Keine Felddetails";
+    detail.textContent = `${fieldLabel} · Nur lokal · Quelle: ${change.source || "local"}`;
     item.append(header, detail);
     if (change.action !== "undo") {
       const button = document.createElement("button");
@@ -3595,7 +3660,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       state.loadedAreas.add(area);
       appliedAreas.push(area);
     });
-    payload.state_versions = { ...(state.data?.state_versions || {}) };
+    payload.state_versions = { ...state.data?.state_versions };
     for (const area of appliedAreas) {
       if (area === "chat" && chatGeneration !== state.chatGeneration) continue;
       const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", "garmin"] }[area] || [area];
@@ -3718,7 +3783,7 @@ async function pollChatStatus() {
   const chatGeneration = state.chatGeneration;
   try {
     let pendingTurn = state.chatRequest?.clientTurnId;
-    if (!pendingTurn) { try { pendingTurn = sessionStorage.getItem("coachPendingTurn"); } catch (_) {} }
+    if (!pendingTurn) { try { pendingTurn = sessionStorage.getItem("coachPendingTurn"); } catch (error) { void error; } }
     if (pendingTurn && !state.chatStream) {
       try {
         const receipt = await api(`/api/chat/receipt?client_turn_id=${encodeURIComponent(pendingTurn)}`);
@@ -3838,7 +3903,7 @@ function queueChatMessage(message, mode, requestKind = null, attachments = []) {
 async function requestCoachResponse(message, requestKind = null, attachments = []) {
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
-  const clientTurnId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `turn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const clientTurnId = secureToken("turn");
   if (state.data) {
     state.data.messages = mergeChatMessages([{ role: "user", content: message, attachment_names: JSON.stringify(attachments.map(item => item.name)), client_turn_id: clientTurnId, created_at: new Date().toISOString(), optimistic: true }]);
     renderMessages(state.data.messages, true);
@@ -3866,7 +3931,7 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
       stream.serverError = true;
       stream.rejected = true;
       let payload = {};
-      try { payload = await response.json(); } catch (_) {}
+      try { payload = await response.json(); } catch (error) { void error; }
       if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
       if (response.status === 401) {
         const rejectedAttachments = [...(attachments || [])];
@@ -3890,7 +3955,7 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
       if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
       let event = "message";
       const data = [];
-      for (const line of block.replace(/\r/g, "").split("\n")) {
+      for (const line of block.replaceAll("\r", "").split("\n")) {
         if (line.startsWith("event:")) event = line.slice(6).trim();
         else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
       }
@@ -4290,9 +4355,9 @@ async function saveProfile(event) {
   const submittedForm = JSON.stringify([...new FormData(form)]);
   const formData = new FormData(form);
   const profile = {
-    ...(state.data?.profile || {}),
+    ...state.data?.profile,
     ...Object.fromEntries(formData),
-    sports: formData.getAll("sports").map((value) => String(value).trim()).filter(Boolean).join(", "),
+    sports: formData.getAll("sports").filter((value) => typeof value === "string").map((value) => value.trim()).filter(Boolean).join(", "),
   };
   try {
     const saved = await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
@@ -4339,7 +4404,7 @@ async function saveCheckin(event) {
   if (button) { button.disabled = true; button.textContent = "Check-in wird gespeichert…"; }
   try {
     const result = await api("/api/feedback", { method: "POST", body: JSON.stringify(values) });
-    if (!result.checkin || result.checkin.checkin_date !== values.checkin_date) throw new Error("Die Check-in-Bestätigung fehlt. Der Entwurf bleibt erhalten.");
+    if (result.checkin?.checkin_date !== values.checkin_date) throw new Error("Die Check-in-Bestätigung fehlt. Der Entwurf bleibt erhalten.");
     state.checkinDirty = false;
     setDirtyIndicator("checkinDirtyIndicator", false);
     state.checkinSelectedDate = result.checkin?.checkin_date || values.checkin_date;
@@ -4407,9 +4472,9 @@ async function saveAiProvider(event) {
   try {
     const result = await api("/api/settings/ai-provider", { method: "PUT", body: JSON.stringify({ provider: select.value }) });
     if (result?.provider && Array.isArray(result.model_options)) {
-      const provider = { ...(state.data?.ai_provider || {}), selected: result.provider };
+      const provider = { ...state.data?.ai_provider, selected: result.provider };
       const model = { selected: result.model, options: result.model_options };
-      state.data = { ...(state.data || {}), ai_provider: provider, model };
+      state.data = { ...state.data, ai_provider: provider, model };
       renderAiProvider(provider);
       renderModel(model);
       renderThinkingLevel(state.data.thinking_level);
@@ -4567,7 +4632,7 @@ async function deletePrivacyData() {
 
 async function logout() {
   if (!await confirmDiscardChanges()) return;
-  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
+  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (error) { void error; }
   showLogin();
 }
 
@@ -4653,7 +4718,13 @@ $("#attachmentInput").addEventListener("change", async (event) => {
     }
     const attachments = await Promise.all(files.map(file => new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve({ name: file.name, data: String(reader.result).split(",")[1] });
+      reader.onload = () => {
+        if (typeof reader.result !== "string") {
+          reject(new Error("Die Datei konnte nicht als Data-URL gelesen werden."));
+          return;
+        }
+        resolve({ name: file.name, data: reader.result.split(",")[1] });
+      };
       reader.onerror = () => reject(new Error("Die Datei konnte nicht gelesen werden."));
       reader.readAsDataURL(file);
     })));
@@ -4784,7 +4855,6 @@ window.addEventListener("pagehide", disconnectStateEvents);
 window.addEventListener("beforeunload", (event) => {
   if (!hasUnsavedChanges()) return;
   event.preventDefault();
-  event.returnValue = "";
 });
 registerServiceWorker();
 setupConnectivityStatus();

@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import test_server as fixtures
-from backend.providers.garmin import collect_garmin_data, normalize_range_records
+from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data, normalize_range_records
 
 server = fixtures.server
 
@@ -340,7 +340,7 @@ class GarminRangeContractTests(unittest.TestCase):
         windows = [(date(2026, 9, 1), date(2026, 9, 1)), (date(2026, 9, 2), date(2026, 9, 2))]
         return collect_garmin_data(client, windows, start=windows[0][0], today=windows[-1][1], synced_at="synthetic",
                                    external_call=lambda _p, _s, fn, _d: fn(), redact=lambda value: value,
-                                   include_current_metrics=False)
+                                   options=GarminCollectionOptions(include_current_metrics=False))
 
     def test_hrv_dictionary_and_list_windows_all_survive(self):
         result = self.collect([{"hrvSummaries": [{"calendarDate": "2026-09-01", "lastNightAvg": 51}]},
