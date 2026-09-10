@@ -15686,6 +15686,8 @@ def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any
                 and previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
                 and previous.get("request_binding_key")
                 and previous["request_binding_key"] == current.get("request_binding_key")
+                and previous.get("plan_effect_key")
+                and previous["plan_effect_key"] == current.get("plan_effect_key")
             )
         if previous["tool"] == "update_profile" and previous.get("result", {}).get("reason") == "profile_conflict":
             # A later profile write repairs a conflict only when it retries the
@@ -15751,6 +15753,29 @@ def _dialogue_request_binding_key(arguments: dict[str, Any]) -> str | None:
         "sync_scope": request.get("sync_scope"),
     }
     return _coach_action_hash(binding)
+
+
+def _dialogue_plan_effect_key(name: str, arguments: dict[str, Any]) -> str | None:
+    """Match cross-tool repairs only when the planned workout payload is exact."""
+    if name == "apply_training_patch":
+        if arguments.get("changes"):
+            # Existing-unit edits cannot be proven equivalent to a complete
+            # replacement without retaining and comparing every prior object.
+            return None
+        workouts = arguments.get("workouts")
+    elif name == "replace_training_plan":
+        workouts = (arguments.get("payload") or {}).get("workouts")
+    else:
+        return None
+    if not isinstance(workouts, list) or not workouts:
+        return None
+    signatures = []
+    for workout in workouts:
+        if not isinstance(workout, dict):
+            return None
+        signatures.append({key: workout.get(key) for key in
+                           ("date", "sport", "name", "description", "duration_minutes", "target", "rationale")})
+    return _coach_action_hash({"workouts": signatures})
 
 
 def _coach_repair_key(name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
@@ -16024,6 +16049,7 @@ def _chat_with_structured_coach_impl(
             step_key = name
             scope_repair_key = None
             request_binding_key = None
+            plan_effect_key = None
             repair_key = None
             try:
                 if len(command_receipts) >= 40 and not any(entry.get("call_id") == call_id for entry in command_receipts):
@@ -16036,6 +16062,7 @@ def _chat_with_structured_coach_impl(
                 repair_key = _coach_repair_key(name, arguments)
                 scope_repair_key = _dialogue_scope_repair_key(name, arguments)
                 request_binding_key = _dialogue_request_binding_key(arguments)
+                plan_effect_key = _dialogue_plan_effect_key(name, arguments)
                 step_key = _coach_action_hash({"name": name, "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
                                                "period": (arguments.get("_request") or {}).get("period"),
                                                "repair_key": repair_key})
@@ -16102,7 +16129,7 @@ def _chat_with_structured_coach_impl(
                         else:
                             result = _structured_coach_tool_result(name, arguments, intent=action, conversation_id=conversation_id,
                                 client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids, cancel_event=cancel_event)
-                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request_binding_key": request_binding_key,
+                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key,
                                                  "request": action.get("request"), "result": result})
                         _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
                     if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
@@ -16120,7 +16147,7 @@ def _chat_with_structured_coach_impl(
                 if not result["reason"]:
                     result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
                 technical_error = _coach_error_metadata(exc)
-                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request_binding_key": request_binding_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
+                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
                 LOGGER.warning("Coach step failed", extra={"event": "coach_tool_failed", "context": {"tool": name if name in {tool['name'] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error}})
             outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
             pending = [entry for entry in pending if entry["call_id"] != call_id]

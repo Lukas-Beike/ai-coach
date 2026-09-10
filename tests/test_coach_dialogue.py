@@ -504,12 +504,24 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_plan_replacement_does_not_resolve_invalid_patch_for_other_period(self):
         first = {
-            "tool": "apply_training_patch", "step_key": "first", "request_binding_key": "period-one",
+            "tool": "apply_training_patch", "step_key": "first", "request_binding_key": "period-one", "plan_effect_key": "saturday",
             "result": {"ok": False, "reason": "request_invalid"},
         }
         second = {
-            "tool": "replace_training_plan", "step_key": "second", "request_binding_key": "period-two",
+            "tool": "replace_training_plan", "step_key": "second", "request_binding_key": "period-two", "plan_effect_key": "monday",
             "result": {"ok": True},
+        }
+
+        self.assertEqual(server._unresolved_coach_steps([first, second]), [first])
+
+    def test_plan_replacement_does_not_resolve_different_workout_with_same_request(self):
+        first = {
+            "tool": "apply_training_patch", "step_key": "first", "request_binding_key": "same",
+            "plan_effect_key": "saturday", "result": {"ok": False, "reason": "request_invalid"},
+        }
+        second = {
+            "tool": "replace_training_plan", "step_key": "second", "request_binding_key": "same",
+            "plan_effect_key": "monday", "result": {"ok": True},
         }
 
         self.assertEqual(server._unresolved_coach_steps([first, second]), [first])
