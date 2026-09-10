@@ -97,6 +97,12 @@ instructions do not delete or convert its data.
   interruption from the independent sync job and does not claim the transfer
   completed or failed without a confirmed result. Failed OpenAI responses retain
   only recognized error codes in diagnostics, never the provider's error text.
+  An invalid OpenAI conversation is retried once using local dialogue, GPX summaries
+  and confirmed tool results; completed effects are not repeated. Later turns avoid
+  that invalid conversation. Earlier image pixels may be unavailable during recovery;
+  the Coach asks for missing evidence when necessary. A saved clarification remains
+  visible and answerable even if the final AI response fails. Technical failures show
+  an explanation and a next step, together with any already completed actions.
 - Related workout moves, edits and additions use one atomic change set with current
   revision and object hashes. Replanning until a target date changes only that period;
   later units remain intact. Constraints such as two strength sessions per week stay
