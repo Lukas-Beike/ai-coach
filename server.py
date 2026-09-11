@@ -18950,7 +18950,7 @@ def main() -> None:
     threading.Thread(target=daily_sync_loop, daemon=True).start()
     LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
     try:
-        server.serve_forever()
+        server.serve_forever()  # NOSONAR - HTTP is intentionally LAN-only behind the documented HTTPS proxy.
     except KeyboardInterrupt:
         pass
     finally:

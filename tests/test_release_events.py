@@ -36,10 +36,12 @@ class ReleaseEventTests(unittest.TestCase):
             with self.subTest(event_name=event_name, event=event, branch=branch, conclusion=conclusion):
                 github = SimpleNamespace(
                     event_name=event_name,
+                    repository="Lukas-Beike/ai-coach",
                     event=SimpleNamespace(workflow_run=SimpleNamespace(
                         name="Test and publish container image",
                         event=event,
                         head_branch=branch,
+                        head_repository=SimpleNamespace(full_name="Lukas-Beike/ai-coach"),
                         conclusion=conclusion,
                     )),
                 )
