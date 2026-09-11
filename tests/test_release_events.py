@@ -60,7 +60,8 @@ class ReleaseShellGuardTests(unittest.TestCase):
             "PATH": os.environ["PATH"],
             "REPOSITORY": "example/release-test",
             "TESTED_SHA": "a" * 40,
-            "CURRENT_MAIN_SHA": "a" * 40,
+            "TESTED_TREE": "c" * 40,
+            "CURRENT_MAIN_TREE": "c" * 40,
             "EVENT_NAME": "workflow_run",
             "WORKFLOW_RUN_BRANCH": "chore/release-version-1.7.3",
             "MERGED_VERSION_PR": "",
@@ -73,7 +74,9 @@ class ReleaseShellGuardTests(unittest.TestCase):
                 'fetch --no-tags origin refs/heads/main:refs/remotes/origin/main'|\
                 'fetch --no-tags origin refs/heads/develop:refs/remotes/origin/develop'|\
                 'reset --hard origin/main'|'reset --hard origin/develop') return 0 ;;
-                'rev-parse refs/remotes/origin/main') printf '%s\n' "$CURRENT_MAIN_SHA" ;;
+                'rev-parse refs/remotes/origin/main^{tree}') printf '%s\n' "$CURRENT_MAIN_TREE" ;;
+                'rev-parse HEAD^{tree}') printf '%s\n' "$CURRENT_MAIN_TREE" ;;
+                'show -s --format=%T '* ) printf '%s\n' "$TESTED_TREE" ;;
                 *) return 97 ;;
               esac
             }
@@ -128,11 +131,18 @@ class ReleaseShellGuardTests(unittest.TestCase):
 
     def test_stale_test_result_cannot_reset_main_or_create_a_release(self):
         script = textwrap.dedent(CREATE_RELEASE.split("        run: |\n", 1)[1])
-        result, operations = self.run_script(script, CURRENT_MAIN_SHA="b" * 40)
+        result, operations = self.run_script(script, CURRENT_MAIN_TREE="d" * 40)
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("is not the current main commit", result.stdout)
+        self.assertIn("is not the current main tree", result.stdout)
         self.assertNotIn("git reset", operations)
         self.assertNotIn("gh ", operations)
+
+    def test_same_tree_on_a_new_main_commit_can_create_a_release(self):
+        script = textwrap.dedent(CREATE_RELEASE.split("        run: |\n", 1)[1])
+        result, operations = self.run_script(script, TESTED_SHA="b" * 40)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("same tree as the tested commit", result.stdout)
+        self.assertIn("git reset --hard origin/main", operations)
 
     def test_unmerged_version_test_defers_without_waiting_or_mutating(self):
         script = textwrap.dedent(WORKFLOW.split("        run: |\n", 1)[1].split(
@@ -152,6 +162,23 @@ class ReleaseShellGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("git reset --hard origin/develop", operations)
         self.assertNotIn("sleep", operations)
+
+    def test_pending_promotion_has_a_same_tree_duplicate_guard(self):
+        prepare = WORKFLOW.split("  prepare-version:\n", 1)[1].split(
+            "  create-release:\n", 1
+        )[0]
+        self.assertIn(
+            'main_tree="$(git rev-parse refs/remotes/origin/main^{tree})"',
+            prepare,
+        )
+        self.assertIn(
+            'if [[ "$main_tree" == "$develop_tree" ]]; then',
+            prepare,
+        )
+        self.assertIn(
+            "Main already contains the current develop tree; no promotion is needed.",
+            prepare,
+        )
 
 
 if __name__ == "__main__":
