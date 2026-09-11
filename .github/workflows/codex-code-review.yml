@@ -524,7 +524,7 @@ jobs:
       - name: Check out trusted develop workflow sources
         # Dispatch and manual-comment workflows already run from protected
         # develop. Use their current action even before the next main release.
-        if: matrix.skipCodexReview != true && (github.event_name != 'pull_request_target' || !!(github.event && github.event.pull_request && github.event.pull_request.head.repo.full_name == github.repository)) && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
+        if: matrix.skipCodexReview != true && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
@@ -533,7 +533,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out trusted main workflow sources
-        if: matrix.skipCodexReview != true && (github.event_name != 'pull_request_target' || !!(github.event && github.event.pull_request && github.event.pull_request.head.repo.full_name == github.repository)) && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
+        if: matrix.skipCodexReview != true && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
