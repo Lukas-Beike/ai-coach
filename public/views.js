@@ -98,7 +98,11 @@ function markdownToHtml(markdown) {
     if (!line.trim()) { flushParagraph(); closeList(); continue; }
     const heading = headingFromMarkdownLine(line);
     if (heading) { flushParagraph(); closeList(); output.push(`<h${heading.level}>${inlineMarkdown(heading.text.replace(/#+$/, "").trim())}</h${heading.level}>`); continue; }
-    if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) { flushParagraph(); closeList(); output.push("<hr>"); continue; }
+    const horizontalRule = line.trim();
+    const isHorizontalRule = horizontalRule.length >= 3
+      && (horizontalRule.split("").every((character) => character === "-")
+        || horizontalRule.split("").every((character) => character === "*"));
+    if (isHorizontalRule) { flushParagraph(); closeList(); output.push("<hr>"); continue; }
     const listItem = listItemFromMarkdownLine(line);
     if (listItem) {
       flushParagraph();
