@@ -235,6 +235,16 @@ jobs:
               echo "Cannot choose $REQUESTED_VERSION while APP_VERSION $app_version is waiting for promotion."
               exit 1
             fi
+            # A queued workflow can run after an identical promotion has
+            # already merged, while the release event is still pending. Do
+            # not create a second PR for the same develop tree.
+            git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+            develop_tree="$(git rev-parse HEAD^{tree})"
+            main_tree="$(git rev-parse refs/remotes/origin/main^{tree})"
+            if [[ "$main_tree" == "$develop_tree" ]]; then
+              echo "Main already contains the current develop tree; no promotion is needed."
+              exit 0
+            fi
             promotion_branch="chore/release-promotion-$app_version"
             existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$promotion_branch" --state open --json number --jq '.[0].number // empty')"
             if [[ -n "$existing_pr" ]]; then
@@ -366,10 +376,13 @@ jobs:
           set -euo pipefail
 
           git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
-          if [[ "$(git rev-parse refs/remotes/origin/main)" != "$TESTED_SHA" ]]; then
-            echo "The tested main commit $TESTED_SHA is not the current main commit."
+          tested_tree="$(git show -s --format='%T' "$TESTED_SHA")"
+          current_main_tree="$(git rev-parse refs/remotes/origin/main^{tree})"
+          if [[ "$current_main_tree" != "$tested_tree" ]]; then
+            echo "The tested main tree is not the current main tree."
             exit 1
           fi
+          echo "The current main commit has the same tree as the tested commit $TESTED_SHA."
           git reset --hard origin/main
 
           release_tag="$(sed -nE 's/^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' server.py)"
