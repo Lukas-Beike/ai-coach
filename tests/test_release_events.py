@@ -179,6 +179,10 @@ class ReleaseShellGuardTests(unittest.TestCase):
             "Main already contains the current develop tree; no promotion is needed.",
             prepare,
         )
+        self.assertLess(
+            prepare.index('if [[ "$version_merge" != "true" && -n "$REQUESTED_VERSION" ]]'),
+            prepare.index('if [[ "$main_tree" == "$develop_tree" ]]; then'),
+        )
 
 
 if __name__ == "__main__":

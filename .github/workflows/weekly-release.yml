@@ -231,6 +231,10 @@ jobs:
           fi
 
           if [[ "$pending_promotion" == "true" ]]; then
+            if [[ "$version_merge" != "true" && -n "$REQUESTED_VERSION" ]]; then
+              echo "Cannot choose $REQUESTED_VERSION while APP_VERSION $app_version is waiting for promotion."
+              exit 1
+            fi
             # A queued workflow can run after an identical promotion has
             # already merged, while the release event is still pending. Do
             # not create a second PR for the same develop tree.
@@ -240,10 +244,6 @@ jobs:
             if [[ "$main_tree" == "$develop_tree" ]]; then
               echo "Main already contains the current develop tree; no promotion is needed."
               exit 0
-            fi
-            if [[ "$version_merge" != "true" && -n "$REQUESTED_VERSION" ]]; then
-              echo "Cannot choose $REQUESTED_VERSION while APP_VERSION $app_version is waiting for promotion."
-              exit 1
             fi
             promotion_branch="chore/release-promotion-$app_version"
             existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$promotion_branch" --state open --json number --jq '.[0].number // empty')"
