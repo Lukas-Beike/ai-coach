@@ -16,6 +16,7 @@ import math
 import mimetypes
 import os
 import platform
+import queue
 import re
 import secrets
 import shutil
@@ -48,7 +49,7 @@ from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, 
 from backend.db.manager import DatabaseManager
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
-from backend.providers.garmin import collect_garmin_data
+from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 from backend.sync.windows import split_date_windows
 from backend.sync.status import persist_sync_operation_state, project_sync_status
@@ -112,25 +113,87 @@ PUBLIC_DIR = ROOT / "public"
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
+ASSET_INDEX_HTML = "index.html"
+ASSET_API_JS = "api.js"
+ASSET_APP_JS = "app.js"
+ASSET_NAVIGATION_JS = "navigation.js"
+ASSET_STATE_JS = "state.js"
+ASSET_VIEWS_JS = "views.js"
+ASSET_FORMS_JS = "forms.js"
+ASSET_COMPONENTS_JS = "components.js"
+ASSET_STYLES_CSS = "styles.css"
+ASSET_SERVICE_WORKER_JS = "service-worker.js"
+ASSET_MANIFEST = "manifest.webmanifest"
+ASSET_LOGO = "logo.png"
+ASSET_ICON = "icon.svg"
 STATIC_TARGETS = {
-    "index.html": PUBLIC_DIR / "index.html",
-    "api.js": PUBLIC_DIR / "api.js",
-    "app.js": PUBLIC_DIR / "app.js",
-    "navigation.js": PUBLIC_DIR / "navigation.js",
-    "state.js": PUBLIC_DIR / "state.js",
-    "views.js": PUBLIC_DIR / "views.js",
-    "forms.js": PUBLIC_DIR / "forms.js",
-    "components.js": PUBLIC_DIR / "components.js",
-    "styles.css": PUBLIC_DIR / "styles.css",
-    "service-worker.js": PUBLIC_DIR / "service-worker.js",
-    "manifest.webmanifest": PUBLIC_DIR / "manifest.webmanifest",
-    "logo.png": PUBLIC_DIR / "logo.png",
-    "icon.svg": PUBLIC_DIR / "icon.svg",
+    ASSET_INDEX_HTML: PUBLIC_DIR / ASSET_INDEX_HTML,
+    ASSET_API_JS: PUBLIC_DIR / ASSET_API_JS,
+    ASSET_APP_JS: PUBLIC_DIR / ASSET_APP_JS,
+    ASSET_NAVIGATION_JS: PUBLIC_DIR / ASSET_NAVIGATION_JS,
+    ASSET_STATE_JS: PUBLIC_DIR / ASSET_STATE_JS,
+    ASSET_VIEWS_JS: PUBLIC_DIR / ASSET_VIEWS_JS,
+    ASSET_FORMS_JS: PUBLIC_DIR / ASSET_FORMS_JS,
+    ASSET_COMPONENTS_JS: PUBLIC_DIR / ASSET_COMPONENTS_JS,
+    ASSET_STYLES_CSS: PUBLIC_DIR / ASSET_STYLES_CSS,
+    ASSET_SERVICE_WORKER_JS: PUBLIC_DIR / ASSET_SERVICE_WORKER_JS,
+    ASSET_MANIFEST: PUBLIC_DIR / ASSET_MANIFEST,
+    ASSET_LOGO: PUBLIC_DIR / ASSET_LOGO,
+    ASSET_ICON: PUBLIC_DIR / ASSET_ICON,
 }
-VERSIONED_STATIC_ASSETS = {"api.js", "navigation.js", "state.js", "views.js", "forms.js", "components.js", "app.js", "styles.css", "logo.png", "icon.svg"}
-STATIC_REVALIDATE_ASSETS = {"index.html", "service-worker.js", "manifest.webmanifest"}
+VERSIONED_STATIC_ASSETS = {ASSET_API_JS, ASSET_NAVIGATION_JS, ASSET_STATE_JS, ASSET_VIEWS_JS, ASSET_FORMS_JS, ASSET_COMPONENTS_JS, ASSET_APP_JS, ASSET_STYLES_CSS, ASSET_LOGO, ASSET_ICON}
+STATIC_REVALIDATE_ASSETS = {ASSET_INDEX_HTML, ASSET_SERVICE_WORKER_JS, ASSET_MANIFEST}
+PROVIDER_INTERVALS_NAME = "Intervals.icu"
+PROVIDER_GARMIN_NAME = "Garmin Connect"
+PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
+UTC_OFFSET_SUFFIX = "+00:00"
+ISO_MIDNIGHT_SUFFIX = "T00:00:00"
+JSON_MEDIA_TYPE = "application/json"
+OPENAI_RESPONSES_PATH = "/responses"
+INTERVALS_API_KEY_ERROR = "INTERVALS_API_KEY ist nicht konfiguriert."
+OPENAI_API_KEY_ERROR = "OPENAI_API_KEY ist nicht konfiguriert."
+GEMINI_API_KEY_ERROR = "GEMINI_API_KEY ist nicht konfiguriert."
+VO2MAX_UNIT = "ml/kg/min"
+GARMIN_RUN_PREDICTION_SOURCE = "Garmin Connect Laufprognose"
+EXTERNAL_HTTP_STARTED_EVENT = "External HTTP request started"
+EXTERNAL_HTTP_COMPLETED_EVENT = "External HTTP request completed"
+COACH_PLAN_CONSTRAINTS_PREFIX = "coach_plan_constraints:"
+TRAINING_PLAN_SCOPE_PREFIX = "training_plan:"
+LOCAL_INTERVALS_SCOPE = "local+intervals"
+WORKDAY_TIME_LABEL = "vor der Arbeit"
+PLANNED_WORKOUT_LABEL = "Geplante Einheit"
+FULL_RESYNC_LABEL = "Vollständiger Resync"
+NOT_FOUND_ERROR = "Nicht gefunden."
+INTERNAL_SERVER_ERROR = "Interner Serverfehler."
+DAILY_AUTO_UPDATE_LABEL = "tägliche automatische Aktualisierung"
+COMPETITION_NOT_FOUND_ERROR = "Wettkampf nicht gefunden."
+COACH_ABORTED_ERROR = "Die Coach-Anfrage wurde abgebrochen."
+APP_NAME = "Intervals Coach"
+REDACTED_PATH = "[REDACTED_PATH]"
+UUID_PATTERN = r"[0-9a-f-]{36}"
+PAYLOAD_HASH_PATTERN = r"[0-9a-f]{64}"
+DATE_ONLY_PATTERN = r"\d{4}-\d{2}-\d{2}"
+SELECT_COMPETITION_SQL = "SELECT * FROM competitions WHERE id=?"
+SELECT_ACTION_PROPOSAL_SQL = "SELECT * FROM coach_action_proposals WHERE id=?"
+INSERT_LIBRARY_SQL = "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)"
+UPDATE_PLANNED_UNIT_SQL = "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?"
+UPDATE_COMPETITION_CONFLICT_SQL = "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?"
+SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
+SELECT_LIBRARY_PAYLOAD_SQL = "SELECT payload FROM workout_library WHERE local_id = ?"
+UPDATE_COMMAND_RECEIPT_SQL = "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?"
+SELECT_COMMAND_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
+SELECT_PLANNING_REVISION_SQL = "SELECT revision FROM planning_state WHERE id=1"
+SELECT_USER_MESSAGE_SQL = "SELECT id FROM messages WHERE client_turn_id=? AND role='user'"
+STRUCTURED_AUTHORIZATION_ERROR = "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht."
+INVALID_PLANNING_ID_ERROR = "Ungültige lokale Planungs-ID."
+CORRUPT_PLANNING_ERROR = "Die lokale Planung ist beschädigt."
+INVALID_LIBRARY_ID_ERROR = "Ungültige lokale Bibliothekseinheiten-ID."
+CORRUPT_LIBRARY_ERROR = "Die lokale Bibliothekseinheit ist beschädigt."
+INVALID_PLANNING_DATE_ERROR = "Das Planungsdatum muss das Format JJJJ-MM-TT haben."
+STALE_PLANNING_REVISION_ERROR = "Die lokale Planrevision ist inzwischen veraltet."
+UNSUPPORTED_BYDAY_ERROR = "BYDAY der Kalender-Wiederholung wird nicht unterstützt."
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.10.1"
+APP_VERSION = "1.10.2"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -378,7 +441,7 @@ class ProviderResyncGate:
             return self.resetting
 
 
-INTERVALS_RESYNC_GATE = ProviderResyncGate("Intervals.icu")
+INTERVALS_RESYNC_GATE = ProviderResyncGate(PROVIDER_INTERVALS_NAME)
 GARMIN_RESYNC_GATE = ProviderResyncGate("Garmin")
 
 
@@ -418,7 +481,7 @@ def load_local_env() -> None:
                 line = line[7:].lstrip()
             key, separator, value = line.partition("=")
             key = key.strip()
-            if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            if not separator or not re.fullmatch(r"(?a:(?!\d)\w+)", key):
                 continue
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
@@ -647,12 +710,12 @@ def _safe_provider_path(path: str) -> str:
         decoded = unquote(segment)
         was_redacted = redact_next
         if was_redacted:
-            safe_segments.append("[REDACTED_PATH]")
+            safe_segments.append(REDACTED_PATH)
             redact_next = False
-        elif re.fullmatch(r"(?:api|v[0-9]+|[a-z][a-z_-]{0,31})", decoded):
+        elif re.fullmatch(r"(?:api|v\d+|[a-z][a-z_-]{0,31})", decoded):
             safe_segments.append(decoded)
         else:
-            safe_segments.append("[REDACTED_PATH]")
+            safe_segments.append(REDACTED_PATH)
         if not was_redacted and decoded.casefold() in {
             "athlete", "activities", "activity", "event", "events", "profile", "user", "workout", "workouts",
         }:
@@ -682,7 +745,7 @@ def _redact_url(match: re.Match[str]) -> str:
             return match.group(0)
         path_segments = []
         for segment in parsed.path.split("/"):
-            path_segments.append("[REDACTED_PATH]" if _unguessable_url_path_segment(segment) else segment)
+            path_segments.append(REDACTED_PATH if _unguessable_url_path_segment(segment) else segment)
         path = "/".join(path_segments)
         query_pairs = []
         for key, item in parse_qsl(parsed.query, keep_blank_values=True):
@@ -795,7 +858,7 @@ def provider_error(service: str | None, category: str, *, status: int | None = N
     """Create a short, classified provider error without forwarding exception text."""
     label = {
         "garmin": "Garmin",
-        "intervals": "Intervals.icu",
+        "intervals": PROVIDER_INTERVALS_NAME,
         "openai": "OpenAI",
         "calendar": "Der externe Kalender",
     }.get(str(service or "").casefold(), "Der externe Dienst")
@@ -847,7 +910,7 @@ def external_call(
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "error_code": operation_error_code(exc),
         }
-        LOGGER.error("External call failed", extra={"event": "external_call_failed", "context": failure_context}, exc_info=True)
+        LOGGER.exception("External call failed", extra={"event": "external_call_failed", "context": failure_context}, exc_info=True)
         capture_diagnostic_event("external_call_failed", {
             "service": service,
             "operation": operation,
@@ -1252,7 +1315,14 @@ def observed_sync(provider: str, area: str = "default"):
                         _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
                     raise
                 result_status = result.get("status") if isinstance(result, dict) else None
-                refresh_status = "skipped" if result_status == "not_configured" else "error" if result_status in {"stale", "error", "failed"} else "partial" if result_status == "partial" else "success"
+                if result_status == "not_configured":
+                    refresh_status = "skipped"
+                elif result_status in {"stale", "error", "failed"}:
+                    refresh_status = "error"
+                elif result_status == "partial":
+                    refresh_status = "partial"
+                else:
+                    refresh_status = "success"
                 _provider_refresh_finish(refresh_id, refresh_status, "complete")
                 log_operation_event(
                     "operation_count", scope["operation_id"], scope["trigger"],
@@ -1273,9 +1343,8 @@ def database_manager() -> DatabaseManager:
         DATABASE_MANAGER = None
         DATABASE_MANAGER_SIGNATURE = None
     if DATABASE_MANAGER is None:
-        if CONFIG.app_password:
-            if not SQLCIPHER_AVAILABLE:
-                raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
+        if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
+            raise RuntimeError("SQLCipher ist fÃ¼r eine verschlÃ¼sselte Datenbank erforderlich.")
         DATABASE_MANAGER = DatabaseManager(
             DB_PATH,
             sqlite_backend if CONFIG.app_password else sqlite3,
@@ -1302,7 +1371,6 @@ def database():
             yield db
         finally:
             DATABASE_CONTEXT.reset(context_token)
-    return
 
 
 def initialise_database() -> None:
@@ -1712,7 +1780,12 @@ def _provider_refresh_finish(
         )
         _provider_refresh_cleanup(db)
     if provider and area:
-        public_status = "ready" if status == "success" else "degraded" if status == "partial" else "error"
+        if status == "success":
+            public_status = "ready"
+        elif status == "partial":
+            public_status = "degraded"
+        else:
+            public_status = "error"
         publish_state_event("provider", {"provider": provider, "area": area, "status": public_status})
 
 
@@ -1774,10 +1847,10 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
             raise AppError(400, "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten.", reason="invalid_job_request")
         normalized_entries = []
         for entry in entries:
-            if not isinstance(entry, dict) or not re.fullmatch(r"[0-9a-f-]{36}", str(entry.get("library_workout_id") or "")):
+            if not isinstance(entry, dict) or not re.fullmatch(UUID_PATTERN, str(entry.get("library_workout_id") or "")):
                 raise AppError(400, "Jede Plan-Push-Einheit benötigt eine lokale UUID.", reason="invalid_job_request")
             payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
-            if not re.fullmatch(r"[0-9a-f]{64}", payload_hash):
+            if not re.fullmatch(PAYLOAD_HASH_PATTERN, payload_hash):
                 raise AppError(400, "Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash.", reason="invalid_job_request")
             normalized_entries.append({"library_workout_id": str(entry["library_workout_id"]), "expected_payload_hash": payload_hash})
         if "repair" in values and type(values["repair"]) is not bool:
@@ -1819,7 +1892,7 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
 def _decode_sync_job_payload(value: Any) -> dict[str, Any]:
     try:
         payload = json.loads(value or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -1976,7 +2049,7 @@ def enqueue_sync_job(
     scheduled_at = now
     if available_at is not None:
         try:
-            scheduled_at = datetime.fromisoformat(str(available_at).replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+            scheduled_at = datetime.fromisoformat(str(available_at).replace("Z", UTC_OFFSET_SUFFIX)).astimezone(timezone.utc).isoformat()
         except (TypeError, ValueError) as exc:
             raise AppError(400, "Der Startzeitpunkt des Synchronisationsjobs ist ungültig.", reason="invalid_job_request") from exc
     job_id = uuid.uuid4().hex
@@ -2244,7 +2317,12 @@ def _run_claimed_sync_job(job: dict[str, Any]) -> None:
         result_status = result.get("status") if isinstance(result, dict) else "ok"
         if result_status == "already_running":
             raise AppError(409, "Der Provider ist noch beschäftigt.", reason="temporary_error")
-        fallback_status = "partial" if result_status == "partial" else "failed" if result_status in {"error", "failed"} else "completed"
+        if result_status == "partial":
+            fallback_status = "partial"
+        elif result_status in {"error", "failed"}:
+            fallback_status = "failed"
+        else:
+            fallback_status = "completed"
         _sync_job_update_from_result(job_id, result, fallback_status=fallback_status)
         if job.get("type") == "historical_backfill" and fallback_status == "completed" and isinstance(result, dict) and result.get("historical_next_end"):
             enqueue_sync_job(
@@ -2338,7 +2416,7 @@ def _scheduled_provider_retry_at(db: Any, provider: str) -> str | None:
     ).fetchall()
     for row in rows:
         try:
-            available_at = datetime.fromisoformat(str(row["available_at"]).replace("Z", "+00:00")).astimezone(timezone.utc)
+            available_at = datetime.fromisoformat(str(row["available_at"]).replace("Z", UTC_OFFSET_SUFFIX)).astimezone(timezone.utc)
         except (TypeError, ValueError):
             continue
         if available_at > now:
@@ -2367,7 +2445,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
         cached_weather = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
         if isinstance(cached_weather, dict):
             fallbacks[("weather", "forecast")] = cached_weather.get("fetched_at")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         pass
     configured = {
         ("intervals", "activities"): bool(CONFIG.intervals_api_key),
@@ -2406,12 +2484,18 @@ def provider_freshness_state() -> list[dict[str, Any]]:
                 state = "partial"
             elif configured[key] and last_good:
                 try:
-                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_good.replace("Z", "+00:00"))).total_seconds()
+                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_good.replace("Z", UTC_OFFSET_SUFFIX))).total_seconds()
                 except (TypeError, ValueError):
                     age = float("inf")
                 state = "stale" if age > PROVIDER_REFRESH_STALE_SECONDS[key] else "fresh"
             elif configured[key] and fallback_error:
                 state = "stale" if last_good else "error"
+            if row and row["status"] == "error":
+                error_code = row.get("error_code")
+            elif fallback_error:
+                error_code = "provider_error"
+            else:
+                error_code = None
             result.append({
                 "provider": provider,
                 "area": area,
@@ -2422,7 +2506,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
                 "phase": row.get("phase") if row else None,
                 "last_attempt_at": last_attempt,
                 "last_success_at": last_good,
-                "error_code": row.get("error_code") if row and row["status"] == "error" else "provider_error" if fallback_error else None,
+                "error_code": error_code,
                 "next_retry_at": scheduled_retry,
                 "stale": state == "stale",
                 "has_last_good": bool(last_good),
@@ -2441,7 +2525,7 @@ def _audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:
         if isinstance(value, dict) and isinstance(value.get("payload"), str):
             try:
                 payload = json.loads(value["payload"])
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 payload = {}
             value = {**payload, "sync_status": value.get("sync_state") or payload.get("sync_status")}
     elif entity_type == "planned_unit":
@@ -2449,7 +2533,7 @@ def _audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:
         if isinstance(value, dict) and isinstance(value.get("payload"), str):
             try:
                 payload = json.loads(value["payload"])
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 payload = {}
             value = {**payload, "sync_status": value.get("sync_state") or payload.get("sync_status")}
     elif entity_type == "competition":
@@ -2561,7 +2645,7 @@ def _record_change(
 def _change_history_view(row: dict[str, Any]) -> dict[str, Any]:
     try:
         diff = json.loads(row.get("diff") or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         diff = {"fields": {}}
     safe_fields = {
         field: {"changed": True}
@@ -2618,7 +2702,7 @@ def _history_current(db: Any, entity_type: str, entity_id: str) -> tuple[dict[st
         value = dict(row) if row else None
         return value, _audit_projection(entity_type, value)
     if entity_type == "competition":
-        row = db.execute("SELECT * FROM competitions WHERE id=?", (entity_id,)).fetchone()
+        row = db.execute(SELECT_COMPETITION_SQL, (entity_id,)).fetchone()
         value = dict(row) if row else None
         return value, _audit_projection(entity_type, value)
     if entity_type == "training_plan":
@@ -2631,7 +2715,7 @@ def _history_current(db: Any, entity_type: str, entity_id: str) -> tuple[dict[st
 def _history_target(row: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     try:
         diff = json.loads(row.get("diff") or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (TypeError, ValueError) as exc:
         raise AppError(409, "Die Änderungshistorie ist beschädigt.") from exc
     fields = diff.get("fields") if isinstance(diff, dict) else None
     if not isinstance(fields, dict):
@@ -2646,7 +2730,7 @@ def _history_target(row: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[st
 
 def _history_preview(change_id: Any, session_csrf_hash: str) -> dict[str, Any]:
     normalized_id = str(change_id or "").strip()
-    if not re.fullmatch(r"[0-9a-f-]{36}", normalized_id):
+    if not re.fullmatch(UUID_PATTERN, normalized_id):
         raise AppError(400, "Ungültige Änderungshistorie-ID.")
     with DB_LOCK, database() as db:
         row = db.execute("SELECT * FROM change_history WHERE id=?", (normalized_id,)).fetchone()
@@ -2673,7 +2757,7 @@ def _history_preview(change_id: Any, session_csrf_hash: str) -> dict[str, Any]:
                 json.dumps(payload, separators=(",", ":")), _coach_action_hash(payload), expires_at, utc_now(),
             ),
         )
-        proposal = db.execute("SELECT * FROM coach_action_proposals WHERE id=?", (proposal_id,)).fetchone()
+        proposal = db.execute(SELECT_ACTION_PROPOSAL_SQL, (proposal_id,)).fetchone()
     return {
         "status": "preview",
         "change": _change_history_view(history),
@@ -2684,7 +2768,7 @@ def _history_preview(change_id: Any, session_csrf_hash: str) -> dict[str, Any]:
 
 def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
     change_id = str(payload.get("change_id") or "").strip()
-    if not re.fullmatch(r"[0-9a-f-]{36}", change_id):
+    if not re.fullmatch(UUID_PATTERN, change_id):
         raise AppError(400, "Ungültige Änderungshistorie-ID.")
     with DB_LOCK, database() as db:
         row = db.execute("SELECT * FROM change_history WHERE id=?", (change_id,)).fetchone()
@@ -2714,14 +2798,14 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
             elif current:
                 try:
                     restored = normalize_library_workout({**json.loads(current["payload"]), **target}, local_id=entity_id, external_id=current.get("external_id"), sync_status="local")
-                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                except (TypeError, ValueError) as exc:
                     raise AppError(409, "Die Bibliothekseinheit kann nicht wiederhergestellt werden.") from exc
                 db.execute("UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?", (json.dumps(restored, ensure_ascii=False), utc_now(), entity_id))
                 after = {**restored, "sync_status": "local"}
             else:
                 restored = normalize_library_workout(target, local_id=entity_id, external_id=None, sync_status="local")
                 now = utc_now()
-                db.execute("INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)", (entity_id, entity_id, json.dumps(restored, ensure_ascii=False), now))
+                db.execute(INSERT_LIBRARY_SQL, (entity_id, entity_id, json.dumps(restored, ensure_ascii=False), now))
                 after = restored
         elif entity_type == "competition":
             if target is None:
@@ -2743,15 +2827,25 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
             elif current:
                 try:
                     current_payload = json.loads(current.get("payload") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                except (TypeError, ValueError) as exc:
                     raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.") from exc
                 if not isinstance(current_payload, dict):
                     raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.")
                 restore_date = str(target.get("date") or current_payload.get("date") or "")[:10]
                 current_date = str(current_payload.get("date") or "")[:10]
                 restoring_deletion = history.get("action") == "delete"
-                target_archived = bool(target["archived"]) if "archived" in target else (False if restoring_deletion else bool(current_payload.get("archived")))
-                target_local_deleted = bool(target["local_deleted"]) if "local_deleted" in target else (False if restoring_deletion else bool(current_payload.get("local_deleted")))
+                if "archived" in target:
+                    target_archived = bool(target["archived"])
+                elif restoring_deletion:
+                    target_archived = False
+                else:
+                    target_archived = bool(current_payload.get("archived"))
+                if "local_deleted" in target:
+                    target_local_deleted = bool(target["local_deleted"])
+                elif restoring_deletion:
+                    target_local_deleted = False
+                else:
+                    target_local_deleted = bool(current_payload.get("local_deleted"))
                 schedule_change = restore_date != current_date or (
                     (bool(current_payload.get("archived")) or bool(current_payload.get("local_deleted")))
                     and not target_archived and not target_local_deleted
@@ -2761,7 +2855,7 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                 restored_target = dict(target)
                 if restore_date:
                     previous_start = str(current_payload.get("start_date_local") or "")
-                    time_suffix = previous_start[10:] if len(previous_start) > 10 and previous_start[10] == "T" else "T00:00:00"
+                    time_suffix = previous_start[10:] if len(previous_start) > 10 and previous_start[10] == "T" else ISO_MIDNIGHT_SUFFIX
                     restored_target["start_date_local"] = restore_date + time_suffix
                 restored = normalize_planned_unit(
                     {
@@ -2775,7 +2869,7 @@ def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
                     sync_status="local",
                 )
                 db.execute(
-                    "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                    UPDATE_PLANNED_UNIT_SQL,
                     (json.dumps(restored, ensure_ascii=False), utc_now(), entity_id),
                 )
                 after = restored
@@ -2927,7 +3021,7 @@ def diagnostic_response_shape(value: Any, depth: int = 0) -> dict[str, Any]:
         keys = []
         for key in list(value)[:50]:
             text = str(key)
-            keys.append(text[:80] if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,79}", text) else "[nonstandard]")
+            keys.append(text[:80] if re.fullmatch(r"(?a:[A-Za-z][\w-]{0,79})", text) else "[nonstandard]")
         result: dict[str, Any] = {"type": "object", "field_count": len(value), "fields": keys}
         if depth < 1 and value:
             result["sample"] = diagnostic_response_shape(next(iter(value.values())), depth + 1)
@@ -2960,6 +3054,9 @@ def _safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     reason = str(getattr(exc, "reason", "") or "").strip()
     if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
         result["reason"] = reason
+    validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
+    if validation_reason and re.fullmatch(r"[a-z_]{1,80}", validation_reason):
+        result["validation_reason"] = validation_reason
     provider_code = getattr(exc, "provider_error_code", None)
     if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
         result["provider_error_code"] = provider_code
@@ -3001,7 +3098,7 @@ def _safe_response_headers(headers: Any) -> dict[str, str]:
 def _diagnostic_capture_state() -> dict[str, Any]:
     try:
         value = json.loads(get_kv(DIAGNOSTIC_CAPTURE_STATE_KEY) or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         value = {}
     return value if isinstance(value, dict) else {}
 
@@ -3010,14 +3107,14 @@ def diagnostic_capture_status() -> dict[str, Any]:
     state = _diagnostic_capture_state()
     expires_at = str(state.get("expires_at") or "")
     try:
-        active = datetime.fromisoformat(expires_at.replace("Z", "+00:00")) > datetime.now(timezone.utc)
+        active = datetime.fromisoformat(expires_at.replace("Z", UTC_OFFSET_SUFFIX)) > datetime.now(timezone.utc)
     except (TypeError, ValueError):
         active = False
     if not active and state:
         set_kv(DIAGNOSTIC_CAPTURE_STATE_KEY, "")
     try:
         entries = json.loads(get_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY) or "[]")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         entries = []
     return {
         "active": active,
@@ -3031,7 +3128,7 @@ def diagnostic_capture_status() -> dict[str, Any]:
 def diagnostic_capture_entries() -> list[dict[str, Any]]:
     try:
         entries = json.loads(get_kv(DIAGNOSTIC_CAPTURE_ENTRIES_KEY) or "[]")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return []
     if not isinstance(entries, list):
         return []
@@ -3091,7 +3188,7 @@ def activity_datetime(value: Any) -> datetime | None:
     if not value:
         return None
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value).replace("Z", UTC_OFFSET_SUFFIX))
     except ValueError:
         return None
     if parsed.tzinfo is not None:
@@ -3334,13 +3431,13 @@ GARMIN_CONTEXT_FIELDS = {
     "hrvStatus", "hrvWeeklyAvg", "weeklyAvg", "hrvLastNight", "lastNightAvg", "bodyBattery", "body_battery", "charged", "drained", "qualifier",
     "racePredictionTime", "distance", "activityId", "activityName", "activityType", "startTimeLocal", "duration",
     "averageHR", "maxHR", "maxHeartRate", "calories", "trainingEffect", "vO2MaxValue", "trainingReadiness", "recoveryTime",
-    "weight", "weightKg", "weight_kg", "summaryDate", "latestWeight", "calendarDate",
+    "weight", "weightKg", "weight_kg", "summaryDate", "latestWeight",
     "restingHeartRate", "restingHR", "functionalThresholdPower", "ftp", "power", "speed",
     "heartRate", "hearRate", "heartRateCycling", "heartRateRunning",
 }
 
 
-GARMIN_PERFORMANCE_SOURCE = "Garmin Connect"
+GARMIN_PERFORMANCE_SOURCE = PROVIDER_GARMIN_NAME
 
 
 def _garmin_key(value: Any) -> str:
@@ -3423,7 +3520,7 @@ def _garmin_record_date(value: Any) -> str | None:
         except (OverflowError, OSError, ValueError):
             return None
     try:
-        return str(value).replace("Z", "+00:00")[:10]
+        return str(value).replace("Z", UTC_OFFSET_SUFFIX)[:10]
     except (AttributeError, TypeError):
         return None
 
@@ -3529,7 +3626,12 @@ def _garmin_pace_seconds(value: Any) -> float | int | None:
     # running threshold speed in a decimetre-per-second-like scale (for
     # example 0.35833233 represents roughly 3.58 m/s, or 4:40/km). The
     # fixture and some API variants expose the regular m/s value instead.
-    pace = 100 / number if scaled_garmin_speed else 1000 / number if number < 20 else number
+    if scaled_garmin_speed:
+        pace = 100 / number
+    elif number < 20:
+        pace = 1000 / number
+    else:
+        pace = number
     if scaled_garmin_speed:
         # Garmin displays this profile pace in five-second steps.
         pace = round(pace / 5) * 5
@@ -3546,7 +3648,12 @@ def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:
             max_hr = as_number(first_present(value, ("maxHeartRateUsed", "maxHeartRate", "maxHR")))
             if max_hr is not None and 80 <= float(max_hr) <= 260:
                 sport = _garmin_key(first_present(value, ("sport", "sportType", "activityType")))
-                kind = "cycling" if any(term in sport for term in ("cycling", "cycl", "bike", "ride")) else "running" if any(term in sport for term in ("running", "run")) else "generic"
+                if any(term in sport for term in ("cycling", "cycl", "bike", "ride")):
+                    kind = "cycling"
+                elif any(term in sport for term in ("running", "run")):
+                    kind = "running"
+                else:
+                    kind = "generic"
                 values[kind].append(max_hr)
             for child in value.values():
                 visit(child)
@@ -3572,7 +3679,12 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                     number = _garmin_vo2_value(item)
                     if number is not None:
                         context = _garmin_key(" ".join((*path, str(key))))
-                        category = "cycling" if any(term in context for term in ("cycling", "cycl", "bike", "ride")) else "running" if any(term in context for term in ("running", "run")) else "generic"
+                        if any(term in context for term in ("cycling", "cycl", "bike", "ride")):
+                            category = "cycling"
+                        elif any(term in context for term in ("running", "run")):
+                            category = "running"
+                        else:
+                            category = "generic"
                         vo2_values[category].append(number)
                 visit_vo2(item, (*path, str(key)))
         elif isinstance(value, list):
@@ -3580,7 +3692,12 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                 visit_vo2(item, path)
 
     visit_vo2(max_metrics)
-    running_vo2 = vo2_values["running"][-1] if vo2_values["running"] else (vo2_values["generic"][-1] if vo2_values["generic"] else None)
+    if vo2_values["running"]:
+        running_vo2 = vo2_values["running"][-1]
+    elif vo2_values["generic"]:
+        running_vo2 = vo2_values["generic"][-1]
+    else:
+        running_vo2 = None
     cycling_vo2 = vo2_values["cycling"][-1] if vo2_values["cycling"] else None
 
     race_values: dict[str, float | int | None] = {
@@ -3661,12 +3778,12 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         "weight_kg": (weight["value"], "kg", "Garmin Connect KÃ¶rpergewicht"),
         "cycling_max_hr_bpm": (max(max_hr_values["cycling"], default=None), "bpm", "Garmin Connect Herzfrequenzzonen" if profile_max_hr else "Garmin Connect RadaktivitÃ¤ten"),
         "running_max_hr_bpm": (max(max_hr_values["running"], default=None), "bpm", "Garmin Connect Herzfrequenzzonen" if profile_max_hr else "Garmin Connect LaufaktivitÃ¤ten"),
-        "cycling_vo2max_ml_kg_min": (cycling_vo2, "ml/kg/min", "Garmin Connect max metrics"),
-        "running_vo2max_ml_kg_min": (running_vo2, "ml/kg/min", "Garmin Connect max metrics"),
-        "run_5k_seconds": (race_values["run_5k_seconds"], "s", "Garmin Connect Laufprognose"),
-        "run_10k_seconds": (race_values["run_10k_seconds"], "s", "Garmin Connect Laufprognose"),
-        "run_half_marathon_seconds": (race_values["run_half_marathon_seconds"], "s", "Garmin Connect Laufprognose"),
-        "run_marathon_seconds": (race_values["run_marathon_seconds"], "s", "Garmin Connect Laufprognose"),
+        "cycling_vo2max_ml_kg_min": (cycling_vo2, VO2MAX_UNIT, "Garmin Connect max metrics"),
+        "running_vo2max_ml_kg_min": (running_vo2, VO2MAX_UNIT, "Garmin Connect max metrics"),
+        "run_5k_seconds": (race_values["run_5k_seconds"], "s", GARMIN_RUN_PREDICTION_SOURCE),
+        "run_10k_seconds": (race_values["run_10k_seconds"], "s", GARMIN_RUN_PREDICTION_SOURCE),
+        "run_half_marathon_seconds": (race_values["run_half_marathon_seconds"], "s", GARMIN_RUN_PREDICTION_SOURCE),
+        "run_marathon_seconds": (race_values["run_marathon_seconds"], "s", GARMIN_RUN_PREDICTION_SOURCE),
         "cycling_ftp_watts": (cycling_ftp, "W", "Garmin Connect FTP"),
         "run_threshold_watts": (running_power, "W", "Garmin Connect Lauf-Schwellenleistung"),
         "run_threshold_pace_seconds_per_km": (running_pace, "s/km", "Garmin Connect Lauf-Schwellenpace"),
@@ -3689,12 +3806,18 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                               if isinstance(activity, dict) and activity_kind(activity) == kind
                               and as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate"))) == result[key]["value"]]
             result[key]["observed_at"] = max((value for value in observed_dates if value), default=None)
-    return {
-        key: garmin_metric_freshness(snapshot, source_keys.get(key) or (
-            "max_metrics" if "vo2max" in key else "race_predictions" if key in race_values else "running_threshold"
-        ), value)
-        for key, value in result.items()
-    }
+    freshness = {}
+    for key, value in result.items():
+        source = source_keys.get(key)
+        if not source:
+            if "vo2max" in key:
+                source = "max_metrics"
+            elif key in race_values:
+                source = "race_predictions"
+            else:
+                source = "running_threshold"
+        freshness[key] = garmin_metric_freshness(snapshot, source, value)
+    return freshness
 
 
 def measurement_age(observed_at: Any) -> dict[str, Any]:
@@ -3703,7 +3826,13 @@ def measurement_age(observed_at: Any) -> dict[str, Any]:
         days = (local_now().date() - date.fromisoformat(str(observed_at)[:10])).days
     except (TypeError, ValueError):
         return {"measurement_status": "unknown", "measurement_age_days": None}
-    return {"measurement_status": "today" if days == 0 else "earlier" if days > 0 else "future", "measurement_age_days": days}
+    if days == 0:
+        measurement_status = "today"
+    elif days > 0:
+        measurement_status = "earlier"
+    else:
+        measurement_status = "future"
+    return {"measurement_status": measurement_status, "measurement_age_days": days}
 
 
 def garmin_source_freshness(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -3931,7 +4060,7 @@ GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
 def _garmin_capability_state(source: str) -> dict[str, Any]:
     try:
         value = json.loads(get_kv(f"garmin_capability_{source}") or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         value = {}
     return value if isinstance(value, dict) else {}
 
@@ -3940,7 +4069,7 @@ def _garmin_capability_allowed(source: str) -> bool:
     state = _garmin_capability_state(source)
     paused_until = str(state.get("paused_until") or "")
     try:
-        return datetime.fromisoformat(paused_until.replace("Z", "+00:00")) <= datetime.now(timezone.utc)
+        return datetime.fromisoformat(paused_until.replace("Z", UTC_OFFSET_SUFFIX)) <= datetime.now(timezone.utc)
     except (TypeError, ValueError):
         return True
 
@@ -4056,7 +4185,7 @@ def garmin_sleep_ready_for_checkin(checkin_date: date, snapshot: dict[str, Any] 
 def _garmin_error_entries() -> list[dict[str, Any]]:
     try:
         errors = json.loads(get_kv("last_garmin_error") or "[]")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         errors = []
     return [entry for entry in errors if isinstance(entry, dict)] if isinstance(errors, list) else []
 
@@ -4082,7 +4211,7 @@ def _garmin_timestamp(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", UTC_OFFSET_SUFFIX))
     except ValueError:
         return None
     return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
@@ -4151,7 +4280,7 @@ def _morning_body_battery_record(
         "status": "not_available_today",
         "before_sleep": None,
         "morning": None,
-        "source": "Garmin Connect",
+        "source": PROVIDER_GARMIN_NAME,
     }
     if sleep_start is None or sleep_end is None:
         return record
@@ -4406,8 +4535,10 @@ def sync_garmin(
             capability_allowed=_garmin_capability_allowed,
             capability_failure=_garmin_capability_failure,
             capability_success=_garmin_capability_success,
-            include_recovery=end_date is None and days != ALL_SYNC_DAYS,
-            include_current_metrics=end_date is None and days != ALL_SYNC_DAYS,
+            options=GarminCollectionOptions(
+                include_recovery=end_date is None and days != ALL_SYNC_DAYS,
+                include_current_metrics=end_date is None and days != ALL_SYNC_DAYS,
+            ),
         )
         merge_garmin_sources(payload, previous)
         payload["activities"] = deduplicate_api_records(payload.get("activities", []))
@@ -4784,9 +4915,9 @@ def competition_start(value: Any, fallback_date: Any = None) -> tuple[str, str]:
     raw = str(value or "").strip()
     fallback = str(fallback_date or "").strip()
     if not raw:
-        raw = fallback + "T00:00:00"
+        raw = fallback + ISO_MIDNIGHT_SUFFIX
     try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(raw.replace("Z", UTC_OFFSET_SUFFIX))
     except ValueError as exc:
         raise AppError(400, "Der Startzeitpunkt des Wettkampfs muss ein gültiges Datum sein.") from exc
     if parsed.tzinfo is not None:
@@ -4875,7 +5006,7 @@ def normalize_competition(value: Any) -> dict[str, str]:
     return result
 
 
-def list_competitions(include_sync: bool = False, limit: int | None = None) -> list[dict[str, Any]]:
+def list_competitions(limit: int | None = None) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
         return COMPETITION_REPOSITORY.list(db, max(1, min(int(limit), 500)) if limit is not None else None)
 
@@ -4928,7 +5059,7 @@ def fetch_calendar_feed(url: str) -> bytes:
         "path": "/redacted",
         "timeout_seconds": CALENDAR_FETCH_TIMEOUT_SECONDS,
     }
-    LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": request_context})
+    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
     timed_out = False
     try:
         addresses = _resolve_calendar_addresses(hostname, status=502)
@@ -4964,7 +5095,7 @@ def fetch_calendar_feed(url: str) -> bytes:
                 if len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
                     raise AppError(413, "Der Kalender-Feed ist zu groß.")
                 LOGGER.info(
-                    "External HTTP request completed",
+                    EXTERNAL_HTTP_COMPLETED_EVENT,
                     extra={
                         "event": "external_request_completed",
                         "context": {
@@ -4994,7 +5125,7 @@ def fetch_calendar_feed(url: str) -> bytes:
             raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.")
         raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.") from last_network_error
     except AppError as exc:
-        LOGGER.error(
+        LOGGER.exception(
             "External calendar request failed",
             extra={
                 "event": "external_request_failed",
@@ -5054,18 +5185,18 @@ def ical_training_impact(description: Any) -> bool:
     return any(_ical_description_contains(description, marker) for marker in ICAL_TRAINING_MARKERS)
 
 
-def ical_training_relevant(name: Any, description: Any) -> bool:
+def ical_training_relevant(description: Any) -> bool:
     """Treat only described events as training-relevant calendar constraints."""
     description_text = str(description or "").strip()
     return bool(description_text) and not _ical_description_contains(description_text, ICAL_NO_TRAINING_MARKER)
 
 
-def ical_no_intensity(name: Any, description: Any) -> bool:
+def ical_no_intensity(description: Any) -> bool:
     """Treat only the explicit marker as a no-intensity training constraint."""
     return _ical_description_contains(description, ICAL_NO_INTENSITY_MARKER)
 
 
-def ical_short_only(name: Any, description: Any) -> bool:
+def ical_short_only(description: Any) -> bool:
     """Treat only the explicit marker as a short-session training constraint."""
     return _ical_description_contains(description, ICAL_SHORT_ONLY_MARKER)
 
@@ -5103,15 +5234,15 @@ def _ical_rrule(raw: str) -> dict[str, Any]:
         for token in values["BYDAY"].split(","):
             match = re.fullmatch(r"([+-]?\d{1,2})?([A-Z]{2})", token)
             if not match or match.group(2) not in day_numbers:
-                raise AppError(400, "BYDAY der Kalender-Wiederholung wird nicht unterstützt.")
+                raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
             ordinal = int(match.group(1)) if match.group(1) else None
             if ordinal == 0 or (ordinal is not None and abs(ordinal) > 53):
-                raise AppError(400, "BYDAY der Kalender-Wiederholung wird nicht unterstützt.")
+                raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
             if frequency in {"DAILY", "WEEKLY"} and ordinal is not None:
                 raise AppError(400, "Eine BYDAY-Position wird nur für MONTHLY oder YEARLY unterstützt.")
             item = (day_numbers[match.group(2)], ordinal)
             if item in bydays:
-                raise AppError(400, "BYDAY der Kalender-Wiederholung wird nicht unterstützt.")
+                raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
             bydays.append(item)
 
     def integer_list(name: str, minimum: int, maximum: int, *, allow_negative: bool = False) -> list[int]:
@@ -5238,9 +5369,9 @@ def _ical_event_record(current: dict[str, Any], start: datetime, duration: timed
         "duration_minutes": duration_minutes,
         "all_day": bool(current.get("all_day")),
         "training_impact": ical_training_impact(current.get("description")),
-        "training_relevant": ical_training_relevant(current.get("name"), current.get("description")),
-        "no_intensity": ical_no_intensity(current.get("name"), current.get("description")),
-        "short_only": ical_short_only(current.get("name"), current.get("description")),
+        "training_relevant": ical_training_relevant(current.get("description")),
+        "no_intensity": ical_no_intensity(current.get("description")),
+        "short_only": ical_short_only(current.get("description")),
     }
 
 
@@ -5497,7 +5628,7 @@ def list_external_calendar_events(limit: int = 300, training_relevant_only: bool
         rows = db.execute(
             "SELECT id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, short_only, updated_at "
             f"FROM external_calendar_events WHERE end_local > ?{relevance_filter} ORDER BY start_local LIMIT ?",
-            (local_now().date().isoformat() + "T00:00:00", max(1, min(int(limit), 1000))),
+            (local_now().date().isoformat() + ISO_MIDNIGHT_SUFFIX, max(1, min(int(limit), 1000))),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -5551,12 +5682,12 @@ def sync_external_calendar(reason: str = "manual", operation_id: str | None = No
         return {"status": "ok", "synced_at": now, "events": len(events), "window_days": EXTERNAL_CALENDAR_WINDOW_DAYS, **replan}
     except AppError as exc:
         set_kv("last_external_calendar_sync_error", redact_text(exc.message)[:1000])
-        LOGGER.error("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
+        LOGGER.exception("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason}}, exc_info=True)
         raise
     except Exception as exc:
         safe_error = provider_error("calendar", "client")
         set_kv("last_external_calendar_sync_error", safe_error.message)
-        LOGGER.error("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason, "error_type": type(exc).__name__}}, exc_info=True)
+        LOGGER.exception("External calendar synchronization failed", extra={"event": "external_calendar_sync_failed", "context": {"reason": reason, "error_type": type(exc).__name__}}, exc_info=True)
         raise safe_error from exc
     finally:
         set_kv("external_calendar_sync_status", "")
@@ -5599,7 +5730,7 @@ PLANNING_CONTEXT_APPOINTMENT_FIELDS = (
 
 
 def _planning_context_date(value: Any) -> str:
-    raw = str(value or "").replace("Z", "+00:00")[:10]
+    raw = str(value or "").replace("Z", UTC_OFFSET_SUFFIX)[:10]
     try:
         return date.fromisoformat(raw).isoformat()
     except ValueError:
@@ -5631,8 +5762,8 @@ def garmin_recovery_metric(
     transform: Callable[[Any], float | int | None] | None = None,
 ) -> tuple[float | int | None, str | None]:
     normalized_keys = {_garmin_key(key) for key in keys}
-    records = sorted(_dated_garmin_recovery_records(snapshot.get(section)), key=lambda item: item[0])
-    for record_date, record in reversed(records):
+    records = sorted(_dated_garmin_recovery_records(snapshot.get(section)), key=lambda item: item[0], reverse=True)
+    for record_date, record in records:
         value = _garmin_last_numeric(record, normalized_keys)
         if transform:
             value = transform(value)
@@ -5705,15 +5836,20 @@ def garmin_daily_health_metrics(snapshot: dict[str, Any], days: int, end_date: d
             if number is not None:
                 values[metric_name].append(float(number))
     units = {"steps": "Schritte/Tag", "floors": "Stockwerke/Tag", "calories": "kcal/Tag"}
-    return {
-        f"{metric_name}_7d": garmin_metric_freshness(snapshot, "daily_stats", metric(
-            int(round(sum(numbers) / len(numbers))) if numbers and metric_name in {"steps", "floors"} else round(sum(numbers) / len(numbers), 2) if numbers else None,
-            units[metric_name],
-            GARMIN_PERFORMANCE_SOURCE,
-            "Durchschnitt der letzten 7 Tage",
-        ))
-        for metric_name, numbers in values.items()
-    }
+    result = {}
+    for metric_name, numbers in values.items():
+        if not numbers:
+            average = None
+        elif metric_name in {"steps", "floors"}:
+            average = int(round(sum(numbers) / len(numbers)))
+        else:
+            average = round(sum(numbers) / len(numbers), 2)
+        result[f"{metric_name}_7d"] = garmin_metric_freshness(
+            snapshot,
+            "daily_stats",
+            metric(average, units[metric_name], GARMIN_PERFORMANCE_SOURCE, "Durchschnitt der letzten 7 Tage"),
+        )
+    return result
 
 
 def _add_planning_recovery_value(
@@ -5744,20 +5880,20 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
                 sleep_hours = round(float(sleep_seconds) / 3600, 1)
             except (TypeError, ValueError):
                 sleep_hours = None
-        _add_planning_recovery_value(recovery, "sleep_hours", sleep_hours, "Intervals.icu Wellness")
-        _add_planning_recovery_value(recovery, "sleep_score", first_present(row, ("sleepScore", "overallSleepScore")), "Intervals.icu Wellness")
-        _add_planning_recovery_value(recovery, "hrv", first_present(row, ("hrv", "hrv_ms")), "Intervals.icu Wellness")
-        _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(row, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness"))), "Intervals.icu Wellness")
-        _add_planning_recovery_value(recovery, "resting_hr", first_present(row, ("restingHR", "resting_hr")), "Intervals.icu Wellness")
+        _add_planning_recovery_value(recovery, "sleep_hours", sleep_hours, PROVIDER_INTERVALS_WELLNESS_NAME)
+        _add_planning_recovery_value(recovery, "sleep_score", first_present(row, ("sleepScore", "overallSleepScore")), PROVIDER_INTERVALS_WELLNESS_NAME)
+        _add_planning_recovery_value(recovery, "hrv", first_present(row, ("hrv", "hrv_ms")), PROVIDER_INTERVALS_WELLNESS_NAME)
+        _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(row, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness"))), PROVIDER_INTERVALS_WELLNESS_NAME)
+        _add_planning_recovery_value(recovery, "resting_hr", first_present(row, ("restingHR", "resting_hr")), PROVIDER_INTERVALS_WELLNESS_NAME)
         for metric_name, keys in (("ctl", ("ctl", "ctLoad")), ("atl", ("atl", "atlLoad")), ("tsb", ("tsb", "form"))):
-            _add_planning_recovery_value(recovery, metric_name, first_present(row, keys), "Intervals.icu Wellness")
+            _add_planning_recovery_value(recovery, metric_name, first_present(row, keys), PROVIDER_INTERVALS_WELLNESS_NAME)
 
     garmin = garmin_snapshot()
     for section, source_name in (
-        ("sleep", "Garmin Connect"),
-        ("hrv", "Garmin Connect"),
-        ("resting_hr", "Garmin Connect"),
-        ("readiness", "Garmin Connect"),
+        ("sleep", PROVIDER_GARMIN_NAME),
+        ("hrv", PROVIDER_GARMIN_NAME),
+        ("resting_hr", PROVIDER_GARMIN_NAME),
+        ("readiness", PROVIDER_GARMIN_NAME),
     ):
         for record_date, record in _dated_garmin_recovery_records(garmin.get(section)):
             recovery = recovery_by_date.setdefault(record_date, {})
@@ -5786,14 +5922,14 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
     for day, value in _saved_daily_history(MORNING_BATTERY_HISTORY_KEY).items():
         record_date = _planning_context_date(day)
         if record_date and as_number(value) is not None:
-            _add_planning_recovery_value(recovery_by_date.setdefault(record_date, {}), "body_battery", value, "Garmin Connect")
+            _add_planning_recovery_value(recovery_by_date.setdefault(record_date, {}), "body_battery", value, PROVIDER_GARMIN_NAME)
     morning_body_battery = _garmin_morning_body_battery(garmin)
     if morning_body_battery and morning_body_battery.get("status") == "ready":
         record_date = _planning_context_date(morning_body_battery.get("sleep_date"))
         morning = morning_body_battery.get("morning")
         if record_date and isinstance(morning, dict):
             recovery = recovery_by_date.setdefault(record_date, {})
-            _add_planning_recovery_value(recovery, "body_battery", morning.get("value"), "Garmin Connect", overwrite=True)
+            _add_planning_recovery_value(recovery, "body_battery", morning.get("value"), PROVIDER_GARMIN_NAME, overwrite=True)
     return recovery_by_date
 
 
@@ -6024,7 +6160,7 @@ def save_coach_competition(arguments: Any) -> dict[str, Any]:
         with DB_LOCK, database() as db:
             existing_row = COMPETITION_REPOSITORY.get(db, competition_id)
         if not existing_row:
-            raise AppError(404, "Wettkampf nicht gefunden.")
+            raise AppError(404, COMPETITION_NOT_FOUND_ERROR)
         for field in ("name", "event_date", "sport", "priority"):
             if field not in arguments:
                 value[field] = existing_row.get(field)
@@ -6071,8 +6207,8 @@ def save_coach_competition(arguments: Any) -> dict[str, Any]:
             status = "updated"
             before = existing
         _record_change(db, "competition", normalized["id"], "create" if status == "created" else "update", before, {**normalized, "sync_state": "local"})
-    saved = next(item for item in list_competitions(include_sync=True) if item["id"] == normalized["id"])
-    return {"status": status, "competition": saved, "competitions": list_competitions(include_sync=True)}
+    saved = next(item for item in list_competitions() if item["id"] == normalized["id"])
+    return {"status": status, "competition": saved, "competitions": list_competitions()}
 
 
 def delete_coach_competition(competition_id: Any) -> dict[str, Any]:
@@ -6080,11 +6216,11 @@ def delete_coach_competition(competition_id: Any) -> dict[str, Any]:
     now = utc_now()
     with DB_LOCK, database() as db:
         row = db.execute(
-            "SELECT * FROM competitions WHERE id=?",
+            SELECT_COMPETITION_SQL,
             (normalized_id,),
         ).fetchone()
         if not row:
-            raise AppError(404, "Wettkampf nicht gefunden.")
+            raise AppError(404, COMPETITION_NOT_FOUND_ERROR)
         remote_sync_pending = bool(row.get("intervals_event_id") or row.get("external_id"))
         if remote_sync_pending:
             db.execute(
@@ -6101,7 +6237,7 @@ def delete_coach_competition(competition_id: Any) -> dict[str, Any]:
         "status": "deleted",
         "competition_id": normalized_id,
         "remote_sync_pending": remote_sync_pending,
-        "competitions": list_competitions(include_sync=True),
+        "competitions": list_competitions(),
     }
 
 
@@ -6210,7 +6346,7 @@ def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
         category = f"RACE_{competition.get('priority') if competition.get('priority') in {'A', 'B', 'C'} else 'B'}"
     payload = {
         "category": category,
-        "start_date_local": str(competition.get("start_date_local") or f"{competition['event_date']}T00:00:00"),
+        "start_date_local": str(competition.get("start_date_local") or f"{competition['event_date']}{ISO_MIDNIGHT_SUFFIX}"),
         "type": intervals_competition_sport(competition.get("sport")),
         "name": str(competition.get("name") or "Zielwettkampf")[:200],
         "description": str(competition.get("description") or competition.get("notes") or "")[:12000],
@@ -6253,7 +6389,7 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
         return None
     category = str(event.get("category") or "RACE_B").upper()
     priority = category.rsplit("_", 1)[-1] if category.rsplit("_", 1)[-1] in {"A", "B", "C"} else "B"
-    start_date_local = str(event.get("start_date_local") or f"{event_date}T00:00:00")[:19]
+    start_date_local = str(event.get("start_date_local") or f"{event_date}{ISO_MIDNIGHT_SUFFIX}")[:19]
     try:
         moving_time = competition_moving_time(event.get("moving_time"))
     except AppError:
@@ -6280,7 +6416,7 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def competition_conflict_payload(local: dict[str, Any], remote: dict[str, Any], conflict_type: str) -> str:
+def competition_conflict_payload(remote: dict[str, Any], conflict_type: str) -> str:
     data = remote_competition_data(remote) or {}
     data["external_id"] = str(remote.get("external_id") or data.get("external_id") or "").strip()[:COMPETITION_TEXT_LIMITS["external_id"]]
     return json.dumps({"type": conflict_type, "remote": data, "detected_at": utc_now()}, ensure_ascii=False)
@@ -6314,12 +6450,12 @@ def resolve_competition_conflict(competition_id: Any, strategy: Any) -> dict[str
     with DB_LOCK, database() as db:
         row = COMPETITION_REPOSITORY.get(db, normalized_id)
         if not row:
-            raise AppError(404, "Wettkampf nicht gefunden.")
+            raise AppError(404, COMPETITION_NOT_FOUND_ERROR)
         if row.get("sync_state") != "conflict" or not row.get("sync_conflict"):
             raise AppError(409, "Für diesen Wettkampf liegt kein offener Synchronisierungskonflikt vor.")
         try:
             conflict = json.loads(row["sync_conflict"])
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (TypeError, ValueError) as exc:
             raise AppError(409, "Der gespeicherte Synchronisierungskonflikt ist nicht mehr gültig.") from exc
         remote = conflict.get("remote") if isinstance(conflict, dict) else None
         remote = remote if isinstance(remote, dict) else {}
@@ -6341,8 +6477,8 @@ def resolve_competition_conflict(competition_id: Any, strategy: Any) -> dict[str
                 "UPDATE competitions SET sync_dirty=1, sync_state='local_override', sync_conflict='', updated_at=? WHERE id=?",
                 (now, normalized_id),
             )
-    saved = next(item for item in list_competitions(include_sync=True) if item["id"] == normalized_id)
-    return {"status": "resolved", "strategy": selected, "competition": saved, "competitions": list_competitions(include_sync=True)}
+    saved = next(item for item in list_competitions() if item["id"] == normalized_id)
+    return {"status": "resolved", "strategy": selected, "competition": saved, "competitions": list_competitions()}
 
 
 def _competition_sync_plan(
@@ -6453,7 +6589,7 @@ def sync_competitions(
     operation_id: str | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     if not COMPETITION_SYNC_LOCK.acquire(blocking=False):
         return {"status": "already_running"}
     try:
@@ -6492,7 +6628,7 @@ def sync_competitions(
         conflicts = 0
         with DB_LOCK, database() as db:
             for row in local_rows:
-                current = db.execute("SELECT * FROM competitions WHERE id=?", (row["id"],)).fetchone()
+                current = db.execute(SELECT_COMPETITION_SQL, (row["id"],)).fetchone()
                 if current is None or dict(current) != row:
                     continue  # A newer local edit or deletion is authoritative.
                 external_id = str(row.get("external_id") or competition_external_id(str(row["id"])))
@@ -6502,8 +6638,8 @@ def sync_competitions(
                 identity_remote = remote_by_identity.get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
                 if row.get("sync_dirty") and identity_remote and not remote and row.get("sync_state") != "local_override":
                     db.execute(
-                        "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
-                        (competition_conflict_payload(row, identity_remote, "identity_only"), now, row["id"]),
+                        UPDATE_COMPETITION_CONFLICT_SQL,
+                        (competition_conflict_payload(identity_remote, "identity_only"), now, row["id"]),
                     )
                     conflicts += 1
                     continue
@@ -6513,13 +6649,13 @@ def sync_competitions(
                     if not push_local:
                         if remote:
                             db.execute(
-                                "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
-                                (competition_conflict_payload(row, remote, "remote_changed"), now, row["id"]),
+                                UPDATE_COMPETITION_CONFLICT_SQL,
+                                (competition_conflict_payload(remote, "remote_changed"), now, row["id"]),
                             )
                             conflicts += 1
                         elif row.get("intervals_event_id"):
                             db.execute(
-                                "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                                UPDATE_COMPETITION_CONFLICT_SQL,
                                 (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
                             )
                             conflicts += 1
@@ -6531,7 +6667,7 @@ def sync_competitions(
                         )
                     elif row.get("intervals_event_id"):
                         db.execute(
-                            "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                            UPDATE_COMPETITION_CONFLICT_SQL,
                             (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
                         )
                         conflicts += 1
@@ -6551,7 +6687,7 @@ def sync_competitions(
                         updated += 1
                 elif row.get("intervals_event_id") and push_local:
                     db.execute(
-                        "UPDATE competitions SET sync_state='conflict', sync_conflict=?, updated_at=? WHERE id=?",
+                        UPDATE_COMPETITION_CONFLICT_SQL,
                         (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
                     )
                     conflicts += 1
@@ -6609,7 +6745,7 @@ def sync_competitions(
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
         set_kv("last_competition_sync_error", error)
-        LOGGER.error("Competition synchronization failed", extra={"event": "competition_sync_failed", "context": {"reason": reason}}, exc_info=True)
+        LOGGER.exception("Competition synchronization failed", extra={"event": "competition_sync_failed", "context": {"reason": reason}}, exc_info=True)
         raise
     finally:
         try:
@@ -6853,7 +6989,7 @@ def _urlopen_interruptibly(request: Request, timeout: int, cancel_event: threadi
                 response.close()
             else:
                 result["response"] = response
-        except BaseException as exc:
+        except Exception as exc:
             result["error"] = exc
         finally:
             completed.set()
@@ -6881,10 +7017,15 @@ def http_json(
     initialise_logging()
     if raw_body is not None and payload is not None:
         raise ValueError("payload and raw_body are mutually exclusive")
-    body = raw_body if raw_body is not None else (None if payload is None else json.dumps(payload).encode("utf-8"))
-    request_headers = {"Accept": "application/json", "User-Agent": f"IntervalsCoach/{APP_VERSION}"}
+    if raw_body is not None:
+        body = raw_body
+    elif payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+    else:
+        body = None
+    request_headers = {"Accept": JSON_MEDIA_TYPE, "User-Agent": f"IntervalsCoach/{APP_VERSION}"}
     if body is not None:
-        request_headers["Content-Type"] = content_type or "application/json"
+        request_headers["Content-Type"] = content_type or JSON_MEDIA_TYPE
     request_headers.update(headers or {})
     request = Request(url, data=body, headers=request_headers, method=method)
     parsed_url = urlparse(url)
@@ -6902,7 +7043,7 @@ def http_json(
     if parsed_url.query:
         request_context["query_keys"] = sorted(parse_qs(parsed_url.query, keep_blank_values=True))
     started = time.perf_counter()
-    LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": request_context})
+    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
     capture_diagnostic_event("external_http_started", {
         "service": request_context["service"],
         "method": request_context["method"],
@@ -6933,7 +7074,7 @@ def http_json(
                 record_openai_rate_limits(getattr(response, "headers", None))
                 record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
             LOGGER.info(
-                "External HTTP request completed",
+                EXTERNAL_HTTP_COMPLETED_EVENT,
                 extra={
                     "event": "external_request_completed",
                     "context": {
@@ -6967,7 +7108,7 @@ def http_json(
             error_details = gemini_error_details(exc.code, raw_error)
         else:
             error_details = None
-        LOGGER.error(
+        LOGGER.exception(
             "Upstream HTTP request failed",
             extra={
                 "event": "upstream_http_error",
@@ -6997,9 +7138,9 @@ def http_json(
             status = exc.code if service == "gemini" or exc.code == 429 else 502
             raise AppError(status, error_details["message"], reason=error_details["reason"]) from exc
         raise AppError(502, upstream_http_error_message(exc.code, raw_error, service), reason="provider_http_error") from exc
-    except (URLError, TimeoutError, OSError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
-            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         if service == "openai":
             record_openai_status({
                 "state": "error",
@@ -7008,7 +7149,7 @@ def http_json(
                 "http_status": None,
                 "updated_at": utc_now(),
             })
-        LOGGER.error(
+        LOGGER.exception(
             "Upstream service is unavailable",
             extra={
                 "event": "upstream_network_error",
@@ -7049,7 +7190,7 @@ def http_json(
                 "http_status": None,
                 "updated_at": utc_now(),
             })
-        LOGGER.error(
+        LOGGER.exception(
             "External HTTP request failed while processing response",
             extra={
                 "event": "external_request_failed",
@@ -7117,7 +7258,7 @@ def _weather_daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:
     dates = daily.get("time") if isinstance(daily.get("time"), list) else []
     result: list[dict[str, Any]] = []
     for index, raw_date in enumerate(dates[:WEATHER_FORECAST_DAYS]):
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(raw_date)):
+        if not re.fullmatch(DATE_ONLY_PATTERN, str(raw_date)):
             continue
         code = _weather_array_value(daily.get("weather_code"), index)
         hours = sorted((row for row in _weather_hourly_rows(forecast, str(raw_date))
@@ -7187,15 +7328,15 @@ def _weather_training_windows(target_date: date) -> list[tuple[int, int, str]]:
     """
     weekday = target_date.weekday()
     if weekday <= 3:  # Monday–Thursday: 06:00–15:30
-        return [(5, 6, "vor der Arbeit"), (12, 13, "Mittagspause"), (16, 22, "nach der Arbeit")]
+        return [(5, 6, WORKDAY_TIME_LABEL), (12, 13, "Mittagspause"), (16, 22, "nach der Arbeit")]
     if weekday == 4:  # Friday: 06:00–14:00
-        return [(5, 6, "vor der Arbeit"), (12, 13, "Mittagspause"), (14, 22, "nach der Arbeit")]
+        return [(5, 6, WORKDAY_TIME_LABEL), (12, 13, "Mittagspause"), (14, 22, "nach der Arbeit")]
     return [(6, 21, "Wochenende")]
 
 
 def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> dict[str, Any] | None:
     event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", event_date):
+    if not re.fullmatch(DATE_ONLY_PATTERN, event_date):
         return None
     try:
         target_date = date.fromisoformat(event_date)
@@ -7241,7 +7382,7 @@ def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> 
             )
             # When the forecast is equally good, prefer a practical daytime slot
             # over the narrow pre-work window. Weather remains the dominant factor.
-            convenience_penalty = 2 if availability == "vor der Arbeit" else 0
+            convenience_penalty = 2 if availability == WORKDAY_TIME_LABEL else 0
             candidates.append((score + convenience_penalty, start_hour, interval, availability))
     if not candidates:
         return None
@@ -7262,7 +7403,7 @@ def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> 
     recommendation = {
         "date": event_date,
         "event_id": str(event.get("id")) if event.get("id") is not None else None,
-        "event_name": str(event.get("name") or "Geplante Einheit")[:200],
+        "event_name": str(event.get("name") or PLANNED_WORKOUT_LABEL)[:200],
         "suggested_time": f"{start_hour:02d}:00–{min(23, end_hour):02d}:00 Uhr",
         "availability": availability,
         "weather_code": best_code,
@@ -7376,7 +7517,7 @@ def weather_state(
         cached = {}
     try:
         failure = json.loads(get_kv(WEATHER_FAILURE_KEY) or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         failure = {}
     if not isinstance(failure, dict):
         failure = {}
@@ -7387,7 +7528,7 @@ def weather_state(
     cache_matches = isinstance(cached, dict) and cached.get("query") == query and isinstance(cached.get("forecast"), dict)
     fetched_at = str(cached.get("fetched_at") or "") if cache_matches else ""
     try:
-        cache_age = (datetime.now(timezone.utc) - datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))).total_seconds()
+        cache_age = (datetime.now(timezone.utc) - datetime.fromisoformat(fetched_at.replace("Z", UTC_OFFSET_SUFFIX))).total_seconds()
     except (TypeError, ValueError):
         cache_age = float("inf")
     error = "Wetterdaten sind veraltet." if cache_matches and (cache_age >= WEATHER_CACHE_SECONDS or failure) else None
@@ -7395,7 +7536,7 @@ def weather_state(
     if refresh and (force or not cache_matches or cache_age >= WEATHER_CACHE_SECONDS):
         retry_at = str(failure.get("retry_at") or "")
         try:
-            retry_wait = (datetime.fromisoformat(retry_at.replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()
+            retry_wait = (datetime.fromisoformat(retry_at.replace("Z", UTC_OFFSET_SUFFIX)) - datetime.now(timezone.utc)).total_seconds()
         except (TypeError, ValueError):
             retry_wait = 0
         if retry_wait > 0 and not force:
@@ -7602,7 +7743,7 @@ def add_weather_to_planned(planned: list[dict[str, Any]], weather: dict[str, Any
     enriched = []
     for event in planned:
         copy = dict(event)
-        recommendation = by_id.get(str(event.get("id"))) or by_date_name.get((str(event.get("start_date_local") or event.get("date") or "")[:10], str(event.get("name") or "Geplante Einheit")[:200]))
+        recommendation = by_id.get(str(event.get("id"))) or by_date_name.get((str(event.get("start_date_local") or event.get("date") or "")[:10], str(event.get("name") or PLANNED_WORKOUT_LABEL)[:200]))
         if recommendation:
             copy["weather_recommendation"] = recommendation
         enriched.append(copy)
@@ -7668,7 +7809,7 @@ def calendar_activity_identity(activity: Any) -> tuple[Any, ...] | None:
         return None
     activity_id = first_present(activity, ("id", "activityId", "external_id"))
     if activity_id not in (None, ""):
-        return ("id", str(activity_id))
+        return ("id", str(activity_id), "", "", "")
     start = first_present(activity, ("start_date_local", "start_date", "date"))
     if start in (None, ""):
         return None
@@ -7735,7 +7876,12 @@ def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[in
 
 def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, today: date) -> dict[str, Any]:
     event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
-    status = "completed" if activity is not None else "missed" if event_date < today.isoformat() else "planned"
+    if activity is not None:
+        status = "completed"
+    elif event_date < today.isoformat():
+        status = "missed"
+    else:
+        status = "planned"
     planned_load = _workout_load(event)
     actual_load = _workout_load(activity)
     planned_duration = _workout_duration(event)
@@ -7953,7 +8099,7 @@ class IntervalsClient:
         pending = [item for item in folders if isinstance(item, dict)]
         while pending:
             folder = pending.pop(0)
-            if str(folder.get("name") or "").strip() == "Intervals Coach":
+            if str(folder.get("name") or "").strip() == APP_NAME:
                 matching.append(folder)
             children = folder.get("children")
             if isinstance(children, list):
@@ -7963,7 +8109,7 @@ class IntervalsClient:
             if folder_id is not None:
                 self._workout_folder_id = folder_id
                 return folder_id
-        created = self.post(f"/athlete/{athlete}/folders", {"name": "Intervals Coach"})
+        created = self.post(f"/athlete/{athlete}/folders", {"name": APP_NAME})
         folder_id = self._folder_id(created.get("id") if isinstance(created, dict) else None)
         if folder_id is None:
             raise AppError(502, "Intervals.icu hat keinen gültigen Ordner zurückgegeben.")
@@ -8265,16 +8411,25 @@ def validate_workout_description(workout: dict[str, Any]) -> float | None:
     sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
     if sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:
         return
-    quantity = re.compile(
-        r"\d+(?:[.,]\d+)?\s*(?P<unit>km|mtr|mi|yd|yards?|meters?|metres?|minutes?|mins?|seconds?|secs?|hours?|hrs?|(?<!\s)[hms]|['\"])(?![a-z])",
-    )
+    quantity = re.compile(r"\d+(?:[.,]\d+)?\s*(?P<unit>[A-Za-z'\"]+)")
+    quantity_units = {
+        "km", "mtr", "mi", "yd", "yard", "yards", "meter", "meters", "metre", "metres",
+        "minute", "minutes", "min", "mins", "second", "seconds", "sec", "secs", "hour", "hours", "hr", "hrs",
+        "h", "m", "s", "'", '"',
+    }
     for line_number, line in enumerate(str(workout.get("description") or "")[:12000].splitlines(), 1):
-        step = re.match(r"^\s*-\s+(.+)$", line)
-        if not step:
+        stripped = line.lstrip(" \t")
+        if not stripped.startswith("-"):
             continue
-        text = step.group(1)
+        text = stripped[1:].lstrip(" \t")
+        if not text:
+            continue
         # Pace denominators (e.g. 2:00/100m Pace) are targets, not steps.
-        amounts = [match for match in quantity.finditer(text) if match.start() == 0 or text[match.start() - 1] != "/"]
+        amounts = [
+            match for match in quantity.finditer(text)
+            if match.group("unit") in quantity_units
+            and (match.start() == 0 or text[match.start() - 1] != "/")
+        ]
         if amounts and amounts[0].start() != 0:
             raise AppError(
                 400,
@@ -8337,7 +8492,7 @@ def workout_event_payload(workout_id: str, workout: dict[str, Any]) -> dict[str,
         raise AppError(400, "Die Trainingsdauer muss zwischen 5 und 600 Minuten liegen.")
     return {
         "category": "WORKOUT",
-        "start_date_local": str(workout.get("start_date_local") or workout_date.isoformat() + "T00:00:00")[:40],
+        "start_date_local": str(workout.get("start_date_local") or workout_date.isoformat() + ISO_MIDNIGHT_SUFFIX)[:40],
         "type": intervals_workout_sport(workout.get("sport") or workout.get("type")),
         "name": str(workout.get("name") or "Coach workout")[:200],
         "description": str(workout.get("description") or "")[:12000],
@@ -8396,7 +8551,7 @@ def _calendar_interval(value: dict[str, Any], default_minutes: int = 60) -> tupl
         if len(raw_start) == 10:
             start = datetime.combine(date.fromisoformat(raw_start[:10]), datetime.min.time())
             return start, start + timedelta(days=1), False
-        start = datetime.fromisoformat(raw_start.replace("Z", "+00:00"))
+        start = datetime.fromisoformat(raw_start.replace("Z", UTC_OFFSET_SUFFIX))
     except (TypeError, ValueError):
         return None
     if start.tzinfo is not None:
@@ -8405,7 +8560,7 @@ def _calendar_interval(value: dict[str, Any], default_minutes: int = 60) -> tupl
     end = None
     if raw_end not in (None, ""):
         try:
-            end = datetime.fromisoformat(str(raw_end).strip().replace("Z", "+00:00"))
+            end = datetime.fromisoformat(str(raw_end).strip().replace("Z", UTC_OFFSET_SUFFIX))
             if end.tzinfo is not None:
                 end = end.replace(tzinfo=None)
         except (TypeError, ValueError):
@@ -8464,7 +8619,7 @@ def calendar_conflicts(
             continue
         try:
             library_entry = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             continue
         if not isinstance(library_entry, dict) or library_entry.get("source") not in {"coach", "library", "intervals"}:
             continue
@@ -8541,7 +8696,7 @@ def list_training_plans(limit: int = 30) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
         plans = TRAINING_PLAN_REPOSITORY.list(db, limit)
         for plan in plans:
-            plan["constraints"] = json.loads(get_kv("coach_plan_constraints:" + plan["id"]) or "[]")
+            plan["constraints"] = json.loads(get_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan["id"]) or "[]")
         return plans
 
 
@@ -8738,7 +8893,7 @@ def coach_quick_actions_state() -> dict[str, Any]:
             if today <= change_date <= horizon and relevant:
                 blockers.append({
                     "date": change_date.isoformat(),
-                    "name": str(change.get("name") or "Geplante Einheit")[:200],
+                    "name": str(change.get("name") or PLANNED_WORKOUT_LABEL)[:200],
                     "triggers": relevant,
                 })
     return {
@@ -8756,7 +8911,7 @@ def latest_illness_pause_state() -> tuple[str, dict[str, Any]] | None:
     for row in rows:
         try:
             payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             continue
         pause = payload.get("illness_pause") if isinstance(payload, dict) else None
         if isinstance(pause, dict):
@@ -8822,7 +8977,7 @@ def illness_calendar_events(pause: dict[str, Any], illness: str) -> list[dict[st
         date_key = current.isoformat()
         events.append({
             "category": ILLNESS_CALENDAR_CATEGORY,
-            "start_date_local": f"{date_key}T00:00:00",
+            "start_date_local": f"{date_key}{ISO_MIDNIGHT_SUFFIX}",
             "name": "Krankheit",
             "description": str(illness or "Krankheit").strip()[:12000],
             "external_id": f"{ILLNESS_EVENT_EXTERNAL_PREFIX}{date_key}",
@@ -8833,7 +8988,7 @@ def illness_calendar_events(pause: dict[str, Any], illness: str) -> list[dict[st
 
 def sync_illness_pause_to_intervals(pause: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     illness = str(pause.get("illness") or "Krankheit").strip()[:CHECKIN_TEXT_LIMITS["illness"]]
     client = IntervalsClient()
     pushed = client.upsert_calendar_events(illness_calendar_events(pause, illness))
@@ -8900,7 +9055,12 @@ def adaptive_replan_preview() -> dict[str, Any]:
             total_event_minutes = sum(int(event.get("duration_minutes") or 0) for event in calendar_events)
             longest_event = max(calendar_events, key=lambda event: int(event.get("duration_minutes") or 0))
             all_day = any(bool(event.get("all_day")) for event in calendar_events)
-            calendar_limit = 45 if all_day or total_event_minutes >= 240 else 60 if total_event_minutes >= 120 else 75
+            if all_day or total_event_minutes >= 240:
+                calendar_limit = 45
+            elif total_event_minutes >= 120:
+                calendar_limit = 60
+            else:
+                calendar_limit = 75
             calendar_reason = (
                 f"family calendar has {len(calendar_events)} event(s), including "
                 f"'{longest_event.get('name') or 'calendar event'}' for about {total_event_minutes} minutes"
@@ -8941,12 +9101,15 @@ def adaptive_replan_preview() -> dict[str, Any]:
                     WEATHER_ADAPTIVE_MAX_MINUTES if weather_reason else None,
                 ) if limit is not None
             ]
-            replacement = illness_pause_replacement(draft, reason) if illness_active else adaptive_recovery_replacement(
-                draft,
-                reason,
-                available_minutes if limited else None,
-                min(adaptive_limits) if adaptive_limits else None,
-            )
+            if illness_active:
+                replacement = illness_pause_replacement(draft, reason)
+            else:
+                replacement = adaptive_recovery_replacement(
+                    draft,
+                    reason,
+                    available_minutes if limited else None,
+                    min(adaptive_limits) if adaptive_limits else None,
+                )
             if calendar_limited:
                 replacement["private_calendar_adjustment"] = private_calendar_adjustment_context(
                     draft, calendar_events, replacement, calendar_reason,
@@ -9043,7 +9206,7 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
                 continue
             try:
                 current = json.loads(draft["payload"])
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 current = None
             expected_fingerprint = str(change.get("source_fingerprint") or "")
             if not isinstance(current, dict) or current.get("local_deleted") or current.get("archived") or not expected_fingerprint or adaptive_workout_fingerprint(current) != expected_fingerprint:
@@ -9067,7 +9230,7 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
                 for key in ("workout_doc", "icu_training_load", "icu_intensity"):
                     replacement.pop(key, None)
             db.execute(
-                "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                UPDATE_PLANNED_UNIT_SQL,
                 (json.dumps(replacement, ensure_ascii=False), now, draft_id),
             )
             _record_change(db, "planned_unit", draft_id, "update", before, {**replacement, "sync_status": "local"}, source="adaptive_replan")
@@ -9077,7 +9240,12 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
         if active_illness_pause:
             updated_checkins = _fill_illness_checkins(db, active_illness_pause, now)
             payload["illness_pause"] = {**active_illness_pause, "approved": True}
-        status = "stale" if stale and not updated else "partial" if stale else "applied"
+        if stale and not updated:
+            status = "stale"
+        elif stale:
+            status = "partial"
+        else:
+            status = "applied"
         PLAN_ADJUSTMENT_REPOSITORY.mark_applied(
             db, normalized_id, json.dumps(payload, ensure_ascii=False), status, now
         )
@@ -9114,7 +9282,16 @@ def season_plan_summary() -> dict[str, Any]:
         except (KeyError, TypeError, ValueError):
             continue
         days = (event_date - today).days
-        phase = "completed" if days < 0 else "taper" if days <= 14 else "peak" if days <= 42 else "build" if days <= 84 else "base"
+        if days < 0:
+            phase = "completed"
+        elif days <= 14:
+            phase = "taper"
+        elif days <= 42:
+            phase = "peak"
+        elif days <= 84:
+            phase = "build"
+        else:
+            phase = "base"
         events.append({**competition, "days_until": days, "phase": phase})
     events.sort(key=lambda item: (item["event_date"], item["priority"], item["name"]))
     return {"as_of": today.isoformat(), "events": events, "next_event": next((event for event in events if event["days_until"] >= 0), None)}
@@ -9412,7 +9589,7 @@ def list_planned_units(limit: int = 500, include_archived: bool = False, *, futu
     for row in rows:
         try:
             payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             continue
         if not isinstance(payload, dict) or (not include_archived and payload.get("archived")):
             continue
@@ -9424,7 +9601,7 @@ def list_planned_units(limit: int = 500, include_archived: bool = False, *, futu
         if row.get("sync_conflict"):
             try:
                 payload["sync_conflict"] = json.loads(row["sync_conflict"])
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 payload["sync_conflict"] = {"raw": str(row["sync_conflict"])[:1000]}
         result.append(payload)
     return result
@@ -9444,14 +9621,14 @@ def create_local_workout_library_entry(workout: dict[str, Any], db: Any | None =
     now = utc_now()
     if db is not None:
         db.execute(
-            "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)",
+            INSERT_LIBRARY_SQL,
             (local_id, local_id, json.dumps(entry, ensure_ascii=False), now),
         )
         _record_change(db, "workout_library", local_id, "create", None, entry)
     else:
         with DB_LOCK, database() as own_db:
             own_db.execute(
-                "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)",
+                INSERT_LIBRARY_SQL,
                 (local_id, local_id, json.dumps(entry, ensure_ascii=False), now),
             )
             _record_change(own_db, "workout_library", local_id, "create", None, entry)
@@ -9500,7 +9677,7 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
             if existing and int(existing.get("sync_dirty") or 0) and existing.get("sync_state") in {"local", "sync_error"}:
                 try:
                     local_payload = json.loads(existing.get("payload") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
+                except (TypeError, ValueError):
                     local_payload = {}
                 if isinstance(local_payload, dict):
                     normalized.append(normalize_library_workout(
@@ -9522,7 +9699,7 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
                     existing_payload = json.loads(
                         db.execute("SELECT payload FROM workout_library WHERE id = ?", (existing["id"],)).fetchone()["payload"]
                     )
-                except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+                except (TypeError, ValueError, KeyError):
                     existing_payload = {}
                 if isinstance(existing_payload, dict):
                     for metadata_key in ("date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_marked", "local_deleted"):
@@ -9547,7 +9724,7 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
                     continue
                 try:
                     payload = json.loads(row.get("payload") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
+                except (TypeError, ValueError):
                     payload = {}
                 if not isinstance(payload, dict):
                     payload = {}
@@ -9572,7 +9749,7 @@ def list_workout_library(limit: int = 500, include_archived: bool = False) -> li
             payload = json.loads(row["payload"])
             if isinstance(payload, dict) and (include_archived or not payload.get("archived")):
                 result.append(payload)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             continue
     return result
 
@@ -9601,7 +9778,7 @@ def decode_page_cursor(value: Any) -> Any | None:
     try:
         padding = "=" * (-len(str(value)) % 4)
         return json.loads(base64.urlsafe_b64decode(f"{value}{padding}"))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return None
 
 
@@ -9774,6 +9951,12 @@ def canonical_planned_workouts(
         local_status = str(entry.get("sync_status") or "local")
         remote_id = str(linked.get("id") or entry.get("remote_event_id") or "") if linked else str(entry.get("remote_event_id") or "")
         remote_external_id = str(linked.get("external_id") or entry.get("remote_event_external_id") or "") if linked else str(entry.get("remote_event_external_id") or "")
+        if local_status not in {"", "synced"}:
+            sync_status = local_status
+        elif linked:
+            sync_status = "synced"
+        else:
+            sync_status = local_status
         result_event = {
             **entry,
             "id": remote_id or local_id,
@@ -9784,13 +9967,13 @@ def canonical_planned_workouts(
             "remote_library_id": str(entry.get("external_id") or "") or None,
             "external_id": remote_external_id or None,
             "category": "WORKOUT",
-            "start_date_local": str(entry.get("start_date_local") or (event_date + "T00:00:00" if event_date else ""))[:40] or None,
+            "start_date_local": str(entry.get("start_date_local") or (event_date + ISO_MIDNIGHT_SUFFIX if event_date else ""))[:40] or None,
             "is_local": True,
             "is_remote": bool(linked),
-            "sync_source": "local+intervals" if linked else "local",
+            "sync_source": LOCAL_INTERVALS_SCOPE if linked else "local",
             # A stale provider snapshot must not hide a local dirty or
             # conflict state. The local store remains the source of truth.
-            "sync_status": local_status if local_status not in {"", "synced"} else "synced" if linked else local_status,
+            "sync_status": sync_status,
         }
         if linked:
             for key in ("compliance",):
@@ -9853,13 +10036,13 @@ def local_calendar_events(
         result.append({
             **competition,
             "date": str(competition.get("event_date") or "")[:10],
-            "start_date_local": competition.get("start_date_local") or f"{str(competition.get('event_date') or '')[:10]}T00:00:00",
+            "start_date_local": competition.get("start_date_local") or f"{str(competition.get('event_date') or '')[:10]}{ISO_MIDNIGHT_SUFFIX}",
             "type": competition.get("sport") or "Competition",
             "category": competition.get("category") or "RACE_B",
             "is_competition": True,
             "is_local": True,
             "is_remote": bool(competition.get("external_id")),
-            "sync_source": "local+intervals" if competition.get("external_id") else "local",
+            "sync_source": LOCAL_INTERVALS_SCOPE if competition.get("external_id") else "local",
             "sync_status": competition.get("sync_state") or "local",
         })
     for event in external_events if external_events is not None else list_external_calendar_events(1000, training_relevant_only=True):
@@ -9877,7 +10060,7 @@ def update_planned_unit_sync_state(local_id: str, state: str, error: str | None 
             return
         try:
             payload = json.loads(row["payload"] or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
@@ -9981,7 +10164,7 @@ class _RepairCalendarBatch:
         try:
             final_events = self.read()
         except Exception as exc:
-            return {local_id: exc for local_id, _ in self.completions}
+            return dict.fromkeys((local_id for local_id, _ in self.completions), exc)
         for local_id, complete in self.completions:
             try:
                 with _planned_unit_sync_guard(local_id):
@@ -9996,7 +10179,7 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
     """Reconcile one explicitly selected future unit using exact remote identities."""
     with _planned_unit_sync_guard(local_id):
         with DB_LOCK, database() as db:
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
             other_rows = db.execute(
                 "SELECT local_id, json_extract(payload, '$.remote_event_id') AS remote_id, "
                 "json_extract(payload, '$.remote_event_external_id') AS remote_external_id FROM planned_units WHERE local_id<>?",
@@ -10010,7 +10193,7 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
 
         def recheck():
             with DB_LOCK, database() as db:
-                current = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+                current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
                 if not current or _library_payload_hash(current["payload"]) != expected_hash:
                     raise AppError(409, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.", reason="planning_revision_conflict")
 
@@ -10043,7 +10226,7 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
                     if belongs_elsewhere or event.get("category") != "WORKOUT" or str(event.get("start_date_local") or "")[:10] < today.isoformat() or event.get("paired_activity_id") or event.get("paired_event_id"):
                         raise AppError(409, "Eine zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
                     related.append(event)
-                elif (not removing and not belongs_elsewhere and event.get("category") == "WORKOUT" and str(event.get("start_date_local") or "")[:10] == planned_date.isoformat()
+                elif (not removing and not belongs_elsewhere and event.get("category") == "WORKOUT" and str(event.get("start_date_local") or "").startswith(planned_date.isoformat())
                       and str(event.get("name") or "").strip().casefold() == str(workout.get("name") or "").strip().casefold()):
                     raise AppError(409, "Eine gleichnamige Remote-Einheit am selben Tag ist nicht eindeutig zugeordnet. Keine automatische Kopie oder Loeschung durchgefuehrt.", reason="intervals_workout_identity_ambiguous")
             return related
@@ -10084,9 +10267,9 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
                     raise
                 update_planned_unit_sync_state(local_id, "syncing", remote_event={**result, "external_id": payload["external_id"]})
                 with database() as db:
-                    current = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+                    current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
                     expected_hash = _library_payload_hash(current["payload"])
-            if str(result.get("start_date_local") or "")[:10] != planned_date.isoformat() or result.get("name") != workout.get("name"):
+            if not str(result.get("start_date_local") or "").startswith(planned_date.isoformat()) or result.get("name") != workout.get("name"):
                 raise AppError(502, "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestaetigt.", reason="intervals_workout_verification_failed")
             validate_intervals_workout_result(workout, result)
         for event in related:
@@ -10105,7 +10288,7 @@ def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str,
             else:
                 if len(remaining) != 1 or str(remaining[0]["id"]) != remote_id:
                     raise AppError(502, "Der Kalender bestaetigt keine eindeutige reparierte Einheit.", reason="intervals_workout_verification_failed")
-                if str(remaining[0].get("start_date_local") or "")[:10] != planned_date.isoformat() or remaining[0].get("name") != workout.get("name"):
+                if not str(remaining[0].get("start_date_local") or "").startswith(planned_date.isoformat()) or remaining[0].get("name") != workout.get("name"):
                     raise AppError(502, "Der Kalender bestaetigt Datum oder Namen der reparierten Einheit nicht.", reason="intervals_workout_verification_failed")
                 validate_intervals_workout_result(workout, remaining[0])
                 verified = remaining[0]
@@ -10131,30 +10314,30 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Planungs-ID.") from exc
+        raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
     with DB_LOCK, database() as db:
         row = db.execute("SELECT payload, sync_state FROM planned_units WHERE local_id=?", (normalized_id,)).fetchone()
     if not row:
         raise AppError(404, "Lokale Planung nicht gefunden.")
     try:
         workout = json.loads(row["payload"] or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise AppError(500, "Die lokale Planung ist beschädigt.") from exc
+    except (TypeError, ValueError) as exc:
+        raise AppError(500, CORRUPT_PLANNING_ERROR) from exc
     if not isinstance(workout, dict):
-        raise AppError(500, "Die lokale Planung ist beschädigt.")
+        raise AppError(500, CORRUPT_PLANNING_ERROR)
     # Future planning is local-authoritative, so an approved push uses the
     # preserved local payload without a separate conflict decision.
     if workout.get("local_deleted") or workout.get("archived"):
         def recheck_removal():
             with DB_LOCK, database() as db:
-                current = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (normalized_id,)).fetchone()
+                current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (normalized_id,)).fetchone()
                 if not current or _library_payload_hash(current["payload"]) != _library_payload_hash(row["payload"]):
                     raise AppError(409, "Die Planung wurde waehrend der Synchronisation geaendert.", reason="planning_revision_conflict")
 
         remote_id = str(workout.get("remote_event_id") or "").strip()
         if remote_id:
             if not CONFIG.intervals_api_key:
-                raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+                raise AppError(503, INTERVALS_API_KEY_ERROR)
             client = IntervalsClient()
             athlete = quote(client.config.intervals_athlete_id, safe="")
             try:
@@ -10183,7 +10366,7 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
         # provider event has no external_id.
         event_payload["id"] = str(workout["remote_event_id"])[:120]
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     result = IntervalsClient().upsert_calendar_events([event_payload])
     event = result[0] if result else None
     if not isinstance(event, dict) or not str(event.get("id") or "").strip():
@@ -10229,17 +10412,20 @@ def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any
         payload = str(row.get("payload") or "")
         try:
             payload_data = json.loads(payload)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             payload_data = {}
         planned_date = str(payload_data.get("date") or "").strip()[:10] if isinstance(payload_data, dict) else ""
         is_planned = str(row.get("local_id") or "") in planned_local_ids
-        category = (
-            "conflict" if state == "conflict"
-            else "missing" if state == "remote_missing"
-            else "planned" if is_planned
-            else "error_retry" if state == "sync_error"
-            else "changed" if row.get("external_id") else "new"
-        )
+        if state == "conflict":
+            category = "conflict"
+        elif state == "remote_missing":
+            category = "missing"
+        elif is_planned:
+            category = "planned"
+        elif state == "sync_error":
+            category = "error_retry"
+        else:
+            category = "changed" if row.get("external_id") else "new"
         if is_planned:
             summary["planned"] += 1
         if category != "planned":
@@ -10268,7 +10454,7 @@ def refresh_workout_library(
 ) -> dict[str, Any]:
     """Seed the local library once without performing any remote writes."""
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     _raise_chat_cancelled(cancel_event)
     if get_kv("last_library_sync_at"):
         return {
@@ -10319,11 +10505,11 @@ def _sync_local_workout_calendar_entry(local_id: str, synced: dict[str, Any]) ->
     if not isinstance(event, dict) or not str(event.get("id") or "").strip():
         raise AppError(502, "Intervals.icu hat keine geplante Bibliothekseinheit zurückgegeben.")
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (local_id,)).fetchone()
+        row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
         if row:
             try:
                 payload = json.loads(row["payload"] or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 payload = {}
             if isinstance(payload, dict):
                 payload["remote_event_id"] = str(event["id"])
@@ -10358,10 +10544,10 @@ def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
             raise AppError(404, "Bibliothekseinheit nicht gefunden.")
         try:
             current = json.loads(row["payload"])
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
+        except (TypeError, ValueError) as exc:
+            raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
         if not isinstance(current, dict):
-            raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.")
+            raise AppError(500, CORRUPT_LIBRARY_ERROR)
         if current.get("date"):
             raise AppError(409, "Geplante lokale Einheiten werden im Kalender bearbeitet.")
         before = {**current, "sync_status": row.get("sync_state") or current.get("sync_status")}
@@ -10413,12 +10599,12 @@ def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
 def update_workout_library_sync_state(local_id: str, state: str, error: str | None = None) -> None:
     """Persist sync progress separately from the provider payload."""
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (local_id,)).fetchone()
+        row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
         if not row:
             return
         try:
             payload = json.loads(row["payload"])
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
@@ -10454,7 +10640,7 @@ def intervals_public_state(snapshot: dict[str, Any] | None = None) -> dict[str, 
     last_library_sync_error = get_kv("last_library_sync_error") or None
     try:
         pagination = json.loads(get_kv("last_sync_pagination") or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         pagination = {}
     if not isinstance(pagination, dict):
         pagination = {}
@@ -10566,7 +10752,7 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Bibliothekseinheiten-ID.") from exc
+        raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
     with DB_LOCK, database() as db:
         row = db.execute(
             "SELECT id, local_id, external_id, sync_state, payload FROM workout_library WHERE local_id = ?",
@@ -10576,8 +10762,8 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
         raise AppError(404, "Lokale Bibliothekseinheit nicht gefunden.")
     try:
         local_workout = json.loads(row["payload"])
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
+    except (TypeError, ValueError) as exc:
+        raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
     if row.get("external_id") and row.get("sync_state") == "synced":
         return local_workout
     validate_workout_description(local_workout)
@@ -10626,9 +10812,9 @@ def sync_local_workout_library_entry(local_id: str) -> dict[str, Any]:
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Bibliothekseinheiten-ID.") from exc
+        raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     with WORKOUT_LIBRARY_SYNC_LOCK:
         try:
             return _sync_local_workout_library_entry_unlocked(normalized_id)
@@ -10653,21 +10839,21 @@ def apply_workout_library_plan(
             try:
                 workout_id = str(uuid.UUID(str(item.get("library_workout_id") or "")))
             except (ValueError, AttributeError) as exc:
-                raise AppError(400, "Ungültige lokale Bibliothekseinheiten-ID.") from exc
+                raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
             plan_date = str(item.get("date") or "").strip()
             try:
                 date.fromisoformat(plan_date)
             except (TypeError, ValueError) as exc:
-                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.") from exc
-            row = db.execute("SELECT payload FROM workout_library WHERE local_id = ?", (workout_id,)).fetchone()
+                raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
+            row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (workout_id,)).fetchone()
             if not row:
                 raise AppError(404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.")
             try:
                 workout = json.loads(row["payload"])
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.") from exc
+            except (TypeError, ValueError) as exc:
+                raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
             if not isinstance(workout, dict):
-                raise AppError(500, "Die lokale Bibliothekseinheit ist beschädigt.")
+                raise AppError(500, CORRUPT_LIBRARY_ERROR)
             requested.append({"library_workout_id": workout_id, "date": plan_date, "workout": workout})
 
     conflicts: list[dict[str, Any]] = []
@@ -10755,10 +10941,10 @@ def _library_bulk_request_entries(
                 raise AppError(400, "Das Bulk-Datum muss das Format JJJJ-MM-TT haben.") from exc
             selected["date"] = plan_date[:10]
         expected_hash = str(item.get("expected_payload_hash") or "").strip().lower()
-        if require_hash and not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        if require_hash and not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
             raise AppError(400, "Die Bulk-Aktion benötigt aktuelle Payload-Hashes.")
         if expected_hash:
-            if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+            if not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
                 raise AppError(400, "Ungültiger Payload-Hash in der Bulk-Auswahl.")
             selected["expected_payload_hash"] = expected_hash
         result.append(selected)
@@ -10784,7 +10970,7 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     requested = _library_bulk_request_entries(payload.get("entries"), require_hash=True)
     repair_batch = _RepairCalendarBatch(requested) if payload.get("repair") else None
     results: list[dict[str, Any]] = []
@@ -10822,7 +11008,7 @@ def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str
         if row.get("sync_state") == "synced":
             try:
                 synced = json.loads(row["payload"] or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 synced = {}
             if not isinstance(synced, dict) or not synced.get("date") or synced.get("remote_event_id"):
                 results.append({"library_workout_id": item["library_workout_id"], "status": "already_synced"})
@@ -10852,7 +11038,12 @@ def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str
                 update_planned_unit_sync_state(item["library_workout_id"], "sync_error", str(error))
                 item.update(status="error", error=redact_text(str(error))[:500], calendar_synced=False)
     failed = [item["library_workout_id"] for item in results if item["status"] in {"error", "conflict"}]
-    status = "ok" if not failed else "partial" if len(failed) < len(results) else "error"
+    if not failed:
+        status = "ok"
+    elif len(failed) < len(results):
+        status = "partial"
+    else:
+        status = "error"
     return {"ok": not failed, "status": status, "results": results, "failed_object_ids": failed, "retry_scope": "Nur fehlgeschlagene Objekte erneut auswählen." if failed else None}
 
 
@@ -10867,7 +11058,7 @@ def update_local_planned_workout(
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Planungs-ID.") from exc
+        raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
     if not isinstance(values, dict):
         raise AppError(400, "Die lokale Planung muss als Objekt gesendet werden.")
     action = str(values.get("action") or "update").strip().casefold()
@@ -10877,8 +11068,8 @@ def update_local_planned_workout(
             raise AppError(404, "Lokale Planung nicht gefunden.")
         try:
             current = json.loads(row["payload"])
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise AppError(500, "Die lokale Planung ist beschädigt.") from exc
+        except (TypeError, ValueError) as exc:
+            raise AppError(500, CORRUPT_PLANNING_ERROR) from exc
         if not isinstance(current, dict) or not current.get("date"):
             raise AppError(403, "Nur lokale geplante Einheiten können bearbeitet werden.")
         before = {**current, "sync_status": row.get("sync_state") or current.get("sync_status")}
@@ -10910,10 +11101,10 @@ def update_local_planned_workout(
             try:
                 date.fromisoformat(candidate["date"])
             except (TypeError, ValueError) as exc:
-                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.") from exc
+                raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
             if candidate["date"][:10] != str(current.get("date") or "")[:10]:
                 old_start = str(current.get("start_date_local") or "")
-                time_suffix = old_start[10:] if len(old_start) > 10 and old_start[10] == "T" else "T00:00:00"
+                time_suffix = old_start[10:] if len(old_start) > 10 and old_start[10] == "T" else ISO_MIDNIGHT_SUFFIX
                 candidate["start_date_local"] = candidate["date"][:10] + time_suffix
             if not skip_calendar_conflict and candidate["date"][:10] != str(current.get("date") or "")[:10]:
                 conflicts = calendar_conflicts({"date": candidate["date"][:10]}, {normalized_id})
@@ -10944,7 +11135,7 @@ def update_local_planned_workout(
                     normalized[key] = current[key]
             now = utc_now()
             db.execute(
-                "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                UPDATE_PLANNED_UNIT_SQL,
                 (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
             )
             _record_change(db, "planned_unit", normalized_id, "update", before, {**normalized, "sync_status": "local"})
@@ -10965,7 +11156,7 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
-        raise AppError(400, "Ungültige lokale Planungs-ID.") from exc
+        raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
     selected = str(strategy or "").strip().casefold()
     if selected not in {"keep_local", "adopt_remote"}:
         raise AppError(400, "Ungültige Konfliktstrategie.")
@@ -10976,20 +11167,20 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
             raise AppError(409, "Für diese Planung liegt kein offener Synchronisierungskonflikt vor.")
         try:
             conflict = json.loads(row["sync_conflict"] or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (TypeError, ValueError) as exc:
             raise AppError(409, "Der gespeicherte Synchronisierungskonflikt ist nicht mehr gültig.") from exc
         conflict = conflict if isinstance(conflict, dict) else {}
         remote = conflict.get("remote") if isinstance(conflict.get("remote"), dict) else None
         if selected == "keep_local":
             try:
                 payload = json.loads(row["payload"] or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise AppError(409, "Die lokale Planung ist beschädigt.") from exc
+            except (TypeError, ValueError) as exc:
+                raise AppError(409, CORRUPT_PLANNING_ERROR) from exc
             if not isinstance(payload, dict):
-                raise AppError(409, "Die lokale Planung ist beschädigt.")
+                raise AppError(409, CORRUPT_PLANNING_ERROR)
             payload["sync_status"] = "local"
             db.execute(
-                "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                UPDATE_PLANNED_UNIT_SQL,
                 (json.dumps(payload, ensure_ascii=False), now, normalized_id),
             )
         elif remote is None:
@@ -10997,10 +11188,10 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
             # but keeps an auditable tombstone and never recreates it on sync.
             try:
                 payload = json.loads(row["payload"] or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise AppError(409, "Die lokale Planung ist beschädigt.") from exc
+            except (TypeError, ValueError) as exc:
+                raise AppError(409, CORRUPT_PLANNING_ERROR) from exc
             if not isinstance(payload, dict):
-                raise AppError(409, "Die lokale Planung ist beschädigt.")
+                raise AppError(409, CORRUPT_PLANNING_ERROR)
             payload["local_deleted"] = True
             payload["archived"] = True
             payload["sync_status"] = "remote_deleted"
@@ -11009,7 +11200,7 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
                 (json.dumps(payload, ensure_ascii=False), now, normalized_id),
             )
         else:
-            incoming, remote_id, identity = _remote_planned_unit_payload(remote) or (None, "", "")
+            incoming, _, identity = _remote_planned_unit_payload(remote) or (None, "", "")
             if not incoming:
                 raise AppError(409, "Das Remote-Event kann nicht übernommen werden.")
             incoming["id"] = normalized_id
@@ -11116,7 +11307,7 @@ def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any],
         duration_minutes = 30
     payload = {
         "date": event_date,
-        "start_date_local": event.get("start_date_local") or event.get("start") or event_date + "T00:00:00",
+        "start_date_local": event.get("start_date_local") or event.get("start") or event_date + ISO_MIDNIGHT_SUFFIX,
         "sport": event.get("type") or event.get("sport") or "Ride",
         "type": event.get("type") or event.get("sport") or "Ride",
         "name": event.get("name") or "Intervals.icu-Einheit",
@@ -11174,7 +11365,7 @@ def upsert_remote_planned_units(
                 continue
             try:
                 current = json.loads(current_row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 current = {}
             if not isinstance(current, dict):
                 current = {}
@@ -11215,13 +11406,25 @@ def upsert_remote_planned_units(
         # The provider request is a bounded calendar window. Only interpret a
         # missing event as a remote deletion when the row falls inside the
         # successfully received window; never tombstone units beyond it.
-        valid_dates = [value for value in incoming_dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)]
-        window_start = str(calendar_start or "")[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(calendar_start or "")[:10]) else (min(valid_dates) if valid_dates else None)
-        window_end = str(calendar_end or "")[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(calendar_end or "")[:10]) else (max(valid_dates) if valid_dates else None)
+        valid_dates = [value for value in incoming_dates if re.fullmatch(DATE_ONLY_PATTERN, value)]
+        calendar_start_value = str(calendar_start or "")[:10]
+        if re.fullmatch(DATE_ONLY_PATTERN, calendar_start_value):
+            window_start = calendar_start_value
+        elif valid_dates:
+            window_start = min(valid_dates)
+        else:
+            window_start = None
+        calendar_end_value = str(calendar_end or "")[:10]
+        if re.fullmatch(DATE_ONLY_PATTERN, calendar_end_value):
+            window_end = calendar_end_value
+        elif valid_dates:
+            window_end = max(valid_dates)
+        else:
+            window_end = None
         for row in rows:
             try:
                 payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 continue
             remote_id = str(payload.get("remote_event_id") or "")
             if not remote_id or remote_id in seen_ids:
@@ -11277,7 +11480,7 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
     if provider not in PROVIDER_RESYNC_KEYS:
         raise AppError(400, "Unbekannte Anbindung.")
     if provider == "intervals" and not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     if provider == "garmin" and not (
         garmin_fixture_path() is not None
         or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
@@ -11288,7 +11491,7 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
     if not gate.begin_reset():
         return {"status": "already_running", "source": provider}
     keys = PROVIDER_RESYNC_KEYS[provider]
-    label = "Intervals.icu" if provider == "intervals" else "Garmin"
+    label = PROVIDER_INTERVALS_NAME if provider == "intervals" else "Garmin"
     operation_id = operation_id or uuid.uuid4().hex
     operation_token = OPERATION_CONTEXT.set({"operation_id": operation_id, "trigger": "full_resync"})
     operation_started = time.perf_counter()
@@ -11305,14 +11508,14 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
         # good snapshot and all athlete-owned records remain recoverable.
         set_kv(keys["status"], f"{label}: vollständiger Resync läuft…")
         if provider == "intervals":
-            result = sync_intervals("Vollständiger Resync", activity_days=ALL_SYNC_DAYS, operation_id=operation_id)
-            competition_result = sync_competitions("Vollständiger Resync", push_local=False, operation_id=operation_id)
+            result = sync_intervals(FULL_RESYNC_LABEL, activity_days=ALL_SYNC_DAYS, operation_id=operation_id)
+            competition_result = sync_competitions(FULL_RESYNC_LABEL, push_local=False, operation_id=operation_id)
             result = {
                 **result,
                 "competitions": competition_result,
             }
         else:
-            result = sync_garmin(days=ALL_SYNC_DAYS, operation_id=operation_id, reason="Vollständiger Resync")
+            result = sync_garmin(days=ALL_SYNC_DAYS, operation_id=operation_id, reason=FULL_RESYNC_LABEL)
         finished_at = utc_now()
         set_kv(keys["last_at"], finished_at)
         set_kv(keys["error"], "")
@@ -11322,7 +11525,7 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
     except Exception as exc:
         operation_failure_code = operation_error_code(exc)
         set_kv(keys["error"], redact_text(str(exc))[:1000])
-        LOGGER.error(
+        LOGGER.exception(
             "Full provider resynchronization failed",
             extra={"event": "provider_full_resync_failed", "context": {"provider": provider}},
             exc_info=True,
@@ -11354,7 +11557,7 @@ def sync_intervals(
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     if activity_days is None:
         activity_days = sync_period("intervals")
     _raise_chat_cancelled(cancel_event)
@@ -11458,7 +11661,6 @@ def sync_intervals(
         # A successful full sync supersedes a transient morning-check-in
         # network error that may otherwise keep the global status in warning.
         set_kv("morning_checkin_error", "")
-        period_label = "alle verfügbaren Daten" if activity_days == ALL_SYNC_DAYS else f"letzte {activity_days} Tage"
         sync_window = sync_date_windows(activity_days, end_date)
         update_provider_sync_cursor("intervals", "activities", sync_window[-1][1].isoformat(), snapshot["synced_at"])
         update_provider_sync_cursor("intervals", "wellness", sync_window[-1][1].isoformat(), snapshot["synced_at"])
@@ -11506,7 +11708,7 @@ def sync_intervals(
         set_kv("last_sync_error", redact_text(str(exc))[:1000])
         set_sync_operation_state(operation_id, "error", "error", 100, "Intervals.icu-Synchronisierung fehlgeschlagen.", str(exc))
         set_kv("sync_operation_finished_at", utc_now())
-        LOGGER.error(
+        LOGGER.exception(
             "Intervals.icu synchronization failed",
             extra={"event": "sync_failed", "context": {"reason": reason, "last_success": get_kv("last_sync_at")}},
             exc_info=True,
@@ -11525,7 +11727,7 @@ def sync_intervals(
 @intervals_operation
 def refresh_current_performance() -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
-        raise AppError(503, "INTERVALS_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
     if not PERFORMANCE_LOCK.acquire(blocking=False):
         return {"status": "already_running"}
     try:
@@ -11540,7 +11742,7 @@ def refresh_current_performance() -> dict[str, Any]:
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
         set_kv("last_performance_error", error)
-        LOGGER.error("Performance refresh failed", extra={"event": "performance_refresh_failed"}, exc_info=True)
+        LOGGER.exception("Performance refresh failed", extra={"event": "performance_refresh_failed"}, exc_info=True)
         raise
     finally:
         set_kv("performance_refresh_running", "0")
@@ -11687,9 +11889,24 @@ def comparison_value(current: Any, average: Any, unit: str, days: int, higher_is
     if current_number is None or average_number is None:
         return None
     delta = round(float(current_number) - float(average_number), 2)
-    direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
-    good = ((delta > 0) if higher_is_better else (delta < 0)) if higher_is_better is not None else False
-    color = "good" if good else "bad" if delta and higher_is_better is not None else "neutral"
+    if delta > 0:
+        direction = "up"
+    elif delta < 0:
+        direction = "down"
+    else:
+        direction = "flat"
+    if higher_is_better is None:
+        good = False
+    elif higher_is_better:
+        good = delta > 0
+    else:
+        good = delta < 0
+    if good:
+        color = "good"
+    elif delta and higher_is_better is not None:
+        color = "bad"
+    else:
+        color = "neutral"
     return {
         "current": current_number,
         "average": average_number,
@@ -11764,7 +11981,7 @@ def as_number(value: Any) -> float | int | None:
         number = float(str(value).replace(",", "."))
     except (TypeError, ValueError):
         return None
-    if number != number or number in {float("inf"), float("-inf")}:
+    if not math.isfinite(number):
         return None
     return int(number) if number.is_integer() else round(number, 2)
 
@@ -11821,8 +12038,8 @@ def intervals_max_hr_metric(
     """Return sport-specific max heart rate with an explicit source."""
     max_hr_keys = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
     candidates: list[tuple[Any, str]] = [
-        (first_present(setting, max_hr_keys), "Intervals.icu"),
-        (first_present(wellness_setting, max_hr_keys), "Intervals.icu Wellness"),
+        (first_present(setting, max_hr_keys), PROVIDER_INTERVALS_NAME),
+        (first_present(wellness_setting, max_hr_keys), PROVIDER_INTERVALS_WELLNESS_NAME),
     ]
     activity_values: list[float | int] = []
     for activity in activities:
@@ -11832,9 +12049,9 @@ def intervals_max_hr_metric(
         if value is not None and 80 <= float(value) <= 260:
             activity_values.append(value)
     if activity_values:
-        candidates.append((max(activity_values), "Intervals.icu"))
+        candidates.append((max(activity_values), PROVIDER_INTERVALS_NAME))
     candidates.extend([
-        (first_present(athlete, max_hr_keys), "Intervals.icu"),
+        (first_present(athlete, max_hr_keys), PROVIDER_INTERVALS_NAME),
     ])
     for value, source in candidates:
         number = as_number(value)
@@ -11883,41 +12100,47 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         running_max_hr = garmin_metrics["running_max_hr_bpm"]
     body_sources = (
         (garmin_metrics["weight_kg"]["value"], GARMIN_PERFORMANCE_SOURCE),
-        (first_present(latest_wellness, ("weight",)), "Intervals.icu Wellness"),
-        (first_present(athlete, ("weight",)), "Intervals.icu"),
+        (first_present(latest_wellness, ("weight",)), PROVIDER_INTERVALS_WELLNESS_NAME),
+        (first_present(athlete, ("weight",)), PROVIDER_INTERVALS_NAME),
         (profile.get("weight_kg"), "Manuell"),
     )
     weight_value, weight_source = next(((value, source) for value, source in body_sources if as_number(value) is not None), (None, None))
     body_fat_value, body_fat_source = next(((value, source) for value, source in (
-        (first_present(latest_wellness, ("bodyFat", "body_fat")), "Intervals.icu Wellness"),
-        (first_present(athlete, ("bodyFat", "body_fat")), "Intervals.icu"),
+        (first_present(latest_wellness, ("bodyFat", "body_fat")), PROVIDER_INTERVALS_WELLNESS_NAME),
+        (first_present(athlete, ("bodyFat", "body_fat")), PROVIDER_INTERVALS_NAME),
         (profile.get("body_fat_pct"), "Manuell"),
     ) if as_number(value) is not None), (None, None))
     height_value, height_source = next(((value, source) for value, source in (
-        (first_present(athlete, ("height_cm", "height")), "Intervals.icu"),
+        (first_present(athlete, ("height_cm", "height")), PROVIDER_INTERVALS_NAME),
         (profile.get("height_cm"), "Manuell"),
     ) if as_number(value) is not None), (None, None))
+    def preferred_metric(key: str, fallback: dict[str, Any]) -> dict[str, Any]:
+        current = garmin_metrics[key]
+        return current if current["value"] is not None else fallback
+
+    bike_lthr = first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",))
+    run_lthr = first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",))
     garmin_threshold_metrics = {
-        "cycling_ftp_watts": garmin_metrics["cycling_ftp_watts"] if garmin_metrics["cycling_ftp_watts"]["value"] is not None else metric(
+        "cycling_ftp_watts": preferred_metric("cycling_ftp_watts", metric(
             first_present(ride, ("ftp", "indoor_ftp")) or first_present(wellness_ride, ("ftp", "indoor_ftp")) or first_present(athlete, ("icu_ftp",)),
-            "W", "Intervals.icu",
-        ),
-        "run_threshold_watts": garmin_metrics["run_threshold_watts"] if garmin_metrics["run_threshold_watts"]["value"] is not None else metric(
+            "W", PROVIDER_INTERVALS_NAME,
+        )),
+        "run_threshold_watts": preferred_metric("run_threshold_watts", metric(
             first_present(run, ("ftp", "indoor_ftp")) or first_present(wellness_run, ("ftp", "indoor_ftp")),
-            "W", "Intervals.icu",
-        ),
-        "run_threshold_pace_seconds_per_km": garmin_metrics["run_threshold_pace_seconds_per_km"] if garmin_metrics["run_threshold_pace_seconds_per_km"]["value"] is not None else metric(
+            "W", PROVIDER_INTERVALS_NAME,
+        )),
+        "run_threshold_pace_seconds_per_km": preferred_metric("run_threshold_pace_seconds_per_km", metric(
             threshold_pace_seconds(first_present(run, ("threshold_pace",)) or first_present(wellness_run, ("threshold_pace",))),
-            "s/km", "Intervals.icu",
-        ),
-        "bike_threshold_hr_bpm": garmin_metrics["bike_threshold_hr_bpm"] if garmin_metrics["bike_threshold_hr_bpm"]["value"] is not None else metric(
-            first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) or generic_lthr,
-            "bpm", "Intervals.icu" if first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",)) else "Intervals.icu (allgemein)",
-        ),
-        "run_threshold_hr_bpm": garmin_metrics["run_threshold_hr_bpm"] if garmin_metrics["run_threshold_hr_bpm"]["value"] is not None else metric(
-            first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) or generic_lthr,
-            "bpm", "Intervals.icu" if first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",)) else "Intervals.icu (allgemein)",
-        ),
+            "s/km", PROVIDER_INTERVALS_NAME,
+        )),
+        "bike_threshold_hr_bpm": preferred_metric("bike_threshold_hr_bpm", metric(
+            bike_lthr or generic_lthr,
+            "bpm", PROVIDER_INTERVALS_NAME if bike_lthr else "Intervals.icu (allgemein)",
+        )),
+        "run_threshold_hr_bpm": preferred_metric("run_threshold_hr_bpm", metric(
+            run_lthr or generic_lthr,
+            "bpm", PROVIDER_INTERVALS_NAME if run_lthr else "Intervals.icu (allgemein)",
+        )),
     }
     return {
         "weight_kg": garmin_metrics["weight_kg"] if weight_source == GARMIN_PERFORMANCE_SOURCE else metric(weight_value, "kg", weight_source),
@@ -11927,11 +12150,11 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         # never be populated from Intervals.icu eFTP; the fallback only uses an
         # explicitly labelled FTP field.
         **garmin_threshold_metrics,
-        "cycling_eftp_watts": metric(current_ride_eftp or latest_ride_eftp, "W", "Intervals.icu"),
+        "cycling_eftp_watts": metric(current_ride_eftp or latest_ride_eftp, "W", PROVIDER_INTERVALS_NAME),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
-        "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
-        "running_vo2max_ml_kg_min": garmin_metrics["running_vo2max_ml_kg_min"] if garmin_metrics["running_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(wellness_run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(athlete, ("running_vo2max", "vo2max", "vo2_max")), "ml/kg/min", "Intervals.icu"),
+        "cycling_vo2max_ml_kg_min": garmin_metrics["cycling_vo2max_ml_kg_min"] if garmin_metrics["cycling_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(wellness_ride, ("vo2max", "vo2_max", "cycling_vo2max")) or first_present(athlete, ("cycling_vo2max", "vo2max", "vo2_max")), VO2MAX_UNIT, PROVIDER_INTERVALS_NAME),
+        "running_vo2max_ml_kg_min": garmin_metrics["running_vo2max_ml_kg_min"] if garmin_metrics["running_vo2max_ml_kg_min"]["value"] is not None else metric(first_present(run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(wellness_run, ("vo2max", "vo2_max", "running_vo2max")) or first_present(athlete, ("running_vo2max", "vo2max", "vo2_max")), VO2MAX_UNIT, PROVIDER_INTERVALS_NAME),
         "run_5k_seconds": garmin_metrics["run_5k_seconds"] if garmin_metrics["run_5k_seconds"]["value"] is not None else metric(None, "s", None),
         "run_10k_seconds": garmin_metrics["run_10k_seconds"] if garmin_metrics["run_10k_seconds"]["value"] is not None else metric(None, "s", None),
         "run_half_marathon_seconds": garmin_metrics["run_half_marathon_seconds"] if garmin_metrics["run_half_marathon_seconds"]["value"] is not None else metric(None, "s", None),
@@ -11942,7 +12165,7 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
 def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     snapshot = snapshot if snapshot is not None else latest_snapshot()
     if not snapshot:
-        return {"available": False, "source": "Intervals.icu", "as_of": None, "metrics": {}}
+        return {"available": False, "source": PROVIDER_INTERVALS_NAME, "as_of": None, "metrics": {}}
     athlete = snapshot.get("athlete") if isinstance(snapshot.get("athlete"), dict) else {}
     activities = snapshot.get("recent_activities") if isinstance(snapshot.get("recent_activities"), list) else []
     wellness_rows = [row for row in snapshot.get("recent_wellness", []) if isinstance(row, dict)] if isinstance(snapshot.get("recent_wellness"), list) else []
@@ -11972,12 +12195,17 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
             sleep_hours = round(float(sleep_seconds) / 3600, 1) if sleep_seconds is not None else None
         except (TypeError, ValueError):
             sleep_hours = None
-        sleep_source = "Intervals.icu Wellness" if sleep_hours is not None else None
+        sleep_source = PROVIDER_INTERVALS_WELLNESS_NAME if sleep_hours is not None else None
         sleep_average = wellness_average(wellness_rows, ("sleepSecs", "sleep_seconds"), 7, local_now().date(), 3600)
         if sleep_average is None:
             sleep_average = wellness_average(wellness_rows, ("sleep_hours",), 7, local_now().date())
     sleep_score = garmin_sleep_score if garmin_sleep_score is not None else first_present(latest_wellness, ("sleepScore",))
-    sleep_score_source = GARMIN_PERFORMANCE_SOURCE if garmin_sleep_score is not None else ("Intervals.icu Wellness" if sleep_score is not None else None)
+    if garmin_sleep_score is not None:
+        sleep_score_source = GARMIN_PERFORMANCE_SOURCE
+    elif sleep_score is not None:
+        sleep_score_source = PROVIDER_INTERVALS_WELLNESS_NAME
+    else:
+        sleep_score_source = None
     garmin_resting_hr, garmin_resting_hr_date = garmin_recovery_metric(
         garmin, "resting_hr", ("restingHeartRate", "restingHR", "resting_heart_rate"),
         lambda value: _garmin_bounded_metric(value, 30, 230),
@@ -11991,7 +12219,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         )
     else:
         resting_hr = first_present(latest_wellness, ("restingHR", "resting_hr"))
-        resting_hr_source = "Intervals.icu Wellness" if resting_hr is not None else None
+        resting_hr_source = PROVIDER_INTERVALS_WELLNESS_NAME if resting_hr is not None else None
         resting_hr_average = wellness_average(wellness_rows, ("restingHR", "resting_hr"), 7, local_now().date())
     garmin_hrv, garmin_hrv_date = garmin_recovery_metric(
         garmin, "hrv", ("hrvLastNight", "lastNightAvg", "hrvWeeklyAvg", "weeklyAvg", "hrv", "hrv_ms"),
@@ -12006,7 +12234,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         )
     else:
         hrv = first_present(latest_wellness, ("hrv", "hrv_ms"))
-        hrv_source = "Intervals.icu Wellness" if hrv is not None else None
+        hrv_source = PROVIDER_INTERVALS_WELLNESS_NAME if hrv is not None else None
         hrv_average = wellness_average(wellness_rows, ("hrv", "hrv_ms"), 7, local_now().date())
     metrics = api_performance_metrics(snapshot)
     load = {
@@ -12032,7 +12260,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
     # Garmin recovery metrics are the authoritative values when available;
     # Intervals.icu remains a fallback for accounts without those Garmin data.
     readiness_current = readiness_score_value(first_present(latest_wellness, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness")))
-    readiness_source = "Intervals.icu Wellness" if readiness_current is not None else None
+    readiness_source = PROVIDER_INTERVALS_WELLNESS_NAME if readiness_current is not None else None
     if readiness_current is None:
         readiness_current = readiness_score_value(garmin_snapshot().get("readiness"))
         readiness_source = GARMIN_PERFORMANCE_SOURCE if readiness_current is not None else None
@@ -12080,8 +12308,8 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         "run_threshold_watts_30d": trend("run_threshold_watts", "W"),
         "run_threshold_pace_seconds_per_km_30d": trend("run_threshold_pace_seconds_per_km", "s/km", False),
         "run_threshold_hr_bpm_30d": trend("run_threshold_hr_bpm", "bpm"),
-        "cycling_vo2max_ml_kg_min_30d": trend("cycling_vo2max_ml_kg_min", "ml/kg/min"),
-        "running_vo2max_ml_kg_min_30d": trend("running_vo2max_ml_kg_min", "ml/kg/min"),
+        "cycling_vo2max_ml_kg_min_30d": trend("cycling_vo2max_ml_kg_min", VO2MAX_UNIT),
+        "running_vo2max_ml_kg_min_30d": trend("running_vo2max_ml_kg_min", VO2MAX_UNIT),
         "run_5k_seconds_30d": trend("run_5k_seconds", "s", False),
         "run_10k_seconds_30d": trend("run_10k_seconds", "s", False),
         "run_half_marathon_seconds_30d": trend("run_half_marathon_seconds", "s", False),
@@ -12252,6 +12480,13 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
         checkins.get("recent", []),
         list_external_calendar_events(limit=50, training_relevant_only=True),
     )
+    def calendar_source(item: dict[str, Any]) -> str:
+        if item.get("is_external_calendar"):
+            return "external-calendar"
+        if item.get("is_competition"):
+            return "competition"
+        return "local-plan"
+
     return {
         "durable_profile": get_profile(),
         "target_competitions": list_competitions(),
@@ -12265,7 +12500,7 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
                 "date": item.get("date") or item.get("event_date"),
                 "name": str(item.get("name") or "")[:200],
                 "type": item.get("category") or item.get("type"),
-                "source": "external-calendar" if item.get("is_external_calendar") else "competition" if item.get("is_competition") else "local-plan",
+                "source": calendar_source(item),
                 "training_relevant": item.get("training_relevant", True),
                 "no_intensity": item.get("no_intensity", False),
                 "short_only": item.get("short_only", False),
@@ -12549,7 +12784,7 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
         error = AppError(502, "OpenAI returned an error response.", reason="response_error")
         error.provider_error_code = code
         raise error
-    if path == "/responses":
+    if path == OPENAI_RESPONSES_PATH:
         response_status = str(result.get("status") or "").casefold()
         if response_status in {"failed", "cancelled"}:
             record_openai_status({"state": "error", "reason": "response_failed", "message": "OpenAI did not complete the coach response.", "http_status": 200})
@@ -12579,9 +12814,9 @@ def openai_endpoint(path: str) -> str:
 
 def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
-        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, OPENAI_API_KEY_ERROR)
     request_payload = dict(payload)
-    if path == "/responses":
+    if path == OPENAI_RESPONSES_PATH:
         request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     result = http_json(
         "POST",
@@ -12596,7 +12831,7 @@ def openai_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise AppError(502, "OpenAI hat eine unerwartete Antwort zurückgegeben.")
     # Background Responses are billed/observed when their final result is
     # retrieved; counting the queued creation would double-count one turn.
-    if not (path == "/responses" and request_payload.get("background") is True):
+    if not (path == OPENAI_RESPONSES_PATH and request_payload.get("background") is True):
         record_openai_usage(result, path.strip("/") or "request")
     return result
 
@@ -12654,7 +12889,7 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
         raise AppError(415, "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.")
     if selected_ai_provider() == "gemini":
         if not CONFIG.gemini_api_key:
-            raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
+            raise AppError(503, GEMINI_API_KEY_ERROR)
         result = gemini_raw_request(selected_model(), {
             "contents": [{"role": "user", "parts": [
                 {"inlineData": {"mimeType": audio_type, "data": base64.b64encode(audio).decode("ascii")}},
@@ -12667,7 +12902,7 @@ def transcribe_audio(audio: bytes, content_type: str) -> dict[str, str]:
             raise AppError(502, "Gemini hat kein Transkript zurückgegeben.")
         return {"transcript": transcript}
     if not CONFIG.openai_api_key:
-        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, OPENAI_API_KEY_ERROR)
     body, multipart_type = multipart_form_data(
         [
             ("model", "gpt-transcribe"),
@@ -12836,7 +13071,7 @@ def _gemini_tools(tools: Any) -> list[dict[str, Any]]:
     return [{"functionDeclarations": declarations}] if declarations else []
 
 
-def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
+def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:  # NOSONAR - provider payload assembly is intentionally kept atomic
     persistent = bool(payload.get("conversation"))
     history = _gemini_history() if persistent else []
     input_value = payload.get("input")
@@ -12906,7 +13141,7 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
     text_format = payload.get("text") if isinstance(payload.get("text"), dict) else {}
     format_config = text_format.get("format") if isinstance(text_format.get("format"), dict) else {}
     if format_config.get("type") == "json_schema" and isinstance(format_config.get("schema"), dict):
-        request["generationConfig"].update({"responseMimeType": "application/json", "responseJsonSchema": format_config["schema"]})
+        request["generationConfig"].update({"responseMimeType": JSON_MEDIA_TYPE, "responseJsonSchema": format_config["schema"]})
     explicit_reasoning = payload.get("reasoning") if isinstance(payload.get("reasoning"), dict) else {}
     thinking_level = str(explicit_reasoning.get("effort") or selected_thinking_level()).casefold()
     if thinking_level not in {"low", "medium", "high"}:
@@ -12922,8 +13157,8 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
 
 def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str, cancel_event: threading.Event | None = None) -> dict[str, Any]:
     if not CONFIG.gemini_api_key:
-        raise AppError(503, "GEMINI_API_KEY ist nicht konfiguriert.")
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", str(model or "")):
+        raise AppError(503, GEMINI_API_KEY_ERROR)
+    if not re.fullmatch(r"(?a:[\w.-]{1,128})", str(model or "")):
         raise AppError(400, "Ungültiges Gemini-Modell.")
     try:
         result = http_json("POST", f"{GEMINI_API_BASE_URL}/models/{model}:generateContent", payload,
@@ -12939,10 +13174,9 @@ def gemini_raw_request(model: str, payload: dict[str, Any], *, operation: str, c
     return result
 
 
-def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading.Event | None = None) -> dict[str, Any]:
-    model = str(payload.get("model") or selected_model("gemini"))
-    request, history, persistent = _gemini_request_payload(payload, model)
-    result = gemini_raw_request(model, request, operation="generate_content", cancel_event=cancel_event)
+def _gemini_responses_result(  # NOSONAR - provider response normalization must preserve tool and history ordering atomically
+    payload: dict[str, Any], history: list[dict[str, Any]], persistent: bool, result: dict[str, Any],
+) -> dict[str, Any]:
     candidates = result.get("candidates") if isinstance(result.get("candidates"), list) else []
     candidate = candidates[0] if candidates and isinstance(candidates[0], dict) else None
     content = candidate.get("content") if isinstance(candidate, dict) and isinstance(candidate.get("content"), dict) else None
@@ -12979,6 +13213,154 @@ def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading
             "usage": {"input_tokens": usage.get("promptTokenCount", 0), "output_tokens": usage.get("candidatesTokenCount", 0), "total_tokens": usage.get("totalTokenCount", 0)}}
 
 
+def gemini_responses_request(payload: dict[str, Any], *, cancel_event: threading.Event | None = None) -> dict[str, Any]:
+    model = str(payload.get("model") or selected_model("gemini"))
+    request, history, persistent = _gemini_request_payload(payload, model)
+    result = gemini_raw_request(model, request, operation="generate_content", cancel_event=cancel_event)
+    return _gemini_responses_result(payload, history, persistent, result)
+
+
+def gemini_stream_request(  # NOSONAR - streaming orchestration keeps cancellation, accounting, and persistence in one transaction
+    payload: dict[str, Any], on_text_delta: Callable[[str], None],
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Stream Gemini GenerateContent chunks and return the aggregated response."""
+    if not CONFIG.gemini_api_key:
+        raise AppError(503, GEMINI_API_KEY_ERROR)
+    model = str(payload.get("model") or selected_model("gemini"))
+    if not re.fullmatch(r"(?a:[\w.-]{1,128})", model):
+        raise AppError(400, "Ung\\u00fcltiges Gemini-Modell.")
+    request_payload, history, persistent = _gemini_request_payload(payload, model)
+    body = json.dumps(request_payload).encode("utf-8")
+    endpoint = f"{GEMINI_API_BASE_URL}/models/{model}:streamGenerateContent?alt=sse"
+    request = Request(
+        endpoint,
+        data=body,
+        headers={
+            "Accept": "text/event-stream",
+            "Content-Type": JSON_MEDIA_TYPE,
+            "x-goog-api-key": CONFIG.gemini_api_key,
+            "User-Agent": f"IntervalsCoach/{APP_VERSION}",
+        },
+        method="POST",
+    )
+    parsed_endpoint = urlparse(endpoint)
+    context = {
+        "service": "gemini", "method": "POST", "host": parsed_endpoint.netloc,
+        "path": _safe_provider_path(parsed_endpoint.path),
+        "timeout_seconds": OPENAI_RESPONSE_TIMEOUT_SECONDS, "request_bytes": len(body),
+        "query_keys": ["alt"],
+    }
+    started = time.perf_counter()
+    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": context})
+    aggregate: dict[str, Any] = {"candidates": []}
+    stream_bytes = 0
+    data_lines: list[str] = []
+
+    def merge_chunk(chunk: Any) -> None:
+        if not isinstance(chunk, dict):
+            raise AppError(502, "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben.", reason="invalid_response")
+        usage = chunk.get("usageMetadata")
+        if isinstance(usage, dict):
+            aggregate["usageMetadata"] = usage
+        for key in ("modelVersion", "promptFeedback"):
+            if key in chunk:
+                aggregate[key] = chunk[key]
+        candidates = chunk.get("candidates") if isinstance(chunk.get("candidates"), list) else []
+        for index, candidate in enumerate(candidates):
+            if not isinstance(candidate, dict):
+                continue
+            while len(aggregate["candidates"]) <= index:
+                aggregate["candidates"].append({"content": {"role": "model", "parts": []}})
+            target = aggregate["candidates"][index]
+            for key in ("finishReason", "finishMessage", "safetyRatings", "citationMetadata"):
+                if key in candidate:
+                    target[key] = candidate[key]
+            content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
+            if content.get("role"):
+                target["content"]["role"] = content["role"]
+            target_parts = target["content"]["parts"]
+            for part in content.get("parts") if isinstance(content.get("parts"), list) else []:
+                if not isinstance(part, dict):
+                    continue
+                delta = part.get("text")
+                if isinstance(delta, str) and delta:
+                    if index == 0:
+                        on_text_delta(delta)
+                    metadata = {key: value for key, value in part.items() if key != "text"}
+                    previous = target_parts[-1] if target_parts else None
+                    if isinstance(previous, dict) and set(previous) <= {"text", *metadata} and all(
+                        previous.get(key) == value for key, value in metadata.items()
+                    ):
+                        previous["text"] = str(previous.get("text") or "") + delta
+                    else:
+                        target_parts.append(dict(part))
+                else:
+                    target_parts.append(dict(part))
+
+    def handle_event() -> None:
+        nonlocal data_lines
+        if not data_lines:
+            return
+        raw = "\n".join(data_lines)
+        data_lines = []
+        if raw.strip() == "[DONE]":
+            return
+        try:
+            merge_chunk(json.loads(raw))
+        except json.JSONDecodeError as exc:
+            raise AppError(502, "Gemini hat ein ung\\u00fcltiges Streaming-Ereignis zur\\u00fcckgegeben.", reason="invalid_response") from exc
+
+    try:
+        _raise_chat_cancelled(cancel_event)
+        with _urlopen_interruptibly(request, OPENAI_RESPONSE_TIMEOUT_SECONDS, cancel_event) as response:
+            if cancel_event is not None:
+                cancel_event._provider_response = response
+            try:
+                for raw_line in response:
+                    _raise_chat_cancelled(cancel_event)
+                    stream_bytes += len(raw_line)
+                    if stream_bytes > MAX_EXTERNAL_RESPONSE_BYTES:
+                        raise AppError(502, "Die Streaming-Antwort von Gemini ist zu\\u00df.", reason="response_too_large")
+                    line = raw_line.decode("utf-8").rstrip("\r\n")
+                    if not line:
+                        handle_event()
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                handle_event()
+            finally:
+                if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
+                    cancel_event._provider_response = None
+        _raise_chat_cancelled(cancel_event)
+        if not aggregate["candidates"]:
+            raise AppError(502, "Gemini hat keine Coach-Antwort geliefert.", reason="invalid_response")
+        _record_gemini_status("ok", "Gemini ist verf\\u00fcgbar.", status=200)
+        _record_gemini_usage(aggregate, "generate_content_stream")
+        LOGGER.info(EXTERNAL_HTTP_COMPLETED_EVENT, extra={"event": "external_request_completed", "context": {
+            **context, "status": 200, "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "response_bytes": stream_bytes,
+        }})
+        return _gemini_responses_result(payload, history, persistent, aggregate)
+    except HTTPError as exc:
+        raw_error = _read_http_error_body(exc)
+        details = gemini_error_details(int(exc.code), raw_error)
+        _record_gemini_status("error", details["message"], reason=details["reason"], status=int(exc.code))
+        raise AppError(int(exc.code), details["message"], reason=details["reason"]) from exc
+    except AppError as exc:
+        _record_gemini_status("error", exc.message, reason=exc.reason or "request_failed", status=exc.status)
+        raise
+    except TimeoutError as exc:
+        if cancel_event is not None and cancel_event.is_set():
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
+        _record_gemini_status("error", "Gemini hat nicht rechtzeitig geantwortet.", reason="provider_timeout", status=504)
+        raise AppError(504, "Gemini hat nicht rechtzeitig geantwortet.", reason="provider_timeout") from exc
+    except (URLError, OSError, UnicodeDecodeError, ValueError) as exc:
+        if cancel_event is not None and cancel_event.is_set():
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
+        _record_gemini_status("error", "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar.", reason="provider_unavailable", status=503)
+        raise AppError(503, "Gemini ist vor\\u00fcbergehend nicht verf\\u00fcgbar.", reason="provider_unavailable") from exc
+
+
 def request_ai_provider(payload: dict[str, Any]) -> str:
     provider = str(payload.get("_ai_provider") or "").casefold()
     return provider if provider in {"openai", "gemini"} else selected_ai_provider()
@@ -12993,7 +13375,7 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     for attempt in range(3):
         try:
-            return openai_request("/responses", request_payload)
+            return openai_request(OPENAI_RESPONSES_PATH, request_payload)
         except AppError as exc:
             if exc.reason != "conversation_locked" or attempt == 2:
                 raise
@@ -13011,7 +13393,7 @@ def responses_request(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _openai_response_id(value: Any) -> str:
     response_id = str(value or "").strip()
-    if not re.fullmatch(r"resp_[A-Za-z0-9_-]{1,200}", response_id):
+    if not re.fullmatch(r"(?a:resp_[\w-]{1,200})", response_id):
         raise AppError(502, "OpenAI hat keine gültige Response-ID zurückgegeben.", reason="invalid_response")
     return response_id
 
@@ -13019,7 +13401,7 @@ def _openai_response_id(value: Any) -> str:
 def retrieve_openai_response(response_id: str) -> dict[str, Any]:
     """Retrieve one background response without exposing its identifier in logs."""
     if not CONFIG.openai_api_key:
-        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, OPENAI_API_KEY_ERROR)
     response_id = _openai_response_id(response_id)
     result = http_json(
         "GET",
@@ -13028,7 +13410,7 @@ def retrieve_openai_response(response_id: str) -> dict[str, Any]:
         timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
         service="openai",
     )
-    return _validate_openai_response("/responses", result)
+    return _validate_openai_response(OPENAI_RESPONSES_PATH, result)
 
 
 def cancel_openai_response(response_id: str) -> None:
@@ -13076,40 +13458,41 @@ def responses_background_request(
     while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
         if cancel_event is not None and cancel_event.wait(OPENAI_BACKGROUND_POLL_SECONDS):
             cancel_openai_response(active_response_id)
-            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled")
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
         if time.monotonic() - started >= OPENAI_BACKGROUND_MAX_SECONDS:
             cancel_openai_response(active_response_id)
             raise AppError(504, "Die Hintergrundplanung hat das Zeitlimit überschritten.", reason="provider_timeout")
         current = retrieve_openai_response(active_response_id)
-    current = _validate_openai_response("/responses", current)
+    current = _validate_openai_response(OPENAI_RESPONSES_PATH, current)
     record_openai_usage(current, "responses_background")
     return current
 
 
 def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
     if cancel_event is not None and cancel_event.is_set():
-        raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled")
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
 def openai_stream_request(
     payload: dict[str, Any],
     on_text_delta: Any,
     cancel_event: threading.Event | None = None,
+    on_response_id: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     if not CONFIG.openai_api_key:
-        raise AppError(503, "OPENAI_API_KEY ist nicht konfiguriert.")
+        raise AppError(503, OPENAI_API_KEY_ERROR)
     request_payload = {**payload, "stream": True}
     request_payload.pop("_ai_provider", None)
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     body = json.dumps(request_payload).encode("utf-8")
-    endpoint = openai_endpoint("/responses")
+    endpoint = openai_endpoint(OPENAI_RESPONSES_PATH)
     parsed_endpoint = urlparse(endpoint)
     request = Request(
         endpoint,
         data=body,
         headers={
             "Accept": "text/event-stream",
-            "Content-Type": "application/json",
+            "Content-Type": JSON_MEDIA_TYPE,
             "Authorization": f"Bearer {CONFIG.openai_api_key}",
             "User-Agent": f"IntervalsCoach/{APP_VERSION}",
         },
@@ -13124,7 +13507,7 @@ def openai_stream_request(
         "timeout_seconds": OPENAI_RESPONSE_TIMEOUT_SECONDS,
         "request_bytes": len(body),
     }
-    LOGGER.info("External HTTP request started", extra={"event": "external_request_started", "context": context})
+    LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": context})
     capture_diagnostic_event("openai_stream_started", {
         "service": "openai",
         "method": "POST",
@@ -13168,6 +13551,11 @@ def openai_stream_request(
         except json.JSONDecodeError as exc:
             raise AppError(502, "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.", reason="invalid_response") from exc
         kind = event_name or str(event.get("type") or "")
+        candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+        if kind in {"response.created", "response.in_progress"} and isinstance(candidate, dict):
+            response_id = str(candidate.get("id") or "").strip()
+            if response_id and on_response_id is not None:
+                on_response_id(response_id)
         if kind == "response.output_text.delta":
             delta = event.get("delta")
             if isinstance(delta, str) and delta:
@@ -13202,7 +13590,7 @@ def openai_stream_request(
         _raise_chat_cancelled(cancel_event)
         if final_response is None:
             raise AppError(502, "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.", reason="invalid_response")
-        final_response = _validate_openai_response("/responses", final_response)
+        final_response = _validate_openai_response(OPENAI_RESPONSES_PATH, final_response)
         record_openai_usage(final_response, "responses_stream")
         capture_diagnostic_event("openai_stream_completed", {
             "service": "openai", "status": 200,
@@ -13210,7 +13598,7 @@ def openai_stream_request(
             "response_bytes": stream_bytes,
         })
         LOGGER.info(
-            "External HTTP request completed",
+            EXTERNAL_HTTP_COMPLETED_EVENT,
             extra={"event": "external_request_completed", "context": {**context, "status": 200, "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes}},
         )
         return final_response
@@ -13248,7 +13636,7 @@ def openai_stream_request(
         if cancel_event is not None and cancel_event.is_set():
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
             log_failure("chat_cancelled", 499, level=logging.INFO)
-            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         details = {"state": "error", "reason": "provider_timeout", "message": "OpenAI hat nicht rechtzeitig geantwortet.", "http_status": 504}
         record_openai_status(details)
         log_failure("provider_timeout", 504)
@@ -13257,11 +13645,11 @@ def openai_stream_request(
             "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
         })
         raise AppError(504, details["message"], reason="provider_timeout") from exc
-    except (URLError, OSError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         if cancel_event is not None and cancel_event.is_set():
             record_openai_usage({"usage": {}}, "responses_stream_cancelled")
             log_failure("chat_cancelled", 499, level=logging.INFO)
-            raise AppError(499, "Die Coach-Anfrage wurde abgebrochen.", reason="chat_cancelled") from exc
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         record_openai_status({"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503})
         log_failure("provider_unavailable", 503)
         capture_diagnostic_event("openai_stream_failed", {
@@ -13275,20 +13663,18 @@ def responses_stream_request(
     payload: dict[str, Any],
     on_text_delta: Any,
     cancel_event: threading.Event | None = None,
+    on_response_id: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     if request_ai_provider(payload) == "gemini":
         _raise_chat_cancelled(cancel_event)
-        result = gemini_responses_request(payload, cancel_event=cancel_event)
+        result = gemini_stream_request(payload, on_text_delta, cancel_event=cancel_event)
         _raise_chat_cancelled(cancel_event)
-        text = output_text(result)
-        if text:
-            on_text_delta(text)
         return result
     request_payload = dict(payload)
     request_payload.setdefault("reasoning", {"effort": selected_thinking_level()})
     for attempt in range(3):
         try:
-            return openai_stream_request(request_payload, on_text_delta, cancel_event)
+            return openai_stream_request(request_payload, on_text_delta, cancel_event, on_response_id)
         except AppError as exc:
             if exc.reason != "conversation_locked" or attempt == 2:
                 raise
@@ -13346,7 +13732,7 @@ def reset_coach_chat() -> dict[str, Any]:
                     "message": None,
                 })
                 db.execute(
-                    "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
+                    UPDATE_COMMAND_RECEIPT_SQL,
                     (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, command["client_turn_id"]),
                 )
             db.execute("DELETE FROM messages")
@@ -13485,7 +13871,7 @@ def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str
     if action_type not in COACH_ACTION_TYPES:
         raise AppError(400, "Unbekannter Coach-Aktionstyp.")
     target_system = str(values.get("target_system") or "").strip()
-    if target_system not in {"local", "intervals", "local+intervals"}:
+    if target_system not in {"local", "intervals", LOCAL_INTERVALS_SCOPE}:
         raise AppError(400, "Die Aktionsvorschau benötigt ein gültiges Zielsystem.")
     object_ids = values.get("object_ids")
     diff = values.get("diff")
@@ -13516,13 +13902,13 @@ def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str
                 _coach_action_hash(payload), expires_at, now,
             ),
         )
-        row = db.execute("SELECT * FROM coach_action_proposals WHERE id=?", (proposal_id,)).fetchone()
+        row = db.execute(SELECT_ACTION_PROPOSAL_SQL, (proposal_id,)).fetchone()
     return {"status": "preview", "proposed_action": _coach_action_view(dict(row))}
 
 
 def confirm_coach_action_preview(proposal_id: Any, session_csrf_hash: str) -> dict[str, Any]:
     normalized_id = str(proposal_id or "").strip()
-    if not re.fullmatch(r"[0-9a-f-]{36}", normalized_id):
+    if not re.fullmatch(UUID_PATTERN, normalized_id):
         raise AppError(400, "Ungültige Aktionsvorschau.")
     token = secrets.token_urlsafe(32)
     now = time.time()
@@ -13540,7 +13926,7 @@ def confirm_coach_action_preview(proposal_id: Any, session_csrf_hash: str) -> di
         ).rowcount
         if confirmed != 1:
             raise AppError(409, "Die Aktionsvorschau wurde bereits bestÃ¤tigt.")
-        updated = db.execute("SELECT * FROM coach_action_proposals WHERE id=?", (normalized_id,)).fetchone()
+        updated = db.execute(SELECT_ACTION_PROPOSAL_SQL, (normalized_id,)).fetchone()
     return {"status": "ready", "action_token": token, "proposed_action": _coach_action_view(dict(updated))}
 
 
@@ -13606,14 +13992,14 @@ def _restore_coach_session_csrf_hash(session_key: str) -> str:
 def _coach_command_receipt(value: Any) -> dict[str, Any]:
     try:
         receipt = json.loads(value or "{}") if not isinstance(value, dict) else dict(value)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         receipt = {}
     return receipt if isinstance(receipt, dict) else {}
 
 
 def _merge_coach_command_receipt(client_turn_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        row = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
         receipt = _coach_command_receipt((row or {}).get("receipt"))
         receipt.update(updates)
         db.execute(
@@ -13737,8 +14123,36 @@ def register_chat_stream(session_csrf_hash: str) -> tuple[str, threading.Event]:
     with CHAT_STREAM_LOCK:
         if session_csrf_hash in CHAT_STREAMS:
             raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
-        CHAT_STREAMS[session_csrf_hash] = {"operation_id": operation_id, "cancel_event": cancel_event}
+        CHAT_STREAMS[session_csrf_hash] = {
+            "operation_id": operation_id,
+            "cancel_event": cancel_event,
+            "events": queue.Queue(),
+        }
     return operation_id, cancel_event
+
+
+def publish_chat_stream_event(operation_id: str, event: str, data: Any) -> bool:
+    """Forward a worker event to the currently attached finite SSE response."""
+    with CHAT_STREAM_LOCK:
+        stream = next(
+            (candidate for candidate in CHAT_STREAMS.values()
+             if candidate.get("operation_id") == operation_id),
+            None,
+        )
+        events = stream.get("events") if stream else None
+    if not isinstance(events, queue.Queue):
+        return False
+    events.put((event, data))
+    return True
+
+
+def chat_stream_events(session_csrf_hash: str, operation_id: str) -> queue.Queue[Any] | None:
+    with CHAT_STREAM_LOCK:
+        stream = CHAT_STREAMS.get(session_csrf_hash)
+        if not stream or stream.get("operation_id") != operation_id:
+            return None
+        events = stream.get("events")
+    return events if isinstance(events, queue.Queue) else None
 
 
 def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:
@@ -14052,7 +14466,7 @@ def _structured_training_state(*, include_inactive: bool = False, cursor: Any = 
                    or len(decoded["key"]) != 3 or not all(isinstance(value, str) for value in decoded["key"])):
         raise AppError(400, "Ungueltiger Planungscursor.", reason="invalid_page_cursor")
     with DB_LOCK, database() as db:
-        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         revision_number = int((revision or {}).get("revision") or 0)
         if decoded and (decoded.get("revision") != revision_number or decoded.get("include_inactive") != include_inactive or decoded.get("today") != today):
             raise AppError(409, "Die Planung hat sich waehrend des Lesens geaendert. Alle Seiten erneut lesen.", reason="planning_revision_conflict")
@@ -14075,7 +14489,7 @@ def _structured_training_state(*, include_inactive: bool = False, cursor: Any = 
     def target_ref(row: dict[str, Any], *, planned: bool) -> dict[str, Any] | None:
         try:
             payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             return None
         if not isinstance(payload, dict):
             return None
@@ -14099,7 +14513,7 @@ def _structured_training_state(*, include_inactive: bool = False, cursor: Any = 
     return {
         "planning_revision": revision_number,
         "artifact_refs": coach_dialogue_artifact_refs(),
-        "competitions": list_competitions(include_sync=True),
+        "competitions": list_competitions(),
         "training_plans": list_training_plans(100),
         "planned_units": [ref for row in planned_rows if (ref := target_ref(row, planned=True)) is not None],
         "planned_units_page": {"has_more": has_more, "next_cursor": next_cursor, "limit": page_size},
@@ -14152,7 +14566,7 @@ def _validate_plan_calendar(workouts: list[dict[str, Any]]) -> None:
 
 def _stage_coach_artifact(conversation_id: str, client_turn_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     with DB_LOCK, database() as db:
-        revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         base_revision = int((revision_row or {}).get("revision") or 0)
         artifact_id = str(uuid.uuid4())
         now = utc_now()
@@ -14182,18 +14596,18 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
             try:
                 date.fromisoformat(candidate_date)
             except ValueError as exc:
-                raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
+                raise AppError(400, INVALID_PLANNING_DATE_ERROR, reason="invalid_change") from exc
             final_active[change_identity] = True
             final_dates[change_identity] = candidate_date
             continue
         if action == "restore":
             restore_identities.add(change_identity)
-        row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+        row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
         if not row:
             continue
         try:
             current = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             current = {}
         if not isinstance(current, dict):
             continue
@@ -14217,7 +14631,7 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
         try:
             date.fromisoformat(candidate_date)
         except ValueError as exc:
-            raise AppError(400, "Das Planungsdatum muss das Format JJJJ-MM-TT haben.", reason="invalid_change") from exc
+            raise AppError(400, INVALID_PLANNING_DATE_ERROR, reason="invalid_change") from exc
         final_dates[change_identity] = candidate_date
     occupied_dates: dict[str, str] = {}
     for change_identity, candidate_date in final_dates.items():
@@ -14293,13 +14707,13 @@ def _apply_structured_training_changes(
             prepared_changes.append(change)
     changes = prepared_changes
     with DB_LOCK, database() as db:
-        revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
         expected_revision = arguments.get("expected_revision")
         if require_revision and expected_revision is None:
             raise AppError(400, "Eine vollständige Planänderung benötigt die gelesene Planrevision.", reason="planning_revision_required")
         if expected_revision is not None and int(expected_revision) != current_revision:
-            raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
+            raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
         for change in changes:
             action = str(change.get("action") or "update").strip().casefold()
             if action == "create":
@@ -14307,10 +14721,10 @@ def _apply_structured_training_changes(
             if not change.get("local_id"):
                 raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
             expected_hash = str(change.get("expected_payload_hash") or "").strip().lower()
-            if require_revision and not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+            if require_revision and not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
                 raise AppError(400, "Eine vollständige Planänderung benötigt aktuelle Payload-Hashes.", reason="payload_hash_required")
             if expected_hash:
-                row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (str(change["local_id"]),)).fetchone()
+                row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (str(change["local_id"]),)).fetchone()
                 if not row or _library_payload_hash(row["payload"]) != expected_hash:
                     raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
         _validate_training_change_batch(changes, db)
@@ -14321,19 +14735,19 @@ def _apply_structured_training_changes(
             local_id = str(change.get("local_id") or "").strip()
             if action == "create" or not local_id:
                 continue
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
             if not row:
                 continue
             try:
                 current = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 current = {}
             if isinstance(current, dict):
                 membership = str(current.get("plan_id") or "").strip()
                 referenced_memberships.add(membership)
                 changes_bounds = action in {"delete", "archive", "restore"} or (
                     action == "update" and "date" in change
-                    and str(change.get("date") or "")[:10] != str(current.get("date") or "")[:10]
+                    and not str(change.get("date") or "").startswith(str(current.get("date") or "")[:10])
                 )
                 if membership and changes_bounds:
                     plans_needing_bounds.add(membership)
@@ -14405,7 +14819,7 @@ def _apply_structured_training_changes(
             for row in member_rows:
                 try:
                     payload = json.loads(row.get("payload") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
+                except (TypeError, ValueError):
                     payload = {}
                 if isinstance(payload, dict) and str(payload.get("date") or "")[:10]:
                     member_dates.append(str(payload["date"])[:10])
@@ -14439,7 +14853,7 @@ def _apply_structured_training_changes(
                         updated_plan,
                         source="coach_apply",
                     )
-        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
     publish_state_event("planning", {"status": "changed"})
     result_changes = [
         {"local_id": item.get("local_id"), "status": item.get("status")}
@@ -14479,10 +14893,10 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
             raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {workout_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
         dates.add(workout_date)
     with DB_LOCK, database() as db:
-        revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
         if expected_revision != current_revision:
-            raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
+            raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
         rows = db.execute(
             "SELECT local_id, payload FROM planned_units "
             "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
@@ -14516,7 +14930,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
         for row in rows:
             try:
                 current = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            except (TypeError, ValueError) as exc:
                 raise AppError(409, "Eine bestehende lokale Planung ist beschädigt.", reason="invalid_plan") from exc
             if not isinstance(current, dict):
                 raise AppError(409, "Eine bestehende lokale Planung ist beschädigt.", reason="invalid_plan")
@@ -14567,10 +14981,10 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
         if plan_id:
             constraints = arguments.get("constraints") or list(dict.fromkeys(
                 item for old_id in sorted(superseded_plan_ids)
-                for item in json.loads(get_kv("coach_plan_constraints:" + old_id) or "[]")
+                for item in json.loads(get_kv(COACH_PLAN_CONSTRAINTS_PREFIX + old_id) or "[]")
             ))
             if constraints:
-                set_kv("coach_plan_constraints:" + plan_id, json.dumps(constraints, ensure_ascii=False), db)
+                set_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id, json.dumps(constraints, ensure_ascii=False), db)
         created: list[dict[str, Any]] = []
         for workout in workouts:
             entry_payload = {**workout, "source": "coach"}
@@ -14582,7 +14996,7 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
             created.append(entry)
         if rows or created or plan_id:
             _bump_planning_revision(db)
-        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
     return {
         "ok": True,
         "status": "replaced",
@@ -14626,13 +15040,13 @@ def _mark_local_planning_authoritative(local_ids: list[str] | None = None) -> in
         for row in rows:
             try:
                 payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 payload = {}
             if not isinstance(payload, dict) or payload.get("local_deleted"):
                 continue
             payload["sync_status"] = "local"
             db.execute(
-                "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+                UPDATE_PLANNED_UNIT_SQL,
                 (json.dumps(payload, ensure_ascii=False), now, row["local_id"]),
             )
             changed += 1
@@ -14653,7 +15067,7 @@ def _mark_local_competitions_authoritative() -> int:
             try:
                 conflict = json.loads(row.get("sync_conflict") or "{}")
                 conflict_type = str(conflict.get("type") or "") if isinstance(conflict, dict) else ""
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 pass
             # Preserve a known provider id for ordinary local edits so the
             # explicit Coach sync updates the existing remote event. Only a
@@ -14686,7 +15100,7 @@ def _coach_repair_manifest(arguments: dict[str, Any], intent: dict[str, Any]) ->
         entries = [{"library_workout_id": row["local_id"], "expected_payload_hash": _library_payload_hash(row["payload"])} for row in rows]
         if supplied is None:
             _require_coach_scope(intent, "local_plan")
-            revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+            revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
             expected = arguments.get("expected_revision")
             if type(expected) is not int or expected != int((revision or {}).get("revision") or 0):
                 raise AppError(409, "Lies die aktuelle Planung vor der vollstaendigen Reparatur erneut.", reason="planning_revision_conflict")
@@ -14706,7 +15120,7 @@ def _coach_repair_manifest(arguments: dict[str, Any], intent: dict[str, Any]) ->
         if rows:
             _mark_local_planning_authoritative([row["local_id"] for row in rows])
         for entry in entries:
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (entry["library_workout_id"],)).fetchone()
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
             entry["expected_payload_hash"] = _library_payload_hash(row["payload"])
     return entries
 
@@ -14750,7 +15164,6 @@ def _structured_coach_tool_result(
     sync_job_ids: list[str],
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
-    operation = intent.get("operation")
     if name == "read_profile":
         return {"ok": True, "profile": get_profile()}
     if name == "update_profile":
@@ -14805,12 +15218,12 @@ def _structured_coach_tool_result(
             raise AppError(400, "Historienlimit ist ungültig.", reason="invalid_list_request") from exc
         return {"ok": True, "changes": list_change_history(limit)}
     if name == "list_competitions":
-        return {"ok": True, "competitions": list_competitions(include_sync=True)}
+        return {"ok": True, "competitions": list_competitions()}
     if name == "list_training_plans":
         return {"ok": True, "training_plans": list_training_plans(100)}
     if name == "stage_training_plan":
         if "stage_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         _require_coach_scope(intent, "local_plan")
         payload = _structured_artifact_payload(arguments)
         _validate_structured_plan_limits(payload)
@@ -14819,7 +15232,7 @@ def _structured_coach_tool_result(
         return _stage_coach_artifact(conversation_id, client_turn_id, payload)
     if name == "commit_training_plan":
         if "commit_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         artifact_id = str(intent.get("artifact_id") or "").strip()
         if not artifact_id:
             raise AppError(400, "Zum Speichern wird ein lokales Planartefakt benötigt.", reason="artifact_required")
@@ -14841,7 +15254,7 @@ def _structured_coach_tool_result(
                     "UPDATE coach_plan_artifacts SET conversation_id=?, updated_at=? WHERE id=? AND status='draft'",
                     (conversation_id, utc_now(), artifact_id),
                 )
-            revision_row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+            revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
             current_revision = int((revision_row or {}).get("revision") or 0)
             if int(artifact["base_revision"] or 0) != current_revision:
                 raise AppError(409, "Der lokale Plan wurde inzwischen geändert.", reason="planning_revision_conflict")
@@ -14861,8 +15274,8 @@ def _structured_coach_tool_result(
             return {"ok": True, "status": "committed", "artifact_id": artifact_id, "library_entry_ids": [entry["id"] for entry in entries]}
     if name == "replace_training_plan":
         if "replace_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
-        selected_plan_ids = sorted(token.split(":", 1)[1] for token in _coach_scope_values(intent) if token.startswith("training_plan:") and token.split(":", 1)[1])
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+        selected_plan_ids = sorted(token.split(":", 1)[1] for token in _coach_scope_values(intent) if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1])
         if len(selected_plan_ids) > 1:
             raise AppError(400, "Ein Planersatz darf nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
         if not selected_plan_ids and "local_plan" not in _coach_scope_values(intent):
@@ -14870,13 +15283,13 @@ def _structured_coach_tool_result(
         return _replace_structured_training_plan({**arguments, "period": intent.get("period"), "constraints": (intent.get("request") or {}).get("constraints", [])}, selected_plan_id=selected_plan_ids[0] if selected_plan_ids else None)
     if name == "apply_training_changes":
         if "apply_training_changes" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         changes = arguments.get("changes")
         if not isinstance(changes, list):
             raise AppError(400, "Coach-Änderungen müssen als Liste gesendet werden.", reason="invalid_change")
         selected_plan_ids = sorted(
             token.split(":", 1)[1] for token in _coach_scope_values(intent)
-            if token.startswith("training_plan:") and token.split(":", 1)[1]
+            if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1]
         )
         if len(selected_plan_ids) > 1:
             raise AppError(400, "Die Änderungen dürfen nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
@@ -14902,7 +15315,7 @@ def _structured_coach_tool_result(
         )
     if name == "manage_training_templates":
         if "manage_training_templates" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         templates = arguments.get("templates")
         if not isinstance(templates, list) or not 1 <= len(templates) <= 28 or not all(isinstance(item, dict) for item in templates):
             raise AppError(400, "Ein Coach-Kommando darf 1 bis 28 Vorlagenänderungen enthalten.", reason="template_limit")
@@ -14923,7 +15336,7 @@ def _structured_coach_tool_result(
         return {"ok": True, "stored_locally": True, "templates": results, "template": results[0] if len(results) == 1 else None}
     if name == "apply_workout_library_plan":
         if "apply_workout_library_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         entries = arguments.get("entries")
         if not isinstance(entries, list):
             raise AppError(400, "Bibliothekseinheiten müssen als Liste gesendet werden.", reason="invalid_library_plan")
@@ -14976,7 +15389,7 @@ def _structured_coach_tool_result(
         return {"ok": True, **delete_coach_competition(competition_id)}
     if name == "start_provider_refresh":
         if "start_provider_refresh" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         provider = str(intent.get("target_system") or "")
         _require_coach_scope(intent, f"{provider}_refresh")
         if arguments.pop("_wait_for_completion", False):
@@ -15034,7 +15447,7 @@ def _structured_coach_tool_result(
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
     if name == "start_intervals_plan_sync":
         if "start_intervals_plan_sync" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         entries = arguments.get("entries")
         if "repair" in arguments and type(arguments["repair"]) is not bool:
             raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
@@ -15130,7 +15543,7 @@ def _structured_coach_tool_result(
                     )
             with DB_LOCK, database() as db:
                 for entry in normalized_entries:
-                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (entry["library_workout_id"],)).fetchone()
+                    row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
                     if not row or _library_payload_hash(row["payload"]) != entry["expected_payload_hash"]:
                         raise AppError(409, "Die ausgewählte Planung wurde geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
                     if arguments.get("repair"):
@@ -15141,7 +15554,7 @@ def _structured_coach_tool_result(
                 # Marking a conflict as locally authoritative changes the payload.
                 # Queue hashes of that validated, updated state.
                 for entry in normalized_entries:
-                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (entry["library_workout_id"],)).fetchone()
+                    row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
                     entry["expected_payload_hash"] = _library_payload_hash(row["payload"])
         return _enqueue_coach_plan_push(
             normalized_entries,
@@ -15168,7 +15581,7 @@ def _structured_coach_tool_result(
         return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
     if name == "resolve_training_sync_conflict":
         if "resolve_training_sync_conflict" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         payload = arguments
         local_id = str(payload.get("local_id") or "").strip()
         strategy = str(payload.get("strategy") or "keep_local").strip().casefold()
@@ -15192,12 +15605,12 @@ def _structured_coach_tool_result(
         return {"ok": True, "status": "queued", "job": job}
     if name == "preview_adaptive_replan":
         if "preview_adaptive_replan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         _require_coach_scope(intent, "adaptive_replan")
         return {"ok": True, **adaptive_replan_preview()}
     if name == "apply_adaptive_replan":
         if "apply_adaptive_replan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         payload = arguments
         adjustment_id = str(payload.get("adjustment_id") or "").strip()
         _require_coach_scope(intent, f"adaptive_replan:{adjustment_id}", "adaptive_replan")
@@ -15211,21 +15624,21 @@ def _structured_coach_tool_result(
         if not latest or str(latest.get("id")) != adjustment_id or latest.get("status") != "preview":
             raise AppError(409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen.")
         with DB_LOCK, database() as db:
-            current_user = db.execute("SELECT id FROM messages WHERE client_turn_id=? AND role='user'", (client_turn_id,)).fetchone()
+            current_user = db.execute(SELECT_USER_MESSAGE_SQL, (client_turn_id,)).fetchone()
             publication = db.execute("SELECT id FROM messages WHERE id=? AND role='assistant'", (latest.get("published_message_id"),)).fetchone()
         if not current_user or not publication or current_user["id"] <= publication["id"] or current_user["id"] not in (intent.get("request") or {}).get("source_message_ids", []):
             raise AppError(403, "Die Vorschau muss zuerst angezeigt und in einer folgenden Nachricht freigegeben werden.", reason="adaptive_approval_required")
         return {"ok": True, **apply_adaptive_replan(adjustment_id, sync_illness_to_intervals=sync_illness)}
     if name == "update_training_plan":
         if "update_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         payload = _structured_action_payload(arguments)
         plan_id = str(payload.get("plan_id") or "").strip()
-        _require_coach_scope(intent, f"training_plan:{plan_id}", "local_plan")
+        _require_coach_scope(intent, f"{TRAINING_PLAN_SCOPE_PREFIX}{plan_id}", "local_plan")
         return {"ok": True, **update_training_plan(plan_id, payload)}
     if name == "undo_training_change":
         if "undo_training_change" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Schritt nicht.", reason="intent_scope_denied")
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
         change_id = str(arguments.get("change_id") or "").strip()
         _require_coach_scope(intent, f"change:{change_id}")
         return {"ok": True, **_history_preview(change_id, session_csrf_hash)}
@@ -15245,7 +15658,7 @@ def coach_dialogue_context(client_turn_id: str) -> dict[str, Any]:
     """Local dialogue survives provider switches; remote conversations are not authority."""
     messages = list_messages(24)
     with DB_LOCK, database() as db:
-        current = db.execute("SELECT id FROM messages WHERE client_turn_id=? AND role='user'", (client_turn_id,)).fetchone()
+        current = db.execute(SELECT_USER_MESSAGE_SQL, (client_turn_id,)).fetchone()
         pending = json.loads(get_kv("coach_pending_request") or "null")
         if pending:
             for message_id in pending.get("source_message_ids", []):
@@ -15290,7 +15703,9 @@ def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, An
     try:
         request = validate_request(arguments.pop("_request", None), user_ids, context["current_user_message_id"])
     except (TypeError, ValueError) as exc:
-        raise AppError(400, "Der Schritt benötigt einen gültigen Bezug zum aktuellen Auftrag. Prüfe die Werkzeugargumente erneut.", reason="request_invalid") from exc
+        error = AppError(400, "Der Schritt benötigt einen gültigen Bezug zum aktuellen Auftrag. Prüfe die Werkzeugargumente erneut.", reason="request_invalid")
+        error.validation_reason = str(exc)
+        raise error from exc
     target = request["target"]
     scope = set(request["scope"])
     retry_job = None
@@ -15348,12 +15763,12 @@ def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, An
             action["_repair_period"] = {**period, "start": max(period["start"], local_now().date().isoformat())}
             with DB_LOCK, database() as db:
                 for entry in arguments.get("entries") or []:
-                    row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (str(entry.get("library_workout_id") or ""),)).fetchone()
+                    row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (str(entry.get("library_workout_id") or ""),)).fetchone()
                     day = str(json.loads(row["payload"]).get("date") or "") if row else ""
                     if not max(period["start"], local_now().date().isoformat()) <= day <= period["end"]:
                         raise AppError(403, "Die Reparaturauswahl liegt ausserhalb des beauftragten Zeitraums.", reason="request_period")
     if name == "update_training_plan":
-        _require_coach_scope(action, "training_plan:" + str((arguments.get("payload") or {}).get("plan_id") or ""))
+        _require_coach_scope(action, TRAINING_PLAN_SCOPE_PREFIX + str((arguments.get("payload") or {}).get("plan_id") or ""))
     if name == "apply_adaptive_replan":
         _require_coach_scope(action, "adaptive_replan:" + str(arguments.get("adjustment_id") or ""))
     return action
@@ -15371,7 +15786,7 @@ def _validate_dialogue_plan_scope(name: str, arguments: dict[str, Any], action: 
         for change in arguments.get("changes", []):
             local_id = str(change.get("local_id") or "")
             _require_coach_scope(action, f"planned_unit:{local_id}")
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
             if not row:
                 raise AppError(404, "Die ausgewählte Einheit fehlt.", reason="request_object_missing")
             check(json.loads(row["payload"]).get("date"))
@@ -15379,7 +15794,7 @@ def _validate_dialogue_plan_scope(name: str, arguments: dict[str, Any], action: 
                 check(change["date"])
         if name == "commit_training_plan":
             artifact = db.execute("SELECT client_turn_id, payload FROM coach_plan_artifacts WHERE id=?", (action.get("artifact_id"),)).fetchone()
-            origin = db.execute("SELECT id FROM messages WHERE client_turn_id=? AND role='user'", (artifact["client_turn_id"],)).fetchone() if artifact else None
+            origin = db.execute(SELECT_USER_MESSAGE_SQL, (artifact["client_turn_id"],)).fetchone() if artifact else None
             if not origin or origin["id"] not in action["request"]["source_message_ids"]:
                 raise AppError(409, "Dieser Entwurf gehört nicht zum aktuellen lokalen Gespräch.", reason="artifact_conversation_conflict")
             for workout in json.loads(artifact["payload"]).get("workouts", []):
@@ -15414,14 +15829,14 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
     if len(set(ids)) != len(ids):
         raise AppError(400, "Eine Einheit darf nur einmal im Änderungssatz vorkommen.", reason="invalid_change")
     with DB_LOCK, database() as db:
-        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()["revision"]
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
         if type(arguments.get("expected_revision")) is not int or arguments["expected_revision"] != revision:
             raise AppError(409, "Der Plan wurde inzwischen geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
         _validate_training_change_batch(changes, db)
         final_dates = set()
         for change in changes:
             if change.get("action") not in {"delete", "archive"}:
-                row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (change["local_id"],)).fetchone()
+                row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (change["local_id"],)).fetchone()
                 final_dates.add(str(change.get("date") or json.loads(row["payload"])["date"])[:10])
         for workout in workouts:
             day = workout["date"][:10]
@@ -15433,12 +15848,12 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
         created = save_workout_library_entries(workouts, plan_name, str(arguments.get("goal") or "")) if workouts else []
         plan_ids = {str(item.get("plan_id") or "") for item in created}
         for local_id in ids:
-            row = db.execute("SELECT payload FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
             plan_ids.add(str(json.loads(row["payload"]).get("plan_id") or ""))
         for plan_id in plan_ids - {""}:
             if action["request"]["constraints"]:
-                set_kv("coach_plan_constraints:" + plan_id, json.dumps(action["request"]["constraints"], ensure_ascii=False), db)
-        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()["revision"]
+                set_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id, json.dumps(action["request"]["constraints"], ensure_ascii=False), db)
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
     return {"ok": True, "status": "applied", "planning_revision": revision, "changes": changed["changes"], "library_entry_ids": [item["id"] for item in created]}
 
 
@@ -15446,7 +15861,15 @@ def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any
     """Corrections resolve the same step, never a different object with the same tool."""
     def repaired(previous, current):
         if previous["tool"] != current["tool"]:
-            return False
+            planning_alternatives = {"apply_training_patch", "replace_training_plan"}
+            return (
+                {previous["tool"], current["tool"]} == planning_alternatives
+                and previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
+                and previous.get("request_binding_key")
+                and previous["request_binding_key"] == current.get("request_binding_key")
+                and previous.get("plan_effect_key")
+                and previous["plan_effect_key"] == current.get("plan_effect_key")
+            )
         if previous["tool"] == "update_profile" and previous.get("result", {}).get("reason") == "profile_conflict":
             # A later profile write repairs a conflict only when it retries the
             # same fields. Independent updates in the same profile scope must
@@ -15490,6 +15913,50 @@ def _dialogue_scope_repair_key(name: str, arguments: dict[str, Any]) -> str:
             if isinstance(change, dict) else change for change in payload["changes"]
         ]
     return _coach_action_hash({"tool": name, "arguments": payload, "binding": binding})
+
+
+def _dialogue_request_binding_key(arguments: dict[str, Any]) -> str | None:
+    """Identify one request without trusting its message provenance or prose."""
+    request = arguments.get("_request")
+    if not isinstance(request, dict):
+        return None
+    scope, constraints = request.get("scope"), request.get("constraints")
+    if not isinstance(scope, list) or not all(isinstance(value, str) for value in scope):
+        return None
+    if not isinstance(constraints, list) or not all(isinstance(value, str) for value in constraints):
+        return None
+    binding = {
+        "target": request.get("target"),
+        "scope": sorted(scope),
+        "period": request.get("period"),
+        "constraints": sorted(constraints),
+        "remote_write": request.get("remote_write"),
+        "sync_scope": request.get("sync_scope"),
+    }
+    return _coach_action_hash(binding)
+
+
+def _dialogue_plan_effect_key(name: str, arguments: dict[str, Any]) -> str | None:
+    """Match cross-tool repairs only when the planned workout payload is exact."""
+    if name == "apply_training_patch":
+        if arguments.get("changes"):
+            # Existing-unit edits cannot be proven equivalent to a complete
+            # replacement without retaining and comparing every prior object.
+            return None
+        workouts = arguments.get("workouts")
+    elif name == "replace_training_plan":
+        workouts = (arguments.get("payload") or {}).get("workouts")
+    else:
+        return None
+    if not isinstance(workouts, list) or not workouts:
+        return None
+    signatures = []
+    for workout in workouts:
+        if not isinstance(workout, dict):
+            return None
+        signatures.append({key: workout.get(key) for key in
+                           ("date", "sport", "name", "description", "duration_minutes", "target", "rationale")})
+    return _coach_action_hash({"workouts": signatures})
 
 
 def _coach_repair_key(name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
@@ -15541,9 +16008,9 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
         intent["authorization_scope"].append(f"artifact:{artifact_id}")
         expected_revision = payload.get("expected_revision")
         with DB_LOCK, database() as db:
-            row = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()
+            row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         if expected_revision is not None and int(expected_revision) != int((row or {}).get("revision") or 0):
-            raise AppError(409, "Die lokale Planrevision ist inzwischen veraltet.", reason="planning_revision_conflict")
+            raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
         arguments = {**arguments, "artifact_id": artifact_id}
     elif operation == "apply_training_changes":
         changes = arguments.get("changes") if isinstance(arguments.get("changes"), list) else []
@@ -15602,7 +16069,7 @@ def _chat_with_structured_coach_impl(
 ) -> dict[str, Any]:
     ai_provider = ai_provider or selected_ai_provider()
     with DB_LOCK, database() as db:
-        existing = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        existing = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
         receipt = _coach_command_receipt(existing["receipt"]) if existing else {}
         if existing:
             _require_command_owner(receipt, session_csrf_hash)
@@ -15686,6 +16153,8 @@ def _chat_with_structured_coach_impl(
             request_delta_emitted = True
             on_delta(delta)
         def checkpoint(response_id: str) -> None:
+            nonlocal resume_id
+            resume_id = response_id
             _merge_coach_command_receipt(client_turn_id, {
                 "status": "running", "phase": "waiting_openai", "openai_response_id": response_id,
                 "pending_tool_outputs": [], "response_input": payload["input"] if isinstance(payload["input"], list) else None,
@@ -15694,10 +16163,28 @@ def _chat_with_structured_coach_impl(
         for attempt in range(3):
             _raise_chat_cancelled(cancel_event)
             try:
-                if background_owned:
+                if background_owned and on_text_delta is None:
                     return responses_background_request(payload, response_id=resume_id or None, on_response_id=checkpoint, cancel_event=cancel_event)
-                return responses_stream_request(payload, request_on_delta, cancel_event) if on_text_delta is not None else responses_request(payload)
+                if on_text_delta is None:
+                    return responses_request(payload)
+                checkpoint_callback = checkpoint if background_owned and ai_provider == "openai" else None
+                return responses_stream_request(
+                    payload, request_on_delta, cancel_event,
+                    on_response_id=checkpoint_callback,
+                )
             except AppError as exc:
+                if (
+                    background_owned and ai_provider == "openai" and resume_id
+                    and exc.reason in {"provider_unavailable", "provider_timeout", "invalid_response"}
+                    and not cancel_event.is_set()
+                ):
+                    # The provider may have completed after its SSE transport
+                    # failed. Retrieve the checkpointed response before ever
+                    # starting a second billed generation.
+                    return responses_background_request(
+                        payload, response_id=resume_id,
+                        on_response_id=checkpoint, cancel_event=cancel_event,
+                    )
                 if (ai_provider == "openai" and exc.reason == "conversation_state_invalid"
                         and not conversation_recovered and not request_delta_emitted and attempt < 2):
                     conversation_recovered = True
@@ -15762,6 +16249,8 @@ def _chat_with_structured_coach_impl(
             effect_key = _coach_action_hash({"tool": name, "arguments": item.get("arguments")})
             step_key = name
             scope_repair_key = None
+            request_binding_key = None
+            plan_effect_key = None
             repair_key = None
             try:
                 if len(command_receipts) >= 40 and not any(entry.get("call_id") == call_id for entry in command_receipts):
@@ -15773,6 +16262,8 @@ def _chat_with_structured_coach_impl(
                     raise ValueError("arguments_object")
                 repair_key = _coach_repair_key(name, arguments)
                 scope_repair_key = _dialogue_scope_repair_key(name, arguments)
+                request_binding_key = _dialogue_request_binding_key(arguments)
+                plan_effect_key = _dialogue_plan_effect_key(name, arguments)
                 step_key = _coach_action_hash({"name": name, "scope": sorted((arguments.get("_request") or {}).get("scope") or []),
                                                "period": (arguments.get("_request") or {}).get("period"),
                                                "repair_key": repair_key})
@@ -15787,7 +16278,7 @@ def _chat_with_structured_coach_impl(
                 if cached and name == "stage_training_plan" and cached.get("result", {}).get("ok"):
                     with DB_LOCK, database() as db:
                         row = db.execute("SELECT status, base_revision FROM coach_plan_artifacts WHERE id=?", (cached["result"].get("artifact_id"),)).fetchone()
-                        revision = db.execute("SELECT revision FROM planning_state WHERE id=1").fetchone()["revision"]
+                        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
                     if not row or (row["status"] == "draft" and row["base_revision"] != revision):
                         cached = None
                 if cached:
@@ -15839,7 +16330,7 @@ def _chat_with_structured_coach_impl(
                         else:
                             result = _structured_coach_tool_result(name, arguments, intent=action, conversation_id=conversation_id,
                                 client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash, sync_job_ids=sync_job_ids, cancel_event=cancel_event)
-                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key,
+                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key,
                                                  "request": action.get("request"), "result": result})
                         _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
                     if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
@@ -15851,10 +16342,13 @@ def _chat_with_structured_coach_impl(
             except (AppError, ValueError, TypeError, KeyError) as exc:
                 result = {"ok": False, "reason": getattr(exc, "reason", "tool_arguments_invalid"),
                           "error": str(exc) if isinstance(exc, AppError) else "Die Werkzeugargumente sind ungültig. Prüfe das Schema und den aktuellen Zustand und korrigiere den Aufruf."}
+                validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
+                if validation_reason and re.fullmatch(r"request_[a-z_]{1,72}", validation_reason):
+                    result["validation_reason"] = validation_reason
                 if not result["reason"]:
                     result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
                 technical_error = _coach_error_metadata(exc)
-                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
+                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
                 LOGGER.warning("Coach step failed", extra={"event": "coach_tool_failed", "context": {"tool": name if name in {tool['name'] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error}})
             outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
             pending = [entry for entry in pending if entry["call_id"] != call_id]
@@ -15934,7 +16428,7 @@ def _chat_with_structured_coach_impl(
                     preview_payload["published_message_id"] = final_receipt["message"]["id"]
                     db.execute("UPDATE plan_adjustments SET payload=? WHERE id=?", (json.dumps(preview_payload, ensure_ascii=False), preview_id))
         set_kv("last_coach_ai_provider", ai_provider or selected_ai_provider(), db)
-        db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
+        db.execute(UPDATE_COMMAND_RECEIPT_SQL,
                    (json.dumps(final_receipt, ensure_ascii=False), utc_now(), client_turn_id))
     publish_state_event("coach", {"message_id": final_receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
     return final_receipt
@@ -16009,7 +16503,12 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
             | {step["tool"] for step in receipt.get("pending_tool_calls", []) if step.get("tool")}
             | (_structured_authorized_operations(intent) - {step["tool"] for step in successes} - {""})
         )
-        status = "partial" if successes else "cancelled" if cancelled else "failed"
+        if successes:
+            status = "partial"
+        elif cancelled:
+            status = "cancelled"
+        else:
+            status = "failed"
         reason = getattr(error, "reason", None)
         explanations = {
             "conversation_state_invalid": "Der KI-Dienst konnte den Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten.",
@@ -16063,7 +16562,7 @@ def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, A
         for key in ("openai_response_id", "pending_tool_outputs", "pending_tool_calls", "response_input", "previous_response_id"):
             receipt.pop(key, None)
         receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
-        db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
+        db.execute(UPDATE_COMMAND_RECEIPT_SQL,
                    (json.dumps(receipt, ensure_ascii=False), utc_now(), client_turn_id))
     publish_state_event("coach", {"message_id": receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
     return receipt
@@ -16143,7 +16642,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
             if not background_owned and float((age or {}).get("age") or 0) > COACH_COMMAND_STALE_SECONDS:
                 try:
                     recovered = json.loads(existing_command.get("receipt") or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
+                except (TypeError, ValueError):
                     recovered = {}
                 if not isinstance(recovered, dict):
                     recovered = {}
@@ -16153,7 +16652,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
         try:
             return coach_command_receipt(client_turn_id, session_csrf_hash)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             pass
     if existing_command and not background_owned:
         raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
@@ -16247,7 +16746,7 @@ def _claim_background_coach_job() -> dict[str, Any] | None:
 def _requeue_background_coach_job(client_turn_id: str, reason: str) -> None:
     """Return a job to the durable queue after transient Coach contention."""
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        row = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
         if not row:
             return
         receipt = _coach_command_receipt(row.get("receipt"))
@@ -16289,9 +16788,19 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
     with CHAT_STREAM_LOCK:
         cancel_event = COACH_JOB_CANCEL_EVENTS.setdefault(operation_id, threading.Event())
     with DB_LOCK, database() as db:
-        current = db.execute("SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        current = db.execute(SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,)).fetchone()
     if current and _coach_command_receipt(current["receipt"]).get("cancel_requested"):
         cancel_event.set()
+    stream_attached = chat_stream_events(session_csrf_hash, operation_id) is not None
+
+    def stream_delta(text: str) -> None:
+        publish_chat_stream_event(operation_id, "delta", {"text": text})
+
+    def stream_receipt(value: dict[str, Any]) -> None:
+        publish_chat_stream_event(
+            operation_id, "completed", {key: item for key, item in value.items() if key != "session_key"},
+        )
+
     try:
         if not session_csrf_hash:
             raise AppError(401, "Die Sitzung des Coach-Auftrags ist abgelaufen.", reason="session_expired")
@@ -16304,6 +16813,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
             refresh_morning_body_battery(local_now().date())
         result = chat_with_coach(
             message,
+            on_text_delta=stream_delta if stream_attached and not receipt.get("openai_response_id") else None,
             cancel_event=cancel_event,
             session_csrf_hash=session_csrf_hash,
             client_turn_id=client_turn_id,
@@ -16322,7 +16832,7 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
             quick_actions = coach_quick_actions_state()
             with DB_LOCK, database() as db:
                 row = db.execute(
-                    "SELECT receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,),
+                    SELECT_COMMAND_RECEIPT_SQL, (client_turn_id,),
                 ).fetchone()
                 completed_receipt = _coach_command_receipt((row or {}).get("receipt"))
                 completed_receipt["coach_quick_actions"] = quick_actions
@@ -16330,6 +16840,8 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
                     "UPDATE coach_commands SET receipt=?, updated_at=? WHERE client_turn_id=? AND status='completed'",
                     (json.dumps(completed_receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
                 )
+            result = completed_receipt
+        stream_receipt(result)
     except AppError as exc:
         if exc.reason in {"chat_queue_full", "chat_request_timeout"}:
             _requeue_background_coach_job(client_turn_id, exc.reason)
@@ -16337,12 +16849,27 @@ def _run_background_coach_job(job: dict[str, Any]) -> None:
                 "Persistent Coach background job requeued after contention",
                 extra={"event": "coach_background_job_requeued", "context": {"operation_id": operation_id, "reason": exc.reason}},
             )
+            publish_chat_stream_event(operation_id, "background", {
+                "status": "queued", "mode": "background", "operation_id": operation_id,
+            })
         else:
-            _persist_structured_command_failure(client_turn_id, {}, exc)
+            failed = _persist_structured_command_failure(client_turn_id, {}, exc)
+            if failed:
+                stream_receipt(failed)
+            else:
+                publish_chat_stream_event(operation_id, "error", {
+                    "reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000],
+                })
 
     except Exception as exc:
-        _persist_structured_command_failure(client_turn_id, {}, exc)
-        LOGGER.error(
+        failed = _persist_structured_command_failure(client_turn_id, {}, exc)
+        if failed:
+            stream_receipt(failed)
+        else:
+            publish_chat_stream_event(operation_id, "error", {
+                "reason": "internal_error", "message": INTERNAL_SERVER_ERROR,
+            })
+        LOGGER.exception(
             "Persistent Coach background job failed",
             extra={"event": "coach_background_job_failed", "context": {"operation_id": operation_id, "error_code": operation_error_code(exc)}},
         )
@@ -16480,7 +17007,7 @@ def run_morning_checkin(checkin_date: str) -> None:
         set_kv("morning_checkin_status", "error")
         set_kv("morning_checkin_error", error)
         publish_state_event("coach", {"status": "changed"})
-        LOGGER.error(
+        LOGGER.exception(
             "Morning check-in failed",
             extra={"event": "morning_checkin_failed", "context": {"date": checkin_date}},
             exc_info=True,
@@ -16573,7 +17100,7 @@ def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict
     return result
 
 
-def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
+def public_bootstrap() -> dict[str, Any]:
     """Return bounded local state without waiting for any provider network call."""
     # The startup screen waits for this response. Keep all of its local reads
     # on one connection so SQLCipher is keyed once instead of once per helper.
@@ -16591,8 +17118,8 @@ def public_bootstrap(local_only: bool = False) -> dict[str, Any]:
             "schema_version": 3,
             "state_versions": state_version_values,
             "plan_revision": state_version_values.get("plan"),
-            "app": {"name": "Intervals Coach", "version": APP_VERSION},
-            "skeleton": {key: True for key in ("chat", "activities", "plan", "library", "performance", "feedback", "profile")},
+            "app": {"name": APP_NAME, "version": APP_VERSION},
+            "skeleton": dict.fromkeys(("chat", "activities", "plan", "library", "performance", "feedback", "profile"), True),
             "messages": list_messages(limit=100),
             "messages_next_cursor": None,
             "plans": list_training_plans(limit=30),
@@ -16728,7 +17255,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         check_adaptive_replan("weather")
     planned_with_weather = add_weather_to_planned(planned, weather)
 
-    with DB_LOCK, database() as db:
+    with DB_LOCK, database():
         checkins = list_checkins(30)
         external_calendar = external_calendar_state()
         daily_context = daily_planning_context(snapshot, planned, weather, checkins, list_external_calendar_events(50, training_relevant_only=True))
@@ -16736,7 +17263,7 @@ def public_state(local_only: bool = False) -> dict[str, Any]:
         sync = sync_browser_state(freshness=freshness)
         return {
             "app": {
-                "name": "Intervals Coach",
+                "name": APP_NAME,
                 "version": APP_VERSION,
             },
             "messages": list_messages(),
@@ -16857,7 +17384,7 @@ def save_settings(values: Any) -> dict[str, Any]:
     seen: set[str] = set()
     rewritten: list[str] = []
     for line in lines:
-        match = re.match(r"^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s*=).*$", line)
+        match = re.match(r"^(\s*(?:export\s+)?)(?a:((?!\d)\w+))(\s*=).*$", line)
         key = match.group(2) if match else None
         if key in updates and match:
             rewritten.append(f"{match.group(1)}{key}={updates[key]}")
@@ -16888,9 +17415,9 @@ def coach_diagnostic_history() -> list[dict[str, Any]]:
         if not isinstance(value, dict):
             return None
         result = {}
-        for key in ("type", "reason"):
+        for key in ("type", "reason", "validation_reason"):
             item = value.get(key)
-            if isinstance(item, str) and re.fullmatch(r"[A-Za-z_]{1,80}", item):
+            if isinstance(item, str) and re.fullmatch(r"(?a:[A-Za-z_]{1,80})", item):
                 result[key] = item
         provider_code = value.get("provider_error_code")
         if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
@@ -16903,7 +17430,7 @@ def coach_diagnostic_history() -> list[dict[str, Any]]:
                 continue
             filename, function, line = frame.get("file"), frame.get("function"), frame.get("line")
             if (isinstance(filename, str) and re.fullmatch(r"(?:server\.py|backend/(?:[a-z_]+/)*[a-z_]+\.py)", filename)
-                    and isinstance(function, str) and re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]{0,100}", function)
+                    and isinstance(function, str) and re.fullmatch(r"(?a:(?!\d)\w{1,101})", function)
                     and isinstance(line, int) and 0 < line < 1_000_000):
                 frames.append({"file": filename, "function": function, "line": line})
         if frames:
@@ -16940,7 +17467,7 @@ def diagnostic_report() -> dict[str, Any]:
         activity_feedback_count = db.execute("SELECT COUNT(*) AS count FROM activity_feedback").fetchone()["count"]
     return {
         "generated_at": utc_now(),
-        "app": {"name": "Intervals Coach", "version": APP_VERSION},
+        "app": {"name": APP_NAME, "version": APP_VERSION},
         "runtime": {
             "python": platform.python_version(),
             "platform": platform.platform(),
@@ -17011,15 +17538,15 @@ def privacy_export() -> dict[str, Any]:
         value = row["value"]
         try:
             application_state[key] = json.loads(value)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             application_state[key] = value
     try:
         garmin_data = json.loads(get_kv("garmin_snapshot") or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         garmin_data = {}
     try:
         weather_data = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         weather_data = {}
     return {
         "exported_at": utc_now(),
@@ -17539,7 +18066,7 @@ def allow_rate(key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
     with RATE_LIMIT_LOCK:
         if now - RATE_LIMIT_LAST_CLEANUP_MONOTONIC >= RATE_LIMIT_CLEANUP_INTERVAL_SECONDS:
             inspected = 0
-            for bucket_key in list(RATE_LIMITS):
+            for bucket_key in tuple(RATE_LIMITS):
                 if inspected >= RATE_LIMIT_CLEANUP_BATCH_SIZE:
                     break
                 inspected += 1
@@ -17573,7 +18100,7 @@ def session_token_hash(token: str) -> str:
 
 def session_timestamp(value: Any) -> float | None:
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value).replace("Z", UTC_OFFSET_SUFFIX))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.timestamp()
@@ -17779,7 +18306,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 require_auth(self)
                 schedule_morning_checkin()
                 query = parse_qs(urlparse(self.path).query)
-                self.send_json(200, public_bootstrap(local_only=query.get("local", ["0"])[0] == "1"))
+                self.send_json(200, public_bootstrap())
             elif path == "/api/state/events":
                 require_auth(self)
                 self.handle_state_events()
@@ -17860,24 +18387,24 @@ class RequestHandler(BaseHTTPRequestHandler):
                 require_auth(self)
                 stream_database_backup(self)
             elif path.startswith("/api/"):
-                raise AppError(404, "Nicht gefunden.")
+                raise AppError(404, NOT_FOUND_ERROR)
             else:
                 self.send_static(path)
         except AppError as exc:
             if exc.status >= 500:
-                LOGGER.error(
+                LOGGER.exception(
                     exc.message,
                     extra={"event": "http_app_error", "context": {"method": "GET", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
             self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
-        except Exception as exc:
-            LOGGER.error(
+        except Exception:
+            LOGGER.exception(
                 "Unhandled GET error",
                 extra={"event": "http_unhandled_error", "context": {"method": "GET", "path": self.path, "request_id": self.request_id}},
                 exc_info=True,
             )
-            self.send_json(500, {"error": "Interner Serverfehler."})
+            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
 
     def do_POST(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
@@ -17919,7 +18446,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         self.handle_authenticated_post(path, session)
         except AppError as exc:
             if exc.status >= 500:
-                LOGGER.error(
+                LOGGER.exception(
                     exc.message,
                     extra={"event": "http_app_error", "context": {"method": "POST", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
@@ -17927,13 +18454,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             status = public_app_error_status(exc)
             headers = {"WWW-Authenticate": "Session"} if status == 401 else None
             self.send_json(status, {"error": redact_text(exc.message)[:1000]}, headers)
-        except Exception as exc:
-            LOGGER.error(
+        except Exception:
+            LOGGER.exception(
                 "Unhandled POST error",
                 extra={"event": "http_unhandled_error", "context": {"method": "POST", "path": self.path, "request_id": self.request_id}},
                 exc_info=True,
             )
-            self.send_json(500, {"error": "Interner Serverfehler."})
+            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
 
     def send_sse_headers(self, *, persistent: bool = True) -> None:
         try:
@@ -17995,7 +18522,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         except ClientDisconnected:
             return
 
-    def handle_chat_stream(self, session: dict[str, Any]) -> None:
+    def handle_chat_stream(self, session: dict[str, Any]) -> None:  # NOSONAR - SSE lifecycle must remain atomic around durable job ownership
         payload = self.read_json(MAX_REQUEST_BYTES)
         message = str(payload.get("message", ""))
         client_turn_id = str(payload.get("client_turn_id") or "").strip()
@@ -18028,16 +18555,42 @@ class RequestHandler(BaseHTTPRequestHandler):
                 message, client_turn_id, session["csrf_hash"],
                 operation_id=operation_id, cancel_event=cancel_event, request_kind=request_kind, attachments=payload.get("attachments"),
             )
-            send_event("background", job)
+            persisted_operation_id = str(job.get("operation_id") or "")
+            if persisted_operation_id and persisted_operation_id != operation_id:
+                # A retry after restart may resolve to the original durable
+                # operation. The new finite stream cannot own that queue, so
+                # return its receipt and let the client resume via polling.
+                send_event("background", job)
+                return
+            events = chat_stream_events(session["csrf_hash"], operation_id)
+            if events is None:
+                send_event("background", job)
+            else:
+                while True:
+                    try:
+                        event, data = events.get(timeout=15)
+                    except queue.Empty:
+                        active = _active_background_coach_job(session["csrf_hash"], operation_id)
+                        if active:
+                            send_event("heartbeat", {"operation_id": operation_id})
+                            continue
+                        try:
+                            send_event("completed", coach_command_receipt(client_turn_id, session["csrf_hash"]))
+                        except AppError as exc:
+                            send_event("error", {"reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000]})
+                        break
+                    send_event(event, data)
+                    if event in {"completed", "error", "background"}:
+                        break
         except AppError as exc:
             send_event("error", {"reason": exc.reason or "request_failed", "message": redact_text(exc.message)[:1000]})
         except Exception:
-            LOGGER.error(
+            LOGGER.exception(
                 "Unhandled coach stream error",
                 extra={"event": "chat_stream_error", "context": {"request_id": self.request_id}},
                 exc_info=True,
             )
-            send_event("error", {"reason": "internal_error", "message": "Interner Serverfehler."})
+            send_event("error", {"reason": "internal_error", "message": INTERNAL_SERVER_ERROR})
         finally:
             unregister_chat_stream(session["csrf_hash"], operation_id)
             self.close_connection = True
@@ -18120,7 +18673,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/change-history/undo":
                 self.send_json(200, _apply_change_undo(self.read_json()))
             else:
-                raise AppError(404, "Nicht gefunden.")
+                raise AppError(404, NOT_FOUND_ERROR)
 
     def do_PUT(self) -> None:
         try:
@@ -18152,23 +18705,23 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, save_athlete_context(payload.get("profile"), payload.get("competitions")))
                 return
             if path != "/api/profile":
-                raise AppError(404, "Nicht gefunden.")
+                raise AppError(404, NOT_FOUND_ERROR)
             self.send_json(200, save_profile(self.read_json()))
         except AppError as exc:
             if exc.status >= 500:
-                LOGGER.error(
+                LOGGER.exception(
                     exc.message,
                     extra={"event": "http_app_error", "context": {"method": "PUT", "path": self.path, "status": exc.status, "request_id": self.request_id}},
                     exc_info=True,
                 )
             self.send_json(public_app_error_status(exc), {"error": redact_text(exc.message)[:1000]})
-        except Exception as exc:
-            LOGGER.error(
+        except Exception:
+            LOGGER.exception(
                 "Unhandled PUT error",
                 extra={"event": "http_unhandled_error", "context": {"method": "PUT", "path": self.path, "request_id": self.request_id}},
                 exc_info=True,
             )
-            self.send_json(500, {"error": "Interner Serverfehler."})
+            self.send_json(500, {"error": INTERNAL_SERVER_ERROR})
 
     def read_body(self, max_bytes: int = MAX_BODY_BYTES) -> bytes:
         return read_request_body(
@@ -18270,23 +18823,23 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.log_client_disconnect()
 
     def send_static(self, path: str) -> None:
-        asset_name = "index.html" if path in {"", "/"} else path.lstrip("/")
+        asset_name = ASSET_INDEX_HTML if path in {"", "/"} else path.lstrip("/")
         if any(marker in asset_name for marker in ("/", "\\", ":")) or asset_name.startswith(".."):
             raise AppError(403, "Forbidden.")
-        target = STATIC_TARGETS.get(asset_name, STATIC_TARGETS["index.html"])
+        target = STATIC_TARGETS.get(asset_name, STATIC_TARGETS[ASSET_INDEX_HTML])
         if not target.is_file():
-            target = STATIC_TARGETS["index.html"]
+            target = STATIC_TARGETS[ASSET_INDEX_HTML]
         data = target.read_bytes()
         mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         etag = f'"{hashlib.sha256(data).hexdigest()[:24]}"'
         query = parse_qs(urlparse(getattr(self, "path", "")).query)
         versioned = target.name in VERSIONED_STATIC_ASSETS and bool(str(query.get("v", [""])[0]).strip())
-        cache_control = (
-            f"public, max-age={STATIC_IMMUTABLE_MAX_AGE}, immutable"
-            if versioned
-            else "no-cache" if target.name in STATIC_REVALIDATE_ASSETS
-            else "public, max-age=3600"
-        )
+        if versioned:
+            cache_control = f"public, max-age={STATIC_IMMUTABLE_MAX_AGE}, immutable"
+        elif target.name in STATIC_REVALIDATE_ASSETS:
+            cache_control = "no-cache"
+        else:
+            cache_control = "public, max-age=3600"
         if getattr(self, "headers", {}).get("If-None-Match") == etag:
             self.send_response(304)
             self.send_header("ETag", etag)
@@ -18334,15 +18887,15 @@ def schedule_daily_sync_jobs() -> None:
             enqueue_sync_job("weather", "refresh", {"force": False, "reason": "dreistündliche automatische Aktualisierung"}, requested_by="scheduler")
     if CONFIG.calendar_ical_url and daily_sync_due("calendar"):
         if not _sync_job_active("calendar"):
-            enqueue_sync_job("calendar", "refresh", {"reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
+            enqueue_sync_job("calendar", "refresh", {"reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
     if garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())):
         if daily_sync_due("garmin"):
             if not _sync_job_active("garmin"):
-                enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
+                enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
     if not CONFIG.intervals_api_key or not daily_sync_due("intervals") or get_kv("sync_running") == "1" or INTERVALS_RESYNC_GATE.is_resetting():
         return
     if not _sync_job_active("intervals"):
-        enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "tägliche automatische Aktualisierung"}, requested_by="scheduler")
+        enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
 
 
 def enqueue_startup_sync_jobs() -> None:
@@ -18386,7 +18939,7 @@ def main() -> None:
     if configuration_error:
         LOGGER.critical("Secure startup refused", extra={"event": "secure_startup_refused", "context": {"reason": configuration_error}})
         raise SystemExit(configuration_error)
-    LOGGER.info("Intervals Coach starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
+    LOGGER.info(f"{APP_NAME} starting", extra={"event": "server_start", "context": {"version": APP_VERSION, "port": CONFIG.port}})
     initialise_database()
     server = CoachHTTPServer(("0.0.0.0", CONFIG.port), RequestHandler)
     server.allow_reuse_address = True
@@ -18395,7 +18948,7 @@ def main() -> None:
     enqueue_startup_sync_jobs()
     schedule_morning_checkin()
     threading.Thread(target=daily_sync_loop, daemon=True).start()
-    LOGGER.info("Intervals Coach listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
+    LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -18406,3 +18959,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

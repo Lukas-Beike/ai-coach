@@ -77,14 +77,14 @@ def validate_attachments(value):
             raise ValueError("Attachment too large")
         try:
             data = base64.b64decode(encoded, validate=True)
-        except (ValueError, binascii.Error):
+        except binascii.Error:
             raise ValueError("Invalid attachment encoding") from None
         if not data or len(data) > MAX_FILE_BYTES:
             raise ValueError("Invalid attachment size")
         if name.lower().endswith(".gpx"):
             try:
                 summary = gpx_summary(data)
-            except (ValueError, KeyError, TypeError, ET.ParseError, UnicodeError):
+            except (ValueError, KeyError, TypeError, ET.ParseError):
                 raise ValueError("Invalid GPX") from None
             result.append({"name": name, "type": "gpx", "summary": summary})
             continue

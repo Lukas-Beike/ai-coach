@@ -493,12 +493,12 @@ class CoachTests(unittest.TestCase):
 
     def test_structured_coach_exposes_competitions_plans_and_adaptive_operations(self):
         names = {tool["name"] for tool in server.COACH_STRUCTURED_TOOLS}
-        self.assertTrue({
+        self.assertLessEqual({
             "list_competitions", "save_competition", "delete_competition", "sync_competitions",
             "list_training_plans", "update_training_plan", "preview_adaptive_replan", "apply_adaptive_replan",
             "list_recent_activities", "list_workout_library", "list_planned_workouts", "list_change_history",
             "apply_workout_library_plan", "delete_activity_feedback", "refresh_current_performance",
-        } <= names)
+        }, names)
 
         competition = server.save_coach_competition({
             "name": "Local Race", "event_date": "2099-01-01", "sport": "Cycling", "priority": "A",
@@ -668,7 +668,7 @@ class CoachTests(unittest.TestCase):
             )
 
         self.assertEqual(server._mark_local_competitions_authoritative(), 1)
-        local_override = server.list_competitions(include_sync=True)[0]
+        local_override = server.list_competitions()[0]
         self.assertEqual(local_override["intervals_event_id"], "123")
         self.assertEqual(local_override["sync_state"], "local_override")
 
@@ -678,7 +678,7 @@ class CoachTests(unittest.TestCase):
                 (json.dumps({"type": "remote_missing"}), competition["id"]),
             )
         server._mark_local_competitions_authoritative()
-        recreated = server.list_competitions(include_sync=True)[0]
+        recreated = server.list_competitions()[0]
         self.assertIsNone(recreated["intervals_event_id"])
 
     def test_structured_coach_can_keep_a_planning_conflict_local_before_push(self):
@@ -883,7 +883,6 @@ class CoachTests(unittest.TestCase):
             "date": (date.today() + timedelta(days=7)).isoformat(),
             "sport": "Run", "name": "Untouched", "description": "- 20m 60% easy",
         })
-        pending = {item["library_workout_id"]: item for item in server._pending_plan_push_entries()}
         intent = {
             "intent": "remote_sync", "operation": "start_intervals_plan_sync", "target_system": "intervals",
             "artifact_id": None, "ambiguities": [],
@@ -1747,7 +1746,7 @@ class CoachTests(unittest.TestCase):
         })
         for index in range(500):
             server.add_message("user", f"message {index}")
-        bootstrap = server.public_bootstrap(local_only=True)
+        bootstrap = server.public_bootstrap()
         self.assertEqual(bootstrap["schema_version"], 3)
         self.assertEqual(len(bootstrap["messages"]), 100)
         self.assertEqual(bootstrap["activities"], [])
@@ -1761,7 +1760,7 @@ class CoachTests(unittest.TestCase):
 
     def test_bootstrap_never_refreshes_provider_network(self):
         with patch.object(server, "http_json", side_effect=AssertionError("network")), patch.object(server, "external_call", side_effect=AssertionError("network")):
-            bootstrap = server.public_bootstrap(local_only=False)
+            bootstrap = server.public_bootstrap()
         self.assertEqual(bootstrap["schema_version"], 3)
         self.assertIn(bootstrap["provider_states"]["intervals"]["status"], {"not_configured", "loading", "ready", "stale", "degraded", "error"})
 
@@ -1788,7 +1787,7 @@ class CoachTests(unittest.TestCase):
 
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
-            server.public_bootstrap(local_only=True)
+            server.public_bootstrap()
         self.assertEqual(connect.call_count, 1)
 
     def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
@@ -1808,9 +1807,9 @@ class CoachTests(unittest.TestCase):
         self.assertIn('checkins: ["feedback", "plan"]', app)
         self.assertIn("function scrollChatToResponseStart()", app)
         self.assertIn("function restoreChatScrollPosition()", app)
-        self.assertIn('state.chatScrollY = window.scrollY', app)
+        self.assertIn('state.chatScrollY = globalThis.scrollY', app)
         self.assertIn('state.chatInitialScrollPending', app)
-        self.assertIn('window.history.scrollRestoration = "manual"', app)
+        self.assertIn('globalThis.history.scrollRestoration = "manual"', app)
         self.assertIn("function latestAssistantMessageKey(messages)", app)
         self.assertIn('state.chatResponseScrollPending = true', app)
         self.assertIn('state.initialStateLoaded = true', app)
@@ -1870,7 +1869,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(status["operation_id"], "operation-test")
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["progress"], 35)
-        bootstrap = server.public_bootstrap(local_only=True)
+        bootstrap = server.public_bootstrap()
         self.assertEqual(bootstrap["sync"]["progress"], 35)
         self.assertEqual(bootstrap["sync"]["message"], "Daten werden gelesen…")
 
@@ -2114,23 +2113,23 @@ class CoachTests(unittest.TestCase):
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
         self.assertIn("window.AppApi = Object.freeze({ audio, request, responseError });", api_client)
-        self.assertIn("window.AppApi.request(path, options, () =>", app)
-        self.assertIn("window.AppApi.audio(path, blob, () =>", app)
+        self.assertIn("globalThis.AppApi.request(path, options, () =>", app)
+        self.assertIn("globalThis.AppApi.audio(path, blob, () =>", app)
         self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
-        self.assertIn('/api.js?v=206', index)
-        self.assertIn('/navigation.js?v=206', index)
-        self.assertIn('/state.js?v=206', index)
-        self.assertIn('/views.js?v=206', index)
-        self.assertIn('/forms.js?v=206', index)
-        self.assertIn('/components.js?v=206', index)
-        self.assertIn('/app.js?v=206', index)
-        self.assertIn('intervals-coach-v206', service_worker)
-        self.assertIn('"/navigation.js?v=206"', service_worker)
-        self.assertIn('"/state.js?v=206"', service_worker)
-        self.assertIn('"/views.js?v=206"', service_worker)
-        self.assertIn('"/forms.js?v=206"', service_worker)
-        self.assertIn('"/components.js?v=206"', service_worker)
+        self.assertIn('/api.js?v=210', index)
+        self.assertIn('/navigation.js?v=210', index)
+        self.assertIn('/state.js?v=210', index)
+        self.assertIn('/views.js?v=210', index)
+        self.assertIn('/forms.js?v=210', index)
+        self.assertIn('/components.js?v=210', index)
+        self.assertIn('/app.js?v=210', index)
+        self.assertIn('intervals-coach-v210', service_worker)
+        self.assertIn('"/navigation.js?v=210"', service_worker)
+        self.assertIn('"/state.js?v=210"', service_worker)
+        self.assertIn('"/views.js?v=210"', service_worker)
+        self.assertIn('"/forms.js?v=210"', service_worker)
+        self.assertIn('"/components.js?v=210"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -2138,7 +2137,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('/api/diagnostics/capture', app)
         self.assertIn('function executeCoachActionProposal(', app)
         self.assertIn('function renderConnectivityStatus(online = navigator.onLine)', app)
-        self.assertIn('window.addEventListener("offline"', app)
+        self.assertIn('globalThis.addEventListener("offline"', app)
         self.assertIn('const state = {', state)
         self.assertIn('chatScrollRestoring: false', state)
         self.assertNotIn('const state = {', app)
@@ -2157,8 +2156,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=206'), index.index('/components.js?v=206'))
-        self.assertLess(index.index('/components.js?v=206'), index.index('/app.js?v=206'))
+        self.assertLess(index.index('/forms.js?v=210'), index.index('/components.js?v=210'))
+        self.assertLess(index.index('/components.js?v=210'), index.index('/app.js?v=210'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -2169,8 +2168,8 @@ class CoachTests(unittest.TestCase):
         index = (Path(__file__).resolve().parents[1] / "public" / "index.html").read_text(encoding="utf-8")
         for route in ("coach", "plan/overview", "analysis/performance", "more"):
             self.assertIn(f'href="#{route}"', index)
-        self.assertIn('window.addEventListener("hashchange", syncNavigationRoute)', app)
-        self.assertIn("window.history.pushState", app)
+        self.assertIn('globalThis.addEventListener("hashchange", syncNavigationRoute)', app)
+        self.assertIn("globalThis.history.pushState", app)
         self.assertIn("panel.focus({ preventScroll: true })", app)
         self.assertNotIn('today: "todayPanel"', navigation)
         self.assertNotIn('href="#today"', index)
@@ -2200,6 +2199,13 @@ class CoachTests(unittest.TestCase):
         self.assertIn('id="coachReceipts"', index)
         self.assertIn('function renderCoachOverview(data)', app)
         self.assertIn('function renderCoachReceipts()', app)
+        self.assertIn('if (hiddenChatReceiptTools.has(entry.tool) && !failedSync && !failedSyncJob) continue;', app)
+        self.assertIn('"get_sync_job"', app)
+        self.assertIn('"start_intervals_plan_sync"', app)
+        self.assertNotIn('id="chatOperationLabel"', index)
+        self.assertIn('node.setAttribute("aria-label", coachWorkingLabel());', app)
+        self.assertNotIn('label.id = "coachWorkingLabel"', app)
+        self.assertIn('position: fixed; z-index: 6; left: 50%; bottom:', styles)
         self.assertIn('function createActionReceipt(', components)
         self.assertIn('createSkeletonStack(4)', app)
         self.assertNotIn('id="todaySummary"', index)
@@ -2993,7 +2999,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(local_row["sync_source"], "local")
         self.assertEqual(local_row["sync_status"], "local")
         self.assertFalse(local_row["is_remote"])
-        self.assertEqual(local_row["remote_id"], None)
+        self.assertIsNone(local_row["remote_id"])
         remote_row = next(row for row in view if row.get("remote_id") == "remote-event-2")
         self.assertEqual(remote_row["sync_source"], "intervals")
         self.assertFalse(remote_row["is_local"])
@@ -3389,7 +3395,6 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["cycling_max_hr_bpm"]["note"], "Garmin Connect Herzfrequenzzonen")
 
     def test_garmin_threshold_metrics_are_used_without_confusing_ftp_and_eftp(self):
-        today = server.local_now().date().isoformat()
         server.set_kv("garmin_snapshot", json.dumps({
             "cycling_ftp": {"functionalThresholdPower": 302},
             "running_threshold": {
@@ -3490,7 +3495,7 @@ class CoachTests(unittest.TestCase):
         comparisons = performance["comparisons"]
         self.assertEqual(comparisons["cycling_ftp_watts_30d"]["days"], 30)
         self.assertEqual(comparisons["cycling_ftp_watts_30d"]["delta"], 10)
-        self.assertEqual(comparisons["bike_threshold_hr_bpm_30d"], None)
+        self.assertIsNone(comparisons["bike_threshold_hr_bpm_30d"])
         self.assertEqual(comparisons["readiness_30d"]["delta"], 5)
         self.assertEqual(comparisons["readiness_30d"]["color"], "good")
         self.assertEqual(comparisons["run_5k_seconds_30d"]["delta"], -100)
@@ -3916,7 +3921,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(request.call_args_list[2].kwargs, {"headers": headers, "service": "intervals"})
 
     def test_garmin_provider_collector_keeps_ranges_bounded_and_errors_redacted(self):
-        from backend.providers.garmin import collect_garmin_data
+        from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 
         class FakeGarmin:
             def get_sleep_daily(self, start, end):
@@ -3997,7 +4002,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["provider_sync"]["pagination"]["daily_stats"]["records"], 2)
 
     def test_historical_garmin_collection_excludes_recovery_and_current_metrics(self):
-        from backend.providers.garmin import collect_garmin_data
+        from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 
         class FakeGarmin:
             def get_activities_by_date(self, start, end):
@@ -4014,8 +4019,7 @@ class CoachTests(unittest.TestCase):
             synced_at="2026-09-01T00:00:00+00:00",
             external_call=lambda _service, _source, operation, _details: operation(),
             redact=lambda value: value,
-            include_recovery=False,
-            include_current_metrics=False,
+            options=GarminCollectionOptions(include_recovery=False, include_current_metrics=False),
         )
 
         self.assertEqual(len(result["activities"]), 1)
@@ -4268,6 +4272,43 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual(function_response["name"], "save_checkin")
         self.assertEqual(server.output_text(followup), "Check-in gespeichert.")
+
+    def test_gemini_stream_forwards_chunks_and_aggregates_the_final_response(self):
+        captured = {}
+
+        class StreamResponse:
+            status = 200
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def __iter__(self):
+                yield b'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hallo "}]}}]}\n'
+                yield b'\n'
+                yield b'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Welt"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7}}\n'
+                yield b'\n'
+
+        def fake_urlopen(request, **_kwargs):
+            captured["request"] = request
+            return StreamResponse()
+
+        deltas = []
+        config = replace(server.CONFIG, openai_api_key="", gemini_api_key="test-gemini-key", ai_provider="gemini")
+        with patch.object(server, "CONFIG", config), patch.object(server, "urlopen", side_effect=fake_urlopen):
+            result = server.responses_stream_request(
+                {"_ai_provider": "gemini", "model": "gemini-3.8-flash", "input": "BegrÃ¼ÃŸe mich."},
+                deltas.append,
+            )
+
+        self.assertEqual(deltas, ["Hallo ", "Welt"])
+        self.assertEqual(server.output_text(result), "Hallo Welt")
+        self.assertEqual(result["usage"]["total_tokens"], 7)
+        self.assertEqual(captured["request"].full_url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse")
+        self.assertEqual(captured["request"].headers["X-goog-api-key"], "test-gemini-key")
 
     def test_gemini_persists_tool_response_before_a_failed_followup(self):
         responses = [
@@ -5625,6 +5666,68 @@ class CoachTests(unittest.TestCase):
             server._run_background_coach_job(job)
         self.assertEqual(seen["session_csrf_hash"], csrf_hash)
 
+    def test_background_worker_forwards_live_deltas_and_completion_to_attached_stream(self):
+        csrf_hash = server.session_token_hash("csrf-background-streamed")
+        with server.SESSION_LOCK, server.DB_LOCK, server.database() as db:
+            db.execute(
+                "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+                (server.session_token_hash("session-background-streamed"), csrf_hash, time.time() + 3600, server.utc_now(), server.utc_now()),
+            )
+        operation_id, _cancel_event = server.register_chat_stream(csrf_hash)
+        try:
+            server.enqueue_background_coach_job(
+                "Wie soll ich heute trainieren?", "turn-background-streamed", csrf_hash,
+                operation_id=operation_id,
+            )
+            job = server._claim_background_coach_job()
+
+            def complete_chat(*_args, **kwargs):
+                kwargs["on_text_delta"]("Erster ")
+                kwargs["on_text_delta"]("Teil")
+                return {"status": "completed", "session_key": "must-not-leave-server", "message": {"id": 42, "role": "assistant", "content": "Erster Teil"}}
+
+            with patch.object(server, "chat_with_coach", side_effect=complete_chat):
+                server._run_background_coach_job(job)
+
+            events = server.chat_stream_events(csrf_hash, operation_id)
+            self.assertEqual(events.get_nowait(), ("delta", {"text": "Erster "}))
+            self.assertEqual(events.get_nowait(), ("delta", {"text": "Teil"}))
+            event, receipt = events.get_nowait()
+            self.assertEqual(event, "completed")
+            self.assertEqual(receipt["message"]["content"], "Erster Teil")
+            self.assertNotIn("session_key", receipt)
+        finally:
+            server.unregister_chat_stream(csrf_hash, operation_id)
+
+    def test_attached_durable_job_uses_provider_stream_instead_of_background_polling(self):
+        csrf_hash = "csrf-attached-provider-stream"
+        server.set_kv("openai_conversation_id", "conv-attached-provider-stream")
+        server.enqueue_background_coach_job(
+            "Wie soll ich heute trainieren?", "turn-attached-provider-stream", csrf_hash,
+            operation_id="operation-attached-provider-stream",
+        )
+        self.assertIsNotNone(server._claim_background_coach_job())
+        deltas = []
+
+        def streamed_response(_payload, on_delta, _cancel_event, **kwargs):
+            if kwargs.get("on_response_id"):
+                kwargs["on_response_id"]("resp_attached_stream")
+            on_delta("Heute locker.")
+            return {"id": "resp_attached_stream", "status": "completed", "output_text": "Heute locker."}
+
+        with patch.object(server, "responses_stream_request", side_effect=streamed_response) as streamed, patch.object(
+            server, "responses_background_request"
+        ) as background:
+            result = server.chat_with_coach(
+                "Wie soll ich heute trainieren?", client_turn_id="turn-attached-provider-stream",
+                session_csrf_hash=csrf_hash, background_job=True, on_text_delta=deltas.append,
+            )
+
+        streamed.assert_called_once()
+        background.assert_not_called()
+        self.assertEqual(deltas, ["Heute locker."])
+        self.assertEqual(result["message"]["content"], "Heute locker.")
+
     def test_background_worker_requeues_transient_coach_contention(self):
         server.enqueue_background_coach_job(
             "Erstelle einen Trainingsplan fuer die naechsten 2 Wochen.",
@@ -6110,7 +6213,7 @@ class CoachTests(unittest.TestCase):
             server, "IntervalsClient", return_value=client
         ):
             result = server.sync_competitions("read-only")
-        competition = server.list_competitions(include_sync=True)[0]
+        competition = server.list_competitions()[0]
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(competition["name"], "Local pending change")
         self.assertEqual(competition["sync_dirty"], 1)
@@ -6481,7 +6584,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["pushed"], 1)
         self.assertEqual(pushed[0]["id"], 123)
         self.assertEqual(pushed[0]["name"], "Updated Race")
-        self.assertEqual(server.list_competitions(include_sync=True)[0]["sync_dirty"], 0)
+        self.assertEqual(server.list_competitions()[0]["sync_dirty"], 0)
 
     def test_competition_sync_pushes_local_events_idempotently(self):
         event_date = (date.today() + timedelta(days=60)).isoformat()
@@ -6515,7 +6618,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(second["pushed"], 0)
         self.assertEqual(calls["events"][0]["category"], "RACE_A")
         self.assertEqual(calls["events"][0]["external_id"], server.competition_external_id(local_id))
-        synced = server.list_competitions(include_sync=True)[0]
+        synced = server.list_competitions()[0]
         self.assertEqual(synced["intervals_event_id"], "12345")
         self.assertEqual(synced["sync_dirty"], 0)
 
@@ -6552,7 +6655,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["conflicts"], 1)
         self.assertEqual(result["imported"], 0)
         self.assertEqual(pushed, [])
-        competition = server.list_competitions(include_sync=True)[0]
+        competition = server.list_competitions()[0]
         self.assertIsNone(competition["intervals_event_id"])
         self.assertEqual(competition["sync_dirty"], 1)
         self.assertEqual(competition["sync_state"], "conflict")
@@ -6599,7 +6702,7 @@ class CoachTests(unittest.TestCase):
             server.resolve_competition_conflict(competition_id, "keep_local")
             result = server.sync_competitions("test", push_local=True)
         self.assertEqual(result["pushed"], 1)
-        self.assertEqual(server.list_competitions(include_sync=True)[0]["sync_state"], "synced")
+        self.assertEqual(server.list_competitions()[0]["sync_state"], "synced")
 
     def test_competition_sync_imports_remote_race_events(self):
         event_date = (date.today() + timedelta(days=45)).isoformat()
@@ -6636,7 +6739,7 @@ class CoachTests(unittest.TestCase):
             result = server.sync_competitions("test")
 
         self.assertEqual(result["imported"], 1)
-        competition = server.list_competitions(include_sync=True)[0]
+        competition = server.list_competitions()[0]
         self.assertEqual(competition["name"], "Remote Half Marathon")
         self.assertEqual(competition["event_date"], event_date)
         self.assertEqual(competition["intervals_event_id"], "777")
@@ -6644,7 +6747,7 @@ class CoachTests(unittest.TestCase):
 
         # Saving the profile after an import must retain the provider link.
         server.save_athlete_context({}, [competition])
-        saved_again = server.list_competitions(include_sync=True)[0]
+        saved_again = server.list_competitions()[0]
         self.assertEqual(saved_again["intervals_event_id"], "777")
 
     def test_competition_sync_skips_unsupported_local_sports(self):
@@ -6929,7 +7032,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('name: "mobile"', playwright_config)
         self.assertIn("width: 390, height: 844", playwright_config)
         self.assertIn("interactive-widget=resizes-content", markup)
-        self.assertIn("window.visualViewport", app_source)
+        self.assertIn("globalThis.visualViewport", app_source)
 
     def test_weather_shows_fourteen_days_and_recommends_outdoor_time_for_five_days(self):
         today = server.local_now().date()
@@ -7131,16 +7234,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=206"', source)
-        self.assertIn('"/navigation.js?v=206"', source)
-        self.assertIn('"/state.js?v=206"', source)
-        self.assertIn('"/views.js?v=206"', source)
-        self.assertIn('"/forms.js?v=206"', source)
-        self.assertIn('"/components.js?v=206"', source)
+        self.assertIn('"/api.js?v=210"', source)
+        self.assertIn('"/navigation.js?v=210"', source)
+        self.assertIn('"/state.js?v=210"', source)
+        self.assertIn('"/views.js?v=210"', source)
+        self.assertIn('"/forms.js?v=210"', source)
+        self.assertIn('"/components.js?v=210"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=206"', source)
-        self.assertIn('"/icon.svg?v=206"', source)
-        self.assertIn('"/styles.css?v=206"', source)
+        self.assertIn('"/app.js?v=210"', source)
+        self.assertIn('"/icon.svg?v=210"', source)
+        self.assertIn('"/styles.css?v=210"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -7472,7 +7575,7 @@ class CoachTests(unittest.TestCase):
             server.set_kv("last_library_sync_at", "2026-08-31T08:00:00+00:00")
             state = server.intervals_public_state()
         self.assertEqual(state["state"], "connected")
-        self.assertEqual(state["last_sync_at"], None)
+        self.assertIsNone(state["last_sync_at"])
         self.assertEqual(state["library_sync"]["last_sync_at"], "2026-08-31T08:00:00+00:00")
         self.assertIsNone(state["last_error"])
 
@@ -7793,7 +7896,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual("".join(deltas), "Hallo")
         self.assertEqual(result["id"], "resp-test")
         request = urlopen.call_args.args[0]
-        self.assertEqual(json.loads(request.data)["stream"], True)
+        self.assertTrue(json.loads(request.data)["stream"])
         self.assertEqual(request.get_header("Accept"), "text/event-stream")
         self.assertNotIn("Hallo", json.dumps(server.recent_log_entries(), ensure_ascii=False))
         self.assertEqual(server.openai_usage_summary()["total_tokens"], 6)
@@ -7901,23 +8004,21 @@ class CoachTests(unittest.TestCase):
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock(side_effect=[None, server.ClientDisconnected()])
-
-        def complete_chat(*args, **kwargs):
-            kwargs["on_text_delta"]("Antwort bleibt gespeichert")
-            return {"message": {"id": 2}}
+        events = server.queue.Queue()
+        events.put(("delta", {"text": "Antwort bleibt gespeichert"}))
+        events.put(("completed", {"message": {"id": 2}}))
 
         with patch.object(server, "register_chat_stream", return_value=(operation_id, cancel_event)), \
                 patch.object(server, "unregister_chat_stream") as unregister, \
-                patch.object(server, "chat_with_coach", side_effect=complete_chat) as chat:
+                patch.object(server, "chat_stream_events", return_value=events):
             handler.handle_chat_stream({"csrf_hash": session_key})
 
-        chat.assert_not_called()
         with server.database() as db:
             self.assertIsNotNone(db.execute("SELECT 1 FROM coach_commands WHERE client_turn_id='turn-disconnect-test' AND status='queued'").fetchone())
         self.assertFalse(cancel_event.is_set())
         unregister.assert_called_once_with(session_key, operation_id)
 
-    def test_long_plan_stream_is_queued_without_holding_sse_open(self):
+    def test_durable_chat_stream_relays_worker_deltas_and_completion(self):
         session_key = "session-background-stream-test"
         operation_id = "operation-background-stream-test"
         cancel_event = threading.Event()
@@ -7929,17 +8030,20 @@ class CoachTests(unittest.TestCase):
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock()
+        events = server.queue.Queue()
+        events.put(("delta", {"text": "Dein Plan "}))
+        events.put(("delta", {"text": "ist fertig."}))
+        events.put(("completed", {"status": "completed", "message": {"id": 2, "content": "Dein Plan ist fertig."}}))
 
         with patch.object(server, "register_chat_stream", return_value=(operation_id, cancel_event)), patch.object(
             server, "unregister_chat_stream"
-        ) as unregister, patch.object(server, "chat_with_coach") as chat:
+        ) as unregister, patch.object(server, "chat_stream_events", return_value=events):
             handler.handle_chat_stream({"csrf_hash": session_key})
 
         events = [call.args[0] for call in handler.send_sse_event.call_args_list]
-        self.assertEqual(events, ["started", "background"])
+        self.assertEqual(events, ["started", "delta", "delta", "completed"])
         handler.send_sse_headers.assert_called_once_with(persistent=False)
         self.assertTrue(handler.close_connection)
-        chat.assert_not_called()
         unregister.assert_called_once_with(session_key, operation_id)
 
     def test_chat_stream_cancel_closes_the_active_provider_response(self):
@@ -8046,7 +8150,7 @@ class CoachTests(unittest.TestCase):
                             with server.DB_LOCK, server.database():
                                 thread.start()
                                 self.assertTrue(database_lock.worker_waiting.wait(timeout=3))
-                                state = state_reader(local_only=True)
+                                state = state_reader()
                                 self.assertIn("usage", state)
                         finally:
                             thread.join(timeout=5)
@@ -8056,7 +8160,7 @@ class CoachTests(unittest.TestCase):
     def test_garmin_sync_persists_fatal_error_status(self):
         config = replace(server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json")
         with patch.object(server, "CONFIG", config):
-            with self.assertRaises(Exception):
+            with self.assertRaises(server.AppError):
                 server.sync_garmin()
         state = server.garmin_public_state()
         self.assertTrue(state["last_error"])
@@ -8173,7 +8277,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=206', index)
+        self.assertIn('v=210', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
@@ -8205,3 +8309,4 @@ class CoachTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

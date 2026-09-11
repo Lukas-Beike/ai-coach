@@ -274,7 +274,9 @@ instructions do not delete or convert its data.
   account or project quota is exhausted. An explicitly cancelled stream never
   executes a partial tool call; a lost browser connection leaves the request
   running so its completed answer can be recovered after reload. All HTTP turns
-  return a durable job immediately and are polled from local state.
+  are persisted as durable jobs before execution. While the originating browser
+  connection remains open, OpenAI and Gemini text is streamed into the current
+  message; after a disconnect, completion is recovered from local state.
   Each OpenAI command starts with bounded local dialogue and current athlete
   context. Tool rounds chain Responses only within that command, avoiding an
   ever-growing remote conversation containing repeated copies of local history.
@@ -595,7 +597,8 @@ or set `AI_PROVIDER=gemini`. `GEMINI_MODEL` defaults to `gemini-3.8-flash`.
 The app sends the same sanitised Coach context only to the selected provider.
 Gemini conversations and tool-call history are stored locally so that Coach
 actions continue to use the same local authorization and validation checks.
-Voice input uses the selected provider and is never persisted.
+Interactive Gemini text uses the provider's SSE streaming endpoint. Voice input
+uses the selected provider and is never persisted.
 
 `DATA_RETENTION_DAYS=-1` is the default and disables automatic deletion. The
 application does not impose its own OpenAI request or token limits; it displays
@@ -1097,7 +1100,7 @@ See [`LICENSE`](LICENSE) for the full license text.
 
 ### Dateien im Coach-Chat
 
-Über **Anhängen** lassen sich bis zu vier GPX-Dateien oder Bilder (PNG, JPEG,
+Über den **+**-Button lassen sich bis zu vier GPX-Dateien oder Bilder (PNG, JPEG,
 WebP) mit jeweils höchstens 5 MB auswählen und vor dem Senden entfernen.
 Eine zusätzliche Frage ist optional. GPX-Tracks und Routen werden lokal zu
 Distanz, ungeglätteten Höhenmetern und einer Stichprobe der Koordinaten

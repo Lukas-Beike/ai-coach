@@ -6,13 +6,13 @@ from datetime import timedelta
 
 # This file is mounted only in disposable test containers, never normal startup.
 os.environ.update({
-    "DATA_DIR": "/tmp/coach-fixture-data",
+    "DATA_DIR": "/data/coach-fixture-data",
     "APP_PASSWORD": "e2e-fixture-password-1234",
     "OPENAI_API_KEY": "",
     "INTERVALS_API_KEY": "",
     "GARMIN_EMAIL": "",
     "GARMIN_PASSWORD": "",
-    "GARMINTOKENS": "/tmp/fixture-no-tokens",
+    "GARMINTOKENS": "/data/fixture-no-tokens",
     "GARMIN_FIXTURE_PATH": "",
     "CALENDAR_ICAL_URL": "",
     "COOKIE_SECURE": "false",
@@ -59,12 +59,14 @@ def fixture_coach_response(payload, **kwargs):
 
 server.responses_request = fixture_coach_response
 server.responses_background_request = fixture_coach_response
+# The application uses the streaming path for browser chat. Reuse the canned
+# response so the fixture remains provider-free while exercising the UI flow.
+server.responses_stream_request = lambda payload, on_text_delta, cancel_event=None, on_response_id=None: fixture_coach_response(payload)
 initialise = server.initialise_database
 artifact = {}
 
 
-def initialise_fixture():
-    initialise()
+def stage_fixture_artifact():
     today = server.local_now().date()
     artifact.update(server._stage_coach_artifact("fixture-conversation", "fixture-stage", {
         "plan_name": "Fixture sport contract",
@@ -75,11 +77,20 @@ def initialise_fixture():
     }))
 
 
+def initialise_fixture():
+    initialise()
+    stage_fixture_artifact()
+
+
 class FixtureHandler(server.RequestHandler):
     def do_GET(self):
         if self.path == "/api/fixture/plan":
             try:
                 server.require_auth(self)
+                with server.DB_LOCK, server.database() as db:
+                    current = db.execute("SELECT status FROM coach_plan_artifacts WHERE id=?", (artifact.get("artifact_id"),)).fetchone()
+                if not current or current["status"] != "draft":
+                    stage_fixture_artifact()
                 self.send_json(200, artifact)
             except server.AppError as error:
                 self.send_json(error.status, {"error": error.message})

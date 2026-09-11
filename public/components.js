@@ -65,7 +65,16 @@ function createActionReceipt({ title, message, status = "success", details = [] 
   heading.className = "action-receipt-heading";
   const label = document.createElement("strong");
   label.textContent = title || "Aktion";
-  heading.append(label, createStatusChip(status === "error" ? "Fehler" : status === "pending" ? "Ausstehend" : "Erledigt", status === "error" ? "error" : status === "pending" ? "pending" : "ready"));
+  let statusLabel = "Erledigt";
+  let statusCode = "ready";
+  if (status === "error") {
+    statusLabel = "Fehler";
+    statusCode = "error";
+  } else if (status === "pending") {
+    statusLabel = "Ausstehend";
+    statusCode = "pending";
+  }
+  heading.append(label, createStatusChip(statusLabel, statusCode));
   root.append(heading);
   if (message) {
     const copy = document.createElement("p");

@@ -10,7 +10,8 @@
       const seconds = /^\d+$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - Date.now()) / 1000);
       if (Number.isFinite(seconds)) retryAfter = Math.max(0, seconds);
     }
-    const error = new Error(`${message}${retryAfter != null ? ` Bitte in ${retryAfter} Sekunden erneut versuchen.` : ""}`);
+    const retryMessage = retryAfter != null ? ` Bitte in ${retryAfter} Sekunden erneut versuchen.` : "";
+    const error = new Error(`${message}${retryMessage}`);
     error.status = response.status;
     error.reason = reason;
     error.retryAfter = retryAfter;
@@ -30,14 +31,15 @@
     return payload;
   }
 
-  async function request(path, options = {}, onUnauthorized) {
+  async function request(path, options, onUnauthorized) {
+    const method = options?.method;
     const response = await fetch(path, {
       credentials: "same-origin",
       ...options,
-      headers: { "Content-Type": "application/json", ...(options.method && options.method !== "GET" ? { "X-CSRF-Token": cookie("ic_csrf") } : {}), ...(options.headers || {}) },
+      headers: { "Content-Type": "application/json", ...(method && method !== "GET" && { "X-CSRF-Token": cookie("ic_csrf") }), ...options?.headers },
     });
     const payload = await readResponse(response, onUnauthorized);
-    if (options.method && options.method !== "GET" && !Object.keys(payload).length) throw responseError(response, "Die Serverbestätigung fehlt. Bitte den gespeicherten Stand prüfen.", "empty_confirmation");
+    if (method && method !== "GET" && !Object.keys(payload).length) throw responseError(response, "Die Serverbestätigung fehlt. Bitte den gespeicherten Stand prüfen.", "empty_confirmation");
     return payload;
   }
 

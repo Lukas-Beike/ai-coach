@@ -4,6 +4,8 @@ test("attachments can be removed, rejected and sent with an empty text draft", a
   await page.goto("/");
   await expect(page.locator("#appShell")).toBeVisible();
   await page.evaluate(() => jumpToChatComposer());
+  await expect(page.locator("#attachmentButton")).toHaveText("+");
+  await expect(page.locator("#attachmentButton")).toHaveAttribute("aria-label", "GPX-Dateien oder Bilder anhängen");
   const file = { name: "route.gpx", mimeType: "application/gpx+xml", buffer: Buffer.from('<gpx><rte><rtept lat="0" lon="0"/><rtept lat="0" lon="0.01"/></rte></gpx>') };
   await page.locator("#attachmentInput").setInputFiles(file);
   await expect(page.locator("#chatAttachments")).toContainText("route.gpx");
