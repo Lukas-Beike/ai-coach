@@ -296,7 +296,13 @@ test('manual events use the current protected develop action before main is upda
     const step = workflow.split(`- name: ${stepName}\n`)[1].split('\n      - name:', 1)[0];
     const condition = step.match(/^        if: (.+)$/m)[1];
     return new Function('matrix', 'github', `return (${condition});`)(
-      { baseRef, skipCodexReview: exempt }, { event_name: eventName },
+      { baseRef, skipCodexReview: exempt }, {
+        event_name: eventName,
+        repository: 'Lukas-Beike/ai-coach',
+        event: eventName === 'pull_request_target'
+          ? { pull_request: { head: { repo: { full_name: 'Lukas-Beike/ai-coach' } } } }
+          : undefined,
+      },
     );
   }
   for (const event of ['workflow_dispatch', 'issue_comment', 'pull_request_target', 'push']) {
