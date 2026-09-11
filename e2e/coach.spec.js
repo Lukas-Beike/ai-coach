@@ -467,6 +467,7 @@ test.describe("critical browser states", () => {
     if (touchProject) {
       expect(await page.evaluate(() => navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches)).toBe(true);
       await input.focus();
+      await page.evaluate(() => updateMobileViewportLayout());
       await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
       const initialViewportHeight = await page.evaluate(() => Math.min(
         window.visualViewport?.height || window.innerHeight,
@@ -475,7 +476,17 @@ test.describe("critical browser states", () => {
       await page.setViewportSize({ width: initialViewport.width, height: Math.max(360, initialViewport.height - 180) });
       await input.focus();
       await page.evaluate(() => window.dispatchEvent(new Event("resize")));
-      await page.evaluate(() => updateMobileViewportLayout());
+      await page.evaluate((baselineHeight) => {
+        const viewport = window.visualViewport;
+        const viewportWidth = viewport?.width || window.innerWidth;
+        const viewportHeight = Math.min(viewport?.height || window.innerHeight, window.innerHeight);
+        const screenOrientation = window.screen?.orientation?.type || "";
+        const orientation = screenOrientation
+          ? (screenOrientation.startsWith("landscape") ? "landscape" : "portrait")
+          : ((window.screen?.width || viewportWidth) > (window.screen?.height || viewportHeight) ? "landscape" : "portrait");
+        mobileViewportBaselines[orientation] = baselineHeight;
+        updateMobileViewportLayout();
+      }, initialViewportHeight);
       // Headless Chromium does not shrink the visual viewport for every emulated
       // mobile height. Exercise the keyboard layout assertions only when the
       // resize is observable; the remaining composer behavior is still covered.
