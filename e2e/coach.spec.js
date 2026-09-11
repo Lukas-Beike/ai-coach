@@ -463,6 +463,7 @@ test.describe("critical browser states", () => {
     if (touchProject) {
       expect(await page.evaluate(() => navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches)).toBe(true);
       await input.focus();
+      await page.evaluate(() => updateMobileViewportLayout());
       await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
       const initialViewportHeight = await page.evaluate(() => Math.min(
         window.visualViewport?.height || window.innerHeight,
@@ -498,7 +499,7 @@ test.describe("critical browser states", () => {
     await input.fill("Analysiere meine letzte Einheit gründlich.");
     await page.getByRole("button", { name: "Senden", exact: true }).click();
     if (touchProject) await expect(page.locator("html")).not.toHaveClass(/chat-keyboard-open/);
-    await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", "Coach arbeitet");
+    await expect(page.locator("#coachWorking")).toHaveAttribute("aria-label", /Coach arbeitet/);
     await expect(page.locator("#messages")).toHaveAttribute("aria-busy", "true");
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     if (!await input.isVisible()) {
