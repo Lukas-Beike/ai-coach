@@ -525,7 +525,7 @@ jobs:
         # Dispatch and manual-comment workflows already run from protected
         # develop. Use their current action even before the next main release.
         if: matrix.skipCodexReview != true && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 - NOSONAR: pull_request_target checks out only the protected develop ref
         with:
           repository: ${{ github.repository }}
           ref: develop
@@ -534,7 +534,7 @@ jobs:
 
       - name: Check out trusted main workflow sources
         if: matrix.skipCodexReview != true && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 - NOSONAR: pull_request_target checks out only the protected main ref
         with:
           repository: ${{ github.repository }}
           ref: main

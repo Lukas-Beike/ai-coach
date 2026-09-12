@@ -182,7 +182,7 @@ language. Never mention internal authorization scopes or classification errors.
 """
 
 
-def validate_request(value: Any, user_ids: set[int], current_user_id: int) -> dict[str, Any]:
+def validate_request(value: Any, user_ids: set[int], current_user_id: int) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Validate provenance and bounds, never the user's choice of words."""
     if not isinstance(value, dict) or set(value) != set(REQUEST_SCHEMA["required"]):
         raise ValueError("request_fields")

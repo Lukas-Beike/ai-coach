@@ -2174,7 +2174,7 @@ class CoachTests(unittest.TestCase):
         components = (Path(__file__).resolve().parents[1] / "public" / "components.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
-        self.assertIn("window.AppApi = Object.freeze({ audio, request, responseError });", api_client)
+        self.assertIn("globalThis.AppApi = Object.freeze({ audio, request, responseError });", api_client)
         self.assertIn("globalThis.AppApi.request(path, options, () =>", app)
         self.assertIn("globalThis.AppApi.audio(path, blob, () =>", app)
         self.assertIn("Array.isArray(result.model_options)", app)

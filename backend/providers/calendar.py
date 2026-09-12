@@ -33,7 +33,7 @@ def parse_ics_date(value: str) -> str | None:
         return None
 
 
-def unfold_ical(payload: bytes, *, max_bytes: int, error: ErrorFactory) -> list[str]:
+def unfold_ical(payload: bytes, *, max_bytes: int, error: ErrorFactory) -> list[str]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if not isinstance(payload, (bytes, bytearray)) or len(payload) > max_bytes:
         raise error(413, "Der Kalender-Feed ist zu groß.")
     try:

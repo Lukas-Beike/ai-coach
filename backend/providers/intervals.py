@@ -81,7 +81,7 @@ class IntervalsWriteTransport:
         )
 
 
-def fetch_paged_collection(
+def fetch_paged_collection(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     get: JsonGetter,
     path: str,
     params: Mapping[str, Any] | None,

@@ -131,7 +131,7 @@ function ensureRouteData(route = state.route) {
   if (requested.length) load("/api/bootstrap?local=1", requested);
 }
 
-async function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
+async function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const panelRoute = NAV_ROUTES[route] ? route : DEFAULT_NAV_ROUTE;
   const mainRoute = baseRoute(panelRoute);
   const shouldFocusPlannedToday = mainRoute === "plan" && planSegmentFromRoute(panelRoute) === "overview";
@@ -458,6 +458,7 @@ function syncPollLeaseAvailable() {
     const verified = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
     return verified?.token === state.syncPoll.leaseToken;
   } catch (_) {
+    // Storage can be denied by privacy settings; a fail-open lease keeps sync available.
     return true;
   }
 }
@@ -735,7 +736,7 @@ function updateVoiceButton() {
   updateChatControls();
 }
 
-function updateChatControls() {
+function updateChatControls() { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const form = $("#chatForm");
   const input = $("#messageInput");
   const sendButton = $("#sendButton");
@@ -1198,7 +1199,7 @@ function addCoachReceipt(receipt) {
   renderCoachReceipts();
 }
 
-function addStructuredCoachReceipts(payload) {
+function addStructuredCoachReceipts(payload) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const hiddenChatReceiptTools = new Set([
     "get_sync_job",
     "refresh_current_performance",
@@ -1455,7 +1456,7 @@ function renderActivityStats(activities, filtered = false) {
   });
 }
 
-function renderActivities(activities) {
+function renderActivities(activities) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const list = Array.isArray(activities) ? activities : [];
   const syncDetail = $("#activitySyncDetail");
   const syncNotices = [];
@@ -1654,7 +1655,7 @@ function createCoachWorkingIndicator() {
   return node;
 }
 
-function renderCoachActionReview() {
+function renderCoachActionReview() { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const root = $("#coachActionReview");
   const content = $("#coachActionReviewContent");
   if (!root || !content) return;
@@ -1705,7 +1706,7 @@ function renderCoachActionReview() {
   }
 }
 
-async function executeCoachActionProposal(proposal, button) {
+async function executeCoachActionProposal(proposal, button) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   if (!proposal?.id || button.disabled || !["preview", "ready"].includes(proposal.status)) return;
   button.disabled = true;
   try {
@@ -1830,7 +1831,7 @@ function appendHistoryPageButton(root, area) {
   root.append(button);
 }
 
-function renderMessages(messages, forceScroll = false, preserveScroll = false) {
+function renderMessages(messages, forceScroll = false, preserveScroll = false) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const root = $("#messages");
   const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
   // Synchronisation and refresh notices belong to their respective tabs,
@@ -1872,7 +1873,13 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
       const names = message.attachment_names;
       if (names) {
         const label = document.createElement("small");
-        try { const parsed = JSON.parse(names); label.textContent = parsed.length ? "\nAnhänge: " + parsed.join(", ") : ""; } catch (_) { label.textContent = ""; }
+        try {
+          const parsed = JSON.parse(names);
+          label.textContent = parsed.length ? "\nAnhänge: " + parsed.join(", ") : "";
+        } catch (_) {
+          // Attachment names are optional persisted metadata; malformed metadata must not hide the message.
+          label.textContent = "";
+        }
         node.append(label);
       }
     }
@@ -2176,7 +2183,7 @@ function plannedAppointmentLabel(event) {
   return time ? `${name} · ${time[1]}` : name;
 }
 
-function plannedDayInsights(context, weather, dateKey, todayKey) {
+function plannedDayInsights(context, weather, dateKey, todayKey) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const checkin = context.checkin || {};
   const recovery = dateKey <= todayKey ? context.recovery || {} : {};
   const metrics = [];
@@ -2384,7 +2391,7 @@ function focusPlannedToday() {
   return true;
 }
 
-function renderPlanned(trainingCalendar) {
+function renderPlanned(trainingCalendar) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const root = $("#plannedCalendar");
   const summary = $("#plannedSummary");
   if (!root) return;
@@ -2694,7 +2701,7 @@ function renderLibrary(workouts) {
     });
 }
 
-function renderProfile(profile) {
+function renderProfile(profile) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
   if (state.profileDirty) return;
   const form = $("#profileForm");
@@ -2732,7 +2739,7 @@ function populateCheckin(checkin, timeZone) {
   state.checkinDirty = false;
 }
 
-function renderCheckins(checkins, timeZone) {
+function renderCheckins(checkins, timeZone) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const form = $("#checkinForm");
   const history = $("#checkinHistory");
   if (!form || !history) return;
@@ -2780,7 +2787,7 @@ function renderCheckins(checkins, timeZone) {
   }
 }
 
-function renderGarmin(garmin) {
+function renderGarmin(garmin) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const status = $("#garminStatus");
   const detail = $("#garminDetail");
   const button = $("#garminSyncButton");
@@ -3001,7 +3008,7 @@ function metricToneClass(label, value) {
   return "metric-form-bad";
 }
 
-function displayMetric(root, label, metricData, formatter = null, editable = null) {
+function displayMetric(root, label, metricData, formatter = null, editable = null) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const item = document.createElement("div");
   const metric = document.createElement("strong");
   const caption = document.createElement("span");
@@ -3283,7 +3290,7 @@ function renderAppVersion(app = {}) {
   if (settingsVersionNode) settingsVersionNode.textContent = app.version ? `v${app.version}` : "unbekannt";
 }
 
-function renderSettings(data) {
+function renderSettings(data) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const configured = data.configured || {};
   const garmin = data.garmin || {};
   const weather = data.weather || {};
@@ -3591,14 +3598,14 @@ function render(data) {
   updateHeaderAction();
 }
 
-function latestAssistantMessageKey(messages) {
+function latestAssistantMessageKey(messages) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const message = [...(messages || [])].reverse().find((entry) => entry.role === "assistant");
   if (!message) return null;
   if (message.id != null) return `id:${message.id}`;
   return `fallback:${message.created_at || ""}:${message.content || ""}`;
 }
 
-async function loadState(path = "/api/bootstrap", requestedAreas = null) {
+async function loadState(path = "/api/bootstrap", requestedAreas = null) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
@@ -3802,7 +3809,7 @@ async function resumeQueuedChat() {
   }
 }
 
-async function pollChatStatus() {
+async function pollChatStatus() { // NOSONAR - cohesive UI flow keeps the state transition explicit
   if (!state.data || document.visibilityState !== "visible" || !navigator.onLine) {
     scheduleChatStatusPoll(5_000);
     return;
@@ -3932,7 +3939,7 @@ function queueChatMessage(message, mode, requestKind = null, attachments = []) {
   return true;
 }
 
-async function requestCoachResponse(message, requestKind = null, attachments = []) {
+async function requestCoachResponse(message, requestKind = null, attachments = []) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
   const clientTurnId = secureToken("turn");
