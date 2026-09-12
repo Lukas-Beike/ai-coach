@@ -60,12 +60,14 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(validated[0]["summary"]["avg_heart_rate_bpm"], 145)
         request_input = model_input("Analyze this activity", validated)
         raw_part = request_input[0]["content"][-1]
-        self.assertEqual(raw_part["type"], "input_text")
-        self.assertIn(attachment["data"], raw_part["text"])
+        self.assertEqual(raw_part["type"], "input_file")
+        self.assertEqual(raw_part["filename"], "ride.fit.txt")
+        self.assertEqual(raw_part["file_data"], "data:text/plain;base64," + attachment["data"])
 
         payload, _, _ = server._gemini_request_payload({"input": request_input}, "gemini-test")
-        raw_text = payload["contents"][-1]["parts"][-1]["text"]
-        self.assertIn(attachment["data"], raw_text)
+        self.assertEqual(payload["contents"][-1]["parts"][-1]["inlineData"], {
+            "mimeType": "application/octet-stream", "data": attachment["data"]
+        })
 
     def test_fit_records_use_standard_headers_fields_and_compressed_timestamps(self):
         summary = fit_summary(FIT_RECORDS)
@@ -183,7 +185,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 ],
             }, "gemini-test")
         self.assertIn({"inlineData": {"mimeType": "image/png", "data": PNG}}, followup["contents"][-1]["parts"])
-        self.assertIn(self.upload(FIT, "ride.fit")["data"], json.dumps(followup["contents"][-1]))
+        self.assertIn({"inlineData": {"mimeType": "application/octet-stream", "data": self.upload(FIT, "ride.fit")["data"]}}, followup["contents"][-1]["parts"])
 
     def test_gemini_history_keeps_latest_raw_files_within_budget(self):
         server.enqueue_background_coach_job("First", "history-first", "synthetic-csrf", attachments=[self.upload(FIT, "first.fit")])
@@ -191,10 +193,29 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         encoded_size = len(self.upload(FIT, "first.fit")["data"])
         with patch.object(server, "MAX_GEMINI_INLINE_IMAGE_BYTES", encoded_size + 1):
             history = server._gemini_local_chat_history()
-        raw_parts = [part for entry in history for part in entry["parts"] if "untrusted_fit_raw_base64" in json.dumps(part)]
+        raw_parts = [part for entry in history for part in entry["parts"] if "inlineData" in part and part["inlineData"].get("mimeType") == "application/octet-stream"]
         self.assertEqual(len(raw_parts), 1)
         self.assertIn("first.fit", json.dumps(history))
         self.assertIn("second.fit", json.dumps(history))
+
+    def test_gemini_replayed_media_survives_tool_followup(self):
+        history = [
+            {"role": "user", "parts": [{"text": "Analyze"},
+                                           {"inlineData": {"mimeType": "application/octet-stream", "data": self.upload(FIT, "ride.fit")["data"]}}]},
+            {"role": "model", "parts": [{"functionCall": {"name": "coach_tool"}}]},
+        ]
+        with patch.object(server, "_gemini_local_chat_history", return_value=history), patch.object(server, "_gemini_history", return_value=history):
+            request_args = {
+                "conversation": "synthetic-gemini",
+                "input": "Follow up with the tool",
+            }
+            server._gemini_request_payload(request_args, "gemini-test")
+            followup, _, _ = server._gemini_request_payload({
+                "conversation": "synthetic-gemini",
+                "input": [{"type": "function_call_output", "call_id": "call-1", "output": "{}"}],
+                "_gemini_transient_images": request_args["_gemini_transient_images"],
+            }, "gemini-test")
+        self.assertIn({"inlineData": {"mimeType": "application/octet-stream", "data": self.upload(FIT, "ride.fit")["data"]}}, followup["contents"][-1]["parts"])
 
     def test_background_model_receives_saved_attachments(self):
         server.enqueue_background_coach_job("Analyze", "worker-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])

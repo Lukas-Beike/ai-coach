@@ -13285,6 +13285,18 @@ def _gemini_history_parts_without_raw_media(parts: list[Any]) -> list[dict[str, 
     return safe_parts
 
 
+def _gemini_inline_media_from_history(history: list[dict[str, Any]]) -> list[dict[str, str]]:
+    media = []
+    for entry in history:
+        parts = entry.get("parts") if isinstance(entry, dict) else None
+        for part in parts if isinstance(parts, list) else []:
+            inline = part.get("inlineData") if isinstance(part, dict) else None
+            if not isinstance(inline, dict) or not inline.get("mimeType") or not inline.get("data"):
+                continue
+            media.append({"mime": str(inline["mimeType"]), "data": str(inline["data"])})
+    return media
+
+
 def _gemini_history() -> list[dict[str, Any]]:
     try:
         value = json.loads(get_kv("gemini_conversation_history") or "[]")
@@ -13357,8 +13369,8 @@ def _gemini_local_chat_history() -> list[dict[str, Any]]:
                     parts.append({"text": json.dumps({"untrusted_attachment_name": attachment.get("name"),
                                                         f"untrusted_{attachment_type}": attachment.get("summary")}, ensure_ascii=False)})
                 if attachment_type == "fit" and (message_index, attachment_index) in selected_raw:
-                    parts.append({"text": json.dumps({"untrusted_fit_filename": attachment.get("name"),
-                                                        "untrusted_fit_raw_base64": attachment["data"]}, ensure_ascii=False)})
+                    parts.append({"inlineData": {"mimeType": attachment.get("gemini_mime", attachment.get("mime")),
+                                                   "data": attachment["data"]}})
                 elif (message_index, attachment_index) in selected_raw and attachment.get("mime"):
                     parts.append({"inlineData": {"mimeType": attachment.get("gemini_mime", attachment["mime"]), "data": attachment["data"]}})
                 elif attachment_type == "image":
@@ -13395,6 +13407,9 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
         local_history = _gemini_local_chat_history()
         if local_history:
             history = local_history
+            replayed_media = _gemini_inline_media_from_history(local_history)
+            if replayed_media:
+                payload["_gemini_transient_images"] = replayed_media
     if isinstance(input_value, str):
         last_text = ""
         if history and isinstance(history[-1], dict) and history[-1].get("role") == "user":
@@ -13420,7 +13435,10 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
                         parts.append({"inlineData": {"mimeType": header[5:].split(";")[0], "data": data}})
                     elif part.get("type") == "input_file":
                         header, data = part["file_data"].split(",", 1)
-                        parts.append({"inlineData": {"mimeType": header[5:].split(";")[0], "data": data}})
+                        mime = header[5:].split(";")[0]
+                        if str(part.get("filename") or "").lower().endswith(".fit.txt"):
+                            mime = "application/octet-stream"
+                        parts.append({"inlineData": {"mimeType": mime, "data": data}})
                 continue
             if not isinstance(item, dict) or item.get("type") != "function_call_output":
                 continue
@@ -13440,7 +13458,7 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
             for image in payload.get("_gemini_transient_images") or []:
                 if isinstance(image, dict) and image.get("mime") and image.get("data"):
                     if image.get("type") == "fit":
-                        parts.append({"text": json.dumps({"untrusted_fit_raw_base64": image["data"]}, ensure_ascii=False)})
+                        parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
                     else:
                         parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
         if parts:

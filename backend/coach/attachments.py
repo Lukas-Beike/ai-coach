@@ -467,10 +467,13 @@ def model_input(text, attachments):
         parts.append({"type": "input_text", "text": json.dumps(evidence, ensure_ascii=False)})
         if item["type"] in {"gpx", "fit"}:
             if item["type"] == "fit":
-                parts.append({"type": "input_text", "text": json.dumps({
-                    "untrusted_fit_filename": item["name"],
-                    "untrusted_fit_raw_base64": item["data"],
-                }, ensure_ascii=False)})
+                # OpenAI does not advertise FIT/octet-stream as an input_file
+                # type.  Keep the exact bytes in a file part, using a text
+                # filename/MIME for the supported transport, while the
+                # bounded decoded summary above remains the model-facing
+                # interpretation of the activity.
+                parts.append({"type": "input_file", "filename": item["name"] + ".txt",
+                              "file_data": f"data:text/plain;base64,{item['data']}"})
             else:
                 parts.append({"type": "input_file", "filename": item["name"],
                               "file_data": f"data:{item['mime']};base64,{item['data']}"})
