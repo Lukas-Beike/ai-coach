@@ -3280,26 +3280,29 @@ def activity_kind(activity: Any) -> str:
     return "other"
 
 
-def parallel_cycling_event_groups(events: Any) -> list[list[dict[str, Any]]]:
-    """Find planned rides whose times overlap or are too vague to distinguish."""
-    candidates = [
+def _cycling_event_candidates(events: Any) -> list[dict[str, Any]]:
+    if not isinstance(events, list):
+        return []
+    return [
         event for event in events if isinstance(event, dict)
         and event.get("id") not in (None, "")
         and activity_kind(event) == "cycling"
-    ] if isinstance(events, list) else []
-    edges = [set() for _ in candidates]
+    ]
 
-    def interval(event: dict[str, Any]) -> tuple[datetime, datetime, bool] | None:
-        raw_start = str(event.get("start_date_local") or event.get("date") or "")
-        start = activity_datetime(raw_start)
-        if start is None:
-            return None
-        explicit_time = "T" in raw_start and start.time() != datetime.min.time()
-        duration = as_number(event.get("moving_time"))
-        seconds = max(60, float(duration)) if duration is not None and duration > 0 else 3600
-        return start, start + timedelta(seconds=seconds), explicit_time
 
-    intervals = [interval(event) for event in candidates]
+def _cycling_event_interval(event: dict[str, Any]) -> tuple[datetime, datetime, bool] | None:
+    raw_start = str(event.get("start_date_local") or event.get("date") or "")
+    start = activity_datetime(raw_start)
+    if start is None:
+        return None
+    explicit_time = "T" in raw_start and start.time() != datetime.min.time()
+    duration = as_number(event.get("moving_time"))
+    seconds = max(60, float(duration)) if duration is not None and duration > 0 else 3600
+    return start, start + timedelta(seconds=seconds), explicit_time
+
+
+def _cycling_event_edges(intervals: list[tuple[datetime, datetime, bool] | None]) -> list[set[int]]:
+    edges = [set() for _ in intervals]
     for left_index, left in enumerate(intervals):
         if left is None:
             continue
@@ -3311,65 +3314,74 @@ def parallel_cycling_event_groups(events: Any) -> list[list[dict[str, Any]]]:
             right_start, right_end, right_has_time = right
             if left_start.date() != right_start.date():
                 continue
-            overlaps = left_start < right_end and right_start < left_end
-            if overlaps or not (left_has_time and right_has_time):
+            if left_start < right_end and right_start < left_end or not (left_has_time and right_has_time):
                 edges[left_index].add(right_index)
                 edges[right_index].add(left_index)
+    return edges
 
-    groups: list[list[dict[str, Any]]] = []
+
+def _cycling_event_group(start_index: int, candidates: list[dict[str, Any]], edges: list[set[int]], visited: set[int]) -> list[dict[str, Any]]:
+    stack = [start_index]
+    visited.add(start_index)
+    group: list[dict[str, Any]] = []
+    while stack:
+        index = stack.pop()
+        group.append(candidates[index])
+        for neighbour in edges[index]:
+            if neighbour not in visited:
+                visited.add(neighbour)
+                stack.append(neighbour)
+    return sorted(group, key=lambda event: str(event.get("start_date_local") or event.get("date") or ""))
+
+
+def parallel_cycling_event_groups(events: Any) -> list[list[dict[str, Any]]]:
+    """Find planned rides whose times overlap or are too vague to distinguish."""
+    candidates = _cycling_event_candidates(events)
+    edges = _cycling_event_edges([_cycling_event_interval(event) for event in candidates])
     visited: set[int] = set()
-    for start_index in range(len(candidates)):
-        if start_index in visited or not edges[start_index]:
+    return [
+        _cycling_event_group(index, candidates, edges, visited)
+        for index in range(len(candidates))
+        if index not in visited and edges[index]
+    ]
+
+
+def _garmin_duplicate_measurements(garmin_activity: dict[str, Any], intervals_activity: dict[str, Any]) -> tuple[int, int]:
+    compared = 0
+    matches = 0
+    pairs = (
+        (as_number(garmin_activity.get("duration") or garmin_activity.get("movingTime")), as_number(intervals_activity.get("moving_time")), 120),
+        (as_number(garmin_activity.get("distance")), as_number(intervals_activity.get("distance")), 500),
+    )
+    for index, (left, right, minimum) in enumerate(pairs):
+        if left is None or right is None or index == 1 and (left <= 0 or right <= 0):
             continue
-        stack = [start_index]
-        visited.add(start_index)
-        group: list[dict[str, Any]] = []
-        while stack:
-            index = stack.pop()
-            group.append(candidates[index])
-            for neighbour in edges[index]:
-                if neighbour not in visited:
-                    visited.add(neighbour)
-                    stack.append(neighbour)
-        groups.append(sorted(group, key=lambda event: str(event.get("start_date_local") or event.get("date") or "")))
-    return groups
+        compared += 1
+        if abs(left - right) <= max(minimum, right * 0.10):
+            matches += 1
+    return compared, matches
+
+
+def _garmin_activity_matches(garmin_activity: dict[str, Any], intervals_activity: dict[str, Any]) -> bool:
+    garmin_start = activity_datetime(garmin_activity.get("startTimeLocal") or garmin_activity.get("start_time_local"))
+    intervals_start = activity_datetime(intervals_activity.get("start_date_local") or intervals_activity.get("start_date"))
+    if garmin_start is None or intervals_start is None:
+        return False
+    if abs((garmin_start - intervals_start).total_seconds()) > 30 * 60:
+        return False
+    garmin_kind = activity_kind(garmin_activity)
+    intervals_kind = activity_kind(intervals_activity)
+    if garmin_kind != intervals_kind and garmin_kind != "other" and intervals_kind != "other":
+        return False
+    compared, matches = _garmin_duplicate_measurements(garmin_activity, intervals_activity)
+    return bool(compared and matches == compared)
 
 
 def garmin_activity_duplicates_intervals(garmin_activity: Any, intervals_activities: list[dict[str, Any]]) -> bool:
     """Treat the Intervals/Wahoo recording as canonical when Garmin is a near duplicate."""
     if not isinstance(garmin_activity, dict):
         return False
-    garmin_start = activity_datetime(garmin_activity.get("startTimeLocal") or garmin_activity.get("start_time_local"))
-    if garmin_start is None:
-        return False
-    garmin_duration = as_number(garmin_activity.get("duration") or garmin_activity.get("movingTime"))
-    garmin_distance = as_number(garmin_activity.get("distance"))
-    garmin_kind = activity_kind(garmin_activity)
-    for intervals_activity in intervals_activities:
-        intervals_start = activity_datetime(intervals_activity.get("start_date_local") or intervals_activity.get("start_date"))
-        # Garmin and Wahoo/Intervals recordings can start a little apart (for
-        # example when one device is started before the other). Treat starts
-        # within half an hour as candidates for the near-duplicate checks
-        # below, while still requiring matching duration/distance.
-        if intervals_start is None or abs((garmin_start - intervals_start).total_seconds()) > 30 * 60:
-            continue
-        if garmin_kind != activity_kind(intervals_activity) and garmin_kind != "other" and activity_kind(intervals_activity) != "other":
-            continue
-        intervals_duration = as_number(intervals_activity.get("moving_time"))
-        intervals_distance = as_number(intervals_activity.get("distance"))
-        compared = 0
-        matches = 0
-        if garmin_duration is not None and intervals_duration is not None:
-            compared += 1
-            if abs(garmin_duration - intervals_duration) <= max(120, intervals_duration * 0.10):
-                matches += 1
-        if garmin_distance is not None and intervals_distance is not None and garmin_distance > 0 and intervals_distance > 0:
-            compared += 1
-            if abs(garmin_distance - intervals_distance) <= max(500, intervals_distance * 0.10):
-                matches += 1
-        if compared and matches == compared:
-            return True
-    return False
+    return any(_garmin_activity_matches(garmin_activity, item) for item in intervals_activities if isinstance(item, dict))
 
 
 def filter_garmin_activities(activities: Any, intervals_activities: Any) -> tuple[list[dict[str, Any]], int]:
@@ -3417,39 +3429,39 @@ def intervals_cycling_activities_match(left: Any, right: Any) -> bool:
     )
 
 
-def latest_wahoo_garmin_duplicate(snapshot: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    """Return the newest exact-source ride pair, always keeping Wahoo canonical."""
-    snapshot = snapshot if isinstance(snapshot, dict) else latest_snapshot() or {}
-    raw = snapshot.get("raw_provider_data") if isinstance(snapshot.get("raw_provider_data"), dict) else {}
-    activities = raw.get("activities") if isinstance(raw.get("activities"), list) else snapshot.get("recent_activities", [])
-    all_activities = [item for item in activities if isinstance(item, dict)]
-    dated_candidates = [
+def _latest_activity_id(activities: list[dict[str, Any]]) -> str | None:
+    dated = [
         (started, item)
-        for item in all_activities
+        for item in activities
         if (started := activity_datetime(item.get("start_date_local") or item.get("start_date"))) is not None
     ]
-    if not dated_candidates:
+    if not dated:
         return None
-    latest_activity = max(dated_candidates, key=lambda item: item[0])[1]
-    latest_id = str(first_present(latest_activity, ("id", "activityId")) or "").strip()
-    if not latest_id:
-        return None
-    candidates = [item for item in all_activities if activity_kind(item) == "cycling"]
+    latest = max(dated, key=lambda item: item[0])[1]
+    value = str(first_present(latest, ("id", "activityId")) or "").strip()
+    return value or None
+
+
+def _wahoo_garmin_pairs(activities: list[dict[str, Any]], latest_id: str) -> list[tuple[datetime, dict[str, Any], dict[str, Any]]]:
+    candidates = [item for item in activities if activity_kind(item) == "cycling"]
     candidates.sort(key=lambda item: activity_datetime(item.get("start_date_local") or item.get("start_date")) or datetime.min, reverse=True)
     wahoo = [item for item in candidates if intervals_activity_device_source(item) == "wahoo"]
     garmin = [item for item in candidates if intervals_activity_device_source(item) == "garmin"]
     pairs: list[tuple[datetime, dict[str, Any], dict[str, Any]]] = []
     for canonical in wahoo:
         for duplicate in garmin:
-            if intervals_cycling_activities_match(canonical, duplicate):
-                started = activity_datetime(canonical.get("start_date_local") or canonical.get("start_date"))
-                canonical_id = str(first_present(canonical, ("id", "activityId")) or "").strip()
-                duplicate_id = str(first_present(duplicate, ("id", "activityId")) or "").strip()
-                if started is not None and latest_id in {canonical_id, duplicate_id}:
-                    pairs.append((started, canonical, duplicate))
-    if not pairs:
-        return None
-    _started, canonical, duplicate = max(pairs, key=lambda item: item[0])
+            if not intervals_cycling_activities_match(canonical, duplicate):
+                continue
+            started = activity_datetime(canonical.get("start_date_local") or canonical.get("start_date"))
+            canonical_id = str(first_present(canonical, ("id", "activityId")) or "").strip()
+            duplicate_id = str(first_present(duplicate, ("id", "activityId")) or "").strip()
+            if started is not None and latest_id in {canonical_id, duplicate_id}:
+                pairs.append((started, canonical, duplicate))
+    return pairs
+
+
+def _wahoo_garmin_duplicate_view(snapshot: dict[str, Any], pair: tuple[datetime, dict[str, Any], dict[str, Any]]) -> dict[str, Any] | None:
+    _started, canonical, duplicate = pair
     canonical_id = str(first_present(canonical, ("id", "activityId")) or "").strip()
     duplicate_id = str(first_present(duplicate, ("id", "activityId")) or "").strip()
     if not canonical_id or not duplicate_id or canonical_id == duplicate_id:
@@ -3464,6 +3476,21 @@ def latest_wahoo_garmin_duplicate(snapshot: dict[str, Any] | None = None) -> dic
         "distance": canonical.get("distance"),
         "snapshot_synced_at": snapshot.get("synced_at"),
     }
+
+
+def latest_wahoo_garmin_duplicate(snapshot: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Return the newest exact-source ride pair, always keeping Wahoo canonical."""
+    current = snapshot if isinstance(snapshot, dict) else latest_snapshot() or {}
+    raw = current.get("raw_provider_data") if isinstance(current.get("raw_provider_data"), dict) else {}
+    activities = raw.get("activities") if isinstance(raw.get("activities"), list) else current.get("recent_activities", [])
+    all_activities = [item for item in activities if isinstance(item, dict)]
+    latest_id = _latest_activity_id(all_activities)
+    if not latest_id:
+        return None
+    pairs = _wahoo_garmin_pairs(all_activities, latest_id)
+    if not pairs:
+        return None
+    return _wahoo_garmin_duplicate_view(current, max(pairs, key=lambda item: item[0]))
 
 
 def garmin_activity_max_hr(activities: Any) -> dict[str, float | int]:
@@ -3594,26 +3621,25 @@ def _garmin_record_date(value: Any) -> str | None:
         return None
 
 
+def _collect_garmin_weight_records(value: Any, records: list[tuple[str | None, float]], inherited_date: str | None = None) -> None:
+    if isinstance(value, dict):
+        record_date = _garmin_record_date(first_present(value, ("calendarDate", "summaryDate", "date", "timestampGMT", "timestamp"))) or inherited_date
+        direct = first_present(value, ("weightKg", "weight_kg", "weight"))
+        if direct not in (None, ""):
+            weight = _garmin_weight_kg(direct, first_present(value, ("unitKey", "unit", "weightUnit")))
+            if weight is not None:
+                records.append((record_date, float(weight)))
+        for key, item in value.items():
+            if _garmin_key(key) not in {"minweight", "maxweight", "weightdelta"}:
+                _collect_garmin_weight_records(item, records, record_date)
+    elif isinstance(value, list):
+        for item in value[:500]:
+            _collect_garmin_weight_records(item, records, inherited_date)
+
+
 def garmin_weight_records(snapshot: dict[str, Any]) -> list[tuple[str | None, float]]:
     records: list[tuple[str | None, float]] = []
-
-    def visit(value: Any, inherited_date: str | None = None) -> None:
-        if isinstance(value, dict):
-            record_date = _garmin_record_date(first_present(value, ("calendarDate", "summaryDate", "date", "timestampGMT", "timestamp"))) or inherited_date
-            direct = first_present(value, ("weightKg", "weight_kg", "weight"))
-            if direct not in (None, ""):
-                weight = _garmin_weight_kg(direct, first_present(value, ("unitKey", "unit", "weightUnit")))
-                if weight is not None:
-                    records.append((record_date, float(weight)))
-            for key, item in value.items():
-                if _garmin_key(key) in {"minweight", "maxweight", "weightdelta"}:
-                    continue
-                visit(item, record_date)
-        elif isinstance(value, list):
-            for item in value[:500]:
-                visit(item, inherited_date)
-
-    visit(snapshot.get("weight"))
+    _collect_garmin_weight_records(snapshot.get("weight"), records)
     return list(dict.fromkeys(records))
 
 
@@ -3638,23 +3664,23 @@ def garmin_weight_average(snapshot: dict[str, Any], days: int, end_date: date) -
     return round(sum(values) / len(values), 2) if values else None
 
 
+def _collect_garmin_numeric_values(item: Any, keys: set[str], values: list[float | int]) -> None:
+    if isinstance(item, dict):
+        for key, child in item.items():
+            if _garmin_key(key) in keys:
+                number = _garmin_numeric(child)
+                if number is not None:
+                    values.append(number)
+            _collect_garmin_numeric_values(child, keys, values)
+    elif isinstance(item, list):
+        for child in item[:500]:
+            _collect_garmin_numeric_values(child, keys, values)
+
+
 def _garmin_last_numeric(value: Any, keys: set[str]) -> float | int | None:
     """Find the last numeric value for exact Garmin field names."""
     values: list[float | int] = []
-
-    def visit(item: Any) -> None:
-        if isinstance(item, dict):
-            for key, child in item.items():
-                if _garmin_key(key) in keys:
-                    number = _garmin_numeric(child)
-                    if number is not None:
-                        values.append(number)
-                visit(child)
-        elif isinstance(item, list):
-            for child in item[:500]:
-                visit(child)
-
-    visit(value)
+    _collect_garmin_numeric_values(value, keys, values)
     return values[-1] if values else None
 
 
