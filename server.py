@@ -7270,7 +7270,7 @@ def _intervals_error_detail(parsed: Any) -> str:
         if isinstance(error, dict):
             return _provider_error_text(error) or _provider_error_text(parsed)
         if isinstance(error, str):
-            return error
+            return error or _provider_error_text(parsed)
         return _provider_error_text(parsed)
     return parsed if isinstance(parsed, str) else ""
 
