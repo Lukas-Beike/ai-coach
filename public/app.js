@@ -4745,8 +4745,8 @@ $("#attachmentInput").addEventListener("change", async (event) => {
   state.chatAttachmentsLoading = true;
   updateChatControls();
   try {
-    if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !file.size || file.size > 5000000 || !/\.(gpx|png|jpe?g|webp)$/i.test(file.name))) {
-      throw new Error("Bis zu 4 GPX-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 5 MB auswählen.");
+    if ((state.chatAttachments || []).length + files.length > 4 || files.some(file => !file.size || file.size > 5000000 || !/\.(gpx|fit|png|jpe?g|webp)$/i.test(file.name))) {
+      throw new Error("Bis zu 4 GPX-, FIT-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 5 MB auswählen.");
     }
     const attachments = await Promise.all(files.map(file => new Promise((resolve, reject) => {
       const reader = new FileReader();

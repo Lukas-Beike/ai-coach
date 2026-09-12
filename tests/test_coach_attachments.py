@@ -1,5 +1,6 @@
 import base64
 import json
+import struct
 import unittest
 from unittest.mock import patch
 
@@ -8,6 +9,20 @@ from backend.coach.attachments import gpx_summary, validate_attachments, model_i
 
 GPX = b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt><trkpt lat="0" lon="0.01"><ele>20</ele></trkpt></trkseg></trk></gpx>'
 PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAASUVORK5CYII='
+
+
+def fit_session_fixture():
+    fields = [(2, 4, 6), (5, 1, 0), (7, 4, 6), (9, 4, 6), (16, 1, 2), (17, 1, 2), (20, 2, 4)]
+    definition = bytes([0x80, 0, 0]) + struct.pack("<H", 18) + bytes([len(fields)])
+    definition += b"".join(bytes(field) for field in fields)
+    record = bytes([0]) + struct.pack("<I", 1_000_000) + bytes([2]) + struct.pack("<I", 3_600_000)
+    record += struct.pack("<I", 123_450) + bytes([145, 170]) + struct.pack("<H", 220)
+    payload = definition + record
+    header = bytes([12, 0x10]) + struct.pack("<H", 0) + struct.pack("<I", len(payload)) + b".FIT"
+    return header + payload
+
+
+FIT = fit_session_fixture()
 
 
 class AttachmentTests(DialogueHarness, unittest.TestCase):
@@ -22,10 +37,28 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(gpx_summary(separated)["distance_km"], 0)
         self.assertEqual(gpx_summary(separated)["elevation_point_count"], 0)
 
+    def test_fit_is_validated_and_passed_as_the_original_file(self):
+        attachment = self.upload(FIT, "ride.fit")
+        validated = validate_attachments([attachment])
+        self.assertEqual(validated[0]["type"], "fit")
+        self.assertEqual(validated[0]["data"], attachment["data"])
+        self.assertEqual(validated[0]["summary"]["distance_km"], 1.234)
+        self.assertEqual(validated[0]["summary"]["avg_heart_rate_bpm"], 145)
+        request_input = model_input("Analyze this activity", validated)
+        file_part = request_input[0]["content"][-1]
+        self.assertEqual(file_part["type"], "input_file")
+        self.assertEqual(file_part["filename"], "ride.fit")
+        self.assertTrue(file_part["file_data"].endswith(attachment["data"]))
+
+        payload, _, _ = server._gemini_request_payload({"input": request_input}, "gemini-test")
+        inline = payload["contents"][-1]["parts"][-1]["inlineData"]
+        self.assertEqual(inline["mimeType"], "application/octet-stream")
+        self.assertEqual(inline["data"], attachment["data"])
+
     def test_rejects_unsafe_xml_coordinates_encoding_and_types(self):
         invalid = [self.upload(b'<!DOCTYPE gpx [<!ENTITY x "boom">]><gpx/>'),
                    self.upload(b'<gpx><rte><rtept lat="nan" lon="0"/></rte></gpx>'),
-                   self.upload(b'<gpx/>'), self.upload(b'garbage', 'fake.png'),
+                   self.upload(b'<gpx/>'), self.upload(b'garbage', 'fake.png'), self.upload(b'garbage', 'fake.fit'),
                    self.upload(name='../route.gpx'), {"name": "x.gpx", "data": "%%%"},
                    self.upload(b'x' * 5_000_001)]
         for item in invalid:
@@ -81,7 +114,8 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(parts[-1]["inlineData"], {"mimeType": "image/png", "data": PNG})
         self.assertIn('uploaded_gpx', json.dumps(parts))
         payload, _, _ = server._gemini_request_payload({"input": value, "_gemini_transient_images": [{"mime": "image/png", "data": PNG}]}, "gemini-test")
-        self.assertEqual(sum("inlineData" in part for part in payload["contents"][-1]["parts"]), 1)
+        self.assertEqual(sum("inlineData" in part for part in payload["contents"][-1]["parts"]), 2)
+        self.assertIn(self.upload()["data"], json.dumps(payload["contents"][-1]))
 
         saved_history = [
             {"role": "user", "parts": [{"text": "Analyze"}]},
