@@ -1059,7 +1059,7 @@ Priorities:
 6h. Use list_training_plans when the athlete asks about existing plans or an ID is needed. Use update_training_plan to rename or delete a plan, or change its goal, status, or metadata dates. Plan deletion removes only plan metadata; its local workout units remain scheduled.
 7. Keep normal chat answers concise and practical.
 8. When the athlete asks for the latest/recent units or explicitly asks to load and analyse current training, use the freshly loaded snapshot supplied by the app and say when the refresh failed or data may be stale.
-8c. Whenever the athlete asks to analyse a completed activity, especially the latest activity, always add a concise section titled "Leistungsfähigkeit und Entwicklung" to the answer. Assess the athlete's performance using the analysed activity's measured data together with the current_performance metrics and comparisons from the structured context. For running, report every available value for VO2max, threshold pace, threshold heart rate, Zone 2 pace, and the 5 km, 10 km, half-marathon, and marathon predictions. For cycling, report every available value for VO2max and FTP; keep FTP and Intervals.icu eFTP clearly separate. For each reported metric, state whether the activity provides direct evidence, whether the value is a current provider estimate, and whether the comparison indicates improvement, stability, decline, or insufficient evidence. A single activity may only indicate a development: do not claim a reliable trend unless comparable historical data supports it. Never invent unavailable metrics; name important missing values briefly. Distinguish measured facts from coaching inference and account for unusual terrain, weather, fatigue, intervals, and heart-rate or power data when present.
+8c. Whenever the athlete asks to analyse a completed activity, especially the latest activity, always add a concise section titled "Leistungsfähigkeit und Entwicklung" to the answer. Do not merely repeat provider values: first use the structured activity_validation block to compare the analysed activity's measured evidence with the current_performance metrics, provider sources, and historical comparisons. For running, report every available value for VO2max, threshold pace, threshold heart rate, Zone 2 pace, and the 5 km, 10 km, half-marathon, and marathon predictions. For cycling, report every available value for VO2max and FTP; keep FTP and Intervals.icu eFTP clearly separate. For each reported metric, state whether the activity directly supports it, only plausibly corroborates it, conflicts with it, or cannot validate it, and whether the historical comparison indicates improvement, stability, decline, or insufficient evidence. If the evidence conflicts, state whether the provider estimate appears too high or too low for this activity and why, but never overwrite the stored provider value from chat. A normal or easy activity cannot by itself validate a threshold, VO2max, Zone 2 pace, or race prediction; a cycling activity cannot by itself establish FTP unless its duration, intensity, power data, and protocol support that inference. A single activity may only indicate a development: do not claim a reliable trend unless comparable historical data supports it. Never invent unavailable metrics; name important missing values briefly. Distinguish measured facts from coaching inference and account for unusual terrain, weather, fatigue, intervals, and heart-rate or power data when present.
 8a. For outdoor running and outdoor cycling, use the supplied weather forecast when choosing advice or a planned time. Concrete time-window recommendations are only available for the next five days; treat them as forecasts, not guarantees. Indoor, swimming, and strength sessions do not need weather adjustments.
 8b. When suggesting a weekday training time, assume normal work from 06:00–15:30 Monday–Thursday and until 14:00 on Friday. The 12:00–13:00 lunch break is available for training; otherwise use time before work or after work unless the athlete states different availability.
 9. Never silently change durable athlete facts, target events, constraints, or preferences based only on chat. Explain the proposed change and ask the athlete to confirm it in the Profile screen.
@@ -12202,6 +12202,125 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
     }
 
 
+def activity_pace_seconds_per_km(activity: dict[str, Any]) -> float | int | None:
+    """Normalize an activity pace or speed into seconds per kilometre."""
+    pace = first_present(activity, ("icu_pace", "average_pace", "pace"))
+    if pace not in (None, ""):
+        normalized = threshold_pace_seconds(pace)
+        if normalized is not None and 120 <= float(normalized) <= 1800:
+            return normalized
+    speed = as_number(first_present(activity, ("average_speed", "icu_weighted_avg_speed")))
+    if speed is None or speed <= 0:
+        return None
+    normalized = round(1000 / float(speed)) if float(speed) < 20 else float(speed)
+    return normalized if 120 <= normalized <= 1800 else None
+
+
+def activity_performance_validation(
+    activities: list[Any],
+    metrics: dict[str, dict[str, Any]],
+    comparisons: dict[str, dict[str, Any] | None],
+) -> dict[str, Any]:
+    """Expose latest-activity evidence without pretending it is a lab test."""
+    dated = [
+        item for item in activities
+        if isinstance(item, dict) and activity_datetime(item.get("start_date_local") or item.get("start_date")) is not None
+    ]
+    latest = max(
+        dated,
+        key=lambda item: (
+            activity_datetime(item.get("start_date_local") or item.get("start_date")) or datetime.min,
+            str(item.get("id") or item.get("activityId") or ""),
+        ),
+        default=None,
+    )
+    if latest is None:
+        return {
+            "available": False,
+            "status": "no_completed_activity",
+            "scope": "Keine abgeschlossene Einheit mit verwertbarem Zeitstempel vorhanden.",
+        }
+
+    sport = activity_sport(latest)
+    activity_evidence: dict[str, Any] = {
+        "activity_id": first_present(latest, ("id", "activityId")),
+        "date": str(first_present(latest, ("start_date_local", "start_date", "date")) or "")[:40],
+        "name": str(latest.get("name") or "")[:200],
+        "sport": sport,
+        "duration_seconds": as_number(first_present(latest, ("moving_time", "elapsed_time"))),
+        "distance": as_number(latest.get("distance")),
+        "elevation_gain": as_number(latest.get("total_elevation_gain")),
+        "training_load": as_number(latest.get("icu_training_load")),
+        "intensity": as_number(latest.get("icu_intensity")),
+        "average_heart_rate_bpm": as_number(first_present(latest, ("average_heartrate", "averageHR"))),
+        "max_heart_rate_bpm": as_number(first_present(latest, ("max_heartrate", "maxHR"))),
+        "average_power_watts": as_number(first_present(latest, ("average_watts", "average_power"))),
+        "weighted_power_watts": as_number(first_present(latest, ("weighted_average_watts", "normalized_power"))),
+        "rpe": as_number(first_present(latest, ("icu_rpe", "rpe"))),
+    }
+    if sport == "Laufen":
+        activity_evidence["pace_seconds_per_km"] = activity_pace_seconds_per_km(latest)
+        reference_keys = (
+            "running_vo2max_ml_kg_min",
+            "run_threshold_pace_seconds_per_km",
+            "run_threshold_hr_bpm",
+            "run_5k_seconds",
+            "run_10k_seconds",
+            "run_half_marathon_seconds",
+            "run_marathon_seconds",
+        )
+        interpretation = (
+            "Pace und Herzfrequenz dieser Einheit sind direkte Belastungsevidenz. "
+            "Sie validieren Schwelle, VO2max, Zone-2-Pace und Wettkampfprognosen nur, "
+            "wenn Dauer, Intensität, Profil und Messqualität dafür geeignet sind."
+        )
+    elif sport == "Radfahren":
+        reference_keys = ("cycling_vo2max_ml_kg_min", "cycling_ftp_watts", "cycling_eftp_watts")
+        ftp = metrics.get("cycling_ftp_watts", {}).get("value")
+        weighted_power = activity_evidence.get("weighted_power_watts") or activity_evidence.get("average_power_watts")
+        if as_number(weighted_power) is not None and as_number(ftp) not in (None, 0):
+            activity_evidence["power_as_percent_of_current_ftp"] = round(float(weighted_power) / float(ftp) * 100, 1)
+        interpretation = (
+            "Leistung, Herzfrequenz, Dauer und Intensität dieser Einheit sind direkte Belastungsevidenz. "
+            "Sie bestätigen oder widerlegen FTP und VO2max aber nur bei einem ausreichend langen "
+            "und geeigneten Belastungsprofil; eine normale Ausfahrt ist kein FTP-Test."
+        )
+    else:
+        reference_keys = ()
+        interpretation = "Für diese Sportart ist keine sportartspezifische Leistungsvalidierung hinterlegt."
+
+    provider_references = []
+    for key in reference_keys:
+        provider_value = metrics.get(key, {})
+        provider_references.append({
+            "metric": key,
+            "value": provider_value.get("value"),
+            "unit": provider_value.get("unit"),
+            "source": provider_value.get("source"),
+            "observed_at": provider_value.get("observed_at"),
+            "historical_comparison": comparisons.get(f"{key}_30d"),
+        })
+    direct_activity_estimates = {
+        key: first_present(latest, aliases)
+        for key, aliases in {
+            "activity_vo2max": ("vo2max", "vo2_max", "vO2MaxValue", "icu_vo2max"),
+            "activity_ftp_watts": ("ftp", "functionalThresholdPower", "icu_ftp"),
+            "activity_eftp_watts": ("eftp", "eFTP", "icu_eftp"),
+        }.items()
+        if first_present(latest, aliases) not in (None, "")
+    }
+    return {
+        "available": True,
+        "status": "needs_coach_interpretation",
+        "activity": activity_evidence,
+        "provider_references": provider_references,
+        "direct_activity_estimates": direct_activity_estimates,
+        "interpretation_boundary": interpretation,
+        "validation_outcome_enum": ["direct_support", "plausible_corroboration", "conflict", "insufficient_evidence"],
+        "scope": "Vergleich der letzten abgeschlossenen Einheit mit Provider-Leistungswerten; keine Laborvalidierung.",
+    }
+
+
 def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     snapshot = snapshot if snapshot is not None else latest_snapshot()
     if not snapshot:
@@ -12355,6 +12474,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         "run_half_marathon_seconds_30d": trend("run_half_marathon_seconds", "s", False),
         "run_marathon_seconds_30d": trend("run_marathon_seconds", "s", False),
     }
+    activity_validation = activity_performance_validation(activities, metrics, comparisons)
     return {
         "available": True,
         "source": "Letzter gespeicherter Intervals.icu-Snapshot",
@@ -12387,6 +12507,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         },
         "rolling_training": {"last_7_days": last_7, "previous_7_days": previous_7, "last_30_days": last_30, "previous_30_days": previous_30, "last_28_days": activity_rollup(activities, 28, today)},
         "comparisons": comparisons,
+        "activity_validation": activity_validation,
     }
 
 

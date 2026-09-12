@@ -6887,6 +6887,53 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(performance["rolling_training"]["last_7_days"]["training_load"], 110.0)
         self.assertNotIn("ai_estimates", performance)
 
+    def test_activity_validation_exposes_running_evidence_against_provider_values(self):
+        today = date.today().isoformat()
+        snapshot = server.compact_snapshot(
+            {
+                "sportSettings": [{"types": ["Run"], "threshold_pace": 4.0, "lthr": 170, "vo2max": 55}],
+            },
+            [{
+                "id": "latest-run", "type": "Run", "name": "Tempo", "start_date_local": f"{today}T08:00:00",
+                "moving_time": 3600, "distance": 12_000, "average_speed": 3.2,
+                "average_heartrate": 166, "icu_training_load": 90,
+            }],
+            [],
+            [],
+        )
+
+        validation = server.current_performance_context(snapshot)["activity_validation"]
+
+        self.assertTrue(validation["available"])
+        self.assertEqual(validation["activity"]["activity_id"], "latest-run")
+        self.assertEqual(validation["activity"]["sport"], "Laufen")
+        self.assertEqual(validation["activity"]["pace_seconds_per_km"], 312)
+        self.assertEqual(validation["activity"]["average_heart_rate_bpm"], 166)
+        self.assertEqual(validation["provider_references"][0]["metric"], "running_vo2max_ml_kg_min")
+        self.assertEqual(validation["provider_references"][1]["value"], 250)
+        self.assertIn("direct_support", validation["validation_outcome_enum"])
+
+    def test_activity_validation_exposes_cycling_power_as_percent_of_ftp(self):
+        today = date.today().isoformat()
+        snapshot = server.compact_snapshot(
+            {"sportSettings": [{"types": ["Ride"], "ftp": 300, "vo2max": 60}]},
+            [{
+                "id": "latest-ride", "type": "Ride", "start_date_local": f"{today}T08:00:00",
+                "moving_time": 3600, "distance": 30_000, "weighted_average_watts": 270,
+                "average_heartrate": 155, "icu_intensity": 90,
+            }],
+            [],
+            [],
+        )
+
+        validation = server.current_performance_context(snapshot)["activity_validation"]
+
+        self.assertEqual(validation["activity"]["sport"], "Radfahren")
+        self.assertEqual(validation["activity"]["power_as_percent_of_current_ftp"], 90.0)
+        self.assertEqual([item["metric"] for item in validation["provider_references"]], [
+            "cycling_vo2max_ml_kg_min", "cycling_ftp_watts", "cycling_eftp_watts",
+        ])
+
     def test_form_is_derived_from_ctl_and_atl_when_intervals_omits_tsb(self):
         today = date.today().isoformat()
         snapshot = {
