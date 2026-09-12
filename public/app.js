@@ -754,50 +754,60 @@ function updateVoiceButton() {
   updateChatControls();
 }
 
-function updateChatControls() {
-  const form = $("#chatForm");
-  const input = $("#messageInput");
-  const sendButton = $("#sendButton");
-  const steerButton = $("#steerButton");
-  const cancelButton = $("#cancelChatButton");
+function chatControlState(input) {
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages));
   const hasDraft = Boolean((state.chatAttachments || []).length || input?.value.trim());
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
-  const chatIsResuming = Boolean(state.chatRequest?.phase === "recovering" || (state.chatServerOperationId && !state.chatStream));
-  const chatIsReconciling = state.chatRequest?.phase === "reconciling";
-  if (form) {
-    form.classList.toggle("is-busy", state.busy);
-    form.classList.toggle("is-recovering", chatIsResuming);
-    form.classList.toggle("is-reconciling", chatIsReconciling);
-  }
-  if (input) {
-    input.disabled = !chatReady;
-    input.placeholder = chatReady ? "Frage deinen Coach…" : "Coach-Chat wird geladen…";
-  }
-  if (sendButton) {
-    sendButton.disabled = state.chatAttachmentsLoading || !chatReady || !hasDraft || !inputAvailable || chatIsResuming || chatIsReconciling;
-    if (chatIsReconciling) sendButton.textContent = "Antwort wird geladen…";
-    else if (chatIsResuming) sendButton.textContent = "Coach antwortet…";
-    else if (state.busy) sendButton.textContent = "Einreihen";
-    else sendButton.textContent = "Senden";
-  }
-  if (steerButton) {
-    steerButton.hidden = !state.busy || chatIsResuming || chatIsReconciling;
-    steerButton.disabled = !hasDraft || !inputAvailable || chatIsResuming || chatIsReconciling;
-  }
-  if (cancelButton) {
-    cancelButton.hidden = !state.busy || chatIsReconciling;
-    const cancelRequested = Boolean(state.chatStream?.cancelRequested || state.chatRequest?.cancelRequested);
-    cancelButton.disabled = (!state.chatStream && !state.chatServerOperationId) || cancelRequested;
-    cancelButton.textContent = cancelRequested ? "Wird abgebrochen…" : "Abbrechen";
-  }
-  const progress = $("#chatOperationStatus");
-  if (progress) {
-    progress.hidden = !state.busy || chatIsReconciling;
-  }
-  updateChatQueueStatus();
+  const resuming = Boolean(state.chatRequest?.phase === "recovering" || (state.chatServerOperationId && !state.chatStream));
+  return { chatReady, hasDraft, inputAvailable, resuming, reconciling: state.chatRequest?.phase === "reconciling" };
 }
 
+function chatSendLabel(controls) {
+  if (controls.reconciling) return "Antwort wird geladen…";
+  if (controls.resuming) return "Coach antwortet…";
+  return state.busy ? "Einreihen" : "Senden";
+}
+
+function updateChatSendButton(button, controls) {
+  if (!button) return;
+  button.disabled = state.chatAttachmentsLoading || !controls.chatReady || !controls.hasDraft || !controls.inputAvailable || controls.resuming || controls.reconciling;
+  button.textContent = chatSendLabel(controls);
+}
+
+function updateChatSteerButton(button, controls) {
+  if (!button) return;
+  button.hidden = !state.busy || controls.resuming || controls.reconciling;
+  button.disabled = !controls.hasDraft || !controls.inputAvailable || controls.resuming || controls.reconciling;
+}
+
+function updateChatCancelButton(button, controls) {
+  if (!button) return;
+  button.hidden = !state.busy || controls.reconciling;
+  const requested = Boolean(state.chatStream?.cancelRequested || state.chatRequest?.cancelRequested);
+  button.disabled = (!state.chatStream && !state.chatServerOperationId) || requested;
+  button.textContent = requested ? "Wird abgebrochen…" : "Abbrechen";
+}
+
+function updateChatControls() {
+  const input = $("#messageInput");
+  const controls = chatControlState(input);
+  const form = $("#chatForm");
+  if (form) {
+    form.classList.toggle("is-busy", state.busy);
+    form.classList.toggle("is-recovering", controls.resuming);
+    form.classList.toggle("is-reconciling", controls.reconciling);
+  }
+  if (input) {
+    input.disabled = !controls.chatReady;
+    input.placeholder = controls.chatReady ? "Frage deinen Coach…" : "Coach-Chat wird geladen…";
+  }
+  updateChatSendButton($("#sendButton"), controls);
+  updateChatSteerButton($("#steerButton"), controls);
+  updateChatCancelButton($("#cancelChatButton"), controls);
+  const progress = $("#chatOperationStatus");
+  if (progress) progress.hidden = !state.busy || controls.reconciling;
+  updateChatQueueStatus();
+}
 function stopVoiceCapture(recorder = state.voiceRecorder) {
   if (state.voiceTimer) clearInterval(state.voiceTimer);
   state.voiceTimer = null;
