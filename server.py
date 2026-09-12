@@ -7786,7 +7786,7 @@ def _workout_load(record: Any) -> float | int | None:
 CALENDAR_ACTIVITY_FIELDS = (
     "id", "external_id", "start_date_local", "name", "type", "moving_time", "elapsed_time",
     "distance", "total_elevation_gain", "icu_training_load", "icu_intensity", "average_heartrate",
-    "max_heartrate", "average_watts", "weighted_average_watts", "icu_weighted_avg_speed",
+    "max_heartrate", "average_watts", "weighted_average_watts", "icu_weighted_avg_watts", "icu_weighted_avg_speed",
     "icu_pace", "icu_rpe", "feel", "source",
 )
 
@@ -8370,7 +8370,7 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
     activity_fields = (
         "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain", "elapsed_time",
         "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "icu_eftp", "average_heartrate",
-        "max_heartrate", "average_watts", "weighted_average_watts", "average_speed", "max_speed",
+        "max_heartrate", "average_watts", "weighted_average_watts", "icu_weighted_avg_watts", "average_speed", "max_speed",
         "icu_weighted_avg_speed", "icu_pace", "vo2max", "vo2_max", "vO2MaxValue", "vo2MaxValue", "icu_vo2max", "feel", "icu_rpe", "paired_event_id",
         "source", "device_name", "external_id", "file_type",
     )
@@ -12289,7 +12289,7 @@ def activity_validation_evidence(latest: dict[str, Any], sport: str) -> dict[str
         ("average_heart_rate_bpm", ("average_heartrate", "averageHR"), 30, 230),
         ("max_heart_rate_bpm", ("max_heartrate", "maxHR"), 30, 230),
         ("average_power_watts", ("average_watts", "average_power"), 0, 5_000),
-        ("weighted_power_watts", ("weighted_average_watts", "normalized_power"), 0, 5_000),
+        ("weighted_power_watts", ("icu_weighted_avg_watts", "weighted_average_watts", "normalized_power"), 0, 5_000),
         ("rpe", ("icu_rpe", "rpe"), 0, 10),
     ):
         value = activity_intensity(first_present(latest, aliases)) if key == "intensity" else bounded_activity_metric(first_present(latest, aliases), minimum, maximum)

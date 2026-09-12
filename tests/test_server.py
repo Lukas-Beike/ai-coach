@@ -1996,10 +1996,11 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in workouts], ["1"])
         self.assertLessEqual(len(json.dumps(bounded_coach_context_value({"text": "x" * 1000}, 100), ensure_ascii=False, separators=(",", ":"))), 100)
         detail = detailed_coach_activity({
-            "id": "provider-id", "average_watts": 245, "provider_extra": "must not pass",
+            "id": "provider-id", "average_watts": 245, "icu_weighted_avg_watts": 300, "provider_extra": "must not pass",
             "streams": {"watts": list(range(2505)), "latlng": [[1, 2]]},
         })
         self.assertEqual(detail["average_watts"], 245)
+        self.assertEqual(detail["icu_weighted_avg_watts"], 300)
         self.assertEqual(len(detail["streams"]["watts"]), 2000)
         self.assertEqual(detail["streams"]["watts"][0], 0)
         self.assertEqual(detail["streams"]["watts"][-1], 2504)
@@ -6955,7 +6956,7 @@ class CoachTests(unittest.TestCase):
             {"sportSettings": [{"types": ["Ride"], "ftp": 300, "vo2max": 60}]},
             [{
                 "id": "latest-ride", "type": "Ride", "start_date_local": f"{today}T08:00:00",
-                "moving_time": 3600, "distance": 30_000, "weighted_average_watts": 270,
+                "moving_time": 3600, "distance": 30_000, "average_watts": 200, "icu_weighted_avg_watts": 270,
                 "average_heartrate": 155, "icu_intensity": 0.9, "icu_ftp": 300,
             }],
             [],
