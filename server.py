@@ -5592,8 +5592,8 @@ def _ical_period_recurrence_starts(base: datetime, rule: dict[str, Any], window_
                 return starts
             occurrence_index += 1
             _ical_add_recurrence_start(starts, start, window_start, window_end)
-        period_end = date(year, months[-1], 1)
-        if period_end > window_end:
+        period_marker = date(year, months[-1], 1) if frequency == "MONTHLY" else date(year, 1, 1)
+        if period_marker > window_end:
             break
         period_index += 1
     return starts
@@ -5662,14 +5662,83 @@ def _ical_event_instances(
     ]
 
 
-def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, window_end: date | None = None) -> list[dict[str, Any]]:
-    """Parse calendar events and safely expand common Google recurrence rules."""
+def _ical_calendar_window(window_start: date | None, window_end: date | None) -> tuple[date, date]:
     first_day = window_start or local_now().date()
     last_day = window_end or first_day + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS)
     if last_day < first_day or (last_day - first_day).days > EXTERNAL_CALENDAR_WINDOW_DAYS:
         raise AppError(400, "Das Kalenderfenster ist ungültig oder zu groß.")
-    events_by_key: dict[tuple[str, str], dict[str, Any]] = {}
-    parsed_events: list[dict[str, Any]] = []
+    return first_day, last_day
+
+
+def _ical_property_parameters(key_part: str) -> tuple[str, dict[str, str]]:
+    parts = key_part.split(";")
+    parameters = {
+        name.upper(): value
+        for parameter in parts[1:]
+        for name, separator, value in [parameter.partition("=")]
+        if separator
+    }
+    return parts[0].upper(), parameters
+
+
+def _ical_store_recurrence_dates(current: dict[str, Any], key: str, raw_value: str, parameters: dict[str, str]) -> bool:
+    if key not in {"EXDATE", "RDATE"}:
+        return False
+    if key == "RDATE" and "/" in raw_value:
+        raise AppError(400, "RDATE mit Zeiträumen wird nicht unterstützt.")
+    field = "exdates" if key == "EXDATE" else "rdates"
+    message = "EXDATE der Kalender-Wiederholung ist ungültig." if key == "EXDATE" else "RDATE der Kalender-Wiederholung ist ungültig."
+    for value in raw_value.split(","):
+        temporal = _ical_temporal_value(value, parameters)
+        if temporal is None:
+            raise AppError(400, message)
+        current.setdefault(field, []).append(temporal[0])
+    return True
+
+
+def _ical_store_event_property(current: dict[str, Any], key: str, raw_value: str, parameters: dict[str, str]) -> None:
+    if key in {"DTSTART", "DTEND"}:
+        temporal = _ical_temporal_value(raw_value, parameters)
+        if temporal:
+            current["all_day"] = temporal[1] if key == "DTSTART" else current.get("all_day", temporal[1])
+            current["start" if key == "DTSTART" else "end"] = temporal[0]
+        return
+    if _ical_store_recurrence_dates(current, key, raw_value, parameters):
+        return
+    if key == "UID":
+        current["uid"] = parse_ics_value(raw_value)[:500]
+    elif key == "SUMMARY":
+        current["name"] = parse_ics_value(raw_value)[:200]
+    elif key == "DURATION":
+        duration = ical_duration(raw_value)
+        if duration:
+            current["duration"] = duration
+    elif key == "DESCRIPTION":
+        current["description"] = parse_ics_value(raw_value)[:2000]
+    elif key == "STATUS":
+        current["status"] = parse_ics_value(raw_value)[:30]
+    elif key == "RRULE":
+        current.setdefault("rrules", []).append(raw_value)
+    elif key == "RECURRENCE-ID":
+        temporal = _ical_temporal_value(raw_value, parameters)
+        if temporal is None:
+            raise AppError(400, "RECURRENCE-ID der Kalender-Wiederholung ist ungültig.")
+        current["recurrence_id"] = temporal[0]
+    elif key == "EXRULE":
+        current["unsupported_recurrence"] = True
+
+
+def _ical_append_event(current: dict[str, Any] | None, events: list[dict[str, Any]]) -> None:
+    if current and current.get("status", "").upper() != "CANCELLED" and not (current.get("uid") and current.get("start")):
+        raise AppError(400, "Ein Kalendertermin benötigt UID und DTSTART.")
+    if current and current.get("uid") and (
+        current.get("start") or (current.get("status", "").upper() == "CANCELLED" and current.get("recurrence_id") is not None)
+    ):
+        events.append(current)
+
+
+def _ical_parsed_events(payload: bytes) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     nested_depth = 0
     for line in unfold_ical(payload, max_bytes=MAX_EXTERNAL_CALENDAR_BYTES, error=lambda status, message: AppError(status, message)):
@@ -5685,89 +5754,56 @@ def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, win
                 nested_depth -= 1
             continue
         if upper == "END:VEVENT":
-            if current and current.get("status", "").upper() != "CANCELLED" and not (current.get("uid") and current.get("start")):
-                raise AppError(400, "Ein Kalendertermin benötigt UID und DTSTART.")
-            if current and current.get("uid") and (
-                current.get("start") or (current.get("status", "").upper() == "CANCELLED" and current.get("recurrence_id") is not None)
-            ):
-                parsed_events.append(current)
+            _ical_append_event(current, events)
             current = None
             continue
         if current is None or ":" not in line:
             continue
         key_part, raw_value = line.split(":", 1)
-        parts = key_part.split(";")
-        key = parts[0].upper()
-        parameters: dict[str, str] = {}
-        for parameter in parts[1:]:
-            name, separator, value = parameter.partition("=")
-            if separator:
-                parameters[name.upper()] = value
-        if key == "UID":
-            current["uid"] = parse_ics_value(raw_value)[:500]
-        elif key == "SUMMARY":
-            current["name"] = parse_ics_value(raw_value)[:200]
-        elif key in {"DTSTART", "DTEND"}:
-            temporal = _ical_temporal_value(raw_value, parameters)
-            if temporal:
-                current["all_day"] = temporal[1] if key == "DTSTART" else current.get("all_day", temporal[1])
-                current["start" if key == "DTSTART" else "end"] = temporal[0]
-        elif key == "DURATION":
-            duration = ical_duration(raw_value)
-            if duration:
-                current["duration"] = duration
-        elif key == "DESCRIPTION":
-            current["description"] = parse_ics_value(raw_value)[:2000]
-        elif key == "STATUS":
-            current["status"] = parse_ics_value(raw_value)[:30]
-        elif key == "RRULE":
-            current.setdefault("rrules", []).append(raw_value)
-        elif key == "EXDATE":
-            for value in raw_value.split(","):
-                temporal = _ical_temporal_value(value, parameters)
-                if temporal is None:
-                    raise AppError(400, "EXDATE der Kalender-Wiederholung ist ungültig.")
-                current.setdefault("exdates", []).append(temporal[0])
-        elif key == "RDATE":
-            for value in raw_value.split(","):
-                if "/" in value:
-                    raise AppError(400, "RDATE mit Zeiträumen wird nicht unterstützt.")
-                temporal = _ical_temporal_value(value, parameters)
-                if temporal is None:
-                    raise AppError(400, "RDATE der Kalender-Wiederholung ist ungültig.")
-                current.setdefault("rdates", []).append(temporal[0])
-        elif key == "RECURRENCE-ID":
-            temporal = _ical_temporal_value(raw_value, parameters)
-            if temporal is None:
-                raise AppError(400, "RECURRENCE-ID der Kalender-Wiederholung ist ungültig.")
-            current["recurrence_id"] = temporal[0]
-        elif key == "EXRULE":
-            current["unsupported_recurrence"] = True
+        key, parameters = _ical_property_parameters(key_part)
+        _ical_store_event_property(current, key, raw_value, parameters)
+    return events
 
-    for event in parsed_events:
+
+def _ical_exception_starts(events: list[dict[str, Any]], event: dict[str, Any]) -> set[datetime]:
+    return {
+        item["recurrence_id"]
+        for item in events
+        if item.get("uid") == event.get("uid") and item.get("recurrence_id") is not None
+    }
+
+
+def _ical_add_event_instances(
+    events_by_key: dict[tuple[str, str], dict[str, Any]],
+    event: dict[str, Any],
+    first_day: date,
+    last_day: date,
+    excluded_starts: set[datetime] | None = None,
+) -> None:
+    for parsed_event in _ical_event_instances(event, first_day, last_day, excluded_starts):
+        key = (parsed_event["uid"], parsed_event["start_local"])
+        if key not in events_by_key and len(events_by_key) >= ICAL_MAX_RECURRENCE_COUNT:
+            raise AppError(400, f"Der Kalender-Feed enthält mehr als {ICAL_MAX_RECURRENCE_COUNT} Termine im Syncfenster.")
+        events_by_key.setdefault(key, parsed_event)
+
+
+def _ical_expanded_events(events: list[dict[str, Any]], first_day: date, last_day: date) -> list[dict[str, Any]]:
+    events_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for event in events:
         if event.get("recurrence_id") is not None or event.get("status", "").upper() == "CANCELLED":
             continue
-        exception_starts = {
-            item["recurrence_id"]
-            for item in parsed_events
-            if item.get("uid") == event.get("uid") and item.get("recurrence_id") is not None
-        }
-        for parsed_event in _ical_event_instances(event, first_day, last_day, exception_starts):
-            key = (parsed_event["uid"], parsed_event["start_local"])
-            if key not in events_by_key and len(events_by_key) >= ICAL_MAX_RECURRENCE_COUNT:
-                raise AppError(400, f"Der Kalender-Feed enthält mehr als {ICAL_MAX_RECURRENCE_COUNT} Termine im Syncfenster.")
-            events_by_key.setdefault(key, parsed_event)
-
-    for event in parsed_events:
+        _ical_add_event_instances(events_by_key, event, first_day, last_day, _ical_exception_starts(events, event))
+    for event in events:
         if event.get("recurrence_id") is None or event.get("status", "").upper() == "CANCELLED":
             continue
-        for parsed_event in _ical_event_instances(event, first_day, last_day):
-            key = (parsed_event["uid"], parsed_event["start_local"])
-            if key not in events_by_key and len(events_by_key) >= ICAL_MAX_RECURRENCE_COUNT:
-                raise AppError(400, f"Der Kalender-Feed enthält mehr als {ICAL_MAX_RECURRENCE_COUNT} Termine im Syncfenster.")
-            events_by_key.setdefault(key, parsed_event)
-    events = sorted(events_by_key.values(), key=lambda item: (item["start_local"], item["name"], item["uid"]))
-    return events[:1000]
+        _ical_add_event_instances(events_by_key, event, first_day, last_day)
+    return sorted(events_by_key.values(), key=lambda item: (item["start_local"], item["name"], item["uid"]))[:1000]
+
+
+def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, window_end: date | None = None) -> list[dict[str, Any]]:
+    """Parse calendar events and safely expand common Google recurrence rules."""
+    first_day, last_day = _ical_calendar_window(window_start, window_end)
+    return _ical_expanded_events(_ical_parsed_events(payload), first_day, last_day)
 
 
 def external_calendar_url(value: Any) -> str:
