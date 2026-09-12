@@ -7128,31 +7128,40 @@ def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     }
 
 
-def gemini_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
-    """Classify Gemini failures without retaining the provider response body."""
+def _provider_error_payload(raw_body: bytes) -> dict[str, Any]:
     try:
         payload = json.loads(raw_body) if raw_body else None
     except (TypeError, json.JSONDecodeError):
         payload = None
     error = payload.get("error") if isinstance(payload, dict) else None
-    error = error if isinstance(error, dict) else {}
+    return error if isinstance(error, dict) else {}
+
+
+def _gemini_error_tokens(error: dict[str, Any]) -> str:
     tokens = [str(error.get("status") or "").casefold()]
     for detail in error.get("details") if isinstance(error.get("details"), list) else []:
         if isinstance(detail, dict):
             tokens.extend(str(detail.get(key) or "").casefold() for key in ("reason", "@type"))
-    searchable = " ".join(tokens)
+    return " ".join(tokens)
+
+
+def _gemini_error_reason(status: int, searchable: str) -> tuple[str, str]:
     if status in {401, 403} or "permission" in searchable or "unauthenticated" in searchable:
-        reason, message = "authentication_or_permission", "Der Gemini-Zugang wurde abgelehnt. Bitte API-Schlüssel und Berechtigungen prüfen."
-    elif status == 429 and "quota" in searchable:
-        reason, message = "insufficient_quota", "Das Gemini-Kontingent ist aufgebraucht. Bitte Nutzung und Abrechnung im Google-Konto prüfen."
-    elif status == 429:
-        reason, message = "rate_limit_exceeded", "Gemini hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
-    elif status == 404:
-        reason, message = "not_found", "Das konfigurierte Gemini-Modell oder der angeforderte Dienst wurde nicht gefunden."
-    elif status >= 500:
-        reason, message = "provider_unavailable", "Gemini ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
-    else:
-        reason, message = "http_error", f"Gemini konnte die Anfrage nicht verarbeiten (HTTP {status})."
+        return "authentication_or_permission", "Der Gemini-Zugang wurde abgelehnt. Bitte API-Schlüssel und Berechtigungen prüfen."
+    if status == 429 and "quota" in searchable:
+        return "insufficient_quota", "Das Gemini-Kontingent ist aufgebraucht. Bitte Nutzung und Abrechnung im Google-Konto prüfen."
+    if status == 429:
+        return "rate_limit_exceeded", "Gemini hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
+    if status == 404:
+        return "not_found", "Das konfigurierte Gemini-Modell oder der angeforderte Dienst wurde nicht gefunden."
+    if status >= 500:
+        return "provider_unavailable", "Gemini ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
+    return "http_error", f"Gemini konnte die Anfrage nicht verarbeiten (HTTP {status})."
+
+
+def gemini_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
+    """Classify Gemini failures without retaining the provider response body."""
+    reason, message = _gemini_error_reason(status, _gemini_error_tokens(_provider_error_payload(raw_body)))
     return {"state": "error", "reason": reason, "message": message, "http_status": status, "updated_at": utc_now()}
 
 
