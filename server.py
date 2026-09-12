@@ -3093,24 +3093,33 @@ def _safe_diagnostic_context(value: Any) -> dict[str, Any]:
     return safe
 
 
+def diagnostic_mapping_shape(value: dict[Any, Any], depth: int) -> dict[str, Any]:
+    fields = [
+        text[:80] if re.fullmatch(r"(?a:[A-Za-z][\w-]{0,79})", text) else "[nonstandard]"
+        for key in list(value)[:50]
+        for text in (str(key),)
+    ]
+    result: dict[str, Any] = {"type": "object", "field_count": len(value), "fields": fields}
+    if depth < 1 and value:
+        result["sample"] = diagnostic_response_shape(next(iter(value.values())), depth + 1)
+    return result
+
+
+def diagnostic_sequence_shape(value: list[Any] | tuple[Any, ...], depth: int) -> dict[str, Any]:
+    result: dict[str, Any] = {"type": "array", "items": len(value)}
+    if depth < 1 and value:
+        result["item_shape"] = diagnostic_response_shape(value[0], depth + 1)
+    return result
+
+
 def diagnostic_response_shape(value: Any, depth: int = 0) -> dict[str, Any]:
     """Describe a response without retaining athlete or provider payload values."""
     if value is None:
         return {"type": "null"}
     if isinstance(value, dict):
-        keys = []
-        for key in list(value)[:50]:
-            text = str(key)
-            keys.append(text[:80] if re.fullmatch(r"(?a:[A-Za-z][\w-]{0,79})", text) else "[nonstandard]")
-        result: dict[str, Any] = {"type": "object", "field_count": len(value), "fields": keys}
-        if depth < 1 and value:
-            result["sample"] = diagnostic_response_shape(next(iter(value.values())), depth + 1)
-        return result
+        return diagnostic_mapping_shape(value, depth)
     if isinstance(value, (list, tuple)):
-        result = {"type": "array", "items": len(value)}
-        if depth < 1 and value:
-            result["item_shape"] = diagnostic_response_shape(value[0], depth + 1)
-        return result
+        return diagnostic_sequence_shape(value, depth)
     if isinstance(value, bool):
         return {"type": "boolean"}
     if isinstance(value, (int, float)):

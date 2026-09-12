@@ -8456,6 +8456,14 @@ class CoachTests(unittest.TestCase):
         state = server.garmin_public_state()
         self.assertTrue(state["last_error"])
 
+    def test_diagnostic_response_shape_keeps_only_structure(self):
+        shape = server.diagnostic_response_shape({"athlete_name": "Ada", "nested": [{"secret": "hidden"}], "invalid key": 1})
+        self.assertEqual(shape["type"], "object")
+        self.assertEqual(shape["fields"], ["athlete_name", "nested", "[nonstandard]"])
+        self.assertEqual(shape["sample"], {"type": "string", "length": 3})
+        self.assertNotIn("Ada", json.dumps(shape))
+        self.assertEqual(server.diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"], ["token"])
+
     def test_garmin_sdk_calls_log_operation_and_result_summary(self):
         server.initialise_logging()
         result = server.external_call(
