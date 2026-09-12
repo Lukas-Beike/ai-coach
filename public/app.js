@@ -1437,15 +1437,39 @@ function activityTypeKey(activity) {
   return String(activity?.type || "Sportart unbekannt").trim() || "Sportart unbekannt";
 }
 
-function renderActivityFilters(activities) {
-  const root = $("#activityFilters");
-  if (!root) return;
-  root.replaceChildren();
+function activityTypeCounts(activities) {
   const counts = new Map();
   (Array.isArray(activities) ? activities : []).forEach((activity) => {
     const type = activityTypeKey(activity);
     counts.set(type, (counts.get(type) || 0) + 1);
   });
+  return counts;
+}
+
+function refreshActivityFilters() {
+  state.activityVisibleCount = 250;
+  renderActivities(state.data?.activities || []);
+}
+
+function activityFilterButton(type, count) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `activity-filter-button${state.activityTypes.has(type) ? " active" : ""}`;
+  button.textContent = `${type} (${count})`;
+  button.setAttribute("aria-pressed", state.activityTypes.has(type) ? "true" : "false");
+  button.addEventListener("click", () => {
+    if (state.activityTypes.has(type)) state.activityTypes.delete(type);
+    else state.activityTypes.add(type);
+    refreshActivityFilters();
+  });
+  return button;
+}
+
+function renderActivityFilters(activities) {
+  const root = $("#activityFilters");
+  if (!root) return;
+  root.replaceChildren();
+  const counts = activityTypeCounts(activities);
   if (!counts.size) {
     root.hidden = true;
     return;
@@ -1455,20 +1479,7 @@ function renderActivityFilters(activities) {
   label.className = "activity-filters-label";
   label.textContent = "Typ filtern:";
   root.append(label);
-  [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).forEach(([type, count]) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `activity-filter-button${state.activityTypes.has(type) ? " active" : ""}`;
-    button.textContent = `${type} (${count})`;
-    button.setAttribute("aria-pressed", state.activityTypes.has(type) ? "true" : "false");
-    button.addEventListener("click", () => {
-      if (state.activityTypes.has(type)) state.activityTypes.delete(type);
-      else state.activityTypes.add(type);
-      state.activityVisibleCount = 250;
-      renderActivities(state.data?.activities || []);
-    });
-    root.append(button);
-  });
+  [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).forEach(([type, count]) => root.append(activityFilterButton(type, count)));
   if (state.activityTypes.size) {
     const clear = document.createElement("button");
     clear.type = "button";
@@ -1476,8 +1487,7 @@ function renderActivityFilters(activities) {
     clear.textContent = "Zurücksetzen";
     clear.addEventListener("click", () => {
       state.activityTypes.clear();
-      state.activityVisibleCount = 250;
-      renderActivities(state.data?.activities || []);
+      refreshActivityFilters();
     });
     root.append(clear);
   }
@@ -2161,18 +2171,14 @@ async function loadContextPreview() {
   } finally { button.disabled = false; }
 }
 
-function renderTrainingPlans(plans, workouts) {
-  const root = $("#trainingPlans");
-  if (!root) return;
-  root.replaceChildren();
-  const entries = (workouts || []).filter((item) => item?.plan_id && !item?.archived);
-  if (!Array.isArray(plans) || !plans.length) return;
-  const heading = document.createElement("h3");
-  heading.className = "subsection-title";
-  heading.textContent = "Mehrwochenpläne";
-  root.append(heading);
-  plans.forEach((plan) => {
-    const planEntries = entries.filter((item) => String(item.plan_id) === String(plan.id));
+function trainingPlanEntry(item) {
+  const entry = document.createElement("div");
+  entry.className = "training-plan-entry";
+  entry.textContent = `${item.date ? dateLabel(item.date) : "Ohne Datum"} · ${item.name || "Einheit"} · ${item.duration_minutes || Math.round(Number(item.moving_time || 0) / 60) || "?"} Min.`;
+  return entry;
+}
+
+function trainingPlanCard(plan, planEntries) {
     const details = document.createElement("details");
     details.className = "training-plan";
     const summary = document.createElement("summary");
@@ -2189,12 +2195,7 @@ function renderTrainingPlans(plans, workouts) {
       goal.textContent = plan.goal;
       body.append(goal);
     }
-    planEntries.sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))).forEach((entry) => {
-      const item = document.createElement("div");
-      item.className = "training-plan-entry";
-      item.textContent = `${entry.date ? dateLabel(entry.date) : "Ohne Datum"} · ${entry.name || "Einheit"} · ${entry.duration_minutes || Math.round(Number(entry.moving_time || 0) / 60) || "?"} Min.`;
-      body.append(item);
-    });
+    planEntries.sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))).forEach((entry) => body.append(trainingPlanEntry(entry)));
     if (!planEntries.length) {
       const empty = document.createElement("p");
       empty.className = "fine-print";
@@ -2202,7 +2203,22 @@ function renderTrainingPlans(plans, workouts) {
       body.append(empty);
     }
     details.append(body);
-    root.append(details);
+    return details;
+}
+
+function renderTrainingPlans(plans, workouts) {
+  const root = $("#trainingPlans");
+  if (!root) return;
+  root.replaceChildren();
+  const entries = (workouts || []).filter((item) => item?.plan_id && !item?.archived);
+  if (!Array.isArray(plans) || !plans.length) return;
+  const heading = document.createElement("h3");
+  heading.className = "subsection-title";
+  heading.textContent = "Mehrwochenpläne";
+  root.append(heading);
+  plans.forEach((plan) => {
+    const planEntries = entries.filter((item) => String(item.plan_id) === String(plan.id));
+    root.append(trainingPlanCard(plan, planEntries));
   });
 }
 
@@ -2450,6 +2466,102 @@ function focusPlannedToday() {
   return true;
 }
 
+function plannedEntryDurationLabel(actual, entry) {
+  if (actual) return formatDuration(actual.moving_time ?? actual.elapsed_time);
+  if (entry.duration_minutes) return `${entry.duration_minutes} Min.`;
+  return formatDuration(entry.moving_time);
+}
+
+function appendActualCalendarDetails(details, actual) {
+  if (!actual) return;
+  const primaryMetrics = document.createElement("span");
+  primaryMetrics.className = "planned-actual-summary";
+  const load = calendarMetricNumber(actual.icu_training_load);
+  const rpe = calendarRpeLabel(actual.icu_rpe);
+  primaryMetrics.textContent = [load != null ? `Load ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
+  const facts = document.createElement("div");
+  facts.className = "planned-actual-facts";
+  appendCalendarFact(facts, "Dauer", formatDuration(actual.moving_time ?? actual.elapsed_time));
+  appendCalendarFact(facts, "Distanz", distanceLabel(actual.distance));
+  appendCalendarFact(facts, "Trainingsload", calendarMetricNumber(actual.icu_training_load));
+  appendCalendarFact(facts, "RPE", rpe != null ? `${rpe}/10` : "nicht angegeben");
+  appendCalendarFact(facts, "Intensität", calendarIntensityLabel(actual.icu_intensity));
+  appendCalendarFact(facts, "Ø Puls", calendarMetricNumber(actual.average_heartrate, " bpm"));
+  appendCalendarFact(facts, "Ø Leistung", calendarMetricNumber(actual.weighted_average_watts ?? actual.average_watts, " W"));
+  appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
+  appendCalendarFact(facts, "Höhenmeter", calendarMetricNumber(actual.total_elevation_gain, " hm"));
+  details.append(primaryMetrics, facts);
+}
+
+function appendPlannedCalendarComparison(details, entry, actual) {
+  if (!actual || entry.is_completed_activity) return;
+  const comparison = document.createElement("div");
+  comparison.className = "planned-comparison";
+  const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time;
+  const planLine = document.createElement("p");
+  planLine.textContent = `Plan: ${[
+    entry.name,
+    formatDuration(plannedDuration),
+    entry.icu_training_load != null ? `Load ${calendarMetricNumber(entry.icu_training_load)}` : null,
+  ].filter(Boolean).join(" · ")}`;
+  const actualLine = document.createElement("p");
+  actualLine.textContent = `Ist: ${[
+    formatDuration(actual.moving_time ?? actual.elapsed_time),
+    actual.icu_training_load != null ? `Load ${calendarMetricNumber(actual.icu_training_load)}` : null,
+  ].filter(Boolean).join(" · ")}`;
+  comparison.append(planLine, actualLine);
+  if (entry.compliance?.percentage != null) {
+    const ratio = document.createElement("p");
+    ratio.textContent = `${entry.compliance.basis === "training_load" ? "Load" : "Umfang"} Plan/Ist: ${entry.compliance.percentage} %`;
+    comparison.append(ratio);
+  }
+  details.append(comparison);
+}
+
+function renderPlannedEntry(entry, dateKey, todayKey) {
+  const actual = calendarActualActivity(entry);
+  const status = calendarEntryStatus(entry, dateKey, todayKey);
+  const card = document.createElement("details");
+  card.className = `planned-entry is-${status}`;
+  card.open = false;
+  const cardSummary = document.createElement("summary");
+  const cardTitle = document.createElement("strong");
+  cardTitle.textContent = actual?.name || entry.name || "Trainingseinheit";
+  const meta = document.createElement("span");
+  meta.className = "planned-meta";
+  const displayed = actual || entry;
+  meta.textContent = [
+    activitySportLabel(displayed),
+    calendarStartTime(displayed.start_date_local),
+    plannedEntryDurationLabel(actual, entry),
+  ].filter(Boolean).join(" · ");
+  cardSummary.append(cardTitle, meta);
+  if (status === "completed" || status === "missed") {
+    const statusText = document.createElement("span");
+    statusText.className = "planned-entry-status";
+    statusText.textContent = calendarStatusLabel(entry, dateKey, todayKey);
+    cardSummary.append(statusText);
+  }
+  const details = document.createElement("div");
+  details.className = "planned-entry-details";
+  appendActualCalendarDetails(details, actual);
+  appendPlannedCalendarComparison(details, entry, actual);
+  if (entry.description) {
+    const description = document.createElement("p");
+    description.className = "planned-description";
+    description.textContent = entry.description;
+    details.append(description);
+  }
+  if (!details.childElementCount) {
+    const description = document.createElement("p");
+    description.className = "planned-description";
+    description.textContent = "Keine weiteren Details hinterlegt.";
+    details.append(description);
+  }
+  card.append(cardSummary, details);
+  return card;
+}
+
 function renderPlanned(trainingCalendar) {
   const root = $("#plannedCalendar");
   const summary = $("#plannedSummary");
@@ -2592,102 +2704,7 @@ function renderPlanned(trainingCalendar) {
           : "Keine Einheit geplant";
         dayContent.append(empty);
       }
-      dayEntries.forEach((entry) => {
-        const actual = calendarActualActivity(entry);
-        const status = calendarEntryStatus(entry, dateKey, todayKey);
-        const card = document.createElement("details");
-        card.className = `planned-entry is-${status}`;
-        card.open = false;
-        const cardSummary = document.createElement("summary");
-        const cardTitle = document.createElement("strong");
-        cardTitle.textContent = actual?.name || entry.name || "Trainingseinheit";
-        const meta = document.createElement("span");
-        meta.className = "planned-meta";
-        const displayed = actual || entry;
-        let durationLabel;
-        if (actual) durationLabel = formatDuration(actual.moving_time ?? actual.elapsed_time);
-        else if (entry.duration_minutes) durationLabel = `${entry.duration_minutes} Min.`;
-        else durationLabel = formatDuration(entry.moving_time);
-        meta.textContent = [
-          activitySportLabel(displayed),
-          calendarStartTime(displayed.start_date_local),
-          durationLabel,
-        ].filter(Boolean).join(" · ");
-        cardSummary.append(cardTitle, meta);
-        if (status === "completed" || status === "missed") {
-          const statusText = document.createElement("span");
-          statusText.className = "planned-entry-status";
-          statusText.textContent = calendarStatusLabel(entry, dateKey, todayKey);
-          cardSummary.append(statusText);
-        }
-        card.append(cardSummary);
-        const details = document.createElement("div");
-        details.className = "planned-entry-details";
-        if (actual) {
-          const primaryMetrics = document.createElement("span");
-          primaryMetrics.className = "planned-actual-summary";
-          const load = calendarMetricNumber(actual.icu_training_load);
-          const rpe = calendarRpeLabel(actual.icu_rpe);
-          primaryMetrics.textContent = [load != null ? `Load ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
-          details.append(primaryMetrics);
-        }
-        if (actual) {
-          const facts = document.createElement("div");
-          facts.className = "planned-actual-facts";
-          const rpe = calendarRpeLabel(actual.icu_rpe);
-          const averageHeartRate = calendarMetricNumber(actual.average_heartrate, " bpm");
-          const averagePower = calendarMetricNumber(actual.weighted_average_watts ?? actual.average_watts, " W");
-          const elevation = calendarMetricNumber(actual.total_elevation_gain, " hm");
-          appendCalendarFact(facts, "Dauer", formatDuration(actual.moving_time ?? actual.elapsed_time));
-          appendCalendarFact(facts, "Distanz", distanceLabel(actual.distance));
-          appendCalendarFact(facts, "Trainingsload", calendarMetricNumber(actual.icu_training_load));
-          appendCalendarFact(facts, "RPE", rpe != null ? `${rpe}/10` : "nicht angegeben");
-          appendCalendarFact(facts, "Intensität", calendarIntensityLabel(actual.icu_intensity));
-          appendCalendarFact(facts, "Ø Puls", averageHeartRate);
-          appendCalendarFact(facts, "Ø Leistung", averagePower);
-          appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
-          appendCalendarFact(facts, "Höhenmeter", elevation);
-          details.append(facts);
-        }
-        if (actual && !entry.is_completed_activity) {
-          const comparison = document.createElement("div");
-          comparison.className = "planned-comparison";
-          const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time;
-          const plannedLoad = entry.icu_training_load;
-          const planLine = document.createElement("p");
-          planLine.textContent = `Plan: ${[
-            entry.name,
-            formatDuration(plannedDuration),
-            plannedLoad != null ? `Load ${calendarMetricNumber(plannedLoad)}` : null,
-          ].filter(Boolean).join(" · ")}`;
-          const actualLine = document.createElement("p");
-          actualLine.textContent = `Ist: ${[
-            formatDuration(actual.moving_time ?? actual.elapsed_time),
-            actual.icu_training_load != null ? `Load ${calendarMetricNumber(actual.icu_training_load)}` : null,
-          ].filter(Boolean).join(" · ")}`;
-          comparison.append(planLine, actualLine);
-          if (entry.compliance?.percentage != null) {
-            const ratio = document.createElement("p");
-            ratio.textContent = `${entry.compliance.basis === "training_load" ? "Load" : "Umfang"} Plan/Ist: ${entry.compliance.percentage} %`;
-            comparison.append(ratio);
-          }
-          details.append(comparison);
-        }
-        if (entry.description) {
-          const description = document.createElement("p");
-          description.className = "planned-description";
-          description.textContent = entry.description;
-          details.append(description);
-        }
-        if (!details.childElementCount) {
-          const description = document.createElement("p");
-          description.className = "planned-description";
-          description.textContent = "Keine weiteren Details hinterlegt.";
-          details.append(description);
-        }
-        card.append(details);
-        dayContent.append(card);
-      });
+      dayEntries.forEach((entry) => dayContent.append(renderPlannedEntry(entry, dateKey, todayKey)));
       if (dayNotes.childElementCount) dayContent.append(dayNotes);
       const insights = plannedDayInsights(dayContext, weather, dateKey, todayKey);
       day.append(dayContent);
@@ -3933,6 +3950,79 @@ async function resumeQueuedChat() {
   }
 }
 
+function chatPollStateIsCurrent(sessionGeneration, chatGeneration) {
+  return sessionGeneration === state.sessionGeneration && chatGeneration === state.chatGeneration;
+}
+
+function pendingChatTurn() {
+  if (state.chatRequest?.clientTurnId) return state.chatRequest.clientTurnId;
+  try {
+    return sessionStorage.getItem("coachPendingTurn");
+  } catch {
+    return null;
+  }
+}
+
+async function pollPendingChatReceipt(clientTurnId, sessionGeneration, chatGeneration) {
+  if (!clientTurnId || state.chatStream) return { running: false, stale: false };
+  try {
+    const receipt = await api(`/api/chat/receipt?client_turn_id=${encodeURIComponent(clientTurnId)}`);
+    if (!chatPollStateIsCurrent(sessionGeneration, chatGeneration)) return { running: false, stale: true };
+    if (["running", "queued"].includes(receipt.status)) {
+      if (!state.chatRequest) state.chatRequest = { phase: "recovering", clientTurnId, message: null };
+      return { running: true, stale: false };
+    }
+    applyChatReceipt(receipt);
+    rememberChatTurn(null);
+    return { running: false, stale: false };
+  } catch (error) {
+    if (!chatPollStateIsCurrent(sessionGeneration, chatGeneration)) return { running: false, stale: true };
+    if (![403, 404].includes(error.status)) throw error;
+    rememberChatTurn(null);
+    const request = state.chatRequest;
+    if (request?.message) {
+      state.rejectedMessages.push({ role: "user", content: request.message, client_turn_id: clientTurnId,
+        error: "Die Nachricht wurde nicht angenommen. Bitte erneut senden." });
+    }
+    return { running: false, stale: false };
+  }
+}
+
+function showRunningChatStatus(status) {
+  state.chatServerOperationId = status.operation_id || null;
+  if (!state.chatRequest) {
+    state.chatRequest = { phase: "recovering", operationId: state.chatServerOperationId, message: null, background: status.mode === "background" };
+  } else if (state.chatRequest.phase === "recovering") {
+    state.chatRequest.operationId = state.chatServerOperationId;
+    state.chatRequest.background = status.mode === "background";
+  }
+  if (!state.busy) {
+    state.busy = true;
+    renderQuickMessageTemplates();
+    updateChatControls();
+    renderMessages(state.data.messages || [], true);
+  }
+}
+
+async function finishRecoveredChatStatus() {
+  if (state.chatStream) return;
+  const request = state.chatRequest;
+  state.chatServerOperationId = null;
+  if (request?.phase !== "recovering") return;
+  await loadChatHistoryFresh();
+  if (state.chatRequest !== request) return;
+  state.chatRequest = null;
+  state.busy = Boolean(state.chatQueue.length);
+  state.chatStreamText = "";
+  state.chatResponseStarted = false;
+  state.chatResponseScrollPending = true;
+  renderQuickMessageTemplates();
+  renderMessages(state.data?.messages || [], true);
+  updateChatControls();
+  void resumeQueuedChat();
+  scrollChatToResponseStart();
+}
+
 async function pollChatStatus() {
   if (!state.data || document.visibilityState !== "visible" || !navigator.onLine) {
     scheduleChatStatusPoll(5_000);
@@ -3945,69 +4035,13 @@ async function pollChatStatus() {
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
   try {
-    let pendingTurn = state.chatRequest?.clientTurnId;
-    if (!pendingTurn) { try { pendingTurn = sessionStorage.getItem("coachPendingTurn"); } catch { } }
-    if (pendingTurn && !state.chatStream) {
-      try {
-        const receipt = await api(`/api/chat/receipt?client_turn_id=${encodeURIComponent(pendingTurn)}`);
-        if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-        if (receipt.status !== "running" && receipt.status !== "queued") {
-          applyChatReceipt(receipt);
-          rememberChatTurn(null);
-        } else {
-          running = true;
-          if (!state.chatRequest) state.chatRequest = { phase: "recovering", clientTurnId: pendingTurn, message: null };
-        }
-      } catch (error) {
-        if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-        if ([403, 404].includes(error.status)) {
-          rememberChatTurn(null);
-          const request = state.chatRequest;
-          if (request?.message) {
-            state.rejectedMessages.push({ role: "user", content: request.message, client_turn_id: pendingTurn,
-              error: "Die Nachricht wurde nicht angenommen. Bitte erneut senden." });
-          }
-        }
-        else throw error;
-      }
-    }
+    const receiptState = await pollPendingChatReceipt(pendingChatTurn(), sessionGeneration, chatGeneration);
+    if (receiptState.stale) return;
     const status = await api("/api/chat/status");
-    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-    running = running || status.status === "running";
-    if (running) {
-      state.chatServerOperationId = status.operation_id || null;
-      if (!state.chatRequest) state.chatRequest = { phase: "recovering", operationId: state.chatServerOperationId, message: null, background: status.mode === "background" };
-      else if (state.chatRequest.phase === "recovering") {
-        state.chatRequest.operationId = state.chatServerOperationId;
-        state.chatRequest.background = status.mode === "background";
-      }
-      if (!state.busy) {
-        state.busy = true;
-        renderQuickMessageTemplates();
-        updateChatControls();
-        renderMessages(state.data.messages || [], true);
-      }
-    } else {
-      if (state.chatStream) return;
-      const recoveringRequest = state.chatRequest?.phase === "recovering";
-      state.chatServerOperationId = null;
-      if (recoveringRequest) {
-        const request = state.chatRequest;
-        await loadChatHistoryFresh();
-        if (state.chatRequest === request) {
-          state.chatRequest = null;
-          state.busy = Boolean(state.chatQueue.length);
-          state.chatStreamText = "";
-          state.chatResponseStarted = false;
-          state.chatResponseScrollPending = true;
-          renderQuickMessageTemplates();
-          renderMessages(state.data?.messages || [], true);
-          updateChatControls();
-          void resumeQueuedChat();
-          scrollChatToResponseStart();
-        }
-      }
-    }
+    if (!chatPollStateIsCurrent(sessionGeneration, chatGeneration)) return;
+    running = receiptState.running || status.status === "running";
+    if (running) showRunningChatStatus(status);
+    else await finishRecoveredChatStatus();
   } catch (error) {
     if (state.chatStatusPollInFlight === pollRequest && !/Authentication/.test(error.message)) scheduleChatStatusPoll(5_000);
   } finally {
@@ -4063,6 +4097,224 @@ function queueChatMessage(message, mode, requestKind = null, attachments = []) {
   return true;
 }
 
+function chatRequestIsCurrent(sessionGeneration, chatGeneration) {
+  return sessionGeneration === state.sessionGeneration && chatGeneration === state.chatGeneration;
+}
+
+async function chatStreamResponse(message, requestKind, attachments, clientTurnId, stream) {
+  return fetch("/api/chat/stream", {
+    method: "POST",
+    credentials: "same-origin",
+    signal: stream.controller.signal,
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": cookie("ic_csrf") },
+    body: JSON.stringify({ message, client_turn_id: clientTurnId, request_kind: requestKind, attachments }),
+  });
+}
+
+async function rejectChatStreamResponse(response, context) {
+  const { attachments, chatGeneration, clientTurnId, message, sessionGeneration, stream } = context;
+  stream.serverError = true;
+  stream.rejected = true;
+  let payload = {};
+  try { payload = await response.json(); } catch { }
+  if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) return false;
+  if (response.status === 401) {
+    const rejectedAttachments = [...(attachments || [])];
+    showLogin();
+    state.chatAttachments = rejectedAttachments;
+    renderChatAttachments();
+    const input = $("#messageInput");
+    if (input.value.trim()) state.rejectedMessages.push({ role: "user", content: message, client_turn_id: clientTurnId, error: payload.error || "Bitte erneut anmelden." });
+    else input.value = message;
+    state.chatDraftDirty = true;
+    toast(payload.error || "Bitte erneut anmelden; der Entwurf bleibt erhalten.", true);
+  }
+  throw globalThis.AppApi.responseError(response, typeof payload.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`, payload.reason || "http_error");
+}
+
+function parseChatStreamEvent(block) {
+  let event = "message";
+  const data = [];
+  for (const line of block.replaceAll("\r", "").split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+  }
+  return data.length ? { event, payload: JSON.parse(data.join("\n")) } : null;
+}
+
+function applyStartedChatStreamEvent(payload, context) {
+  const { request, stream } = context;
+  stream.operationId = payload.operation_id || null;
+  request.operationId = stream.operationId;
+  state.chatServerOperationId = stream.operationId;
+  if (stream.cancelRequested) void cancelChat();
+}
+
+function applyDeltaChatStreamEvent(payload) {
+  const responseJustStarted = !state.chatStreamText;
+  state.chatStreamText += payload.text || "";
+  state.chatResponseStarted = state.chatResponseStarted || responseJustStarted;
+  if (responseJustStarted) state.chatResponseScrollPending = true;
+  scheduleChatStreamRender(responseJustStarted);
+}
+
+function applyBackgroundChatStreamEvent(payload, context) {
+  const { request, stream } = context;
+  context.background = true;
+  request.background = true;
+  request.phase = "recovering";
+  stream.operationId = payload.operation_id || stream.operationId;
+  request.operationId = stream.operationId;
+  state.chatServerOperationId = stream.operationId;
+  renderMessages(state.data?.messages || [], false);
+  updateChatControls();
+}
+
+function applyCompletedChatStreamEvent(payload, context) {
+  const { clientTurnId, request } = context;
+  cancelScheduledChatStreamRender();
+  context.completed = true;
+  context.completedPayload = payload;
+  state.chatContentVersion += 1;
+  rememberChatTurn(null);
+  request.phase = "reconciling";
+  request.responseMessageId = payload.message?.id || null;
+  state.chatResponseMessageId = request.responseMessageId;
+  request.responseMessageReceived = reconcileCompletedChatMessage(payload.message ? { ...payload.message, client_turn_id: clientTurnId } : null);
+  if (request.responseMessageReceived) state.chatStreamText = "";
+  request.hadOutstandingProposals = Array.isArray(state.coachActionProposals) && state.coachActionProposals.length > 0;
+  if (request.hadOutstandingProposals) state.chatProposalRefreshPending = true;
+  state.coachActionProposals = Array.isArray(payload?.proposed_actions) ? payload.proposed_actions : [];
+  if (payload?.coach_quick_actions && state.data) {
+    state.data.coach_quick_actions = payload.coach_quick_actions;
+    renderCoachOverview(state.data);
+  }
+  addStructuredCoachReceipts(payload);
+  renderMessages(state.data?.messages || [], false);
+  updateChatControls();
+}
+
+function applyChatStreamEvent(event, payload, context) {
+  if (event === "started") return applyStartedChatStreamEvent(payload, context);
+  if (event === "delta") return applyDeltaChatStreamEvent(payload);
+  if (event === "background") return applyBackgroundChatStreamEvent(payload, context);
+  if (event === "completed") return applyCompletedChatStreamEvent(payload, context);
+  if (event === "error") {
+    context.stream.serverError = true;
+    if (!context.background) context.stream.rejected = true;
+    const error = new Error(payload.message || "Die Coach-Anfrage ist fehlgeschlagen.");
+    error.reason = payload.reason;
+    throw error;
+  }
+}
+
+function consumeChatStreamBlock(block, context) {
+  if (!chatRequestIsCurrent(context.sessionGeneration, context.chatGeneration)) return;
+  const parsed = parseChatStreamEvent(block);
+  if (parsed) applyChatStreamEvent(parsed.event, parsed.payload, context);
+}
+
+async function readChatStream(response, context) {
+  if (!response.body) throw new Error("Der Browser unterstützt keinen Antwort-Stream.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() || "";
+    for (const block of blocks) consumeChatStreamBlock(block, context);
+    // The chat endpoint is a finite SSE response. A proxy may keep the HTTP
+    // connection open after the terminal event, so release the reader as
+    // soon as the persisted result has arrived instead of trapping the
+    // composer in the reconciling state.
+    if (context.completed || context.background) {
+      await reader.cancel().catch(() => {});
+      break;
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) consumeChatStreamBlock(buffer, context);
+}
+
+async function refreshCompletedChatStream(context) {
+  const { completedPayload, request } = context;
+  const hasPersistedReceipt = request.responseMessageReceived || Boolean(completedPayload?.message?.content && state.data);
+  if (hasPersistedReceipt) {
+    if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
+    return;
+  }
+  await loadChatHistoryFresh();
+}
+
+async function finishChatStream(context) {
+  const { completed, stream } = context;
+  if (context.background) {
+    scheduleChatStatusPoll(0);
+    return "recovering";
+  }
+  if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
+  await refreshCompletedChatStream(context);
+  if (completed) scrollChatToResponseStart();
+  invalidateContextPreview();
+  return completed ? "completed" : "failed";
+}
+
+async function recoverChatRequestFailure(error, context) {
+  const { attachments, chatGeneration, clientTurnId, completed, message, request, sessionGeneration, stream } = context;
+  if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) return false;
+  cancelScheduledChatStreamRender();
+  if (stream.rejected) {
+    rememberChatTurn(null);
+    const input = $("#messageInput");
+    if (input.value.trim()) {
+      const failed = state.data.messages.find((entry) => entry.optimistic && entry.client_turn_id === clientTurnId);
+      if (failed) { failed.error = error.message; failed.attachments = attachments; }
+    } else {
+      state.data.messages = (state.data.messages || []).filter((entry) => !(entry.optimistic && entry.client_turn_id === clientTurnId));
+      input.value = message;
+      state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
+      renderChatAttachments();
+    }
+    state.chatDraftDirty = true;
+    toast(error.message, true);
+    return false;
+  }
+  const cancelled = stream.cancelRequested || error?.name === "AbortError" || error?.reason === "chat_cancelled";
+  if (!completed && !stream.serverError) {
+    request.phase = "recovering";
+    state.chatServerOperationId = stream.operationId || state.chatServerOperationId;
+    if (state.chatStream === stream) state.chatStream = null;
+    renderMessages(state.data?.messages || [], false);
+    updateChatControls();
+    scheduleChatStatusPoll(0);
+    return "recovering";
+  }
+  if (!cancelled) toast(error.message, true);
+  scheduleChatStatusPoll(0);
+  await loadChatHistoryFresh();
+  invalidateContextPreview();
+  return false;
+}
+
+function finishChatRequest(context) {
+  const { chatGeneration, completed, request, sessionGeneration, stream } = context;
+  if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) return;
+  if (state.chatStream === stream) state.chatStream = null;
+  if (request.phase !== "recovering") {
+    cancelScheduledChatStreamRender();
+    state.chatStreamText = "";
+  }
+  if (!completed && request.phase !== "recovering") state.chatResponseScrollPending = false;
+  if (!completed && request.phase !== "recovering") state.chatResponseMessageId = null;
+  state.chatResponseStarted = false;
+  if (state.chatRequest === request && request.phase !== "recovering") state.chatRequest = null;
+  if (request.phase !== "recovering") state.chatServerOperationId = null;
+  updateChatControls();
+}
+
 async function requestCoachResponse(message, requestKind = null, attachments = []) {
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
@@ -4079,186 +4331,20 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
   state.chatStream = stream;
   updateChatControls();
   renderMessages(state.data?.messages || [], true);
-  let completed = false;
-  let background = false;
+  const context = { attachments, background: false, chatGeneration, clientTurnId, completed: false, completedPayload: null, message, request, sessionGeneration, stream };
   try {
-    const response = await fetch("/api/chat/stream", {
-      method: "POST",
-      credentials: "same-origin",
-      signal: stream.controller.signal,
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": cookie("ic_csrf") },
-      body: JSON.stringify({ message, client_turn_id: clientTurnId, request_kind: requestKind, attachments }),
-    });
-    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
+    const response = await chatStreamResponse(message, requestKind, attachments, clientTurnId, stream);
+    if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) return false;
     if (!response.ok) {
-      stream.serverError = true;
-      stream.rejected = true;
-      let payload = {};
-      try { payload = await response.json(); } catch { }
-      if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
-      if (response.status === 401) {
-        const rejectedAttachments = [...(attachments || [])];
-        showLogin();
-        state.chatAttachments = rejectedAttachments;
-        renderChatAttachments();
-        const input = $("#messageInput");
-        if (input.value.trim()) state.rejectedMessages.push({ role: "user", content: message, client_turn_id: clientTurnId, error: payload.error || "Bitte erneut anmelden." });
-        else input.value = message;
-        state.chatDraftDirty = true;
-        toast(payload.error || "Bitte erneut anmelden; der Entwurf bleibt erhalten.", true);
-      }
-      throw globalThis.AppApi.responseError(response, typeof payload.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`, payload.reason || "http_error");
-    }
-    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
-    if (!response.body) throw new Error("Der Browser unterstützt keinen Antwort-Stream.");
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    const consume = (block) => {
-      if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-      let event = "message";
-      const data = [];
-      for (const line of block.replaceAll("\r", "").split("\n")) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-      }
-      if (!data.length) return;
-      const payload = JSON.parse(data.join("\n"));
-      if (event === "started") {
-        stream.operationId = payload.operation_id || null;
-        request.operationId = stream.operationId;
-        state.chatServerOperationId = stream.operationId;
-        if (stream.cancelRequested) void cancelChat();
-      }
-      else if (event === "delta") {
-        const responseJustStarted = !state.chatStreamText;
-        state.chatStreamText += payload.text || "";
-        state.chatResponseStarted = state.chatResponseStarted || responseJustStarted;
-        if (responseJustStarted) state.chatResponseScrollPending = true;
-        scheduleChatStreamRender(responseJustStarted);
-      } else if (event === "background") {
-        background = true;
-        request.background = true;
-        request.phase = "recovering";
-        stream.operationId = payload.operation_id || stream.operationId;
-        request.operationId = stream.operationId;
-        state.chatServerOperationId = stream.operationId;
-        renderMessages(state.data?.messages || [], false);
-        updateChatControls();
-      } else if (event === "error") {
-        stream.serverError = true;
-        if (!background) stream.rejected = true;
-        const error = new Error(payload.message || "Die Coach-Anfrage ist fehlgeschlagen.");
-        error.reason = payload.reason;
-        throw error;
-      } else if (event === "completed") {
-        cancelScheduledChatStreamRender();
-        completed = true;
-        state.chatContentVersion += 1;
-        rememberChatTurn(null);
-        request.phase = "reconciling";
-        request.responseMessageId = payload.message?.id || null;
-        state.chatResponseMessageId = request.responseMessageId;
-        request.responseMessageReceived = reconcileCompletedChatMessage(payload.message ? { ...payload.message, client_turn_id: clientTurnId } : null);
-        if (request.responseMessageReceived) state.chatStreamText = "";
-        request.hadOutstandingProposals = Array.isArray(state.coachActionProposals) && state.coachActionProposals.length > 0;
-        if (request.hadOutstandingProposals) state.chatProposalRefreshPending = true;
-        state.coachActionProposals = Array.isArray(payload?.proposed_actions) ? payload.proposed_actions : [];
-        if (payload?.coach_quick_actions && state.data) {
-          state.data.coach_quick_actions = payload.coach_quick_actions;
-          renderCoachOverview(state.data);
-        }
-        addStructuredCoachReceipts(payload);
-        renderMessages(state.data?.messages || [], false);
-        updateChatControls();
-      }
-    };
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      const blocks = buffer.split(/\r?\n\r?\n/);
-      buffer = blocks.pop() || "";
-      for (const block of blocks) consume(block);
-      // The chat endpoint is a finite SSE response. A proxy may keep the HTTP
-      // connection open after the terminal event, so release the reader as
-      // soon as the persisted result has arrived instead of trapping the
-      // composer in the reconciling state.
-      if (completed || background) {
-        await reader.cancel().catch(() => {});
-        break;
-      }
-    }
-    buffer += decoder.decode();
-    if (buffer.trim()) consume(buffer);
-    if (background) {
-      scheduleChatStatusPoll(0);
-      return "recovering";
-    }
-    if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
-    // A completed SSE receipt already contains the persisted assistant message.
-    // Do not keep the composer in "reconciling" while unrelated/pending loads
-    // finish; refresh the authoritative proposal list in the background.
-    if (completed && request.responseMessageReceived) {
-      if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
-    } else if (completed && payload.message?.content && state.data) {
-      // A valid completed SSE receipt already contains the persisted assistant
-      // message. Keep the receipt authoritative even if reconciliation was
-      // skipped by a transient state transition; do not refetch chat history.
-      if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
-    } else {
-      await loadChatHistoryFresh();
-    }
-    if (completed) scrollChatToResponseStart();
-    invalidateContextPreview();
-    return completed ? "completed" : "failed";
-  } catch (error) {
-    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
-    cancelScheduledChatStreamRender();
-    if (stream.rejected) {
-      rememberChatTurn(null);
-      const input = $("#messageInput");
-      if (input.value.trim()) {
-        const failed = state.data.messages.find((entry) => entry.optimistic && entry.client_turn_id === clientTurnId);
-        if (failed) { failed.error = error.message; failed.attachments = attachments; }
-      } else {
-        state.data.messages = (state.data.messages || []).filter((entry) => !(entry.optimistic && entry.client_turn_id === clientTurnId));
-        input.value = message;
-        state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
-        renderChatAttachments();
-      }
-      state.chatDraftDirty = true;
-      toast(error.message, true);
+      await rejectChatStreamResponse(response, context);
       return false;
     }
-    const cancelled = stream.cancelRequested || error?.name === "AbortError" || error?.reason === "chat_cancelled";
-    if (!completed && !stream.serverError) {
-      request.phase = "recovering";
-      state.chatServerOperationId = stream.operationId || state.chatServerOperationId;
-      if (state.chatStream === stream) state.chatStream = null;
-      renderMessages(state.data?.messages || [], false);
-      updateChatControls();
-      scheduleChatStatusPoll(0);
-      return "recovering";
-    }
-    if (!cancelled) toast(error.message, true);
-    scheduleChatStatusPoll(0);
-    await loadChatHistoryFresh();
-    invalidateContextPreview();
-    return false;
+    await readChatStream(response, context);
+    return await finishChatStream(context);
+  } catch (error) {
+    return await recoverChatRequestFailure(error, context);
   } finally {
-    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-    if (state.chatStream === stream) state.chatStream = null;
-    if (request.phase !== "recovering") {
-      cancelScheduledChatStreamRender();
-      state.chatStreamText = "";
-    }
-    if (!completed && request.phase !== "recovering") state.chatResponseScrollPending = false;
-    if (!completed && request.phase !== "recovering") state.chatResponseMessageId = null;
-    state.chatResponseStarted = false;
-    if (state.chatRequest === request && request.phase !== "recovering") state.chatRequest = null;
-    if (request.phase !== "recovering") state.chatServerOperationId = null;
-    updateChatControls();
+    finishChatRequest(context);
   }
 }
 
