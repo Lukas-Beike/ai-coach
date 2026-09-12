@@ -108,7 +108,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     def seed_activity(self):
         activity = {"id": "synthetic-run", "type": "Run", "name": "Synthetic run", "start_date_local": "2026-09-06T10:00:00",
                     "moving_time": 1800, "distance": 5000}
-        server.save_snapshot_view({"recent_activities": [activity], "recent_wellness": [], "planned_workouts": []})
+        server.save_snapshot_view({
+            "recent_activities": [activity], "recent_wellness": [], "planned_workouts": [],
+            "raw_provider_data": {"activities": [{**activity, "raw_detail": "Synthetic complete provider record"}]},
+        })
         return activity
 
     @covers("read_profile:success", "update_profile:success")
@@ -128,7 +131,8 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(server.sync_jobs_state(), [])
 
     @covers("read_training_state:success", "list_planned_workouts:success", "list_workout_library:success",
-            "list_training_plans:success", "list_competitions:success", "list_change_history:success", "list_recent_activities:success")
+            "list_training_plans:success", "list_competitions:success", "list_change_history:success", "list_recent_activities:success",
+            "get_activity_details:success")
     def test_read_tools_return_seeded_objects_without_mutating_them(self):
         planned = server.save_workout_library_entries([self.workout()], plan_name="Synthetic plan")[0]
         server.create_local_library_template({"name": "Synthetic template", "sport": "Run", "description": "- 30m 60% Easy", "duration_minutes": 30})
@@ -138,9 +142,11 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         for tool, expected in (("read_training_state", planned["id"]), ("list_planned_workouts", planned["id"]),
                                ("list_workout_library", "Synthetic template"), ("list_training_plans", "Synthetic plan"),
                                ("list_competitions", "Synthetic race"), ("list_change_history", "entity_type"),
-                               ("list_recent_activities", "synthetic-run")):
+                               ("list_recent_activities", "synthetic-run"), ("get_activity_details", "raw_detail")):
             with self.subTest(tool=tool):
-                result = self.run_tool(tool, message="Zeig mir den aktuellen Stand.")
+                arguments = {"activity_id": "synthetic-run"} if tool == "get_activity_details" else None
+                message = "Analysiere bitte diese konkrete Einheit im Detail." if tool == "get_activity_details" else "Zeig mir den aktuellen Stand."
+                result = self.run_tool(tool, arguments, message=message)
                 self.assertIn(expected, json.dumps(result))
                 self.assertEqual(self.athlete_state(), before)
 

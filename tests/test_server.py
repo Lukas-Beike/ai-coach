@@ -496,7 +496,7 @@ class CoachTests(unittest.TestCase):
         self.assertLessEqual({
             "list_competitions", "save_competition", "delete_competition", "sync_competitions",
             "list_training_plans", "update_training_plan", "preview_adaptive_replan", "apply_adaptive_replan",
-            "list_recent_activities", "list_workout_library", "list_planned_workouts", "list_change_history",
+            "list_recent_activities", "get_activity_details", "list_workout_library", "list_planned_workouts", "list_change_history",
             "apply_workout_library_plan", "delete_activity_feedback", "refresh_current_performance",
         }, names)
 
@@ -524,6 +524,51 @@ class CoachTests(unittest.TestCase):
         enqueue.assert_called_once_with(
             "intervals", "competition_push", {"reason": "Bestätigter Coach-Auftrag"}, requested_by="coach",
         )
+
+    def test_explicit_activity_detail_reads_only_the_requested_complete_raw_record(self):
+        server.save_snapshot({
+            "synced_at": "2026-09-11T08:00:00+00:00",
+            "athlete": {},
+            "recent_activities": [
+                {"id": "activity-1", "name": "Tempo", "start_date_local": "2026-09-11T07:00:00"},
+                {"id": "activity-2", "name": "Recovery", "start_date_local": "2026-09-10T07:00:00"},
+            ],
+            "recent_wellness": [],
+            "upcoming_calendar": [],
+            "raw_provider_data": {
+                "athlete": {},
+                "activities": [
+                    {
+                        "id": "activity-1", "name": "Tempo", "average_watts": 245,
+                        "streams": {"watts": [200, 250, 280]}, "provider_extra": "kept",
+                    },
+                    {"id": "activity-2", "name": "Recovery", "average_watts": 120},
+                ],
+                "wellness": [],
+                "upcoming_calendar": [],
+            },
+        })
+        intent = {
+            "intent": "local_action", "operation": "get_activity_details", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": [],
+        }
+
+        result = server._structured_coach_tool_result(
+            "get_activity_details", {"activity_id": "activity-1"}, intent=intent,
+            conversation_id="conversation-activity-detail", client_turn_id="turn-activity-detail",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["activity"]["id"], "activity-1")
+        self.assertEqual(result["activity"]["streams"], {"watts": [200, 250, 280]})
+        self.assertEqual(result["activity"]["provider_extra"], "kept")
+        self.assertEqual(result["data_scope"], "complete raw Intervals.icu activity record from the durable provider snapshot")
+        self.assertNotIn("activity-2", json.dumps(result))
+
+        with self.assertRaises(server.AppError) as missing:
+            server.get_activity_details("activity-3")
+        self.assertEqual(missing.exception.reason, "activity_details_not_found")
 
     def test_structured_coach_reads_local_detail_and_schedules_library_templates(self):
         template = server.create_local_library_template({
