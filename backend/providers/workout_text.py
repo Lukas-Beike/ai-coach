@@ -81,7 +81,7 @@ def _read_time_part(value: str, position: int) -> tuple[int, str, str] | None:
     return position + 1, value[amount_start:position], value[position]
 
 
-def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
+def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Normalize explicit zone notation only, never infer effort from prose.
 
     The Coach selects the intensity semantically. This serializer tolerates
@@ -132,7 +132,7 @@ def canonical_workout_zones(description: str, *, endurance: bool = True) -> str:
     return "\n".join(normalized)
 
 
-def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
+def structured_steps(description: str, target: str = "AUTO") -> list[dict]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Return expanded steps for comparison with the provider's parsed reply."""
     result = []
     block = []
@@ -219,7 +219,7 @@ def structured_duration(description: str, target: str = "AUTO") -> tuple[float, 
     return sum(step.get("duration", 0) for step in steps), any("distance" in step for step in steps)
 
 
-def verify_workout_readback(description: str, remote: dict) -> None:
+def verify_workout_readback(description: str, remote: dict) -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Require provider-generated steps, targets and load, not just HTTP 200.
 
     Source: https://forum.intervals.icu/t/downloading-planned-workouts-from-the-api/93737

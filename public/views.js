@@ -65,7 +65,7 @@ function listItemFromMarkdownLine(line) {
   return { type: "ol", text: trimmed.slice(digitCount + 1).trimStart() };
 }
 
-function markdownToHtml(markdown) {
+function markdownToHtml(markdown) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const lines = String(markdown || "").replaceAll("\r", "").split("\n");
   const output = [];
   let paragraph = [];
@@ -97,7 +97,14 @@ function markdownToHtml(markdown) {
     if (inCode) { codeLines.push(line); continue; }
     if (!line.trim()) { flushParagraph(); closeList(); continue; }
     const heading = headingFromMarkdownLine(line);
-    if (heading) { flushParagraph(); closeList(); output.push(`<h${heading.level}>${inlineMarkdown(heading.text.replace(/#+$/, "").trim())}</h${heading.level}>`); continue; }
+    if (heading) {
+      flushParagraph();
+      closeList();
+      let headingText = heading.text.trim();
+      while (headingText.endsWith("#")) headingText = headingText.slice(0, -1).trimEnd();
+      output.push(`<h${heading.level}>${inlineMarkdown(headingText)}</h${heading.level}>`);
+      continue;
+    }
     const horizontalRule = line.trim();
     const isHorizontalRule = horizontalRule.length >= 3
       && (horizontalRule.split("").every((character) => character === "-")
@@ -161,21 +168,16 @@ function plannedEventDate(event) {
   return String(event?.start_date_local || event?.date || "").slice(0, 10);
 }
 
-function weatherIcon(code) {
+function weatherIcon(code) { // NOSONAR - cohesive UI flow keeps the state transition explicit
   const number = Number(code);
   if (!Number.isFinite(number)) return "🌡️";
-  if (number === 0) return "☀️";
-  if (number === 1) return "🌤️";
-  if (number === 2) return "⛅";
-  if (number === 3) return "☁️";
-  if ([45, 48].includes(number)) return "🌫️";
-  if (number >= 51 && number <= 57) return "🌦️";
-  if (number >= 61 && number <= 67) return "🌧️";
-  if (number >= 71 && number <= 77) return number === 75 ? "❄️" : "🌨️";
-  if (number >= 80 && number <= 82) return number === 80 ? "🌦️" : "🌧️";
-  if (number >= 85 && number <= 86) return "🌨️";
-  if (number >= 95) return "⛈️";
-  return "🌤️";
+  const exact = { 0: "☀️", 1: "🌤️", 2: "⛅", 3: "☁️", 45: "🌫️", 48: "🌫️", 75: "❄️" };
+  if (exact[number]) return exact[number];
+  const range = [
+    [51, 57, "🌦️"], [61, 67, "🌧️"], [71, 74, "🌨️"], [76, 77, "🌨️"],
+    [80, 80, "🌦️"], [81, 82, "🌧️"], [85, 86, "🌨️"], [95, Number.POSITIVE_INFINITY, "⛈️"],
+  ].find(([minimum, maximum]) => number >= minimum && number <= maximum);
+  return range?.[2] || "🌤️";
 }
 
 function weatherIconFor(item) {

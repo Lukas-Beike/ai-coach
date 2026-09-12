@@ -55,5 +55,5 @@
     return payload;
   }
 
-  window.AppApi = Object.freeze({ audio, request, responseError });
+  globalThis.AppApi = Object.freeze({ audio, request, responseError });
 })();

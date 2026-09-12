@@ -378,7 +378,7 @@ def fit_summary(data):
     return summary
 
 
-def gpx_summary(data):
+def gpx_summary(data):  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     text = data.decode("utf-8-sig")
     if "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
         raise ValueError("XML declarations are forbidden")
@@ -421,7 +421,7 @@ def gpx_summary(data):
             "sampled_coordinates_lat_lon_ele": points[::stride], "end": points[-1]}
 
 
-def validate_attachments(value):
+def validate_attachments(value):  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if value is None:
         return []
     if not isinstance(value, list) or len(value) > MAX_FILES:

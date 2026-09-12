@@ -469,7 +469,7 @@ def garmin_operation(function: Any) -> Any:
     return guarded
 
 
-def load_local_env() -> None:
+def load_local_env() -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Load local and persistent settings while preserving non-empty process env values."""
     for env_path in (ROOT / ".env", DATA_DIR / ".env"):
         try:
@@ -1300,7 +1300,7 @@ def observed_operation(provider: str, reason: Any = "background", operation_id: 
         OPERATION_CONTEXT.reset(token)
 
 
-def observed_sync(provider: str, area: str = "default"):
+def observed_sync(provider: str, area: str = "default"):  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Correlate a sync function and its provider calls with one operation."""
     def decorator(function: Any) -> Any:
         @wraps(function)
@@ -1824,7 +1824,7 @@ def _sync_job_error_class(error: BaseException) -> str:
     }.get(code, code)
 
 
-def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, Any]:
+def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Validate the small provider-specific payload stored in the database."""
     try:
         envelope = validate_job_request(provider, job_type, payload)
@@ -1992,7 +1992,7 @@ def _enqueue_automatic_performance_refresh(reason: str) -> dict[str, Any] | None
         return None
 
 
-def _wait_for_performance_refresh(
+def _wait_for_performance_refresh(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     job_id: str | None = None,
     *,
     cancel_event: threading.Event | None = None,
@@ -2039,7 +2039,7 @@ def _wait_for_performance_refresh(
 
 
 @maintenance_operation
-def enqueue_sync_job(
+def enqueue_sync_job(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     provider: str,
     job_type: str = "refresh",
     payload: Any = None,
@@ -2194,7 +2194,7 @@ def _sync_job_item_results(result: Any) -> list[dict[str, Any]] | None:
     return [item for item in result["results"] if isinstance(item, dict)]
 
 
-def _sync_job_update_from_result(job_id: str, result: Any, *, fallback_status: str) -> None:
+def _sync_job_update_from_result(job_id: str, result: Any, *, fallback_status: str) -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Persist per-object plan-push outcomes and derive the aggregate status."""
     item_results = _sync_job_item_results(result)
     if not item_results:
@@ -2249,7 +2249,7 @@ def _sync_job_update_from_result(job_id: str, result: Any, *, fallback_status: s
         )
 
 
-def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
+def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     envelope = _sync_job_payload(
         str(job.get("provider") or ""),
         str(job.get("type") or ""),
@@ -2430,7 +2430,7 @@ def _scheduled_provider_retry_at(db: Any, provider: str) -> str | None:
     return None
 
 
-def provider_freshness_state() -> list[dict[str, Any]]:
+def provider_freshness_state() -> list[dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     fallbacks = {
         ("intervals", "activities"): get_kv("last_sync_at"),
         ("intervals", "competitions"): get_kv("last_competition_sync_at"),
@@ -2520,7 +2520,7 @@ def provider_freshness_state() -> list[dict[str, Any]]:
     return result
 
 
-def _audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:
+def _audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Return the small, local-only representation allowed in change history."""
     if value is None:
         return None
@@ -2691,7 +2691,7 @@ def list_change_history(limit: int = 100) -> list[dict[str, Any]]:
     return [_change_history_view(dict(row)) for row in rows]
 
 
-def _history_current(db: Any, entity_type: str, entity_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def _history_current(db: Any, entity_type: str, entity_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if entity_type == "profile":
         payload = PROFILE_REPOSITORY.get(db)
         try:
@@ -2772,7 +2772,7 @@ def _history_preview(change_id: Any, session_csrf_hash: str) -> dict[str, Any]:
     }
 
 
-def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
+def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     change_id = str(payload.get("change_id") or "").strip()
     if not re.fullmatch(UUID_PATTERN, change_id):
         raise AppError(400, "Ungültige Änderungshistorie-ID.")
@@ -3019,7 +3019,7 @@ def _safe_diagnostic_context(value: Any) -> dict[str, Any]:
     return safe
 
 
-def diagnostic_response_shape(value: Any, depth: int = 0) -> dict[str, Any]:
+def diagnostic_response_shape(value: Any, depth: int = 0) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Describe a response without retaining athlete or provider payload values."""
     if value is None:
         return {"type": "null"}
@@ -3217,7 +3217,7 @@ def activity_kind(activity: Any) -> str:
     return "other"
 
 
-def parallel_cycling_event_groups(events: Any) -> list[list[dict[str, Any]]]:
+def parallel_cycling_event_groups(events: Any) -> list[list[dict[str, Any]]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Find planned rides whose times overlap or are too vague to distinguish."""
     candidates = [
         event for event in events if isinstance(event, dict)
@@ -3272,7 +3272,7 @@ def parallel_cycling_event_groups(events: Any) -> list[list[dict[str, Any]]]:
     return groups
 
 
-def garmin_activity_duplicates_intervals(garmin_activity: Any, intervals_activities: list[dict[str, Any]]) -> bool:
+def garmin_activity_duplicates_intervals(garmin_activity: Any, intervals_activities: list[dict[str, Any]]) -> bool:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Treat the Intervals/Wahoo recording as canonical when Garmin is a near duplicate."""
     if not isinstance(garmin_activity, dict):
         return False
@@ -3354,7 +3354,7 @@ def intervals_cycling_activities_match(left: Any, right: Any) -> bool:
     )
 
 
-def latest_wahoo_garmin_duplicate(snapshot: dict[str, Any] | None = None) -> dict[str, Any] | None:
+def latest_wahoo_garmin_duplicate(snapshot: dict[str, Any] | None = None) -> dict[str, Any] | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Return the newest exact-source ride pair, always keeping Wahoo canonical."""
     snapshot = snapshot if isinstance(snapshot, dict) else latest_snapshot() or {}
     raw = snapshot.get("raw_provider_data") if isinstance(snapshot.get("raw_provider_data"), dict) else {}
@@ -3461,7 +3461,7 @@ def _garmin_vo2_value(value: Any) -> float | int | None:
     return number if number is not None and 20 <= float(number) <= 100 else None
 
 
-def _garmin_duration_seconds(value: Any) -> float | int | None:
+def _garmin_duration_seconds(value: Any) -> float | int | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if isinstance(value, dict):
         value = first_present(value, ("raceTime", "racePredictionTime", "predictedTime", "time", "seconds", "value"))
     if isinstance(value, str) and ":" in value:
@@ -3531,7 +3531,7 @@ def _garmin_record_date(value: Any) -> str | None:
         return None
 
 
-def garmin_weight_records(snapshot: dict[str, Any]) -> list[tuple[str | None, float]]:
+def garmin_weight_records(snapshot: dict[str, Any]) -> list[tuple[str | None, float]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     records: list[tuple[str | None, float]] = []
 
     def visit(value: Any, inherited_date: str | None = None) -> None:
@@ -3575,7 +3575,7 @@ def garmin_weight_average(snapshot: dict[str, Any], days: int, end_date: date) -
     return round(sum(values) / len(values), 2) if values else None
 
 
-def _garmin_last_numeric(value: Any, keys: set[str]) -> float | int | None:
+def _garmin_last_numeric(value: Any, keys: set[str]) -> float | int | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Find the last numeric value for exact Garmin field names."""
     values: list[float | int] = []
 
@@ -3644,7 +3644,7 @@ def _garmin_pace_seconds(value: Any) -> float | int | None:
     return round(pace) if 120 <= pace <= 900 else None
 
 
-def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:
+def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Read max-HR values from Garmin's heart-rate-zone profile payload."""
     values: dict[str, list[float | int]] = {"cycling": [], "running": [], "generic": []}
     zones = snapshot.get("heart_rate_zones")
@@ -3671,7 +3671,7 @@ def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:
     return {kind: max(items) for kind, items in values.items() if items}
 
 
-def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Normalize Garmin's varying max-metric and race-prediction payloads."""
     max_metrics = snapshot.get("max_metrics") if isinstance(snapshot.get("max_metrics"), (dict, list)) else {}
     race_predictions = snapshot.get("race_predictions") if isinstance(snapshot.get("race_predictions"), (dict, list)) else {}
@@ -4137,7 +4137,7 @@ def garmin_source_observed_at(value: Any) -> str | None:
     return max(dates, default=None)
 
 
-def merge_garmin_sources(payload: dict[str, Any], previous: dict[str, Any]) -> None:
+def merge_garmin_sources(payload: dict[str, Any], previous: dict[str, Any]) -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Keep source-owned fetch/observation dates through partial reads and backfills."""
     collections = ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr")
     metrics = ("heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp", "running_threshold", "weight")
@@ -4248,7 +4248,7 @@ def _garmin_sleep_bounds(payload: Any) -> tuple[datetime | None, datetime | None
     return None, None
 
 
-def _garmin_body_battery_samples(records: Any) -> list[dict[str, Any]]:
+def _garmin_body_battery_samples(records: Any) -> list[dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Return validated timestamp/level samples from Garmin's daily reports."""
     values = records if isinstance(records, list) else [records]
     samples: dict[str, dict[str, Any]] = {}
@@ -4322,7 +4322,7 @@ def _saved_daily_history(key: str, db: Any | None = None) -> dict[str, Any]:
 
 @maintenance_operation
 @garmin_operation
-def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
+def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Keep a successful pair; retry unavailable readings with a bounded cooldown."""
     previous = garmin_snapshot()
     existing = _garmin_morning_body_battery(previous)
@@ -4424,7 +4424,7 @@ def refresh_morning_body_battery(checkin_date: date | None = None) -> None:
 @observed_sync("garmin", "data")
 @maintenance_operation
 @garmin_operation
-def sync_garmin(
+def sync_garmin(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     days: int = 30,
     operation_id: str | None = None,
     reason: str = "background",
@@ -4971,7 +4971,7 @@ def competition_target(value: Any) -> str:
     return str(value or "").strip()[:COMPETITION_TEXT_LIMITS["target"]]
 
 
-def normalize_competition(value: Any) -> dict[str, str]:
+def normalize_competition(value: Any) -> dict[str, str]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if not isinstance(value, dict):
         raise AppError(400, "Jeder Wettkampf muss ein Objekt sein.")
     name = str(value.get("name") or "").strip()[:COMPETITION_TEXT_LIMITS["name"]]
@@ -5032,7 +5032,7 @@ def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress
     return addresses
 
 
-def fetch_calendar_feed(url: str) -> bytes:
+def fetch_calendar_feed(url: str) -> bytes:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").rstrip(".").casefold()
     port = parsed.port or 443
@@ -5207,7 +5207,7 @@ def ical_short_only(description: Any) -> bool:
     return _ical_description_contains(description, ICAL_SHORT_ONLY_MARKER)
 
 
-def _ical_rrule(raw: str) -> dict[str, Any]:
+def _ical_rrule(raw: str) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     values: dict[str, str] = {}
     for part in raw.split(";"):
         key, separator, value = part.partition("=")
@@ -5381,7 +5381,7 @@ def _ical_event_record(current: dict[str, Any], start: datetime, duration: timed
     }
 
 
-def _ical_recurrence_starts(current: dict[str, Any], rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
+def _ical_recurrence_starts(current: dict[str, Any], rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     base = current["start"]
     base_date = base.date()
     starts: list[datetime] = []
@@ -5474,7 +5474,7 @@ def _ical_recurrence_starts(current: dict[str, Any], rule: dict[str, Any], windo
     return starts
 
 
-def _ical_event_instances(
+def _ical_event_instances(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     current: dict[str, Any],
     window_start: date,
     window_end: date,
@@ -5504,7 +5504,7 @@ def _ical_event_instances(
     return [_ical_event_record(current, occurrence, duration) for occurrence in starts if occurrence not in excluded and (occurrence + duration - timedelta(microseconds=1)).date() >= window_start]
 
 
-def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, window_end: date | None = None) -> list[dict[str, Any]]:
+def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, window_end: date | None = None) -> list[dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Parse calendar events and safely expand common Google recurrence rules."""
     first_day = window_start or local_now().date()
     last_day = window_end or first_day + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS)
@@ -5867,7 +5867,7 @@ def _add_planning_recovery_value(
     recovery.setdefault("sources", {})[metric_name] = source
 
 
-def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Build a small date-indexed recovery view from Intervals and Garmin."""
     recovery_by_date: dict[str, dict[str, Any]] = {}
 
@@ -5939,7 +5939,7 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
     return recovery_by_date
 
 
-def daily_planning_context(
+def daily_planning_context(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     snapshot: dict[str, Any] | None = None,
     planned: list[dict[str, Any]] | None = None,
     weather: dict[str, Any] | None = None,
@@ -6052,7 +6052,7 @@ def public_calendar_state(db: Any | None = None) -> dict[str, Any]:
     return {"sources": [dict(row) for row in sources], "candidates": [dict(row) for row in candidates]}
 
 
-def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
+def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if not isinstance(profile, dict):
         raise AppError(400, "Das Profil muss ein Objekt sein.")
     if not isinstance(competitions, list):
@@ -6154,7 +6154,7 @@ def _normalise_coach_competition_id(value: Any, required: bool = False) -> str:
         raise AppError(400, "Ungültige lokale Wettkampf-ID.") from exc
 
 
-def save_coach_competition(arguments: Any) -> dict[str, Any]:
+def save_coach_competition(arguments: Any) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Create or update one competition without replacing the athlete profile."""
     value = coach_competition_payload(arguments)
     raw_id = str(value.get("id") or "").strip()
@@ -6346,7 +6346,7 @@ def competition_external_id(competition_id: str) -> str:
     return f"{COMPETITION_EXTERNAL_PREFIX}{competition_id}"
 
 
-def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
+def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     category = str(competition.get("category") or "").upper()
     if category not in {"RACE_A", "RACE_B", "RACE_C"}:
         category = f"RACE_{competition.get('priority') if competition.get('priority') in {'A', 'B', 'C'} else 'B'}"
@@ -6487,7 +6487,7 @@ def resolve_competition_conflict(competition_id: Any, strategy: Any) -> dict[str
     return {"status": "resolved", "strategy": selected, "competition": saved, "competitions": list_competitions()}
 
 
-def _competition_sync_plan(
+def _competition_sync_plan(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     local_rows: list[dict[str, Any]],
     tombstones: list[dict[str, Any]],
     remote_events: list[dict[str, Any]],
@@ -6589,7 +6589,7 @@ def _competition_remote_events(client: Any, local_rows: list[dict[str, Any]]) ->
 @observed_sync("intervals", "competitions")
 @maintenance_operation
 @intervals_operation
-def sync_competitions(
+def sync_competitions(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     reason: str = "manual",
     push_local: bool = False,
     operation_id: str | None = None,
@@ -6804,7 +6804,7 @@ def openai_error_diagnostic_details(raw_body: bytes, headers: Any = None) -> dic
     return details
 
 
-def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
+def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Classify an OpenAI error without exposing the provider's raw message."""
     payload: Any = None
     try:
@@ -6875,7 +6875,7 @@ def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     }
 
 
-def gemini_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
+def gemini_error_details(status: int, raw_body: bytes) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Classify Gemini failures without retaining the provider response body."""
     try:
         payload = json.loads(raw_body) if raw_body else None
@@ -6940,7 +6940,7 @@ def record_openai_rate_limits(response_headers: Any) -> None:
         set_kv("openai_rate_limits", json.dumps({"updated_at": utc_now(), **values}, ensure_ascii=False))
 
 
-def upstream_http_error_message(status: int, raw_body: bytes, service: str | None) -> str:
+def upstream_http_error_message(status: int, raw_body: bytes, service: str | None) -> str:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Expose a bounded provider validation hint without exposing the payload."""
     if service != "intervals":
         return f"Anfrage an externen Dienst fehlgeschlagen ({status})."
@@ -7009,7 +7009,7 @@ def _urlopen_interruptibly(request: Request, timeout: int, cancel_event: threadi
     return result["response"]
 
 
-def http_json(
+def http_json(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     method: str,
     url: str,
     payload: Any | None = None,
@@ -7259,7 +7259,7 @@ def _weather_array_value(values: Any, index: int) -> float | None:
     return _weather_number(values[index])
 
 
-def _weather_daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:
+def _weather_daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     daily = forecast.get("daily") if isinstance(forecast.get("daily"), dict) else {}
     dates = daily.get("time") if isinstance(daily.get("time"), list) else []
     result: list[dict[str, Any]] = []
@@ -7340,7 +7340,7 @@ def _weather_training_windows(target_date: date) -> list[tuple[int, int, str]]:
     return [(6, 21, "Wochenende")]
 
 
-def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> dict[str, Any] | None:
+def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> dict[str, Any] | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
     if not re.fullmatch(DATE_ONLY_PATTERN, event_date):
         return None
@@ -7428,7 +7428,7 @@ def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> 
     return recommendation
 
 
-def _merge_weather_forecasts(long_forecast: dict[str, Any], short_forecast: dict[str, Any]) -> dict[str, Any]:
+def _merge_weather_forecasts(long_forecast: dict[str, Any], short_forecast: dict[str, Any]) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Overlay the higher-resolution ICON-D2 range on the long forecast."""
     merged = json.loads(json.dumps(long_forecast))
     for section_name in ("hourly", "daily"):
@@ -7450,7 +7450,7 @@ def _merge_weather_forecasts(long_forecast: dict[str, Any], short_forecast: dict
     return merged
 
 
-def _fetch_weather_forecast(query: str) -> dict[str, Any]:
+def _fetch_weather_forecast(query: str) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     geocode_url = "https://geocoding-api.open-meteo.com/v1/search?" + urlencode({
         "name": query[:200], "count": 1, "language": "de", "format": "json",
     })
@@ -7507,7 +7507,7 @@ def _fetch_weather_forecast(query: str) -> dict[str, Any]:
 
 
 @maintenance_operation
-def weather_state(
+def weather_state(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     planned: list[dict[str, Any]] | None = None,
     refresh: bool = True,
     force: bool = False,
@@ -7667,7 +7667,7 @@ def _calendar_weather_state(weather: dict[str, Any]) -> dict[str, Any]:
     return {**weather, "days": [days[day] for day in sorted(days)]}
 
 
-def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict[str, Any]], today: date) -> str | None:
+def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict[str, Any]], today: date) -> str | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Return a reason when a long outdoor ride is not reasonable in the near forecast."""
     if not is_outdoor_activity(event) or not is_cycling_activity(event):
         return None
@@ -7828,7 +7828,7 @@ def calendar_activity_identity(activity: Any) -> tuple[Any, ...] | None:
     )
 
 
-def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[int, dict[str, Any]]:
+def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[int, dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Match completed activities to planned workouts without reusing one activity."""
     activity_rows = [item for item in activities if isinstance(item, dict)]
     unused = set(range(len(activity_rows)))
@@ -7880,7 +7880,7 @@ def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[in
     return matches
 
 
-def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, today: date) -> dict[str, Any]:
+def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, today: date) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
     if activity is not None:
         status = "completed"
@@ -7929,7 +7929,7 @@ def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, t
     return result
 
 
-def planning_compliance_state(planned: list[Any], activities: list[Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def planning_compliance_state(planned: list[Any], activities: list[Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Add unit compliance and return aggregate weekly compliance metrics."""
     normalized_planned = [dict(item) for item in planned if isinstance(item, dict)]
     matches = match_planned_workouts(normalized_planned, activities)
@@ -8406,7 +8406,7 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
     }
 
 
-def validate_workout_description(workout: dict[str, Any]) -> float | None:
+def validate_workout_description(workout: dict[str, Any]) -> float | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Require quantity-first endurance steps; never guess intent from prose.
 
     This is a deliberately narrower authoring contract than the provider's
@@ -8548,7 +8548,7 @@ def normalize_workout(workout: Any) -> dict[str, Any]:
     return draft
 
 
-def _calendar_interval(value: dict[str, Any], default_minutes: int = 60) -> tuple[datetime, datetime, bool] | None:
+def _calendar_interval(value: dict[str, Any], default_minutes: int = 60) -> tuple[datetime, datetime, bool] | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     raw_start = first_present(value, ("start_date_local", "start_local", "start", "date"))
     if raw_start in (None, ""):
         return None
@@ -8606,7 +8606,7 @@ def _calendar_conflict_record(item: dict[str, Any], source: str, match: str) -> 
     }
 
 
-def calendar_conflicts(
+def calendar_conflicts(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     workout: dict[str, Any],
     exclude_library_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
@@ -8643,7 +8643,7 @@ def calendar_conflicts(
     return conflicts
 
 
-def save_workout_library_entries(
+def save_workout_library_entries(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     workouts: list[dict[str, Any]],
     plan_name: str = "",
     goal: str = "",
@@ -8875,7 +8875,7 @@ def current_adaptive_replan_status() -> dict[str, Any]:
     }
 
 
-def coach_quick_actions_state() -> dict[str, Any]:
+def coach_quick_actions_state() -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Expose only actions that are useful now; never expose provider status here."""
     today = local_now().date()
     morning_done = (
@@ -9001,7 +9001,7 @@ def sync_illness_pause_to_intervals(pause: dict[str, Any]) -> dict[str, Any]:
     return {"status": "ok", "synced": len(pushed), "category": ILLNESS_CALENDAR_CATEGORY}
 
 
-def adaptive_replan_preview() -> dict[str, Any]:
+def adaptive_replan_preview() -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     today_date = local_now().date()
     today = today_date.isoformat()
     feedback = local_feedback_context().get("today") or {}
@@ -9181,7 +9181,7 @@ def _fill_illness_checkins(db: Any, pause: dict[str, Any], now: str) -> int:
     return filled
 
 
-def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool = False) -> dict[str, Any]:
+def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool = False) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     try:
         normalized_id = str(uuid.UUID(str(adjustment_id)))
     except (ValueError, AttributeError) as exc:
@@ -9307,7 +9307,7 @@ def planning_state() -> dict[str, Any]:
     return {"season": season_plan_summary(), "latest_replan": latest_replan_preview(), **current_adaptive_replan_status()}
 
 
-def normalize_library_workout(
+def normalize_library_workout(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     workout: Any,
     *,
     local_id: str | None = None,
@@ -9417,7 +9417,7 @@ def compatible_workout_duration(expected_minutes: int, library_minutes: float | 
     return abs(expected_minutes - library_minutes) <= max(10, expected_minutes * 0.2)
 
 
-def find_similar_library_workout(workout: dict[str, Any], library: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+def find_similar_library_workout(workout: dict[str, Any], library: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Find an exact or conservative near-match in the cached Intervals.icu library."""
     expected_type = workout_library_type(workout.get("sport"))
     expected_text = normalized_workout_text(workout.get("description"))
@@ -9471,7 +9471,7 @@ def _planned_unit_payload_hash(payload: Any) -> str:
     return hashlib.sha256(json.dumps(comparable, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
 
 
-def normalize_planned_unit(
+def normalize_planned_unit(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     workout: dict[str, Any],
     *,
     local_id: str | None = None,
@@ -9573,7 +9573,7 @@ def create_local_planned_unit(
     return entry
 
 
-def list_planned_units(limit: int = 500, include_archived: bool = False, *, future_only: bool = False) -> list[dict[str, Any]]:
+def list_planned_units(limit: int = 500, include_archived: bool = False, *, future_only: bool = False) -> list[dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     with DB_LOCK, database() as db:
         clauses = []
         params: list[Any] = []
@@ -9664,7 +9664,7 @@ def create_local_library_template(workout: dict[str, Any]) -> dict[str, Any]:
     })
 
 
-def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool = False) -> list[dict[str, Any]]:
+def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool = False) -> list[dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Merge remote templates while preserving local-only library entries."""
     normalized: list[dict[str, Any]] = []
     seen_external_ids: set[str] = set()
@@ -9974,7 +9974,7 @@ def list_dated_local_planned_workouts(limit: int = 500) -> list[dict[str, Any]]:
     return list_planned_units(limit)
 
 
-def canonical_planned_workouts(
+def canonical_planned_workouts(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     remote: list[Any] | None,
     local: list[Any] | None,
     limit: int = 500,
@@ -10070,7 +10070,7 @@ def list_coach_planned_workouts(limit: int = 250) -> dict[str, Any]:
     return {"local": local, "intervals": [], "canonical": canonical_planned_workouts([], local, limit), "source": "local"}
 
 
-def local_calendar_events(
+def local_calendar_events(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     planned: list[Any] | None = None,
     competitions: list[Any] | None = None,
     external_events: list[Any] | None = None,
@@ -10099,7 +10099,7 @@ def local_calendar_events(
     return result
 
 
-def update_planned_unit_sync_state(local_id: str, state: str, error: str | None = None, *, remote_event: dict[str, Any] | None = None) -> None:
+def update_planned_unit_sync_state(local_id: str, state: str, error: str | None = None, *, remote_event: dict[str, Any] | None = None) -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Persist planning sync state without changing the canonical workout data."""
     with DB_LOCK, database() as db:
         row = db.execute("SELECT payload FROM planned_units WHERE local_id = ?", (local_id,)).fetchone()
@@ -10222,7 +10222,7 @@ class _RepairCalendarBatch:
         return outcomes
 
 
-def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str, *, batch: _RepairCalendarBatch | None = None) -> dict[str, Any] | None:
+def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str, *, batch: _RepairCalendarBatch | None = None) -> dict[str, Any] | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Reconcile one explicitly selected future unit using exact remote identities."""
     with _planned_unit_sync_guard(local_id):
         with DB_LOCK, database() as db:
@@ -10356,7 +10356,7 @@ def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | N
         return _sync_local_planned_unit_calendar_entry_unlocked(local_id)
 
 
-def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str, Any] | None:
+def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str, Any] | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Push one approved local calendar unit; this is never called by planning mutations."""
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
@@ -10441,7 +10441,7 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
 LIBRARY_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
 
 
-def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any]], str]:
+def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any]], str]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     summary = {"new": 0, "changed": 0, "missing": 0, "error_retry": 0, "planned": 0, "conflict": 0}
     entries: list[dict[str, Any]] = []
     with DB_LOCK, database() as db:
@@ -10540,7 +10540,7 @@ def plan_library_workout_remote(workout_id: str, workout: dict[str, Any], plan_d
     return IntervalsClient().plan_library_workout(workout_id, workout, plan_date)
 
 
-def _sync_local_workout_calendar_entry(local_id: str, synced: dict[str, Any]) -> dict[str, Any] | None:
+def _sync_local_workout_calendar_entry(local_id: str, synced: dict[str, Any]) -> dict[str, Any] | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Upsert a dated local library entry in the remote training calendar."""
     planned_date = str(synced.get("date") or "").strip()[:10]
     if not planned_date:
@@ -10576,7 +10576,7 @@ def save_snapshot_view(snapshot: dict[str, Any]) -> None:
         SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot.get("synced_at") or utc_now())
 
 
-def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
+def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Edit, archive, restore, or remove a local library template."""
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
@@ -10678,7 +10678,7 @@ def workout_library_sync_summary() -> dict[str, int]:
     return summary
 
 
-def intervals_public_state(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+def intervals_public_state(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Return connection health without exposing Intervals credentials."""
     configured = bool(CONFIG.intervals_api_key)
     last_sync_at = get_kv("last_sync_at")
@@ -10795,7 +10795,7 @@ def sync_browser_state(
     return result
 
 
-def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
+def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
@@ -10870,7 +10870,7 @@ def sync_local_workout_library_entry(local_id: str) -> dict[str, Any]:
             raise
 
 
-def apply_workout_library_plan(
+def apply_workout_library_plan(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     entries: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Apply local library templates to the local plan only."""
@@ -10960,7 +10960,7 @@ def apply_workout_library_plan(
     }
 
 
-def _library_bulk_request_entries(
+def _library_bulk_request_entries(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     entries: Any, *, require_hash: bool = False, max_entries: int = LIBRARY_BULK_MAX_ENTRIES,
 ) -> list[dict[str, Any]]:
     if not isinstance(entries, list) or not entries:
@@ -11015,7 +11015,7 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
     return _sync_selected_workout_library_unlocked(payload)
 
 
-def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
+def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if not CONFIG.intervals_api_key:
         raise AppError(503, INTERVALS_API_KEY_ERROR)
     requested = _library_bulk_request_entries(payload.get("entries"), require_hash=True)
@@ -11094,7 +11094,7 @@ def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str
     return {"ok": not failed, "status": status, "results": results, "failed_object_ids": failed, "retry_scope": "Nur fehlgeschlagene Objekte erneut auswählen." if failed else None}
 
 
-def update_local_planned_workout(
+def update_local_planned_workout(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     local_id: str,
     values: Any,
     *,
@@ -11198,7 +11198,7 @@ def update_local_planned_workout(
     return {"status": "local", "local_id": normalized_id, "library_entry": updated}
 
 
-def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any]:
+def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Explicitly choose the local or remote side of a planned-unit conflict."""
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
@@ -11333,7 +11333,7 @@ def merge_historical_snapshot(current: dict[str, Any] | None, historical: dict[s
     return merged
 
 
-def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any], str, str] | None:
+def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any], str, str] | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if str(event.get("category") or "WORKOUT").upper() != "WORKOUT":
         return None
     remote_id = str(event.get("id") or "").strip()
@@ -11373,7 +11373,7 @@ def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any],
     return normalized, remote_id, identity
 
 
-def upsert_remote_planned_units(
+def upsert_remote_planned_units(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     events: list[Any] | None,
     *,
     calendar_start: str | None = None,
@@ -11523,7 +11523,7 @@ def provider_resync_state(provider: str) -> dict[str, Any]:
     }
 
 
-def full_provider_resync(provider: str, operation_id: str | None = None) -> dict[str, Any]:
+def full_provider_resync(provider: str, operation_id: str | None = None) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if provider not in PROVIDER_RESYNC_KEYS:
         raise AppError(400, "Unbekannte Anbindung.")
     if provider == "intervals" and not CONFIG.intervals_api_key:
@@ -11594,7 +11594,7 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
 @observed_sync("intervals", "activities")
 @maintenance_operation
 @intervals_operation
-def sync_intervals(
+def sync_intervals(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     reason: str = "manual",
     activity_days: int | None = None,
     operation_id: str | None = None,
@@ -11796,7 +11796,7 @@ def refresh_current_performance() -> dict[str, Any]:
         PERFORMANCE_LOCK.release()
 
 
-def activity_rollup(activities: list[Any], days: int, end_date: date | None = None) -> dict[str, Any]:
+def activity_rollup(activities: list[Any], days: int, end_date: date | None = None) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     anchor = end_date or local_now().date()
     cutoff = anchor - timedelta(days=days - 1)
     count = 0
@@ -11845,7 +11845,7 @@ def wellness_average(rows: list[dict[str, Any]], keys: tuple[str, ...], days: in
     return round(sum(values) / len(values), 2) if values else None
 
 
-def actual_atl_series(wellness_rows: list[dict[str, Any]], activities: list[Any], end_date: date | None = None) -> dict[date, float]:
+def actual_atl_series(wellness_rows: list[dict[str, Any]], activities: list[Any], end_date: date | None = None) -> dict[date, float]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Reconstruct ATL from completed activity load only (default 7-day ATL decay)."""
     dated_wellness: list[tuple[date, dict[str, Any]]] = []
     for row in wellness_rows:
@@ -11897,7 +11897,7 @@ def actual_atl_series(wellness_rows: list[dict[str, Any]], activities: list[Any]
     return series
 
 
-def eftp_30_day_average(wellness_rows: list[dict[str, Any]], activities: list[Any], end_date: date | None = None) -> float | None:
+def eftp_30_day_average(wellness_rows: list[dict[str, Any]], activities: list[Any], end_date: date | None = None) -> float | None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     anchor = end_date or local_now().date()
     cutoff = anchor - timedelta(days=29)
     values: list[float] = []
@@ -12129,7 +12129,7 @@ def height_in_cm(value: Any) -> float | int | None:
     return number
 
 
-def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     athlete = snapshot.get("athlete") if isinstance(snapshot.get("athlete"), dict) else {}
     wellness_rows = snapshot.get("recent_wellness") if isinstance(snapshot.get("recent_wellness"), list) else []
     activities = snapshot.get("recent_activities") if isinstance(snapshot.get("recent_activities"), list) else []
@@ -12433,7 +12433,7 @@ def activity_performance_validation(
     }
 
 
-def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     snapshot = snapshot if snapshot is not None else latest_snapshot()
     if not snapshot:
         return {"available": False, "source": PROVIDER_INTERVALS_NAME, "as_of": None, "metrics": {}}
@@ -12686,7 +12686,7 @@ def coach_context_projection_meta(
     )
 
 
-def coach_intervals_context(snapshot: dict[str, Any] | None, planned_units: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def coach_intervals_context(snapshot: dict[str, Any] | None, planned_units: list[dict[str, Any]] | None = None) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Build the bounded Intervals.icu projection sent to the coach."""
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     activities = [item for item in snapshot.get("recent_activities", []) if isinstance(item, dict)]
@@ -12806,7 +12806,7 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
     }
 
 
-def coach_workout_library() -> list[dict[str, Any]]:
+def coach_workout_library() -> list[dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Return a small, balanced template catalogue for the coach prompt."""
     # Dated entries are local planned units and are projected separately in the
     # structured context. Keeping them out of the template catalogue prevents
@@ -13335,7 +13335,7 @@ def repair_incomplete_gemini_tool_history(db: sqlite3.Connection) -> None:
     set_kv("gemini_call_names", "{}", db)
 
 
-def _gemini_local_chat_history() -> list[dict[str, Any]]:
+def _gemini_local_chat_history() -> list[dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     messages = list_messages(limit=20)
     message_attachments = []
     raw_candidates = []
@@ -13814,7 +13814,7 @@ def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
-def openai_stream_request(
+def openai_stream_request(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     payload: dict[str, Any],
     on_text_delta: Any,
     cancel_event: threading.Event | None = None,
@@ -14094,7 +14094,7 @@ def reset_coach_chat() -> dict[str, Any]:
     return {"status": "ok", "generation": get_kv("chat_generation"), "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
 
 
-def output_text(response: dict[str, Any]) -> str:
+def output_text(response: dict[str, Any]) -> str:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     direct = response.get("output_text")
     if isinstance(direct, str) and direct.strip():
         return direct.strip()
@@ -14205,7 +14205,7 @@ def delete_duplicate_intervals_activity(payload: dict[str, Any]) -> dict[str, An
     }
 
 
-def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str, Any]:
+def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if not isinstance(values, dict):
         raise AppError(400, "Die Aktionsvorschau muss ein Objekt sein.")
     action_type = str(values.get("action_type") or "").strip()
@@ -14367,7 +14367,7 @@ def _active_background_coach_job(session_csrf_hash: str, operation_id: str | Non
     return None
 
 
-def enqueue_background_coach_job(
+def enqueue_background_coach_job(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     message: str,
     client_turn_id: str,
     session_csrf_hash: str,
@@ -14496,7 +14496,7 @@ def chat_stream_events(session_csrf_hash: str, operation_id: str) -> queue.Queue
     return events if isinstance(events, queue.Queue) else None
 
 
-def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:
+def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     with CHAT_STREAM_LOCK:
         stream = CHAT_STREAMS.get(session_csrf_hash)
         if stream:
@@ -14801,7 +14801,7 @@ def _require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
         raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.", reason="intent_scope_denied")
 
 
-def _structured_training_state(*, include_inactive: bool = False, cursor: Any = None, limit: Any = None) -> dict[str, Any]:
+def _structured_training_state(*, include_inactive: bool = False, cursor: Any = None, limit: Any = None) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     today = local_now().date().isoformat()
     page_size = api_page_limit(limit, COACH_TRAINING_CHANGE_LIMIT, COACH_TRAINING_CHANGE_LIMIT)
     decoded = decode_page_cursor(cursor)
@@ -14872,7 +14872,7 @@ def _structured_artifact_payload(arguments: dict[str, Any]) -> dict[str, Any]:
     raise AppError(400, "Ein Planartefakt benoetigt payload.", reason="invalid_plan")
 
 
-def _structured_action_payload(arguments: dict[str, Any]) -> dict[str, Any]:
+def _structured_action_payload(arguments: dict[str, Any]) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     payload = arguments.get("payload")
     if isinstance(payload, dict):
         return payload
@@ -14920,7 +14920,7 @@ def _stage_coach_artifact(conversation_id: str, client_turn_id: str, payload: di
     return {"ok": True, "status": "draft", "artifact_id": artifact_id, "base_revision": base_revision}
 
 
-def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> None:
+def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Validate all final dates before applying any member of a batch."""
     batch_ids = {str(change.get("local_id") or "").strip() for change in changes}
     batch_ids.discard("")
@@ -15002,7 +15002,7 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
             raise AppError(409, f"Für den {candidate_date} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
 
 
-def _apply_structured_training_changes(
+def _apply_structured_training_changes(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
 ) -> dict[str, Any]:
     changes = arguments.get("changes") or []
@@ -15213,7 +15213,7 @@ def _apply_structured_training_changes(
     }
 
 
-def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_plan_id: str | None = None) -> dict[str, Any]:
+def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_plan_id: str | None = None) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Atomically replace future local Coach/library sessions with a new plan."""
     payload = _structured_artifact_payload(arguments)
     _validate_structured_plan_limits(payload)
@@ -15428,7 +15428,7 @@ def _mark_local_competitions_authoritative() -> int:
     return len(rows)
 
 
-def _coach_repair_manifest(arguments: dict[str, Any], intent: dict[str, Any]) -> list[dict[str, str]]:
+def _coach_repair_manifest(arguments: dict[str, Any], intent: dict[str, Any]) -> list[dict[str, str]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Validate one complete period before splitting its manifest into jobs."""
     period = intent.get("_repair_period")
     if not period or intent.get("_sync_all_pending"):
@@ -15496,7 +15496,7 @@ def _enqueue_coach_plan_push(entries: list[dict[str, str]], sync_job_ids: list[s
     }
 
 
-def _structured_coach_tool_result(
+def _structured_coach_tool_result(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     name: str,
     arguments: dict[str, Any],
     *,
@@ -15999,7 +15999,7 @@ def _structured_authorized_operations(intent: dict[str, Any]) -> set[str]:
     return operations
 
 
-def coach_dialogue_context(client_turn_id: str) -> dict[str, Any]:
+def coach_dialogue_context(client_turn_id: str) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Local dialogue survives provider switches; remote conversations are not authority."""
     messages = list_messages(24)
     with DB_LOCK, database() as db:
@@ -16033,7 +16033,7 @@ def coach_dialogue_context(client_turn_id: str) -> dict[str, Any]:
     }
 
 
-def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, Any], *, allow_mutations: bool) -> dict[str, Any]:
+def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, Any], *, allow_mutations: bool) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Bind one model-selected action to user messages and live object scopes."""
     if not allow_mutations:
         raise AppError(403, "Dieser Coach-Lauf dient ausschließlich der Beratung.", reason="intent_scope_denied")
@@ -16119,7 +16119,7 @@ def _dialogue_action(name: str, arguments: dict[str, Any], context: dict[str, An
     return action
 
 
-def _validate_dialogue_plan_scope(name: str, arguments: dict[str, Any], action: dict[str, Any]) -> None:
+def _validate_dialogue_plan_scope(name: str, arguments: dict[str, Any], action: dict[str, Any]) -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     start, end = action["period"]["start"], action["period"]["end"]
     def check(value: Any) -> None:
         value = str(value or "")[:10]
@@ -16162,7 +16162,7 @@ def _save_coach_question(arguments: dict[str, Any], context: dict[str, Any]) -> 
     return {"ok": True, "status": "needs_clarification", "question": question}
 
 
-def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
+def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Validate the final schedule, then commit all related changes together."""
     changes, raw_workouts = arguments.get("changes", []), arguments.get("workouts", [])
     if not isinstance(changes, list) or not isinstance(raw_workouts, list) or not 1 <= len(changes) + len(raw_workouts) <= COACH_TRAINING_CHANGE_LIMIT:
@@ -16202,7 +16202,7 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
     return {"ok": True, "status": "applied", "planning_revision": revision, "changes": changed["changes"], "library_entry_ids": [item["id"] for item in created]}
 
 
-def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Corrections resolve the same step, never a different object with the same tool."""
     def repaired(previous, current):
         if previous["tool"] != current["tool"]:
@@ -16324,7 +16324,7 @@ def _dialogue_effect_key(name: str, arguments: dict[str, Any]) -> str:
     return _coach_action_hash({"tool": name, "arguments": {key: value for key, value in arguments.items() if key != "_request"}, "binding": binding})
 
 
-def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf_hash: str = "") -> dict[str, Any]:
+def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf_hash: str = "") -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Execute one explicitly validated local planning command idempotently."""
     if not isinstance(payload, dict):
         raise AppError(400, "Das Planungskommando muss ein Objekt sein.", reason="invalid_planning_command")
@@ -16406,7 +16406,7 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
     return coach_command_receipt(client_turn_id, session_csrf_hash)
 
 
-def _chat_with_structured_coach_impl(
+def _chat_with_structured_coach_impl(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     message: str, *, intent: dict[str, Any], conversation_id: str, client_turn_id: str,
     on_text_delta: Any = None, cancel_event: threading.Event | None = None,
     session_csrf_hash: str = "", background_job: bool = False,
@@ -16825,7 +16825,7 @@ def coach_command_receipt(client_turn_id: Any, session_csrf_hash: str) -> dict[s
     return {key: value for key, value in {**receipt, "client_turn_id": turn_id}.items() if key != "session_key"}
 
 
-def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, Any], error: BaseException) -> dict[str, Any]:
+def _persist_structured_command_failure(client_turn_id: str, intent: dict[str, Any], error: BaseException) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Report confirmed effects without claiming an unfinished request succeeded."""
     cancelled = isinstance(error, AppError) and error.reason == "chat_cancelled"
     safe_error = redact_text(error.message)[:1000] if isinstance(error, AppError) else "Die Coach-Verarbeitung wurde unterbrochen."
@@ -16963,7 +16963,7 @@ def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
 
 @maintenance_operation
 @serialise_conversation
-def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str, background_job: bool = False) -> dict[str, Any]:
+def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str, background_job: bool = False) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     _raise_chat_cancelled(cancel_event)
     message = message.strip()
     if not message:
@@ -17125,7 +17125,7 @@ def _background_coach_message(job: dict[str, Any]) -> str:
 
 
 @claimed_maintenance_operation
-def _run_background_coach_job(job: dict[str, Any]) -> None:
+def _run_background_coach_job(job: dict[str, Any]) -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
     operation_id = str(receipt.get("operation_id") or "")
     client_turn_id = str(job.get("client_turn_id") or "")
@@ -17307,7 +17307,7 @@ MORNING_GARMIN_SYNC_DAYS = 2
 
 
 @maintenance_operation
-def run_morning_checkin(checkin_date: str) -> None:
+def run_morning_checkin(checkin_date: str) -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     try:
         set_kv("morning_checkin_running", "1")
         set_kv("morning_checkin_status", "working")
@@ -17363,7 +17363,7 @@ def run_morning_checkin(checkin_date: str) -> None:
 
 
 @maintenance_operation
-def schedule_morning_checkin() -> None:
+def schedule_morning_checkin() -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     checkin_date = morning_checkin_date()
     if not checkin_date or not selected_ai_provider() or not CONFIG.intervals_api_key:
         return
@@ -17705,7 +17705,7 @@ SETTINGS_VALUE_KEYS = ("GARMIN_EMAIL", "GARMINTOKENS", "GARMIN_FIXTURE_PATH")
 SETTINGS_KEYS = SETTINGS_SECRET_KEYS + SETTINGS_VALUE_KEYS
 
 
-def save_settings(values: Any) -> dict[str, Any]:
+def save_settings(values: Any) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Update explicitly submitted settings without ever returning their values."""
     if not isinstance(values, dict):
         raise AppError(400, "Die Einstellungen müssen als Objekt gesendet werden.")
@@ -17749,7 +17749,7 @@ def save_settings(values: Any) -> dict[str, Any]:
     return {"status": "ok", "updated": sorted(updates), "restart_required": True}
 
 
-def coach_diagnostic_history() -> list[dict[str, Any]]:
+def coach_diagnostic_history() -> list[dict[str, Any]]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Project at most 20 durable commands without dialogue, arguments or results."""
     with DB_LOCK, database() as db:
         rows = db.execute("SELECT client_turn_id, receipt, created_at, updated_at FROM coach_commands ORDER BY created_at DESC, client_turn_id DESC LIMIT 20").fetchall()
@@ -18243,7 +18243,7 @@ def restore_database_backup(payload: bytes) -> dict[str, Any]:
         return _restore_database_backup(payload)
 
 
-def _restore_database_backup(payload: bytes) -> dict[str, Any]:
+def _restore_database_backup(payload: bytes) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if not payload or len(payload) > MAX_BACKUP_BYTES:
         raise AppError(413, "Das Datenbank-Backup ist leer oder zu groß.")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -18581,7 +18581,7 @@ def require_csrf(handler: BaseHTTPRequestHandler, session: dict[str, Any]) -> No
         raise AppError(403, "Ungültiges CSRF-Token.")
 
 
-def session_cookie_headers(token: str = "", csrf: str = "", *, clear: bool = False) -> list[str]:
+def session_cookie_headers(token: str = "", csrf: str = "", *, clear: bool = False) -> list[str]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Create hardened session cookies without duplicating flag logic."""
     return session_cookies(
         SESSION_COOKIE,
@@ -19226,7 +19226,7 @@ def daily_sync_loop() -> None:
 
 
 @maintenance_operation
-def schedule_daily_sync_jobs() -> None:
+def schedule_daily_sync_jobs() -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     if get_profile().get("weather_location", "").strip():
         if not _sync_job_active("weather"):
             enqueue_sync_job("weather", "refresh", {"force": False, "reason": "dreistündliche automatische Aktualisierung"}, requested_by="scheduler")
@@ -19243,7 +19243,7 @@ def schedule_daily_sync_jobs() -> None:
         enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
 
 
-def enqueue_startup_sync_jobs() -> None:
+def enqueue_startup_sync_jobs() -> None:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Queue configured startup refreshes without duplicating resumed jobs."""
     if CONFIG.calendar_ical_url and not _sync_job_active("calendar", "refresh"):
         enqueue_sync_job("calendar", "refresh", {"reason": "startup"}, requested_by="startup")

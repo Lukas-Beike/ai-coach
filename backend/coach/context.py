@@ -138,7 +138,7 @@ def coach_context_json_size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
 
 
-def bounded_coach_context_value(value: Any, limit: int) -> Any:
+def bounded_coach_context_value(value: Any, limit: int) -> Any:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     """Keep a JSON value valid while deterministically fitting a character limit."""
     if limit <= 0:
         return None

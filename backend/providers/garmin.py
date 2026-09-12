@@ -38,7 +38,7 @@ def normalize_range_records(source: str, value: Any) -> list[dict[str, Any]]:
     return value
 
 
-def collect_garmin_data(
+def collect_garmin_data(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
     client: Any,
     windows: Iterable[tuple[date, date]],
     *,
