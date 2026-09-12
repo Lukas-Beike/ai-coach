@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
-from backend.coach.attachments import _fit_session_summary, fit_summary, gpx_summary, validate_attachments, model_input
+from backend.coach.attachments import _fit_crc16, _fit_session_summary, fit_summary, gpx_summary, validate_attachments, model_input
 
 GPX = b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt><trkpt lat="0" lon="0.01"><ele>20</ele></trkpt></trkseg></trk></gpx>'
 PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAASUVORK5CYII='
@@ -59,15 +59,13 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(validated[0]["summary"]["distance_km"], 1.234)
         self.assertEqual(validated[0]["summary"]["avg_heart_rate_bpm"], 145)
         request_input = model_input("Analyze this activity", validated)
-        file_part = request_input[0]["content"][-1]
-        self.assertEqual(file_part["type"], "input_file")
-        self.assertEqual(file_part["filename"], "ride.fit")
-        self.assertTrue(file_part["file_data"].endswith(attachment["data"]))
+        raw_part = request_input[0]["content"][-1]
+        self.assertEqual(raw_part["type"], "input_text")
+        self.assertIn(attachment["data"], raw_part["text"])
 
         payload, _, _ = server._gemini_request_payload({"input": request_input}, "gemini-test")
-        inline = payload["contents"][-1]["parts"][-1]["inlineData"]
-        self.assertEqual(inline["mimeType"], "application/octet-stream")
-        self.assertEqual(inline["data"], attachment["data"])
+        raw_text = payload["contents"][-1]["parts"][-1]["text"]
+        self.assertIn(attachment["data"], raw_text)
 
     def test_fit_records_use_standard_headers_fields_and_compressed_timestamps(self):
         summary = fit_summary(FIT_RECORDS)
@@ -95,6 +93,17 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         header = bytes([12, 0x10]) + struct.pack("<H", 0) + struct.pack("<I", len(fields)) + b".FIT"
         with self.assertRaises(ValueError):
             fit_summary(header + fields)
+
+    def test_fit_rejects_invalid_header_and_file_checksums(self):
+        payload = FIT
+        header = bytes([14, 0x10]) + struct.pack("<H", 0) + struct.pack("<I", len(payload) - 12) + b".FIT"
+        checksummed = bytearray(header + b"\x00\x00" + payload[12:])
+        checksummed[12:14] = struct.pack("<H", _fit_crc16(checksummed[:12]))
+        checksummed += struct.pack("<H", _fit_crc16(checksummed))
+        self.assertEqual(fit_summary(bytes(checksummed))["distance_km"], 1.234)
+        checksummed[-1] ^= 0x01
+        with self.assertRaises(ValueError):
+            fit_summary(bytes(checksummed))
 
     def test_fit_session_metrics_are_aggregated(self):
         sessions = [
@@ -182,7 +191,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         encoded_size = len(self.upload(FIT, "first.fit")["data"])
         with patch.object(server, "MAX_GEMINI_INLINE_IMAGE_BYTES", encoded_size + 1):
             history = server._gemini_local_chat_history()
-        raw_parts = [part for entry in history for part in entry["parts"] if "inlineData" in part]
+        raw_parts = [part for entry in history for part in entry["parts"] if "untrusted_fit_raw_base64" in json.dumps(part)]
         self.assertEqual(len(raw_parts), 1)
         self.assertIn("first.fit", json.dumps(history))
         self.assertIn("second.fit", json.dumps(history))

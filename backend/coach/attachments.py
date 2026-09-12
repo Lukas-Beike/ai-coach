@@ -22,6 +22,10 @@ MAX_ATTACHMENT_STORAGE_BYTES = 40_000_000
 FIT_SIGNATURE = b".FIT"
 FIT_EPOCH = datetime(1989, 12, 31, tzinfo=timezone.utc)
 _UNSUPPORTED_FIT_BASE_TYPE = "Unsupported FIT base type"
+_FIT_CRC_TABLE = (
+    0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
+    0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
+)
 
 # FIT base types used by the profile.  Unknown fields are still skipped safely,
 # but an unknown base type makes the file structurally ambiguous and is rejected.
@@ -69,6 +73,28 @@ def _fit_usable(value, invalid):
     if isinstance(invalid, float) and math.isnan(invalid):
         return None if isinstance(value, float) and math.isnan(value) else value
     return None if value == invalid else value
+
+
+def _fit_crc16(data):
+    crc = 0
+    for byte in data:
+        crc = (crc >> 4) ^ _FIT_CRC_TABLE[(crc ^ byte) & 0x0F]
+        crc = (crc >> 4) ^ _FIT_CRC_TABLE[(crc ^ (byte >> 4)) & 0x0F]
+    return crc
+
+
+def _fit_validate_checksums(data, header_size, data_end):
+    if header_size > 12:
+        if header_size < 14:
+            raise ValueError("Invalid FIT header size")
+        header_crc_offset = header_size - 2
+        expected = struct.unpack_from("<H", data, header_crc_offset)[0]
+        if _fit_crc16(data[:header_crc_offset]) != expected:
+            raise ValueError("Invalid FIT header CRC")
+    if len(data) >= data_end + 2:
+        expected = struct.unpack_from("<H", data, data_end)[0]
+        if _fit_crc16(data[:data_end]) != expected:
+            raise ValueError("Invalid FIT file CRC")
 
 
 def _fit_decode_values(raw, base_type, architecture, size):
@@ -188,6 +214,7 @@ def _fit_messages(data):
     data_end = header_size + data_size
     if data_end > len(data):
         raise ValueError("Truncated FIT data")
+    _fit_validate_checksums(data, header_size, data_end)
     definitions, messages = {}, []
     offset, last_timestamp = header_size, None
     while offset < data_end:
@@ -439,8 +466,14 @@ def model_input(text, attachments):
             evidence[summary_key] = item.get("summary")
         parts.append({"type": "input_text", "text": json.dumps(evidence, ensure_ascii=False)})
         if item["type"] in {"gpx", "fit"}:
-            parts.append({"type": "input_file", "filename": item["name"],
-                          "file_data": f"data:{item['mime']};base64,{item['data']}"})
+            if item["type"] == "fit":
+                parts.append({"type": "input_text", "text": json.dumps({
+                    "untrusted_fit_filename": item["name"],
+                    "untrusted_fit_raw_base64": item["data"],
+                }, ensure_ascii=False)})
+            else:
+                parts.append({"type": "input_file", "filename": item["name"],
+                              "file_data": f"data:{item['mime']};base64,{item['data']}"})
         elif item["type"] == "image":
             parts.append({"type": "input_image", "image_url": f"data:{item['mime']};base64,{item['data']}", "detail": "auto"})
     return [{"role": "user", "content": parts}]
