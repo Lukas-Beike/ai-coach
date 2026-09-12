@@ -4335,7 +4335,10 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
   try {
     const response = await chatStreamResponse(message, requestKind, attachments, clientTurnId, stream);
     if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) return false;
-    if (!response.ok) return rejectChatStreamResponse(response, context);
+    if (!response.ok) {
+      await rejectChatStreamResponse(response, context);
+      return false;
+    }
     await readChatStream(response, context);
     return finishChatStream(context);
   } catch (error) {
