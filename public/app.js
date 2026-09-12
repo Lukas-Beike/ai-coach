@@ -458,6 +458,7 @@ function syncPollLeaseAvailable() {
     const verified = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
     return verified?.token === state.syncPoll.leaseToken;
   } catch (_) {
+    // Storage can be denied by privacy settings; a fail-open lease keeps sync available.
     return true;
   }
 }
@@ -1872,7 +1873,14 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
       const names = message.attachment_names;
       if (names) {
         const label = document.createElement("small");
-        try { const parsed = JSON.parse(names); label.textContent = parsed.length ? "\nAnhänge: " + parsed.join(", ") : ""; } catch (_) { label.textContent = ""; }
+        try {
+          const parsed = JSON.parse(names);
+          label.textContent = parsed.length ? "\nAnhänge: " + parsed.join(", ") : "";
+        } catch (parseError) {
+          if (!(parseError instanceof SyntaxError)) throw parseError;
+          // Attachment names are optional persisted metadata; malformed JSON must not hide the message.
+          label.textContent = "";
+        }
         node.append(label);
       }
     }

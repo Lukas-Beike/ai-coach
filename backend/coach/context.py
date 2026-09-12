@@ -138,38 +138,48 @@ def coach_context_json_size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
 
 
+def _bounded_string(value: str, limit: int) -> str:
+    low, high = 0, len(value)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if coach_context_json_size(value[:middle]) <= limit:
+            low = middle
+        else:
+            high = middle - 1
+    return value[:low]
+
+
+def _bounded_list(value: list[Any], limit: int) -> list[Any]:
+    result: list[Any] = []
+    for item in value:
+        candidate = result + [bounded_coach_context_value(item, limit)]
+        if coach_context_json_size(candidate) > limit:
+            break
+        result = candidate
+    return result
+
+
+def _bounded_dict(value: dict[Any, Any], limit: int) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, item in value.items():
+        candidate = dict(result)
+        candidate[str(key)] = bounded_coach_context_value(item, limit)
+        if coach_context_json_size(candidate) > limit:
+            break
+        result = candidate
+    return result
+
+
 def bounded_coach_context_value(value: Any, limit: int) -> Any:
     """Keep a JSON value valid while deterministically fitting a character limit."""
-    if limit <= 0:
-        return None
-    if coach_context_json_size(value) <= limit:
-        return value
+    if limit <= 0 or coach_context_json_size(value) <= limit:
+        return None if limit <= 0 else value
     if isinstance(value, str):
-        low, high = 0, len(value)
-        while low < high:
-            middle = (low + high + 1) // 2
-            if coach_context_json_size(value[:middle]) <= limit:
-                low = middle
-            else:
-                high = middle - 1
-        return value[:low]
+        return _bounded_string(value, limit)
     if isinstance(value, list):
-        result: list[Any] = []
-        for item in value:
-            candidate = result + [bounded_coach_context_value(item, limit)]
-            if coach_context_json_size(candidate) > limit:
-                break
-            result = candidate
-        return result
+        return _bounded_list(value, limit)
     if isinstance(value, dict):
-        result: dict[str, Any] = {}
-        for key, item in value.items():
-            candidate = dict(result)
-            candidate[str(key)] = bounded_coach_context_value(item, limit)
-            if coach_context_json_size(candidate) > limit:
-                break
-            result = candidate
-        return result
+        return _bounded_dict(value, limit)
     return None
 
 

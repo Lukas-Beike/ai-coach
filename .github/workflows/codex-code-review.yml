@@ -526,7 +526,7 @@ jobs:
         # develop. Invoke the action directly from that protected ref so no
         # pull-request repository is checked out in this privileged workflow.
         if: matrix.skipCodexReview != true && github.event_name != 'push' && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
-        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@develop
+        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@81184e6f2137aa6365724a1ce57968bd1a3f1965
         with:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}
@@ -539,7 +539,7 @@ jobs:
       - name: Run trusted main Codex gate
         # Main pull-request events use the protected main action revision.
         if: matrix.skipCodexReview != true && github.event_name != 'push' && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
-        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@main
+        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@81184e6f2137aa6365724a1ce57968bd1a3f1965
         with:
           github-token: ${{ github.token }}
           pull-request-number: ${{ matrix.pullRequestNumber }}

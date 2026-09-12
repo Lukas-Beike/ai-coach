@@ -316,3 +316,12 @@ test('manual events use the current protected action without checking out pull-r
     assert.equal(actionEnabled('Run trusted main Codex gate', 'main', event, true), false);
   }
 });
+
+test('privileged review gate uses a pinned protected action without checkout', () => {
+  assert.doesNotMatch(workflow, /actions\/checkout/);
+  assert.match(
+    workflow,
+    /uses: Lukas-Beike\/ai-coach\/\.github\/actions\/codex-review-gate@[0-9a-f]{40}/,
+  );
+});
+

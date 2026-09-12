@@ -21,12 +21,12 @@ const NAV_LINK_ROUTES = Object.freeze({
 });
 const DEFAULT_NAV_ROUTE = "coach";
 
-function routeFromHash(hash = window.location.hash) {
+function routeFromHash(hash = globalThis.location.hash) {
   const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
   return Object.hasOwn(NAV_ROUTES, rawRoute) ? rawRoute : DEFAULT_NAV_ROUTE;
 }
 
-function hashContainsKnownRoute(hash = window.location.hash) {
+function hashContainsKnownRoute(hash = globalThis.location.hash) {
   const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
   return Object.hasOwn(NAV_ROUTES, rawRoute);
 }
