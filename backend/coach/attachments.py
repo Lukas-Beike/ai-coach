@@ -289,6 +289,9 @@ def _fit_session_metric_value(key, values, durations, divisor):
     if key in _FIT_SESSION_MAXIMA:
         return max(values) / divisor
     if key in _FIT_SESSION_WEIGHTED_AVERAGES and len(values) == len(durations) and sum(durations) > 0:
+        if key == "normalized_power_w":
+            return (sum(max(0, metric) ** 4 * duration for metric, duration in zip(values, durations))
+                    / sum(durations)) ** 0.25 / divisor
         return sum(metric * duration for metric, duration in zip(values, durations)) / sum(durations) / divisor
     if key in _FIT_SESSION_WEIGHTED_AVERAGES:
         return sum(values) / len(values) / divisor
@@ -303,10 +306,12 @@ def _fit_session_summary(messages, sessions, records):
     )
     if start:
         summary["start_time_utc"] = start
-    sport = session.get(5)
-    if isinstance(sport, int) and sport in _FIT_SPORTS:
-        summary["sport"] = _FIT_SPORTS[sport]
-    durations = _fit_scaled(messages, 18, 7)
+    sports = {_FIT_SPORTS[sport] for sport in (item.get(5) for item in sessions) if sport in _FIT_SPORTS}
+    if len(sports) > 1:
+        summary["sport"] = "multisport"
+    elif sports:
+        summary["sport"] = next(iter(sports))
+    durations = _fit_scaled(messages, 18, 8) or _fit_scaled(messages, 18, 7)
     for key, (message_number, field_number, divisor) in _FIT_SESSION_METRICS.items():
         values = _fit_scaled(messages, message_number, field_number)
         if not values:

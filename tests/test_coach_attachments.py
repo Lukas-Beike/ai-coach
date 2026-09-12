@@ -121,17 +121,20 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
 
     def test_fit_session_metrics_are_aggregated(self):
         sessions = [
-            {2: 1_000_000, 7: 10_000, 9: 500_000, 16: 100, 17: 120, 22: 40, 35: 100},
-            {2: 1_000_010, 7: 20_000, 9: 300_000, 16: 130, 17: 140, 22: 60, 35: 200},
+            {2: 1_000_000, 5: 2, 7: 10_000, 8: 10_000, 9: 500_000, 16: 100, 17: 120, 22: 40, 34: 100, 35: 100},
+            {2: 1_000_010, 5: 5, 7: 20_000, 8: 10_000, 9: 300_000, 16: 130, 17: 140, 22: 60, 34: 300, 35: 200},
         ]
         summary = _fit_session_summary(
             [(18, session) for session in sessions], sessions, []
         )
         self.assertEqual(summary["duration_s"], 30)
+        self.assertEqual(summary["timer_time_s"], 20)
         self.assertEqual(summary["distance_km"], 8)
         self.assertEqual(summary["max_heart_rate_bpm"], 140)
-        self.assertEqual(summary["avg_heart_rate_bpm"], 120)
+        self.assertEqual(summary["avg_heart_rate_bpm"], 115)
+        self.assertEqual(summary["normalized_power_w"], 253.044)
         self.assertEqual(summary["training_stress_score"], 30)
+        self.assertEqual(summary["sport"], "multisport")
 
     def test_attachment_persists_for_worker_without_leaking_into_history(self):
         server.enqueue_background_coach_job("", "attachments-turn", "synthetic-csrf", attachments=[self.upload(), {"name": "chart.png", "data": PNG}])
