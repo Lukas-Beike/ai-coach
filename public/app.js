@@ -1264,8 +1264,27 @@ function receiptIsVisible(entry, planCommitRequested, finalCommit) {
 
 function syncJobReceipt(job) {
   const title = SYNC_JOB_RECEIPT_LABELS[job.status] || "Synchronisierungsstatus unklar";
-  const status = ["partial", "failed"].includes(job.status) ? "error" : job.status === "completed" ? "success" : "pending";
+  let status = "pending";
+  if (["partial", "failed"].includes(job.status)) status = "error";
+  else if (job.status === "completed") status = "success";
   return { title, message: job.error_detail || title, status };
+}
+
+function commandReceiptTitle(entry, result, failed, queued) {
+  if (failed) return "Coach-Aktion fehlgeschlagen";
+  if (entry.tool === "start_provider_refresh" && result.status === "completed") return "Daten aktualisiert";
+  if (COACH_RECEIPT_LABELS[entry.tool]) return COACH_RECEIPT_LABELS[entry.tool];
+  return queued ? "Synchronisierung beauftragt" : "Informationen geladen";
+}
+
+function commandReceiptMessage(result, failed, queued) {
+  if (failed) return result.error || "Die Aktion konnte nicht ausgeführt werden.";
+  return queued ? "Der Auftrag wird im Hintergrund bearbeitet; das Ergebnis steht noch aus." : "Der lokale Beleg liegt vor.";
+}
+
+function commandReceiptStatus(failed, queued) {
+  if (failed) return "error";
+  return queued ? "pending" : "success";
 }
 
 function commandReceipt(entry) {
@@ -1273,18 +1292,15 @@ function commandReceipt(entry) {
   if (entry.tool === "get_sync_job" && result.job) return syncJobReceipt(result.job);
   const failed = result.ok === false;
   const queued = Boolean(result.sync_job_id || result.job_id || result.job?.id || result.status === "queued");
-  const title = failed
-    ? "Coach-Aktion fehlgeschlagen"
-    : entry.tool === "start_provider_refresh" && result.status === "completed"
-      ? "Daten aktualisiert"
-      : COACH_RECEIPT_LABELS[entry.tool] || (queued ? "Synchronisierung beauftragt" : "Informationen geladen");
   const details = [];
   if (Array.isArray(result.library_entry_ids) && result.library_entry_ids.length) details.push(`${result.library_entry_ids.length} lokale Einheit(en) gespeichert`);
   if (result.remote_untouched) details.push("Providerdaten unverändert");
-  const message = failed
-    ? result.error || "Die Aktion konnte nicht ausgeführt werden."
-    : queued ? "Der Auftrag wird im Hintergrund bearbeitet; das Ergebnis steht noch aus." : "Der lokale Beleg liegt vor.";
-  return { title, message, status: failed ? "error" : queued ? "pending" : "success", details };
+  return {
+    title: commandReceiptTitle(entry, result, failed, queued),
+    message: commandReceiptMessage(result, failed, queued),
+    status: commandReceiptStatus(failed, queued),
+    details,
+  };
 }
 
 function addStructuredCoachReceipts(payload) {
@@ -1871,6 +1887,42 @@ function appendHistoryPageButton(root, area) {
   root.append(button);
 }
 
+function messageAttachmentLabel(names) {
+  try {
+    const parsed = JSON.parse(names);
+    return parsed.length ? String.fromCodePoint(10) + "Anhänge: " + parsed.join(", ") : "";
+  } catch (parseError) {
+    if (!(parseError instanceof SyntaxError)) throw parseError;
+    return "";
+  }
+}
+
+function restoreRejectedMessage(message) {
+  const input = $("#messageInput");
+  if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
+  input.value = message.content;
+  state.chatAttachments = message.attachments || [];
+  renderChatAttachments();
+  state.chatDraftDirty = true;
+  state.data.messages = state.data.messages.filter((entry) => entry !== message);
+  state.rejectedMessages = state.rejectedMessages.filter((entry) => entry.client_turn_id !== message.client_turn_id);
+  renderMessages(state.data.messages);
+  jumpToChatComposer();
+  updateChatControls();
+}
+
+function appendMessageRetry(node, message) {
+  if (!message.error) return;
+  const error = document.createElement("p");
+  error.className = "message-error";
+  error.textContent = message.error;
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "Als Entwurf übernehmen";
+  retry.addEventListener("click", () => restoreRejectedMessage(message));
+  node.append(error, retry);
+}
+
 function renderMessageNode(message) {
   const node = document.createElement("div");
   node.className = `message ${message.role}`;
@@ -1880,45 +1932,17 @@ function renderMessageNode(message) {
     node.textContent = message.content;
     if (message.attachment_names) {
       const label = document.createElement("small");
-      try {
-        const parsed = JSON.parse(message.attachment_names);
-        label.textContent = parsed.length ? String.fromCharCode(10) + "Anhänge: " + parsed.join(", ") : "";
-      } catch (parseError) {
-        if (!(parseError instanceof SyntaxError)) throw parseError;
-        label.textContent = "";
-      }
+      label.textContent = messageAttachmentLabel(message.attachment_names);
       node.append(label);
     }
   }
-  if (message.error) {
-    const error = document.createElement("p");
-    error.className = "message-error";
-    error.textContent = message.error;
-    const retry = document.createElement("button");
-    retry.type = "button";
-    retry.textContent = "Als Entwurf übernehmen";
-    retry.addEventListener("click", () => {
-      const input = $("#messageInput");
-      if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
-      input.value = message.content;
-      state.chatAttachments = message.attachments || [];
-      renderChatAttachments();
-      state.chatDraftDirty = true;
-      state.data.messages = state.data.messages.filter((entry) => entry !== message);
-      state.rejectedMessages = state.rejectedMessages.filter((entry) => entry.client_turn_id !== message.client_turn_id);
-      renderMessages(state.data.messages);
-      jumpToChatComposer();
-      updateChatControls();
-    });
-    node.append(error, retry);
-  }
+  appendMessageRetry(node, message);
   return node;
 }
 
-function appendChatStream(root, persistedResponse) {
+function appendChatStream(root, streamVisible) {
   const phase = state.chatRequest?.phase;
-  const visible = state.chatStreamText && !persistedResponse && ["running", "recovering", "reconciling"].includes(phase);
-  if (!visible) return false;
+  if (!streamVisible) return false;
   const node = document.createElement("div");
   node.className = `message assistant streaming${phase === "recovering" ? " is-recovering" : ""}`;
   node.innerHTML = markdownToHtml(state.chatStreamText);
@@ -1957,8 +1981,9 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
     || (state.chatRequest?.responseMessageId != null
       && visibleMessages.some((message) => message.id != null && String(message.id) === String(state.chatRequest.responseMessageId)))
   );
+  const streamVisible = state.chatStreamText && !persistedResponse && ["running", "recovering", "reconciling"].includes(state.chatRequest?.phase);
   const showWorking = !persistedResponse && ["running", "recovering", "reconciling"].includes(state.chatRequest?.phase);
-  appendChatStream(root, persistedResponse);
+  appendChatStream(root, streamVisible);
   if (showWorking) root.append(createCoachWorkingIndicator());
   renderCoachActionReview();
   updateChatQueueStatus();
@@ -3331,29 +3356,77 @@ function settingsStatus(selector, ok, text) {
   node.className = ok ? "configured" : "not-configured";
 }
 
+function aiProviderName(provider) {
+  return provider === "gemini" ? "Gemini" : "OpenAI";
+}
+
+function aiConnectionLabel(configured, activeError) {
+  if (!configured) return "Nicht konfiguriert";
+  return activeError ? "Fehler bei letzter Anfrage" : "Konfiguriert";
+}
+
+function aiConnectionConfigurationDetail(provider) {
+  return provider === "gemini" ? "GEMINI_API_KEY nicht konfiguriert" : "API-Schlüssel nicht konfiguriert";
+}
+
+function aiConnectionErrorDetail(provider, status) {
+  const message = status.message || aiProviderName(provider) + "-Anfrage fehlgeschlagen.";
+  const updated = status.updated_at ? " · " + formatTime(status.updated_at) : "";
+  return message + updated;
+}
+
+function aiConnectionDetail(provider, configured, activeProvider, activeError, status) {
+  if (!configured) return aiConnectionConfigurationDetail(provider);
+  if (activeError) return aiConnectionErrorDetail(provider, status);
+  if (activeProvider === provider && status.state === "ok") return "Letzter erfolgreicher API-Aufruf: " + formatTime(status.updated_at);
+  return "Als alternativer Anbieter konfiguriert";
+}
+
 function renderAiConnection(provider, configured, activeProvider, status) {
   const activeError = activeProvider === provider && status.state === "error";
   const healthy = configured && !activeError;
-  const label = !configured ? "Nicht konfiguriert" : activeError ? "Fehler bei letzter Anfrage" : "Konfiguriert";
-  settingsStatus(`#${provider}ConnectionStatus`, healthy, label);
-  const detail = $(`#${provider}ConnectionDetail`);
-  if (!detail) return;
-  detail.classList.toggle("error", Boolean(configured && activeError));
-  if (!configured) detail.textContent = provider === "gemini" ? "GEMINI_API_KEY nicht konfiguriert" : "API-Schlüssel nicht konfiguriert";
-  else if (activeError) {
-    const updated = status.updated_at ? ` · ${formatTime(status.updated_at)}` : "";
-    detail.textContent = `${status.message || `${provider === "gemini" ? "Gemini" : "OpenAI"}-Anfrage fehlgeschlagen.`}${updated}`;
-  } else if (activeProvider === provider && status.state === "ok") {
-    detail.textContent = `Letzter erfolgreicher API-Aufruf: ${formatTime(status.updated_at)}`;
-  } else detail.textContent = "Als alternativer Anbieter konfiguriert";
+  settingsStatus("#" + provider + "ConnectionStatus", healthy, aiConnectionLabel(configured, activeError));
+  const detail = $("#" + provider + "ConnectionDetail");
+  if (detail) {
+    detail.classList.toggle("error", Boolean(configured && activeError));
+    detail.textContent = aiConnectionDetail(provider, configured, activeProvider, activeError, status);
+  }
   return healthy;
 }
 
-function renderIntervalsConnection(data, configured) {
-  const intervals = data.intervals || {
+function intervalsConnectionState(data, configured) {
+  return data.intervals || {
     configured: Boolean(configured.intervals),
     state: configured.intervals ? "configured" : "not_configured",
   };
+}
+
+function intervalsPaginationDetail(intervals) {
+  return Object.entries(intervals.pagination || {})
+    .filter(([, value]) => value && (Number(value.pages) > 1 || value.complete === false))
+    .map(([name, value]) => {
+      const completeness = value.complete === false ? " · unvollständig" : "";
+      return name + ": " + (value.records || 0) + " Datensätze auf " + (value.pages || 0) + " Seiten" + completeness;
+    })
+    .join(" · ");
+}
+
+function intervalsConnectionDetail(intervals) {
+  const librarySync = intervals.library_sync || {};
+  if (!intervals.configured) return "API-Schlüssel nicht konfiguriert";
+  if (intervals.state === "syncing") return intervals.status || "Intervals.icu wird synchronisiert.";
+  if (intervals.last_error) return intervals.last_error;
+  if (!(intervals.last_sync_at || librarySync.last_sync_at)) return "Noch keine Synchronisierung durchgeführt";
+  const updated = formatTime(intervals.last_sync_at || librarySync.last_sync_at);
+  const libraryCount = Number(librarySync.state?.synced || 0);
+  const counts = libraryCount ? " · " + libraryCount + " Bibliothekseinheiten" : "";
+  const pagination = intervalsPaginationDetail(intervals);
+  const paginationSuffix = pagination ? " · " + pagination : "";
+  return "Letzte Aktualisierung: " + updated + counts + paginationSuffix;
+}
+
+function renderIntervalsConnection(data, configured) {
+  const intervals = intervalsConnectionState(data, configured);
   const healthy = intervals.configured && intervals.state !== "error";
   const labels = {
     not_configured: "Nicht konfiguriert",
@@ -3363,35 +3436,30 @@ function renderIntervalsConnection(data, configured) {
   };
   settingsStatus("#intervalsConnectionStatus", healthy, labels[intervals.state] || "Konfiguriert · noch nicht getestet");
   const detail = $("#intervalsConnectionDetail");
-  if (!detail) return { intervals, healthy };
-  const librarySync = intervals.library_sync || {};
-  const libraryState = librarySync.state || {};
-  const libraryCount = Number(libraryState.synced || 0);
-  const pagination = Object.entries(intervals.pagination || {})
-    .filter(([, value]) => value && (Number(value.pages) > 1 || value.complete === false))
-    .map(([name, value]) => `${name}: ${value.records || 0} Datensätze auf ${value.pages || 0} Seiten${value.complete === false ? " · unvollständig" : ""}`)
-    .join(" · ");
-  detail.classList.toggle("error", Boolean(intervals.last_error));
-  if (!intervals.configured) detail.textContent = "API-Schlüssel nicht konfiguriert";
-  else if (intervals.state === "syncing") detail.textContent = intervals.status || "Intervals.icu wird synchronisiert.";
-  else if (intervals.last_error) detail.textContent = intervals.last_error;
-  else if (intervals.last_sync_at || librarySync.last_sync_at) {
-    const updated = formatTime(intervals.last_sync_at || librarySync.last_sync_at);
-    const counts = libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : "";
-    detail.textContent = `Letzte Aktualisierung: ${updated}${counts}${pagination ? ` · ${pagination}` : ""}`;
-  } else detail.textContent = "Noch keine Synchronisierung durchgeführt";
-  return { intervals, healthy };
+  if (detail) {
+    detail.classList.toggle("error", Boolean(intervals.last_error));
+    detail.textContent = intervalsConnectionDetail(intervals);
+  }
+  return healthy;
+}
+
+function weatherConnectionLabel(weather) {
+  if (!weather.configured) return "Nicht konfiguriert";
+  return weather.loading ? "Wird geladen" : "Konfiguriert";
+}
+
+function weatherConnectionDetail(weather) {
+  if (!weather.configured) return "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
+  const location = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
+  const prefix = location ? "Standort: " + location + " · " : "";
+  const fetched = weather.fetched_at ? "letzte Abfrage: " + formatTime(weather.fetched_at) : "Standort im Profil hinterlegen";
+  return prefix + fetched;
 }
 
 function renderWeatherConnection(weather) {
-  const location = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
-  const label = !weather.configured ? "Nicht konfiguriert" : weather.loading ? "Wird geladen" : "Konfiguriert";
-  settingsStatus("#weatherConnectionStatus", weather.configured, label);
+  settingsStatus("#weatherConnectionStatus", weather.configured, weatherConnectionLabel(weather));
   const detail = $("#weatherConnectionDetail");
-  if (detail) {
-    if (!weather.configured) detail.textContent = "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
-    else detail.textContent = `${location ? `Standort: ${location} · ` : ""}${weather.fetched_at ? `letzte Abfrage: ${formatTime(weather.fetched_at)}` : "Standort im Profil hinterlegen"}`;
-  }
+  if (detail) detail.textContent = weatherConnectionDetail(weather);
   const button = $("#weatherSyncButton");
   if (button) {
     const running = Boolean(state.localSync.weather);
@@ -3400,56 +3468,82 @@ function renderWeatherConnection(weather) {
   }
 }
 
-function renderSettingsInputs(data) {
-  const intervalsDays = $("#intervalsSyncDays");
-  const garminDays = $("#garminSyncDays");
-  if (intervalsDays && document.activeElement !== intervalsDays) intervalsDays.value = data.sync_settings?.intervals_days || 90;
-  if (garminDays && document.activeElement !== garminDays) garminDays.value = data.sync_settings?.garmin_days || 30;
-  const calendarDisplay = data.calendar_display || CALENDAR_DISPLAY_DEFAULTS;
-  const calendarPastWeeks = $("#calendarDisplayPastWeeks");
-  const calendarFutureWeeks = $("#calendarDisplayFutureWeeks");
-  const pastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
-  const futureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
-  if (calendarPastWeeks && document.activeElement !== calendarPastWeeks) calendarPastWeeks.value = pastWeeks;
-  if (calendarFutureWeeks && document.activeElement !== calendarFutureWeeks) calendarFutureWeeks.value = futureWeeks;
+function updateUnfocusedInput(selector, value) {
+  const input = $(selector);
+  if (input && document.activeElement !== input) input.value = value;
+}
+
+function renderSettingsSyncDayInputs(data) {
+  updateUnfocusedInput("#intervalsSyncDays", data.sync_settings?.intervals_days || 90);
+  updateUnfocusedInput("#garminSyncDays", data.sync_settings?.garmin_days || 30);
+}
+
+function calendarHorizonText(data) {
+  const window = data.planning_view?.provider_window || {};
+  if (window.start && window.end) return "Die Ansicht bleibt auf das lokal geladene Intervals.icu-Fenster " + window.start + " bis " + window.end + " begrenzt.";
+  return "Die Ansicht wird auf das lokal geladene Providerfenster begrenzt.";
+}
+
+function renderCalendarDisplayInputs(data) {
+  const display = data.calendar_display || CALENDAR_DISPLAY_DEFAULTS;
+  const pastWeeks = calendarDisplayValue(display.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
+  const futureWeeks = calendarDisplayValue(display.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
+  updateUnfocusedInput("#calendarDisplayPastWeeks", pastWeeks);
+  updateUnfocusedInput("#calendarDisplayFutureWeeks", futureWeeks);
   const summary = $("#calendarDisplaySummary");
-  if (summary) summary.textContent = `${pastWeeks} zurück · ${futureWeeks} voraus`;
+  if (summary) summary.textContent = pastWeeks + " zurück · " + futureWeeks + " voraus";
   const hint = $("#calendarHorizonHint");
-  if (hint) {
-    const window = data.planning_view?.provider_window || {};
-    hint.textContent = window.start && window.end
-      ? `Die Ansicht bleibt auf das lokal geladene Intervals.icu-Fenster ${window.start} bis ${window.end} begrenzt.`
-      : "Die Ansicht wird auf das lokal geladene Providerfenster begrenzt.";
+  if (hint) hint.textContent = calendarHorizonText(data);
+}
+
+function renderSettingsInputs(data) {
+  renderSettingsSyncDayInputs(data);
+  renderCalendarDisplayInputs(data);
+}
+
+function intervalsSyncRunning(data, fullRunning) {
+  return Boolean(data.sync?.running || state.localSync.intervals || fullRunning);
+}
+
+function intervalsFullResyncText(fullResync, fullRunning) {
+  if (fullRunning && fullResync.status) return fullResync.status;
+  if (fullResync.last_error) return fullResync.last_error;
+  if (fullResync.last_resync_at) return "Letzter vollständiger Resync: " + formatTime(fullResync.last_resync_at);
+  return "Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.";
+}
+
+function renderIntervalsSyncControls(data, configured) {
+  const fullResync = data.provider_resync?.intervals || {};
+  const fullRunning = Boolean(fullResync.running || state.localSync.intervalsFull);
+  const syncRunning = intervalsSyncRunning(data, fullRunning);
+  const syncButton = $("#systemIntervalsSyncButton");
+  if (syncButton) {
+    syncButton.disabled = syncRunning;
+    syncButton.textContent = data.sync?.running || state.localSync.intervals ? "Synchronisierung läuft…" : "Synchronisieren";
+  }
+  const fullButton = $("#systemIntervalsFullResyncButton");
+  if (fullButton) {
+    fullButton.disabled = !configured.intervals || fullRunning || Boolean(data.sync?.running || state.localSync.intervals);
+    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
+  }
+  const status = $("#intervalsFullResyncStatus");
+  if (status) {
+    status.classList.toggle("error", Boolean(fullResync.last_error));
+    status.textContent = intervalsFullResyncText(fullResync, fullRunning);
   }
 }
 
-function renderSettingsSyncControls(data, configured) {
-  const intervalsSyncButton = $("#systemIntervalsSyncButton");
-  const intervalsFullButton = $("#systemIntervalsFullResyncButton");
-  const intervalsFullStatus = $("#intervalsFullResyncStatus");
-  const fullResync = data.provider_resync?.intervals || {};
-  const fullRunning = Boolean(fullResync.running || state.localSync.intervalsFull);
-  if (intervalsSyncButton) {
-    intervalsSyncButton.disabled = Boolean(data.sync?.running || state.localSync.intervals || fullRunning);
-    intervalsSyncButton.textContent = data.sync?.running || state.localSync.intervals ? "Synchronisierung läuft…" : "Synchronisieren";
-  }
-  if (intervalsFullButton) {
-    intervalsFullButton.disabled = !configured.intervals || fullRunning || Boolean(data.sync?.running || state.localSync.intervals);
-    intervalsFullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
-  }
-  if (intervalsFullStatus) {
-    intervalsFullStatus.classList.toggle("error", Boolean(fullResync.last_error));
-    if (fullRunning && fullResync.status) intervalsFullStatus.textContent = fullResync.status;
-    else if (fullResync.last_error) intervalsFullStatus.textContent = fullResync.last_error;
-    else if (fullResync.last_resync_at) intervalsFullStatus.textContent = `Letzter vollständiger Resync: ${formatTime(fullResync.last_resync_at)}`;
-    else intervalsFullStatus.textContent = "Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.";
-  }
+function renderGarminSyncControl(data) {
   const button = $("#garminSyncButton");
-  if (button) {
-    const running = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-    button.disabled = running;
-    button.textContent = running ? "Synchronisierung läuft…" : "Garmin synchronisieren";
-  }
+  if (!button) return;
+  const running = Boolean(data.garmin_sync?.running || state.localSync.garmin);
+  button.disabled = running;
+  button.textContent = running ? "Synchronisierung läuft…" : "Garmin synchronisieren";
+}
+
+function renderSettingsSyncControls(data, configured) {
+  renderIntervalsSyncControls(data, configured);
+  renderGarminSyncControl(data);
 }
 
 function renderSettingsUsage(data, activeProvider) {
@@ -3468,21 +3562,31 @@ function renderSettingsUsage(data, activeProvider) {
   if (privacy) privacy.textContent = `${usage.requests || 0} ${providerLabel}-Anfragen heute`;
 }
 
+function garminConnectionLabel(garmin, running) {
+  if (!garmin.configured) return "Nicht konfiguriert";
+  if (running) return "Synchronisierung läuft…";
+  return garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert";
+}
+
+function renderConnectionsSummary(openaiHealthy, geminiHealthy, intervalsHealthy, garminConfigured, weatherConfigured) {
+  const connections = $("#connectionsSummary");
+  if (!connections) return;
+  const values = [["OpenAI", openaiHealthy], ["Gemini", geminiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garminConfigured], ["Open-Meteo", weatherConfigured]];
+  connections.textContent = values.map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
+}
+
 function renderSettings(data) {
   const configured = data.configured || {};
   const activeProvider = data.ai_provider?.selected || "openai";
   const status = data.usage?.status || {};
   const openaiHealthy = renderAiConnection("openai", configured.openai, activeProvider, status);
   const geminiHealthy = renderAiConnection("gemini", configured.gemini, activeProvider, status);
-  const { intervals, healthy: intervalsHealthy } = renderIntervalsConnection(data, configured);
+  const intervalsHealthy = renderIntervalsConnection(data, configured);
   const garmin = data.garmin || {};
   const garminRunning = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-  const garminLabel = !garmin.configured ? "Nicht konfiguriert" : garminRunning ? "Synchronisierung läuft…" : garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert";
-  settingsStatus("#garminConnectionStatus", garmin.configured, garminLabel);
+  settingsStatus("#garminConnectionStatus", garmin.configured, garminConnectionLabel(garmin, garminRunning));
   renderWeatherConnection(data.weather || {});
-  const connections = $("#connectionsSummary");
-  if (connections) connections.textContent = [["OpenAI", openaiHealthy], ["Gemini", geminiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garmin.configured], ["Open-Meteo", data.weather?.configured]]
-    .map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
+  renderConnectionsSummary(openaiHealthy, geminiHealthy, intervalsHealthy, garmin.configured, data.weather?.configured);
   renderSettingsInputs(data);
   renderSettingsSyncControls(data, configured);
   renderSettingsUsage(data, activeProvider);
