@@ -12261,6 +12261,14 @@ def bounded_activity_metric(value: Any, minimum: float, maximum: float) -> float
     return number if number is not None and minimum <= float(number) <= maximum else None
 
 
+def activity_intensity(value: Any) -> float | int | None:
+    """Normalize Intervals.icu fractional or percentage intensity values."""
+    intensity = bounded_activity_metric(value, 0, 1000)
+    if intensity is not None and 0 < float(intensity) <= 2:
+        return round(float(intensity) * 100, 1)
+    return intensity
+
+
 def activity_validation_evidence(latest: dict[str, Any], sport: str) -> dict[str, Any]:
     """Return bounded measured evidence from one untrusted activity record."""
     activity_id = first_present(latest, ("id", "activityId"))
@@ -12282,7 +12290,7 @@ def activity_validation_evidence(latest: dict[str, Any], sport: str) -> dict[str
         ("weighted_power_watts", ("weighted_average_watts", "normalized_power"), 0, 5_000),
         ("rpe", ("icu_rpe", "rpe"), 0, 10),
     ):
-        value = bounded_activity_metric(first_present(latest, aliases), minimum, maximum)
+        value = activity_intensity(first_present(latest, aliases)) if key == "intensity" else bounded_activity_metric(first_present(latest, aliases), minimum, maximum)
         if value is not None:
             evidence[key] = value
     return evidence

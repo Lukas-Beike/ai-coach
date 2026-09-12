@@ -6956,7 +6956,7 @@ class CoachTests(unittest.TestCase):
             [{
                 "id": "latest-ride", "type": "Ride", "start_date_local": f"{today}T08:00:00",
                 "moving_time": 3600, "distance": 30_000, "weighted_average_watts": 270,
-                "average_heartrate": 155, "icu_intensity": 90, "icu_ftp": 300,
+                "average_heartrate": 155, "icu_intensity": 0.9, "icu_ftp": 300,
             }],
             [],
             [],
@@ -6965,6 +6965,7 @@ class CoachTests(unittest.TestCase):
         validation = server.current_performance_context(snapshot)["activity_validation"]
 
         self.assertEqual(validation["activity"]["sport"], "Radfahren")
+        self.assertEqual(validation["activity"]["intensity"], 90)
         self.assertEqual(validation["activity"]["power_as_percent_of_current_ftp"], 90.0)
         self.assertEqual([item["metric"] for item in validation["provider_references"]], [
             "cycling_vo2max_ml_kg_min", "cycling_ftp_watts", "cycling_eftp_watts",
