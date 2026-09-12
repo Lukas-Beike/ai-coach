@@ -2534,6 +2534,10 @@ class CoachTests(unittest.TestCase):
         unsupported = weekly.replace(b"FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH", b"FREQ=HOURLY;COUNT=2")
         with self.assertRaises(server.AppError):
             server.parse_ical_calendar(unsupported)
+        for malformed_byday in (b"BYDAY=MO,", b"BYDAY=MO,,TU", b"BYDAY=,"):
+            malformed = weekly.replace(b"BYDAY=TU,TH", malformed_byday)
+            with self.assertRaises(server.AppError):
+                server.parse_ical_calendar(malformed)
 
     def test_ical_parser_applies_google_rdate_and_recurring_exceptions(self):
         payload = (
