@@ -3564,6 +3564,20 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(comparisons["run_5k_seconds_30d"]["delta"], -100)
         self.assertEqual(comparisons["run_5k_seconds_30d"]["color"], "good")
 
+    def test_performance_does_not_compare_garmin_metrics_to_intervals_history(self):
+        today = server.local_now().date()
+        snapshot = {
+            "synced_at": "now", "athlete": {}, "recent_activities": [],
+            "recent_wellness": [{"id": today.isoformat(), "sport_info": [{"types": ["Ride"], "ftp": 280}]}],
+        }
+        server.set_kv("garmin_snapshot", json.dumps({
+            "cycling_ftp": {"functionalThresholdPower": 300},
+            "performance_history": [],
+        }))
+
+        comparison = server.current_performance_context(snapshot)["comparisons"]["cycling_ftp_watts_30d"]
+        self.assertIsNone(comparison)
+
     def test_calendar_conflict_is_detected_before_push(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         server.upsert_remote_planned_units([{"id": "existing", "name": "Existing", "category": "WORKOUT", "type": "Ride", "start_date_local": tomorrow + "T08:00:00", "moving_time": 3600}])
@@ -6940,6 +6954,18 @@ class CoachTests(unittest.TestCase):
         ])
         self.assertEqual(validation["direct_activity_estimates"]["activity_configured_ftp_watts"], 300)
         self.assertNotEqual(validation["direct_activity_estimates"].get("activity_ftp_watts"), 300)
+
+    def test_activity_validation_omits_power_ratio_for_invalid_or_implausible_ftp(self):
+        activity = {
+            "id": "invalid-ftp", "type": "Ride", "start_date_local": "2026-09-12T08:00:00",
+            "weighted_average_watts": 270,
+        }
+        for ftp in (-1, 10):
+            with self.subTest(ftp=ftp):
+                validation = server.activity_performance_validation(
+                    [activity], {"cycling_ftp_watts": {"value": ftp}}, {},
+                )
+                self.assertNotIn("power_as_percent_of_current_ftp", validation["activity"])
 
     def test_activity_validation_omits_malformed_or_oversized_direct_estimates(self):
         validation = server.activity_performance_validation([{

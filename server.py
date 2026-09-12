@@ -12324,9 +12324,12 @@ def activity_performance_validation(
     elif sport == "Radfahren":
         reference_keys = ("cycling_vo2max_ml_kg_min", "cycling_ftp_watts", "cycling_eftp_watts")
         ftp = metrics.get("cycling_ftp_watts", {}).get("value")
+        ftp = bounded_activity_metric(ftp, 20, 2000)
         weighted_power = activity_evidence.get("weighted_power_watts") or activity_evidence.get("average_power_watts")
-        if as_number(weighted_power) is not None and as_number(ftp) not in (None, 0):
-            activity_evidence["power_as_percent_of_current_ftp"] = round(float(weighted_power) / float(ftp) * 100, 1)
+        if weighted_power is not None and ftp is not None:
+            power_percent = round(float(weighted_power) / float(ftp) * 100, 1)
+            if 0 <= power_percent <= 500:
+                activity_evidence["power_as_percent_of_current_ftp"] = power_percent
         interpretation = (
             "Leistung, Herzfrequenz, Dauer und Intensität dieser Einheit sind direkte Belastungsevidenz. "
             "Sie bestätigen oder widerlegen FTP und VO2max aber nur bei einem ausreichend langen "
@@ -12356,7 +12359,7 @@ def activity_performance_validation(
         "direct_activity_estimates": direct_activity_estimates,
         "interpretation_boundary": interpretation,
         "validation_outcome_enum": ["direct_support", "plausible_corroboration", "conflict", "insufficient_evidence"],
-        "scope": "Vergleich der letzten abgeschlossenen Einheit mit Provider-Leistungswerten; keine Laborvalidierung.",
+        "scope": "Vergleich der analysierten abgeschlossenen Einheit mit Provider-Leistungswerten; keine Laborvalidierung.",
     }
 
 
@@ -12896,11 +12899,8 @@ def performance_trend_average(snapshot: dict[str, Any], metrics: dict[str, dict[
     current_source = metrics.get(key, {}).get("source")
     if current_source == GARMIN_PERFORMANCE_SOURCE:
         if key == "weight_kg":
-            average = garmin_weight_average(garmin_snapshot(), days, end_date)
-        else:
-            average = garmin_history_average(garmin_snapshot(), key, days, end_date)
-        if average is not None:
-            return average
+            return garmin_weight_average(garmin_snapshot(), days, end_date)
+        return garmin_history_average(garmin_snapshot(), key, days, end_date)
     rows = snapshot.get("recent_wellness") if isinstance(snapshot.get("recent_wellness"), list) else []
     return intervals_performance_average([row for row in rows if isinstance(row, dict)], key, days, end_date)
 
