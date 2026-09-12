@@ -1100,13 +1100,17 @@ See [`LICENSE`](LICENSE) for the full license text.
 
 ### Dateien im Coach-Chat
 
-Über den **+**-Button lassen sich bis zu vier GPX-Dateien oder Bilder (PNG, JPEG,
-WebP) mit jeweils höchstens 5 MB auswählen und vor dem Senden entfernen.
+Über den **+**-Button lassen sich bis zu vier GPX- oder FIT-Dateien sowie
+Bilder (PNG, JPEG, WebP) mit jeweils höchstens 5 MB auswählen und vor dem
+Senden entfernen. GPX- und FIT-Rohdateien werden unverändert an den
+ausgewählten Coach übergeben; zusätzlich wird eine begrenzte lokale
+Zusammenfassung für den Dialogverlauf erzeugt.
 Eine zusätzliche Frage ist optional. GPX-Tracks und Routen werden lokal zu
 Distanz, ungeglätteten Höhenmetern und einer Stichprobe der Koordinaten
 aufbereitet; fehlende Höhen und GPS-Ungenauigkeiten begrenzen die Aussagekraft.
 Bilder werden zur Analyse an den ausgewählten KI-Anbieter gesendet.
 Die Anhänge werden in der verschlüsselten Chat-Datenbank gespeichert und sind
-in Datenschutzexport und Backup enthalten. Bei GPX wird nur die aufbereitete
-Streckeninformation gespeichert. Chat zurücksetzen entfernt auch die lokalen
-Anhänge. Nicht gesendete Dateien bleiben nur im Arbeitsspeicher des Browsers.
+in Datenschutzexport und Backup enthalten. Bei GPX und FIT werden die
+Rohdateien für die Coach-Anfrage sowie die begrenzte Zusammenfassung gespeichert.
+Chat zurücksetzen entfernt auch die lokalen Anhänge. Nicht gesendete Dateien
+bleiben nur im Arbeitsspeicher des Browsers.
