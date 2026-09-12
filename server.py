@@ -5589,16 +5589,22 @@ def _ical_period_marker(year: int, months: list[int], frequency: str) -> date:
     return date(year, months[-1], 1) if frequency == "MONTHLY" else date(year, 1, 1)
 
 
+def _ical_first_period_index(base_date: date, rule: dict[str, Any], window_start: date) -> int:
+    if rule["count"] is not None:
+        return 0
+    frequency = rule["frequency"]
+    base_period = base_date.year * 12 + base_date.month - 1 if frequency == "MONTHLY" else base_date.year
+    target_period = window_start.year * 12 + window_start.month - 1 if frequency == "MONTHLY" else window_start.year
+    return max(0, max(0, target_period - base_period) // rule["interval"] - 1)
+
+
 def _ical_period_recurrence_starts(base: datetime, rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
     base_date = base.date()
     starts: list[datetime] = []
     count = rule["count"]
     until = rule["until"]
     frequency = rule["frequency"]
-    base_period = base_date.year * 12 + base_date.month - 1 if frequency == "MONTHLY" else base_date.year
-    target_period = window_start.year * 12 + window_start.month - 1 if frequency == "MONTHLY" else window_start.year
-    period_distance = max(0, target_period - base_period)
-    first_period = 0 if count is not None else max(0, period_distance // rule["interval"] - 1)
+    first_period = _ical_first_period_index(base_date, rule, window_start)
     occurrence_index = 0
     period_index = first_period
     while period_index <= first_period + ICAL_MAX_RECURRENCE_PERIODS:
