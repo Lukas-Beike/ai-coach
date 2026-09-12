@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
@@ -3750,143 +3750,136 @@ def _garmin_pace_seconds(value: Any) -> float | int | None:
     return round(pace) if 120 <= pace <= 900 else None
 
 
+def _garmin_mapping_nodes(value: Any) -> Iterator[dict[str, Any]]:
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _garmin_mapping_nodes(child)
+    elif isinstance(value, list):
+        for child in value[:100]:
+            yield from _garmin_mapping_nodes(child)
+
+
+def _garmin_sport_category(value: Any) -> str:
+    sport = _garmin_key(value)
+    if any(term in sport for term in ("cycling", "cycl", "bike", "ride")):
+        return "cycling"
+    if any(term in sport for term in ("running", "run")):
+        return "running"
+    return "generic"
+
+
 def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:
     """Read max-HR values from Garmin's heart-rate-zone profile payload."""
     values: dict[str, list[float | int]] = {"cycling": [], "running": [], "generic": []}
-    zones = snapshot.get("heart_rate_zones")
-
-    def visit(value: Any) -> None:
-        if isinstance(value, dict):
-            max_hr = as_number(first_present(value, ("maxHeartRateUsed", "maxHeartRate", "maxHR")))
-            if max_hr is not None and 80 <= float(max_hr) <= 260:
-                sport = _garmin_key(first_present(value, ("sport", "sportType", "activityType")))
-                if any(term in sport for term in ("cycling", "cycl", "bike", "ride")):
-                    kind = "cycling"
-                elif any(term in sport for term in ("running", "run")):
-                    kind = "running"
-                else:
-                    kind = "generic"
-                values[kind].append(max_hr)
-            for child in value.values():
-                visit(child)
-        elif isinstance(value, list):
-            for child in value[:100]:
-                visit(child)
-
-    visit(zones)
+    for item in _garmin_mapping_nodes(snapshot.get("heart_rate_zones")):
+        max_hr = as_number(first_present(item, ("maxHeartRateUsed", "maxHeartRate", "maxHR")))
+        if max_hr is not None and 80 <= float(max_hr) <= 260:
+            values[_garmin_sport_category(first_present(item, ("sport", "sportType", "activityType")))].append(max_hr)
     return {kind: max(items) for kind, items in values.items() if items}
 
 
-def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Normalize Garmin's varying max-metric and race-prediction payloads."""
-    max_metrics = snapshot.get("max_metrics") if isinstance(snapshot.get("max_metrics"), (dict, list)) else {}
-    race_predictions = snapshot.get("race_predictions") if isinstance(snapshot.get("race_predictions"), (dict, list)) else {}
-    vo2_values: dict[str, list[float | int]] = {"cycling": [], "running": [], "generic": []}
+def _garmin_collect_vo2_values(value: Any, values: dict[str, list[float | int]], path: tuple[str, ...] = ()) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = _garmin_key(key)
+            if "vo2max" in normalized or ("vo2" in normalized and "max" in normalized):
+                number = _garmin_vo2_value(item)
+                if number is not None:
+                    context = _garmin_key(" ".join((*path, str(key))))
+                    values[_garmin_sport_category(context)].append(number)
+            _garmin_collect_vo2_values(item, values, (*path, str(key)))
+    elif isinstance(value, list):
+        for item in value[:100]:
+            _garmin_collect_vo2_values(item, values, path)
 
-    def visit_vo2(value: Any, path: tuple[str, ...] = ()) -> None:
-        if isinstance(value, dict):
-            for key, item in value.items():
-                normalized = _garmin_key(key)
-                if "vo2max" in normalized or ("vo2" in normalized and "max" in normalized):
-                    number = _garmin_vo2_value(item)
-                    if number is not None:
-                        context = _garmin_key(" ".join((*path, str(key))))
-                        if any(term in context for term in ("cycling", "cycl", "bike", "ride")):
-                            category = "cycling"
-                        elif any(term in context for term in ("running", "run")):
-                            category = "running"
-                        else:
-                            category = "generic"
-                        vo2_values[category].append(number)
-                visit_vo2(item, (*path, str(key)))
-        elif isinstance(value, list):
-            for item in value[:100]:
-                visit_vo2(item, path)
 
-    visit_vo2(max_metrics)
-    if vo2_values["running"]:
-        running_vo2 = vo2_values["running"][-1]
-    elif vo2_values["generic"]:
-        running_vo2 = vo2_values["generic"][-1]
-    else:
-        running_vo2 = None
-    cycling_vo2 = vo2_values["cycling"][-1] if vo2_values["cycling"] else None
+def _garmin_vo2_metrics(max_metrics: Any) -> tuple[float | int | None, float | int | None]:
+    values: dict[str, list[float | int]] = {"cycling": [], "running": [], "generic": []}
+    _garmin_collect_vo2_values(max_metrics, values)
+    running = values["running"][-1] if values["running"] else (values["generic"][-1] if values["generic"] else None)
+    return values["cycling"][-1] if values["cycling"] else None, running
 
-    race_values: dict[str, float | int | None] = {
+
+def _garmin_collect_race_predictions(value: Any, values: dict[str, float | int | None], path: tuple[str, ...] = ()) -> None:
+    if isinstance(value, dict):
+        distance = first_present(value, ("raceDistance", "distanceName", "raceType", "distance"))
+        time_value = first_present(value, ("raceTime", "racePredictionTime", "predictedTime", "time", "seconds"))
+        slot = _garmin_race_slot(distance) if isinstance(distance, str) else None
+        if slot and time_value not in (None, "") and values[slot] is None:
+            values[slot] = _garmin_race_time(time_value)
+        for key, item in value.items():
+            nested_path = (*path, str(key))
+            direct_slot = _garmin_race_slot(" ".join(nested_path))
+            if direct_slot and values[direct_slot] is None:
+                candidate = _garmin_race_time(item)
+                if candidate is not None:
+                    values[direct_slot] = candidate
+            _garmin_collect_race_predictions(item, values, nested_path)
+    elif isinstance(value, list):
+        for item in value[:100]:
+            _garmin_collect_race_predictions(item, values, path)
+
+
+def _garmin_race_predictions(value: Any) -> dict[str, float | int | None]:
+    races: dict[str, float | int | None] = {
         "run_5k_seconds": None,
         "run_10k_seconds": None,
         "run_half_marathon_seconds": None,
         "run_marathon_seconds": None,
     }
+    _garmin_collect_race_predictions(value, races)
+    return races
 
-    def visit_races(value: Any, path: tuple[str, ...] = ()) -> None:
-        if isinstance(value, dict):
-            distance = first_present(value, ("raceDistance", "distanceName", "raceType", "distance"))
-            time_value = first_present(value, ("raceTime", "racePredictionTime", "predictedTime", "time", "seconds"))
-            slot = _garmin_race_slot(distance) if isinstance(distance, str) else None
-            if slot and time_value not in (None, "") and race_values[slot] is None:
-                race_values[slot] = _garmin_race_time(time_value)
-            for key, item in value.items():
-                normalized_path = (*path, str(key))
-                direct_slot = _garmin_race_slot(" ".join(normalized_path))
-                if direct_slot and race_values[direct_slot] is None:
-                    candidate = _garmin_race_time(item)
-                    if candidate is not None:
-                        race_values[direct_slot] = candidate
-                visit_races(item, normalized_path)
-        elif isinstance(value, list):
-            for item in value[:100]:
-                visit_races(item, path)
 
-    visit_races(race_predictions)
-    cycling_ftp = _garmin_bounded_metric(
-        _garmin_last_numeric(snapshot.get("cycling_ftp"), {"functionalthresholdpower", "ftp", "cyclingftp"}),
-        50,
-        700,
-    )
+def _garmin_threshold_metrics(snapshot: dict[str, Any]) -> tuple[float | int | None, float | int | None, float | int | None, float | int | None, float | int | None]:
     running_threshold = snapshot.get("running_threshold")
+    cycling_ftp = _garmin_bounded_metric(
+        _garmin_last_numeric(snapshot.get("cycling_ftp"), {"functionalthresholdpower", "ftp", "cyclingftp"}), 50, 700,
+    )
     running_power = _garmin_bounded_metric(
-        _garmin_last_numeric(running_threshold, {"functionalthresholdpower", "ftp", "runningftp", "power"}),
-        50,
-        800,
+        _garmin_last_numeric(running_threshold, {"functionalthresholdpower", "ftp", "runningftp", "power"}), 50, 800,
     )
     running_pace = _garmin_pace_seconds(_garmin_last_value(
         running_threshold,
-        {
-            "speed", "speedinmeterspersecond", "speedmeterspersecond", "lactatethresholdspeed",
-            "thresholdspeed", "pace", "paceinsecondsperkilometer", "thresholdpace",
-        },
+        {"speed", "speedinmeterspersecond", "speedmeterspersecond", "lactatethresholdspeed", "thresholdspeed", "pace", "paceinsecondsperkilometer", "thresholdpace"},
     ))
     running_hr = _garmin_bounded_metric(
-        _garmin_last_numeric(running_threshold, {"heartrate", "hearrate", "heartraterunning", "lthr"}),
-        80,
-        230,
+        _garmin_last_numeric(running_threshold, {"heartrate", "hearrate", "heartraterunning", "lthr"}), 80, 230,
     )
-    cycling_hr = _garmin_bounded_metric(
-        _garmin_last_numeric(running_threshold, {"heartratecycling"}),
-        80,
-        230,
-    )
+    cycling_hr = _garmin_bounded_metric(_garmin_last_numeric(running_threshold, {"heartratecycling"}), 80, 230)
+    return cycling_ftp, running_power, running_pace, running_hr, cycling_hr
+
+
+def _garmin_max_hr_samples(snapshot: dict[str, Any]) -> tuple[dict[str, float | int], dict[str, list[float | int]], list[Any]]:
     profile_max_hr = garmin_profile_max_hr(snapshot)
-    max_hr_values: dict[str, list[float | int]] = {"cycling": [], "running": []}
-    stored_max_hr = snapshot.get("sport_max_hr") if isinstance(snapshot.get("sport_max_hr"), dict) else {}
+    values: dict[str, list[float | int]] = {"cycling": [], "running": []}
+    stored = snapshot.get("sport_max_hr") if isinstance(snapshot.get("sport_max_hr"), dict) else {}
     activities = snapshot.get("activities") if isinstance(snapshot.get("activities"), list) else []
-    for kind in max_hr_values:
+    for kind in values:
         profile_value = profile_max_hr.get(kind) or profile_max_hr.get("generic")
         if profile_value is not None:
-            max_hr_values[kind].append(profile_value)
+            values[kind].append(profile_value)
             continue
-        stored_value = as_number(stored_max_hr.get(kind))
+        stored_value = as_number(stored.get(kind))
         if stored_value is not None and 80 <= float(stored_value) <= 260:
-            max_hr_values[kind].append(stored_value)
+            values[kind].append(stored_value)
         for activity in activities:
-            if not isinstance(activity, dict):
+            if not isinstance(activity, dict) or activity_kind(activity) != kind:
                 continue
             value = as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate")))
-            if value is not None and 80 <= float(value) <= 260 and activity_kind(activity) == kind:
-                max_hr_values[kind].append(value)
-    weight = garmin_weight_metric(snapshot)
-    units = {
+            if value is not None and 80 <= float(value) <= 260:
+                values[kind].append(value)
+    return profile_max_hr, values, activities
+
+
+def _garmin_performance_units(
+    weight: dict[str, Any], max_hr_values: dict[str, list[float | int]], profile_max_hr: dict[str, float | int],
+    cycling_vo2: float | int | None, running_vo2: float | int | None, race_values: dict[str, float | int | None],
+    thresholds: tuple[float | int | None, float | int | None, float | int | None, float | int | None, float | int | None],
+) -> dict[str, tuple[float | int | None, str, str]]:
+    cycling_ftp, running_power, running_pace, running_hr, cycling_hr = thresholds
+    return {
         "weight_kg": (weight["value"], "kg", "Garmin Connect KÃ¶rpergewicht"),
         "cycling_max_hr_bpm": (max(max_hr_values["cycling"], default=None), "bpm", "Garmin Connect Herzfrequenzzonen" if profile_max_hr else "Garmin Connect RadaktivitÃ¤ten"),
         "running_max_hr_bpm": (max(max_hr_values["running"], default=None), "bpm", "Garmin Connect Herzfrequenzzonen" if profile_max_hr else "Garmin Connect LaufaktivitÃ¤ten"),
@@ -3902,6 +3895,18 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         "bike_threshold_hr_bpm": (cycling_hr, "bpm", "Garmin Connect Rad-Schwellenpuls"),
         "run_threshold_hr_bpm": (running_hr, "bpm", "Garmin Connect Lauf-Schwellenpuls"),
     }
+
+
+def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Normalize Garmin's varying max-metric and race-prediction payloads."""
+    max_metrics = snapshot.get("max_metrics") if isinstance(snapshot.get("max_metrics"), (dict, list)) else {}
+    race_predictions = snapshot.get("race_predictions") if isinstance(snapshot.get("race_predictions"), (dict, list)) else {}
+    cycling_vo2, running_vo2 = _garmin_vo2_metrics(max_metrics)
+    race_values = _garmin_race_predictions(race_predictions)
+    thresholds = _garmin_threshold_metrics(snapshot)
+    profile_max_hr, max_hr_values, activities = _garmin_max_hr_samples(snapshot)
+    weight = garmin_weight_metric(snapshot)
+    units = _garmin_performance_units(weight, max_hr_values, profile_max_hr, cycling_vo2, running_vo2, race_values, thresholds)
     source_keys = {
         "weight_kg": "weight", "cycling_ftp_watts": "cycling_ftp",
         "cycling_max_hr_bpm": "heart_rate_zones" if profile_max_hr.get("cycling") or profile_max_hr.get("generic") else "activities",
