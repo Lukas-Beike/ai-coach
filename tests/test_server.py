@@ -530,8 +530,8 @@ class CoachTests(unittest.TestCase):
             "synced_at": "2026-09-11T08:00:00+00:00",
             "athlete": {},
             "recent_activities": [
-                {"id": "activity-1", "name": "Tempo", "start_date_local": "2026-09-11T07:00:00"},
-                {"id": "activity-2", "name": "Recovery", "start_date_local": "2026-09-10T07:00:00"},
+                {"id": "activity-1", "name": "Tempo", "type": "Run", "start_date_local": "2026-09-10T07:00:00"},
+                {"id": "activity-2", "name": "Recovery", "type": "Ride", "start_date_local": "2026-09-11T07:00:00"},
             ],
             "recent_wellness": [],
             "upcoming_calendar": [],
@@ -539,10 +539,11 @@ class CoachTests(unittest.TestCase):
                 "athlete": {},
                 "activities": [
                     {
-                        "id": "activity-1", "name": "Tempo", "average_watts": 245,
+                        "id": "activity-1", "name": "Tempo", "type": "Run", "start_date_local": "2026-09-10T07:00:00",
+                        "average_speed": 3.2, "average_heartrate": 166, "average_watts": 245,
                         "streams": {"watts": [200, 250, 280], "latlng": [[1, 2], [3, 4]]}, "provider_extra": "must not pass",
                     },
-                    {"id": "activity-2", "name": "Recovery", "average_watts": 120},
+                    {"id": "activity-2", "name": "Recovery", "type": "Ride", "start_date_local": "2026-09-11T07:00:00", "average_watts": 120},
                 ],
                 "wellness": [],
                 "upcoming_calendar": [],
@@ -566,6 +567,8 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("provider_extra", result["activity"])
         self.assertEqual(result["data_scope"], "bounded sanitized detail projection of exactly one Intervals.icu activity")
         self.assertNotIn("activity-2", json.dumps(result))
+        self.assertEqual(result["activity_validation"]["activity"]["activity_id"], "activity-1")
+        self.assertEqual(result["activity_validation"]["activity"]["sport"], "Laufen")
 
         with self.assertRaises(server.AppError) as missing:
             server.get_activity_details("activity-3")
@@ -2903,13 +2906,14 @@ class CoachTests(unittest.TestCase):
     def test_compact_snapshot_drops_unknown_and_sensitive_fields(self):
         result = server.compact_snapshot(
             {"id": "i1", "name": "Ada", "secret": "nope"},
-            [{"id": "a1", "name": "Ride", "private_note": "nope"}],
+            [{"id": "a1", "name": "Ride", "icu_vo2max": 52, "private_note": "nope"}],
             [{"id": "2026-01-01", "ctl": 42, "unknown": 99}],
             [{"id": 1, "name": "Tempo", "category": "WORKOUT", "raw": "nope"}],
         )
         self.assertEqual(result["athlete"]["name"], "Ada")
         self.assertNotIn("secret", result["athlete"])
         self.assertNotIn("private_note", result["recent_activities"][0])
+        self.assertEqual(result["recent_activities"][0]["icu_vo2max"], 52)
         self.assertEqual(result["recent_wellness"][0]["ctl"], 42)
 
     def test_planned_workouts_match_activities_and_roll_up_weekly_compliance(self):
@@ -6920,7 +6924,7 @@ class CoachTests(unittest.TestCase):
             [{
                 "id": "latest-ride", "type": "Ride", "start_date_local": f"{today}T08:00:00",
                 "moving_time": 3600, "distance": 30_000, "weighted_average_watts": 270,
-                "average_heartrate": 155, "icu_intensity": 90,
+                "average_heartrate": 155, "icu_intensity": 90, "icu_ftp": 300,
             }],
             [],
             [],
@@ -6933,6 +6937,8 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([item["metric"] for item in validation["provider_references"]], [
             "cycling_vo2max_ml_kg_min", "cycling_ftp_watts", "cycling_eftp_watts",
         ])
+        self.assertEqual(validation["direct_activity_estimates"]["activity_configured_ftp_watts"], 300)
+        self.assertNotEqual(validation["direct_activity_estimates"].get("activity_ftp_watts"), 300)
 
     def test_form_is_derived_from_ctl_and_atl_when_intervals_omits_tsb(self):
         today = date.today().isoformat()
@@ -7029,6 +7035,9 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
         self.assertEqual(metrics["cycling_eftp_watts"]["source"], "Intervals.icu")
         self.assertEqual(performance["comparisons"]["cycling_eftp_30d"]["average"], 287)
+        eftp_reference = next(item for item in performance["activity_validation"]["provider_references"] if item["metric"] == "cycling_eftp_watts")
+        self.assertEqual(eftp_reference["historical_comparison"]["average"], 287)
+        self.assertEqual(performance["activity_validation"]["direct_activity_estimates"]["activity_configured_ftp_watts"], 300)
 
     def test_current_eftp_reads_mmp_model_without_using_ftp_as_eftp(self):
         today = date.today().isoformat()

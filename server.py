@@ -1061,6 +1061,7 @@ Priorities:
 8. When the athlete asks for the latest/recent units or explicitly asks to load and analyse current training, use the freshly loaded snapshot supplied by the app and say when the refresh failed or data may be stale.
 8c. Whenever the athlete asks to analyse a completed activity, especially the latest activity, always add a concise section titled "Leistungsfähigkeit und Entwicklung" to the answer. Do not merely repeat provider values: first use the structured activity_validation block to compare the analysed activity's measured evidence with the current_performance metrics, provider sources, and historical comparisons. For running, report every available value for VO2max, threshold pace, threshold heart rate, Zone 2 pace, and the 5 km, 10 km, half-marathon, and marathon predictions. For cycling, report every available value for VO2max and FTP; keep FTP and Intervals.icu eFTP clearly separate. For each reported metric, state whether the activity directly supports it, only plausibly corroborates it, conflicts with it, or cannot validate it, and whether the historical comparison indicates improvement, stability, decline, or insufficient evidence. If the evidence conflicts, state whether the provider estimate appears too high or too low for this activity and why, but never overwrite the stored provider value from chat. A normal or easy activity cannot by itself validate a threshold, VO2max, Zone 2 pace, or race prediction; a cycling activity cannot by itself establish FTP unless its duration, intensity, power data, and protocol support that inference. A single activity may only indicate a development: do not claim a reliable trend unless comparable historical data supports it. Never invent unavailable metrics; name important missing values briefly. Distinguish measured facts from coaching inference and account for unusual terrain, weather, fatigue, intervals, and heart-rate or power data when present.
 8a. For outdoor running and outdoor cycling, use the supplied weather forecast when choosing advice or a planned time. Concrete time-window recommendations are only available for the next five days; treat them as forecasts, not guarantees. Indoor, swimming, and strength sessions do not need weather adjustments.
+8d. When analysing a concrete completed activity, use the activity_validation returned by get_activity_details for that exact activity. Use the current_performance.activity_validation block only when its activity_id matches the analysed activity; never attribute evidence from the newest activity to a different requested activity. If exact validation data is unavailable, say so and limit the assessment to the evidence actually available.
 8b. When suggesting a weekday training time, assume normal work from 06:00–15:30 Monday–Thursday and until 14:00 on Friday. The 12:00–13:00 lunch break is available for training; otherwise use time before work or after work unless the athlete states different availability.
 9. Never silently change durable athlete facts, target events, constraints, or preferences based only on chat. Explain the proposed change and ask the athlete to confirm it in the Profile screen.
 10. Reply in German unless the athlete explicitly asks for another language. Use metric units and German date conventions.
@@ -8370,7 +8371,7 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
         "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain", "elapsed_time",
         "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "icu_eftp", "average_heartrate",
         "max_heartrate", "average_watts", "weighted_average_watts", "average_speed", "max_speed",
-        "icu_weighted_avg_speed", "icu_pace", "feel", "icu_rpe", "paired_event_id",
+        "icu_weighted_avg_speed", "icu_pace", "vo2max", "vo2_max", "vo2MaxValue", "icu_vo2max", "feel", "icu_rpe", "paired_event_id",
         "source", "device_name", "external_id", "file_type",
     )
     wellness_fields = (
@@ -9948,10 +9949,14 @@ def get_activity_details(activity_id: Any) -> dict[str, Any]:
         (item for item in list_activity_feedback(500) if item.get("activity_id") == normalized_id),
         None,
     )
+    performance = current_performance_context(snapshot)
     return {
         "ok": True,
         "snapshot_synced_at": snapshot.get("synced_at") if isinstance(snapshot, dict) else None,
         "activity": detailed_coach_activity_value(activity),
+        "activity_validation": activity_performance_validation(
+            [activity], performance.get("metrics", {}), performance.get("comparisons", {}),
+        ),
         "activity_feedback": feedback,
         "data_scope": "bounded sanitized detail projection of exactly one Intervals.icu activity",
     }
@@ -12303,14 +12308,15 @@ def activity_performance_validation(
             "unit": provider_value.get("unit"),
             "source": provider_value.get("source"),
             "observed_at": provider_value.get("observed_at"),
-            "historical_comparison": comparisons.get(f"{key}_30d"),
+            "historical_comparison": comparisons.get({"cycling_eftp_watts": "cycling_eftp_30d"}.get(key, f"{key}_30d")),
         })
     direct_activity_estimates = {
         key: first_present(latest, aliases)
         for key, aliases in {
-            "activity_vo2max": ("vo2max", "vo2_max", "vO2MaxValue", "icu_vo2max"),
-            "activity_ftp_watts": ("ftp", "functionalThresholdPower", "icu_ftp"),
+            "activity_vo2max": ("vo2max", "vo2_max", "vO2MaxValue", "vo2MaxValue", "icu_vo2max"),
+            "activity_ftp_watts": ("ftp", "functionalThresholdPower"),
             "activity_eftp_watts": ("eftp", "eFTP", "icu_eftp"),
+            "activity_configured_ftp_watts": ("icu_ftp",),
         }.items()
         if first_present(latest, aliases) not in (None, "")
     }
