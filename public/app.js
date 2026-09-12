@@ -131,6 +131,51 @@ function ensureRouteData(route = state.route) {
   if (requested.length) load("/api/bootstrap?local=1", requested);
 }
 
+function activateNavigationPanel(panelRoute, navigationRoute) {
+  document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
+  const navigation = document.querySelector(`.nav-item[data-route="${navigationRoute}"]`);
+  const panel = document.querySelector(`#${NAV_ROUTES[panelRoute]}`);
+  if (!navigation || !panel) return null;
+  document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
+  document.querySelectorAll(`.nav-item[data-route="${navigationRoute}"]`).forEach((item) => {
+    item.classList.add("active");
+    item.setAttribute("aria-current", "page");
+  });
+  panel.classList.add("active");
+  return panel;
+}
+
+function updateNavigationHistory(panelRoute, historyMode) {
+  const targetHash = `#${panelRoute}`;
+  if (globalThis.location.hash === targetHash) return;
+  if (historyMode === "push") globalThis.history.pushState({ route: panelRoute }, "", targetHash);
+  else if (historyMode === "replace") globalThis.history.replaceState({ route: panelRoute }, "", targetHash);
+}
+
+function renderActiveRoute(mainRoute, panelRoute) {
+  if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
+  if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
+  if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
+  if (state.data && mainRoute === "more") {
+    loadContextPreview();
+    loadLogs();
+    loadChangeHistory();
+  }
+}
+
+function restoreRouteScroll(mainRoute, returningToChat, shouldFocusPlannedToday) {
+  if (mainRoute === "coach") {
+    if (state.chatResponseScrollPending) scrollChatToResponseStart();
+    else if (state.chatInitialScrollPending) scrollChatToLatest();
+    else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest();
+    if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground(state.chatContentVersion);
+    return;
+  }
+  requestAnimationFrame(() => {
+    if (!shouldFocusPlannedToday || !focusPlannedToday()) globalThis.scrollTo({ top: 0, behavior: "auto" });
+  });
+}
+
 async function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
   const panelRoute = NAV_ROUTES[route] ? route : DEFAULT_NAV_ROUTE;
   const mainRoute = baseRoute(panelRoute);
@@ -145,42 +190,16 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   if (state.data && !state.chatInitialScrollPending && historyMode === "push" && currentPanel === "chatPanel" && mainRoute !== "coach") {
     state.chatScrollY = globalThis.scrollY;
   }
-  if (currentPanel === "chatPanel" && mainRoute !== "coach" && (state.chatRequest || state.chatServerOperationId)) {
-    state.chatResponseScrollPending = true;
-  }
-  document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
-  const navigation = document.querySelector(`.nav-item[data-route="${navigationRoute}"]`);
-  const panel = document.querySelector(`#${NAV_ROUTES[panelRoute]}`);
-  if (!navigation || !panel) return false;
+  if (currentPanel === "chatPanel" && mainRoute !== "coach" && (state.chatRequest || state.chatServerOperationId)) state.chatResponseScrollPending = true;
+  const panel = activateNavigationPanel(panelRoute, navigationRoute);
+  if (!panel) return false;
   state.plannedTodayFocusPending = shouldFocusPlannedToday;
-  document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
-  document.querySelectorAll(`.nav-item[data-route="${navigationRoute}"]`).forEach((item) => {
-    item.classList.add("active");
-    item.setAttribute("aria-current", "page");
-  });
-  panel.classList.add("active");
   state.route = panelRoute;
-  if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
-  if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
-  if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
-  const targetHash = `#${panelRoute}`;
-  if (globalThis.location.hash !== targetHash) {
-    if (historyMode === "push") globalThis.history.pushState({ route: panelRoute }, "", targetHash);
-    else if (historyMode === "replace") globalThis.history.replaceState({ route: panelRoute }, "", targetHash);
-  }
+  renderActiveRoute(mainRoute, panelRoute);
+  updateNavigationHistory(panelRoute, historyMode);
   if (state.data) renderStatus(state.data);
   updateHeaderAction();
-  if (state.data && mainRoute === "more") loadContextPreview();
-  if (state.data && mainRoute === "more") loadLogs();
-  if (state.data && mainRoute === "more") loadChangeHistory();
-  if (mainRoute === "coach") {
-    if (state.chatResponseScrollPending) scrollChatToResponseStart();
-    else if (state.chatInitialScrollPending) scrollChatToLatest();
-    else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest();
-    if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground(state.chatContentVersion);
-  } else requestAnimationFrame(() => {
-    if (!shouldFocusPlannedToday || !focusPlannedToday()) globalThis.scrollTo({ top: 0, behavior: "auto" });
-  });
+  restoreRouteScroll(mainRoute, returningToChat, shouldFocusPlannedToday);
   ensureRouteData(panelRoute);
   if (focus && !$("#appShell")?.hidden) {
     panel.setAttribute("tabindex", "-1");
@@ -188,7 +207,6 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   }
   return true;
 }
-
 async function syncNavigationRoute() {
   const route = routeFromHash();
   const applied = await applyNavigationRoute(route, {
