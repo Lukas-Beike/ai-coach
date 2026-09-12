@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
 from backend.coach.attachments import (_FIT_SPORTS, _fit_crc16, _fit_data_record, _fit_session_summary,
-                                       fit_summary, gpx_summary, validate_attachments, model_input)
+                                       fit_summary, gpx_summary, validate_attachments, model_input, provider_attachment_data)
 
 GPX = b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt><trkpt lat="0" lon="0.01"><ele>20</ele></trkpt></trkseg></trk></gpx>'
 PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAASUVORK5CYII='
@@ -62,13 +62,15 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         request_input = model_input("Analyze this activity", validated)
         raw_part = request_input[0]["content"][-1]
         self.assertEqual(raw_part["type"], "input_file")
-        self.assertEqual(raw_part["filename"], "ride.fit.txt")
-        self.assertEqual(raw_part["file_data"], "data:text/plain;base64," + attachment["data"])
+        self.assertEqual(raw_part["filename"], "ride.fit.json")
+        self.assertTrue(raw_part["file_data"].startswith("data:application/json;base64,"))
+        envelope = json.loads(base64.b64decode(raw_part["file_data"].split(",", 1)[1]).decode("utf-8"))
+        self.assertEqual(envelope["raw_base64"], attachment["data"])
 
         payload, _, _ = server._gemini_request_payload({"input": request_input}, "gemini-test")
-        self.assertEqual(payload["contents"][-1]["parts"][-1]["inlineData"], {
-            "mimeType": "application/octet-stream", "data": attachment["data"]
-        })
+        inline_data = payload["contents"][-1]["parts"][-1]["inlineData"]
+        self.assertEqual(inline_data["mimeType"], "application/json")
+        self.assertEqual(json.loads(base64.b64decode(inline_data["data"]).decode("utf-8"))["raw_base64"], attachment["data"])
 
     def test_fit_records_use_standard_headers_fields_and_compressed_timestamps(self):
         summary = fit_summary(FIT_RECORDS)
@@ -208,10 +210,10 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
     def test_gemini_history_keeps_latest_raw_files_within_budget(self):
         server.enqueue_background_coach_job("First", "history-first", "synthetic-csrf", attachments=[self.upload(FIT, "first.fit")])
         server.enqueue_background_coach_job("Second", "history-second", "synthetic-csrf-2", attachments=[self.upload(FIT, "second.fit")])
-        encoded_size = len(self.upload(FIT, "first.fit")["data"])
+        encoded_size = len(provider_attachment_data(validate_attachments([self.upload(FIT, "first.fit")])[0])[0])
         with patch.object(server, "MAX_GEMINI_INLINE_IMAGE_BYTES", encoded_size + 1):
             history = server._gemini_local_chat_history()
-        raw_parts = [part for entry in history for part in entry["parts"] if "inlineData" in part and part["inlineData"].get("mimeType") == "application/octet-stream"]
+        raw_parts = [part for entry in history for part in entry["parts"] if "inlineData" in part and part["inlineData"].get("mimeType") == "application/json"]
         self.assertEqual(len(raw_parts), 1)
         self.assertIn("first.fit", json.dumps(history))
         self.assertIn("second.fit", json.dumps(history))

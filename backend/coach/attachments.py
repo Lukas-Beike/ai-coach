@@ -481,21 +481,31 @@ def model_input(text, attachments):
             evidence[summary_key] = item.get("summary")
         parts.append({"type": "input_text", "text": json.dumps(evidence, ensure_ascii=False)})
         if item["type"] in {"gpx", "fit"}:
-            if item["type"] == "fit":
-                # OpenAI does not advertise FIT/octet-stream as an input_file
-                # type.  Keep the exact bytes in a file part, using a text
-                # filename/MIME for the supported transport, while the
-                # bounded decoded summary above remains the model-facing
-                # interpretation of the activity.
-                parts.append({"type": "input_file", "filename": item["name"] + ".txt",
-                              "file_data": f"data:text/plain;base64,{item['data']}"})
-            else:
-                parts.append({"type": "input_file", "filename": item["name"],
-                              "file_data": f"data:{item['mime']};base64,{item['data']}"})
+            data, mime = provider_attachment_data(item)
+            filename = item["name"] + ".json" if item["type"] == "fit" else item["name"]
+            parts.append({"type": "input_file", "filename": filename,
+                          "file_data": f"data:{mime};base64,{data}"})
         elif item["type"] == "image":
             parts.append({"type": "input_image", "image_url": f"data:{item['mime']};base64,{item['data']}", "detail": "auto"})
     return [{"role": "user", "content": parts}]
 
 
 def gemini_inline_image_bytes(attachments):
-    return sum(len(str(item.get("data") or "")) for item in attachments if item.get("type") in {"image", "gpx", "fit"})
+    return sum(len(provider_attachment_data(item)[0]) for item in attachments if item.get("type") in {"image", "gpx", "fit"})
+
+
+def provider_attachment_data(item):
+    """Return a provider-safe representation without changing persisted bytes."""
+    data = str(item.get("data") or "")
+    if item.get("type") != "fit":
+        return data, str(item.get("gemini_mime") or item.get("mime") or "")
+    document = {
+        "format": "FIT",
+        "filename": str(item.get("name") or "activity.fit"),
+        "summary": item.get("summary") if isinstance(item.get("summary"), dict) else {},
+        # This is the exact original upload, encoded as a valid JSON string so
+        # providers do not have to interpret binary bytes as text.
+        "raw_base64": data,
+    }
+    encoded = base64.b64encode(json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).decode("ascii")
+    return encoded, "application/json"
