@@ -2906,7 +2906,7 @@ class CoachTests(unittest.TestCase):
     def test_compact_snapshot_drops_unknown_and_sensitive_fields(self):
         result = server.compact_snapshot(
             {"id": "i1", "name": "Ada", "secret": "nope"},
-            [{"id": "a1", "name": "Ride", "icu_vo2max": 52, "private_note": "nope"}],
+            [{"id": "a1", "name": "Ride", "icu_vo2max": 52, "vO2MaxValue": 53, "private_note": "nope"}],
             [{"id": "2026-01-01", "ctl": 42, "unknown": 99}],
             [{"id": 1, "name": "Tempo", "category": "WORKOUT", "raw": "nope"}],
         )
@@ -2914,6 +2914,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("secret", result["athlete"])
         self.assertNotIn("private_note", result["recent_activities"][0])
         self.assertEqual(result["recent_activities"][0]["icu_vo2max"], 52)
+        self.assertEqual(result["recent_activities"][0]["vO2MaxValue"], 53)
         self.assertEqual(result["recent_wellness"][0]["ctl"], 42)
 
     def test_planned_workouts_match_activities_and_roll_up_weekly_compliance(self):
@@ -6948,6 +6949,18 @@ class CoachTests(unittest.TestCase):
         }], {}, {})
 
         self.assertEqual(validation["direct_activity_estimates"], {"activity_configured_ftp_watts": 300})
+
+    def test_activity_validation_omits_implausible_measured_evidence(self):
+        validation = server.activity_performance_validation([{
+            "id": "invalid-evidence", "type": "Ride", "start_date_local": "2026-09-12T08:00:00",
+            "moving_time": 3600, "average_heartrate": 9999, "average_watts": -10, "icu_rpe": 100,
+        }], {}, {})
+
+        evidence = validation["activity"]
+        self.assertEqual(evidence["duration_seconds"], 3600)
+        self.assertNotIn("average_heart_rate_bpm", evidence)
+        self.assertNotIn("average_power_watts", evidence)
+        self.assertNotIn("rpe", evidence)
 
     def test_form_is_derived_from_ctl_and_atl_when_intervals_omits_tsb(self):
         today = date.today().isoformat()

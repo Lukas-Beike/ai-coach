@@ -8371,7 +8371,7 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
         "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain", "elapsed_time",
         "icu_training_load", "icu_intensity", "icu_ctl", "icu_atl", "icu_ftp", "icu_eftp", "average_heartrate",
         "max_heartrate", "average_watts", "weighted_average_watts", "average_speed", "max_speed",
-        "icu_weighted_avg_speed", "icu_pace", "vo2max", "vo2_max", "vo2MaxValue", "icu_vo2max", "feel", "icu_rpe", "paired_event_id",
+        "icu_weighted_avg_speed", "icu_pace", "vo2max", "vo2_max", "vO2MaxValue", "vo2MaxValue", "icu_vo2max", "feel", "icu_rpe", "paired_event_id",
         "source", "device_name", "external_id", "file_type",
     )
     wellness_fields = (
@@ -12260,24 +12260,32 @@ def activity_performance_validation(
         }
 
     sport = activity_sport(latest)
+    activity_id = first_present(latest, ("id", "activityId"))
     activity_evidence: dict[str, Any] = {
-        "activity_id": first_present(latest, ("id", "activityId")),
+        "activity_id": str(activity_id)[:200] if activity_id not in (None, "") else None,
         "date": str(first_present(latest, ("start_date_local", "start_date", "date")) or "")[:40],
         "name": str(latest.get("name") or "")[:200],
         "sport": sport,
-        "duration_seconds": as_number(first_present(latest, ("moving_time", "elapsed_time"))),
-        "distance": as_number(latest.get("distance")),
-        "elevation_gain": as_number(latest.get("total_elevation_gain")),
-        "training_load": as_number(latest.get("icu_training_load")),
-        "intensity": as_number(latest.get("icu_intensity")),
-        "average_heart_rate_bpm": as_number(first_present(latest, ("average_heartrate", "averageHR"))),
-        "max_heart_rate_bpm": as_number(first_present(latest, ("max_heartrate", "maxHR"))),
-        "average_power_watts": as_number(first_present(latest, ("average_watts", "average_power"))),
-        "weighted_power_watts": as_number(first_present(latest, ("weighted_average_watts", "normalized_power"))),
-        "rpe": as_number(first_present(latest, ("icu_rpe", "rpe"))),
     }
+    for key, aliases, minimum, maximum in (
+        ("duration_seconds", ("moving_time", "elapsed_time"), 1, 604800),
+        ("distance", ("distance",), 0, 1_000_000),
+        ("elevation_gain", ("total_elevation_gain",), 0, 100_000),
+        ("training_load", ("icu_training_load",), 0, 100_000),
+        ("intensity", ("icu_intensity",), 0, 1_000),
+        ("average_heart_rate_bpm", ("average_heartrate", "averageHR"), 30, 230),
+        ("max_heart_rate_bpm", ("max_heartrate", "maxHR"), 30, 230),
+        ("average_power_watts", ("average_watts", "average_power"), 0, 5_000),
+        ("weighted_power_watts", ("weighted_average_watts", "normalized_power"), 0, 5_000),
+        ("rpe", ("icu_rpe", "rpe"), 0, 10),
+    ):
+        value = bounded_activity_metric(first_present(latest, aliases), minimum, maximum)
+        if value is not None:
+            activity_evidence[key] = value
     if sport == "Laufen":
-        activity_evidence["pace_seconds_per_km"] = activity_pace_seconds_per_km(latest)
+        pace = activity_pace_seconds_per_km(latest)
+        if pace is not None:
+            activity_evidence["pace_seconds_per_km"] = pace
         reference_keys = (
             "running_vo2max_ml_kg_min",
             "run_threshold_pace_seconds_per_km",
