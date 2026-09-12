@@ -132,7 +132,7 @@ def _fit_developer_definition(data, offset, record_header, data_end):
     for _ in range(developer_count):
         if offset + 3 > data_end:
             raise ValueError("Truncated FIT developer definition")
-        _field_number, size, developer_index = data[offset:offset + 3]
+        size, developer_index = data[offset + 1:offset + 3]
         developer_fields.append((developer_index, size, 13))
         offset += 3
     return offset - start_offset, developer_fields
