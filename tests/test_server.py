@@ -3355,6 +3355,12 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["run_half_marathon_seconds"]["value"], 6150)
         self.assertEqual(result["run_5k_seconds"]["source"], "Garmin Connect")
 
+    def test_garmin_duration_parser_normalizes_colon_delimited_times(self):
+        self.assertEqual(server._garmin_duration_seconds("01:42:30"), 6150)
+        self.assertEqual(server._garmin_duration_seconds("42:30"), 2550)
+        self.assertIsNone(server._garmin_duration_seconds("01:02:03:04"))
+        self.assertIsNone(server._garmin_duration_seconds("00:00"))
+
     def test_garmin_values_have_priority_in_performance_metrics(self):
         server.set_kv("garmin_snapshot", json.dumps({
             "max_metrics": {"running": {"vo2Max": 55}},
