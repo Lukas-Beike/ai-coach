@@ -11907,7 +11907,7 @@ def eftp_30_day_average(wellness_rows: list[dict[str, Any]], activities: list[An
         if not cutoff <= row_date <= anchor:
             continue
         info = sport_info_setting(row, "ride")
-        value = as_number(first_present(info, ("eftp", "eFTP")))
+        value = bounded_performance_metric("cycling_eftp_watts", first_present(info, ("eftp", "eFTP")))
         if value is not None:
             values.append(float(value))
     for activity in activities:
@@ -11922,7 +11922,7 @@ def eftp_30_day_average(wellness_rows: list[dict[str, Any]], activities: list[An
         raw_type = str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold()
         if not any(term in raw_type for term in ("ride", "rad", "bike", "cycling")):
             continue
-        value = as_number(first_present(activity, ("icu_eftp", "eftp", "eFTP")))
+        value = bounded_performance_metric("cycling_eftp_watts", first_present(activity, ("icu_eftp", "eftp", "eFTP")))
         if value is not None:
             values.append(float(value))
     return round(sum(values) / len(values), 1) if values else None

@@ -7120,6 +7120,22 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(eftp_reference["historical_comparison"]["average"], 287)
         self.assertEqual(performance["activity_validation"]["direct_activity_estimates"]["activity_configured_ftp_watts"], 300)
 
+    def test_current_eftp_history_omits_implausible_samples(self):
+        today = date.today()
+        snapshot = server.compact_snapshot(
+            {"sportSettings": [{"types": ["Ride"], "eFTP": 300}]},
+            [],
+            [
+                {"id": today.isoformat(), "sportInfo": [{"types": ["Ride"], "eFTP": 9999}]},
+                {"id": (today - timedelta(days=1)).isoformat(), "sportInfo": [{"types": ["Ride"], "eFTP": 280}]},
+            ],
+            [],
+        )
+
+        comparison = server.current_performance_context(snapshot)["comparisons"]["cycling_eftp_30d"]
+
+        self.assertEqual(comparison["average"], 280)
+
     def test_current_eftp_reads_mmp_model_without_using_ftp_as_eftp(self):
         today = date.today().isoformat()
         snapshot = server.compact_snapshot(
