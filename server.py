@@ -7057,68 +7057,69 @@ def openai_error_diagnostic_details(raw_body: bytes, headers: Any = None) -> dic
     return details
 
 
-def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
-    """Classify an OpenAI error without exposing the provider's raw message."""
-    payload: Any = None
-    try:
-        payload = json.loads(raw_body) if raw_body else None
-    except (TypeError, json.JSONDecodeError):
-        payload = None
-    error = payload.get("error") if isinstance(payload, dict) else None
-    error = error if isinstance(error, dict) else {}
+def _openai_error_tokens(error: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    """Return transient normalized tokens used only for OpenAI error classification."""
     code = str(error.get("code") or "").strip().casefold()
     error_type = str(error.get("type") or "").strip().casefold()
     parameter = str(error.get("param") or "").strip().casefold()
     provider_message = str(error.get("message") or "").strip().casefold()
     searchable = " ".join((code, error_type, provider_message))
-    invalid_input_state = (
-        error_type == "invalid_request_error"
-        and parameter.startswith("input")
-        and (
-            "no tool output found for function call" in provider_message
-            or ("reasoning" in provider_message and "required following item" in provider_message)
-        )
+    return code, error_type, parameter, provider_message, searchable
+
+
+def _openai_invalid_input_state(error_type: str, parameter: str, provider_message: str) -> bool:
+    """Identify recoverable tool-output and reasoning continuation state errors."""
+    return error_type == "invalid_request_error" and parameter.startswith("input") and (
+        "no tool output found for function call" in provider_message
+        or ("reasoning" in provider_message and "required following item" in provider_message)
     )
 
-    if code in {"conversation_locked", "conversation_lock_timeout", "concurrent_request"} or (
-        "conversation" in searchable and "lock" in searchable
-    ):
-        reason = "conversation_locked"
-        message = "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen."
-    elif status == 400 and (
-        code in {"conversation_not_found", "invalid_conversation", "conversation_state_invalid", "invalid_function_call_output"}
-        or "function_call_output" in searchable
-        or invalid_input_state
-        or ("conversation" in searchable and any(marker in searchable for marker in ("state", "previous", "invalid", "not found")))
-    ):
-        reason = "conversation_state_invalid"
-        message = "Der KI-Dienst konnte den bisherigen Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten."
-    elif code == "credit_balance_exhausted":
-        reason = "credit_balance_exhausted"
-        message = "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
-    elif code in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
-        reason = code
-        message = "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. Bitte das Limit im OpenAI-Konto prüfen."
-    elif code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(
-        marker in searchable for marker in ("insufficient_quota", "quota", "billing_hard_limit", "credits")
-    ):
-        reason = "insufficient_quota"
-        message = "Das OpenAI-Guthaben bzw. Kontingent ist aufgebraucht. Bitte Guthaben und Abrechnung im OpenAI-Konto prüfen."
-    elif status == 429 or code == "rate_limit_exceeded" or error_type == "rate_limit_exceeded":
-        reason = "rate_limit_exceeded"
-        message = "OpenAI hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
-    elif status in {401, 403} or code in {"invalid_api_key", "invalid_organization", "permission_denied"}:
-        reason = "authentication_or_permission"
-        message = "Der OpenAI-Zugang wurde abgelehnt. Bitte API-Schlüssel und Projektberechtigungen prüfen."
-    elif status == 404 or code in {"model_not_found", "not_found"}:
-        reason = "not_found"
-        message = "Das konfigurierte OpenAI-Modell oder der angeforderte Dienst wurde nicht gefunden."
-    elif status >= 500:
-        reason = "provider_unavailable"
-        message = "OpenAI ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
-    else:
-        reason = "http_error"
-        message = f"OpenAI konnte die Anfrage nicht verarbeiten (HTTP {status})."
+
+def _openai_conversation_error(status: int, code: str, error_type: str, parameter: str, provider_message: str, searchable: str) -> tuple[str, str] | None:
+    """Classify conversation locking and invalid continuation state separately."""
+    if code in {"conversation_locked", "conversation_lock_timeout", "concurrent_request"} or ("conversation" in searchable and "lock" in searchable):
+        return "conversation_locked", "Die OpenAI-Konversation wird gerade von einer anderen Anfrage verwendet. Bitte kurz warten und erneut versuchen."
+    invalid_state = _openai_invalid_input_state(error_type, parameter, provider_message)
+    continuation_error = "conversation" in searchable and any(marker in searchable for marker in ("state", "previous", "invalid", "not found"))
+    if status == 400 and (code in {"conversation_not_found", "invalid_conversation", "conversation_state_invalid", "invalid_function_call_output"} or "function_call_output" in searchable or invalid_state or continuation_error):
+        return "conversation_state_invalid", "Der KI-Dienst konnte den bisherigen Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten."
+    return None
+
+
+def _openai_billing_error(code: str, error_type: str, searchable: str) -> tuple[str, str] | None:
+    """Classify quota and billing limits before generic rate limiting."""
+    if code == "credit_balance_exhausted":
+        return "credit_balance_exhausted", "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen."
+    if code in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
+        return code, "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. Bitte das Limit im OpenAI-Konto prüfen."
+    if code in {"insufficient_quota", "billing_hard_limit_reached"} or error_type == "insufficient_quota" or any(marker in searchable for marker in ("insufficient_quota", "quota", "billing_hard_limit", "credits")):
+        return "insufficient_quota", "Das OpenAI-Guthaben bzw. Kontingent ist aufgebraucht. Bitte Guthaben und Abrechnung im OpenAI-Konto prüfen."
+    return None
+
+
+def _openai_error_reason(status: int, error: dict[str, Any]) -> tuple[str, str]:
+    """Map safe OpenAI error markers to an athlete-facing recovery action."""
+    code, error_type, parameter, provider_message, searchable = _openai_error_tokens(error)
+    conversation_error = _openai_conversation_error(status, code, error_type, parameter, provider_message, searchable)
+    if conversation_error:
+        return conversation_error
+    billing_error = _openai_billing_error(code, error_type, searchable)
+    if billing_error:
+        return billing_error
+    if status == 429 or code == "rate_limit_exceeded" or error_type == "rate_limit_exceeded":
+        return "rate_limit_exceeded", "OpenAI hat das Anfragelimit erreicht. Bitte kurz warten und erneut versuchen."
+    if status in {401, 403} or code in {"invalid_api_key", "invalid_organization", "permission_denied"}:
+        return "authentication_or_permission", "Der OpenAI-Zugang wurde abgelehnt. Bitte API-Schlüssel und Projektberechtigungen prüfen."
+    if status == 404 or code in {"model_not_found", "not_found"}:
+        return "not_found", "Das konfigurierte OpenAI-Modell oder der angeforderte Dienst wurde nicht gefunden."
+    if status >= 500:
+        return "provider_unavailable", "OpenAI ist vorübergehend nicht verfügbar. Bitte später erneut versuchen."
+    return "http_error", f"OpenAI konnte die Anfrage nicht verarbeiten (HTTP {status})."
+
+
+def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
+    """Classify an OpenAI error without exposing the provider's raw message."""
+    reason, message = _openai_error_reason(status, _provider_error_payload(raw_body))
     return {
         "state": "error",
         "reason": reason,
