@@ -3578,6 +3578,20 @@ class CoachTests(unittest.TestCase):
         comparison = server.current_performance_context(snapshot)["comparisons"]["cycling_ftp_watts_30d"]
         self.assertIsNone(comparison)
 
+    def test_performance_does_not_use_eftp_as_ftp_history(self):
+        today = date.today().isoformat()
+        snapshot = server.compact_snapshot(
+            {"sportSettings": [{"types": ["Ride"], "ftp": 300}]},
+            [],
+            [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 290}]}],
+            [],
+        )
+
+        performance = server.current_performance_context(snapshot)
+
+        self.assertEqual(performance["metrics"]["cycling_ftp_watts"]["value"], 300)
+        self.assertIsNone(performance["comparisons"]["cycling_ftp_watts_30d"])
+
     def test_calendar_conflict_is_detected_before_push(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         server.upsert_remote_planned_units([{"id": "existing", "name": "Existing", "category": "WORKOUT", "type": "Ride", "start_date_local": tomorrow + "T08:00:00", "moving_time": 3600}])

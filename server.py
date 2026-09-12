@@ -12879,7 +12879,7 @@ def intervals_performance_average(rows: list[dict[str, Any]], key: str, days: in
         ride = sport_info_setting(row, "ride")
         run = sport_info_setting(row, "run")
         candidates: dict[str, Any] = {
-            "cycling_ftp_watts": first_present(ride, ("ftp", "indoor_ftp", "eftp", "eFTP")),
+            "cycling_ftp_watts": first_present(ride, ("ftp", "indoor_ftp")),
             "bike_threshold_hr_bpm": first_present(ride, ("lthr",)),
             "cycling_vo2max_ml_kg_min": first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")),
             "run_threshold_watts": first_present(run, ("ftp", "indoor_ftp", "eftp", "eFTP")),
