@@ -8217,6 +8217,34 @@ def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[in
     return matches
 
 
+def _workout_compliance_basis(
+    activity: dict[str, Any] | None, planned_load: float | None, actual_load: float | None,
+    planned_duration: float | None, actual_duration: float | None,
+) -> tuple[str | None, float | None, float | None]:
+    if activity is None:
+        return None, None, None
+    if planned_load is not None and planned_load > 0 and actual_load is not None:
+        return "training_load", planned_load, actual_load
+    if planned_duration is not None and planned_duration > 0 and actual_duration is not None:
+        return "duration", planned_duration, actual_duration
+    if planned_load is None and planned_duration is None:
+        return "unavailable", None, None
+    return None, None, None
+
+
+def _workout_compliance_percentage(
+    status: str, activity: dict[str, Any] | None, basis: str | None,
+    planned_value: float | None, actual_value: float | None,
+) -> int | None:
+    if status == "missed":
+        return 0
+    if activity is not None and basis == "unavailable":
+        return 100
+    if planned_value is not None and actual_value is not None and planned_value > 0:
+        return round(float(actual_value) * 100 / float(planned_value))
+    return None
+
+
 def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, today: date) -> dict[str, Any]:
     event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
     if activity is not None:
@@ -8229,22 +8257,11 @@ def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, t
     actual_load = _workout_load(activity)
     planned_duration = _workout_duration(event)
     actual_duration = _workout_duration(activity)
-    basis = None
-    planned_value = None
-    actual_value = None
-    if planned_load is not None and planned_load > 0 and activity is not None and actual_load is not None:
-        basis, planned_value, actual_value = "training_load", planned_load, actual_load
-    elif planned_duration is not None and planned_duration > 0 and activity is not None and actual_duration is not None:
-        basis, planned_value, actual_value = "duration", planned_duration, actual_duration
-    elif activity is not None and planned_load is None and planned_duration is None:
-        basis = "unavailable"
-
-    percentage = 0 if status == "missed" else None
-    if activity is not None and basis == "unavailable":
-        percentage = 100
-    elif planned_value is not None and actual_value is not None and planned_value > 0:
-        # Intervals.icu also allows values above 100% when more was completed.
-        percentage = round(float(actual_value) * 100 / float(planned_value))
+    basis, planned_value, actual_value = _workout_compliance_basis(
+        activity, planned_load, actual_load, planned_duration, actual_duration,
+    )
+    # Intervals.icu also allows values above 100% when more was completed.
+    percentage = _workout_compliance_percentage(status, activity, basis, planned_value, actual_value)
     result: dict[str, Any] = {
         "status": status,
         "percentage": percentage,

@@ -2959,6 +2959,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(enriched[1]["compliance"]["status"], "missed")
         self.assertEqual(enriched[1]["compliance"]["percentage"], 0)
         self.assertNotIn("compliance", enriched[2])
+
         current_week = next(item for item in weekly if item["week_start"] == (today - timedelta(days=today.weekday())).isoformat())
         if today.weekday() == 0:
             # On Monday, yesterday belongs to the previous calendar week.
@@ -2978,6 +2979,15 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(current_week["unit_percentage"], 50)
             self.assertEqual(current_week["percentage"], 40)
             self.assertEqual(current_week["basis"], "training_load")
+
+    def test_workout_compliance_uses_duration_and_unavailable_fallbacks(self):
+        today = date(2026, 9, 12)
+        duration_event = {"start_date_local": today.isoformat(), "moving_time": 3600}
+        duration_activity = {"id": "done", "start_date_local": today.isoformat(), "moving_time": 2700}
+        duration = server.workout_compliance(duration_event, duration_activity, today)
+        self.assertEqual((duration["basis"], duration["percentage"]), ("duration", 75))
+        unavailable = server.workout_compliance({"start_date_local": today.isoformat()}, duration_activity, today)
+        self.assertEqual((unavailable["basis"], unavailable["percentage"]), ("unavailable", 100))
 
     def test_training_calendar_adds_unplanned_completed_activities_without_duplicating_matches(self):
         today = date(2026, 8, 26)
