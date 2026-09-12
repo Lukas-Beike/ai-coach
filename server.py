@@ -7247,32 +7247,45 @@ def record_openai_rate_limits(response_headers: Any) -> None:
         set_kv("openai_rate_limits", json.dumps({"updated_at": utc_now(), **values}, ensure_ascii=False))
 
 
+def _provider_error_body(raw_body: bytes) -> Any:
+    """Decode a provider error response only when it is a valid JSON value."""
+    try:
+        return json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else None
+    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+
+def _provider_error_text(payload: dict[str, Any]) -> str:
+    """Select the first bounded human-readable provider error field."""
+    for key in ("message", "detail", "title"):
+        if payload.get(key):
+            return str(payload[key])
+    return ""
+
+
+def _intervals_error_detail(parsed: Any) -> str:
+    """Extract the user-safe validation detail returned by Intervals.icu."""
+    if isinstance(parsed, dict):
+        error = parsed.get("error")
+        if isinstance(error, dict):
+            return _provider_error_text(error) or _provider_error_text(parsed)
+        if isinstance(error, str):
+            return error
+        return _provider_error_text(parsed)
+    return parsed if isinstance(parsed, str) else ""
+
+
+def _safe_interval_error_detail(raw_body: bytes) -> str:
+    """Redact and bound an Intervals.icu response detail before displaying it."""
+    detail = _intervals_error_detail(_provider_error_body(raw_body))
+    return re.sub(r"\s+", " ", redact_text(detail)).strip()[:500]
+
+
 def upstream_http_error_message(status: int, raw_body: bytes, service: str | None) -> str:
     """Expose a bounded provider validation hint without exposing the payload."""
     if service != "intervals":
         return f"Anfrage an externen Dienst fehlgeschlagen ({status})."
-    detail = ""
-    try:
-        parsed = json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else None
-    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
-        parsed = None
-    if isinstance(parsed, dict):
-        error = parsed.get("error")
-        if isinstance(error, dict):
-            for key in ("message", "detail", "title"):
-                if error.get(key):
-                    detail = str(error[key])
-                    break
-        elif isinstance(error, str):
-            detail = error
-        if not detail:
-            for key in ("message", "detail", "title"):
-                if parsed.get(key):
-                    detail = str(parsed[key])
-                    break
-    elif isinstance(parsed, str):
-        detail = parsed
-    detail = re.sub(r"\s+", " ", redact_text(detail)).strip()[:500]
+    detail = _safe_interval_error_detail(raw_body)
     if detail:
         return f"Intervals.icu weist die Anfrage zurück ({status}): {detail}"
     return f"Anfrage an externen Dienst fehlgeschlagen ({status})."
