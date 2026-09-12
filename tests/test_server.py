@@ -6956,7 +6956,7 @@ class CoachTests(unittest.TestCase):
             {"sportSettings": [{"types": ["Ride"], "ftp": 300, "vo2max": 60}]},
             [{
                 "id": "latest-ride", "type": "Ride", "start_date_local": f"{today}T08:00:00",
-                "moving_time": 3600, "distance": 30_000, "average_watts": 200, "icu_weighted_avg_watts": 270,
+                "moving_time": 3600, "distance": 30_000, "average_watts": 200, "normalized_power": 270,
                 "average_heartrate": 155, "icu_intensity": 0.9, "icu_ftp": 300,
             }],
             [],

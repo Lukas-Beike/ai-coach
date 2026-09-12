@@ -10,13 +10,13 @@ from typing import Any
 COACH_ACTIVITY_FIELDS = (
     "id", "start_date_local", "name", "type", "moving_time", "distance", "total_elevation_gain",
     "icu_training_load", "icu_intensity", "average_heartrate", "max_heartrate", "average_watts",
-    "weighted_average_watts", "icu_weighted_avg_watts", "average_speed", "icu_weighted_avg_speed", "icu_pace", "icu_rpe", "feel",
+    "weighted_average_watts", "icu_weighted_avg_watts", "normalized_power", "average_speed", "icu_weighted_avg_speed", "icu_pace", "icu_rpe", "feel",
 )
 
 COACH_ACTIVITY_DETAIL_FIELDS = (
     "start_date_local", "start_date", "name", "type", "sport", "subtype", "moving_time", "elapsed_time",
     "distance", "total_elevation_gain", "total_elevation_loss", "calories", "average_speed", "max_speed",
-    "average_heartrate", "max_heartrate", "average_watts", "max_watts", "weighted_average_watts", "icu_weighted_avg_watts",
+    "average_heartrate", "max_heartrate", "average_watts", "max_watts", "weighted_average_watts", "icu_weighted_avg_watts", "normalized_power",
     "average_cadence", "max_cadence", "average_temp", "min_temp", "max_temp", "icu_training_load",
     "icu_intensity", "icu_rolling_ftp", "icu_weighted_avg_speed", "icu_pace", "icu_rpe", "feel", "faded",
     "decoupling",
@@ -27,7 +27,7 @@ COACH_ACTIVITY_DETAIL_STREAM_FIELDS = (
 )
 COACH_ACTIVITY_DETAIL_LAP_FIELDS = (
     "name", "start_time", "elapsed_time", "moving_time", "distance", "average_speed", "max_speed",
-    "average_heartrate", "max_heartrate", "average_watts", "max_watts", "weighted_average_watts", "icu_weighted_avg_watts",
+    "average_heartrate", "max_heartrate", "average_watts", "max_watts", "weighted_average_watts", "icu_weighted_avg_watts", "normalized_power",
     "average_cadence", "total_elevation_gain", "icu_training_load", "icu_intensity",
 )
 COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS = 2000
