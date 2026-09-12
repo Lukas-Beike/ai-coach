@@ -291,7 +291,6 @@ test('dispatch refuses an ordinary main PR and malformed PR numbers', async () =
   }
 });
 
-<<<<<<< HEAD
 test('manual events use the current protected action without checking out pull-request code', () => {
   function actionEnabled(stepName, baseRef, eventName, exempt = false) {
     const step = workflow.split(`- name: ${stepName}\n`)[1].split('\n      - name:', 1)[0];
@@ -316,13 +315,13 @@ test('manual events use the current protected action without checking out pull-r
     assert.equal(actionEnabled('Run trusted develop Codex gate', 'main', event, true), false);
     assert.equal(actionEnabled('Run trusted main Codex gate', 'main', event, true), false);
   }
-=======
+});
+
 test('privileged review gate uses a pinned protected action without checkout', () => {
   assert.doesNotMatch(workflow, /actions\/checkout/);
   assert.match(
     workflow,
     /uses: Lukas-Beike\/ai-coach\/\.github\/actions\/codex-review-gate@[0-9a-f]{40}/,
   );
->>>>>>> 32cd82d (refactor: reduce Sonar complexity hotspots)
 });
 
