@@ -4340,9 +4340,9 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
       return false;
     }
     await readChatStream(response, context);
-    return finishChatStream(context);
+    return await finishChatStream(context);
   } catch (error) {
-    return recoverChatRequestFailure(error, context);
+    return await recoverChatRequestFailure(error, context);
   } finally {
     finishChatRequest(context);
   }
