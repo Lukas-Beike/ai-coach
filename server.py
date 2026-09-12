@@ -3941,7 +3941,12 @@ def _garmin_performance_freshness(
     for key, value in metrics.items():
         source = source_keys.get(key)
         if not source:
-            source = "max_metrics" if "vo2max" in key else "race_predictions" if key in race_values else "running_threshold"
+            if "vo2max" in key:
+                source = "max_metrics"
+            elif key in race_values:
+                source = "race_predictions"
+            else:
+                source = "running_threshold"
         metrics[key] = garmin_metric_freshness(snapshot, source, value)
     return metrics
 
