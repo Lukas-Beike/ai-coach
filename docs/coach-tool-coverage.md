@@ -1,6 +1,6 @@
 # Coach tool execution coverage
 
-This matrix covers the 33 tools currently offered to the conversational Coach.
+This matrix covers the 34 tools currently offered to the conversational Coach.
 It builds on the profile/sync fix in `ebbe311`. It measures execution through
 `chat_with_coach`, not the accuracy of a language model's interpretation.
 
@@ -31,6 +31,7 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `delete_activity_feedback` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
 | `delete_competition` | `success` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
 | `get_sync_job` | `success` | `test_provider_reads_and_job_status_use_correct_provider` |
+| `get_activity_details` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `inspect_activity_duplicates` | `success` | `test_duplicate_inspection_returns_preview_without_deleting_provider_data` |
 | `list_change_history` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_competitions` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |

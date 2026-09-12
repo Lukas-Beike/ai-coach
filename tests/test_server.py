@@ -496,7 +496,7 @@ class CoachTests(unittest.TestCase):
         self.assertLessEqual({
             "list_competitions", "save_competition", "delete_competition", "sync_competitions",
             "list_training_plans", "update_training_plan", "preview_adaptive_replan", "apply_adaptive_replan",
-            "list_recent_activities", "list_workout_library", "list_planned_workouts", "list_change_history",
+            "list_recent_activities", "get_activity_details", "list_workout_library", "list_planned_workouts", "list_change_history",
             "apply_workout_library_plan", "delete_activity_feedback", "refresh_current_performance",
         }, names)
 
@@ -524,6 +524,55 @@ class CoachTests(unittest.TestCase):
         enqueue.assert_called_once_with(
             "intervals", "competition_push", {"reason": "Bestätigter Coach-Auftrag"}, requested_by="coach",
         )
+
+    def test_explicit_activity_detail_reads_only_the_requested_complete_raw_record(self):
+        server.save_snapshot({
+            "synced_at": "2026-09-11T08:00:00+00:00",
+            "athlete": {},
+            "recent_activities": [
+                {"id": "activity-1", "name": "Tempo", "type": "Run", "start_date_local": "2026-09-10T07:00:00"},
+                {"id": "activity-2", "name": "Recovery", "type": "Ride", "start_date_local": "2026-09-11T07:00:00"},
+            ],
+            "recent_wellness": [],
+            "upcoming_calendar": [],
+            "raw_provider_data": {
+                "athlete": {},
+                "activities": [
+                    {
+                        "id": "activity-1", "name": "Tempo", "type": "Run", "start_date_local": "2026-09-10T07:00:00",
+                        "average_speed": 3.2, "average_heartrate": 166, "average_watts": 245,
+                        "streams": {"watts": [200, 250, 280], "latlng": [[1, 2], [3, 4]]}, "provider_extra": "must not pass",
+                    },
+                    {"id": "activity-2", "name": "Recovery", "type": "Ride", "start_date_local": "2026-09-11T07:00:00", "average_watts": 120},
+                ],
+                "wellness": [],
+                "upcoming_calendar": [],
+            },
+        })
+        intent = {
+            "intent": "local_action", "operation": "get_activity_details", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": [],
+        }
+
+        result = server._structured_coach_tool_result(
+            "get_activity_details", {"activity_id": "activity-1"}, intent=intent,
+            conversation_id="conversation-activity-detail", client_turn_id="turn-activity-detail",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["activity"]["streams"], {"watts": [200, 250, 280]})
+        self.assertNotIn("id", result["activity"])
+        self.assertNotIn("latlng", result["activity"]["streams"])
+        self.assertNotIn("provider_extra", result["activity"])
+        self.assertEqual(result["data_scope"], "bounded sanitized detail projection of exactly one Intervals.icu activity")
+        self.assertNotIn("activity-2", json.dumps(result))
+        self.assertEqual(result["activity_validation"]["activity"]["activity_id"], "activity-1")
+        self.assertEqual(result["activity_validation"]["activity"]["sport"], "Laufen")
+
+        with self.assertRaises(server.AppError) as missing:
+            server.get_activity_details("activity-3")
+        self.assertEqual(missing.exception.reason, "activity_details_not_found")
 
     def test_structured_coach_reads_local_detail_and_schedules_library_templates(self):
         template = server.create_local_library_template({
@@ -1932,6 +1981,7 @@ class CoachTests(unittest.TestCase):
             bounded_coach_context_value,
             compact_coach_activity,
             compact_coach_local_planned_workouts,
+            detailed_coach_activity,
         )
 
         select = lambda value, fields: {key: value[key] for key in fields if key in value}
@@ -1945,6 +1995,18 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual([item["id"] for item in workouts], ["1"])
         self.assertLessEqual(len(json.dumps(bounded_coach_context_value({"text": "x" * 1000}, 100), ensure_ascii=False, separators=(",", ":"))), 100)
+        detail = detailed_coach_activity({
+            "id": "provider-id", "average_watts": 245, "icu_weighted_avg_watts": 300, "provider_extra": "must not pass",
+            "streams": {"watts": list(range(2505)), "latlng": [[1, 2]]},
+        })
+        self.assertEqual(detail["average_watts"], 245)
+        self.assertEqual(detail["icu_weighted_avg_watts"], 300)
+        self.assertEqual(len(detail["streams"]["watts"]), 2000)
+        self.assertEqual(detail["streams"]["watts"][0], 0)
+        self.assertEqual(detail["streams"]["watts"][-1], 2504)
+        self.assertNotIn("id", detail)
+        self.assertNotIn("provider_extra", detail)
+        self.assertNotIn("latlng", detail["streams"])
 
     def test_backup_export_helpers_are_dependency_light_and_preserve_bounds(self):
         from backend.backup import export as backup_export
@@ -2117,19 +2179,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("globalThis.AppApi.audio(path, blob, () =>", app)
         self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
-        self.assertIn('/api.js?v=211', index)
-        self.assertIn('/navigation.js?v=211', index)
-        self.assertIn('/state.js?v=211', index)
-        self.assertIn('/views.js?v=211', index)
-        self.assertIn('/forms.js?v=211', index)
-        self.assertIn('/components.js?v=211', index)
-        self.assertIn('/app.js?v=211', index)
-        self.assertIn('intervals-coach-v211', service_worker)
-        self.assertIn('"/navigation.js?v=211"', service_worker)
-        self.assertIn('"/state.js?v=211"', service_worker)
-        self.assertIn('"/views.js?v=211"', service_worker)
-        self.assertIn('"/forms.js?v=211"', service_worker)
-        self.assertIn('"/components.js?v=211"', service_worker)
+        self.assertIn('/api.js?v=212', index)
+        self.assertIn('/navigation.js?v=212', index)
+        self.assertIn('/state.js?v=212', index)
+        self.assertIn('/views.js?v=212', index)
+        self.assertIn('/forms.js?v=212', index)
+        self.assertIn('/components.js?v=212', index)
+        self.assertIn('/app.js?v=212', index)
+        self.assertIn('intervals-coach-v212', service_worker)
+        self.assertIn('"/navigation.js?v=212"', service_worker)
+        self.assertIn('"/state.js?v=212"', service_worker)
+        self.assertIn('"/views.js?v=212"', service_worker)
+        self.assertIn('"/forms.js?v=212"', service_worker)
+        self.assertIn('"/components.js?v=212"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -2156,8 +2218,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=211'), index.index('/components.js?v=211'))
-        self.assertLess(index.index('/components.js?v=211'), index.index('/app.js?v=211'))
+        self.assertLess(index.index('/forms.js?v=212'), index.index('/components.js?v=212'))
+        self.assertLess(index.index('/components.js?v=212'), index.index('/app.js?v=212'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -2845,13 +2907,15 @@ class CoachTests(unittest.TestCase):
     def test_compact_snapshot_drops_unknown_and_sensitive_fields(self):
         result = server.compact_snapshot(
             {"id": "i1", "name": "Ada", "secret": "nope"},
-            [{"id": "a1", "name": "Ride", "private_note": "nope"}],
+            [{"id": "a1", "name": "Ride", "icu_vo2max": 52, "vO2MaxValue": 53, "private_note": "nope"}],
             [{"id": "2026-01-01", "ctl": 42, "unknown": 99}],
             [{"id": 1, "name": "Tempo", "category": "WORKOUT", "raw": "nope"}],
         )
         self.assertEqual(result["athlete"]["name"], "Ada")
         self.assertNotIn("secret", result["athlete"])
         self.assertNotIn("private_note", result["recent_activities"][0])
+        self.assertEqual(result["recent_activities"][0]["icu_vo2max"], 52)
+        self.assertEqual(result["recent_activities"][0]["vO2MaxValue"], 53)
         self.assertEqual(result["recent_wellness"][0]["ctl"], 42)
 
     def test_planned_workouts_match_activities_and_roll_up_weekly_compliance(self):
@@ -3500,6 +3564,34 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(comparisons["readiness_30d"]["color"], "good")
         self.assertEqual(comparisons["run_5k_seconds_30d"]["delta"], -100)
         self.assertEqual(comparisons["run_5k_seconds_30d"]["color"], "good")
+
+    def test_performance_does_not_compare_garmin_metrics_to_intervals_history(self):
+        today = server.local_now().date()
+        snapshot = {
+            "synced_at": "now", "athlete": {}, "recent_activities": [],
+            "recent_wellness": [{"id": today.isoformat(), "sport_info": [{"types": ["Ride"], "ftp": 280}]}],
+        }
+        server.set_kv("garmin_snapshot", json.dumps({
+            "cycling_ftp": {"functionalThresholdPower": 300},
+            "performance_history": [],
+        }))
+
+        comparison = server.current_performance_context(snapshot)["comparisons"]["cycling_ftp_watts_30d"]
+        self.assertIsNone(comparison)
+
+    def test_performance_does_not_use_eftp_as_ftp_history(self):
+        today = date.today().isoformat()
+        snapshot = server.compact_snapshot(
+            {"sportSettings": [{"types": ["Ride"], "ftp": 300}]},
+            [],
+            [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 290}]}],
+            [],
+        )
+
+        performance = server.current_performance_context(snapshot)
+
+        self.assertEqual(performance["metrics"]["cycling_ftp_watts"]["value"], 300)
+        self.assertIsNone(performance["comparisons"]["cycling_ftp_watts_30d"])
 
     def test_calendar_conflict_is_detected_before_push(self):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -5198,6 +5290,15 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])
 
+    def test_coach_context_requires_performance_assessment_for_completed_activity_analysis(self):
+        context = server.build_training_context()
+
+        self.assertIn('"Leistungsfähigkeit und Entwicklung"', context)
+        self.assertIn("VO2max", context)
+        self.assertIn("Zone 2 pace", context)
+        self.assertIn("keep FTP and Intervals.icu eFTP clearly separate", context)
+        self.assertIn("do not claim a reliable trend", context)
+
     def test_coach_projection_does_not_change_provider_snapshots(self):
         today = server.local_now().date()
         intervals_snapshot = {
@@ -6820,6 +6921,110 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(performance["rolling_training"]["last_7_days"]["training_load"], 110.0)
         self.assertNotIn("ai_estimates", performance)
 
+    def test_activity_validation_exposes_running_evidence_against_provider_values(self):
+        today = date.today().isoformat()
+        snapshot = server.compact_snapshot(
+            {
+                "sportSettings": [{"types": ["Run"], "threshold_pace": 4.0, "zone2_pace": 3.0, "lthr": 170, "vo2max": 55}],
+            },
+            [{
+                "id": "latest-run", "type": "Run", "name": "Tempo", "start_date_local": f"{today}T08:00:00",
+                "moving_time": 3600, "distance": 12_000, "average_speed": 3.2,
+                "average_heartrate": 166, "icu_training_load": 90,
+            }],
+            [],
+            [],
+        )
+
+        validation = server.current_performance_context(snapshot)["activity_validation"]
+
+        self.assertTrue(validation["available"])
+        self.assertEqual(validation["activity"]["activity_id"], "latest-run")
+        self.assertEqual(validation["activity"]["sport"], "Laufen")
+        self.assertEqual(validation["activity"]["pace_seconds_per_km"], 312)
+        self.assertEqual(validation["activity"]["average_heart_rate_bpm"], 166)
+        self.assertEqual(validation["provider_references"][0]["metric"], "running_vo2max_ml_kg_min")
+        zone2_reference = next(item for item in validation["provider_references"] if item["metric"] == "run_zone2_pace_seconds_per_km")
+        self.assertEqual(zone2_reference["value"], 333)
+        threshold_reference = next(item for item in validation["provider_references"] if item["metric"] == "run_threshold_pace_seconds_per_km")
+        self.assertEqual(threshold_reference["value"], 250)
+        self.assertIn("direct_support", validation["validation_outcome_enum"])
+
+    def test_activity_validation_exposes_cycling_power_as_percent_of_ftp(self):
+        today = date.today().isoformat()
+        snapshot = server.compact_snapshot(
+            {"sportSettings": [{"types": ["Ride"], "ftp": 300, "vo2max": 60}]},
+            [{
+                "id": "latest-ride", "type": "Ride", "start_date_local": f"{today}T08:00:00",
+                "moving_time": 3600, "distance": 30_000, "average_watts": 200, "normalized_power": 270,
+                "average_heartrate": 155, "icu_intensity": 0.9, "icu_ftp": 300,
+            }],
+            [],
+            [],
+        )
+
+        validation = server.current_performance_context(snapshot)["activity_validation"]
+
+        self.assertEqual(validation["activity"]["sport"], "Radfahren")
+        self.assertEqual(validation["activity"]["intensity"], 90)
+        self.assertEqual(validation["activity"]["power_as_percent_of_current_ftp"], 90.0)
+        self.assertEqual([item["metric"] for item in validation["provider_references"]], [
+            "cycling_vo2max_ml_kg_min", "cycling_ftp_watts", "cycling_eftp_watts",
+        ])
+        self.assertEqual(validation["direct_activity_estimates"]["activity_configured_ftp_watts"], 300)
+        self.assertNotEqual(validation["direct_activity_estimates"].get("activity_ftp_watts"), 300)
+
+    def test_activity_validation_omits_implausible_provider_references(self):
+        validation = server.activity_performance_validation(
+            [{"id": "invalid-provider", "type": "Run", "start_date_local": "2026-09-12T08:00:00"}],
+            {
+                "running_vo2max_ml_kg_min": {"value": 500, "unit": "ml/kg/min", "source": "Intervals.icu"},
+                "run_threshold_pace_seconds_per_km": {"value": 9999, "unit": "s/km", "source": "Intervals.icu"},
+                "run_threshold_hr_bpm": {"value": 9999, "unit": "bpm", "source": "Intervals.icu"},
+            },
+            {},
+        )
+
+        reference_metrics = {item["metric"] for item in validation["provider_references"]}
+        self.assertNotIn("running_vo2max_ml_kg_min", reference_metrics)
+        self.assertNotIn("run_threshold_pace_seconds_per_km", reference_metrics)
+        self.assertNotIn("run_threshold_hr_bpm", reference_metrics)
+
+    def test_activity_validation_omits_power_ratio_for_invalid_or_implausible_ftp(self):
+        activity = {
+            "id": "invalid-ftp", "type": "Ride", "start_date_local": "2026-09-12T08:00:00",
+            "weighted_average_watts": 270,
+        }
+        for ftp in (-1, 10):
+            with self.subTest(ftp=ftp):
+                validation = server.activity_performance_validation(
+                    [activity], {"cycling_ftp_watts": {"value": ftp}}, {},
+                )
+                self.assertNotIn("power_as_percent_of_current_ftp", validation["activity"])
+
+    def test_activity_validation_omits_malformed_or_oversized_direct_estimates(self):
+        validation = server.activity_performance_validation([{
+            "id": "invalid-estimates", "type": "Ride", "start_date_local": "2026-09-12T08:00:00",
+            "vo2max": {"value": 60}, "ftp": "999999999999999999999999999999999999999999",
+            "eFTP": [300], "icu_ftp": 300,
+        }], {}, {})
+
+        self.assertEqual(validation["direct_activity_estimates"], {"activity_configured_ftp_watts": 300})
+
+    def test_activity_validation_omits_implausible_measured_evidence(self):
+        validation = server.activity_performance_validation([{
+            "id": "invalid-evidence", "type": "Ride", "start_date_local": "2026-09-12T08:00:00",
+            "moving_time": 3600, "average_heartrate": 9999, "average_watts": -10, "icu_rpe": 100,
+            "icu_intensity": 999,
+        }], {}, {})
+
+        evidence = validation["activity"]
+        self.assertEqual(evidence["duration_seconds"], 3600)
+        self.assertNotIn("average_heart_rate_bpm", evidence)
+        self.assertNotIn("average_power_watts", evidence)
+        self.assertNotIn("rpe", evidence)
+        self.assertNotIn("intensity", evidence)
+
     def test_form_is_derived_from_ctl_and_atl_when_intervals_omits_tsb(self):
         today = date.today().isoformat()
         snapshot = {
@@ -6915,6 +7120,25 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
         self.assertEqual(metrics["cycling_eftp_watts"]["source"], "Intervals.icu")
         self.assertEqual(performance["comparisons"]["cycling_eftp_30d"]["average"], 287)
+        eftp_reference = next(item for item in performance["activity_validation"]["provider_references"] if item["metric"] == "cycling_eftp_watts")
+        self.assertEqual(eftp_reference["historical_comparison"]["average"], 287)
+        self.assertEqual(performance["activity_validation"]["direct_activity_estimates"]["activity_configured_ftp_watts"], 300)
+
+    def test_current_eftp_history_omits_implausible_samples(self):
+        today = date.today()
+        snapshot = server.compact_snapshot(
+            {"sportSettings": [{"types": ["Ride"], "eFTP": 300}]},
+            [],
+            [
+                {"id": today.isoformat(), "sportInfo": [{"types": ["Ride"], "eFTP": 9999}]},
+                {"id": (today - timedelta(days=1)).isoformat(), "sportInfo": [{"types": ["Ride"], "eFTP": 280}]},
+            ],
+            [],
+        )
+
+        comparison = server.current_performance_context(snapshot)["comparisons"]["cycling_eftp_30d"]
+
+        self.assertEqual(comparison["average"], 280)
 
     def test_current_eftp_reads_mmp_model_without_using_ftp_as_eftp(self):
         today = date.today().isoformat()
@@ -7234,16 +7458,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=211"', source)
-        self.assertIn('"/navigation.js?v=211"', source)
-        self.assertIn('"/state.js?v=211"', source)
-        self.assertIn('"/views.js?v=211"', source)
-        self.assertIn('"/forms.js?v=211"', source)
-        self.assertIn('"/components.js?v=211"', source)
+        self.assertIn('"/api.js?v=212"', source)
+        self.assertIn('"/navigation.js?v=212"', source)
+        self.assertIn('"/state.js?v=212"', source)
+        self.assertIn('"/views.js?v=212"', source)
+        self.assertIn('"/forms.js?v=212"', source)
+        self.assertIn('"/components.js?v=212"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=211"', source)
-        self.assertIn('"/icon.svg?v=211"', source)
-        self.assertIn('"/styles.css?v=211"', source)
+        self.assertIn('"/app.js?v=212"', source)
+        self.assertIn('"/icon.svg?v=212"', source)
+        self.assertIn('"/styles.css?v=212"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -8277,7 +8501,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=211', index)
+        self.assertIn('v=212', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
