@@ -7797,6 +7797,11 @@ class CoachTests(unittest.TestCase):
         self.assertIn("422", raised.exception.message)
         self.assertIn("Invalid workout type", raised.exception.message)
 
+    def test_intervals_validation_error_uses_top_level_detail_after_empty_error(self):
+        raw_error = json.dumps({"error": "", "message": "Invalid workout type"}).encode("utf-8")
+        details = server.upstream_http_error_message(422, raw_error, "intervals")
+        self.assertIn("Invalid workout type", details)
+
     def test_intervals_public_state_reports_sync_health(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
