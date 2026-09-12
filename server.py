@@ -8341,7 +8341,7 @@ def compact_sport_settings(athlete: Any) -> list[dict[str, Any]]:
         return []
     fields = (
         "id", "types", "ftp", "indoor_ftp", "eftp", "eFTP", "w_prime", "p_max",
-        "lthr", "max_hr", "maxHR", "maxHeartRate", "threshold_pace", "pace_units", "vo2max", "vo2_max",
+        "lthr", "max_hr", "maxHR", "maxHeartRate", "threshold_pace", "zone2_pace", "zone_2_pace", "z2_pace", "pace_zone2", "paceZone2", "zone2Pace", "aerobic_pace", "aerobicPace", "easy_pace", "easyPace", "pace_units", "vo2max", "vo2_max",
         "running_vo2max", "cycling_vo2max",
     )
     compacted: list[dict[str, Any]] = []
@@ -8361,7 +8361,7 @@ def compact_wellness_sport_info(value: Any) -> list[dict[str, Any]]:
         return []
     fields = (
         "id", "type", "types", "sport", "sport_type", "ftp", "eftp", "eFTP", "wPrime", "w_prime", "pMax", "p_max",
-        "lthr", "max_hr", "maxHR", "maxHeartRate", "threshold_pace", "pace_units", "vo2max", "vo2_max", "running_vo2max", "cycling_vo2max",
+        "lthr", "max_hr", "maxHR", "maxHeartRate", "threshold_pace", "zone2_pace", "zone_2_pace", "z2_pace", "pace_zone2", "paceZone2", "zone2Pace", "aerobic_pace", "aerobicPace", "easy_pace", "easyPace", "pace_units", "vo2max", "vo2_max", "running_vo2max", "cycling_vo2max",
     )
     return [selected(item, fields) for item in value if isinstance(item, dict)][:30]
 
@@ -12114,6 +12114,12 @@ def threshold_pace_seconds(value: Any) -> float | int | None:
     return round(1000 / number) if number < 20 else number
 
 
+def zone2_pace_seconds(value: Any) -> float | int | None:
+    """Normalize a provider's running Zone 2 pace without inventing one."""
+    pace = threshold_pace_seconds(value)
+    return pace if pace is not None and 120 <= float(pace) <= 1800 else None
+
+
 def height_in_cm(value: Any) -> float | int | None:
     number = as_number(value)
     if number is not None and 1.2 <= float(number) <= 2.5:
@@ -12165,6 +12171,13 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
 
     bike_lthr = first_present(ride, ("lthr",)) or first_present(wellness_ride, ("lthr",))
     run_lthr = first_present(run, ("lthr",)) or first_present(wellness_run, ("lthr",))
+    run_zone2_pace = first_present(
+        run,
+        ("zone2_pace", "zone_2_pace", "z2_pace", "pace_zone2", "paceZone2", "zone2Pace", "aerobic_pace", "aerobicPace", "easy_pace", "easyPace"),
+    ) or first_present(
+        wellness_run,
+        ("zone2_pace", "zone_2_pace", "z2_pace", "pace_zone2", "paceZone2", "zone2Pace", "aerobic_pace", "aerobicPace", "easy_pace", "easyPace"),
+    )
     garmin_threshold_metrics = {
         "cycling_ftp_watts": preferred_metric("cycling_ftp_watts", metric(
             first_present(ride, ("ftp", "indoor_ftp")) or first_present(wellness_ride, ("ftp", "indoor_ftp")) or first_present(athlete, ("icu_ftp",)),
@@ -12178,6 +12191,9 @@ def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
             threshold_pace_seconds(first_present(run, ("threshold_pace",)) or first_present(wellness_run, ("threshold_pace",))),
             "s/km", PROVIDER_INTERVALS_NAME,
         )),
+        "run_zone2_pace_seconds_per_km": metric(
+            zone2_pace_seconds(run_zone2_pace), "s/km", PROVIDER_INTERVALS_NAME,
+        ),
         "bike_threshold_hr_bpm": preferred_metric("bike_threshold_hr_bpm", metric(
             bike_lthr or generic_lthr,
             "bpm", PROVIDER_INTERVALS_NAME if bike_lthr else "Intervals.icu (allgemein)",
@@ -12310,6 +12326,7 @@ def activity_performance_validation(
         reference_keys = (
             "running_vo2max_ml_kg_min",
             "run_threshold_pace_seconds_per_km",
+            "run_zone2_pace_seconds_per_km",
             "run_threshold_hr_bpm",
             "run_5k_seconds",
             "run_10k_seconds",
@@ -12508,6 +12525,7 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
         "bike_threshold_hr_bpm_30d": trend("bike_threshold_hr_bpm", "bpm"),
         "run_threshold_watts_30d": trend("run_threshold_watts", "W"),
         "run_threshold_pace_seconds_per_km_30d": trend("run_threshold_pace_seconds_per_km", "s/km", False),
+        "run_zone2_pace_seconds_per_km_30d": trend("run_zone2_pace_seconds_per_km", "s/km", False),
         "run_threshold_hr_bpm_30d": trend("run_threshold_hr_bpm", "bpm"),
         "cycling_vo2max_ml_kg_min_30d": trend("cycling_vo2max_ml_kg_min", VO2MAX_UNIT),
         "running_vo2max_ml_kg_min_30d": trend("running_vo2max_ml_kg_min", VO2MAX_UNIT),
@@ -12884,6 +12902,7 @@ def intervals_performance_average(rows: list[dict[str, Any]], key: str, days: in
             "cycling_vo2max_ml_kg_min": first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max")),
             "run_threshold_watts": first_present(run, ("ftp", "indoor_ftp", "eftp", "eFTP")),
             "run_threshold_pace_seconds_per_km": threshold_pace_seconds(first_present(run, ("threshold_pace",))),
+            "run_zone2_pace_seconds_per_km": zone2_pace_seconds(first_present(run, ("zone2_pace", "zone_2_pace", "z2_pace", "pace_zone2", "paceZone2", "zone2Pace", "aerobic_pace", "aerobicPace", "easy_pace", "easyPace"))),
             "run_threshold_hr_bpm": first_present(run, ("lthr",)),
             "running_vo2max_ml_kg_min": first_present(run, ("vo2max", "vo2_max", "running_vo2max")),
             "weight_kg": first_present(row, ("weight",)),

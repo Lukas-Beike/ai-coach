@@ -6924,7 +6924,7 @@ class CoachTests(unittest.TestCase):
         today = date.today().isoformat()
         snapshot = server.compact_snapshot(
             {
-                "sportSettings": [{"types": ["Run"], "threshold_pace": 4.0, "lthr": 170, "vo2max": 55}],
+                "sportSettings": [{"types": ["Run"], "threshold_pace": 4.0, "zone2_pace": 3.0, "lthr": 170, "vo2max": 55}],
             },
             [{
                 "id": "latest-run", "type": "Run", "name": "Tempo", "start_date_local": f"{today}T08:00:00",
@@ -6943,7 +6943,10 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(validation["activity"]["pace_seconds_per_km"], 312)
         self.assertEqual(validation["activity"]["average_heart_rate_bpm"], 166)
         self.assertEqual(validation["provider_references"][0]["metric"], "running_vo2max_ml_kg_min")
-        self.assertEqual(validation["provider_references"][1]["value"], 250)
+        zone2_reference = next(item for item in validation["provider_references"] if item["metric"] == "run_zone2_pace_seconds_per_km")
+        self.assertEqual(zone2_reference["value"], 333)
+        threshold_reference = next(item for item in validation["provider_references"] if item["metric"] == "run_threshold_pace_seconds_per_km")
+        self.assertEqual(threshold_reference["value"], 250)
         self.assertIn("direct_support", validation["validation_outcome_enum"])
 
     def test_activity_validation_exposes_cycling_power_as_percent_of_ftp(self):
