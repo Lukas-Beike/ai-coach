@@ -12326,6 +12326,56 @@ def bounded_performance_metric(key: str, value: Any) -> float | int | None:
     return bounded_activity_metric(value, minimum, maximum)
 
 
+def cycling_activity_validation_details(
+    activity_evidence: dict[str, Any],
+    metrics: dict[str, dict[str, Any]],
+) -> tuple[tuple[str, ...], str]:
+    ftp = bounded_activity_metric(metrics.get("cycling_ftp_watts", {}).get("value"), 20, 2000)
+    weighted_power = activity_evidence.get("weighted_power_watts") or activity_evidence.get("average_power_watts")
+    if weighted_power is not None and ftp is not None:
+        power_percent = round(float(weighted_power) / float(ftp) * 100, 1)
+        if 0 <= power_percent <= 500:
+            activity_evidence["power_as_percent_of_current_ftp"] = power_percent
+    return (
+        ("cycling_vo2max_ml_kg_min", "cycling_ftp_watts", "cycling_eftp_watts"),
+        "Leistung, Herzfrequenz, Dauer und Intensität dieser Einheit sind direkte Belastungsevidenz. "
+        "Sie bestätigen oder widerlegen FTP und VO2max aber nur bei einem ausreichend langen "
+        "und geeigneten Belastungsprofil; eine normale Ausfahrt ist kein FTP-Test.",
+    )
+
+
+def activity_validation_details(
+    latest: dict[str, Any],
+    sport: str,
+    metrics: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], tuple[str, ...], str]:
+    activity_evidence = activity_validation_evidence(latest, sport)
+    if sport == "Laufen":
+        pace = activity_pace_seconds_per_km(latest)
+        if pace is not None:
+            activity_evidence["pace_seconds_per_km"] = pace
+        return (
+            activity_evidence,
+            (
+                "running_vo2max_ml_kg_min",
+                "run_threshold_pace_seconds_per_km",
+                "run_zone2_pace_seconds_per_km",
+                "run_threshold_hr_bpm",
+                "run_5k_seconds",
+                "run_10k_seconds",
+                "run_half_marathon_seconds",
+                "run_marathon_seconds",
+            ),
+            "Pace und Herzfrequenz dieser Einheit sind direkte Belastungsevidenz. "
+            "Sie validieren Schwelle, VO2max, Zone-2-Pace und Wettkampfprognosen nur, "
+            "wenn Dauer, Intensität, Profil und Messqualität dafür geeignet sind.",
+        )
+    if sport == "Radfahren":
+        reference_keys, interpretation = cycling_activity_validation_details(activity_evidence, metrics)
+        return activity_evidence, reference_keys, interpretation
+    return activity_evidence, (), "Für diese Sportart ist keine sportartspezifische Leistungsvalidierung hinterlegt."
+
+
 def activity_performance_validation(
     activities: list[Any],
     metrics: dict[str, dict[str, Any]],
@@ -12341,43 +12391,7 @@ def activity_performance_validation(
         }
 
     sport = activity_sport(latest)
-    activity_evidence = activity_validation_evidence(latest, sport)
-    if sport == "Laufen":
-        pace = activity_pace_seconds_per_km(latest)
-        if pace is not None:
-            activity_evidence["pace_seconds_per_km"] = pace
-        reference_keys = (
-            "running_vo2max_ml_kg_min",
-            "run_threshold_pace_seconds_per_km",
-            "run_zone2_pace_seconds_per_km",
-            "run_threshold_hr_bpm",
-            "run_5k_seconds",
-            "run_10k_seconds",
-            "run_half_marathon_seconds",
-            "run_marathon_seconds",
-        )
-        interpretation = (
-            "Pace und Herzfrequenz dieser Einheit sind direkte Belastungsevidenz. "
-            "Sie validieren Schwelle, VO2max, Zone-2-Pace und Wettkampfprognosen nur, "
-            "wenn Dauer, Intensität, Profil und Messqualität dafür geeignet sind."
-        )
-    elif sport == "Radfahren":
-        reference_keys = ("cycling_vo2max_ml_kg_min", "cycling_ftp_watts", "cycling_eftp_watts")
-        ftp = metrics.get("cycling_ftp_watts", {}).get("value")
-        ftp = bounded_activity_metric(ftp, 20, 2000)
-        weighted_power = activity_evidence.get("weighted_power_watts") or activity_evidence.get("average_power_watts")
-        if weighted_power is not None and ftp is not None:
-            power_percent = round(float(weighted_power) / float(ftp) * 100, 1)
-            if 0 <= power_percent <= 500:
-                activity_evidence["power_as_percent_of_current_ftp"] = power_percent
-        interpretation = (
-            "Leistung, Herzfrequenz, Dauer und Intensität dieser Einheit sind direkte Belastungsevidenz. "
-            "Sie bestätigen oder widerlegen FTP und VO2max aber nur bei einem ausreichend langen "
-            "und geeigneten Belastungsprofil; eine normale Ausfahrt ist kein FTP-Test."
-        )
-    else:
-        reference_keys = ()
-        interpretation = "Für diese Sportart ist keine sportartspezifische Leistungsvalidierung hinterlegt."
+    activity_evidence, reference_keys, interpretation = activity_validation_details(latest, sport, metrics)
 
     provider_references = []
     for key in reference_keys:
