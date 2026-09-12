@@ -7512,46 +7512,57 @@ def _weather_array_value(values: Any, index: int) -> float | None:
     return _weather_number(values[index])
 
 
+def _weather_daily_peak_time(forecast: dict[str, Any], target_date: str) -> str | None:
+    hours = sorted((row for row in _weather_hourly_rows(forecast, target_date)
+                    if row.get("precipitation_probability") is not None
+                    and 0 <= row["precipitation_probability"] <= 100
+                    and re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", str(row["time"])[11:16])),
+                   key=lambda row: row["time"])
+    peak = max(hours, key=lambda row: row["precipitation_probability"], default=None)
+    if peak and any(row["precipitation_probability"] < peak["precipitation_probability"] for row in hours):
+        return str(peak["time"])[11:16]
+    return None
+
+
+def _weather_daily_sun_time(daily: dict[str, Any], key: str, index: int) -> str | None:
+    values = daily.get(key)
+    return str(values[index]) if isinstance(values, list) and index < len(values) else None
+
+
+def _weather_daily_row(daily: dict[str, Any], forecast: dict[str, Any], raw_date: Any, index: int) -> dict[str, Any]:
+    target_date = str(raw_date)
+    code = _weather_array_value(daily.get("weather_code"), index)
+    numeric_code = int(code) if code is not None else None
+    return {
+        "date": target_date,
+        "weather_code": numeric_code,
+        "condition": WEATHER_CONDITIONS.get(numeric_code, "Unbekannte Wetterlage") if numeric_code is not None else "Keine Angabe",
+        "icon": _weather_icon(numeric_code),
+        "temperature_min": _weather_array_value(daily.get("temperature_2m_min"), index),
+        "temperature_max": _weather_array_value(daily.get("temperature_2m_max"), index),
+        "apparent_temperature_min": _weather_array_value(daily.get("apparent_temperature_min"), index),
+        "apparent_temperature_max": _weather_array_value(daily.get("apparent_temperature_max"), index),
+        "precipitation_probability_max": _weather_array_value(daily.get("precipitation_probability_max"), index),
+        "rain_peak_time": _weather_daily_peak_time(forecast, target_date),
+        "rain_sum": _weather_array_value(daily.get("rain_sum"), index),
+        "showers_sum": _weather_array_value(daily.get("showers_sum"), index),
+        "snowfall_sum": _weather_array_value(daily.get("snowfall_sum"), index),
+        "wind_speed_max": _weather_array_value(daily.get("wind_speed_10m_max"), index),
+        "wind_gusts_max": _weather_array_value(daily.get("wind_gusts_10m_max"), index),
+        "wind_direction_dominant": _weather_array_value(daily.get("wind_direction_10m_dominant"), index),
+        "sunrise": _weather_daily_sun_time(daily, "sunrise", index),
+        "sunset": _weather_daily_sun_time(daily, "sunset", index),
+    }
+
+
 def _weather_daily_summary(forecast: dict[str, Any]) -> list[dict[str, Any]]:
     daily = forecast.get("daily") if isinstance(forecast.get("daily"), dict) else {}
     dates = daily.get("time") if isinstance(daily.get("time"), list) else []
-    result: list[dict[str, Any]] = []
-    for index, raw_date in enumerate(dates[:WEATHER_FORECAST_DAYS]):
-        if not re.fullmatch(DATE_ONLY_PATTERN, str(raw_date)):
-            continue
-        code = _weather_array_value(daily.get("weather_code"), index)
-        hours = sorted((row for row in _weather_hourly_rows(forecast, str(raw_date))
-                        if row.get("precipitation_probability") is not None
-                        and 0 <= row["precipitation_probability"] <= 100
-                        and re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", str(row["time"])[11:16])),
-                       key=lambda row: row["time"])
-        peak = max(hours, key=lambda row: row["precipitation_probability"], default=None)
-        # A flat (including dry) or incomplete single-hour forecast has no
-        # distinct most-likely time. Equal maxima use the earliest local hour.
-        peak_time = (str(peak["time"])[11:16] if peak and any(
-            row["precipitation_probability"] < peak["precipitation_probability"] for row in hours
-        ) else None)
-        result.append({
-            "date": str(raw_date),
-            "weather_code": int(code) if code is not None else None,
-            "condition": WEATHER_CONDITIONS.get(int(code), "Unbekannte Wetterlage") if code is not None else "Keine Angabe",
-            "icon": _weather_icon(int(code)) if code is not None else _weather_icon(None),
-            "temperature_min": _weather_array_value(daily.get("temperature_2m_min"), index),
-            "temperature_max": _weather_array_value(daily.get("temperature_2m_max"), index),
-            "apparent_temperature_min": _weather_array_value(daily.get("apparent_temperature_min"), index),
-            "apparent_temperature_max": _weather_array_value(daily.get("apparent_temperature_max"), index),
-            "precipitation_probability_max": _weather_array_value(daily.get("precipitation_probability_max"), index),
-            "rain_peak_time": peak_time,
-            "rain_sum": _weather_array_value(daily.get("rain_sum"), index),
-            "showers_sum": _weather_array_value(daily.get("showers_sum"), index),
-            "snowfall_sum": _weather_array_value(daily.get("snowfall_sum"), index),
-            "wind_speed_max": _weather_array_value(daily.get("wind_speed_10m_max"), index),
-            "wind_gusts_max": _weather_array_value(daily.get("wind_gusts_10m_max"), index),
-            "wind_direction_dominant": _weather_array_value(daily.get("wind_direction_10m_dominant"), index),
-            "sunrise": str(daily.get("sunrise", [])[index]) if isinstance(daily.get("sunrise"), list) and index < len(daily["sunrise"]) else None,
-            "sunset": str(daily.get("sunset", [])[index]) if isinstance(daily.get("sunset"), list) and index < len(daily["sunset"]) else None,
-        })
-    return result
+    return [
+        _weather_daily_row(daily, forecast, raw_date, index)
+        for index, raw_date in enumerate(dates[:WEATHER_FORECAST_DAYS])
+        if re.fullmatch(DATE_ONLY_PATTERN, str(raw_date))
+    ]
 
 
 def _weather_hourly_rows(forecast: dict[str, Any], target_date: str) -> list[dict[str, float | int | str]]:
