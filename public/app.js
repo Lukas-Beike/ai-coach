@@ -475,8 +475,7 @@ function syncPollLeaseAvailable() {
     localStorage.setItem(SYNC_POLL_LEASE_KEY, JSON.stringify(lease));
     const verified = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
     return verified?.token === state.syncPoll.leaseToken;
-  } catch (_) {
-    // Intentionally ignored: privacy settings can deny storage; fail open to keep sync available.
+  } catch (_) { // Privacy settings can deny storage; fail open to keep sync available.
     return true;
   }
 }
@@ -1721,55 +1720,88 @@ function createCoachWorkingIndicator() {
   return node;
 }
 
+function coachActionDescription(proposal) {
+  return proposal.action_type === "undo_change"
+    ? "Diese lokale Änderung zurücknehmen? Der aktuelle Stand wird vor der Ausführung erneut geprüft."
+    : "Diese Garmin-Aufzeichnung ist nahezu identisch mit der Wahoo-Einheit. Nur das Garmin-Duplikat aus Intervals.icu löschen?";
+}
+
+function coachActionStatus(proposal) {
+  return proposal.status === "used"
+    ? "Freigabe bereits verwendet. Bitte den Ausführungsbeleg prüfen."
+    : "Dieser Vorschlag ist abgelaufen oder nicht mehr ausführbar. Bitte den Coach um eine neue Prüfung bitten.";
+}
+
+function coachActionDiff(proposal) {
+  const entries = document.createElement("ul");
+  for (const entry of Array.isArray(proposal.diff) ? proposal.diff : []) {
+    const item = document.createElement("li");
+    item.textContent = [entry.name, entry.date, entry.sport].filter(Boolean).join(" · ");
+    entries.append(item);
+  }
+  return entries;
+}
+
+function coachActionButtons(proposal) {
+  const undo = proposal.action_type === "undo_change";
+  const actions = document.createElement("div");
+  actions.className = "coach-action-card-actions";
+  const later = document.createElement("button");
+  later.type = "button";
+  later.className = "secondary-button";
+  later.textContent = "Später prüfen";
+  later.addEventListener("click", () => {
+    state.chatProposalRefreshPending = true;
+    state.coachActionProposals = state.coachActionProposals.filter((item) => item.id !== proposal.id);
+    renderCoachActionReview();
+  });
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.textContent = undo ? "Änderung zurücknehmen" : "Garmin-Duplikat löschen";
+  confirm.addEventListener("click", () => executeCoachActionProposal(proposal, confirm));
+  actions.append(later, confirm);
+  return actions;
+}
+
+function coachActionCard(proposal) {
+  const card = document.createElement("div");
+  card.className = "coach-action-card";
+  card.dataset.proposalStatus = proposal.status;
+  const description = document.createElement("p");
+  description.textContent = coachActionDescription(proposal);
+  card.append(description);
+  if (!["preview", "ready"].includes(proposal.status)) {
+    const status = document.createElement("p");
+    status.textContent = coachActionStatus(proposal);
+    card.append(status);
+    return card;
+  }
+  card.append(coachActionDiff(proposal), coachActionButtons(proposal));
+  return card;
+}
+
 function renderCoachActionReview() {
   const root = $("#coachActionReview");
   const content = $("#coachActionReviewContent");
   if (!root || !content) return;
-  content.replaceChildren();
   const proposals = (state.coachActionProposals || []).filter((proposal) => ["undo_change", "delete_duplicate_intervals_activity"].includes(proposal.action_type));
+  content.replaceChildren(...proposals.map(coachActionCard));
   root.hidden = proposals.length === 0;
   $("#coachActionReviewTitle").textContent = "Aktion prüfen";
   root.querySelector(".coach-action-review-status").textContent = "Freigabe und Ergebnis getrennt prüfen";
-  for (const proposal of proposals) {
-    const undo = proposal.action_type === "undo_change";
-    const actionable = ["preview", "ready"].includes(proposal.status);
-    const card = document.createElement("div");
-    card.className = "coach-action-card";
-    card.dataset.proposalStatus = proposal.status;
-    const description = document.createElement("p");
-    description.textContent = undo ? "Diese lokale Änderung zurücknehmen? Der aktuelle Stand wird vor der Ausführung erneut geprüft." : "Diese Garmin-Aufzeichnung ist nahezu identisch mit der Wahoo-Einheit. Nur das Garmin-Duplikat aus Intervals.icu löschen?";
-    card.append(description);
-    if (!actionable) {
-      const status = document.createElement("p");
-      status.textContent = proposal.status === "used" ? "Freigabe bereits verwendet. Bitte den Ausführungsbeleg prüfen." : "Dieser Vorschlag ist abgelaufen oder nicht mehr ausführbar. Bitte den Coach um eine neue Prüfung bitten.";
-      card.append(status);
-    } else {
-      const entries = document.createElement("ul");
-      for (const entry of Array.isArray(proposal.diff) ? proposal.diff : []) {
-        const item = document.createElement("li");
-        item.textContent = [entry.name, entry.date, entry.sport].filter(Boolean).join(" · ");
-        entries.append(item);
-      }
-      const actions = document.createElement("div");
-      actions.className = "coach-action-card-actions";
-      const later = document.createElement("button");
-      later.type = "button";
-      later.className = "secondary-button";
-      later.textContent = "Später prüfen";
-      later.addEventListener("click", () => {
-        state.chatProposalRefreshPending = true;
-        state.coachActionProposals = state.coachActionProposals.filter((item) => item.id !== proposal.id);
-        renderCoachActionReview();
-      });
-      const confirm = document.createElement("button");
-      confirm.type = "button";
-      confirm.textContent = undo ? "Änderung zurücknehmen" : "Garmin-Duplikat löschen";
-      confirm.addEventListener("click", () => executeCoachActionProposal(proposal, confirm));
-      actions.append(later, confirm);
-      card.append(entries, actions);
-    }
-    content.append(card);
-  }
+}
+
+function coachActionReceipt(proposal, result) {
+  const undo = proposal.action_type === "undo_change";
+  const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
+  const message = undo ? "Die lokale Änderung wurde zurückgenommen."
+    : duplicateDelete ? "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten."
+      : result.local_planned ? `${result.local_planned} Einheit(en) lokal geplant.` : "Planung lokal gespeichert.";
+  const title = undo ? "Änderung zurückgenommen" : duplicateDelete ? "Duplikat gelöscht" : "Planung gespeichert";
+  const details = duplicateDelete ? ["Wahoo bleibt die kanonische Radaufzeichnung"]
+    : result.sync_job_ids?.length ? [`${result.sync_job_ids.length} Syncjobs eingereiht`]
+      : result.sync_job_id ? [`Syncjob ${result.sync_job_id} eingereiht`] : ["Keine implizite Remote-Änderung"];
+  return { title, message, details, duplicateDelete, undo };
 }
 
 async function executeCoachActionProposal(proposal, button) {
@@ -1787,26 +1819,11 @@ async function executeCoachActionProposal(proposal, button) {
     if (proposal.action_type === "undo_change" && result.status !== "undone") throw new Error("Die Undo-Bestätigung fehlt; bitte den aktuellen Stand prüfen.");
     state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
     renderCoachActionReview();
-    const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
-    const undo = proposal.action_type === "undo_change";
-    let receiptMessage;
-    if (undo) receiptMessage = "Die lokale Änderung wurde zurückgenommen.";
-    else if (duplicateDelete) receiptMessage = "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten.";
-    else if (result.local_planned) receiptMessage = `${result.local_planned} Einheit(en) lokal geplant.`;
-    else receiptMessage = "Planung lokal gespeichert.";
-    let receiptTitle;
-    if (undo) receiptTitle = "Änderung zurückgenommen";
-    else if (duplicateDelete) receiptTitle = "Duplikat gelöscht";
-    else receiptTitle = "Planung gespeichert";
-    let receiptDetails;
-    if (duplicateDelete) receiptDetails = ["Wahoo bleibt die kanonische Radaufzeichnung"];
-    else if (result.sync_job_ids?.length) receiptDetails = [`${result.sync_job_ids.length} Syncjobs eingereiht`];
-    else if (result.sync_job_id) receiptDetails = [`Syncjob ${result.sync_job_id} eingereiht`];
-    else receiptDetails = ["Keine implizite Remote-Änderung"];
-    addCoachReceipt({ title: receiptTitle, message: receiptMessage, details: receiptDetails });
-    toast(receiptMessage);
-    await load("/api/bootstrap?local=1", duplicateDelete ? ["activities"] : ["plan", "library", "profile", "feedback"]);
-    if (!duplicateDelete && !undo) applyNavigationRoute("plan", { historyMode: "push" });
+    const receipt = coachActionReceipt(proposal, result);
+    addCoachReceipt(receipt);
+    toast(receipt.message);
+    await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["activities"] : ["plan", "library", "profile", "feedback"]);
+    if (!receipt.duplicateDelete && !receipt.undo) applyNavigationRoute("plan", { historyMode: "push" });
   } catch (error) {
     addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
     if ([409, 410].includes(error.status)) { proposal.status = "expired"; renderCoachActionReview(); }
@@ -2823,31 +2840,38 @@ function renderLibrary(workouts) {
     });
 }
 
+function populateProfileSports(field, value) {
+  const selectedSports = new Set(String(value || "").split(",").map((item) => item.trim()).filter(Boolean));
+  [...field.options].forEach((option) => { option.selected = selectedSports.has(option.value); });
+}
+
+function populateProfileTimezone(field, value) {
+  if (value && ![...field.options].some((option) => option.value === value)) field.append(new Option(`${value} (gespeichert)`, value));
+  field.value = value || "";
+}
+
+function populateProfileField(form, key, value) {
+  const field = form.elements[key];
+  if (!field) return;
+  if (key === "sports" && field.multiple) return populateProfileSports(field, value);
+  if (key === "timezone" && field.tagName === "SELECT") return populateProfileTimezone(field, value);
+  field.value = value || "";
+}
+
+function renderProfileSummary(profile) {
+  const summary = $("#profileSummary");
+  if (!summary) return;
+  const values = [profile.name, profile.sports, profile.typical_weekly_volume].filter(Boolean);
+  summary.textContent = values.length ? values.join(" · ") : "Noch nicht ausgefüllt";
+}
+
 function renderProfile(profile) {
   setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
   if (state.profileDirty) return;
   const form = $("#profileForm");
-  for (const [key, value] of Object.entries(profile)) {
-    const field = form.elements[key];
-    if (!field) continue;
-    if (key === "sports" && field.multiple) {
-      const selectedSports = new Set(String(value || "").split(",").map((item) => item.trim()).filter(Boolean));
-      [...field.options].forEach((option) => { option.selected = selectedSports.has(option.value); });
-      continue;
-    }
-    if (key === "timezone" && field.tagName === "SELECT") {
-      if (value && ![...field.options].some((option) => option.value === value)) field.append(new Option(`${value} (gespeichert)`, value));
-      field.value = value || "";
-      continue;
-    }
-    field.value = value || "";
-  }
+  for (const [key, value] of Object.entries(profile)) populateProfileField(form, key, value);
   if (form.elements.coaching_style?.value === "Supportive, direct, and evidence-aware") form.elements.coaching_style.value = "Unterstützend, direkt und evidenzbasiert";
-  const summary = $("#profileSummary");
-  if (summary) {
-    const values = [profile.name, profile.sports, profile.typical_weekly_volume].filter(Boolean);
-    summary.textContent = values.length ? values.join(" · ") : "Noch nicht ausgefüllt";
-  }
+  renderProfileSummary(profile);
 }
 
 function populateCheckin(checkin, timeZone) {
@@ -2861,17 +2885,40 @@ function populateCheckin(checkin, timeZone) {
   state.checkinDirty = false;
 }
 
-function renderCheckins(checkins, timeZone) {
-  const form = $("#checkinForm");
-  const history = $("#checkinHistory");
-  if (!form || !history) return;
-  setDirtyIndicator("checkinDirtyIndicator", state.checkinDirty);
-  const rows = Array.isArray(checkins) ? checkins : [];
-  if (!state.checkinDirty) {
-    const selected = rows.find((row) => row.checkin_date === state.checkinSelectedDate)
-      || (!state.checkinSelectedDate ? rows.find((row) => row.checkin_date === timezoneDateKey(timeZone)) : null);
-    populateCheckin(selected || (state.checkinSelectedDate ? { checkin_date: state.checkinSelectedDate } : null), timeZone);
-  }
+function selectedCheckin(rows, timeZone) {
+  return rows.find((row) => row.checkin_date === state.checkinSelectedDate)
+    || (!state.checkinSelectedDate ? rows.find((row) => row.checkin_date === timezoneDateKey(timeZone)) : null);
+}
+
+function checkinSummary(row) {
+  return [
+    row.day_form ? `Tagesform: ${row.day_form}` : null,
+    row.soreness != null ? `Schmerz/Muskelkater ${row.soreness}/10` : null,
+    row.stress != null ? `Stress ${row.stress}/10` : null,
+    row.motivation != null ? `Motivation ${row.motivation}/10` : null,
+    row.illness ? `Krankheit: ${row.illness}` : null,
+    row.pain ? "Schmerz notiert" : null,
+  ].filter(Boolean).join(" · ") || "Ohne Bewertungen";
+}
+
+function checkinHistoryButton(row, rows, timeZone) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "checkin-history-item";
+  button.classList.toggle("selected", row.checkin_date === state.checkinSelectedDate);
+  const title = document.createElement("strong");
+  title.textContent = dateLabel(row.checkin_date);
+  const summary = document.createElement("span");
+  summary.textContent = checkinSummary(row);
+  button.append(title, summary);
+  button.addEventListener("click", () => {
+    populateCheckin(row, timeZone);
+    renderCheckins(rows, timeZone);
+  });
+  return button;
+}
+
+function renderCheckinHistory(history, rows, timeZone) {
   history.replaceChildren();
   if (!rows.length) {
     const empty = document.createElement("p");
@@ -2882,31 +2929,73 @@ function renderCheckins(checkins, timeZone) {
   }
   const heading = document.createElement("strong");
   heading.textContent = "Gespeicherte Check-ins";
-  history.append(heading);
-  for (const row of rows) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "checkin-history-item";
-    button.classList.toggle("selected", row.checkin_date === state.checkinSelectedDate);
-    const title = document.createElement("strong");
-    title.textContent = dateLabel(row.checkin_date);
-    const values = [
-      row.day_form ? `Tagesform: ${row.day_form}` : null,
-      row.soreness != null ? `Schmerz/Muskelkater ${row.soreness}/10` : null,
-      row.stress != null ? `Stress ${row.stress}/10` : null,
-      row.motivation != null ? `Motivation ${row.motivation}/10` : null,
-      row.illness ? `Krankheit: ${row.illness}` : null,
-      row.pain ? "Schmerz notiert" : null,
-    ].filter(Boolean);
-    const summary = document.createElement("span");
-    summary.textContent = values.join(" · ") || "Ohne Bewertungen";
-    button.append(title, summary);
-    button.addEventListener("click", () => {
-      populateCheckin(row, timeZone);
-      renderCheckins(rows, timeZone);
-    });
-    history.append(button);
+  history.append(heading, ...rows.map((row) => checkinHistoryButton(row, rows, timeZone)));
+}
+
+function renderCheckins(checkins, timeZone) {
+  const form = $("#checkinForm");
+  const history = $("#checkinHistory");
+  if (!form || !history) return;
+  setDirtyIndicator("checkinDirtyIndicator", state.checkinDirty);
+  const rows = Array.isArray(checkins) ? checkins : [];
+  if (!state.checkinDirty) {
+    const selected = selectedCheckin(rows, timeZone);
+    populateCheckin(selected || (state.checkinSelectedDate ? { checkin_date: state.checkinSelectedDate } : null), timeZone);
   }
+  renderCheckinHistory(history, rows, timeZone);
+}
+
+function garminPerformanceSources(garmin) {
+  return [garmin.has_vo2max ? "VO2max" : null, garmin.has_estimated_run_times ? "Laufprognosen" : null, garmin.has_max_hr ? "Max HF" : null, garmin.has_weight ? "Gewicht" : null].filter(Boolean);
+}
+
+function garminPaginationDetail(garmin) {
+  return Object.entries(garmin.pagination || {})
+    .filter(([, value]) => value && (Number(value.windows) > 1 || value.complete === false))
+    .map(([name, value]) => `${name}: ${value.records || 0} Datensätze in ${value.windows || 0} Zeitfenstern${value.complete === false ? " · unvollständig" : ""}`)
+    .join(" · ");
+}
+
+function garminBodyBatteryDetail(garmin) {
+  const bodyBattery = garmin.morning_body_battery || {};
+  const beforeSleep = Number(bodyBattery.before_sleep?.value);
+  const morning = Number(bodyBattery.morning?.value);
+  if (bodyBattery.status === "ready" && Number.isFinite(beforeSleep) && Number.isFinite(morning)) {
+    return `Body Battery am ${dateLabel(bodyBattery.sleep_date)}: ${beforeSleep} vor dem Schlafen → ${morning} nach dem Aufwachen`;
+  }
+  return bodyBattery.sleep_date ? `Body Battery am ${dateLabel(bodyBattery.sleep_date)}: nicht verfügbar` : "";
+}
+
+function garminDetailText(garmin) {
+  const sourceDetail = garmin.last_sync_at
+    ? `Letzter Abruf: ${formatTime(garmin.last_sync_at)} · ${garmin.activities || 0} Aktivitäten · Schlaf/HRV/Readiness ${[garmin.has_sleep, garmin.has_hrv, garmin.has_readiness].filter(Boolean).length}/3`
+    : garmin.source === "fixture" ? "Testdatei ist konfiguriert; synchronisiere sie mit dem Button."
+      : "Noch kein Garmin-Abruf durchgeführt.";
+  const performance = garminPerformanceSources(garmin);
+  return [sourceDetail, performance.length ? `${performance.join("/")} aus Garmin` : "", garminBodyBatteryDetail(garmin), garminPaginationDetail(garmin)].filter(Boolean).join(" · ");
+}
+
+function renderGarminFullResync(fullButton, fullStatus, fullResync, fullRunning) {
+  if (fullButton) {
+    fullButton.disabled = fullRunning || Boolean(state.data?.garmin_sync?.running || state.localSync.garmin);
+    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
+  }
+  if (!fullStatus) return;
+  fullStatus.classList.toggle("error", Boolean(fullResync.last_error));
+  fullStatus.textContent = fullRunning && fullResync.status ? fullResync.status
+    : fullResync.last_error ? fullResync.last_error
+      : fullResync.last_resync_at ? `Letzter vollständiger Resync: ${formatTime(fullResync.last_resync_at)}`
+        : "Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.";
+}
+
+function renderUnavailableGarmin(garmin, status, detail, button, fullButton) {
+  const unavailable = !garmin?.available;
+  if (!unavailable && garmin.configured) return false;
+  status.textContent = unavailable ? "Garmin nicht verfügbar" : "Garmin nicht eingerichtet";
+  detail.textContent = "";
+  button.disabled = true;
+  if (fullButton) fullButton.disabled = true;
+  return true;
 }
 
 function renderGarmin(garmin) {
@@ -2919,56 +3008,12 @@ function renderGarmin(garmin) {
   const fullResync = state.data?.provider_resync?.garmin || {};
   const fullRunning = Boolean(fullResync.running || state.localSync.garminFull);
   button.disabled = Boolean(state.data?.garmin_sync?.running || fullRunning);
-  if (!garmin?.available) {
-    status.textContent = "Garmin nicht verfügbar";
-    detail.textContent = "";
-    button.disabled = true;
-    if (fullButton) fullButton.disabled = true;
-    return;
-  }
-  if (!garmin.configured) {
-    status.textContent = "Garmin nicht eingerichtet";
-    detail.textContent = "";
-    button.disabled = true;
-    if (fullButton) fullButton.disabled = true;
-    return;
-  }
-  const performanceSources = [garmin.has_vo2max ? "VO2max" : null, garmin.has_estimated_run_times ? "Laufprognosen" : null, garmin.has_max_hr ? "Max HF" : null, garmin.has_weight ? "Gewicht" : null].filter(Boolean);
-  const morningBodyBattery = garmin.morning_body_battery || {};
-  const beforeSleepBattery = Number(morningBodyBattery.before_sleep?.value);
-  const morningBattery = Number(morningBodyBattery.morning?.value);
-  const paginationDetail = Object.entries(garmin.pagination || {})
-    .filter(([, value]) => value && (Number(value.windows) > 1 || value.complete === false))
-    .map(([name, value]) => `${name}: ${value.records || 0} Datensätze in ${value.windows || 0} Zeitfenstern${value.complete === false ? " · unvollständig" : ""}`)
-    .join(" · ");
+  if (renderUnavailableGarmin(garmin, status, detail, button, fullButton)) return;
   if (garmin.source === "fixture") status.textContent = "Lokale Garmin-Testdaten aktiv";
   else if (garmin.last_error) status.textContent = "Mit Fehlern synchronisiert";
   else status.textContent = "Optionaler Direktabruf aktiv";
-  if (garmin.last_sync_at) {
-    detail.textContent = `Letzter Abruf: ${formatTime(garmin.last_sync_at)} · ${garmin.activities || 0} Aktivitäten · Schlaf/HRV/Readiness ${[garmin.has_sleep, garmin.has_hrv, garmin.has_readiness].filter(Boolean).length}/3`;
-  } else if (garmin.source === "fixture") {
-    detail.textContent = "Testdatei ist konfiguriert; synchronisiere sie mit dem Button.";
-  } else {
-    detail.textContent = "Noch kein Garmin-Abruf durchgeführt.";
-  }
-  if (performanceSources.length) detail.textContent += ` · ${performanceSources.join("/")} aus Garmin`;
-  if (morningBodyBattery.status === "ready" && Number.isFinite(beforeSleepBattery) && Number.isFinite(morningBattery)) {
-    detail.textContent += ` · Body Battery am ${dateLabel(morningBodyBattery.sleep_date)}: ${beforeSleepBattery} vor dem Schlafen → ${morningBattery} nach dem Aufwachen`;
-  } else if (morningBodyBattery.sleep_date) {
-    detail.textContent += ` · Body Battery am ${dateLabel(morningBodyBattery.sleep_date)}: nicht verfügbar`;
-  }
-  if (paginationDetail) detail.textContent += ` · ${paginationDetail}`;
-  if (fullButton) {
-    fullButton.disabled = fullRunning || Boolean(state.data?.garmin_sync?.running || state.localSync.garmin);
-    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
-  }
-  if (fullStatus) {
-    fullStatus.classList.toggle("error", Boolean(fullResync.last_error));
-    if (fullRunning && fullResync.status) fullStatus.textContent = fullResync.status;
-    else if (fullResync.last_error) fullStatus.textContent = fullResync.last_error;
-    else if (fullResync.last_resync_at) fullStatus.textContent = `Letzter vollständiger Resync: ${formatTime(fullResync.last_resync_at)}`;
-    else fullStatus.textContent = "Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.";
-  }
+  detail.textContent = garminDetailText(garmin);
+  renderGarminFullResync(fullButton, fullStatus, fullResync, fullRunning);
 }
 
 function competitionSportLabel(sport) {
