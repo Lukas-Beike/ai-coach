@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
-from backend.coach.attachments import gpx_summary, validate_attachments, model_input
+from backend.coach.attachments import fit_summary, gpx_summary, validate_attachments, model_input
 
 GPX = b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt><trkpt lat="0" lon="0.01"><ele>20</ele></trkpt></trkseg></trk></gpx>'
 PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAASUVORK5CYII='
@@ -13,7 +13,7 @@ PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF
 
 def fit_session_fixture():
     fields = [(2, 4, 6), (5, 1, 0), (7, 4, 6), (9, 4, 6), (16, 1, 2), (17, 1, 2), (20, 2, 4)]
-    definition = bytes([0x80, 0, 0]) + struct.pack("<H", 18) + bytes([len(fields)])
+    definition = bytes([0x40, 0, 0]) + struct.pack("<H", 18) + bytes([len(fields)])
     definition += b"".join(bytes(field) for field in fields)
     record = bytes([0]) + struct.pack("<I", 1_000_000) + bytes([2]) + struct.pack("<I", 3_600_000)
     record += struct.pack("<I", 123_450) + bytes([145, 170]) + struct.pack("<H", 220)
@@ -23,6 +23,20 @@ def fit_session_fixture():
 
 
 FIT = fit_session_fixture()
+
+
+def fit_records_fixture():
+    fields = [(253, 4, 6), (2, 2, 4), (3, 1, 2), (4, 1, 2), (5, 4, 6)]
+    definition = bytes([0x40, 0, 0]) + struct.pack("<H", 20) + bytes([len(fields)])
+    definition += b"".join(bytes(field) for field in fields)
+    first = bytes([0]) + struct.pack("<I", 1_000_000) + struct.pack("<H", 2_500) + bytes([150, 90]) + struct.pack("<I", 100_000)
+    second = bytes([0x82]) + struct.pack("<H", 2_550) + bytes([152, 92]) + struct.pack("<I", 200_000)
+    payload = definition + first + second
+    header = bytes([12, 0x10]) + struct.pack("<H", 0) + struct.pack("<I", len(payload)) + b".FIT"
+    return header + payload
+
+
+FIT_RECORDS = fit_records_fixture()
 
 
 class AttachmentTests(DialogueHarness, unittest.TestCase):
@@ -54,6 +68,15 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         inline = payload["contents"][-1]["parts"][-1]["inlineData"]
         self.assertEqual(inline["mimeType"], "application/octet-stream")
         self.assertEqual(inline["data"], attachment["data"])
+
+    def test_fit_records_use_standard_headers_fields_and_compressed_timestamps(self):
+        summary = fit_summary(FIT_RECORDS)
+        self.assertEqual(summary["record_count"], 2)
+        self.assertEqual(summary["duration_s"], 2)
+        self.assertEqual(summary["distance_km"], 2.0)
+        self.assertEqual(summary["max_heart_rate_bpm"], 152)
+        self.assertEqual(summary["max_cadence_rpm"], 92)
+        self.assertEqual(summary["ascent_m"], 10)
 
     def test_rejects_unsafe_xml_coordinates_encoding_and_types(self):
         invalid = [self.upload(b'<!DOCTYPE gpx [<!ENTITY x "boom">]><gpx/>'),
@@ -101,7 +124,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
     def test_gemini_rejects_images_that_exceed_its_inline_request_budget(self):
         with patch.object(server, "selected_ai_provider", return_value="gemini"), patch.object(server, "MAX_GEMINI_INLINE_IMAGE_BYTES", 1):
             with self.assertRaises(server.AppError) as error:
-                server.enqueue_background_coach_job("Analyze", "gemini-size-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])
+                server.enqueue_background_coach_job("Analyze", "gemini-size-turn", "synthetic-csrf", attachments=[self.upload(FIT, "ride.fit")])
         self.assertEqual(error.exception.reason, "gemini_attachment_request_too_large")
         self.assertEqual(server.list_messages(), [])
 
@@ -125,9 +148,13 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             followup, _, _ = server._gemini_request_payload({
                 "conversation": "synthetic-gemini",
                 "input": [{"type": "function_call_output", "call_id": "call-1", "output": "{}"}],
-                "_gemini_transient_images": [{"mime": "image/png", "data": PNG}],
+                "_gemini_transient_images": [
+                    {"mime": "image/png", "data": PNG},
+                    {"mime": "application/octet-stream", "data": self.upload(FIT, "ride.fit")["data"]},
+                ],
             }, "gemini-test")
-        self.assertEqual(followup["contents"][-1]["parts"][-1]["inlineData"], {"mimeType": "image/png", "data": PNG})
+        self.assertIn({"inlineData": {"mimeType": "image/png", "data": PNG}}, followup["contents"][-1]["parts"])
+        self.assertIn(self.upload(FIT, "ride.fit")["data"], json.dumps(followup["contents"][-1]))
 
     def test_background_model_receives_saved_attachments(self):
         server.enqueue_background_coach_job("Analyze", "worker-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])

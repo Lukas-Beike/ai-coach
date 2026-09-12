@@ -30,10 +30,10 @@ _FIT_BASE_TYPE_SIZES = {
 }
 _FIT_FIELD_SCALES = {
     # record message
-    (20, 0): ("timestamp", 1, 0), (20, 1): ("position_lat", 1, 0),
-    (20, 2): ("position_long", 1, 0), (20, 3): ("altitude_m", 5, -500),
-    (20, 4): ("heart_rate_bpm", 1, 0), (20, 5): ("cadence_rpm", 1, 0),
-    (20, 6): ("distance_m", 100, 0), (20, 7): ("speed_m_s", 1000, 0),
+    (20, 253): ("timestamp", 1, 0), (20, 0): ("position_lat", 1, 0),
+    (20, 1): ("position_long", 1, 0), (20, 2): ("altitude_m", 5, -500),
+    (20, 3): ("heart_rate_bpm", 1, 0), (20, 4): ("cadence_rpm", 1, 0),
+    (20, 5): ("distance_m", 100, 0), (20, 6): ("speed_m_s", 1000, 0),
     (20, 13): ("temperature_c", 1, 0),
     # session message
     (18, 2): ("timestamp", 1, 0), (18, 7): ("elapsed_time_s", 1000, 0),
@@ -139,17 +139,18 @@ def _fit_developer_definition(data, offset, record_header, data_end):
 
 
 def _fit_data_record(data, offset, record_header, definition, data_end, last_timestamp):
-    compressed = bool(record_header & 0x40)
+    compressed = bool(record_header & 0x80)
     local_number = ((record_header >> 5) & 0x03) if compressed else (record_header & 0x0F)
     if definition is None:
         raise ValueError("FIT data has no definition")
     architecture, global_number, fields, developer_fields = definition
+    record_fields = [field for field in fields if not (compressed and field[0] == 253)]
     developer_size = sum(field[1] for field in developer_fields)
-    total_size = sum(field[1] for field in fields)
+    total_size = sum(field[1] for field in record_fields)
     if offset + total_size + developer_size > data_end:
         raise ValueError("Truncated FIT data record")
     values = {}
-    for number, size, base_type in fields:
+    for number, size, base_type in record_fields:
         values[number] = _fit_value(data[offset:offset + size], base_type, architecture)
         offset += size
     offset += developer_size
@@ -178,11 +179,11 @@ def _fit_messages(data):
     while offset < data_end:
         record_header = data[offset]
         offset += 1
-        if record_header & 0x80:
+        if record_header & 0x40:
             offset, definition = _fit_definition(data, offset, record_header, data_end)
             definitions[record_header & 0x0F] = definition
             continue
-        local_number = ((record_header >> 5) & 0x03) if record_header & 0x40 else record_header & 0x0F
+        local_number = ((record_header >> 5) & 0x03) if record_header & 0x80 else record_header & 0x0F
         offset, last_timestamp, message = _fit_data_record(
             data, offset, record_header, definitions.get(local_number), data_end, last_timestamp
         )
@@ -220,8 +221,8 @@ _FIT_SESSION_METRICS = {
     "avg_cadence_rpm": (18, 18, 1), "max_cadence_rpm": (18, 19, 1),
     "avg_power_w": (18, 20, 1), "max_power_w": (18, 21, 1),
     "ascent_m": (18, 22, 1), "descent_m": (18, 23, 1),
-    "normalized_power_w": (18, 34, 1), "training_stress_score": (18, 35, 10),
-    "intensity_factor": (18, 36, 1000),
+    "normalized_power_w": (18, 34, 1), "training_stress_score": (18, 35, 1),
+    "intensity_factor": (18, 36, 1),
 }
 
 
@@ -245,7 +246,7 @@ def _fit_session_summary(messages, sessions, records):
 
 
 def _fit_add_record_timing(messages, summary):
-    record_timestamps = _fit_scaled(messages, 20, 0)
+    record_timestamps = _fit_scaled(messages, 20, 253)
     if not record_timestamps:
         return
     first, last = min(record_timestamps), max(record_timestamps)
@@ -258,13 +259,13 @@ def _fit_add_record_timing(messages, summary):
 def _fit_add_record_distance(messages, summary):
     if "distance_km" in summary:
         return
-    distances = _fit_scaled(messages, 20, 6)
+    distances = _fit_scaled(messages, 20, 5)
     if distances:
         summary["distance_km"] = round(max(distances) / 1000, 3)
 
 
 def _fit_add_record_extrema(messages, summary):
-    for key, field_number in (("max_heart_rate_bpm", 4), ("max_cadence_rpm", 5), ("max_power_w", 7)):
+    for key, field_number in (("max_heart_rate_bpm", 3), ("max_cadence_rpm", 4), ("max_power_w", 7)):
         if key in summary:
             continue
         values = _fit_metric(messages, 20, field_number)
@@ -275,7 +276,7 @@ def _fit_add_record_extrema(messages, summary):
 def _fit_add_record_elevation(messages, summary):
     if "ascent_m" in summary and "descent_m" in summary:
         return
-    elevations = _fit_scaled(messages, 20, 3)
+    elevations = _fit_scaled(messages, 20, 2)
     if not elevations:
         return
     ascent = sum(max(0, current - previous) for previous, current in zip(elevations, elevations[1:]))
@@ -411,4 +412,4 @@ def model_input(text, attachments):
 
 
 def gemini_inline_image_bytes(attachments):
-    return sum(len(str(item.get("data") or "")) for item in attachments if item.get("type") == "image")
+    return sum(len(str(item.get("data") or "")) for item in attachments if item.get("type") in {"image", "gpx", "fit"})
