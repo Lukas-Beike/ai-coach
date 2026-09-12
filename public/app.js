@@ -4096,6 +4096,220 @@ function queueChatMessage(message, mode, requestKind = null, attachments = []) {
   return true;
 }
 
+function chatRequestIsCurrent(sessionGeneration, chatGeneration) {
+  return sessionGeneration === state.sessionGeneration && chatGeneration === state.chatGeneration;
+}
+
+async function chatStreamResponse(message, requestKind, attachments, clientTurnId, stream) {
+  return fetch("/api/chat/stream", {
+    method: "POST",
+    credentials: "same-origin",
+    signal: stream.controller.signal,
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": cookie("ic_csrf") },
+    body: JSON.stringify({ message, client_turn_id: clientTurnId, request_kind: requestKind, attachments }),
+  });
+}
+
+async function rejectChatStreamResponse(response, context) {
+  const { attachments, chatGeneration, clientTurnId, message, sessionGeneration, stream } = context;
+  stream.serverError = true;
+  stream.rejected = true;
+  let payload = {};
+  try { payload = await response.json(); } catch { }
+  if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) return false;
+  if (response.status === 401) {
+    const rejectedAttachments = [...(attachments || [])];
+    showLogin();
+    state.chatAttachments = rejectedAttachments;
+    renderChatAttachments();
+    const input = $("#messageInput");
+    if (input.value.trim()) state.rejectedMessages.push({ role: "user", content: message, client_turn_id: clientTurnId, error: payload.error || "Bitte erneut anmelden." });
+    else input.value = message;
+    state.chatDraftDirty = true;
+    toast(payload.error || "Bitte erneut anmelden; der Entwurf bleibt erhalten.", true);
+  }
+  throw globalThis.AppApi.responseError(response, typeof payload.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`, payload.reason || "http_error");
+}
+
+function parseChatStreamEvent(block) {
+  let event = "message";
+  const data = [];
+  for (const line of block.replaceAll("\r", "").split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+  }
+  return data.length ? { event, payload: JSON.parse(data.join("\n")) } : null;
+}
+
+function applyStartedChatStreamEvent(payload, context) {
+  const { request, stream } = context;
+  stream.operationId = payload.operation_id || null;
+  request.operationId = stream.operationId;
+  state.chatServerOperationId = stream.operationId;
+  if (stream.cancelRequested) void cancelChat();
+}
+
+function applyDeltaChatStreamEvent(payload) {
+  const responseJustStarted = !state.chatStreamText;
+  state.chatStreamText += payload.text || "";
+  state.chatResponseStarted = state.chatResponseStarted || responseJustStarted;
+  if (responseJustStarted) state.chatResponseScrollPending = true;
+  scheduleChatStreamRender(responseJustStarted);
+}
+
+function applyBackgroundChatStreamEvent(payload, context) {
+  const { request, stream } = context;
+  context.background = true;
+  request.background = true;
+  request.phase = "recovering";
+  stream.operationId = payload.operation_id || stream.operationId;
+  request.operationId = stream.operationId;
+  state.chatServerOperationId = stream.operationId;
+  renderMessages(state.data?.messages || [], false);
+  updateChatControls();
+}
+
+function applyCompletedChatStreamEvent(payload, context) {
+  const { clientTurnId, request } = context;
+  cancelScheduledChatStreamRender();
+  context.completed = true;
+  context.completedPayload = payload;
+  state.chatContentVersion += 1;
+  rememberChatTurn(null);
+  request.phase = "reconciling";
+  request.responseMessageId = payload.message?.id || null;
+  state.chatResponseMessageId = request.responseMessageId;
+  request.responseMessageReceived = reconcileCompletedChatMessage(payload.message ? { ...payload.message, client_turn_id: clientTurnId } : null);
+  if (request.responseMessageReceived) state.chatStreamText = "";
+  request.hadOutstandingProposals = Array.isArray(state.coachActionProposals) && state.coachActionProposals.length > 0;
+  if (request.hadOutstandingProposals) state.chatProposalRefreshPending = true;
+  state.coachActionProposals = Array.isArray(payload?.proposed_actions) ? payload.proposed_actions : [];
+  if (payload?.coach_quick_actions && state.data) {
+    state.data.coach_quick_actions = payload.coach_quick_actions;
+    renderCoachOverview(state.data);
+  }
+  addStructuredCoachReceipts(payload);
+  renderMessages(state.data?.messages || [], false);
+  updateChatControls();
+}
+
+function applyChatStreamEvent(event, payload, context) {
+  if (event === "started") return applyStartedChatStreamEvent(payload, context);
+  if (event === "delta") return applyDeltaChatStreamEvent(payload);
+  if (event === "background") return applyBackgroundChatStreamEvent(payload, context);
+  if (event === "completed") return applyCompletedChatStreamEvent(payload, context);
+  if (event === "error") {
+    context.stream.serverError = true;
+    if (!context.background) context.stream.rejected = true;
+    const error = new Error(payload.message || "Die Coach-Anfrage ist fehlgeschlagen.");
+    error.reason = payload.reason;
+    throw error;
+  }
+}
+
+function consumeChatStreamBlock(block, context) {
+  if (!chatRequestIsCurrent(context.sessionGeneration, context.chatGeneration)) return;
+  const parsed = parseChatStreamEvent(block);
+  if (parsed) applyChatStreamEvent(parsed.event, parsed.payload, context);
+}
+
+async function readChatStream(response, context) {
+  if (!response.body) throw new Error("Der Browser unterstützt keinen Antwort-Stream.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() || "";
+    for (const block of blocks) consumeChatStreamBlock(block, context);
+    // The chat endpoint is a finite SSE response. A proxy may keep the HTTP
+    // connection open after the terminal event, so release the reader as
+    // soon as the persisted result has arrived instead of trapping the
+    // composer in the reconciling state.
+    if (context.completed || context.background) {
+      await reader.cancel().catch(() => {});
+      break;
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) consumeChatStreamBlock(buffer, context);
+}
+
+async function finishChatStream(context) {
+  const { completed, completedPayload, request, stream } = context;
+  if (context.background) {
+    scheduleChatStatusPoll(0);
+    return "recovering";
+  }
+  if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
+  if (completed && request.responseMessageReceived) {
+    if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
+  } else if (completed && completedPayload?.message?.content && state.data) {
+    if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
+  } else {
+    await loadChatHistoryFresh();
+  }
+  if (completed) scrollChatToResponseStart();
+  invalidateContextPreview();
+  return completed ? "completed" : "failed";
+}
+
+async function recoverChatRequestFailure(error, context) {
+  const { attachments, chatGeneration, clientTurnId, completed, message, request, sessionGeneration, stream } = context;
+  if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) return false;
+  cancelScheduledChatStreamRender();
+  if (stream.rejected) {
+    rememberChatTurn(null);
+    const input = $("#messageInput");
+    if (input.value.trim()) {
+      const failed = state.data.messages.find((entry) => entry.optimistic && entry.client_turn_id === clientTurnId);
+      if (failed) { failed.error = error.message; failed.attachments = attachments; }
+    } else {
+      state.data.messages = (state.data.messages || []).filter((entry) => !(entry.optimistic && entry.client_turn_id === clientTurnId));
+      input.value = message;
+      state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
+      renderChatAttachments();
+    }
+    state.chatDraftDirty = true;
+    toast(error.message, true);
+    return false;
+  }
+  const cancelled = stream.cancelRequested || error?.name === "AbortError" || error?.reason === "chat_cancelled";
+  if (!completed && !stream.serverError) {
+    request.phase = "recovering";
+    state.chatServerOperationId = stream.operationId || state.chatServerOperationId;
+    if (state.chatStream === stream) state.chatStream = null;
+    renderMessages(state.data?.messages || [], false);
+    updateChatControls();
+    scheduleChatStatusPoll(0);
+    return "recovering";
+  }
+  if (!cancelled) toast(error.message, true);
+  scheduleChatStatusPoll(0);
+  await loadChatHistoryFresh();
+  invalidateContextPreview();
+  return false;
+}
+
+function finishChatRequest(context) {
+  const { chatGeneration, completed, request, sessionGeneration, stream } = context;
+  if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) return;
+  if (state.chatStream === stream) state.chatStream = null;
+  if (request.phase !== "recovering") {
+    cancelScheduledChatStreamRender();
+    state.chatStreamText = "";
+  }
+  if (!completed && request.phase !== "recovering") state.chatResponseScrollPending = false;
+  if (!completed && request.phase !== "recovering") state.chatResponseMessageId = null;
+  state.chatResponseStarted = false;
+  if (state.chatRequest === request && request.phase !== "recovering") state.chatRequest = null;
+  if (request.phase !== "recovering") state.chatServerOperationId = null;
+  updateChatControls();
+}
+
 async function requestCoachResponse(message, requestKind = null, attachments = []) {
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
@@ -4112,186 +4326,17 @@ async function requestCoachResponse(message, requestKind = null, attachments = [
   state.chatStream = stream;
   updateChatControls();
   renderMessages(state.data?.messages || [], true);
-  let completed = false;
-  let background = false;
+  const context = { attachments, background: false, chatGeneration, clientTurnId, completed: false, completedPayload: null, message, request, sessionGeneration, stream };
   try {
-    const response = await fetch("/api/chat/stream", {
-      method: "POST",
-      credentials: "same-origin",
-      signal: stream.controller.signal,
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": cookie("ic_csrf") },
-      body: JSON.stringify({ message, client_turn_id: clientTurnId, request_kind: requestKind, attachments }),
-    });
-    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
-    if (!response.ok) {
-      stream.serverError = true;
-      stream.rejected = true;
-      let payload = {};
-      try { payload = await response.json(); } catch { }
-      if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
-      if (response.status === 401) {
-        const rejectedAttachments = [...(attachments || [])];
-        showLogin();
-        state.chatAttachments = rejectedAttachments;
-        renderChatAttachments();
-        const input = $("#messageInput");
-        if (input.value.trim()) state.rejectedMessages.push({ role: "user", content: message, client_turn_id: clientTurnId, error: payload.error || "Bitte erneut anmelden." });
-        else input.value = message;
-        state.chatDraftDirty = true;
-        toast(payload.error || "Bitte erneut anmelden; der Entwurf bleibt erhalten.", true);
-      }
-      throw globalThis.AppApi.responseError(response, typeof payload.error === "string" ? payload.error : `Anfrage fehlgeschlagen (${response.status})`, payload.reason || "http_error");
-    }
-    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
-    if (!response.body) throw new Error("Der Browser unterstützt keinen Antwort-Stream.");
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    const consume = (block) => {
-      if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-      let event = "message";
-      const data = [];
-      for (const line of block.replaceAll("\r", "").split("\n")) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-      }
-      if (!data.length) return;
-      const payload = JSON.parse(data.join("\n"));
-      if (event === "started") {
-        stream.operationId = payload.operation_id || null;
-        request.operationId = stream.operationId;
-        state.chatServerOperationId = stream.operationId;
-        if (stream.cancelRequested) void cancelChat();
-      }
-      else if (event === "delta") {
-        const responseJustStarted = !state.chatStreamText;
-        state.chatStreamText += payload.text || "";
-        state.chatResponseStarted = state.chatResponseStarted || responseJustStarted;
-        if (responseJustStarted) state.chatResponseScrollPending = true;
-        scheduleChatStreamRender(responseJustStarted);
-      } else if (event === "background") {
-        background = true;
-        request.background = true;
-        request.phase = "recovering";
-        stream.operationId = payload.operation_id || stream.operationId;
-        request.operationId = stream.operationId;
-        state.chatServerOperationId = stream.operationId;
-        renderMessages(state.data?.messages || [], false);
-        updateChatControls();
-      } else if (event === "error") {
-        stream.serverError = true;
-        if (!background) stream.rejected = true;
-        const error = new Error(payload.message || "Die Coach-Anfrage ist fehlgeschlagen.");
-        error.reason = payload.reason;
-        throw error;
-      } else if (event === "completed") {
-        cancelScheduledChatStreamRender();
-        completed = true;
-        state.chatContentVersion += 1;
-        rememberChatTurn(null);
-        request.phase = "reconciling";
-        request.responseMessageId = payload.message?.id || null;
-        state.chatResponseMessageId = request.responseMessageId;
-        request.responseMessageReceived = reconcileCompletedChatMessage(payload.message ? { ...payload.message, client_turn_id: clientTurnId } : null);
-        if (request.responseMessageReceived) state.chatStreamText = "";
-        request.hadOutstandingProposals = Array.isArray(state.coachActionProposals) && state.coachActionProposals.length > 0;
-        if (request.hadOutstandingProposals) state.chatProposalRefreshPending = true;
-        state.coachActionProposals = Array.isArray(payload?.proposed_actions) ? payload.proposed_actions : [];
-        if (payload?.coach_quick_actions && state.data) {
-          state.data.coach_quick_actions = payload.coach_quick_actions;
-          renderCoachOverview(state.data);
-        }
-        addStructuredCoachReceipts(payload);
-        renderMessages(state.data?.messages || [], false);
-        updateChatControls();
-      }
-    };
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      const blocks = buffer.split(/\r?\n\r?\n/);
-      buffer = blocks.pop() || "";
-      for (const block of blocks) consume(block);
-      // The chat endpoint is a finite SSE response. A proxy may keep the HTTP
-      // connection open after the terminal event, so release the reader as
-      // soon as the persisted result has arrived instead of trapping the
-      // composer in the reconciling state.
-      if (completed || background) {
-        await reader.cancel().catch(() => {});
-        break;
-      }
-    }
-    buffer += decoder.decode();
-    if (buffer.trim()) consume(buffer);
-    if (background) {
-      scheduleChatStatusPoll(0);
-      return "recovering";
-    }
-    if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
-    // A completed SSE receipt already contains the persisted assistant message.
-    // Do not keep the composer in "reconciling" while unrelated/pending loads
-    // finish; refresh the authoritative proposal list in the background.
-    if (completed && request.responseMessageReceived) {
-      if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
-    } else if (completed && payload.message?.content && state.data) {
-      // A valid completed SSE receipt already contains the persisted assistant
-      // message. Keep the receipt authoritative even if reconciliation was
-      // skipped by a transient state transition; do not refetch chat history.
-      if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
-    } else {
-      await loadChatHistoryFresh();
-    }
-    if (completed) scrollChatToResponseStart();
-    invalidateContextPreview();
-    return completed ? "completed" : "failed";
+    const response = await chatStreamResponse(message, requestKind, attachments, clientTurnId, stream);
+    if (!chatRequestIsCurrent(sessionGeneration, chatGeneration)) return false;
+    if (!response.ok) return rejectChatStreamResponse(response, context);
+    await readChatStream(response, context);
+    return finishChatStream(context);
   } catch (error) {
-    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return false;
-    cancelScheduledChatStreamRender();
-    if (stream.rejected) {
-      rememberChatTurn(null);
-      const input = $("#messageInput");
-      if (input.value.trim()) {
-        const failed = state.data.messages.find((entry) => entry.optimistic && entry.client_turn_id === clientTurnId);
-        if (failed) { failed.error = error.message; failed.attachments = attachments; }
-      } else {
-        state.data.messages = (state.data.messages || []).filter((entry) => !(entry.optimistic && entry.client_turn_id === clientTurnId));
-        input.value = message;
-        state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
-        renderChatAttachments();
-      }
-      state.chatDraftDirty = true;
-      toast(error.message, true);
-      return false;
-    }
-    const cancelled = stream.cancelRequested || error?.name === "AbortError" || error?.reason === "chat_cancelled";
-    if (!completed && !stream.serverError) {
-      request.phase = "recovering";
-      state.chatServerOperationId = stream.operationId || state.chatServerOperationId;
-      if (state.chatStream === stream) state.chatStream = null;
-      renderMessages(state.data?.messages || [], false);
-      updateChatControls();
-      scheduleChatStatusPoll(0);
-      return "recovering";
-    }
-    if (!cancelled) toast(error.message, true);
-    scheduleChatStatusPoll(0);
-    await loadChatHistoryFresh();
-    invalidateContextPreview();
-    return false;
+    return recoverChatRequestFailure(error, context);
   } finally {
-    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-    if (state.chatStream === stream) state.chatStream = null;
-    if (request.phase !== "recovering") {
-      cancelScheduledChatStreamRender();
-      state.chatStreamText = "";
-    }
-    if (!completed && request.phase !== "recovering") state.chatResponseScrollPending = false;
-    if (!completed && request.phase !== "recovering") state.chatResponseMessageId = null;
-    state.chatResponseStarted = false;
-    if (state.chatRequest === request && request.phase !== "recovering") state.chatRequest = null;
-    if (request.phase !== "recovering") state.chatServerOperationId = null;
-    updateChatControls();
+    finishChatRequest(context);
   }
 }
 
