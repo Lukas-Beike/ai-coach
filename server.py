@@ -5313,7 +5313,10 @@ def ical_short_only(description: Any) -> bool:
     return _ical_description_contains(description, ICAL_SHORT_ONLY_MARKER)
 
 
-def _ical_rrule(raw: str) -> dict[str, Any]:
+ICAL_DAY_NUMBERS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
+
+
+def _ical_rule_values(raw: str) -> dict[str, str]:
     values: dict[str, str] = {}
     for part in raw.split(";"):
         key, separator, value = part.partition("=")
@@ -5325,6 +5328,57 @@ def _ical_rrule(raw: str) -> dict[str, Any]:
     unsupported = set(values) - supported
     if unsupported:
         raise AppError(400, "Diese Kalender-Wiederholungsregel wird nicht unterstützt.")
+    return values
+
+
+def _ical_rule_integer(values: dict[str, str], name: str, minimum: int, maximum: int, *, allow_negative: bool = False) -> list[int]:
+    result: list[int] = []
+    if not values.get(name):
+        return result
+    for raw_value in values[name].split(","):
+        try:
+            number = int(raw_value)
+        except ValueError as exc:
+            raise AppError(400, f"{name} der Kalender-Wiederholung muss aus ganzen Zahlen bestehen.") from exc
+        if number == 0 or number < minimum or number > maximum or (number < 0 and not allow_negative):
+            raise AppError(400, f"{name} der Kalender-Wiederholung ist ungültig.")
+        if number in result:
+            raise AppError(400, f"{name} der Kalender-Wiederholung ist doppelt angegeben.")
+        result.append(number)
+    return result
+
+
+def _ical_rule_bydays(values: dict[str, str], frequency: str) -> list[tuple[int, int | None]]:
+    bydays: list[tuple[int, int | None]] = []
+    for token in values.get("BYDAY", "").split(","):
+        if not token:
+            continue
+        match = re.fullmatch(r"([+-]?\d{1,2})?([A-Z]{2})", token)
+        if not match or match.group(2) not in ICAL_DAY_NUMBERS:
+            raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
+        ordinal = int(match.group(1)) if match.group(1) else None
+        if ordinal == 0 or (ordinal is not None and abs(ordinal) > 53):
+            raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
+        if frequency in {"DAILY", "WEEKLY"} and ordinal is not None:
+            raise AppError(400, "Eine BYDAY-Position wird nur für MONTHLY oder YEARLY unterstützt.")
+        item = (ICAL_DAY_NUMBERS[match.group(2)], ordinal)
+        if item in bydays:
+            raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
+        bydays.append(item)
+    return bydays
+
+
+def _ical_rule_until(values: dict[str, str]) -> datetime | None:
+    if not values.get("UNTIL"):
+        return None
+    temporal = _ical_temporal_value(values["UNTIL"], {})
+    if temporal is None:
+        raise AppError(400, "UNTIL der Kalender-Wiederholung ist ungültig.")
+    return temporal[0]
+
+
+def _ical_rrule(raw: str) -> dict[str, Any]:
+    values = _ical_rule_values(raw)
     frequency = values.get("FREQ")
     if frequency not in {"DAILY", "WEEKLY", "MONTHLY", "YEARLY"}:
         raise AppError(400, "Diese Kalender-Wiederholungsfrequenz wird nicht unterstützt.")
@@ -5340,53 +5394,16 @@ def _ical_rrule(raw: str) -> dict[str, Any]:
         raise AppError(400, "INTERVAL der Kalender-Wiederholung muss eine ganze Zahl sein.") from exc
     if not 1 <= interval <= ICAL_MAX_RECURRENCE_COUNT:
         raise AppError(400, "INTERVAL der Kalender-Wiederholung ist zu groß.")
-    day_numbers = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
-    bydays: list[tuple[int, int | None]] = []
-    if values.get("BYDAY"):
-        for token in values["BYDAY"].split(","):
-            match = re.fullmatch(r"([+-]?\d{1,2})?([A-Z]{2})", token)
-            if not match or match.group(2) not in day_numbers:
-                raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
-            ordinal = int(match.group(1)) if match.group(1) else None
-            if ordinal == 0 or (ordinal is not None and abs(ordinal) > 53):
-                raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
-            if frequency in {"DAILY", "WEEKLY"} and ordinal is not None:
-                raise AppError(400, "Eine BYDAY-Position wird nur für MONTHLY oder YEARLY unterstützt.")
-            item = (day_numbers[match.group(2)], ordinal)
-            if item in bydays:
-                raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
-            bydays.append(item)
-
-    def integer_list(name: str, minimum: int, maximum: int, *, allow_negative: bool = False) -> list[int]:
-        result: list[int] = []
-        if not values.get(name):
-            return result
-        for raw_value in values[name].split(","):
-            try:
-                number = int(raw_value)
-            except ValueError as exc:
-                raise AppError(400, f"{name} der Kalender-Wiederholung muss aus ganzen Zahlen bestehen.") from exc
-            if number == 0 or number < minimum or number > maximum or (number < 0 and not allow_negative):
-                raise AppError(400, f"{name} der Kalender-Wiederholung ist ungültig.")
-            if number in result:
-                raise AppError(400, f"{name} der Kalender-Wiederholung ist doppelt angegeben.")
-            result.append(number)
-        return result
-
-    bymonthday = integer_list("BYMONTHDAY", -31, 31, allow_negative=True)
-    bymonth = integer_list("BYMONTH", 1, 12)
-    bysetpos = integer_list("BYSETPOS", -366, 366, allow_negative=True)
+    bydays = _ical_rule_bydays(values, frequency)
+    bymonthday = _ical_rule_integer(values, "BYMONTHDAY", -31, 31, allow_negative=True)
+    bymonth = _ical_rule_integer(values, "BYMONTH", 1, 12)
+    bysetpos = _ical_rule_integer(values, "BYSETPOS", -366, 366, allow_negative=True)
     if bysetpos and frequency in {"DAILY", "WEEKLY"}:
         raise AppError(400, "BYSETPOS wird nur für MONTHLY oder YEARLY unterstützt.")
-    week_start = day_numbers.get(values.get("WKST", "MO"))
+    week_start = ICAL_DAY_NUMBERS.get(values.get("WKST", "MO"))
     if week_start is None:
         raise AppError(400, "WKST der Kalender-Wiederholung ist ungültig.")
-    until = None
-    if values.get("UNTIL"):
-        temporal = _ical_temporal_value(values["UNTIL"], {})
-        if temporal is None:
-            raise AppError(400, "UNTIL der Kalender-Wiederholung ist ungültig.")
-        until = temporal[0]
+    until = _ical_rule_until(values)
     return {
         "frequency": frequency,
         "count": count,
@@ -5487,81 +5504,84 @@ def _ical_event_record(current: dict[str, Any], start: datetime, duration: timed
     }
 
 
-def _ical_recurrence_starts(current: dict[str, Any], rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
-    base = current["start"]
+def _ical_daily_recurrence_starts(base: datetime, rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
     base_date = base.date()
     starts: list[datetime] = []
     count = rule["count"]
     until = rule["until"]
-    if rule["frequency"] == "DAILY":
-        interval = rule["interval"]
-        first_index = 0 if count is not None else max(0, math.ceil((window_start - base_date).days / interval) - 1)
-        index = first_index
-        occurrence_index = 0
-        while index <= first_index + ICAL_MAX_RECURRENCE_COUNT * 366:
-            start = _ical_shift_local(base, index * interval)
-            if start.date() > window_end or (until is not None and start > until):
+    interval = rule["interval"]
+    first_index = 0 if count is not None else max(0, math.ceil((window_start - base_date).days / interval) - 1)
+    index = first_index
+    occurrence_index = 0
+    while index <= first_index + ICAL_MAX_RECURRENCE_COUNT * 366:
+        start = _ical_shift_local(base, index * interval)
+        if start.date() > window_end or (until is not None and start > until):
+            break
+        if _ical_matches_date_filters(start.date(), rule):
+            if count is not None and occurrence_index >= count:
                 break
-            if _ical_matches_date_filters(start.date(), rule):
-                if count is not None and occurrence_index >= count:
-                    break
-                occurrence_index += 1
-                _ical_add_recurrence_start(starts, start, window_start, window_end)
-            index += 1
-        return starts
+            occurrence_index += 1
+            _ical_add_recurrence_start(starts, start, window_start, window_end)
+        index += 1
+    return starts
 
-    if rule["frequency"] == "WEEKLY":
-        bydays = rule["bydays"] or [(base_date.weekday(), None)]
-        base_week = base_date - timedelta(days=(base_date.weekday() - rule["wkst"]) % 7)
-        target_week = window_start - timedelta(days=(window_start.weekday() - rule["wkst"]) % 7)
-        weeks_between = max(0, (target_week - base_week).days // 7)
-        first_slot = 0 if count is not None else max(0, weeks_between // rule["interval"] - 1)
-        occurrence_index = 0
-        slot_index = first_slot
-        while slot_index <= first_slot + ICAL_MAX_RECURRENCE_PERIODS:
-            week_start = base_week + timedelta(days=slot_index * rule["interval"] * 7)
-            if week_start > window_end:
-                break
-            for weekday, _ordinal in sorted(bydays):
-                offset = (weekday - rule["wkst"]) % 7
-                start_date = week_start + timedelta(days=offset)
-                if start_date < base_date:
-                    continue
-                if not _ical_matches_date_filters(start_date, {**rule, "bydays": []}):
-                    continue
-                start = _ical_shift_local(base, (start_date - base_date).days)
-                if count is not None and occurrence_index >= count:
-                    return starts
-                if until is not None and start > until:
-                    return starts
-                occurrence_index += 1
-                _ical_add_recurrence_start(starts, start, window_start, window_end)
-            slot_index += 1
-        return starts
 
+def _ical_weekly_recurrence_starts(base: datetime, rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
+    base_date = base.date()
+    starts: list[datetime] = []
+    count = rule["count"]
+    until = rule["until"]
+    bydays = rule["bydays"] or [(base_date.weekday(), None)]
+    base_week = base_date - timedelta(days=(base_date.weekday() - rule["wkst"]) % 7)
+    target_week = window_start - timedelta(days=(window_start.weekday() - rule["wkst"]) % 7)
+    weeks_between = max(0, (target_week - base_week).days // 7)
+    first_slot = 0 if count is not None else max(0, weeks_between // rule["interval"] - 1)
+    occurrence_index = 0
+    slot_index = first_slot
+    while slot_index <= first_slot + ICAL_MAX_RECURRENCE_PERIODS:
+        week_start = base_week + timedelta(days=slot_index * rule["interval"] * 7)
+        if week_start > window_end:
+            break
+        for weekday, _ordinal in sorted(bydays):
+            start_date = week_start + timedelta(days=(weekday - rule["wkst"]) % 7)
+            if start_date < base_date or not _ical_matches_date_filters(start_date, {**rule, "bydays": []}):
+                continue
+            start = _ical_shift_local(base, (start_date - base_date).days)
+            if count is not None and occurrence_index >= count:
+                return starts
+            if until is not None and start > until:
+                return starts
+            occurrence_index += 1
+            _ical_add_recurrence_start(starts, start, window_start, window_end)
+        slot_index += 1
+    return starts
+
+
+def _ical_recurrence_period(base_date: date, rule: dict[str, Any], period_index: int) -> tuple[int, list[int]]:
+    if rule["frequency"] == "MONTHLY":
+        month_index = base_date.year * 12 + base_date.month - 1 + period_index * rule["interval"]
+        year, month = divmod(month_index, 12)
+        return year, [month + 1]
+    year = base_date.year + period_index * rule["interval"]
+    months = rule["bymonth"] or (range(1, 13) if rule["bydays"] or rule["bymonthday"] else [base_date.month])
+    return year, list(months)
+
+
+def _ical_period_recurrence_starts(base: datetime, rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
+    base_date = base.date()
+    starts: list[datetime] = []
+    count = rule["count"]
+    until = rule["until"]
     frequency = rule["frequency"]
-    if frequency == "MONTHLY":
-        base_period = base_date.year * 12 + base_date.month - 1
-        target_period = window_start.year * 12 + window_start.month - 1
-        period_distance = max(0, target_period - base_period)
-    else:
-        base_period = base_date.year
-        period_distance = max(0, window_start.year - base_date.year)
+    base_period = base_date.year * 12 + base_date.month - 1 if frequency == "MONTHLY" else base_date.year
+    target_period = window_start.year * 12 + window_start.month - 1 if frequency == "MONTHLY" else window_start.year
+    period_distance = max(0, target_period - base_period)
     first_period = 0 if count is not None else max(0, period_distance // rule["interval"] - 1)
     occurrence_index = 0
     period_index = first_period
     while period_index <= first_period + ICAL_MAX_RECURRENCE_PERIODS:
-        if frequency == "MONTHLY":
-            month_index = base_period + period_index * rule["interval"]
-            year, month = divmod(month_index, 12)
-            month += 1
-            months = [month]
-        else:
-            year = base_period + period_index * rule["interval"]
-            months = rule["bymonth"] or (range(1, 13) if rule["bydays"] or rule["bymonthday"] else [base_date.month])
-        candidates: list[date] = []
-        for month in months:
-            candidates.extend(_ical_period_dates(base_date, year, month, rule))
+        year, months = _ical_recurrence_period(base_date, rule, period_index)
+        candidates = [candidate for month in months for candidate in _ical_period_dates(base_date, year, month, rule)]
         for candidate in _ical_apply_bysetpos(candidates, rule):
             if candidate < base_date:
                 continue
@@ -5572,12 +5592,21 @@ def _ical_recurrence_starts(current: dict[str, Any], rule: dict[str, Any], windo
                 return starts
             occurrence_index += 1
             _ical_add_recurrence_start(starts, start, window_start, window_end)
-        if frequency == "MONTHLY" and date(year, month, 1) > window_end:
-            break
-        if frequency == "YEARLY" and date(year, 1, 1) > window_end:
+        period_end = date(year, months[-1], 1)
+        if period_end > window_end:
             break
         period_index += 1
     return starts
+
+
+def _ical_recurrence_starts(current: dict[str, Any], rule: dict[str, Any], window_start: date, window_end: date) -> list[datetime]:
+    base = current["start"]
+    frequency = rule["frequency"]
+    if frequency == "DAILY":
+        return _ical_daily_recurrence_starts(base, rule, window_start, window_end)
+    if frequency == "WEEKLY":
+        return _ical_weekly_recurrence_starts(base, rule, window_start, window_end)
+    return _ical_period_recurrence_starts(base, rule, window_start, window_end)
 
 
 def _ical_event_instances(
