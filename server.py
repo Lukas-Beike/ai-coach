@@ -12133,6 +12133,20 @@ def refresh_current_performance() -> dict[str, Any]:
         PERFORMANCE_LOCK.release()
 
 
+def _activity_rollup_date(activity: dict[str, Any]) -> date | None:
+    try:
+        return date.fromisoformat(str(activity.get("start_date_local") or "")[:10])
+    except ValueError:
+        return None
+
+
+def _activity_rollup_number(activity: dict[str, Any], key: str) -> float:
+    try:
+        return float(activity.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def activity_rollup(activities: list[Any], days: int, end_date: date | None = None) -> dict[str, Any]:
     anchor = end_date or local_now().date()
     cutoff = anchor - timedelta(days=days - 1)
@@ -12142,21 +12156,12 @@ def activity_rollup(activities: list[Any], days: int, end_date: date | None = No
     for activity in activities:
         if not isinstance(activity, dict):
             continue
-        try:
-            activity_date = date.fromisoformat(str(activity.get("start_date_local") or "")[:10])
-        except ValueError:
-            continue
-        if activity_date < cutoff or activity_date > anchor:
+        activity_date = _activity_rollup_date(activity)
+        if activity_date is None or not cutoff <= activity_date <= anchor:
             continue
         count += 1
-        try:
-            moving_seconds += float(activity.get("moving_time") or 0)
-        except (TypeError, ValueError):
-            pass
-        try:
-            training_load += float(activity.get("icu_training_load") or 0)
-        except (TypeError, ValueError):
-            pass
+        moving_seconds += _activity_rollup_number(activity, "moving_time")
+        training_load += _activity_rollup_number(activity, "icu_training_load")
     return {
         "days": days,
         "sessions": count,
