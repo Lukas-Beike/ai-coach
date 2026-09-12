@@ -8455,6 +8455,29 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(completed["context"]["operation"], "get_sleep_daily")
         self.assertEqual(completed["context"]["result_items"], 1)
 
+    def test_coach_action_preview_input_validates_safe_action_contract(self):
+        values = {
+            "action_type": "undo_change",
+            "target_system": "local",
+            "object_ids": {"history_id": "change-1"},
+            "diff": {"fields": {"name": {"changed": True}}},
+            "payload": {"history_id": "change-1"},
+        }
+        self.assertEqual(
+            server.validated_coach_action_preview_input(values),
+            ("undo_change", "local", values["object_ids"], values["diff"], values["payload"]),
+        )
+        for invalid in (
+            None,
+            {**values, "action_type": "unknown"},
+            {**values, "target_system": "intervals"},
+            {**values, "diff": {}},
+            {**values, "payload": []},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(server.AppError) as error:
+                server.validated_coach_action_preview_input(invalid)
+            self.assertEqual(error.exception.status, 400)
+
     def test_change_history_records_safe_diff_and_explicit_undo(self):
         server.save_profile({"name": "Ada", "weight_kg": "71"})
         server.save_profile({"name": "Bea", "weight_kg": "72"})
