@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 MAX_FILE_BYTES = 5_000_000
 MAX_FILES = 4
 MAX_REQUEST_BYTES = 28_000_000
+MAX_FIT_MESSAGES = 100_000
 # Gemini accepts at most 20 MB per inline request.  Leave room for the route
 # summary, instructions and the surrounding JSON framing.
 MAX_GEMINI_INLINE_IMAGE_BYTES = 16_000_000
@@ -111,12 +112,16 @@ def _fit_definition(data, offset, record_header, data_end):
         if offset + 3 > data_end:
             raise ValueError("Truncated FIT field definition")
         number, size, base_type = data[offset:offset + 3]
+        if size <= 0:
+            raise ValueError("Invalid FIT field size")
         if base_type & 0x1F not in _FIT_BASE_TYPE_SIZES:
             raise ValueError(_UNSUPPORTED_FIT_BASE_TYPE)
         fields.append((number, size, base_type))
         offset += 3
     developer_fields = _fit_developer_definition(data, offset, record_header, data_end)
     offset += developer_fields[0]
+    if not fields and not developer_fields[1]:
+        raise ValueError("FIT definition has no fields")
     return offset, (architecture, global_number, fields, developer_fields[1])
 
 
@@ -133,6 +138,8 @@ def _fit_developer_definition(data, offset, record_header, data_end):
         if offset + 3 > data_end:
             raise ValueError("Truncated FIT developer definition")
         size, developer_index = data[offset + 1:offset + 3]
+        if size <= 0:
+            raise ValueError("Invalid FIT developer field size")
         developer_fields.append((developer_index, size, 13))
         offset += 3
     return offset - start_offset, developer_fields
@@ -162,6 +169,14 @@ def _fit_data_record(data, offset, record_header, definition, data_end, last_tim
     return offset, last_timestamp, (global_number, values)
 
 
+def _fit_record_is_definition(record_header):
+    return bool(record_header & 0x40) and not bool(record_header & 0x80)
+
+
+def _fit_local_number(record_header):
+    return ((record_header >> 5) & 0x03) if record_header & 0x80 else (record_header & 0x0F)
+
+
 def _fit_messages(data):
     """Read FIT definitions and data records without trusting provider bytes."""
     if len(data) < 12 or data[8:12] != FIT_SIGNATURE:
@@ -178,11 +193,13 @@ def _fit_messages(data):
     while offset < data_end:
         record_header = data[offset]
         offset += 1
-        if record_header & 0x40:
+        if _fit_record_is_definition(record_header):
             offset, definition = _fit_definition(data, offset, record_header, data_end)
             definitions[record_header & 0x0F] = definition
             continue
-        local_number = ((record_header >> 5) & 0x03) if record_header & 0x80 else record_header & 0x0F
+        if len(messages) >= MAX_FIT_MESSAGES:
+            raise ValueError("Too many FIT records")
+        local_number = _fit_local_number(record_header)
         offset, last_timestamp, message = _fit_data_record(
             data, offset, record_header, definitions.get(local_number), data_end, last_timestamp
         )
@@ -223,6 +240,11 @@ _FIT_SESSION_METRICS = {
     "normalized_power_w": (18, 34, 1), "training_stress_score": (18, 35, 1),
     "intensity_factor": (18, 36, 1),
 }
+_FIT_SESSION_TOTALS = {"duration_s", "timer_time_s", "distance_km", "ascent_m", "descent_m", "training_stress_score"}
+_FIT_SESSION_MAXIMA = {"max_speed_kmh", "max_heart_rate_bpm", "max_cadence_rpm", "max_power_w"}
+_FIT_SESSION_WEIGHTED_AVERAGES = {
+    "avg_speed_kmh", "avg_heart_rate_bpm", "avg_cadence_rpm", "avg_power_w", "normalized_power_w", "intensity_factor"
+}
 
 
 def _fit_session_summary(messages, sessions, records):
@@ -236,11 +258,22 @@ def _fit_session_summary(messages, sessions, records):
     sport = session.get(5)
     if isinstance(sport, int) and sport in _FIT_SPORTS:
         summary["sport"] = _FIT_SPORTS[sport]
+    durations = _fit_scaled(messages, 18, 7)
     for key, (message_number, field_number, divisor) in _FIT_SESSION_METRICS.items():
         values = _fit_scaled(messages, message_number, field_number)
-        if values:
+        if not values:
+            continue
+        if key in _FIT_SESSION_TOTALS:
+            value = sum(values) / divisor
+        elif key in _FIT_SESSION_MAXIMA:
+            value = max(values) / divisor
+        elif key in _FIT_SESSION_WEIGHTED_AVERAGES and len(values) == len(durations) and sum(durations) > 0:
+            value = sum(metric * duration for metric, duration in zip(values, durations)) / sum(durations) / divisor
+        elif key in _FIT_SESSION_WEIGHTED_AVERAGES:
+            value = sum(values) / len(values) / divisor
+        else:
             value = values[0] / divisor
-            summary[key] = round(value, 3) if isinstance(value, float) else value
+        summary[key] = round(value, 3) if isinstance(value, float) else value
     return summary
 
 

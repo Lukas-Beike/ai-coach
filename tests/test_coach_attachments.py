@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
-from backend.coach.attachments import fit_summary, gpx_summary, validate_attachments, model_input
+from backend.coach.attachments import _fit_session_summary, fit_summary, gpx_summary, validate_attachments, model_input
 
 GPX = b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt><trkpt lat="0" lon="0.01"><ele>20</ele></trkpt></trkseg></trk></gpx>'
 PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAASUVORK5CYII='
@@ -27,10 +27,10 @@ FIT = fit_session_fixture()
 
 def fit_records_fixture():
     fields = [(253, 4, 6), (2, 2, 4), (3, 1, 2), (4, 1, 2), (5, 4, 6)]
-    definition = bytes([0x40, 0, 0]) + struct.pack("<H", 20) + bytes([len(fields)])
+    definition = bytes([0x42, 0, 0]) + struct.pack("<H", 20) + bytes([len(fields)])
     definition += b"".join(bytes(field) for field in fields)
-    first = bytes([0]) + struct.pack("<I", 1_000_000) + struct.pack("<H", 2_500) + bytes([150, 90]) + struct.pack("<I", 100_000)
-    second = bytes([0x82]) + struct.pack("<H", 2_550) + bytes([152, 92]) + struct.pack("<I", 200_000)
+    first = bytes([2]) + struct.pack("<I", 1_000_000) + struct.pack("<H", 2_500) + bytes([150, 90]) + struct.pack("<I", 100_000)
+    second = bytes([0xC2]) + struct.pack("<H", 2_550) + bytes([152, 92]) + struct.pack("<I", 200_000)
     payload = definition + first + second
     header = bytes([12, 0x10]) + struct.pack("<H", 0) + struct.pack("<I", len(payload)) + b".FIT"
     return header + payload
@@ -89,6 +89,26 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 validate_attachments([item])
         with self.assertRaises(ValueError):
             validate_attachments([self.upload()] * 5)
+
+    def test_fit_rejects_empty_definitions(self):
+        fields = bytes([0x40, 0, 0]) + struct.pack("<H", 20) + bytes([0])
+        header = bytes([12, 0x10]) + struct.pack("<H", 0) + struct.pack("<I", len(fields)) + b".FIT"
+        with self.assertRaises(ValueError):
+            fit_summary(header + fields)
+
+    def test_fit_session_metrics_are_aggregated(self):
+        sessions = [
+            {2: 1_000_000, 7: 10_000, 9: 500_000, 16: 100, 17: 120, 22: 40, 35: 100},
+            {2: 1_000_010, 7: 20_000, 9: 300_000, 16: 130, 17: 140, 22: 60, 35: 200},
+        ]
+        summary = _fit_session_summary(
+            [(18, session) for session in sessions], sessions, []
+        )
+        self.assertEqual(summary["duration_s"], 30)
+        self.assertEqual(summary["distance_km"], 8)
+        self.assertEqual(summary["max_heart_rate_bpm"], 140)
+        self.assertEqual(summary["avg_heart_rate_bpm"], 120)
+        self.assertEqual(summary["training_stress_score"], 30)
 
     def test_attachment_persists_for_worker_without_leaking_into_history(self):
         server.enqueue_background_coach_job("", "attachments-turn", "synthetic-csrf", attachments=[self.upload(), {"name": "chart.png", "data": PNG}])
@@ -155,6 +175,17 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             }, "gemini-test")
         self.assertIn({"inlineData": {"mimeType": "image/png", "data": PNG}}, followup["contents"][-1]["parts"])
         self.assertIn(self.upload(FIT, "ride.fit")["data"], json.dumps(followup["contents"][-1]))
+
+    def test_gemini_history_keeps_latest_raw_files_within_budget(self):
+        server.enqueue_background_coach_job("First", "history-first", "synthetic-csrf", attachments=[self.upload(FIT, "first.fit")])
+        server.enqueue_background_coach_job("Second", "history-second", "synthetic-csrf-2", attachments=[self.upload(FIT, "second.fit")])
+        encoded_size = len(self.upload(FIT, "first.fit")["data"])
+        with patch.object(server, "MAX_GEMINI_INLINE_IMAGE_BYTES", encoded_size + 1):
+            history = server._gemini_local_chat_history()
+        raw_parts = [part for entry in history for part in entry["parts"] if "inlineData" in part]
+        self.assertEqual(len(raw_parts), 1)
+        self.assertIn("first.fit", json.dumps(history))
+        self.assertIn("second.fit", json.dumps(history))
 
     def test_background_model_receives_saved_attachments(self):
         server.enqueue_background_coach_job("Analyze", "worker-turn", "synthetic-csrf", attachments=[{"name": "chart.png", "data": PNG}])
