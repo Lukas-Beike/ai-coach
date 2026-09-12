@@ -2258,9 +2258,7 @@ function plannedAppointmentLabel(event) {
   return time ? `${name} · ${time[1]}` : name;
 }
 
-function plannedDayInsights(context, weather, dateKey, todayKey) {
-  const checkin = context.checkin || {};
-  const recovery = dateKey <= todayKey ? context.recovery || {} : {};
+function plannedInsightMetrics(checkin, recovery) {
   const metrics = [];
   const addMetric = (label, value, suffix, source) => {
     const formatted = calendarMetricNumber(value, suffix);
@@ -2275,11 +2273,10 @@ function plannedDayInsights(context, weather, dateKey, todayKey) {
     ["soreness", "Muskelkater", "/10"], ["stress", "Stress", "/10"],
     ["motivation", "Motivation", "/10"], ["available_minutes", "Zeit verfügbar", " Min."],
   ]) addMetric(label, checkin[key], suffix, "Eigene Angabe");
+  return metrics;
+}
 
-  const section = document.createElement("div");
-  section.className = "planned-day-insights";
-  const content = document.createElement("div");
-  content.className = "planned-insights-content";
+function appendPlannedInsightMeasurements(content, metrics, checkin, dateKey, todayKey) {
   if (metrics.length || Object.keys(checkin).length) {
     if (checkin.day_form) {
       const form = document.createElement("p");
@@ -2287,61 +2284,89 @@ function plannedDayInsights(context, weather, dateKey, todayKey) {
       form.textContent = checkin.day_form;
       content.append(form);
     }
-    const grid = document.createElement("dl");
-    grid.className = "planned-day-metrics";
-    metrics.forEach(({ label, value, source }) => {
-      const item = document.createElement("div");
-      if (source) item.title = `${label}: ${source}`;
-      const term = document.createElement("dt");
-      term.textContent = label;
-      const measurement = document.createElement("dd");
-      measurement.textContent = value;
-      item.append(term, measurement);
-      grid.append(item);
-    });
-    if (metrics.length) content.append(grid);
+    if (metrics.length) {
+      const grid = document.createElement("dl");
+      grid.className = "planned-day-metrics";
+      metrics.forEach(({ label, value, source }) => {
+        const item = document.createElement("div");
+        if (source) item.title = `${label}: ${source}`;
+        const term = document.createElement("dt");
+        term.textContent = label;
+        const measurement = document.createElement("dd");
+        measurement.textContent = value;
+        item.append(term, measurement);
+        grid.append(item);
+      });
+      content.append(grid);
+    }
   } else if (dateKey <= todayKey) {
     const empty = document.createElement("p");
     empty.className = "planned-insights-empty";
     empty.textContent = "Keine Check-in- oder Erholungswerte gespeichert";
     content.append(empty);
   }
+}
+
+function appendPlannedWeatherInsight(body, weather) {
+  const weatherLabel = plannedWeatherLabel(weather);
+  if (!weather || !weatherLabel) return;
+  const condition = document.createElement("p");
+  condition.className = "planned-weather-detail";
+  condition.textContent = [weather.condition, weatherLabel].filter(Boolean).join(" · ");
+  condition.title = [
+    weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage",
+    "Open-Meteo", weather.forecast_location || state.data?.weather?.location?.name,
+    weather.forecast_saved_at ? `Stand: ${formatTime(weather.forecast_saved_at)}` : null,
+  ].filter(Boolean).join(" · ");
+  body.append(condition);
+  const directionValue = calendarMetricNumber(weather.wind_direction_dominant);
+  const direction = directionValue != null && Number(weather.wind_direction_dominant) >= 0 && Number(weather.wind_direction_dominant) <= 360
+    ? weatherDirection(weather.wind_direction_dominant) : "";
+  const peakTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(weather.rain_peak_time || "") ? weather.rain_peak_time : "";
+  const values = [
+    calendarMetricNumber(weather.precipitation_probability_max, ` % Regen${peakTime ? " (max. " + peakTime + " Uhr)" : ""}`),
+    calendarMetricNumber(weather.wind_speed_max, ` km/h Wind${direction ? " " + direction : ""}`),
+    calendarMetricNumber(weather.wind_gusts_max, " km/h Böen"),
+  ].filter(Boolean);
+  if (peakTime && weather.precipitation_probability_max == null) values.unshift(`Regen am ehesten ${peakTime} Uhr`);
+  if (values.length) {
+    const metrics = document.createElement("p");
+    metrics.className = "planned-weather-metrics";
+    metrics.textContent = values.join(" · ");
+    body.append(metrics);
+  }
+}
+
+function appendPlannedCheckinObservations(body, checkin) {
+  for (const [field, label] of [["availability_notes", "Zeitplanung"], ["notes", "Notizen"]]) {
+    if (checkin[field]) {
+      const note = document.createElement("p");
+      note.textContent = `${label}: ${checkin[field]}`;
+      body.append(note);
+    }
+  }
+  const rpe = calendarRpeLabel(checkin.session_rpe);
+  if (rpe != null) {
+    const effort = document.createElement("p");
+    effort.textContent = `Belastung nach dem Training: RPE ${rpe}/10 · Eigene Angabe`;
+    body.append(effort);
+  }
+}
+
+function plannedDayInsights(context, weather, dateKey, todayKey) {
+  const checkin = context.checkin || {};
+  const recovery = dateKey <= todayKey ? context.recovery || {} : {};
+  const metrics = plannedInsightMetrics(checkin, recovery);
+  const section = document.createElement("div");
+  section.className = "planned-day-insights";
+  const content = document.createElement("div");
+  content.className = "planned-insights-content";
+  appendPlannedInsightMeasurements(content, metrics, checkin, dateKey, todayKey);
   const details = document.createElement("div");
   details.className = "planned-day-observations";
   const body = document.createElement("div");
-  const text = (value, className = "") => {
-    const p = document.createElement("p");
-    p.className = className;
-    p.textContent = value;
-    body.append(p);
-    return p;
-  };
-  if (weather && plannedWeatherLabel(weather)) {
-    const condition = text([
-      weather.condition, plannedWeatherLabel(weather),
-    ].filter(Boolean).join(" · "), "planned-weather-detail");
-    condition.title = [
-      weather.archived_forecast ? "Gespeicherte Wettervorhersage" : "Wettervorhersage",
-      "Open-Meteo", weather.forecast_location || state.data?.weather?.location?.name,
-      weather.forecast_saved_at ? `Stand: ${formatTime(weather.forecast_saved_at)}` : null,
-    ].filter(Boolean).join(" · ");
-    const directionValue = calendarMetricNumber(weather.wind_direction_dominant);
-    const direction = directionValue != null && Number(weather.wind_direction_dominant) >= 0
-      && Number(weather.wind_direction_dominant) <= 360 ? weatherDirection(weather.wind_direction_dominant) : "";
-    const peakTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(weather.rain_peak_time || "") ? weather.rain_peak_time : "";
-    const values = [
-      calendarMetricNumber(weather.precipitation_probability_max, ` % Regen${peakTime ? " (max. " + peakTime + " Uhr)" : ""}`),
-      calendarMetricNumber(weather.wind_speed_max, ` km/h Wind${direction ? " " + direction : ""}`),
-      calendarMetricNumber(weather.wind_gusts_max, " km/h Böen"),
-    ].filter(Boolean);
-    if (peakTime && weather.precipitation_probability_max == null) values.unshift(`Regen am ehesten ${peakTime} Uhr`);
-    if (values.length) text(values.join(" · "), "planned-weather-metrics");
-  }
-  for (const [field, label] of [["availability_notes", "Zeitplanung"], ["notes", "Notizen"]]) {
-    if (checkin[field]) text(`${label}: ${checkin[field]}`);
-  }
-  const rpe = calendarRpeLabel(checkin.session_rpe);
-  if (rpe != null) text(`Belastung nach dem Training: RPE ${rpe}/10 · Eigene Angabe`);
+  appendPlannedWeatherInsight(body, weather);
+  appendPlannedCheckinObservations(body, checkin);
   if (body.childElementCount) {
     details.append(body);
     content.append(details);
