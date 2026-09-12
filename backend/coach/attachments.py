@@ -57,8 +57,9 @@ _FIT_SPORTS = {
     10: "training", 11: "walking", 12: "cross_country_skiing", 13: "alpine_skiing",
     14: "snowboarding", 15: "rowing", 16: "mountaineering", 17: "hiking", 18: "multisport",
     19: "paddling", 20: "flying", 21: "e_biking", 22: "motorcycling", 23: "boating",
-    24: "driving", 25: "golf", 26: "hang_gliding", 27: "horseback_riding", 28: "kayaking",
-    29: "rafting", 30: "inline_skating", 31: "rock_climbing", 32: "all",
+    24: "driving", 25: "golf", 26: "hang_gliding", 27: "horseback_riding",
+    28: "hunting", 29: "fishing", 30: "inline_skating", 31: "rock_climbing", 32: "sailing",
+    41: "kayaking", 42: "rafting", 254: "all",
 }
 _FIT_BASE_TYPE_FORMATS = {
     0: "B", 1: "b", 2: "B", 3: "h", 4: "H", 5: "i", 6: "I", 8: "f", 9: "d",

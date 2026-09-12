@@ -81,7 +81,10 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
 
     def test_fit_sport_enum_and_timestamp_state_follow_the_profile(self):
         self.assertEqual(fit_summary(FIT)["sport"], "cycling")
-        self.assertEqual({_FIT_SPORTS[6], _FIT_SPORTS[11], _FIT_SPORTS[32]}, {"basketball", "walking", "all"})
+        self.assertEqual(
+            {_FIT_SPORTS[6], _FIT_SPORTS[11], _FIT_SPORTS[32], _FIT_SPORTS[41], _FIT_SPORTS[254]},
+            {"basketball", "walking", "sailing", "kayaking", "all"},
+        )
         definition = (0, 21, [(253, 4, 6)], [])
         _, last_timestamp, _ = _fit_data_record(struct.pack("<I", 1_000_100), 0, 0, definition, 4, None)
         _, compressed_timestamp, message = _fit_data_record(b"", 0, 0x85, definition, 0, last_timestamp)
