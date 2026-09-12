@@ -4385,6 +4385,20 @@ def _garmin_timestamp(value: Any) -> datetime | None:
     return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
 
 
+def _garmin_sleep_interval(record: dict[str, Any]) -> tuple[datetime | None, datetime | None]:
+    start = _garmin_timestamp(first_present(record, (
+        "sleepStartTimestampGMT", "sleepStartTimestamp", "startTimestampGMT",
+    )))
+    end = _garmin_timestamp(first_present(record, (
+        "sleepEndTimestampGMT", "sleepEndTimestamp", "endTimestampGMT",
+    )))
+    return start, end
+
+
+def _garmin_nested_sleep_records(record: dict[str, Any]) -> list[Any]:
+    return [value for value in record.values() if isinstance(value, (dict, list))]
+
+
 def _garmin_sleep_bounds(payload: Any) -> tuple[datetime | None, datetime | None]:
     """Read the authoritative sleep interval from a detailed Garmin response."""
     pending = [payload]
@@ -4393,18 +4407,13 @@ def _garmin_sleep_bounds(payload: Any) -> tuple[datetime | None, datetime | None
         current = pending.pop(0)
         visited += 1
         if isinstance(current, dict):
-            start = _garmin_timestamp(first_present(current, (
-                "sleepStartTimestampGMT", "sleepStartTimestamp", "startTimestampGMT",
-            )))
-            end = _garmin_timestamp(first_present(current, (
-                "sleepEndTimestampGMT", "sleepEndTimestamp", "endTimestampGMT",
-            )))
+            start, end = _garmin_sleep_interval(current)
             if start is not None and end is not None and start <= end:
                 return start, end
-            nested = current.get("dailySleepDTO")
-            if isinstance(nested, dict):
-                pending.insert(0, nested)
-            pending.extend(value for value in current.values() if isinstance(value, (dict, list)))
+            daily_sleep = current.get("dailySleepDTO")
+            if isinstance(daily_sleep, dict):
+                pending.insert(0, daily_sleep)
+            pending.extend(_garmin_nested_sleep_records(current))
         elif isinstance(current, list):
             pending.extend(current[:50])
     return None, None
