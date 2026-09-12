@@ -7129,6 +7129,29 @@ def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
     }
 
 
+def safe_openai_log_reason(reason: Any) -> str:
+    """Project an OpenAI status reason onto static values safe for structured logs."""
+    if reason == "conversation_locked":
+        return "conversation_locked"
+    if reason == "conversation_state_invalid":
+        return "conversation_state_invalid"
+    if reason == "credit_balance_exhausted":
+        return "credit_balance_exhausted"
+    if reason in {"organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded"}:
+        return "usage_limit_exceeded"
+    if reason == "insufficient_quota":
+        return "insufficient_quota"
+    if reason == "rate_limit_exceeded":
+        return "rate_limit_exceeded"
+    if reason == "authentication_or_permission":
+        return "authentication_or_permission"
+    if reason == "not_found":
+        return "not_found"
+    if reason == "provider_unavailable":
+        return "provider_unavailable"
+    return "http_error"
+
+
 def _provider_error_payload(raw_body: bytes) -> dict[str, Any]:
     try:
         payload = json.loads(raw_body) if raw_body else None
@@ -14240,7 +14263,7 @@ def openai_stream_request(
         status = int(getattr(exc, "code", 502) or 502)
         details = openai_error_details(status, raw_error)
         record_openai_status(details)
-        log_failure(details["reason"], status)
+        log_failure(safe_openai_log_reason(details["reason"]), status)
         capture_diagnostic_event("openai_stream_failed", {
             "service": "openai", "status": status, "reason": details["reason"],
             "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
