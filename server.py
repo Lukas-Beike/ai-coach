@@ -12216,17 +12216,13 @@ def activity_pace_seconds_per_km(activity: dict[str, Any]) -> float | int | None
     return normalized if 120 <= normalized <= 1800 else None
 
 
-def activity_performance_validation(
-    activities: list[Any],
-    metrics: dict[str, dict[str, Any]],
-    comparisons: dict[str, dict[str, Any] | None],
-) -> dict[str, Any]:
-    """Expose latest-activity evidence without pretending it is a lab test."""
+def latest_activity_for_validation(activities: list[Any]) -> dict[str, Any] | None:
+    """Return the newest completed activity with a usable timestamp."""
     dated = [
         item for item in activities
         if isinstance(item, dict) and activity_datetime(item.get("start_date_local") or item.get("start_date")) is not None
     ]
-    latest = max(
+    return max(
         dated,
         key=lambda item: (
             activity_datetime(item.get("start_date_local") or item.get("start_date")) or datetime.min,
@@ -12234,6 +12230,15 @@ def activity_performance_validation(
         ),
         default=None,
     )
+
+
+def activity_performance_validation(
+    activities: list[Any],
+    metrics: dict[str, dict[str, Any]],
+    comparisons: dict[str, dict[str, Any] | None],
+) -> dict[str, Any]:
+    """Expose latest-activity evidence without pretending it is a lab test."""
+    latest = latest_activity_for_validation(activities)
     if latest is None:
         return {
             "available": False,
