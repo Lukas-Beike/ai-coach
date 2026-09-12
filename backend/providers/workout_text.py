@@ -144,13 +144,18 @@ def _workout_target(rest: str, number: int, target: str) -> tuple[str, str, bool
     if _target_match(cue, search=True):
         raise WorkoutTextError("ambiguous_workout_target", f"Workout-Zeile {number}: Mehrere Intensitaetsziele im selben Schritt.")
     parsed = intensity[0].upper()
-    kind = "PACE" if "PACE" in parsed else "HR" if re.search(r"HR|BPM", parsed) else "POWER"
+    if "PACE" in parsed:
+        kind = "PACE"
+    elif re.search(r"HR|BPM", parsed):
+        kind = "HR"
+    else:
+        kind = "POWER"
     if target in {"POWER", "HR", "PACE"} and target != kind:
         raise WorkoutTextError("workout_target_mismatch", f"Workout-Zeile {number}: Schrittziel {kind} passt nicht zum Einheitenziel {target}.")
     return parsed, kind, ramp
 
 
-def _workout_amount(value: str, number: int) -> dict:
+def _workout_amount(value: str) -> dict:
     distance_match = _distance_match(value)
     if distance_match:
         amount_match = re.match(r"\d+(?:\.\d+)?", value)
@@ -169,7 +174,7 @@ def _workout_amount(value: str, number: int) -> dict:
 def _parse_workout_step(line: str, number: int, target: str) -> dict:
     value, rest = _workout_quantity(line, number)
     parsed_target, kind, ramp = _workout_target(rest, number, target)
-    return {"kind": kind.lower(), "target": parsed_target, "ramp": ramp, **_workout_amount(value, number)}
+    return {"kind": kind.lower(), "target": parsed_target, "ramp": ramp, **_workout_amount(value)}
 
 
 def _repeat_header(line: str, repeat_pending: bool, previous_step: bool) -> tuple[int, bool, bool]:

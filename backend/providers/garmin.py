@@ -93,6 +93,31 @@ def _collect_ranges(client: Any, windows: list[tuple[date, date]], payload: dict
                 future.result()
 
 
+def _daily_stats_records(value: Any, current: date) -> list[dict[str, Any]]:
+    records = value if isinstance(value, list) else [value]
+    if any(not isinstance(record, dict) for record in records):
+        raise ValueError("Invalid Garmin daily_stats response")
+    return [
+        record if any(key in record for key in ("calendarDate", "summaryDate", "date"))
+        else {"calendarDate": current.isoformat(), **record}
+        for record in records
+    ]
+
+
+def _collect_daily_stats_day(fetch: Any, current: date, payload: dict[str, Any],
+                             stats: dict[str, Any], external_call: ExternalCall, redact: Redact,
+                             warn: WarningLogger | None) -> None:
+    try:
+        value = external_call("garmin", "daily_stats", lambda: fetch(current.isoformat()), {"date": current.isoformat()})
+        records = _daily_stats_records(value, current)
+        payload.setdefault("daily_stats", []).extend(records)
+        stats["records"] = int(stats["records"]) + len(records)
+    except Exception as exc:
+        stats["complete"] = False
+        stats["error"] = redact(str(exc))[:500]
+        _add_error(payload, "daily_stats", exc, redact, warn)
+
+
 def _collect_daily_stats(client: Any, windows: list[tuple[date, date]], payload: dict[str, Any],
                          pagination: dict[str, dict[str, Any]], external_call: ExternalCall, redact: Redact,
                          warn: WarningLogger | None) -> None:
@@ -103,20 +128,7 @@ def _collect_daily_stats(client: Any, windows: list[tuple[date, date]], payload:
     for window_start, window_end in windows:
         current = window_start
         while current <= window_end:
-            try:
-                value = external_call("garmin", "daily_stats", lambda current=current: fetch(current.isoformat()), {"date": current.isoformat()})
-                records = value if isinstance(value, list) else [value]
-                if any(not isinstance(record, dict) for record in records):
-                    raise ValueError("Invalid Garmin daily_stats response")
-                for record in records:
-                    if not any(key in record for key in ("calendarDate", "summaryDate", "date")):
-                        record = {"calendarDate": current.isoformat(), **record}
-                    payload.setdefault("daily_stats", []).append(record)
-                    stats["records"] = int(stats["records"]) + 1
-            except Exception as exc:
-                stats["complete"] = False
-                stats["error"] = redact(str(exc))[:500]
-                _add_error(payload, "daily_stats", exc, redact, warn)
+            _collect_daily_stats_day(fetch, current, payload, stats, external_call, redact, warn)
             current += timedelta(days=1)
 
 
@@ -222,4 +234,3 @@ def collect_garmin_data(
     payload["provider_sync"] = {"pagination": pagination}
     _validate_current_metrics(payload, redact, warn)
     return payload
-

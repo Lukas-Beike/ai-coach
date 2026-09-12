@@ -1876,8 +1876,9 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
         try {
           const parsed = JSON.parse(names);
           label.textContent = parsed.length ? "\nAnhänge: " + parsed.join(", ") : "";
-        } catch (_) {
-          // Attachment names are optional persisted metadata; malformed metadata must not hide the message.
+        } catch (parseError) {
+          if (!(parseError instanceof SyntaxError)) throw parseError;
+          // Attachment names are optional persisted metadata; malformed JSON must not hide the message.
           label.textContent = "";
         }
         node.append(label);
