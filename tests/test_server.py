@@ -7014,6 +7014,7 @@ class CoachTests(unittest.TestCase):
         validation = server.activity_performance_validation([{
             "id": "invalid-evidence", "type": "Ride", "start_date_local": "2026-09-12T08:00:00",
             "moving_time": 3600, "average_heartrate": 9999, "average_watts": -10, "icu_rpe": 100,
+            "icu_intensity": 999,
         }], {}, {})
 
         evidence = validation["activity"]
@@ -7021,6 +7022,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn("average_heart_rate_bpm", evidence)
         self.assertNotIn("average_power_watts", evidence)
         self.assertNotIn("rpe", evidence)
+        self.assertNotIn("intensity", evidence)
 
     def test_form_is_derived_from_ctl_and_atl_when_intervals_omits_tsb(self):
         today = date.today().isoformat()

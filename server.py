@@ -12263,7 +12263,9 @@ def bounded_activity_metric(value: Any, minimum: float, maximum: float) -> float
 
 def activity_intensity(value: Any) -> float | int | None:
     """Normalize Intervals.icu fractional or percentage intensity values."""
-    intensity = bounded_activity_metric(value, 0, 1000)
+    # Intervals.icu may expose intensity as either a fraction (0..2) or a
+    # percentage (0..200).  Reject provider sentinels before normalizing them.
+    intensity = bounded_activity_metric(value, 0, 200)
     if intensity is not None and 0 < float(intensity) <= 2:
         return round(float(intensity) * 100, 1)
     return intensity
