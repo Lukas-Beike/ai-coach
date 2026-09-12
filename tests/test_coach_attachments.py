@@ -5,7 +5,8 @@ import unittest
 from unittest.mock import patch
 
 from test_coach_dialogue import DialogueHarness, server
-from backend.coach.attachments import _fit_crc16, _fit_session_summary, fit_summary, gpx_summary, validate_attachments, model_input
+from backend.coach.attachments import (_FIT_SPORTS, _fit_crc16, _fit_data_record, _fit_session_summary,
+                                       fit_summary, gpx_summary, validate_attachments, model_input)
 
 GPX = b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt><trkpt lat="0" lon="0.01"><ele>20</ele></trkpt></trkseg></trk></gpx>'
 PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAASUVORK5CYII='
@@ -78,6 +79,15 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(summary["max_cadence_rpm"], 92)
         self.assertEqual(summary["ascent_m"], 10)
 
+    def test_fit_sport_enum_and_timestamp_state_follow_the_profile(self):
+        self.assertEqual(fit_summary(FIT)["sport"], "cycling")
+        self.assertEqual({_FIT_SPORTS[6], _FIT_SPORTS[11], _FIT_SPORTS[32]}, {"basketball", "walking", "all"})
+        definition = (0, 21, [(253, 4, 6)], [])
+        _, last_timestamp, _ = _fit_data_record(struct.pack("<I", 1_000_100), 0, 0, definition, 4, None)
+        _, compressed_timestamp, message = _fit_data_record(b"", 0, 0x85, definition, 0, last_timestamp)
+        self.assertGreater(compressed_timestamp, last_timestamp)
+        self.assertEqual(message[1][253], compressed_timestamp)
+
     def test_rejects_unsafe_xml_coordinates_encoding_and_types(self):
         invalid = [self.upload(b'<!DOCTYPE gpx [<!ENTITY x "boom">]><gpx/>'),
                    self.upload(b'<gpx><rte><rtept lat="nan" lon="0"/></rte></gpx>'),
@@ -106,6 +116,8 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         checksummed[-1] ^= 0x01
         with self.assertRaises(ValueError):
             fit_summary(bytes(checksummed))
+        with self.assertRaises(ValueError):
+            fit_summary(checksummed[:-1])
 
     def test_fit_session_metrics_are_aggregated(self):
         sessions = [

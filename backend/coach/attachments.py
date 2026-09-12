@@ -53,7 +53,12 @@ _FIT_FIELD_SCALES = {
 }
 _FIT_SPORTS = {
     0: "generic", 1: "running", 2: "cycling", 3: "transition", 4: "fitness_equipment",
-    5: "swimming", 6: "walking", 7: "sedentary", 8: "all", 9: "ultra_run",
+    5: "swimming", 6: "basketball", 7: "soccer", 8: "tennis", 9: "american_football",
+    10: "training", 11: "walking", 12: "cross_country_skiing", 13: "alpine_skiing",
+    14: "snowboarding", 15: "rowing", 16: "mountaineering", 17: "hiking", 18: "multisport",
+    19: "paddling", 20: "flying", 21: "e_biking", 22: "motorcycling", 23: "boating",
+    24: "driving", 25: "golf", 26: "hang_gliding", 27: "horseback_riding", 28: "kayaking",
+    29: "rafting", 30: "inline_skating", 31: "rock_climbing", 32: "all",
 }
 _FIT_BASE_TYPE_FORMATS = {
     0: "B", 1: "b", 2: "B", 3: "h", 4: "H", 5: "i", 6: "I", 8: "f", 9: "d",
@@ -91,7 +96,10 @@ def _fit_validate_checksums(data, header_size, data_end):
         expected = struct.unpack_from("<H", data, header_crc_offset)[0]
         if _fit_crc16(data[:header_crc_offset]) != expected:
             raise ValueError("Invalid FIT header CRC")
-    if len(data) >= data_end + 2:
+    trailer_size = len(data) - data_end
+    if trailer_size not in {0, 2}:
+        raise ValueError("Invalid FIT file CRC length")
+    if trailer_size == 2:
         expected = struct.unpack_from("<H", data, data_end)[0]
         if _fit_crc16(data[:data_end]) != expected:
             raise ValueError("Invalid FIT file CRC")
@@ -186,11 +194,12 @@ def _fit_data_record(data, offset, record_header, definition, data_end, last_tim
         values[number] = _fit_value(data[offset:offset + size], base_type, architecture)
         offset += size
     offset += developer_size
-    if compressed and global_number == 20 and isinstance(last_timestamp, int):
+    has_timestamp = any(number == 253 for number, _, _ in fields)
+    if compressed and has_timestamp and isinstance(last_timestamp, int):
         timestamp_offset = record_header & 0x1F
         last_timestamp += (timestamp_offset - (last_timestamp & 0x1F)) & 0x1F
         values.setdefault(253, last_timestamp)
-    if global_number == 20 and isinstance(values.get(253), int):
+    if has_timestamp and isinstance(values.get(253), int):
         last_timestamp = values[253]
     return offset, last_timestamp, (global_number, values)
 
