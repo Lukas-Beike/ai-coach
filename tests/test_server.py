@@ -5221,6 +5221,16 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in result["planned_workouts"]], ["Future workout"])
         self.assertEqual(result["activity_rollups_by_sport"]["Radfahren"]["last_7_days"]["sessions"], 7)
 
+    def test_future_coach_planned_workouts_excludes_invalid_and_past_dates(self):
+        today = date(2026, 9, 13)
+        planned = server.future_coach_planned_workouts([
+            {"name": "Later", "date": "2026-09-15"},
+            {"name": "Invalid", "date": "not-a-date"},
+            {"name": "Past", "start_date_local": "2026-09-12"},
+            {"name": "Today", "date": "2026-09-13"},
+        ], today)
+        self.assertEqual([item["name"] for item in planned], ["Today", "Later"])
+
     def test_activity_rollup_ignores_invalid_values_and_outside_dates(self):
         anchor = date(2026, 9, 12)
         rollup = server.activity_rollup([

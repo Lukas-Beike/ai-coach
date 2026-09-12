@@ -13045,6 +13045,25 @@ def coach_context_projection_meta(
     )
 
 
+def future_coach_planned_workouts(events: list[dict[str, Any]], today: date) -> list[dict[str, Any]]:
+    planned: list[dict[str, Any]] = []
+    for event in events:
+        raw_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+        try:
+            event_date = date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        if event_date >= today:
+            planned.append(event)
+    return sorted(
+        planned,
+        key=lambda item: (
+            str(item.get("start_date_local") or item.get("date") or ""),
+            str(item.get("name") or ""),
+        ),
+    )
+
+
 def coach_intervals_context(snapshot: dict[str, Any] | None, planned_units: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Build the bounded Intervals.icu projection sent to the coach."""
     snapshot = snapshot if isinstance(snapshot, dict) else {}
@@ -13076,20 +13095,11 @@ def coach_intervals_context(snapshot: dict[str, Any] | None, planned_units: list
         for sport, rows in sorted(grouped.items())
     }
 
-    planned: list[dict[str, Any]] = []
     source_planned = planned_units if isinstance(planned_units, list) else list_local_planned_workouts()
-    for event in source_planned:
-        if not isinstance(event, dict):
-            continue
-        raw_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
-        try:
-            event_date = date.fromisoformat(raw_date)
-        except ValueError:
-            continue
-        if event_date < today:
-            continue
-        planned.append(event)
-    planned.sort(key=lambda item: (str(item.get("start_date_local") or item.get("date") or ""), str(item.get("name") or "")))
+    planned = future_coach_planned_workouts(
+        [event for event in source_planned if isinstance(event, dict)],
+        today,
+    )
 
     return {
         "synced_at": snapshot.get("synced_at"),
