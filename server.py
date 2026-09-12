@@ -469,30 +469,38 @@ def garmin_operation(function: Any) -> Any:
     return guarded
 
 
+def _read_local_env(path: Path) -> list[str]:
+    try:
+        return path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+
+
+def _parse_local_env_line(raw_line: str) -> tuple[str, str] | None:
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        return None
+    if line.startswith("export "):
+        line = line[7:].lstrip()
+    key, separator, value = line.partition("=")
+    key = key.strip()
+    if not separator or not re.fullmatch(r"(?a:(?!\d)\w+)", key):
+        return None
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return key, value
+
+
 def load_local_env() -> None:
     """Load local and persistent settings while preserving non-empty process env values."""
     for env_path in (ROOT / ".env", DATA_DIR / ".env"):
-        try:
-            lines = env_path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        for raw_line in lines:
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[7:].lstrip()
-            key, separator, value = line.partition("=")
-            key = key.strip()
-            if not separator or not re.fullmatch(r"(?a:(?!\d)\w+)", key):
-                continue
-            value = value.strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-                value = value[1:-1]
-            # Docker/Unraid values supplied with -e are authoritative. Empty
-            # process values still allow a persisted local setting to fill in.
-            if not os.environ.get(key):
-                os.environ[key] = value
+        for raw_line in _read_local_env(env_path):
+            parsed = _parse_local_env_line(raw_line)
+            if parsed and not os.environ.get(parsed[0]):
+                # Docker/Unraid values supplied with -e are authoritative. Empty
+                # process values still allow a persisted local setting to fill in.
+                os.environ[parsed[0]] = parsed[1]
 
 
 load_local_env()
@@ -1302,6 +1310,22 @@ def observed_operation(provider: str, reason: Any = "background", operation_id: 
 
 def observed_sync(provider: str, area: str = "default"):
     """Correlate a sync function and its provider calls with one operation."""
+    def finish_error(refresh_id: str, error: BaseException) -> None:
+        if isinstance(error, AppError) and error.reason == "chat_cancelled":
+            _provider_refresh_finish(refresh_id, "skipped", "cancelled")
+        else:
+            _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(error))
+
+    def refresh_status(result: Any) -> str:
+        status = result.get("status") if isinstance(result, dict) else None
+        return {
+            "not_configured": "skipped",
+            "stale": "error",
+            "error": "error",
+            "failed": "error",
+            "partial": "partial",
+        }.get(status, "success")
+
     def decorator(function: Any) -> Any:
         @wraps(function)
         @maintenance_operation
@@ -1315,21 +1339,9 @@ def observed_sync(provider: str, area: str = "default"):
                 try:
                     result = function(*args, **kwargs)
                 except Exception as exc:
-                    if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
-                        _provider_refresh_finish(refresh_id, "skipped", "cancelled")
-                    else:
-                        _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
+                    finish_error(refresh_id, exc)
                     raise
-                result_status = result.get("status") if isinstance(result, dict) else None
-                if result_status == "not_configured":
-                    refresh_status = "skipped"
-                elif result_status in {"stale", "error", "failed"}:
-                    refresh_status = "error"
-                elif result_status == "partial":
-                    refresh_status = "partial"
-                else:
-                    refresh_status = "success"
-                _provider_refresh_finish(refresh_id, refresh_status, "complete")
+                _provider_refresh_finish(refresh_id, refresh_status(result), "complete")
                 log_operation_event(
                     "operation_count", scope["operation_id"], scope["trigger"],
                     provider, "complete", scope["started"], count=operation_result_count(result),
@@ -1824,45 +1836,59 @@ def _sync_job_error_class(error: BaseException) -> str:
     }.get(code, code)
 
 
+def _normalized_performance_job(envelope: dict[str, Any]) -> dict[str, Any]:
+    values = envelope["payload"]
+    if envelope["provider"] != "intervals":
+        raise AppError(400, "Dieser Job ist nur für Intervals.icu zulässig.", reason="invalid_job_request")
+    if set(values) - {"reason"}:
+        raise AppError(400, "Der Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
+    return {"provider": "intervals", "type": envelope["type"], "payload": {"reason": str(values.get("reason") or "job").strip()[:80] or "job"}}
+
+
+def _normalized_plan_push_job(envelope: dict[str, Any]) -> dict[str, Any]:
+    values = envelope["payload"]
+    if envelope["provider"] != "intervals":
+        raise AppError(400, "Plan-Push-Jobs sind nur für Intervals.icu zulässig.", reason="invalid_job_request")
+    if set(values) - {"entries", "reason", "repair"}:
+        raise AppError(400, "Ein Plan-Push-Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
+    entries = values.get("entries")
+    if not isinstance(entries, list) or not 1 <= len(entries) <= 28:
+        raise AppError(400, "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten.", reason="invalid_job_request")
+    normalized_entries = []
+    for entry in entries:
+        if not isinstance(entry, dict) or not re.fullmatch(UUID_PATTERN, str(entry.get("library_workout_id") or "")):
+            raise AppError(400, "Jede Plan-Push-Einheit benötigt eine lokale UUID.", reason="invalid_job_request")
+        payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
+        if not re.fullmatch(PAYLOAD_HASH_PATTERN, payload_hash):
+            raise AppError(400, "Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash.", reason="invalid_job_request")
+        normalized_entries.append({"library_workout_id": str(entry["library_workout_id"]), "expected_payload_hash": payload_hash})
+    if "repair" in values and type(values["repair"]) is not bool:
+        raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
+    repair = {"repair": True} if values.get("repair") else {}
+    return {"provider": envelope["provider"], "type": envelope["type"], "payload": {"entries": normalized_entries, "reason": str(values.get("reason") or "job").strip()[:80] or "job", **repair}}
+
+
+def _normalized_sync_payload(envelope: dict[str, Any]) -> dict[str, Any]:
+    if envelope["type"] == "historical_backfill" and envelope["provider"] not in {"intervals", "garmin"}:
+        raise AppError(400, "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig.", reason="invalid_job_request")
+    if envelope["type"] in {"performance_refresh", "competition_push"}:
+        return _normalized_performance_job(envelope)
+    if envelope["type"] == "plan_push":
+        return _normalized_plan_push_job(envelope)
+    return _normalized_generic_sync_job(envelope)
+
+
 def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, Any]:
     """Validate the small provider-specific payload stored in the database."""
     try:
         envelope = validate_job_request(provider, job_type, payload)
     except ValueError as exc:
         raise AppError(400, str(exc), reason="invalid_job_request") from exc
+    return _normalized_sync_payload(envelope)
+
+
+def _normalized_generic_sync_job(envelope: dict[str, Any]) -> dict[str, Any]:
     values = envelope["payload"]
-    if envelope["type"] == "historical_backfill" and envelope["provider"] not in {"intervals", "garmin"}:
-        raise AppError(400, "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig.", reason="invalid_job_request")
-    if envelope["type"] in {"performance_refresh", "competition_push"}:
-        if envelope["provider"] != "intervals":
-            raise AppError(400, "Dieser Job ist nur für Intervals.icu zulässig.", reason="invalid_job_request")
-        if set(values) - {"reason"}:
-            raise AppError(400, "Der Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
-        return {
-            "provider": "intervals",
-            "type": envelope["type"],
-            "payload": {"reason": str(values.get("reason") or "job").strip()[:80] or "job"},
-        }
-    if envelope["type"] == "plan_push":
-        if envelope["provider"] != "intervals":
-            raise AppError(400, "Plan-Push-Jobs sind nur für Intervals.icu zulässig.", reason="invalid_job_request")
-        if set(values) - {"entries", "reason", "repair"}:
-            raise AppError(400, "Ein Plan-Push-Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
-        entries = values.get("entries")
-        if not isinstance(entries, list) or not 1 <= len(entries) <= 28:
-            raise AppError(400, "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten.", reason="invalid_job_request")
-        normalized_entries = []
-        for entry in entries:
-            if not isinstance(entry, dict) or not re.fullmatch(UUID_PATTERN, str(entry.get("library_workout_id") or "")):
-                raise AppError(400, "Jede Plan-Push-Einheit benötigt eine lokale UUID.", reason="invalid_job_request")
-            payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
-            if not re.fullmatch(PAYLOAD_HASH_PATTERN, payload_hash):
-                raise AppError(400, "Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash.", reason="invalid_job_request")
-            normalized_entries.append({"library_workout_id": str(entry["library_workout_id"]), "expected_payload_hash": payload_hash})
-        if "repair" in values and type(values["repair"]) is not bool:
-            raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
-        repair = {"repair": True} if values.get("repair") else {}
-        return {"provider": envelope["provider"], "type": envelope["type"], "payload": {"entries": normalized_entries, "reason": str(values.get("reason") or "job").strip()[:80] or "job", **repair}}
     allowed = {
         "intervals": {"days", "reason", "end_date"},
         "garmin": {"days", "reason", "end_date"},
@@ -1992,6 +2018,41 @@ def _enqueue_automatic_performance_refresh(reason: str) -> dict[str, Any] | None
         return None
 
 
+def _performance_refresh_failed() -> None:
+    raise AppError(
+        503,
+        "Die aktuelle Intervals.icu-Leistungsaktualisierung ist fehlgeschlagen.",
+        reason="provider_refresh_failed",
+    )
+
+
+def _pending_performance_job_id() -> str | None:
+    with DB_LOCK, database() as db:
+        row = db.execute(
+            "SELECT id FROM sync_jobs WHERE provider='intervals' AND type='performance_refresh' "
+            "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1"
+        ).fetchone()
+    return row["id"] if row else None
+
+
+def _performance_refresh_poll_state(active_job_id: str | None) -> tuple[str, dict[str, Any] | str | None]:
+    if active_job_id:
+        state = sync_job_state(active_job_id)
+        if state["status"] == "completed":
+            return "completed", state
+        if state["status"] in {"failed", "partial"}:
+            _performance_refresh_failed()
+        return "waiting", None
+    pending_id = _pending_performance_job_id()
+    if pending_id:
+        return "job", pending_id
+    if get_kv("performance_refresh_running") == "1":
+        return "waiting", None
+    if get_kv("last_performance_error"):
+        _performance_refresh_failed()
+    return "idle", None
+
+
 def _wait_for_performance_refresh(
     job_id: str | None = None,
     *,
@@ -2002,32 +2063,13 @@ def _wait_for_performance_refresh(
     active_job_id = job_id
     while True:
         _raise_chat_cancelled(cancel_event)
-        if active_job_id:
-            state = sync_job_state(active_job_id)
-            if state["status"] == "completed":
-                return state
-            if state["status"] in {"failed", "partial"}:
-                raise AppError(
-                    503,
-                    "Die aktuelle Intervals.icu-Leistungsaktualisierung ist fehlgeschlagen.",
-                    reason="provider_refresh_failed",
-                )
-        else:
-            with DB_LOCK, database() as db:
-                row = db.execute(
-                    "SELECT id FROM sync_jobs WHERE provider='intervals' AND type='performance_refresh' "
-                    "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1"
-                ).fetchone()
-            if row:
-                active_job_id = row["id"]
-            elif get_kv("performance_refresh_running") != "1":
-                if get_kv("last_performance_error"):
-                    raise AppError(
-                        503,
-                        "Die aktuelle Intervals.icu-Leistungsaktualisierung ist fehlgeschlagen.",
-                        reason="provider_refresh_failed",
-                    )
-                return None
+        state, value = _performance_refresh_poll_state(active_job_id)
+        if state == "completed":
+            return value
+        if state == "job":
+            active_job_id = str(value)
+        elif state == "idle":
+            return None
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise AppError(
@@ -2036,6 +2078,70 @@ def _wait_for_performance_refresh(
                 reason="provider_busy",
             )
         time.sleep(min(SYNC_JOB_POLL_SECONDS, remaining))
+
+
+def _scheduled_sync_job_at(available_at: str | None, now: str) -> str:
+    if available_at is None:
+        return now
+    try:
+        return datetime.fromisoformat(str(available_at).replace("Z", UTC_OFFSET_SUFFIX)).astimezone(timezone.utc).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Der Startzeitpunkt des Synchronisationsjobs ist ungültig.", reason="invalid_job_request") from exc
+
+
+def _sync_job_operations(envelope: dict[str, Any], item_operations: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    operations = item_operations or [{"item_key": f"{envelope['provider']}:{envelope['type']}", "operation": envelope["type"]}]
+    if not 1 <= len(operations) <= 1000:
+        raise AppError(400, "Ein Job muss zwischen 1 und 1000 Operationen enthalten.", reason="invalid_job_request")
+    return operations
+
+
+def _existing_performance_job_id(db: Any, envelope: dict[str, Any]) -> str | None:
+    if envelope["type"] != "performance_refresh":
+        return None
+    existing = db.execute(
+        "SELECT id FROM sync_jobs WHERE provider='intervals' AND type='performance_refresh' "
+        "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1"
+    ).fetchone()
+    return existing["id"] if existing else None
+
+
+def _insert_sync_job(db: Any, job_id: str, envelope: dict[str, Any], requested: str, operations: list[dict[str, Any]], scheduled_at: str, now: str) -> None:
+    db.execute(
+        "INSERT INTO sync_jobs(id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, available_at, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'queued', ?, ?, 0, ?, 0, ?, ?, ?)",
+        (job_id, envelope["provider"], envelope["type"], json.dumps(envelope["payload"], ensure_ascii=False, separators=(",", ":")), requested, len(operations), scheduled_at, now, now),
+    )
+    for index, operation in enumerate(operations):
+        if not isinstance(operation, dict):
+            raise AppError(400, "Job-Operationen müssen Objekte sein.", reason="invalid_job_request")
+        item_key = str(operation.get("item_key") or f"item-{index}").strip()[:160]
+        item_operation = str(operation.get("operation") or envelope["type"]).strip()[:80]
+        if not item_key or not item_operation:
+            raise AppError(400, "Job-Operationen benötigen Schlüssel und Typ.", reason="invalid_job_request")
+        payload_hash = str(operation.get("payload_hash") or "")[:128]
+        if not payload_hash:
+            payload_hash = hashlib.sha256(
+                json.dumps({"operation": item_operation, "payload": envelope["payload"]}, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+        db.execute(
+            "INSERT INTO sync_job_items(id, job_id, item_key, operation, payload_hash, status, attempts, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'queued', 0, ?, ?)",
+            (f"{job_id}-{index}", job_id, item_key, item_operation, payload_hash, now, now),
+        )
+
+
+def _publish_created_sync_job(job_id: str, result: dict[str, Any]) -> None:
+    publish_state_event(
+        "job",
+        {
+            "job_id": job_id,
+            "provider": result["provider"],
+            "type": result["type"],
+            "status": result["status"],
+            "progress": result["progress"],
+        },
+    )
 
 
 @maintenance_operation
@@ -2052,60 +2158,17 @@ def enqueue_sync_job(
     envelope = _sync_job_payload(provider, job_type, payload)
     requested = str(requested_by or "system").strip().casefold()[:40] or "system"
     now = utc_now()
-    scheduled_at = now
-    if available_at is not None:
-        try:
-            scheduled_at = datetime.fromisoformat(str(available_at).replace("Z", UTC_OFFSET_SUFFIX)).astimezone(timezone.utc).isoformat()
-        except (TypeError, ValueError) as exc:
-            raise AppError(400, "Der Startzeitpunkt des Synchronisationsjobs ist ungültig.", reason="invalid_job_request") from exc
+    scheduled_at = _scheduled_sync_job_at(available_at, now)
     job_id = uuid.uuid4().hex
-    operations = item_operations or [{"item_key": f"{envelope['provider']}:{envelope['type']}", "operation": envelope["type"]}]
-    if not 1 <= len(operations) <= 1000:
-        raise AppError(400, "Ein Job muss zwischen 1 und 1000 Operationen enthalten.", reason="invalid_job_request")
-    existing_job_id = None
+    operations = _sync_job_operations(envelope, item_operations)
     with DB_LOCK, database() as db:
-        if envelope["type"] == "performance_refresh":
-            existing = db.execute(
-                "SELECT id FROM sync_jobs WHERE provider='intervals' AND type='performance_refresh' "
-                "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1"
-            ).fetchone()
-            existing_job_id = existing["id"] if existing else None
+        existing_job_id = _existing_performance_job_id(db, envelope)
         if existing_job_id:
             return sync_job_state(existing_job_id)
-        db.execute(
-            "INSERT INTO sync_jobs(id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, available_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, 'queued', ?, ?, 0, ?, 0, ?, ?, ?)",
-            (job_id, envelope["provider"], envelope["type"], json.dumps(envelope["payload"], ensure_ascii=False, separators=(",", ":")), requested, len(operations), scheduled_at, now, now),
-        )
-        for index, operation in enumerate(operations):
-            if not isinstance(operation, dict):
-                raise AppError(400, "Job-Operationen müssen Objekte sein.", reason="invalid_job_request")
-            item_key = str(operation.get("item_key") or f"item-{index}").strip()[:160]
-            item_operation = str(operation.get("operation") or envelope["type"]).strip()[:80]
-            if not item_key or not item_operation:
-                raise AppError(400, "Job-Operationen benötigen Schlüssel und Typ.", reason="invalid_job_request")
-            payload_hash = str(operation.get("payload_hash") or "")[:128]
-            if not payload_hash:
-                payload_hash = hashlib.sha256(
-                    json.dumps({"operation": item_operation, "payload": envelope["payload"]}, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-                ).hexdigest()
-            db.execute(
-                "INSERT INTO sync_job_items(id, job_id, item_key, operation, payload_hash, status, attempts, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, 'queued', 0, ?, ?)",
-                (f"{job_id}-{index}", job_id, item_key, item_operation, payload_hash, now, now),
-            )
+        _insert_sync_job(db, job_id, envelope, requested, operations, scheduled_at, now)
     SYNC_JOB_WAKE.set()
     result = sync_job_state(job_id)
-    publish_state_event(
-        "job",
-        {
-            "job_id": job_id,
-            "provider": result["provider"],
-            "type": result["type"],
-            "status": result["status"],
-            "progress": result["progress"],
-        },
-    )
+    _publish_created_sync_job(job_id, result)
     return result
 
 
