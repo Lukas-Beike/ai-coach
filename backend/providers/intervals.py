@@ -81,7 +81,32 @@ class IntervalsWriteTransport:
         )
 
 
-def fetch_paged_collection(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
+def _fetch_page(get: JsonGetter, path: str, params: Mapping[str, Any] | None, collection: str,
+                error: ErrorFactory, offset: int, page_size: int, cancel_event: Any) -> list[dict[str, Any]]:
+    page_params = {**(dict(params) if params else {}), "limit": page_size, "offset": offset}
+    page = get(path, page_params) if cancel_event is None else get(path, page_params, cancel_event=cancel_event)
+    if not isinstance(page, list):
+        raise error(f"Invalid {collection} page")
+    page_rows = [item for item in page if isinstance(item, dict)]
+    if len(page_rows) != len(page):
+        raise error(f"Invalid {collection} records")
+    return page_rows
+
+
+def _page_fingerprint(page_rows: list[dict[str, Any]]) -> str:
+    return hashlib.sha256(
+        json.dumps(page_rows, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def _remember_page(fingerprints: set[str], fingerprint: str, page_rows: list[dict[str, Any]],
+                   collection: str, error: ErrorFactory) -> None:
+    if fingerprint in fingerprints and page_rows:
+        raise error(f"Repeated {collection} page")
+    fingerprints.add(fingerprint)
+
+
+def fetch_paged_collection(
     get: JsonGetter,
     path: str,
     params: Mapping[str, Any] | None,
@@ -91,38 +116,21 @@ def fetch_paged_collection(  # NOSONAR - cohesive orchestration keeps the transa
     max_pages: int = 100,
     cancel_event: Any = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Read a bounded provider collection through an injected GET operation.
-
-    The helper owns only provider pagination and validation. HTTP transport,
-    authentication, application errors, and operation metadata remain at the
-    application boundary so this module has no dependency on ``server.py``.
-    """
+    """Read and validate a bounded provider collection through pagination."""
     rows: list[dict[str, Any]] = []
     offset = 0
     pages = 0
     fingerprints: set[str] = set()
     while True:
-        page_params = {**(dict(params) if params else {}), "limit": page_size, "offset": offset}
-        if cancel_event is None:
-            page = get(path, page_params)
-        else:
-            page = get(path, page_params, cancel_event=cancel_event)
-        if not isinstance(page, list):
-            raise error(f"Intervals.icu hat keine gültige {collection}-Seite zurückgegeben.")
-        page_rows = [item for item in page if isinstance(item, dict)]
-        if len(page_rows) != len(page):
-            raise error(f"Intervals.icu liefert ungültige Datensätze in der {collection}-Seite.")
+        page_rows = _fetch_page(get, path, params, collection, error, offset, page_size, cancel_event)
         pages += 1
-        fingerprint = hashlib.sha256(
-            json.dumps(page_rows, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
-        ).hexdigest()
-        if fingerprint in fingerprints and page_rows:
-            raise error(f"Intervals.icu liefert wiederholt dieselbe {collection}-Seite.")
-        fingerprints.add(fingerprint)
+        fingerprint = _page_fingerprint(page_rows)
+        _remember_page(fingerprints, fingerprint, page_rows, collection, error)
         rows.extend(page_rows)
-        if len(page) < page_size:
+        if len(page_rows) < page_size:
             break
-        offset += len(page)
+        offset += len(page_rows)
         if pages >= max_pages:
-            raise error(f"Die {collection}-Synchronisierung überschreitet das Seitenlimit.")
+            raise error(f"Page limit exceeded for {collection}.")
     return rows, {"pages": pages, "records": len(rows), "complete": True}
+

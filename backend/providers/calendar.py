@@ -33,13 +33,14 @@ def parse_ics_date(value: str) -> str | None:
         return None
 
 
-def unfold_ical(payload: bytes, *, max_bytes: int, error: ErrorFactory) -> list[str]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
-    if not isinstance(payload, (bytes, bytearray)) or len(payload) > max_bytes:
-        raise error(413, "Der Kalender-Feed ist zu groß.")
+def _decode_ical(payload: bytes, error: ErrorFactory) -> str:
     try:
-        text = payload.decode("utf-8-sig")
+        return payload.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise error(400, "Der Kalender-Feed ist keine gültige UTF-8-iCalendar-Datei.") from exc
+
+
+def _unfold_lines(text: str, error: ErrorFactory) -> list[str]:
     unfolded: list[str] = []
     for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         if len(line) > 20000:
@@ -48,6 +49,10 @@ def unfold_ical(payload: bytes, *, max_bytes: int, error: ErrorFactory) -> list[
             unfolded[-1] += line[1:]
         else:
             unfolded.append(line)
+    return unfolded
+
+
+def _validate_ical_structure(unfolded: list[str], error: ErrorFactory) -> None:
     nonempty = [line for line in unfolded if line]
     if not nonempty or nonempty[0].upper() != "BEGIN:VCALENDAR" or nonempty[-1].upper() != "END:VCALENDAR":
         raise error(400, "Der Kalender-Feed muss ein vollständiges VCALENDAR-Dokument sein.")
@@ -66,8 +71,14 @@ def unfold_ical(payload: bytes, *, max_bytes: int, error: ErrorFactory) -> list[
             raise error(400, "Der Kalender-Feed enthält eine ungültige Eigenschaft.")
     if stack:
         raise error(400, "Der Kalender-Feed enthält nicht geschlossene Komponenten.")
-    return unfolded
 
+
+def unfold_ical(payload: bytes, *, max_bytes: int, error: ErrorFactory) -> list[str]:
+    if not isinstance(payload, (bytes, bytearray)) or len(payload) > max_bytes:
+        raise error(413, "Der Kalender-Feed ist zu groß.")
+    unfolded = _unfold_lines(_decode_ical(payload, error), error)
+    _validate_ical_structure(unfolded, error)
+    return unfolded
 
 def ical_duration(raw: str) -> timedelta | None:
     match = re.fullmatch(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?", raw.strip().upper())
@@ -76,3 +87,5 @@ def ical_duration(raw: str) -> timedelta | None:
     days, hours, minutes, seconds = (int(value or 0) for value in match.groups())
     duration = timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
     return duration if duration.total_seconds() > 0 else None
+
+

@@ -75,9 +75,11 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("ready_for_review", workflow)
         self.assertIn("issue_comment:", workflow)
         self.assertIn("pullRequest.draft !== true", workflow)
-        self.assertIn("uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@develop", workflow)
-        self.assertIn("uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@main", workflow)
-        self.assertNotIn("uses: actions/checkout@", workflow)
+        self.assertRegex(
+            workflow,
+            r"uses: Lukas-Beike/ai-coach/\.github/actions/codex-review-gate@[0-9a-f]{40}",
+        )
+        self.assertNotIn("actions/checkout", workflow)
         self.assertRegex(
             workflow,
             r"(?ms)  gate:.*?    permissions:\n      contents: read\n      issues: read\n      pull-requests: read\n      checks: write",
@@ -138,6 +140,8 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("if: needs.discover.outputs.has_pull_requests == 'true'", workflow)
         self.assertIn("matrix.pullRequestNumber", workflow)
         self.assertIn("matrix.baseRef", workflow)
+        self.assertNotIn("ref: develop", workflow)
+        self.assertNotIn("ref: main", workflow)
         self.assertNotIn("steps.resolve_base.outputs.base_sha", workflow)
         self.assertIn("EXPECTED_BASE_REF: ${{ matrix.baseRef }}", workflow)
         self.assertIn("cancel-in-progress: true", workflow)

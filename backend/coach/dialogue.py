@@ -182,32 +182,51 @@ language. Never mention internal authorization scopes or classification errors.
 """
 
 
-def validate_request(value: Any, user_ids: set[int], current_user_id: int) -> dict[str, Any]:  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
-    """Validate provenance and bounds, never the user's choice of words."""
-    if not isinstance(value, dict) or set(value) != set(REQUEST_SCHEMA["required"]):
-        raise ValueError("request_fields")
+def _validate_request_provenance(value: dict[str, Any], user_ids: set[int], current_user_id: int) -> None:
     ids = value["source_message_ids"]
-    if (not isinstance(ids, list) or not 1 <= len(ids) <= 24
-            or any(type(item) is not int or item not in user_ids for item in ids)
-            or current_user_id not in ids):
+    valid = isinstance(ids, list) and 1 <= len(ids) <= 24
+    valid = valid and all(type(item) is int and item in user_ids for item in ids)
+    if not valid or current_user_id not in ids:
         raise ValueError("request_provenance")
+
+
+def _validate_request_text(value: dict[str, Any]) -> None:
     if value["target"] not in REQUEST_SCHEMA["properties"]["target"]["enum"]:
         raise ValueError("request_target")
-    if not isinstance(value["summary"], str) or not value["summary"].strip() or len(value["summary"]) > 2000:
+    summary = value["summary"]
+    if not isinstance(summary, str) or not summary.strip() or len(summary) > 2000:
         raise ValueError("request_summary")
     for key, count, length in (("scope", 400, 160), ("constraints", 24, 1000)):
         items = value[key]
-        if not isinstance(items, list) or len(items) > count or any(not isinstance(item, str) or not item.strip() or len(item) > length for item in items):
+        valid = isinstance(items, list) and len(items) <= count
+        valid = valid and all(isinstance(item, str) and item.strip() and len(item) <= length for item in items)
+        if not valid:
             raise ValueError("request_" + key)
+
+
+def _validate_request_sync(value: dict[str, Any]) -> None:
     if type(value["remote_write"]) is not bool or value["sync_scope"] not in {None, "created", "selected", "all_pending"}:
         raise ValueError("request_sync")
-    period = value["period"]
-    if period is not None:
-        if not isinstance(period, dict) or set(period) != {"start", "end"}:
-            raise ValueError("request_period")
-        start, end = date.fromisoformat(period["start"]), date.fromisoformat(period["end"])
-        if start.isoformat() != period["start"] or end.isoformat() != period["end"] or not 0 <= (end - start).days <= 730:
-            raise ValueError("request_period")
+
+
+def _validate_request_period(period: Any) -> None:
+    if period is None:
+        return
+    if not isinstance(period, dict) or set(period) != {"start", "end"}:
+        raise ValueError("request_period")
+    start, end = date.fromisoformat(period["start"]), date.fromisoformat(period["end"])
+    if start.isoformat() != period["start"] or end.isoformat() != period["end"] or not 0 <= (end - start).days <= 730:
+        raise ValueError("request_period")
+
+
+def validate_request(value: Any, user_ids: set[int], current_user_id: int) -> dict[str, Any]:
+    """Validate provenance and bounds, never the user's choice of words."""
+    if not isinstance(value, dict) or set(value) != set(REQUEST_SCHEMA["required"]):
+        raise ValueError("request_fields")
+    _validate_request_provenance(value, user_ids, current_user_id)
+    _validate_request_text(value)
+    _validate_request_sync(value)
+    _validate_request_period(value["period"])
     return deepcopy(value)
 
 

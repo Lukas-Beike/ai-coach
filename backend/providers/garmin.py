@@ -38,7 +38,160 @@ def normalize_range_records(source: str, value: Any) -> list[dict[str, Any]]:
     return value
 
 
-def collect_garmin_data(  # NOSONAR - cohesive orchestration keeps the transaction boundary explicit
+def _add_error(payload: dict[str, Any], source: str, exc: BaseException, redact: Redact,
+               warn: WarningLogger | None) -> None:
+    message = redact(str(exc))[:500]
+    payload["errors"].append({"source": source, "message": message})
+    if warn:
+        warn(source, message, exc)
+
+
+def _fetch_range(payload: dict[str, Any], pagination: dict[str, dict[str, Any]], key: str, fetch: Any,
+                 window_start: date, window_end: date, windows_count: int, external_call: ExternalCall,
+                 redact: Redact, warn: WarningLogger | None, capability_allowed: CapabilityAllowed | None,
+                 capability_failure: CapabilityFailure | None, capability_success: CapabilitySuccess | None) -> None:
+    stats = pagination.setdefault(key, {"windows": windows_count, "records": 0, "complete": True})
+    if capability_allowed is not None and not capability_allowed(key):
+        stats.update({"complete": False, "paused": True, "error": "capability_paused"})
+        return
+    try:
+        value = external_call(
+            "garmin", key, lambda: fetch(window_start.isoformat(), window_end.isoformat()),
+            {"window_start": window_start.isoformat(), "window_end": window_end.isoformat()},
+        )
+        records = normalize_range_records(key, value)
+        payload.setdefault(key, []).extend(records)
+        stats["records"] = int(stats["records"]) + len(records)
+        stats.setdefault("completed_windows", []).append({"start": window_start.isoformat(), "end": window_end.isoformat()})
+        if capability_success:
+            capability_success(key)
+    except Exception as exc:
+        stats["complete"] = False
+        stats["error"] = redact(str(exc))[:500]
+        if capability_failure:
+            capability_failure(key, exc)
+        _add_error(payload, key, exc, redact, warn)
+
+
+def _collect_ranges(client: Any, windows: list[tuple[date, date]], payload: dict[str, Any],
+                    pagination: dict[str, dict[str, Any]], include_recovery: bool, status: StatusCallback | None,
+                    external_call: ExternalCall, redact: Redact, warn: WarningLogger | None,
+                    capability_allowed: CapabilityAllowed | None, capability_failure: CapabilityFailure | None,
+                    capability_success: CapabilitySuccess | None) -> None:
+    for index, (window_start, window_end) in enumerate(windows, 1):
+        if status:
+            status(f"Garmin: Zeitraum {index}/{len(windows)} wird synchronisiert…")
+        requests = [("activities", client.get_activities_by_date)]
+        if include_recovery:
+            requests[0:0] = [("sleep", client.get_sleep_daily), ("hrv", client.get_hrv_data_range)]
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="garmin-range") as executor:
+            futures = [executor.submit(
+                _fetch_range, payload, pagination, key, fetch, window_start, window_end, len(windows),
+                external_call, redact, warn, capability_allowed, capability_failure, capability_success
+            ) for key, fetch in requests]
+            for future in futures:
+                future.result()
+
+
+def _collect_daily_stats(client: Any, windows: list[tuple[date, date]], payload: dict[str, Any],
+                         pagination: dict[str, dict[str, Any]], external_call: ExternalCall, redact: Redact,
+                         warn: WarningLogger | None) -> None:
+    fetch = getattr(client, "get_user_summary", None)
+    if not callable(fetch):
+        return
+    stats = pagination.setdefault("daily_stats", {"windows": len(windows), "records": 0, "complete": True})
+    for window_start, window_end in windows:
+        current = window_start
+        while current <= window_end:
+            try:
+                value = external_call("garmin", "daily_stats", lambda current=current: fetch(current.isoformat()), {"date": current.isoformat()})
+                records = value if isinstance(value, list) else [value]
+                if any(not isinstance(record, dict) for record in records):
+                    raise ValueError("Invalid Garmin daily_stats response")
+                for record in records:
+                    if not any(key in record for key in ("calendarDate", "summaryDate", "date")):
+                        record = {"calendarDate": current.isoformat(), **record}
+                    payload.setdefault("daily_stats", []).append(record)
+                    stats["records"] = int(stats["records"]) + 1
+            except Exception as exc:
+                stats["complete"] = False
+                stats["error"] = redact(str(exc))[:500]
+                _add_error(payload, "daily_stats", exc, redact, warn)
+            current += timedelta(days=1)
+
+
+def _collect_resting_hr(client: Any, windows: list[tuple[date, date]], payload: dict[str, Any],
+                        pagination: dict[str, dict[str, Any]], external_call: ExternalCall, redact: Redact,
+                        warn: WarningLogger | None) -> None:
+    fetch = getattr(client, "get_heart_rates", None)
+    if not callable(fetch):
+        return
+    stats = pagination.setdefault("resting_hr", {"windows": len(windows), "records": 0, "complete": True})
+    for window_start, window_end in windows:
+        current = window_start
+        while current <= window_end:
+            try:
+                value = external_call("garmin", "resting_hr", lambda current=current: fetch(current.isoformat()), {"date": current.isoformat()})
+                if not isinstance(value, dict):
+                    raise ValueError("Invalid Garmin resting_hr response")
+                if not any(key in value for key in ("calendarDate", "date", "summaryDate")):
+                    value = {"calendarDate": current.isoformat(), **value}
+                payload.setdefault("resting_hr", []).append(value)
+                stats["records"] = int(stats["records"]) + 1
+            except Exception as exc:
+                stats["complete"] = False
+                stats["error"] = redact(str(exc))[:500]
+                _add_error(payload, "resting_hr", exc, redact, warn)
+            current += timedelta(days=1)
+
+
+def _collect_current_metrics(client: Any, today: date, payload: dict[str, Any], external_call: ExternalCall,
+                             redact: Redact, warn: WarningLogger | None) -> None:
+    fetch = getattr(client, "get_heart_rate_zones", None)
+    if callable(fetch):
+        _collect_optional_metric(payload, "heart_rate_zones", fetch, None, external_call, redact, warn)
+    max_metrics_start = today - timedelta(days=89)
+    max_metrics_range = getattr(client, "get_max_metrics_range", None)
+    metrics = (
+        ("readiness", lambda: client.get_training_readiness(today.isoformat()), {"date": today.isoformat()}),
+        ("race_predictions", client.get_race_predictions, None),
+        ("max_metrics", lambda: client.get_max_metrics_range(max_metrics_start.isoformat(), today.isoformat()),
+         {"window_start": max_metrics_start.isoformat(), "window_end": today.isoformat(), "range_supported": callable(max_metrics_range)}),
+    )
+    for key, metric_fetch, details in metrics:
+        _collect_optional_metric(payload, key, metric_fetch, details, external_call, redact, warn)
+    fetch = getattr(client, "get_cycling_ftp", None)
+    if callable(fetch):
+        _collect_optional_metric(payload, "cycling_ftp", fetch, None, external_call, redact, warn)
+    fetch = getattr(client, "get_lactate_threshold", None)
+    if callable(fetch):
+        _collect_optional_metric(payload, "running_threshold", lambda: fetch(latest=True), {"latest": True}, external_call, redact, warn)
+    fetch = getattr(client, "get_weigh_ins", None)
+    if callable(fetch):
+        weight_start = today - timedelta(days=89)
+        _collect_optional_metric(payload, "weight", lambda: fetch(weight_start.isoformat(), today.isoformat()),
+                                 {"window_start": weight_start.isoformat(), "window_end": today.isoformat()},
+                                 external_call, redact, warn)
+
+
+def _collect_optional_metric(payload: dict[str, Any], key: str, fetch: Any, details: Any,
+                             external_call: ExternalCall, redact: Redact, warn: WarningLogger | None) -> None:
+    try:
+        payload[key] = external_call("garmin", key, fetch, details)
+    except Exception as exc:
+        _add_error(payload, key, exc, redact, warn)
+
+
+def _validate_current_metrics(payload: dict[str, Any], redact: Redact, warn: WarningLogger | None) -> None:
+    keys = ("heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp",
+            "running_threshold", "weight")
+    for key in keys:
+        if key in payload and not isinstance(payload[key], (dict, list)):
+            payload.pop(key)
+            _add_error(payload, key, ValueError(f"Invalid Garmin {key} response"), redact, warn)
+
+
+def collect_garmin_data(
     client: Any,
     windows: Iterable[tuple[date, date]],
     *,
@@ -54,205 +207,19 @@ def collect_garmin_data(  # NOSONAR - cohesive orchestration keeps the transacti
     capability_success: CapabilitySuccess | None = None,
     options: GarminCollectionOptions | None = None,
 ) -> dict[str, Any]:
-    """Collect Garmin ranges through injected application boundaries.
-
-    No credentials, database connections, locks, or application globals are
-    owned here. Individual source failures are retained only as redacted
-    bounded messages so callers can persist the result safely.
-    """
+    """Collect bounded Garmin data through injected application boundaries."""
     windows = list(windows)
     collection_options = options or GarminCollectionOptions()
-    include_recovery = collection_options.include_recovery
-    include_current_metrics = collection_options.include_current_metrics
-    payload: dict[str, Any] = {
-        "synced_at": synced_at,
-        "start": start.isoformat(),
-        "end": today.isoformat(),
-        "errors": [],
-    }
+    payload: dict[str, Any] = {"synced_at": synced_at, "start": start.isoformat(), "end": today.isoformat(), "errors": []}
     pagination: dict[str, dict[str, Any]] = {}
-
-    def add_error(source: str, exc: BaseException) -> None:
-        message = redact(str(exc))[:500]
-        payload["errors"].append({"source": source, "message": message})
-        if warn:
-            warn(source, message, exc)
-
-    def fetch_range(key: str, fetch: Any, window_start: date, window_end: date) -> None:
-        stats = pagination.setdefault(key, {"windows": len(windows), "records": 0, "complete": True})
-        if capability_allowed is not None and not capability_allowed(key):
-            stats["complete"] = False
-            stats["paused"] = True
-            stats["error"] = "capability_paused"
-            return
-        try:
-            value = external_call(
-                "garmin",
-                key,
-                lambda: fetch(window_start.isoformat(), window_end.isoformat()),
-                {"window_start": window_start.isoformat(), "window_end": window_end.isoformat()},
-            )
-            records = normalize_range_records(key, value)
-            payload.setdefault(key, []).extend(records)
-            stats["records"] = int(stats["records"]) + len(records)
-            stats.setdefault("completed_windows", []).append({"start": window_start.isoformat(), "end": window_end.isoformat()})
-            if capability_success:
-                capability_success(key)
-        except Exception as exc:
-            stats["complete"] = False
-            stats["error"] = redact(str(exc))[:500]
-            if capability_failure:
-                capability_failure(key, exc)
-            add_error(key, exc)
-
-    for index, (window_start, window_end) in enumerate(windows, 1):
-        if status:
-            status(f"Garmin: Zeitraum {index}/{len(windows)} wird synchronisiert…")
-        requests = [("activities", client.get_activities_by_date)]
-        if include_recovery:
-            requests[0:0] = [
-                ("sleep", client.get_sleep_daily),
-                ("hrv", client.get_hrv_data_range),
-            ]
-        # Garmin's range endpoints are independent. Keep the concurrency
-        # deliberately at two calls so the provider is not flooded and the
-        # persisted job can still report one bounded window at a time.
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="garmin-range") as executor:
-            futures = [
-                executor.submit(fetch_range, key, fetch, window_start, window_end)
-                for key, fetch in requests
-            ]
-            for future in futures:
-                future.result()
-
-    daily_stats_fetch = (
-        getattr(client, "get_user_summary", None)
-        if include_recovery else None
-    )
-    if callable(daily_stats_fetch):
-        stats = pagination.setdefault("daily_stats", {"windows": len(windows), "records": 0, "complete": True})
-        for window_start, window_end in windows:
-            current = window_start
-            while current <= window_end:
-                try:
-                    value = external_call(
-                        "garmin",
-                        "daily_stats",
-                        lambda current=current: daily_stats_fetch(current.isoformat()),
-                        {"date": current.isoformat()},
-                    )
-                    records = value if isinstance(value, list) else [value]
-                    if any(not isinstance(record, dict) for record in records):
-                        raise ValueError("Invalid Garmin daily_stats response")
-                    for record in records:
-                        if isinstance(record, dict):
-                            if not any(key in record for key in ("calendarDate", "summaryDate", "date")):
-                                record = {"calendarDate": current.isoformat(), **record}
-                            payload.setdefault("daily_stats", []).append(record)
-                            stats["records"] = int(stats["records"]) + 1
-                except Exception as exc:
-                    stats["complete"] = False
-                    stats["error"] = redact(str(exc))[:500]
-                    add_error("daily_stats", exc)
-                current += timedelta(days=1)
-
-    heart_rate_fetch = getattr(client, "get_heart_rates", None) if include_recovery else None
-    if callable(heart_rate_fetch):
-        stats = pagination.setdefault("resting_hr", {"windows": len(windows), "records": 0, "complete": True})
-        for window_start, window_end in windows:
-            current = window_start
-            while current <= window_end:
-                try:
-                    value = external_call(
-                        "garmin",
-                        "resting_hr",
-                        lambda current=current: heart_rate_fetch(current.isoformat()),
-                        {"date": current.isoformat()},
-                    )
-                    if not isinstance(value, dict):
-                        raise ValueError("Invalid Garmin resting_hr response")
-                    if value is not None:
-                        if isinstance(value, dict) and not any(key in value for key in ("calendarDate", "date", "summaryDate")):
-                            value = {"calendarDate": current.isoformat(), **value}
-                        payload.setdefault("resting_hr", []).append(value)
-                        stats["records"] = int(stats["records"]) + 1
-                except Exception as exc:
-                    stats["complete"] = False
-                    stats["error"] = redact(str(exc))[:500]
-                    add_error("resting_hr", exc)
-                current += timedelta(days=1)
-
-    heart_rate_zones_fetch = getattr(client, "get_heart_rate_zones", None) if include_current_metrics else None
-    if callable(heart_rate_zones_fetch):
-        try:
-            payload["heart_rate_zones"] = external_call(
-                "garmin", "heart_rate_zones", heart_rate_zones_fetch, None
-            )
-        except Exception as exc:
-            add_error("heart_rate_zones", exc)
-
-    if include_current_metrics:
-        max_metrics_start = today - timedelta(days=89)
-        max_metrics_range = getattr(client, "get_max_metrics_range", None)
-        for key, fetch, details in (
-            ("readiness", lambda: client.get_training_readiness(today.isoformat()), {"date": today.isoformat()}),
-            ("race_predictions", client.get_race_predictions, None),
-            (
-                "max_metrics",
-                lambda: client.get_max_metrics_range(max_metrics_start.isoformat(), today.isoformat()),
-                {
-                    "window_start": max_metrics_start.isoformat(),
-                    "window_end": today.isoformat(),
-                    "range_supported": callable(max_metrics_range),
-                },
-            ),
-        ):
-            try:
-                payload[key] = external_call("garmin", key, fetch, details)
-            except Exception as exc:
-                add_error(key, exc)
-
-    cycling_ftp_fetch = getattr(client, "get_cycling_ftp", None) if include_current_metrics else None
-    if callable(cycling_ftp_fetch):
-        try:
-            payload["cycling_ftp"] = external_call("garmin", "cycling_ftp", cycling_ftp_fetch, None)
-        except Exception as exc:
-            add_error("cycling_ftp", exc)
-
-    running_threshold_fetch = getattr(client, "get_lactate_threshold", None) if include_current_metrics else None
-    if callable(running_threshold_fetch):
-        try:
-            payload["running_threshold"] = external_call(
-                "garmin", "running_threshold", lambda: running_threshold_fetch(latest=True), {"latest": True}
-            )
-        except Exception as exc:
-            add_error("running_threshold", exc)
-    # get_lactate_threshold() already contains the cycling heart-rate field
-    # when Garmin provides it (heartRateCycling). The separate range endpoint
-    # is undocumented and has started returning an unprocessable response for
-    # otherwise healthy accounts. Keep the collector on the supported client
-    # method; garmin_performance_metrics() can read heartRateCycling from the
-    # running_threshold payload and falls back to the other source sections.
-
-    weight_fetch = (
-        getattr(client, "get_weigh_ins", None)
-        if include_current_metrics else None
-    )
-    if callable(weight_fetch):
-        try:
-            weight_start = today - timedelta(days=89)
-            payload["weight"] = external_call(
-                "garmin",
-                "weight",
-                lambda: weight_fetch(weight_start.isoformat(), today.isoformat()),
-                {"window_start": weight_start.isoformat(), "window_end": today.isoformat()},
-            )
-        except Exception as exc:
-            add_error("weight", exc)
-
+    _collect_ranges(client, windows, payload, pagination, collection_options.include_recovery, status, external_call,
+                    redact, warn, capability_allowed, capability_failure, capability_success)
+    if collection_options.include_recovery:
+        _collect_daily_stats(client, windows, payload, pagination, external_call, redact, warn)
+        _collect_resting_hr(client, windows, payload, pagination, external_call, redact, warn)
+    if collection_options.include_current_metrics:
+        _collect_current_metrics(client, today, payload, external_call, redact, warn)
     payload["provider_sync"] = {"pagination": pagination}
-    for key in ("heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp", "running_threshold", "weight"):
-        if key in payload and not isinstance(payload[key], (dict, list)):
-            payload.pop(key)
-            add_error(key, ValueError(f"Invalid Garmin {key} response"))
+    _validate_current_metrics(payload, redact, warn)
     return payload
+
