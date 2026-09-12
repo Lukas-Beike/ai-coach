@@ -2171,18 +2171,14 @@ async function loadContextPreview() {
   } finally { button.disabled = false; }
 }
 
-function renderTrainingPlans(plans, workouts) {
-  const root = $("#trainingPlans");
-  if (!root) return;
-  root.replaceChildren();
-  const entries = (workouts || []).filter((item) => item?.plan_id && !item?.archived);
-  if (!Array.isArray(plans) || !plans.length) return;
-  const heading = document.createElement("h3");
-  heading.className = "subsection-title";
-  heading.textContent = "Mehrwochenpläne";
-  root.append(heading);
-  plans.forEach((plan) => {
-    const planEntries = entries.filter((item) => String(item.plan_id) === String(plan.id));
+function trainingPlanEntry(item) {
+  const entry = document.createElement("div");
+  entry.className = "training-plan-entry";
+  entry.textContent = `${item.date ? dateLabel(item.date) : "Ohne Datum"} · ${item.name || "Einheit"} · ${item.duration_minutes || Math.round(Number(item.moving_time || 0) / 60) || "?"} Min.`;
+  return entry;
+}
+
+function trainingPlanCard(plan, planEntries) {
     const details = document.createElement("details");
     details.className = "training-plan";
     const summary = document.createElement("summary");
@@ -2199,12 +2195,7 @@ function renderTrainingPlans(plans, workouts) {
       goal.textContent = plan.goal;
       body.append(goal);
     }
-    planEntries.sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))).forEach((entry) => {
-      const item = document.createElement("div");
-      item.className = "training-plan-entry";
-      item.textContent = `${entry.date ? dateLabel(entry.date) : "Ohne Datum"} · ${entry.name || "Einheit"} · ${entry.duration_minutes || Math.round(Number(entry.moving_time || 0) / 60) || "?"} Min.`;
-      body.append(item);
-    });
+    planEntries.sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))).forEach((entry) => body.append(trainingPlanEntry(entry)));
     if (!planEntries.length) {
       const empty = document.createElement("p");
       empty.className = "fine-print";
@@ -2212,7 +2203,22 @@ function renderTrainingPlans(plans, workouts) {
       body.append(empty);
     }
     details.append(body);
-    root.append(details);
+    return details;
+}
+
+function renderTrainingPlans(plans, workouts) {
+  const root = $("#trainingPlans");
+  if (!root) return;
+  root.replaceChildren();
+  const entries = (workouts || []).filter((item) => item?.plan_id && !item?.archived);
+  if (!Array.isArray(plans) || !plans.length) return;
+  const heading = document.createElement("h3");
+  heading.className = "subsection-title";
+  heading.textContent = "Mehrwochenpläne";
+  root.append(heading);
+  plans.forEach((plan) => {
+    const planEntries = entries.filter((item) => String(item.plan_id) === String(plan.id));
+    root.append(trainingPlanCard(plan, planEntries));
   });
 }
 
