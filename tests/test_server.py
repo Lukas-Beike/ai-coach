@@ -5211,6 +5211,16 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in result["planned_workouts"]], ["Future workout"])
         self.assertEqual(result["activity_rollups_by_sport"]["Radfahren"]["last_7_days"]["sessions"], 7)
 
+    def test_activity_rollup_ignores_invalid_values_and_outside_dates(self):
+        anchor = date(2026, 9, 12)
+        rollup = server.activity_rollup([
+            {"start_date_local": "2026-09-12", "moving_time": "3600", "icu_training_load": "42.5"},
+            {"start_date_local": "2026-09-11", "moving_time": "invalid", "icu_training_load": None},
+            {"start_date_local": "not-a-date", "moving_time": 7200, "icu_training_load": 90},
+            {"start_date_local": "2026-09-01", "moving_time": 7200, "icu_training_load": 90},
+        ], 2, anchor)
+        self.assertEqual(rollup, {"days": 2, "sessions": 2, "duration_hours": 1.0, "training_load": 42.5})
+
     def test_coach_intervals_context_is_deterministic_for_same_timestamps_and_missing_sports(self):
         today = server.local_now().date()
         snapshot = {
