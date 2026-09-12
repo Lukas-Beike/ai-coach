@@ -11,8 +11,8 @@ on:
   # resulting check remains blocking until a fresh review is requested.
   push:
     branches: [develop, main]
-  # pull_request_target runs the workflow and local action from the trusted
-  # target branch. This workflow never checks out or executes pull-request code.
+  # pull_request_target runs the workflow from the trusted target branch. This
+  # workflow never checks out or executes pull-request code.
   pull_request_target:
     branches: [develop, main]
     types: [opened, synchronize, reopened, ready_for_review, edited]
@@ -521,25 +521,33 @@ jobs:
               core.setFailed(message);
             }
 
-      - name: Check out trusted develop workflow sources
+      - name: Run trusted develop Codex gate
         # Dispatch and manual-comment workflows already run from protected
-        # develop. Use their current action even before the next main release.
-        if: matrix.skipCodexReview != true && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # develop. Invoke the action directly from that protected ref so no
+        # pull-request repository is checked out in this privileged workflow.
+        if: matrix.skipCodexReview != true && github.event_name != 'push' && (matrix.baseRef == 'develop' || github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment')
+        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@develop
         with:
-          repository: ${{ github.repository }}
-          ref: develop
-          fetch-depth: 1
-          persist-credentials: false
+          github-token: ${{ github.token }}
+          pull-request-number: ${{ matrix.pullRequestNumber }}
+          review-requested-at: ${{ matrix.reviewRequestedAt }}
+          check-name: ${{ matrix.checkName }}
+          codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
+          timeout-seconds: 2400
+          poll-seconds: 30
 
-      - name: Check out trusted main workflow sources
-        if: matrix.skipCodexReview != true && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run trusted main Codex gate
+        # Main pull-request events use the protected main action revision.
+        if: matrix.skipCodexReview != true && github.event_name != 'push' && matrix.baseRef == 'main' && github.event_name != 'workflow_dispatch' && github.event_name != 'issue_comment'
+        uses: Lukas-Beike/ai-coach/.github/actions/codex-review-gate@main
         with:
-          repository: ${{ github.repository }}
-          ref: main
-          fetch-depth: 1
-          persist-credentials: false
+          github-token: ${{ github.token }}
+          pull-request-number: ${{ matrix.pullRequestNumber }}
+          review-requested-at: ${{ matrix.reviewRequestedAt }}
+          check-name: ${{ matrix.checkName }}
+          codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
+          timeout-seconds: 2400
+          poll-seconds: 30
 
       - name: Block until a fresh Codex review is requested
         if: matrix.skipCodexReview != true && github.event_name == 'push'
@@ -570,15 +578,3 @@ jobs:
                 summary: `The target branch advanced. Comment @codex review on PR #${pullRequest.data.number} to obtain a review against the current base.`,
               },
             });
-
-      - name: Wait for the subscription-backed Codex review
-        if: matrix.skipCodexReview != true && github.event_name != 'push'
-        uses: ./.github/actions/codex-review-gate
-        with:
-          github-token: ${{ github.token }}
-          pull-request-number: ${{ matrix.pullRequestNumber }}
-          review-requested-at: ${{ matrix.reviewRequestedAt }}
-          check-name: ${{ matrix.checkName }}
-          codex-bot-logins: chatgpt-codex-connector[bot],chatgpt-codex-connector
-          timeout-seconds: 2400
-          poll-seconds: 30
