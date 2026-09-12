@@ -1834,6 +1834,24 @@ class CoachTests(unittest.TestCase):
         event = server.publish_state_event("job", {"job_id": "job-1", "status": "completed", "progress": {"completed": 1, "total": 1}})
         self.assertEqual(server.state_events_since(event["event_id"] - 1)["events"][0]["data"]["progress"]["completed"], 1)
 
+    def test_state_event_batch_sends_events_and_resets_for_gaps(self):
+        handler = object.__new__(server.RequestHandler)
+        sent = []
+        handler.send_sse_event = lambda event, payload, event_id=None: sent.append((event, payload, event_id))
+        since, gap = handler.send_state_event_batch({
+            "gap": False,
+            "latest_event_id": 5,
+            "events": [
+                {"event_id": 4, "event": "provider", "data": {"status": "running"}},
+                {"event_id": 5, "event": "provider", "data": {"status": "completed"}},
+            ],
+        }, 3)
+        self.assertEqual((since, gap), (5, False))
+        self.assertEqual(sent[-1], ("provider", {"status": "completed"}, 5))
+        since, gap = handler.send_state_event_batch({"gap": True, "latest_event_id": 9, "events": []}, since)
+        self.assertEqual((since, gap), (9, True))
+        self.assertEqual(sent[-1], ("reset", {"reason": "gap", "latest_event_id": 9}, 9))
+
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
             server.public_bootstrap()

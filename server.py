@@ -19212,6 +19212,16 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.log_client_disconnect()
             raise ClientDisconnected() from exc
 
+    def send_state_event_batch(self, batch: dict[str, Any], since: int) -> tuple[int, bool]:
+        if batch["gap"]:
+            latest_event_id = int(batch["latest_event_id"])
+            self.send_sse_event("reset", {"reason": "gap", "latest_event_id": latest_event_id}, latest_event_id or None)
+            return latest_event_id, True
+        for item in batch["events"]:
+            since = int(item["event_id"])
+            self.send_sse_event(item["event"], item["data"], since)
+        return since, False
+
     def handle_state_events(self) -> None:
         query = parse_qs(urlparse(self.path).query)
         raw_since = query.get("since", ["0"])[0]
@@ -19222,28 +19232,18 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             self.send_sse_headers()
             initial = state_events_since(since)
-            if initial["gap"]:
-                since = int(initial["latest_event_id"])
-                self.send_sse_event("reset", {"reason": "gap", "latest_event_id": since}, since or None)
-            else:
-                for item in initial["events"]:
-                    since = int(item["event_id"])
-                    self.send_sse_event(item["event"], item["data"], since)
+            since, _ = self.send_state_event_batch(initial, since)
             self.send_sse_event("ready", {"latest_event_id": since}, since or None)
             while True:
                 with STATE_EVENT_CONDITION:
                     STATE_EVENT_CONDITION.wait(timeout=15)
                 pending = state_events_since(since)
-                if pending["gap"]:
-                    since = int(pending["latest_event_id"])
-                    self.send_sse_event("reset", {"reason": "gap", "latest_event_id": since}, since or None)
+                since, gap = self.send_state_event_batch(pending, since)
+                if gap:
                     continue
                 if not pending["events"]:
                     self.send_sse_event("heartbeat", {"latest_event_id": pending["latest_event_id"]})
                     continue
-                for item in pending["events"]:
-                    since = int(item["event_id"])
-                    self.send_sse_event(item["event"], item["data"], since)
         except ClientDisconnected:
             return
 
