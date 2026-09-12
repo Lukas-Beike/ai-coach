@@ -6940,6 +6940,15 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(validation["direct_activity_estimates"]["activity_configured_ftp_watts"], 300)
         self.assertNotEqual(validation["direct_activity_estimates"].get("activity_ftp_watts"), 300)
 
+    def test_activity_validation_omits_malformed_or_oversized_direct_estimates(self):
+        validation = server.activity_performance_validation([{
+            "id": "invalid-estimates", "type": "Ride", "start_date_local": "2026-09-12T08:00:00",
+            "vo2max": {"value": 60}, "ftp": "999999999999999999999999999999999999999999",
+            "eFTP": [300], "icu_ftp": 300,
+        }], {}, {})
+
+        self.assertEqual(validation["direct_activity_estimates"], {"activity_configured_ftp_watts": 300})
+
     def test_form_is_derived_from_ctl_and_atl_when_intervals_omits_tsb(self):
         today = date.today().isoformat()
         snapshot = {

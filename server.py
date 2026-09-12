@@ -12237,6 +12237,14 @@ def latest_activity_for_validation(activities: list[Any]) -> dict[str, Any] | No
     )
 
 
+def bounded_activity_metric(value: Any, minimum: float, maximum: float) -> float | int | None:
+    """Normalize bounded numeric estimates from an untrusted activity record."""
+    if isinstance(value, (dict, list)) or (isinstance(value, str) and len(value) > 32):
+        return None
+    number = as_number(value)
+    return number if number is not None and minimum <= float(number) <= maximum else None
+
+
 def activity_performance_validation(
     activities: list[Any],
     metrics: dict[str, dict[str, Any]],
@@ -12310,16 +12318,16 @@ def activity_performance_validation(
             "observed_at": provider_value.get("observed_at"),
             "historical_comparison": comparisons.get({"cycling_eftp_watts": "cycling_eftp_30d"}.get(key, f"{key}_30d")),
         })
-    direct_activity_estimates = {
-        key: first_present(latest, aliases)
-        for key, aliases in {
-            "activity_vo2max": ("vo2max", "vo2_max", "vO2MaxValue", "vo2MaxValue", "icu_vo2max"),
-            "activity_ftp_watts": ("ftp", "functionalThresholdPower"),
-            "activity_eftp_watts": ("eftp", "eFTP", "icu_eftp"),
-            "activity_configured_ftp_watts": ("icu_ftp",),
-        }.items()
-        if first_present(latest, aliases) not in (None, "")
-    }
+    direct_activity_estimates = {}
+    for key, aliases, minimum, maximum in (
+        ("activity_vo2max", ("vo2max", "vo2_max", "vO2MaxValue", "vo2MaxValue", "icu_vo2max"), 10, 100),
+        ("activity_ftp_watts", ("ftp", "functionalThresholdPower"), 20, 2000),
+        ("activity_eftp_watts", ("eftp", "eFTP", "icu_eftp"), 20, 2000),
+        ("activity_configured_ftp_watts", ("icu_ftp",), 20, 2000),
+    ):
+        value = bounded_activity_metric(first_present(latest, aliases), minimum, maximum)
+        if value is not None:
+            direct_activity_estimates[key] = value
     return {
         "available": True,
         "status": "needs_coach_interpretation",
