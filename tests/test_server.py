@@ -540,7 +540,7 @@ class CoachTests(unittest.TestCase):
                 "activities": [
                     {
                         "id": "activity-1", "name": "Tempo", "average_watts": 245,
-                        "streams": {"watts": [200, 250, 280]}, "provider_extra": "kept",
+                        "streams": {"watts": [200, 250, 280], "latlng": [[1, 2], [3, 4]]}, "provider_extra": "must not pass",
                     },
                     {"id": "activity-2", "name": "Recovery", "average_watts": 120},
                 ],
@@ -560,10 +560,11 @@ class CoachTests(unittest.TestCase):
         )
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["activity"]["id"], "activity-1")
         self.assertEqual(result["activity"]["streams"], {"watts": [200, 250, 280]})
-        self.assertEqual(result["activity"]["provider_extra"], "kept")
-        self.assertEqual(result["data_scope"], "complete raw Intervals.icu activity record from the durable provider snapshot")
+        self.assertNotIn("id", result["activity"])
+        self.assertNotIn("latlng", result["activity"]["streams"])
+        self.assertNotIn("provider_extra", result["activity"])
+        self.assertEqual(result["data_scope"], "bounded sanitized detail projection of exactly one Intervals.icu activity")
         self.assertNotIn("activity-2", json.dumps(result))
 
         with self.assertRaises(server.AppError) as missing:
@@ -1977,6 +1978,7 @@ class CoachTests(unittest.TestCase):
             bounded_coach_context_value,
             compact_coach_activity,
             compact_coach_local_planned_workouts,
+            detailed_coach_activity,
         )
 
         select = lambda value, fields: {key: value[key] for key in fields if key in value}
@@ -1990,6 +1992,17 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual([item["id"] for item in workouts], ["1"])
         self.assertLessEqual(len(json.dumps(bounded_coach_context_value({"text": "x" * 1000}, 100), ensure_ascii=False, separators=(",", ":"))), 100)
+        detail = detailed_coach_activity({
+            "id": "provider-id", "average_watts": 245, "provider_extra": "must not pass",
+            "streams": {"watts": list(range(2505)), "latlng": [[1, 2]]},
+        })
+        self.assertEqual(detail["average_watts"], 245)
+        self.assertEqual(len(detail["streams"]["watts"]), 2000)
+        self.assertEqual(detail["streams"]["watts"][0], 0)
+        self.assertEqual(detail["streams"]["watts"][-1], 2504)
+        self.assertNotIn("id", detail)
+        self.assertNotIn("provider_extra", detail)
+        self.assertNotIn("latlng", detail["streams"])
 
     def test_backup_export_helpers_are_dependency_light_and_preserve_bounds(self):
         from backend.backup import export as backup_export

@@ -142,7 +142,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         for tool, expected in (("read_training_state", planned["id"]), ("list_planned_workouts", planned["id"]),
                                ("list_workout_library", "Synthetic template"), ("list_training_plans", "Synthetic plan"),
                                ("list_competitions", "Synthetic race"), ("list_change_history", "entity_type"),
-                               ("list_recent_activities", "synthetic-run"), ("get_activity_details", "raw_detail")):
+                               ("list_recent_activities", "synthetic-run"), ("get_activity_details", "Synthetic run")):
             with self.subTest(tool=tool):
                 arguments = {"activity_id": "synthetic-run"} if tool == "get_activity_details" else None
                 message = "Analysiere bitte diese konkrete Einheit im Detail." if tool == "get_activity_details" else "Zeig mir den aktuellen Stand."
