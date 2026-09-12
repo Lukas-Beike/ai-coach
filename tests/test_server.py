@@ -7995,6 +7995,10 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(details["reason"], code)
             self.assertIn("Limit", details["message"])
 
+    def test_openai_log_reasons_are_static_allowlisted_values(self):
+        self.assertEqual(server.safe_openai_log_reason("project_spend_limit_exceeded"), "usage_limit_exceeded")
+        self.assertEqual(server.safe_openai_log_reason("provider-private-message"), "http_error")
+
     def test_openai_conversation_lock_retry_uses_structured_reason(self):
         calls = []
         responses = [server.AppError(409, "locked", reason="conversation_locked"), {"output_text": "ok"}]
