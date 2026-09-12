@@ -140,7 +140,6 @@ def _fit_developer_definition(data, offset, record_header, data_end):
 
 def _fit_data_record(data, offset, record_header, definition, data_end, last_timestamp):
     compressed = bool(record_header & 0x80)
-    local_number = ((record_header >> 5) & 0x03) if compressed else (record_header & 0x0F)
     if definition is None:
         raise ValueError("FIT data has no definition")
     architecture, global_number, fields, developer_fields = definition
