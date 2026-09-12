@@ -5609,34 +5609,57 @@ def _ical_recurrence_starts(current: dict[str, Any], rule: dict[str, Any], windo
     return _ical_period_recurrence_starts(base, rule, window_start, window_end)
 
 
+def _ical_event_duration(current: dict[str, Any]) -> timedelta:
+    start = current["start"]
+    end = current.get("end")
+    if end is None:
+        fallback = timedelta(days=1) if current.get("all_day") else timedelta(hours=1)
+        end = start + current.get("duration", fallback)
+    if end <= start:
+        end = start + (timedelta(days=1) if current.get("all_day") else timedelta(minutes=30))
+    return end - start
+
+
+def _ical_occurrence_overlaps_window(start: datetime, duration: timedelta, window_start: date, window_end: date) -> bool:
+    end_date = (start + duration - timedelta(microseconds=1)).date()
+    return start.date() <= window_end and end_date >= window_start
+
+
+def _ical_event_rule_starts(current: dict[str, Any], duration: timedelta, window_start: date, window_end: date) -> list[datetime]:
+    start = current["start"]
+    if not current.get("rrules"):
+        return [start] if _ical_occurrence_overlaps_window(start, duration, window_start, window_end) else []
+    if current.get("unsupported_recurrence"):
+        raise AppError(400, "Diese Kalender-Wiederholung wird nicht unterstützt.")
+    starts: list[datetime] = []
+    recurrence_start = window_start - timedelta(days=duration.days + 1)
+    for raw_rule in current["rrules"]:
+        starts.extend(_ical_recurrence_starts(current, _ical_rrule(raw_rule), recurrence_start, window_end))
+    return sorted(set(starts))
+
+
+def _ical_event_rdates(current: dict[str, Any], duration: timedelta, window_start: date, window_end: date, existing: list[datetime]) -> list[datetime]:
+    return [
+        value for value in current.get("rdates", [])
+        if value not in existing and _ical_occurrence_overlaps_window(value, duration, window_start, window_end)
+    ]
+
+
 def _ical_event_instances(
     current: dict[str, Any],
     window_start: date,
     window_end: date,
     excluded_starts: set[datetime] | None = None,
 ) -> list[dict[str, Any]]:
-    start = current["start"]
-    end = current.get("end")
-    if end is None:
-        end = start + current.get("duration", (timedelta(days=1) if current.get("all_day") else timedelta(hours=1)))
-    if end <= start:
-        end = start + (timedelta(days=1) if current.get("all_day") else timedelta(minutes=30))
-    duration = end - start
-    if not current.get("rrules"):
-        starts = [start] if start.date() <= window_end and (end - timedelta(microseconds=1)).date() >= window_start else []
-    else:
-        if current.get("unsupported_recurrence"):
-            raise AppError(400, "Diese Kalender-Wiederholung wird nicht unterstützt.")
-        starts = []
-        for raw_rule in current["rrules"]:
-            starts.extend(_ical_recurrence_starts(current, _ical_rrule(raw_rule), window_start - timedelta(days=duration.days + 1), window_end))
-        starts = sorted(set(starts))
-    starts.extend(
-        value for value in current.get("rdates", [])
-        if value.date() <= window_end and (value + duration - timedelta(microseconds=1)).date() >= window_start and value not in starts
-    )
+    duration = _ical_event_duration(current)
+    starts = _ical_event_rule_starts(current, duration, window_start, window_end)
+    starts.extend(_ical_event_rdates(current, duration, window_start, window_end, starts))
     excluded = set(current.get("exdates", [])) | set(excluded_starts or ())
-    return [_ical_event_record(current, occurrence, duration) for occurrence in starts if occurrence not in excluded and (occurrence + duration - timedelta(microseconds=1)).date() >= window_start]
+    return [
+        _ical_event_record(current, occurrence, duration)
+        for occurrence in starts
+        if occurrence not in excluded and _ical_occurrence_overlaps_window(occurrence, duration, window_start, window_end)
+    ]
 
 
 def parse_ical_calendar(payload: bytes, *, window_start: date | None = None, window_end: date | None = None) -> list[dict[str, Any]]:
