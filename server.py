@@ -5363,8 +5363,13 @@ def _ical_rule_byday(token: str, frequency: str) -> tuple[int, int | None] | Non
 
 
 def _ical_rule_bydays(values: dict[str, str], frequency: str) -> list[tuple[int, int | None]]:
+    raw_bydays = values.get("BYDAY", "")
+    if not raw_bydays:
+        return []
     bydays: list[tuple[int, int | None]] = []
-    for token in values.get("BYDAY", "").split(","):
+    for token in raw_bydays.split(","):
+        if not token:
+            raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
         item = _ical_rule_byday(token, frequency)
         if item is None:
             continue
