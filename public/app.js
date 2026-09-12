@@ -3933,6 +3933,79 @@ async function resumeQueuedChat() {
   }
 }
 
+function chatPollStateIsCurrent(sessionGeneration, chatGeneration) {
+  return sessionGeneration === state.sessionGeneration && chatGeneration === state.chatGeneration;
+}
+
+function pendingChatTurn() {
+  if (state.chatRequest?.clientTurnId) return state.chatRequest.clientTurnId;
+  try {
+    return sessionStorage.getItem("coachPendingTurn");
+  } catch {
+    return null;
+  }
+}
+
+async function pollPendingChatReceipt(clientTurnId, sessionGeneration, chatGeneration) {
+  if (!clientTurnId || state.chatStream) return { running: false, stale: false };
+  try {
+    const receipt = await api(`/api/chat/receipt?client_turn_id=${encodeURIComponent(clientTurnId)}`);
+    if (!chatPollStateIsCurrent(sessionGeneration, chatGeneration)) return { running: false, stale: true };
+    if (["running", "queued"].includes(receipt.status)) {
+      if (!state.chatRequest) state.chatRequest = { phase: "recovering", clientTurnId, message: null };
+      return { running: true, stale: false };
+    }
+    applyChatReceipt(receipt);
+    rememberChatTurn(null);
+    return { running: false, stale: false };
+  } catch (error) {
+    if (!chatPollStateIsCurrent(sessionGeneration, chatGeneration)) return { running: false, stale: true };
+    if (![403, 404].includes(error.status)) throw error;
+    rememberChatTurn(null);
+    const request = state.chatRequest;
+    if (request?.message) {
+      state.rejectedMessages.push({ role: "user", content: request.message, client_turn_id: clientTurnId,
+        error: "Die Nachricht wurde nicht angenommen. Bitte erneut senden." });
+    }
+    return { running: false, stale: false };
+  }
+}
+
+function showRunningChatStatus(status) {
+  state.chatServerOperationId = status.operation_id || null;
+  if (!state.chatRequest) {
+    state.chatRequest = { phase: "recovering", operationId: state.chatServerOperationId, message: null, background: status.mode === "background" };
+  } else if (state.chatRequest.phase === "recovering") {
+    state.chatRequest.operationId = state.chatServerOperationId;
+    state.chatRequest.background = status.mode === "background";
+  }
+  if (!state.busy) {
+    state.busy = true;
+    renderQuickMessageTemplates();
+    updateChatControls();
+    renderMessages(state.data.messages || [], true);
+  }
+}
+
+async function finishRecoveredChatStatus() {
+  if (state.chatStream) return;
+  const request = state.chatRequest;
+  state.chatServerOperationId = null;
+  if (request?.phase !== "recovering") return;
+  await loadChatHistoryFresh();
+  if (state.chatRequest !== request) return;
+  state.chatRequest = null;
+  state.busy = Boolean(state.chatQueue.length);
+  state.chatStreamText = "";
+  state.chatResponseStarted = false;
+  state.chatResponseScrollPending = true;
+  renderQuickMessageTemplates();
+  renderMessages(state.data?.messages || [], true);
+  updateChatControls();
+  void resumeQueuedChat();
+  scrollChatToResponseStart();
+}
+
 async function pollChatStatus() {
   if (!state.data || document.visibilityState !== "visible" || !navigator.onLine) {
     scheduleChatStatusPoll(5_000);
@@ -3945,69 +4018,13 @@ async function pollChatStatus() {
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
   try {
-    let pendingTurn = state.chatRequest?.clientTurnId;
-    if (!pendingTurn) { try { pendingTurn = sessionStorage.getItem("coachPendingTurn"); } catch { } }
-    if (pendingTurn && !state.chatStream) {
-      try {
-        const receipt = await api(`/api/chat/receipt?client_turn_id=${encodeURIComponent(pendingTurn)}`);
-        if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-        if (receipt.status !== "running" && receipt.status !== "queued") {
-          applyChatReceipt(receipt);
-          rememberChatTurn(null);
-        } else {
-          running = true;
-          if (!state.chatRequest) state.chatRequest = { phase: "recovering", clientTurnId: pendingTurn, message: null };
-        }
-      } catch (error) {
-        if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-        if ([403, 404].includes(error.status)) {
-          rememberChatTurn(null);
-          const request = state.chatRequest;
-          if (request?.message) {
-            state.rejectedMessages.push({ role: "user", content: request.message, client_turn_id: pendingTurn,
-              error: "Die Nachricht wurde nicht angenommen. Bitte erneut senden." });
-          }
-        }
-        else throw error;
-      }
-    }
+    const receiptState = await pollPendingChatReceipt(pendingChatTurn(), sessionGeneration, chatGeneration);
+    if (receiptState.stale) return;
     const status = await api("/api/chat/status");
-    if (sessionGeneration !== state.sessionGeneration || chatGeneration !== state.chatGeneration) return;
-    running = running || status.status === "running";
-    if (running) {
-      state.chatServerOperationId = status.operation_id || null;
-      if (!state.chatRequest) state.chatRequest = { phase: "recovering", operationId: state.chatServerOperationId, message: null, background: status.mode === "background" };
-      else if (state.chatRequest.phase === "recovering") {
-        state.chatRequest.operationId = state.chatServerOperationId;
-        state.chatRequest.background = status.mode === "background";
-      }
-      if (!state.busy) {
-        state.busy = true;
-        renderQuickMessageTemplates();
-        updateChatControls();
-        renderMessages(state.data.messages || [], true);
-      }
-    } else {
-      if (state.chatStream) return;
-      const recoveringRequest = state.chatRequest?.phase === "recovering";
-      state.chatServerOperationId = null;
-      if (recoveringRequest) {
-        const request = state.chatRequest;
-        await loadChatHistoryFresh();
-        if (state.chatRequest === request) {
-          state.chatRequest = null;
-          state.busy = Boolean(state.chatQueue.length);
-          state.chatStreamText = "";
-          state.chatResponseStarted = false;
-          state.chatResponseScrollPending = true;
-          renderQuickMessageTemplates();
-          renderMessages(state.data?.messages || [], true);
-          updateChatControls();
-          void resumeQueuedChat();
-          scrollChatToResponseStart();
-        }
-      }
-    }
+    if (!chatPollStateIsCurrent(sessionGeneration, chatGeneration)) return;
+    running = receiptState.running || status.status === "running";
+    if (running) showRunningChatStatus(status);
+    else await finishRecoveredChatStatus();
   } catch (error) {
     if (state.chatStatusPollInFlight === pollRequest && !/Authentication/.test(error.message)) scheduleChatStatusPoll(5_000);
   } finally {
