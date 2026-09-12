@@ -3568,15 +3568,22 @@ def _garmin_vo2_value(value: Any) -> float | int | None:
     return number if number is not None and 20 <= float(number) <= 100 else None
 
 
+def _garmin_colon_duration_seconds(value: str) -> int | None:
+    parts = value.strip().split(":")
+    if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
+        return None
+    numbers = [int(part) for part in parts]
+    seconds = numbers[-1] + numbers[-2] * 60 + (numbers[-3] * 3600 if len(numbers) == 3 else 0)
+    return seconds if 60 <= seconds <= 100_000 else None
+
+
 def _garmin_duration_seconds(value: Any) -> float | int | None:
     if isinstance(value, dict):
         value = first_present(value, ("raceTime", "racePredictionTime", "predictedTime", "time", "seconds", "value"))
     if isinstance(value, str) and ":" in value:
-        parts = value.strip().split(":")
-        if len(parts) in (2, 3) and all(part.isdigit() for part in parts):
-            numbers = [int(part) for part in parts]
-            seconds = numbers[-1] + numbers[-2] * 60 + (numbers[-3] * 3600 if len(numbers) == 3 else 0)
-            return seconds if 60 <= seconds <= 100_000 else None
+        parsed_duration = _garmin_colon_duration_seconds(value)
+        if parsed_duration is not None:
+            return parsed_duration
     number = as_number(value)
     if number is None:
         return None
