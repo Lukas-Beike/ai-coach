@@ -2774,23 +2774,22 @@ def _history_current(db: Any, entity_type: str, entity_id: str) -> tuple[dict[st
         except (TypeError, json.JSONDecodeError):
             value = dict(DEFAULT_PROFILE)
         return value, _audit_projection(entity_type, value)
-    if entity_type == "workout_library":
-        row = db.execute("SELECT * FROM workout_library WHERE local_id=?", (entity_id,)).fetchone()
-        value = dict(row) if row else None
-        return value, _audit_projection(entity_type, value)
-    if entity_type == "planned_unit":
-        row = db.execute("SELECT * FROM planned_units WHERE local_id=?", (entity_id,)).fetchone()
-        value = dict(row) if row else None
-        return value, _audit_projection(entity_type, value)
-    if entity_type == "competition":
-        row = db.execute(SELECT_COMPETITION_SQL, (entity_id,)).fetchone()
-        value = dict(row) if row else None
-        return value, _audit_projection(entity_type, value)
-    if entity_type == "training_plan":
-        row = db.execute("SELECT * FROM training_plans WHERE id=?", (entity_id,)).fetchone()
-        value = dict(row) if row else None
-        return value, _audit_projection(entity_type, value)
-    raise AppError(400, "Unbekannte lokale Änderung.")
+    value = _history_current_record(db, entity_type, entity_id)
+    return value, _audit_projection(entity_type, value)
+
+
+def _history_current_record(db: Any, entity_type: str, entity_id: str) -> dict[str, Any] | None:
+    queries = {
+        "workout_library": "SELECT * FROM workout_library WHERE local_id=?",
+        "planned_unit": "SELECT * FROM planned_units WHERE local_id=?",
+        "competition": SELECT_COMPETITION_SQL,
+        "training_plan": "SELECT * FROM training_plans WHERE id=?",
+    }
+    query = queries.get(entity_type)
+    if query is None:
+        raise AppError(400, "Unbekannte lokale Änderung.")
+    row = db.execute(query, (entity_id,)).fetchone()
+    return dict(row) if row else None
 
 
 def _history_target(row: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
