@@ -150,6 +150,7 @@ PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 UTC_OFFSET_SUFFIX = "+00:00"
 ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 JSON_MEDIA_TYPE = "application/json"
+OCTET_STREAM_MIME = "application/octet-stream"
 OPENAI_RESPONSES_PATH = "/responses"
 INTERVALS_API_KEY_ERROR = "INTERVALS_API_KEY ist nicht konfiguriert."
 OPENAI_API_KEY_ERROR = "OPENAI_API_KEY ist nicht konfiguriert."
@@ -13437,7 +13438,7 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
                         header, data = part["file_data"].split(",", 1)
                         mime = header[5:].split(";")[0]
                         if str(part.get("filename") or "").lower().endswith(".fit.txt"):
-                            mime = "application/octet-stream"
+                            mime = OCTET_STREAM_MIME
                         parts.append({"inlineData": {"mimeType": mime, "data": data}})
                 continue
             if not isinstance(item, dict) or item.get("type") != "function_call_output":
@@ -13457,10 +13458,7 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
         if not has_input_media:
             for image in payload.get("_gemini_transient_images") or []:
                 if isinstance(image, dict) and image.get("mime") and image.get("data"):
-                    if image.get("type") == "fit":
-                        parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
-                    else:
-                        parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
+                    parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
         if parts:
             history.append({"role": "user", "parts": parts})
     history = _trim_gemini_history(history)
@@ -18225,7 +18223,7 @@ def stream_database_backup(handler: Any) -> None:
             raise AppError(507, "Für den Backup-Download ist nicht ausreichend freier Speicher verfügbar.")
         handler.send_file_stream(
             DB_PATH,
-            "application/octet-stream",
+            OCTET_STREAM_MIME,
             "intervals-coach-database.backup",
             deadline=started + EXPORT_TIME_LIMIT_SECONDS,
         )
@@ -19179,7 +19177,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not target.is_file():
             target = STATIC_TARGETS[ASSET_INDEX_HTML]
         data = target.read_bytes()
-        mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        mime = mimetypes.guess_type(target.name)[0] or OCTET_STREAM_MIME
         etag = f'"{hashlib.sha256(data).hexdigest()[:24]}"'
         query = parse_qs(urlparse(getattr(self, "path", "")).query)
         versioned = target.name in VERSIONED_STATIC_ASSETS and bool(str(query.get("v", [""])[0]).strip())
