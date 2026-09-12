@@ -496,7 +496,7 @@ class CoachTests(unittest.TestCase):
         self.assertLessEqual({
             "list_competitions", "save_competition", "delete_competition", "sync_competitions",
             "list_training_plans", "update_training_plan", "preview_adaptive_replan", "apply_adaptive_replan",
-            "list_recent_activities", "list_workout_library", "list_planned_workouts", "list_change_history",
+            "list_recent_activities", "get_activity_details", "list_workout_library", "list_planned_workouts", "list_change_history",
             "apply_workout_library_plan", "delete_activity_feedback", "refresh_current_performance",
         }, names)
 
@@ -524,6 +524,52 @@ class CoachTests(unittest.TestCase):
         enqueue.assert_called_once_with(
             "intervals", "competition_push", {"reason": "Bestätigter Coach-Auftrag"}, requested_by="coach",
         )
+
+    def test_explicit_activity_detail_reads_only_the_requested_complete_raw_record(self):
+        server.save_snapshot({
+            "synced_at": "2026-09-11T08:00:00+00:00",
+            "athlete": {},
+            "recent_activities": [
+                {"id": "activity-1", "name": "Tempo", "start_date_local": "2026-09-11T07:00:00"},
+                {"id": "activity-2", "name": "Recovery", "start_date_local": "2026-09-10T07:00:00"},
+            ],
+            "recent_wellness": [],
+            "upcoming_calendar": [],
+            "raw_provider_data": {
+                "athlete": {},
+                "activities": [
+                    {
+                        "id": "activity-1", "name": "Tempo", "average_watts": 245,
+                        "streams": {"watts": [200, 250, 280], "latlng": [[1, 2], [3, 4]]}, "provider_extra": "must not pass",
+                    },
+                    {"id": "activity-2", "name": "Recovery", "average_watts": 120},
+                ],
+                "wellness": [],
+                "upcoming_calendar": [],
+            },
+        })
+        intent = {
+            "intent": "local_action", "operation": "get_activity_details", "target_system": "local",
+            "artifact_id": None, "ambiguities": [], "authorization_scope": [],
+        }
+
+        result = server._structured_coach_tool_result(
+            "get_activity_details", {"activity_id": "activity-1"}, intent=intent,
+            conversation_id="conversation-activity-detail", client_turn_id="turn-activity-detail",
+            session_csrf_hash="", sync_job_ids=[],
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["activity"]["streams"], {"watts": [200, 250, 280]})
+        self.assertNotIn("id", result["activity"])
+        self.assertNotIn("latlng", result["activity"]["streams"])
+        self.assertNotIn("provider_extra", result["activity"])
+        self.assertEqual(result["data_scope"], "bounded sanitized detail projection of exactly one Intervals.icu activity")
+        self.assertNotIn("activity-2", json.dumps(result))
+
+        with self.assertRaises(server.AppError) as missing:
+            server.get_activity_details("activity-3")
+        self.assertEqual(missing.exception.reason, "activity_details_not_found")
 
     def test_structured_coach_reads_local_detail_and_schedules_library_templates(self):
         template = server.create_local_library_template({
@@ -1932,6 +1978,7 @@ class CoachTests(unittest.TestCase):
             bounded_coach_context_value,
             compact_coach_activity,
             compact_coach_local_planned_workouts,
+            detailed_coach_activity,
         )
 
         select = lambda value, fields: {key: value[key] for key in fields if key in value}
@@ -1945,6 +1992,17 @@ class CoachTests(unittest.TestCase):
         )
         self.assertEqual([item["id"] for item in workouts], ["1"])
         self.assertLessEqual(len(json.dumps(bounded_coach_context_value({"text": "x" * 1000}, 100), ensure_ascii=False, separators=(",", ":"))), 100)
+        detail = detailed_coach_activity({
+            "id": "provider-id", "average_watts": 245, "provider_extra": "must not pass",
+            "streams": {"watts": list(range(2505)), "latlng": [[1, 2]]},
+        })
+        self.assertEqual(detail["average_watts"], 245)
+        self.assertEqual(len(detail["streams"]["watts"]), 2000)
+        self.assertEqual(detail["streams"]["watts"][0], 0)
+        self.assertEqual(detail["streams"]["watts"][-1], 2504)
+        self.assertNotIn("id", detail)
+        self.assertNotIn("provider_extra", detail)
+        self.assertNotIn("latlng", detail["streams"])
 
     def test_backup_export_helpers_are_dependency_light_and_preserve_bounds(self):
         from backend.backup import export as backup_export
