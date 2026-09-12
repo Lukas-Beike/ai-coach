@@ -247,6 +247,18 @@ _FIT_SESSION_WEIGHTED_AVERAGES = {
 }
 
 
+def _fit_session_metric_value(key, values, durations, divisor):
+    if key in _FIT_SESSION_TOTALS:
+        return sum(values) / divisor
+    if key in _FIT_SESSION_MAXIMA:
+        return max(values) / divisor
+    if key in _FIT_SESSION_WEIGHTED_AVERAGES and len(values) == len(durations) and sum(durations) > 0:
+        return sum(metric * duration for metric, duration in zip(values, durations)) / sum(durations) / divisor
+    if key in _FIT_SESSION_WEIGHTED_AVERAGES:
+        return sum(values) / len(values) / divisor
+    return values[0] / divisor
+
+
 def _fit_session_summary(messages, sessions, records):
     session = sessions[0] if sessions else {}
     summary = {"source": "uploaded_fit", "record_count": len(records), "session_count": len(sessions)}
@@ -263,16 +275,7 @@ def _fit_session_summary(messages, sessions, records):
         values = _fit_scaled(messages, message_number, field_number)
         if not values:
             continue
-        if key in _FIT_SESSION_TOTALS:
-            value = sum(values) / divisor
-        elif key in _FIT_SESSION_MAXIMA:
-            value = max(values) / divisor
-        elif key in _FIT_SESSION_WEIGHTED_AVERAGES and len(values) == len(durations) and sum(durations) > 0:
-            value = sum(metric * duration for metric, duration in zip(values, durations)) / sum(durations) / divisor
-        elif key in _FIT_SESSION_WEIGHTED_AVERAGES:
-            value = sum(values) / len(values) / divisor
-        else:
-            value = values[0] / divisor
+        value = _fit_session_metric_value(key, values, durations, divisor)
         summary[key] = round(value, 3) if isinstance(value, float) else value
     return summary
 
