@@ -14574,7 +14574,9 @@ def delete_duplicate_intervals_activity(payload: dict[str, Any]) -> dict[str, An
     }
 
 
-def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str, Any]:
+def validated_coach_action_preview_input(
+    values: Any,
+) -> tuple[str, str, dict[str, Any] | list[Any], dict[str, Any] | list[Any], dict[str, Any]]:
     if not isinstance(values, dict):
         raise AppError(400, "Die Aktionsvorschau muss ein Objekt sein.")
     action_type = str(values.get("action_type") or "").strip()
@@ -14591,13 +14593,22 @@ def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str
     expected_target = "intervals" if action_type == "delete_duplicate_intervals_activity" else "local"
     if target_system != expected_target or not diff:
         raise AppError(400, "Die geschuetzte Aktion benoetigt das passende Ziel und einen sichtbaren Diff.")
+    return action_type, target_system, object_ids, diff, payload
+
+
+def assert_duplicate_action_preview_is_current(payload: dict[str, Any]) -> None:
+    current = latest_wahoo_garmin_duplicate()
+    if not current or any(
+        str(payload.get(key) or "") != str(current.get(key) or "")
+        for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
+    ):
+        raise AppError(409, "Das Wahoo-/Garmin-Duplikat ist nicht mehr aktuell. Bitte die letzte Einheit erneut analysieren.")
+
+
+def create_coach_action_preview(values: Any, session_csrf_hash: str) -> dict[str, Any]:
+    action_type, target_system, object_ids, diff, payload = validated_coach_action_preview_input(values)
     if action_type == "delete_duplicate_intervals_activity":
-        current = latest_wahoo_garmin_duplicate()
-        if not current or any(
-            str(payload.get(key) or "") != str(current.get(key) or "")
-            for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
-        ):
-            raise AppError(409, "Das Wahoo-/Garmin-Duplikat ist nicht mehr aktuell. Bitte die letzte Einheit erneut analysieren.")
+        assert_duplicate_action_preview_is_current(payload)
     proposal_id = str(uuid.uuid4())
     expires_at = time.time() + COACH_ACTION_TTL_SECONDS
     now = utc_now()
