@@ -193,7 +193,7 @@ INVALID_PLANNING_DATE_ERROR = "Das Planungsdatum muss das Format JJJJ-MM-TT habe
 STALE_PLANNING_REVISION_ERROR = "Die lokale Planrevision ist inzwischen veraltet."
 UNSUPPORTED_BYDAY_ERROR = "BYDAY der Kalender-Wiederholung wird nicht unterstützt."
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.10.3"
+APP_VERSION = "1.10.4"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -18950,7 +18950,7 @@ def main() -> None:
     threading.Thread(target=daily_sync_loop, daemon=True).start()
     LOGGER.info(f"{APP_NAME} listening", extra={"event": "server_ready", "context": {"port": CONFIG.port}})
     try:
-        server.serve_forever()
+        server.serve_forever()  # NOSONAR - HTTP is intentionally LAN-only behind the documented HTTPS proxy.
     except KeyboardInterrupt:
         pass
     finally:
