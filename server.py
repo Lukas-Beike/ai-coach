@@ -12245,23 +12245,10 @@ def bounded_activity_metric(value: Any, minimum: float, maximum: float) -> float
     return number if number is not None and minimum <= float(number) <= maximum else None
 
 
-def activity_performance_validation(
-    activities: list[Any],
-    metrics: dict[str, dict[str, Any]],
-    comparisons: dict[str, dict[str, Any] | None],
-) -> dict[str, Any]:
-    """Expose latest-activity evidence without pretending it is a lab test."""
-    latest = latest_activity_for_validation(activities)
-    if latest is None:
-        return {
-            "available": False,
-            "status": "no_completed_activity",
-            "scope": "Keine abgeschlossene Einheit mit verwertbarem Zeitstempel vorhanden.",
-        }
-
-    sport = activity_sport(latest)
+def activity_validation_evidence(latest: dict[str, Any], sport: str) -> dict[str, Any]:
+    """Return bounded measured evidence from one untrusted activity record."""
     activity_id = first_present(latest, ("id", "activityId"))
-    activity_evidence: dict[str, Any] = {
+    evidence: dict[str, Any] = {
         "activity_id": str(activity_id)[:200] if activity_id not in (None, "") else None,
         "date": str(first_present(latest, ("start_date_local", "start_date", "date")) or "")[:40],
         "name": str(latest.get("name") or "")[:200],
@@ -12281,7 +12268,41 @@ def activity_performance_validation(
     ):
         value = bounded_activity_metric(first_present(latest, aliases), minimum, maximum)
         if value is not None:
-            activity_evidence[key] = value
+            evidence[key] = value
+    return evidence
+
+
+def activity_direct_estimates(latest: dict[str, Any]) -> dict[str, float | int]:
+    """Return only bounded numeric estimates explicitly attached to an activity."""
+    estimates: dict[str, float | int] = {}
+    for key, aliases, minimum, maximum in (
+        ("activity_vo2max", ("vo2max", "vo2_max", "vO2MaxValue", "vo2MaxValue", "icu_vo2max"), 10, 100),
+        ("activity_ftp_watts", ("ftp", "functionalThresholdPower"), 20, 2000),
+        ("activity_eftp_watts", ("eftp", "eFTP", "icu_eftp"), 20, 2000),
+        ("activity_configured_ftp_watts", ("icu_ftp",), 20, 2000),
+    ):
+        value = bounded_activity_metric(first_present(latest, aliases), minimum, maximum)
+        if value is not None:
+            estimates[key] = value
+    return estimates
+
+
+def activity_performance_validation(
+    activities: list[Any],
+    metrics: dict[str, dict[str, Any]],
+    comparisons: dict[str, dict[str, Any] | None],
+) -> dict[str, Any]:
+    """Expose latest-activity evidence without pretending it is a lab test."""
+    latest = latest_activity_for_validation(activities)
+    if latest is None:
+        return {
+            "available": False,
+            "status": "no_completed_activity",
+            "scope": "Keine abgeschlossene Einheit mit verwertbarem Zeitstempel vorhanden.",
+        }
+
+    sport = activity_sport(latest)
+    activity_evidence = activity_validation_evidence(latest, sport)
     if sport == "Laufen":
         pace = activity_pace_seconds_per_km(latest)
         if pace is not None:
@@ -12326,16 +12347,7 @@ def activity_performance_validation(
             "observed_at": provider_value.get("observed_at"),
             "historical_comparison": comparisons.get({"cycling_eftp_watts": "cycling_eftp_30d"}.get(key, f"{key}_30d")),
         })
-    direct_activity_estimates = {}
-    for key, aliases, minimum, maximum in (
-        ("activity_vo2max", ("vo2max", "vo2_max", "vO2MaxValue", "vo2MaxValue", "icu_vo2max"), 10, 100),
-        ("activity_ftp_watts", ("ftp", "functionalThresholdPower"), 20, 2000),
-        ("activity_eftp_watts", ("eftp", "eFTP", "icu_eftp"), 20, 2000),
-        ("activity_configured_ftp_watts", ("icu_ftp",), 20, 2000),
-    ):
-        value = bounded_activity_metric(first_present(latest, aliases), minimum, maximum)
-        if value is not None:
-            direct_activity_estimates[key] = value
+    direct_activity_estimates = activity_direct_estimates(latest)
     return {
         "available": True,
         "status": "needs_coach_interpretation",
