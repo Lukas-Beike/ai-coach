@@ -4239,20 +4239,24 @@ async function readChatStream(response, context) {
   if (buffer.trim()) consumeChatStreamBlock(buffer, context);
 }
 
+async function refreshCompletedChatStream(context) {
+  const { completedPayload, request } = context;
+  const hasPersistedReceipt = request.responseMessageReceived || Boolean(completedPayload?.message?.content && state.data);
+  if (hasPersistedReceipt) {
+    if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
+    return;
+  }
+  await loadChatHistoryFresh();
+}
+
 async function finishChatStream(context) {
-  const { completed, completedPayload, request, stream } = context;
+  const { completed, stream } = context;
   if (context.background) {
     scheduleChatStatusPoll(0);
     return "recovering";
   }
   if (!completed && !stream.cancelRequested) throw new Error("Der Antwort-Stream wurde unerwartet beendet.");
-  if (completed && request.responseMessageReceived) {
-    if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
-  } else if (completed && completedPayload?.message?.content && state.data) {
-    if (state.chatProposalRefreshPending && baseRoute() === "coach") void refreshChatProposalsInBackground(state.chatContentVersion);
-  } else {
-    await loadChatHistoryFresh();
-  }
+  await refreshCompletedChatStream(context);
   if (completed) scrollChatToResponseStart();
   invalidateContextPreview();
   return completed ? "completed" : "failed";
