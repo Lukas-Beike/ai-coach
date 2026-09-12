@@ -131,6 +131,51 @@ function ensureRouteData(route = state.route) {
   if (requested.length) load("/api/bootstrap?local=1", requested);
 }
 
+function activateNavigationPanel(panelRoute, navigationRoute) {
+  document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
+  const navigation = document.querySelector(`.nav-item[data-route="${navigationRoute}"]`);
+  const panel = document.querySelector(`#${NAV_ROUTES[panelRoute]}`);
+  if (!navigation || !panel) return null;
+  document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
+  document.querySelectorAll(`.nav-item[data-route="${navigationRoute}"]`).forEach((item) => {
+    item.classList.add("active");
+    item.setAttribute("aria-current", "page");
+  });
+  panel.classList.add("active");
+  return panel;
+}
+
+function updateNavigationHistory(panelRoute, historyMode) {
+  const targetHash = `#${panelRoute}`;
+  if (globalThis.location.hash === targetHash) return;
+  if (historyMode === "push") globalThis.history.pushState({ route: panelRoute }, "", targetHash);
+  else if (historyMode === "replace") globalThis.history.replaceState({ route: panelRoute }, "", targetHash);
+}
+
+function renderActiveRoute(mainRoute, panelRoute) {
+  if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
+  if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
+  if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
+  if (state.data && mainRoute === "more") {
+    loadContextPreview();
+    loadLogs();
+    loadChangeHistory();
+  }
+}
+
+function restoreRouteScroll(mainRoute, returningToChat, shouldFocusPlannedToday) {
+  if (mainRoute === "coach") {
+    if (state.chatResponseScrollPending) scrollChatToResponseStart();
+    else if (state.chatInitialScrollPending) scrollChatToLatest();
+    else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest();
+    if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground(state.chatContentVersion);
+    return;
+  }
+  requestAnimationFrame(() => {
+    if (!shouldFocusPlannedToday || !focusPlannedToday()) globalThis.scrollTo({ top: 0, behavior: "auto" });
+  });
+}
+
 async function applyNavigationRoute(route, { historyMode = "none", focus = true } = {}) {
   const panelRoute = NAV_ROUTES[route] ? route : DEFAULT_NAV_ROUTE;
   const mainRoute = baseRoute(panelRoute);
@@ -145,42 +190,16 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   if (state.data && !state.chatInitialScrollPending && historyMode === "push" && currentPanel === "chatPanel" && mainRoute !== "coach") {
     state.chatScrollY = globalThis.scrollY;
   }
-  if (currentPanel === "chatPanel" && mainRoute !== "coach" && (state.chatRequest || state.chatServerOperationId)) {
-    state.chatResponseScrollPending = true;
-  }
-  document.querySelectorAll(".nav-item, .panel").forEach((node) => node.classList.remove("active"));
-  const navigation = document.querySelector(`.nav-item[data-route="${navigationRoute}"]`);
-  const panel = document.querySelector(`#${NAV_ROUTES[panelRoute]}`);
-  if (!navigation || !panel) return false;
+  if (currentPanel === "chatPanel" && mainRoute !== "coach" && (state.chatRequest || state.chatServerOperationId)) state.chatResponseScrollPending = true;
+  const panel = activateNavigationPanel(panelRoute, navigationRoute);
+  if (!panel) return false;
   state.plannedTodayFocusPending = shouldFocusPlannedToday;
-  document.querySelectorAll(".nav-item").forEach((item) => item.removeAttribute("aria-current"));
-  document.querySelectorAll(`.nav-item[data-route="${navigationRoute}"]`).forEach((item) => {
-    item.classList.add("active");
-    item.setAttribute("aria-current", "page");
-  });
-  panel.classList.add("active");
   state.route = panelRoute;
-  if (mainRoute === "more") renderMoreSegments(moreSegmentFromRoute(panelRoute));
-  if (mainRoute === "plan") renderPlanSegments(planSegmentFromRoute(panelRoute));
-  if (mainRoute === "analysis") renderAnalysisSegments(analysisSegmentFromRoute(panelRoute));
-  const targetHash = `#${panelRoute}`;
-  if (globalThis.location.hash !== targetHash) {
-    if (historyMode === "push") globalThis.history.pushState({ route: panelRoute }, "", targetHash);
-    else if (historyMode === "replace") globalThis.history.replaceState({ route: panelRoute }, "", targetHash);
-  }
+  renderActiveRoute(mainRoute, panelRoute);
+  updateNavigationHistory(panelRoute, historyMode);
   if (state.data) renderStatus(state.data);
   updateHeaderAction();
-  if (state.data && mainRoute === "more") loadContextPreview();
-  if (state.data && mainRoute === "more") loadLogs();
-  if (state.data && mainRoute === "more") loadChangeHistory();
-  if (mainRoute === "coach") {
-    if (state.chatResponseScrollPending) scrollChatToResponseStart();
-    else if (state.chatInitialScrollPending) scrollChatToLatest();
-    else if (!returningToChat || !restoreChatScrollPosition()) scrollChatToLatest();
-    if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground(state.chatContentVersion);
-  } else requestAnimationFrame(() => {
-    if (!shouldFocusPlannedToday || !focusPlannedToday()) globalThis.scrollTo({ top: 0, behavior: "auto" });
-  });
+  restoreRouteScroll(mainRoute, returningToChat, shouldFocusPlannedToday);
   ensureRouteData(panelRoute);
   if (focus && !$("#appShell")?.hidden) {
     panel.setAttribute("tabindex", "-1");
@@ -188,7 +207,6 @@ async function applyNavigationRoute(route, { historyMode = "none", focus = true 
   }
   return true;
 }
-
 async function syncNavigationRoute() {
   const route = routeFromHash();
   const applied = await applyNavigationRoute(route, {
@@ -736,50 +754,60 @@ function updateVoiceButton() {
   updateChatControls();
 }
 
-function updateChatControls() {
-  const form = $("#chatForm");
-  const input = $("#messageInput");
-  const sendButton = $("#sendButton");
-  const steerButton = $("#steerButton");
-  const cancelButton = $("#cancelChatButton");
+function chatControlState(input) {
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages));
   const hasDraft = Boolean((state.chatAttachments || []).length || input?.value.trim());
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
-  const chatIsResuming = Boolean(state.chatRequest?.phase === "recovering" || (state.chatServerOperationId && !state.chatStream));
-  const chatIsReconciling = state.chatRequest?.phase === "reconciling";
-  if (form) {
-    form.classList.toggle("is-busy", state.busy);
-    form.classList.toggle("is-recovering", chatIsResuming);
-    form.classList.toggle("is-reconciling", chatIsReconciling);
-  }
-  if (input) {
-    input.disabled = !chatReady;
-    input.placeholder = chatReady ? "Frage deinen Coach…" : "Coach-Chat wird geladen…";
-  }
-  if (sendButton) {
-    sendButton.disabled = state.chatAttachmentsLoading || !chatReady || !hasDraft || !inputAvailable || chatIsResuming || chatIsReconciling;
-    if (chatIsReconciling) sendButton.textContent = "Antwort wird geladen…";
-    else if (chatIsResuming) sendButton.textContent = "Coach antwortet…";
-    else if (state.busy) sendButton.textContent = "Einreihen";
-    else sendButton.textContent = "Senden";
-  }
-  if (steerButton) {
-    steerButton.hidden = !state.busy || chatIsResuming || chatIsReconciling;
-    steerButton.disabled = !hasDraft || !inputAvailable || chatIsResuming || chatIsReconciling;
-  }
-  if (cancelButton) {
-    cancelButton.hidden = !state.busy || chatIsReconciling;
-    const cancelRequested = Boolean(state.chatStream?.cancelRequested || state.chatRequest?.cancelRequested);
-    cancelButton.disabled = (!state.chatStream && !state.chatServerOperationId) || cancelRequested;
-    cancelButton.textContent = cancelRequested ? "Wird abgebrochen…" : "Abbrechen";
-  }
-  const progress = $("#chatOperationStatus");
-  if (progress) {
-    progress.hidden = !state.busy || chatIsReconciling;
-  }
-  updateChatQueueStatus();
+  const resuming = Boolean(state.chatRequest?.phase === "recovering" || (state.chatServerOperationId && !state.chatStream));
+  return { chatReady, hasDraft, inputAvailable, resuming, reconciling: state.chatRequest?.phase === "reconciling" };
 }
 
+function chatSendLabel(controls) {
+  if (controls.reconciling) return "Antwort wird geladen…";
+  if (controls.resuming) return "Coach antwortet…";
+  return state.busy ? "Einreihen" : "Senden";
+}
+
+function updateChatSendButton(button, controls) {
+  if (!button) return;
+  button.disabled = state.chatAttachmentsLoading || !controls.chatReady || !controls.hasDraft || !controls.inputAvailable || controls.resuming || controls.reconciling;
+  button.textContent = chatSendLabel(controls);
+}
+
+function updateChatSteerButton(button, controls) {
+  if (!button) return;
+  button.hidden = !state.busy || controls.resuming || controls.reconciling;
+  button.disabled = !controls.hasDraft || !controls.inputAvailable || controls.resuming || controls.reconciling;
+}
+
+function updateChatCancelButton(button, controls) {
+  if (!button) return;
+  button.hidden = !state.busy || controls.reconciling;
+  const requested = Boolean(state.chatStream?.cancelRequested || state.chatRequest?.cancelRequested);
+  button.disabled = (!state.chatStream && !state.chatServerOperationId) || requested;
+  button.textContent = requested ? "Wird abgebrochen…" : "Abbrechen";
+}
+
+function updateChatControls() {
+  const input = $("#messageInput");
+  const controls = chatControlState(input);
+  const form = $("#chatForm");
+  if (form) {
+    form.classList.toggle("is-busy", state.busy);
+    form.classList.toggle("is-recovering", controls.resuming);
+    form.classList.toggle("is-reconciling", controls.reconciling);
+  }
+  if (input) {
+    input.disabled = !controls.chatReady;
+    input.placeholder = controls.chatReady ? "Frage deinen Coach…" : "Coach-Chat wird geladen…";
+  }
+  updateChatSendButton($("#sendButton"), controls);
+  updateChatSteerButton($("#steerButton"), controls);
+  updateChatCancelButton($("#cancelChatButton"), controls);
+  const progress = $("#chatOperationStatus");
+  if (progress) progress.hidden = !state.busy || controls.reconciling;
+  updateChatQueueStatus();
+}
 function stopVoiceCapture(recorder = state.voiceRecorder) {
   if (state.voiceTimer) clearInterval(state.voiceTimer);
   state.voiceTimer = null;
@@ -1199,75 +1227,93 @@ function addCoachReceipt(receipt) {
   renderCoachReceipts();
 }
 
-function addStructuredCoachReceipts(payload) {
-  const hiddenChatReceiptTools = new Set([
-    "get_sync_job",
-    "refresh_current_performance",
-    "start_intervals_plan_sync",
-    "start_provider_refresh",
-    "sync_competitions",
-  ]);
-  const labels = {
-    update_profile: "Profil aktualisiert", apply_training_patch: "Geplante Einheiten angepasst",
-    stage_training_plan: "Planvorlage vorbereitet", commit_training_plan: "Trainingsplan gespeichert",
-    replace_training_plan: "Trainingsplan vollständig ersetzt",
-    apply_training_changes: "Lokale Planung geändert", manage_training_templates: "Trainingsvorlagen bearbeitet",
-    apply_workout_library_plan: "Einheiten lokal geplant",
-    save_checkin: "Tages-Check-in gespeichert", save_activity_feedback: "Aktivitätsfeedback gespeichert",
-    delete_activity_feedback: "Aktivitätsfeedback gelöscht", save_competition: "Wettkampf gespeichert",
-    delete_competition: "Wettkampf gelöscht", update_training_plan: "Trainingsplan geändert",
-    undo_training_change: "Rücknahme zur Prüfung bereit", preview_adaptive_replan: "Plananpassung zur Prüfung bereit",
-    apply_adaptive_replan: "Plananpassung gespeichert", start_provider_refresh: "Datenabruf beauftragt",
-    refresh_current_performance: "Leistungsdatenabruf beauftragt", sync_competitions: "Wettkampfsynchronisierung beauftragt",
-    resolve_training_sync_conflict: "Synchronisierungsentscheidung gespeichert",
-    start_intervals_plan_sync: "Intervals-Synchronisierung beauftragt",
+const HIDDEN_CHAT_RECEIPT_TOOLS = new Set([
+  "get_sync_job", "refresh_current_performance", "start_intervals_plan_sync",
+  "start_provider_refresh", "sync_competitions",
+]);
+const COACH_RECEIPT_LABELS = {
+  update_profile: "Profil aktualisiert", apply_training_patch: "Geplante Einheiten angepasst",
+  stage_training_plan: "Planvorlage vorbereitet", commit_training_plan: "Trainingsplan gespeichert",
+  replace_training_plan: "Trainingsplan vollständig ersetzt",
+  apply_training_changes: "Lokale Planung geändert", manage_training_templates: "Trainingsvorlagen bearbeitet",
+  apply_workout_library_plan: "Einheiten lokal geplant", save_checkin: "Tages-Check-in gespeichert",
+  save_activity_feedback: "Aktivitätsfeedback gespeichert", delete_activity_feedback: "Aktivitätsfeedback gelöscht",
+  save_competition: "Wettkampf gespeichert", delete_competition: "Wettkampf gelöscht",
+  update_training_plan: "Trainingsplan geändert", undo_training_change: "Rücknahme zur Prüfung bereit",
+  preview_adaptive_replan: "Plananpassung zur Prüfung bereit", apply_adaptive_replan: "Plananpassung gespeichert",
+  start_provider_refresh: "Datenabruf beauftragt", refresh_current_performance: "Leistungsdatenabruf beauftragt",
+  sync_competitions: "Wettkampfsynchronisierung beauftragt",
+  resolve_training_sync_conflict: "Synchronisierungsentscheidung gespeichert",
+  start_intervals_plan_sync: "Intervals-Synchronisierung beauftragt",
+};
+const SYNC_JOB_RECEIPT_LABELS = {
+  queued: "Synchronisierung beauftragt", running: "Synchronisierung läuft",
+  completed: "Synchronisierung abgeschlossen", partial: "Synchronisierung teilweise abgeschlossen",
+  failed: "Synchronisierung fehlgeschlagen",
+};
+
+function receiptIsVisible(entry, planCommitRequested, finalCommit) {
+  if (entry.resolved) return false;
+  const result = entry.result || {};
+  const failedSync = entry.tool === "start_intervals_plan_sync" && result.ok === false;
+  const failedSyncJob = entry.tool === "get_sync_job" && result.job?.status === "failed";
+  if (HIDDEN_CHAT_RECEIPT_TOOLS.has(entry.tool) && !failedSync && !failedSyncJob) return false;
+  if (planCommitRequested && entry.tool === "stage_training_plan") return false;
+  return entry.tool !== "commit_training_plan" || entry === finalCommit;
+}
+
+function syncJobReceipt(job) {
+  const title = SYNC_JOB_RECEIPT_LABELS[job.status] || "Synchronisierungsstatus unklar";
+  let status = "pending";
+  if (["partial", "failed"].includes(job.status)) status = "error";
+  else if (job.status === "completed") status = "success";
+  return { title, message: job.error_detail || title, status };
+}
+
+function commandReceiptTitle(entry, result, failed, queued) {
+  if (failed) return "Coach-Aktion fehlgeschlagen";
+  if (entry.tool === "start_provider_refresh" && result.status === "completed") return "Daten aktualisiert";
+  if (COACH_RECEIPT_LABELS[entry.tool]) return COACH_RECEIPT_LABELS[entry.tool];
+  return queued ? "Synchronisierung beauftragt" : "Informationen geladen";
+}
+
+function commandReceiptMessage(result, failed, queued) {
+  if (failed) return result.error || "Die Aktion konnte nicht ausgeführt werden.";
+  return queued ? "Der Auftrag wird im Hintergrund bearbeitet; das Ergebnis steht noch aus." : "Der lokale Beleg liegt vor.";
+}
+
+function commandReceiptStatus(failed, queued) {
+  if (failed) return "error";
+  return queued ? "pending" : "success";
+}
+
+function commandReceipt(entry) {
+  const result = entry.result || {};
+  if (entry.tool === "get_sync_job" && result.job) return syncJobReceipt(result.job);
+  const failed = result.ok === false;
+  const queued = Boolean(result.sync_job_id || result.job_id || result.job?.id || result.status === "queued");
+  const details = [];
+  if (Array.isArray(result.library_entry_ids) && result.library_entry_ids.length) details.push(`${result.library_entry_ids.length} lokale Einheit(en) gespeichert`);
+  if (result.remote_untouched) details.push("Providerdaten unverändert");
+  return {
+    title: commandReceiptTitle(entry, result, failed, queued),
+    message: commandReceiptMessage(result, failed, queued),
+    status: commandReceiptStatus(failed, queued),
+    details,
   };
+}
+
+function addStructuredCoachReceipts(payload) {
   const commands = Array.isArray(payload?.command_receipts) ? payload.command_receipts : [];
   const planCommitRequested = payload?.intent?.operation === "commit_training_plan"
     || payload?.intent?.follow_up_operations?.includes("commit_training_plan")
     || commands.some((entry) => entry.tool === "commit_training_plan");
   const finalCommit = commands.findLast((entry) => entry.tool === "commit_training_plan");
-  // Receipts describe this turn's outcome, not its internal draft/retry history.
   state.coachReceipts = [];
   renderCoachReceipts();
-  for (const entry of commands) {
-    if (entry.resolved) continue;
-    const failedSync = entry.tool === "start_intervals_plan_sync" && entry.result?.ok === false;
-    const failedSyncJob = entry.tool === "get_sync_job" && entry.result?.job?.status === "failed";
-    if (hiddenChatReceiptTools.has(entry.tool) && !failedSync && !failedSyncJob) continue;
-    if (planCommitRequested && entry.tool === "stage_training_plan") continue;
-    if (entry.tool === "commit_training_plan" && entry !== finalCommit) continue;
-    const result = entry?.result || {};
-    if (entry.tool === "get_sync_job" && result.job) {
-      const job = result.job;
-      const status = { queued: "Synchronisierung beauftragt", running: "Synchronisierung läuft", completed: "Synchronisierung abgeschlossen", partial: "Synchronisierung teilweise abgeschlossen", failed: "Synchronisierung fehlgeschlagen" }[job.status] || "Synchronisierungsstatus unklar";
-      let receiptStatus = "pending";
-      if (["partial", "failed"].includes(job.status)) receiptStatus = "error";
-      else if (job.status === "completed") receiptStatus = "success";
-      addCoachReceipt({ title: status, message: job.error_detail || status, status: receiptStatus });
-      continue;
-    }
-    const failed = result.ok === false;
-    const queued = Boolean(result.sync_job_id || result.job_id || result.job?.id || result.status === "queued");
-    const completedRefresh = entry.tool === "start_provider_refresh" && result.status === "completed";
-    let title;
-    if (failed) title = "Coach-Aktion fehlgeschlagen";
-    else if (completedRefresh) title = "Daten aktualisiert";
-    else title = labels[entry.tool] || (queued ? "Synchronisierung beauftragt" : "Informationen geladen");
-    const details = [];
-    if (Array.isArray(result.library_entry_ids) && result.library_entry_ids.length) details.push(`${result.library_entry_ids.length} lokale Einheit(en) gespeichert`);
-    if (result.remote_untouched) details.push("Providerdaten unverändert");
-    let message;
-    if (failed) message = result.error || "Die Aktion konnte nicht ausgeführt werden.";
-    else if (queued) message = "Der Auftrag wird im Hintergrund bearbeitet; das Ergebnis steht noch aus.";
-    else message = "Der lokale Beleg liegt vor.";
-    let receiptStatus = "success";
-    if (failed) receiptStatus = "error";
-    else if (queued) receiptStatus = "pending";
-    addCoachReceipt({ title, message, status: receiptStatus, details });
-  }
+  commands.filter((entry) => receiptIsVisible(entry, planCommitRequested, finalCommit))
+    .forEach((entry) => addCoachReceipt(commandReceipt(entry)));
 }
-
 async function retryProvider(provider, button) {
   if (button) button.disabled = true;
   try {
@@ -1456,30 +1502,118 @@ function renderActivityStats(activities, filtered = false) {
   });
 }
 
-function renderActivities(activities) {
-  const list = Array.isArray(activities) ? activities : [];
+function renderActivitySyncDetail() {
   const syncDetail = $("#activitySyncDetail");
+  if (!syncDetail) return;
   const syncNotices = [];
   if (state.data?.provider_resync?.intervals?.running || state.localSync.intervalsFull) syncNotices.push(state.data?.provider_resync?.intervals?.status || "Intervals.icu wird vollständig neu geladen…");
   if (state.data?.provider_resync?.garmin?.running || state.localSync.garminFull) syncNotices.push(state.data?.provider_resync?.garmin?.status || "Garmin wird vollständig neu geladen…");
   if (state.data?.sync?.running || state.localSync.intervals) syncNotices.push(state.data?.sync?.status || "Intervals.icu wird synchronisiert…");
-  if (syncDetail) {
-    const refreshedAt = state.data?.sync?.last_sync_at;
-    let refreshedText = "Noch nicht aktualisiert";
-    if (refreshedAt) refreshedText = `Letzte Aktualisierung: ${formatTime(refreshedAt)}`;
-    syncDetail.textContent = syncNotices.length ? syncNotices.join(" · ") : refreshedText;
-  }
-  renderActivityFilters(list);
-  const dateFilteredActivities = list.filter((activity) => {
+  const refreshedAt = state.data?.sync?.last_sync_at;
+  const refreshedText = refreshedAt ? `Letzte Aktualisierung: ${formatTime(refreshedAt)}` : "Noch nicht aktualisiert";
+  syncDetail.textContent = syncNotices.length ? syncNotices.join(" · ") : refreshedText;
+}
+
+function filteredActivities(list) {
+  const dateFiltered = list.filter((activity) => {
     const activityDate = String(activity.start_date_local || activity.date || "").slice(0, 10);
     if (state.activityFromDate && (!activityDate || activityDate < state.activityFromDate)) return false;
     if (state.activityToDate && (!activityDate || activityDate > state.activityToDate)) return false;
     return true;
   });
-  const filteredActivities = state.activityTypes.size
-    ? dateFilteredActivities.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))
-    : dateFilteredActivities;
-  const displayedActivities = filteredActivities;
+  return state.activityTypes.size
+    ? dateFiltered.filter((activity) => state.activityTypes.has(activityTypeKey(activity)))
+    : dateFiltered;
+}
+
+function renderActivitiesEmpty(root, list) {
+  const empty = document.createElement("div");
+  empty.className = "empty";
+  const title = document.createElement("strong");
+  title.textContent = list.length ? "Keine passenden Einheiten" : "Noch keine absolvierten Einheiten";
+  let emptyMessage;
+  if (!list.length) emptyMessage = "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen.";
+  else if (state.activityFromDate || state.activityToDate) emptyMessage = "Passe den Zeitraum an oder setze den Filter zurück.";
+  else emptyMessage = "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück.";
+  empty.append(title, document.createTextNode(emptyMessage));
+  root.append(empty);
+}
+
+function renderActivityCard(activity) {
+  const card = document.createElement("article");
+  card.className = "activity-card";
+  const top = document.createElement("div");
+  top.className = "activity-top";
+  const title = document.createElement("h3");
+  title.textContent = activity.name || activity.type || "Einheit";
+  const date = document.createElement("span");
+  date.className = "eyebrow";
+  date.textContent = dateLabel(activity.start_date_local);
+  top.append(title, date);
+  const stats = document.createElement("div");
+  stats.className = "activity-stats";
+  const addStat = (label, value) => {
+    if (value == null || value === "") return;
+    const item = document.createElement("span");
+    item.innerHTML = `${escapeHtml(label)} <strong>${escapeHtml(String(value))}</strong>`;
+    stats.append(item);
+  };
+  addStat("Dauer", formatDuration(activity.moving_time));
+  addStat("Distanz", distanceLabel(activity.distance));
+  addStat("Belastung", activity.icu_training_load);
+  addStat("Ø Puls", activity.average_heartrate ? `${Math.round(activity.average_heartrate)} bpm` : null);
+  addStat("Ø Leistung", activity.average_watts ? `${Math.round(activity.average_watts)} W` : null);
+  card.append(top, stats);
+  const feedbackNotes = String(activity.activity_feedback?.notes || "").trim();
+  if (feedbackNotes) {
+    const feedback = document.createElement("section");
+    feedback.className = "activity-feedback";
+    const feedbackTitle = document.createElement("h4");
+    feedbackTitle.className = "activity-feedback-title";
+    feedbackTitle.textContent = "Besonderheiten";
+    const feedbackText = document.createElement("p");
+    feedbackText.className = "activity-feedback-notes";
+    feedbackText.textContent = feedbackNotes;
+    feedback.append(feedbackTitle, feedbackText);
+    card.append(feedback);
+  }
+  return card;
+}
+
+function appendActivitiesLoadMore(root, displayedActivities) {
+  if (!(displayedActivities.length > state.activityVisibleCount || state.data?.activities_next_cursor)) return;
+  const loadMore = document.createElement("button");
+  loadMore.type = "button";
+  loadMore.className = "secondary-button activity-load-more";
+  loadMore.textContent = displayedActivities.length > state.activityVisibleCount
+    ? `Weitere Einheiten laden (${displayedActivities.length - state.activityVisibleCount} verbleibend)`
+    : "Weitere Einheiten laden";
+  loadMore.addEventListener("click", async () => {
+    if (displayedActivities.length > state.activityVisibleCount) {
+      state.activityVisibleCount += 250;
+      renderActivities(state.data?.activities || []);
+      return;
+    }
+    loadMore.disabled = true;
+    try {
+      const page = await api(`/api/activities?limit=250&cursor=${encodeURIComponent(state.data.activities_next_cursor)}`);
+      state.data.activities = [...(state.data.activities || []), ...(page.activities || [])];
+      state.data.activities_next_cursor = page.next_cursor;
+      state.activityVisibleCount += 250;
+      renderActivities(state.data.activities);
+    } catch (error) {
+      toast(error.message, true);
+      loadMore.disabled = false;
+    }
+  });
+  root.append(loadMore);
+}
+
+function renderActivities(activities) {
+  const list = Array.isArray(activities) ? activities : [];
+  renderActivitySyncDetail();
+  renderActivityFilters(list);
+  const displayedActivities = filteredActivities(list);
   const isFiltered = Boolean(state.activityTypes.size || state.activityFromDate || state.activityToDate);
   renderActivityStats(displayedActivities, isFiltered);
   const stats = $("#activityStats");
@@ -1490,88 +1624,10 @@ function renderActivities(activities) {
   if (fromDate && fromDate.value !== state.activityFromDate) fromDate.value = state.activityFromDate;
   if (toDate && toDate.value !== state.activityToDate) toDate.value = state.activityToDate;
   root.replaceChildren();
-  if (!displayedActivities.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    const title = document.createElement("strong");
-    title.textContent = list.length ? "Keine passenden Einheiten" : "Noch keine absolvierten Einheiten";
-      let emptyMessage;
-      if (!list.length) emptyMessage = "Aktualisiere die Trainingsdaten, um deine synchronisierten Aktivitäten hier zu sehen.";
-      else if (state.activityFromDate || state.activityToDate) emptyMessage = "Passe den Zeitraum an oder setze den Filter zurück.";
-      else emptyMessage = "Wähle einen weiteren Aktivitätstyp oder setze den Filter zurück.";
-      empty.append(title, document.createTextNode(emptyMessage));
-    root.append(empty);
-  }
-  displayedActivities.slice(0, state.activityVisibleCount).forEach((activity) => {
-    const card = document.createElement("article");
-    card.className = "activity-card";
-    const top = document.createElement("div");
-    top.className = "activity-top";
-    const title = document.createElement("h3");
-    title.textContent = activity.name || activity.type || "Einheit";
-    const date = document.createElement("span");
-    date.className = "eyebrow";
-    date.textContent = dateLabel(activity.start_date_local);
-    top.append(title, date);
-    const stats = document.createElement("div");
-    stats.className = "activity-stats";
-    const addStat = (label, value) => {
-      if (value == null || value === "") return;
-      const item = document.createElement("span");
-      item.innerHTML = `${escapeHtml(label)} <strong>${escapeHtml(String(value))}</strong>`;
-      stats.append(item);
-    };
-    addStat("Dauer", formatDuration(activity.moving_time));
-    addStat("Distanz", distanceLabel(activity.distance));
-    addStat("Belastung", activity.icu_training_load);
-    addStat("Ø Puls", activity.average_heartrate ? `${Math.round(activity.average_heartrate)} bpm` : null);
-    addStat("Ø Leistung", activity.average_watts ? `${Math.round(activity.average_watts)} W` : null);
-    card.append(top, stats);
-
-    const feedbackNotes = String(activity.activity_feedback?.notes || "").trim();
-    if (feedbackNotes) {
-      const feedback = document.createElement("section");
-      feedback.className = "activity-feedback";
-      const feedbackTitle = document.createElement("h4");
-      feedbackTitle.className = "activity-feedback-title";
-      feedbackTitle.textContent = "Besonderheiten";
-      const feedbackText = document.createElement("p");
-      feedbackText.className = "activity-feedback-notes";
-      feedbackText.textContent = feedbackNotes;
-      feedback.append(feedbackTitle, feedbackText);
-      card.append(feedback);
-    }
-    root.append(card);
-  });
-  if (displayedActivities.length > state.activityVisibleCount || state.data?.activities_next_cursor) {
-    const loadMore = document.createElement("button");
-    loadMore.type = "button";
-    loadMore.className = "secondary-button activity-load-more";
-    loadMore.textContent = displayedActivities.length > state.activityVisibleCount
-      ? `Weitere Einheiten laden (${displayedActivities.length - state.activityVisibleCount} verbleibend)`
-      : "Weitere Einheiten laden";
-    loadMore.addEventListener("click", async () => {
-      if (displayedActivities.length > state.activityVisibleCount) {
-        state.activityVisibleCount += 250;
-        renderActivities(state.data?.activities || []);
-        return;
-      }
-      loadMore.disabled = true;
-      try {
-        const page = await api(`/api/activities?limit=250&cursor=${encodeURIComponent(state.data.activities_next_cursor)}`);
-        state.data.activities = [...(state.data.activities || []), ...(page.activities || [])];
-        state.data.activities_next_cursor = page.next_cursor;
-        state.activityVisibleCount += 250;
-        renderActivities(state.data.activities);
-      } catch (error) {
-        toast(error.message, true);
-        loadMore.disabled = false;
-      }
-    });
-    root.append(loadMore);
-  }
+  if (!displayedActivities.length) renderActivitiesEmpty(root, list);
+  displayedActivities.slice(0, state.activityVisibleCount).forEach((activity) => root.append(renderActivityCard(activity)));
+  appendActivitiesLoadMore(root, displayedActivities);
 }
-
 let chatStreamRenderFrame = null;
 let chatStreamStartScrollPending = false;
 let chatComposerRevealPending = false;
@@ -1831,21 +1887,77 @@ function appendHistoryPageButton(root, area) {
   root.append(button);
 }
 
+function messageAttachmentLabel(names) {
+  try {
+    const parsed = JSON.parse(names);
+    return parsed.length ? String.fromCodePoint(10) + "Anhänge: " + parsed.join(", ") : "";
+  } catch (parseError) {
+    if (!(parseError instanceof SyntaxError)) throw parseError;
+    return "";
+  }
+}
+
+function restoreRejectedMessage(message) {
+  const input = $("#messageInput");
+  if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
+  input.value = message.content;
+  state.chatAttachments = message.attachments || [];
+  renderChatAttachments();
+  state.chatDraftDirty = true;
+  state.data.messages = state.data.messages.filter((entry) => entry !== message);
+  state.rejectedMessages = state.rejectedMessages.filter((entry) => entry.client_turn_id !== message.client_turn_id);
+  renderMessages(state.data.messages);
+  jumpToChatComposer();
+  updateChatControls();
+}
+
+function appendMessageRetry(node, message) {
+  if (!message.error) return;
+  const error = document.createElement("p");
+  error.className = "message-error";
+  error.textContent = message.error;
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "Als Entwurf übernehmen";
+  retry.addEventListener("click", () => restoreRejectedMessage(message));
+  node.append(error, retry);
+}
+
+function renderMessageNode(message) {
+  const node = document.createElement("div");
+  node.className = `message ${message.role}`;
+  if (message.id != null) node.dataset.messageId = String(message.id);
+  if (message.role === "assistant") node.innerHTML = markdownToHtml(message.content);
+  else {
+    node.textContent = message.content;
+    if (message.attachment_names) {
+      const label = document.createElement("small");
+      label.textContent = messageAttachmentLabel(message.attachment_names);
+      node.append(label);
+    }
+  }
+  appendMessageRetry(node, message);
+  return node;
+}
+
+function appendChatStream(root, streamVisible) {
+  const phase = state.chatRequest?.phase;
+  if (!streamVisible) return false;
+  const node = document.createElement("div");
+  node.className = `message assistant streaming${phase === "recovering" ? " is-recovering" : ""}`;
+  node.innerHTML = markdownToHtml(state.chatStreamText);
+  root.append(node);
+  return true;
+}
+
 function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   const root = $("#messages");
   const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
-  // Synchronisation and refresh notices belong to their respective tabs,
-  // not to the personal conversation history.
   const visibleMessages = messages || [];
   const signature = JSON.stringify([
     visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error]),
-    appShellLoading,
-    state.data?.messages_next_cursor,
-    state.chatStreamText,
-    state.chatServerOperationId,
-    state.chatResponseStarted,
-    state.chatRequest?.phase || null,
-    state.chatRequest?.responseMessageId || null,
+    appShellLoading, state.data?.messages_next_cursor, state.chatStreamText, state.chatServerOperationId,
+    state.chatResponseStarted, state.chatRequest?.phase || null, state.chatRequest?.responseMessageId || null,
     state.chatRequest?.responseMessageReceived || false,
     (state.coachActionProposals || []).map((proposal) => [proposal.id, proposal.status]),
     state.chatQueue.map((entry) => [entry.id, entry.mode, entry.message]),
@@ -1860,78 +1972,24 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   root.replaceChildren();
   appendHistoryPageButton(root, "chat");
   if (!visibleMessages.length && !state.chatRequest && !state.chatQueue.length) {
-    if (appShellLoading) root.append(createSkeletonStack(4));
-    else root.append(createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest oder starte mit einer Schnellaktion."));
+    root.append(appShellLoading ? createSkeletonStack(4) : createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest oder starte mit einer Schnellaktion."));
   }
-  for (const message of visibleMessages) {
-    const node = document.createElement("div");
-    node.className = `message ${message.role}`;
-    if (message.id != null) node.dataset.messageId = String(message.id);
-    if (message.role === "assistant") node.innerHTML = markdownToHtml(message.content);
-    else {
-      node.textContent = message.content;
-      const names = message.attachment_names;
-      if (names) {
-        const label = document.createElement("small");
-        try {
-          const parsed = JSON.parse(names);
-          label.textContent = parsed.length ? "\nAnhänge: " + parsed.join(", ") : "";
-        } catch (parseError) {
-          if (!(parseError instanceof SyntaxError)) throw parseError;
-          // Attachment names are optional persisted metadata; malformed JSON must not hide the message.
-          label.textContent = "";
-        }
-        node.append(label);
-      }
-    }
-    if (message.error) {
-      const error = document.createElement("p");
-      error.className = "message-error";
-      error.textContent = message.error;
-      const retry = document.createElement("button");
-      retry.type = "button";
-      retry.textContent = "Als Entwurf übernehmen";
-      retry.addEventListener("click", () => {
-        const input = $("#messageInput");
-        if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
-        input.value = message.content;
-        state.chatAttachments = message.attachments || [];
-        renderChatAttachments();
-        state.chatDraftDirty = true;
-        state.data.messages = state.data.messages.filter((entry) => entry !== message);
-        state.rejectedMessages = state.rejectedMessages.filter((entry) => entry.client_turn_id !== message.client_turn_id);
-        renderMessages(state.data.messages);
-        jumpToChatComposer();
-        updateChatControls();
-      });
-      node.append(error, retry);
-    }
-    root.append(node);
-  }
-  for (const entry of state.chatQueue) root.append(createPendingMessage(entry));
+  visibleMessages.forEach((message) => root.append(renderMessageNode(message)));
+  state.chatQueue.forEach((entry) => root.append(createPendingMessage(entry)));
   const persistedResponse = Boolean(
     state.chatRequest?.responseMessageReceived
     || (state.chatRequest?.responseMessageId != null
       && visibleMessages.some((message) => message.id != null && String(message.id) === String(state.chatRequest.responseMessageId)))
   );
   const streamVisible = state.chatStreamText && !persistedResponse && ["running", "recovering", "reconciling"].includes(state.chatRequest?.phase);
-  if (streamVisible) {
-    const node = document.createElement("div");
-    node.className = `message assistant streaming${state.chatRequest?.phase === "recovering" ? " is-recovering" : ""}`;
-    node.innerHTML = markdownToHtml(state.chatStreamText);
-    root.append(node);
-  }
-  const showWorking = !persistedResponse
-    && ["running", "recovering", "reconciling"].includes(state.chatRequest?.phase);
-  if (showWorking) {
-    root.append(createCoachWorkingIndicator());
-  }
+  const showWorking = !persistedResponse && ["running", "recovering", "reconciling"].includes(state.chatRequest?.phase);
+  appendChatStream(root, streamVisible);
+  if (showWorking) root.append(createCoachWorkingIndicator());
   renderCoachActionReview();
   updateChatQueueStatus();
   updateChatComposerVisibility();
   if ((state.chatInitialScrollPending || shouldScroll) && !state.chatResponseStarted) scrollChatToLatest();
 }
-
 function cancelScheduledChatStreamRender() {
   if (chatStreamRenderFrame != null) cancelAnimationFrame(chatStreamRenderFrame);
   chatStreamRenderFrame = null;
@@ -3291,187 +3349,252 @@ function renderAppVersion(app = {}) {
   if (settingsVersionNode) settingsVersionNode.textContent = app.version ? `v${app.version}` : "unbekannt";
 }
 
-function renderSettings(data) {
-  const configured = data.configured || {};
-  const garmin = data.garmin || {};
-  const weather = data.weather || {};
-  const openaiStatus = data.usage?.status || {};
-  const activeProvider = data.ai_provider?.selected || "openai";
-  const setStatus = (selector, ok, text) => {
-    const node = $(selector);
-    if (!node) return;
-    node.textContent = text;
-    node.className = ok ? "configured" : "not-configured";
-  };
-  const openaiHealthy = configured.openai && (activeProvider !== "openai" || openaiStatus.state !== "error");
-  let openaiStatusLabel = "Konfiguriert";
-  if (!configured.openai) openaiStatusLabel = "Nicht konfiguriert";
-  else if (activeProvider === "openai" && openaiStatus.state === "error") openaiStatusLabel = "Fehler bei letzter Anfrage";
-  setStatus(
-    "#openaiConnectionStatus",
-    openaiHealthy,
-    openaiStatusLabel,
-  );
-  const openaiDetail = $("#openaiConnectionDetail");
-  if (openaiDetail) {
-    openaiDetail.classList.toggle("error", Boolean(configured.openai && activeProvider === "openai" && openaiStatus.state === "error"));
-    if (!configured.openai) openaiDetail.textContent = "API-Schlüssel nicht konfiguriert";
-    else if (activeProvider === "openai" && openaiStatus.state === "error") {
-      const updated = openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : "";
-      openaiDetail.textContent = `${openaiStatus.message || "OpenAI-Anfrage fehlgeschlagen."}${updated}`;
-    } else if (activeProvider === "openai" && openaiStatus.state === "ok") {
-      openaiDetail.textContent = `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`;
-    } else openaiDetail.textContent = "Als alternativer Anbieter konfiguriert";
+function settingsStatus(selector, ok, text) {
+  const node = $(selector);
+  if (!node) return;
+  node.textContent = text;
+  node.className = ok ? "configured" : "not-configured";
+}
+
+function aiProviderName(provider) {
+  return provider === "gemini" ? "Gemini" : "OpenAI";
+}
+
+function aiConnectionLabel(configured, activeError) {
+  if (!configured) return "Nicht konfiguriert";
+  return activeError ? "Fehler bei letzter Anfrage" : "Konfiguriert";
+}
+
+function aiConnectionConfigurationDetail(provider) {
+  return provider === "gemini" ? "GEMINI_API_KEY nicht konfiguriert" : "API-Schlüssel nicht konfiguriert";
+}
+
+function aiConnectionErrorDetail(provider, status) {
+  const message = status.message || aiProviderName(provider) + "-Anfrage fehlgeschlagen.";
+  const updated = status.updated_at ? " · " + formatTime(status.updated_at) : "";
+  return message + updated;
+}
+
+function aiConnectionDetail(provider, configured, activeProvider, activeError, status) {
+  if (!configured) return aiConnectionConfigurationDetail(provider);
+  if (activeError) return aiConnectionErrorDetail(provider, status);
+  if (activeProvider === provider && status.state === "ok") return "Letzter erfolgreicher API-Aufruf: " + formatTime(status.updated_at);
+  return "Als alternativer Anbieter konfiguriert";
+}
+
+function renderAiConnection(provider, configured, activeProvider, status) {
+  const activeError = activeProvider === provider && status.state === "error";
+  const healthy = configured && !activeError;
+  settingsStatus("#" + provider + "ConnectionStatus", healthy, aiConnectionLabel(configured, activeError));
+  const detail = $("#" + provider + "ConnectionDetail");
+  if (detail) {
+    detail.classList.toggle("error", Boolean(configured && activeError));
+    detail.textContent = aiConnectionDetail(provider, configured, activeProvider, activeError, status);
   }
-  const geminiHealthy = configured.gemini && (activeProvider !== "gemini" || openaiStatus.state !== "error");
-  let geminiStatusLabel = "Konfiguriert";
-  if (!configured.gemini) geminiStatusLabel = "Nicht konfiguriert";
-  else if (activeProvider === "gemini" && openaiStatus.state === "error") geminiStatusLabel = "Fehler bei letzter Anfrage";
-  setStatus(
-    "#geminiConnectionStatus",
-    geminiHealthy,
-    geminiStatusLabel,
-  );
-  const geminiDetail = $("#geminiConnectionDetail");
-  if (geminiDetail) {
-    geminiDetail.classList.toggle("error", Boolean(configured.gemini && activeProvider === "gemini" && openaiStatus.state === "error"));
-    if (!configured.gemini) geminiDetail.textContent = "GEMINI_API_KEY nicht konfiguriert";
-    else if (activeProvider === "gemini" && openaiStatus.state === "error") {
-      const updated = openaiStatus.updated_at ? ` · ${formatTime(openaiStatus.updated_at)}` : "";
-      geminiDetail.textContent = `${openaiStatus.message || "Gemini-Anfrage fehlgeschlagen."}${updated}`;
-    } else if (activeProvider === "gemini" && openaiStatus.state === "ok") {
-      geminiDetail.textContent = `Letzter erfolgreicher API-Aufruf: ${formatTime(openaiStatus.updated_at)}`;
-    } else geminiDetail.textContent = "Als alternativer Anbieter konfiguriert";
-  }
-  const intervals = data.intervals || {
+  return healthy;
+}
+
+function intervalsConnectionState(data, configured) {
+  return data.intervals || {
     configured: Boolean(configured.intervals),
     state: configured.intervals ? "configured" : "not_configured",
   };
-  const intervalsHealthy = intervals.configured && intervals.state !== "error";
-  let intervalsStatusLabel = "Konfiguriert · noch nicht getestet";
-  if (!intervals.configured) intervalsStatusLabel = "Nicht konfiguriert";
-  else if (intervals.state === "syncing") intervalsStatusLabel = "Synchronisierung läuft…";
-  else if (intervals.state === "error") intervalsStatusLabel = "Fehler bei letzter Aktualisierung";
-  else if (intervals.state === "connected") intervalsStatusLabel = "Verbunden";
-  setStatus(
-    "#intervalsConnectionStatus",
-    intervalsHealthy,
-    intervalsStatusLabel,
-  );
-  const intervalsDetail = $("#intervalsConnectionDetail");
-  if (intervalsDetail) {
-    const librarySync = intervals.library_sync || {};
-    const libraryState = librarySync.state || {};
-    const libraryCount = Number(libraryState.synced || 0);
-    const paginationDetail = Object.entries(intervals.pagination || {})
-      .filter(([, value]) => value && (Number(value.pages) > 1 || value.complete === false))
-      .map(([name, value]) => `${name}: ${value.records || 0} Datensätze auf ${value.pages || 0} Seiten${value.complete === false ? " · unvollständig" : ""}`)
-      .join(" · ");
-    intervalsDetail.classList.toggle("error", Boolean(intervals.last_error));
-    if (!intervals.configured) intervalsDetail.textContent = "API-Schlüssel nicht konfiguriert";
-    else if (intervals.state === "syncing") intervalsDetail.textContent = intervals.status || "Intervals.icu wird synchronisiert.";
-    else if (intervals.last_error) intervalsDetail.textContent = intervals.last_error;
-    else if (intervals.last_sync_at || librarySync.last_sync_at) {
-      const updated = formatTime(intervals.last_sync_at || librarySync.last_sync_at);
-      const counts = libraryCount ? ` · ${libraryCount} Bibliothekseinheiten` : "";
-      const pagination = paginationDetail ? ` · ${paginationDetail}` : "";
-      intervalsDetail.textContent = `Letzte Aktualisierung: ${updated}${counts}${pagination}`;
-    } else intervalsDetail.textContent = "Noch keine Synchronisierung durchgeführt";
+}
+
+function intervalsPaginationDetail(intervals) {
+  return Object.entries(intervals.pagination || {})
+    .filter(([, value]) => value && (Number(value.pages) > 1 || value.complete === false))
+    .map(([name, value]) => {
+      const completeness = value.complete === false ? " · unvollständig" : "";
+      return name + ": " + (value.records || 0) + " Datensätze auf " + (value.pages || 0) + " Seiten" + completeness;
+    })
+    .join(" · ");
+}
+
+function intervalsConnectionDetail(intervals) {
+  const librarySync = intervals.library_sync || {};
+  if (!intervals.configured) return "API-Schlüssel nicht konfiguriert";
+  if (intervals.state === "syncing") return intervals.status || "Intervals.icu wird synchronisiert.";
+  if (intervals.last_error) return intervals.last_error;
+  if (!(intervals.last_sync_at || librarySync.last_sync_at)) return "Noch keine Synchronisierung durchgeführt";
+  const updated = formatTime(intervals.last_sync_at || librarySync.last_sync_at);
+  const libraryCount = Number(librarySync.state?.synced || 0);
+  const counts = libraryCount ? " · " + libraryCount + " Bibliothekseinheiten" : "";
+  const pagination = intervalsPaginationDetail(intervals);
+  const paginationSuffix = pagination ? " · " + pagination : "";
+  return "Letzte Aktualisierung: " + updated + counts + paginationSuffix;
+}
+
+function renderIntervalsConnection(data, configured) {
+  const intervals = intervalsConnectionState(data, configured);
+  const healthy = intervals.configured && intervals.state !== "error";
+  const labels = {
+    not_configured: "Nicht konfiguriert",
+    syncing: "Synchronisierung läuft…",
+    error: "Fehler bei letzter Aktualisierung",
+    connected: "Verbunden",
+  };
+  settingsStatus("#intervalsConnectionStatus", healthy, labels[intervals.state] || "Konfiguriert · noch nicht getestet");
+  const detail = $("#intervalsConnectionDetail");
+  if (detail) {
+    detail.classList.toggle("error", Boolean(intervals.last_error));
+    detail.textContent = intervalsConnectionDetail(intervals);
   }
-  const garminSyncRunning = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-  let garminStatusLabel = "Konfiguriert";
-  if (!garmin.configured) garminStatusLabel = "Nicht konfiguriert";
-  else if (garminSyncRunning) garminStatusLabel = "Synchronisierung läuft…";
-  else if (garmin.source === "fixture") garminStatusLabel = "Lokale Testdatei aktiv";
-  setStatus("#garminConnectionStatus", garmin.configured, garminStatusLabel);
-  const weatherLocation = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
-  let weatherStatusLabel = "Nicht konfiguriert";
-  if (weather.configured) weatherStatusLabel = weather.loading ? "Wird geladen" : "Konfiguriert";
-  setStatus("#weatherConnectionStatus", weather.configured, weatherStatusLabel);
-  const weatherDetail = $("#weatherConnectionDetail");
-  if (weatherDetail) {
-    if (!weather.configured) weatherDetail.textContent = "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
-    else {
-      const location = weatherLocation ? `Standort: ${weatherLocation} · ` : "";
-      const fetched = weather.fetched_at ? `letzte Abfrage: ${formatTime(weather.fetched_at)}` : "Standort im Profil hinterlegen";
-      weatherDetail.textContent = `${location}${fetched}`;
-    }
+  return healthy;
+}
+
+function weatherConnectionLabel(weather) {
+  if (!weather.configured) return "Nicht konfiguriert";
+  return weather.loading ? "Wird geladen" : "Konfiguriert";
+}
+
+function weatherConnectionDetail(weather) {
+  if (!weather.configured) return "Kein API-Schlüssel erforderlich · Standort im Profil hinterlegen";
+  const location = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
+  const prefix = location ? "Standort: " + location + " · " : "";
+  const fetched = weather.fetched_at ? "letzte Abfrage: " + formatTime(weather.fetched_at) : "Standort im Profil hinterlegen";
+  return prefix + fetched;
+}
+
+function renderWeatherConnection(weather) {
+  settingsStatus("#weatherConnectionStatus", weather.configured, weatherConnectionLabel(weather));
+  const detail = $("#weatherConnectionDetail");
+  if (detail) detail.textContent = weatherConnectionDetail(weather);
+  const button = $("#weatherSyncButton");
+  if (button) {
+    const running = Boolean(state.localSync.weather);
+    button.disabled = !weather.configured || running;
+    button.textContent = running ? "Wetter wird aktualisiert…" : "Wetter aktualisieren";
   }
-  const weatherSyncButton = $("#weatherSyncButton");
-  if (weatherSyncButton) {
-    const weatherSyncRunning = Boolean(state.localSync.weather);
-    weatherSyncButton.disabled = !weather.configured || weatherSyncRunning;
-    weatherSyncButton.textContent = weatherSyncRunning ? "Wetter wird aktualisiert…" : "Wetter aktualisieren";
+}
+
+function updateUnfocusedInput(selector, value) {
+  const input = $(selector);
+  if (input && document.activeElement !== input) input.value = value;
+}
+
+function renderSettingsSyncDayInputs(data) {
+  updateUnfocusedInput("#intervalsSyncDays", data.sync_settings?.intervals_days || 90);
+  updateUnfocusedInput("#garminSyncDays", data.sync_settings?.garmin_days || 30);
+}
+
+function calendarHorizonText(data) {
+  const window = data.planning_view?.provider_window || {};
+  if (window.start && window.end) return "Die Ansicht bleibt auf das lokal geladene Intervals.icu-Fenster " + window.start + " bis " + window.end + " begrenzt.";
+  return "Die Ansicht wird auf das lokal geladene Providerfenster begrenzt.";
+}
+
+function renderCalendarDisplayInputs(data) {
+  const display = data.calendar_display || CALENDAR_DISPLAY_DEFAULTS;
+  const pastWeeks = calendarDisplayValue(display.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
+  const futureWeeks = calendarDisplayValue(display.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
+  updateUnfocusedInput("#calendarDisplayPastWeeks", pastWeeks);
+  updateUnfocusedInput("#calendarDisplayFutureWeeks", futureWeeks);
+  const summary = $("#calendarDisplaySummary");
+  if (summary) summary.textContent = pastWeeks + " zurück · " + futureWeeks + " voraus";
+  const hint = $("#calendarHorizonHint");
+  if (hint) hint.textContent = calendarHorizonText(data);
+}
+
+function renderSettingsInputs(data) {
+  renderSettingsSyncDayInputs(data);
+  renderCalendarDisplayInputs(data);
+}
+
+function intervalsSyncRunning(data, fullRunning) {
+  return Boolean(data.sync?.running || state.localSync.intervals || fullRunning);
+}
+
+function intervalsFullResyncText(fullResync, fullRunning) {
+  if (fullRunning && fullResync.status) return fullResync.status;
+  if (fullResync.last_error) return fullResync.last_error;
+  if (fullResync.last_resync_at) return "Letzter vollständiger Resync: " + formatTime(fullResync.last_resync_at);
+  return "Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.";
+}
+
+function renderIntervalsSyncControls(data, configured) {
+  const fullResync = data.provider_resync?.intervals || {};
+  const fullRunning = Boolean(fullResync.running || state.localSync.intervalsFull);
+  const syncRunning = intervalsSyncRunning(data, fullRunning);
+  const syncButton = $("#systemIntervalsSyncButton");
+  if (syncButton) {
+    syncButton.disabled = syncRunning;
+    syncButton.textContent = data.sync?.running || state.localSync.intervals ? "Synchronisierung läuft…" : "Synchronisieren";
   }
-  const connectionsSummary = $("#connectionsSummary");
-  if (connectionsSummary) {
-    connectionsSummary.textContent = [["OpenAI", openaiHealthy], ["Gemini", geminiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garmin.configured], ["Open-Meteo", weather.configured]]
-      .map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
+  const fullButton = $("#systemIntervalsFullResyncButton");
+  if (fullButton) {
+    fullButton.disabled = !configured.intervals || fullRunning || Boolean(data.sync?.running || state.localSync.intervals);
+    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
   }
-  const intervalsDays = $("#intervalsSyncDays");
-  const garminDays = $("#garminSyncDays");
-  if (intervalsDays && document.activeElement !== intervalsDays) intervalsDays.value = data.sync_settings?.intervals_days || 90;
-  if (garminDays && document.activeElement !== garminDays) garminDays.value = data.sync_settings?.garmin_days || 30;
-  const calendarDisplay = data.calendar_display || CALENDAR_DISPLAY_DEFAULTS;
-  const calendarPastWeeks = $("#calendarDisplayPastWeeks");
-  const calendarFutureWeeks = $("#calendarDisplayFutureWeeks");
-  const pastWeeks = calendarDisplayValue(calendarDisplay.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
-  const futureWeeks = calendarDisplayValue(calendarDisplay.future_weeks, CALENDAR_DISPLAY_DEFAULTS.future_weeks);
-  if (calendarPastWeeks && document.activeElement !== calendarPastWeeks) calendarPastWeeks.value = pastWeeks;
-  if (calendarFutureWeeks && document.activeElement !== calendarFutureWeeks) calendarFutureWeeks.value = futureWeeks;
-  const calendarDisplaySummary = $("#calendarDisplaySummary");
-  if (calendarDisplaySummary) calendarDisplaySummary.textContent = `${pastWeeks} zurück · ${futureWeeks} voraus`;
-  const calendarHorizonHint = $("#calendarHorizonHint");
-  if (calendarHorizonHint) {
-    const window = data.planning_view?.provider_window || {};
-    calendarHorizonHint.textContent = window.start && window.end
-      ? `Die Ansicht bleibt auf das lokal geladene Intervals.icu-Fenster ${window.start} bis ${window.end} begrenzt.`
-      : "Die Ansicht wird auf das lokal geladene Providerfenster begrenzt.";
+  const status = $("#intervalsFullResyncStatus");
+  if (status) {
+    status.classList.toggle("error", Boolean(fullResync.last_error));
+    status.textContent = intervalsFullResyncText(fullResync, fullRunning);
   }
-  const intervalsSyncButton = $("#systemIntervalsSyncButton");
-  const intervalsFullButton = $("#systemIntervalsFullResyncButton");
-  const intervalsFullStatus = $("#intervalsFullResyncStatus");
-  const intervalsFullResync = data.provider_resync?.intervals || {};
-  const intervalsFullRunning = Boolean(intervalsFullResync.running || state.localSync.intervalsFull);
-  if (intervalsSyncButton) {
-    intervalsSyncButton.disabled = Boolean(data.sync?.running || state.localSync.intervals || intervalsFullRunning);
-    intervalsSyncButton.textContent = data.sync?.running || state.localSync.intervals ? "Synchronisierung läuft…" : "Synchronisieren";
-  }
-  if (intervalsFullButton) {
-    intervalsFullButton.disabled = !configured.intervals || intervalsFullRunning || Boolean(data.sync?.running || state.localSync.intervals);
-    intervalsFullButton.textContent = intervalsFullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
-  }
-  if (intervalsFullStatus) {
-    intervalsFullStatus.classList.toggle("error", Boolean(intervalsFullResync.last_error));
-    if (intervalsFullRunning && intervalsFullResync.status) intervalsFullStatus.textContent = intervalsFullResync.status;
-    else if (intervalsFullResync.last_error) intervalsFullStatus.textContent = intervalsFullResync.last_error;
-    else if (intervalsFullResync.last_resync_at) intervalsFullStatus.textContent = `Letzter vollständiger Resync: ${formatTime(intervalsFullResync.last_resync_at)}`;
-    else intervalsFullStatus.textContent = "Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.";
-  }
-  const garminSyncButton = $("#garminSyncButton");
-  if (garminSyncButton) {
-    garminSyncButton.disabled = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-    garminSyncButton.textContent = data.garmin_sync?.running || state.localSync.garmin ? "Synchronisierung läuft…" : "Garmin synchronisieren";
-  }
+}
+
+function renderGarminSyncControl(data) {
+  const button = $("#garminSyncButton");
+  if (!button) return;
+  const running = Boolean(data.garmin_sync?.running || state.localSync.garmin);
+  button.disabled = running;
+  button.textContent = running ? "Synchronisierung läuft…" : "Garmin synchronisieren";
+}
+
+function renderSettingsSyncControls(data, configured) {
+  renderIntervalsSyncControls(data, configured);
+  renderGarminSyncControl(data);
+}
+
+function renderSettingsUsage(data, activeProvider) {
   const usage = data.usage || {};
+  const providerLabel = activeProvider === "gemini" ? "Gemini" : "OpenAI";
   const usageNode = $("#usageSummary");
   if (usageNode) {
     const rateLimits = usage.rate_limits || {};
-    const providerLabel = activeProvider === "gemini" ? "Gemini" : "OpenAI";
     const remaining = rateLimits.remaining_requests != null || rateLimits.remaining_tokens != null
       ? ` · Restkontingent im aktuellen Anbieterfenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
       : " · Restkontingent wird nach einem API-Aufruf angezeigt";
-    const openaiError = usage.status?.state === "error" ? ` · Status: ${usage.status.message || "Fehler bei letzter Anfrage"}` : "";
-    usageNode.textContent = `${providerLabel} heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}${openaiError}`;
+    const error = usage.status?.state === "error" ? ` · Status: ${usage.status.message || "Fehler bei letzter Anfrage"}` : "";
+    usageNode.textContent = `${providerLabel} heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}${error}`;
   }
-  const privacySummary = $("#privacySummary");
-  if (privacySummary) privacySummary.textContent = `${usage.requests || 0} ${activeProvider === "gemini" ? "Gemini" : "OpenAI"}-Anfragen heute`;
+  const privacy = $("#privacySummary");
+  if (privacy) privacy.textContent = `${usage.requests || 0} ${providerLabel}-Anfragen heute`;
+}
+
+function garminConnectionLabel(garmin, running) {
+  if (!garmin.configured) return "Nicht konfiguriert";
+  if (running) return "Synchronisierung läuft…";
+  return garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert";
+}
+
+function renderConnectionsSummary(openaiHealthy, geminiHealthy, intervalsHealthy, garminConfigured, weatherConfigured) {
+  const connections = $("#connectionsSummary");
+  if (!connections) return;
+  const values = [["OpenAI", openaiHealthy], ["Gemini", geminiHealthy], ["Intervals", intervalsHealthy], ["Garmin", garminConfigured], ["Open-Meteo", weatherConfigured]];
+  connections.textContent = values.map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
+}
+
+function renderSettings(data) {
+  const configured = data.configured || {};
+  const activeProvider = data.ai_provider?.selected || "openai";
+  const status = data.usage?.status || {};
+  const openaiHealthy = renderAiConnection("openai", configured.openai, activeProvider, status);
+  const geminiHealthy = renderAiConnection("gemini", configured.gemini, activeProvider, status);
+  const intervalsHealthy = renderIntervalsConnection(data, configured);
+  const garmin = data.garmin || {};
+  const garminRunning = Boolean(data.garmin_sync?.running || state.localSync.garmin);
+  settingsStatus("#garminConnectionStatus", garmin.configured, garminConnectionLabel(garmin, garminRunning));
+  renderWeatherConnection(data.weather || {});
+  renderConnectionsSummary(openaiHealthy, geminiHealthy, intervalsHealthy, garmin.configured, data.weather?.configured);
+  renderSettingsInputs(data);
+  renderSettingsSyncControls(data, configured);
+  renderSettingsUsage(data, activeProvider);
   renderNotificationStatus();
   renderProviderAttention(data);
   renderConnectionsSyncProgress(data);
   renderProviderFreshness(data);
 }
-
 const CHANGE_HISTORY_LABELS = {
   profile: "Profil",
   workout_library: "Workout-Bibliothek",
