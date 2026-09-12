@@ -1845,13 +1845,7 @@ def _normalized_performance_job(envelope: dict[str, Any]) -> dict[str, Any]:
     return {"provider": "intervals", "type": envelope["type"], "payload": {"reason": str(values.get("reason") or "job").strip()[:80] or "job"}}
 
 
-def _normalized_plan_push_job(envelope: dict[str, Any]) -> dict[str, Any]:
-    values = envelope["payload"]
-    if envelope["provider"] != "intervals":
-        raise AppError(400, "Plan-Push-Jobs sind nur für Intervals.icu zulässig.", reason="invalid_job_request")
-    if set(values) - {"entries", "reason", "repair"}:
-        raise AppError(400, "Ein Plan-Push-Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
-    entries = values.get("entries")
+def _normalized_plan_push_entries(entries: Any) -> list[dict[str, str]]:
     if not isinstance(entries, list) or not 1 <= len(entries) <= 28:
         raise AppError(400, "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten.", reason="invalid_job_request")
     normalized_entries = []
@@ -1862,6 +1856,16 @@ def _normalized_plan_push_job(envelope: dict[str, Any]) -> dict[str, Any]:
         if not re.fullmatch(PAYLOAD_HASH_PATTERN, payload_hash):
             raise AppError(400, "Jede Plan-Push-Einheit benötigt einen aktuellen Payload-Hash.", reason="invalid_job_request")
         normalized_entries.append({"library_workout_id": str(entry["library_workout_id"]), "expected_payload_hash": payload_hash})
+    return normalized_entries
+
+
+def _normalized_plan_push_job(envelope: dict[str, Any]) -> dict[str, Any]:
+    values = envelope["payload"]
+    if envelope["provider"] != "intervals":
+        raise AppError(400, "Plan-Push-Jobs sind nur für Intervals.icu zulässig.", reason="invalid_job_request")
+    if set(values) - {"entries", "reason", "repair"}:
+        raise AppError(400, "Ein Plan-Push-Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
+    normalized_entries = _normalized_plan_push_entries(values.get("entries"))
     if "repair" in values and type(values["repair"]) is not bool:
         raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
     repair = {"repair": True} if values.get("repair") else {}
@@ -1887,6 +1891,23 @@ def _sync_job_payload(provider: str, job_type: str, payload: Any) -> dict[str, A
     return _normalized_sync_payload(envelope)
 
 
+def _normalized_sync_days(value: Any) -> int:
+    try:
+        days = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Der Synchronisationszeitraum ist ungültig.", reason="invalid_job_request") from exc
+    if days != ALL_SYNC_DAYS and (days < 1 or days > 3660):
+        raise AppError(400, "Der Synchronisationszeitraum ist zu groß.", reason="invalid_job_request")
+    return days
+
+
+def _normalized_sync_end_date(value: Any) -> str:
+    try:
+        return date.fromisoformat(str(value)[:10]).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Das Backfill-Enddatum ist ungültig.", reason="invalid_job_request") from exc
+
+
 def _normalized_generic_sync_job(envelope: dict[str, Any]) -> dict[str, Any]:
     values = envelope["payload"]
     allowed = {
@@ -1900,22 +1921,13 @@ def _normalized_generic_sync_job(envelope: dict[str, Any]) -> dict[str, Any]:
         raise AppError(400, "Der Job enthält nicht unterstützte Felder.", reason="invalid_job_request")
     normalized: dict[str, Any] = {}
     if "days" in values:
-        try:
-            days = int(values["days"])
-        except (TypeError, ValueError) as exc:
-            raise AppError(400, "Der Synchronisationszeitraum ist ungültig.", reason="invalid_job_request") from exc
-        if days != ALL_SYNC_DAYS and (days < 1 or days > 3660):
-            raise AppError(400, "Der Synchronisationszeitraum ist zu groß.", reason="invalid_job_request")
-        normalized["days"] = days
+        normalized["days"] = _normalized_sync_days(values["days"])
     if "force" in values:
         if not isinstance(values["force"], bool):
             raise AppError(400, "force muss ein Boolean sein.", reason="invalid_job_request")
         normalized["force"] = values["force"]
     if "end_date" in values:
-        try:
-            normalized["end_date"] = date.fromisoformat(str(values["end_date"])[:10]).isoformat()
-        except (TypeError, ValueError) as exc:
-            raise AppError(400, "Das Backfill-Enddatum ist ungültig.", reason="invalid_job_request") from exc
+        normalized["end_date"] = _normalized_sync_end_date(values["end_date"])
     if values.get("reason") is not None:
         normalized["reason"] = str(values["reason"]).strip()[:80] or "job"
     return {"provider": envelope["provider"], "type": envelope["type"], "payload": normalized}
@@ -3301,20 +3313,25 @@ def _cycling_event_interval(event: dict[str, Any]) -> tuple[datetime, datetime, 
     return start, start + timedelta(seconds=seconds), explicit_time
 
 
+def _cycling_intervals_share_group(left: tuple[datetime, datetime, bool], right: tuple[datetime, datetime, bool]) -> bool:
+    left_start, left_end, left_has_time = left
+    right_start, right_end, right_has_time = right
+    if left_start.date() != right_start.date():
+        return False
+    overlap = left_start < right_end and right_start < left_end
+    return overlap or not (left_has_time and right_has_time)
+
+
 def _cycling_event_edges(intervals: list[tuple[datetime, datetime, bool] | None]) -> list[set[int]]:
     edges = [set() for _ in intervals]
     for left_index, left in enumerate(intervals):
         if left is None:
             continue
-        left_start, left_end, left_has_time = left
         for right_index in range(left_index + 1, len(intervals)):
             right = intervals[right_index]
             if right is None:
                 continue
-            right_start, right_end, right_has_time = right
-            if left_start.date() != right_start.date():
-                continue
-            if left_start < right_end and right_start < left_end or not (left_has_time and right_has_time):
+            if _cycling_intervals_share_group(left, right):
                 edges[left_index].add(right_index)
                 edges[right_index].add(left_index)
     return edges
