@@ -13269,6 +13269,22 @@ def _trim_gemini_history(history: list[dict[str, Any]], limit: int = 60) -> list
     return []
 
 
+def _gemini_history_parts_without_raw_media(parts: list[Any]) -> list[dict[str, Any]]:
+    safe_parts = []
+    for part in parts:
+        if not isinstance(part, dict) or "inlineData" in part:
+            continue
+        text = part.get("text")
+        try:
+            parsed = json.loads(text) if isinstance(text, str) else None
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict) and parsed.get("untrusted_fit_raw_base64"):
+            continue
+        safe_parts.append(part)
+    return safe_parts
+
+
 def _gemini_history() -> list[dict[str, Any]]:
     try:
         value = json.loads(get_kv("gemini_conversation_history") or "[]")
@@ -13283,18 +13299,7 @@ def _save_gemini_history(history: list[dict[str, Any]]) -> None:
         parts = entry.get("parts") if isinstance(entry, dict) else None
         if not isinstance(parts, list):
             continue
-        safe_parts = []
-        for part in parts:
-            if not isinstance(part, dict) or "inlineData" in part:
-                continue
-            text = part.get("text")
-            try:
-                parsed = json.loads(text) if isinstance(text, str) else None
-            except json.JSONDecodeError:
-                parsed = None
-            if isinstance(parsed, dict) and parsed.get("untrusted_fit_raw_base64"):
-                continue
-            safe_parts.append(part)
+        safe_parts = _gemini_history_parts_without_raw_media(parts)
         if safe_parts:
             compact.append({"role": entry.get("role"), "parts": safe_parts})
     set_kv("gemini_conversation_history", json.dumps(compact, ensure_ascii=False, separators=(",", ":")))
