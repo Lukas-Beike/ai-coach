@@ -1792,15 +1792,23 @@ function renderCoachActionReview() {
 }
 
 function coachActionReceipt(proposal, result) {
-  const undo = proposal.action_type === "undo_change";
-  const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
-  const message = undo ? "Die lokale Änderung wurde zurückgenommen."
-    : duplicateDelete ? "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten."
-      : result.local_planned ? `${result.local_planned} Einheit(en) lokal geplant.` : "Planung lokal gespeichert.";
-  const title = undo ? "Änderung zurückgenommen" : duplicateDelete ? "Duplikat gelöscht" : "Planung gespeichert";
-  const details = duplicateDelete ? ["Wahoo bleibt die kanonische Radaufzeichnung"]
-    : result.sync_job_ids?.length ? [`${result.sync_job_ids.length} Syncjobs eingereiht`]
-      : result.sync_job_id ? [`Syncjob ${result.sync_job_id} eingereiht`] : ["Keine implizite Remote-Änderung"];
+    const undo = proposal.action_type === "undo_change";
+    const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
+  let message = "Planung lokal gespeichert.";
+  let title = "Planung gespeichert";
+  let details = ["Keine implizite Remote-Änderung"];
+  if (undo) {
+    message = "Die lokale Änderung wurde zurückgenommen.";
+    title = "Änderung zurückgenommen";
+  } else if (duplicateDelete) {
+    message = "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten.";
+    title = "Duplikat gelöscht";
+    details = ["Wahoo bleibt die kanonische Radaufzeichnung"];
+  } else if (result.local_planned) {
+    message = `${result.local_planned} Einheit(en) lokal geplant.`;
+  }
+  if (!duplicateDelete && result.sync_job_ids?.length) details = [`${result.sync_job_ids.length} Syncjobs eingereiht`];
+  else if (!duplicateDelete && result.sync_job_id) details = [`Syncjob ${result.sync_job_id} eingereiht`];
   return { title, message, details, duplicateDelete, undo };
 }
 
@@ -2967,10 +2975,12 @@ function garminBodyBatteryDetail(garmin) {
 }
 
 function garminDetailText(garmin) {
-  const sourceDetail = garmin.last_sync_at
-    ? `Letzter Abruf: ${formatTime(garmin.last_sync_at)} · ${garmin.activities || 0} Aktivitäten · Schlaf/HRV/Readiness ${[garmin.has_sleep, garmin.has_hrv, garmin.has_readiness].filter(Boolean).length}/3`
-    : garmin.source === "fixture" ? "Testdatei ist konfiguriert; synchronisiere sie mit dem Button."
-      : "Noch kein Garmin-Abruf durchgeführt.";
+  let sourceDetail = "Noch kein Garmin-Abruf durchgeführt.";
+  if (garmin.last_sync_at) {
+    sourceDetail = `Letzter Abruf: ${formatTime(garmin.last_sync_at)} · ${garmin.activities || 0} Aktivitäten · Schlaf/HRV/Readiness ${[garmin.has_sleep, garmin.has_hrv, garmin.has_readiness].filter(Boolean).length}/3`;
+  } else if (garmin.source === "fixture") {
+    sourceDetail = "Testdatei ist konfiguriert; synchronisiere sie mit dem Button.";
+  }
   const performance = garminPerformanceSources(garmin);
   return [sourceDetail, performance.length ? `${performance.join("/")} aus Garmin` : "", garminBodyBatteryDetail(garmin), garminPaginationDetail(garmin)].filter(Boolean).join(" · ");
 }
@@ -2982,10 +2992,11 @@ function renderGarminFullResync(fullButton, fullStatus, fullResync, fullRunning)
   }
   if (!fullStatus) return;
   fullStatus.classList.toggle("error", Boolean(fullResync.last_error));
-  fullStatus.textContent = fullRunning && fullResync.status ? fullResync.status
-    : fullResync.last_error ? fullResync.last_error
-      : fullResync.last_resync_at ? `Letzter vollständiger Resync: ${formatTime(fullResync.last_resync_at)}`
-        : "Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.";
+  let statusText = "Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.";
+  if (fullRunning && fullResync.status) statusText = fullResync.status;
+  else if (fullResync.last_error) statusText = fullResync.last_error;
+  else if (fullResync.last_resync_at) statusText = `Letzter vollständiger Resync: ${formatTime(fullResync.last_resync_at)}`;
+  fullStatus.textContent = statusText;
 }
 
 function renderUnavailableGarmin(garmin, status, detail, button, fullButton) {
