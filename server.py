@@ -3912,6 +3912,45 @@ def _garmin_performance_units(
     }
 
 
+def _garmin_performance_source_keys(profile_max_hr: dict[str, float | int]) -> dict[str, str]:
+    return {
+        "weight_kg": "weight",
+        "cycling_ftp_watts": "cycling_ftp",
+        "cycling_max_hr_bpm": "heart_rate_zones" if profile_max_hr.get("cycling") or profile_max_hr.get("generic") else "activities",
+        "running_max_hr_bpm": "heart_rate_zones" if profile_max_hr.get("running") or profile_max_hr.get("generic") else "activities",
+    }
+
+
+def _garmin_activity_observed_at(activities: list[Any], kind: str, maximum_hr: Any) -> str | None:
+    observed_dates = [
+        garmin_source_observed_at(activity)
+        for activity in activities
+        if isinstance(activity, dict)
+        and activity_kind(activity) == kind
+        and as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate"))) == maximum_hr
+    ]
+    return max((value for value in observed_dates if value), default=None)
+
+
+def _garmin_performance_freshness(
+    snapshot: dict[str, Any],
+    metrics: dict[str, dict[str, Any]],
+    source_keys: dict[str, str],
+    race_values: dict[str, float | int | None],
+) -> dict[str, dict[str, Any]]:
+    for key, value in metrics.items():
+        source = source_keys.get(key)
+        if not source:
+            if "vo2max" in key:
+                source = "max_metrics"
+            elif key in race_values:
+                source = "race_predictions"
+            else:
+                source = "running_threshold"
+        metrics[key] = garmin_metric_freshness(snapshot, source, value)
+    return metrics
+
+
 def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Normalize Garmin's varying max-metric and race-prediction payloads."""
     max_metrics = snapshot.get("max_metrics") if isinstance(snapshot.get("max_metrics"), (dict, list)) else {}
@@ -3922,11 +3961,7 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
     profile_max_hr, max_hr_values, activities = _garmin_max_hr_samples(snapshot)
     weight = garmin_weight_metric(snapshot)
     units = _garmin_performance_units(weight, max_hr_values, profile_max_hr, cycling_vo2, running_vo2, race_values, thresholds)
-    source_keys = {
-        "weight_kg": "weight", "cycling_ftp_watts": "cycling_ftp",
-        "cycling_max_hr_bpm": "heart_rate_zones" if profile_max_hr.get("cycling") or profile_max_hr.get("generic") else "activities",
-        "running_max_hr_bpm": "heart_rate_zones" if profile_max_hr.get("running") or profile_max_hr.get("generic") else "activities",
-    }
+    source_keys = _garmin_performance_source_keys(profile_max_hr)
     result = {
         key: metric(value, unit, GARMIN_PERFORMANCE_SOURCE, note)
         for key, (value, unit, note) in units.items()
@@ -3934,22 +3969,8 @@ def garmin_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, 
     for kind in ("cycling", "running"):
         key = f"{kind}_max_hr_bpm"
         if source_keys[key] == "activities":
-            observed_dates = [garmin_source_observed_at(activity) for activity in activities
-                              if isinstance(activity, dict) and activity_kind(activity) == kind
-                              and as_number(first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate"))) == result[key]["value"]]
-            result[key]["observed_at"] = max((value for value in observed_dates if value), default=None)
-    freshness = {}
-    for key, value in result.items():
-        source = source_keys.get(key)
-        if not source:
-            if "vo2max" in key:
-                source = "max_metrics"
-            elif key in race_values:
-                source = "race_predictions"
-            else:
-                source = "running_threshold"
-        freshness[key] = garmin_metric_freshness(snapshot, source, value)
-    return freshness
+            result[key]["observed_at"] = _garmin_activity_observed_at(activities, kind, result[key]["value"])
+    return _garmin_performance_freshness(snapshot, result, source_keys, race_values)
 
 
 def measurement_age(observed_at: Any) -> dict[str, Any]:
