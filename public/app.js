@@ -1437,15 +1437,39 @@ function activityTypeKey(activity) {
   return String(activity?.type || "Sportart unbekannt").trim() || "Sportart unbekannt";
 }
 
-function renderActivityFilters(activities) {
-  const root = $("#activityFilters");
-  if (!root) return;
-  root.replaceChildren();
+function activityTypeCounts(activities) {
   const counts = new Map();
   (Array.isArray(activities) ? activities : []).forEach((activity) => {
     const type = activityTypeKey(activity);
     counts.set(type, (counts.get(type) || 0) + 1);
   });
+  return counts;
+}
+
+function refreshActivityFilters() {
+  state.activityVisibleCount = 250;
+  renderActivities(state.data?.activities || []);
+}
+
+function activityFilterButton(type, count) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `activity-filter-button${state.activityTypes.has(type) ? " active" : ""}`;
+  button.textContent = `${type} (${count})`;
+  button.setAttribute("aria-pressed", state.activityTypes.has(type) ? "true" : "false");
+  button.addEventListener("click", () => {
+    if (state.activityTypes.has(type)) state.activityTypes.delete(type);
+    else state.activityTypes.add(type);
+    refreshActivityFilters();
+  });
+  return button;
+}
+
+function renderActivityFilters(activities) {
+  const root = $("#activityFilters");
+  if (!root) return;
+  root.replaceChildren();
+  const counts = activityTypeCounts(activities);
   if (!counts.size) {
     root.hidden = true;
     return;
@@ -1455,20 +1479,7 @@ function renderActivityFilters(activities) {
   label.className = "activity-filters-label";
   label.textContent = "Typ filtern:";
   root.append(label);
-  [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).forEach(([type, count]) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `activity-filter-button${state.activityTypes.has(type) ? " active" : ""}`;
-    button.textContent = `${type} (${count})`;
-    button.setAttribute("aria-pressed", state.activityTypes.has(type) ? "true" : "false");
-    button.addEventListener("click", () => {
-      if (state.activityTypes.has(type)) state.activityTypes.delete(type);
-      else state.activityTypes.add(type);
-      state.activityVisibleCount = 250;
-      renderActivities(state.data?.activities || []);
-    });
-    root.append(button);
-  });
+  [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).forEach(([type, count]) => root.append(activityFilterButton(type, count)));
   if (state.activityTypes.size) {
     const clear = document.createElement("button");
     clear.type = "button";
@@ -1476,8 +1487,7 @@ function renderActivityFilters(activities) {
     clear.textContent = "Zurücksetzen";
     clear.addEventListener("click", () => {
       state.activityTypes.clear();
-      state.activityVisibleCount = 250;
-      renderActivities(state.data?.activities || []);
+      refreshActivityFilters();
     });
     root.append(clear);
   }
