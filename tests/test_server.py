@@ -6972,6 +6972,22 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(validation["direct_activity_estimates"]["activity_configured_ftp_watts"], 300)
         self.assertNotEqual(validation["direct_activity_estimates"].get("activity_ftp_watts"), 300)
 
+    def test_activity_validation_omits_implausible_provider_references(self):
+        validation = server.activity_performance_validation(
+            [{"id": "invalid-provider", "type": "Run", "start_date_local": "2026-09-12T08:00:00"}],
+            {
+                "running_vo2max_ml_kg_min": {"value": 500, "unit": "ml/kg/min", "source": "Intervals.icu"},
+                "run_threshold_pace_seconds_per_km": {"value": 9999, "unit": "s/km", "source": "Intervals.icu"},
+                "run_threshold_hr_bpm": {"value": 9999, "unit": "bpm", "source": "Intervals.icu"},
+            },
+            {},
+        )
+
+        reference_metrics = {item["metric"] for item in validation["provider_references"]}
+        self.assertNotIn("running_vo2max_ml_kg_min", reference_metrics)
+        self.assertNotIn("run_threshold_pace_seconds_per_km", reference_metrics)
+        self.assertNotIn("run_threshold_hr_bpm", reference_metrics)
+
     def test_activity_validation_omits_power_ratio_for_invalid_or_implausible_ftp(self):
         activity = {
             "id": "invalid-ftp", "type": "Ride", "start_date_local": "2026-09-12T08:00:00",

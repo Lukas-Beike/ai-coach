@@ -12303,6 +12303,29 @@ def activity_direct_estimates(latest: dict[str, Any]) -> dict[str, float | int]:
     return estimates
 
 
+def bounded_performance_metric(key: str, value: Any) -> float | int | None:
+    """Normalize provider performance values before using them for validation."""
+    bounds = {
+        "cycling_ftp_watts": (20, 2000),
+        "cycling_eftp_watts": (20, 2000),
+        "run_threshold_watts": (20, 2000),
+        "running_vo2max_ml_kg_min": (10, 100),
+        "cycling_vo2max_ml_kg_min": (10, 100),
+        "run_threshold_pace_seconds_per_km": (120, 1800),
+        "run_zone2_pace_seconds_per_km": (120, 1800),
+        "run_threshold_hr_bpm": (80, 230),
+        "bike_threshold_hr_bpm": (80, 230),
+        "run_5k_seconds": (1, 86400),
+        "run_10k_seconds": (1, 86400),
+        "run_half_marathon_seconds": (1, 172800),
+        "run_marathon_seconds": (1, 345600),
+    }
+    minimum, maximum = bounds.get(key, (None, None))
+    if minimum is None:
+        return as_number(value)
+    return bounded_activity_metric(value, minimum, maximum)
+
+
 def activity_performance_validation(
     activities: list[Any],
     metrics: dict[str, dict[str, Any]],
@@ -12359,9 +12382,13 @@ def activity_performance_validation(
     provider_references = []
     for key in reference_keys:
         provider_value = metrics.get(key, {})
+        raw_value = provider_value.get("value")
+        value = bounded_performance_metric(key, raw_value)
+        if raw_value not in (None, "") and value is None:
+            continue
         provider_references.append({
             "metric": key,
-            "value": provider_value.get("value"),
+            "value": value,
             "unit": provider_value.get("unit"),
             "source": provider_value.get("source"),
             "observed_at": provider_value.get("observed_at"),
@@ -12908,7 +12935,7 @@ def intervals_performance_average(rows: list[dict[str, Any]], key: str, days: in
             "weight_kg": first_present(row, ("weight",)),
             "readiness": readiness_score_value(first_present(row, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness"))),
         }
-        value = as_number(candidates.get(key))
+        value = bounded_performance_metric(key, candidates.get(key))
         if value is not None:
             values.append(float(value))
     return round(sum(values) / len(values), 2) if values else None
