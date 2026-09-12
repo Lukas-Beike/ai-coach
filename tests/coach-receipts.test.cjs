@@ -5,7 +5,7 @@ const vm = require("node:vm");
 const { test } = require("node:test");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8");
-const start = source.indexOf("function addStructuredCoachReceipts(payload) {");
+const start = source.indexOf("const HIDDEN_CHAT_RECEIPT_TOOLS");
 const end = source.indexOf("\nasync function retryProvider", start);
 
 function render(commands) {
