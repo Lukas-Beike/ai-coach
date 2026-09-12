@@ -5256,6 +5256,15 @@ class CoachTests(unittest.TestCase):
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])
 
+    def test_coach_context_requires_performance_assessment_for_completed_activity_analysis(self):
+        context = server.build_training_context()
+
+        self.assertIn('"Leistungsfähigkeit und Entwicklung"', context)
+        self.assertIn("VO2max", context)
+        self.assertIn("Zone 2 pace", context)
+        self.assertIn("keep FTP and Intervals.icu eFTP clearly separate", context)
+        self.assertIn("do not claim a reliable trend", context)
+
     def test_coach_projection_does_not_change_provider_snapshots(self):
         today = server.local_now().date()
         intervals_snapshot = {
