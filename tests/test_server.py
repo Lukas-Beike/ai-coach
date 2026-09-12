@@ -4189,6 +4189,17 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(record["before_sleep"]["value"], 57)
         self.assertEqual(record["morning"]["value"], 78)
 
+    def test_garmin_sleep_bounds_prefers_valid_nested_daily_sleep(self):
+        start, end = server._garmin_sleep_bounds({
+            "dailySleepDTO": {
+                "sleepStartTimestampGMT": "2026-09-03T21:30:00+00:00",
+                "sleepEndTimestampGMT": "2026-09-04T05:45:00+00:00",
+            },
+            "invalid": {"startTimestampGMT": "2026-09-05T06:00:00+00:00", "endTimestampGMT": "2026-09-05T05:00:00+00:00"},
+        })
+        self.assertEqual(start, datetime(2026, 9, 3, 21, 30, tzinfo=timezone.utc))
+        self.assertEqual(end, datetime(2026, 9, 4, 5, 45, tzinfo=timezone.utc))
+
     def test_morning_body_battery_loads_once_for_the_sleep_window(self):
         class FakeGarmin:
             sleep_calls = []
