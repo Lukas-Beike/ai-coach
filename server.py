@@ -13283,7 +13283,18 @@ def _save_gemini_history(history: list[dict[str, Any]]) -> None:
         parts = entry.get("parts") if isinstance(entry, dict) else None
         if not isinstance(parts, list):
             continue
-        safe_parts = [part for part in parts if not (isinstance(part, dict) and "inlineData" in part)]
+        safe_parts = []
+        for part in parts:
+            if not isinstance(part, dict) or "inlineData" in part:
+                continue
+            text = part.get("text")
+            try:
+                parsed = json.loads(text) if isinstance(text, str) else None
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict) and parsed.get("untrusted_fit_raw_base64"):
+                continue
+            safe_parts.append(part)
         if safe_parts:
             compact.append({"role": entry.get("role"), "parts": safe_parts})
     set_kv("gemini_conversation_history", json.dumps(compact, ensure_ascii=False, separators=(",", ":")))
@@ -13414,7 +13425,12 @@ def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[s
             except (TypeError, json.JSONDecodeError):
                 output = {"error": "Tool output was not JSON."}
             parts.append({"functionResponse": {"name": call_names.get(call_id, "coach_tool"), "response": output if isinstance(output, dict) else {"result": output}}})
-        has_input_media = any(isinstance(part, dict) and "inlineData" in part for part in parts)
+        has_input_media = any(
+            isinstance(part, dict) and (
+                "inlineData" in part or "untrusted_fit_raw_base64" in str(part.get("text") or "")
+            )
+            for part in parts
+        )
         if not has_input_media:
             for image in payload.get("_gemini_transient_images") or []:
                 if isinstance(image, dict) and image.get("mime") and image.get("data"):
