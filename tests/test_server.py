@@ -4225,6 +4225,19 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(start, datetime(2026, 9, 3, 21, 30, tzinfo=timezone.utc))
         self.assertEqual(end, datetime(2026, 9, 4, 5, 45, tzinfo=timezone.utc))
 
+    def test_morning_checkin_garmin_gate_waits_for_fresh_sleep(self):
+        events = []
+        with patch.object(server, "garmin_fixture_path", return_value="fixture.json"), \
+             patch.object(server, "sync_garmin") as sync_garmin, \
+             patch.object(server, "garmin_sleep_ready_for_checkin", return_value=False), \
+             patch.object(server, "publish_state_event", side_effect=lambda *args: events.append(args)):
+            ready = server._morning_checkin_garmin_ready(date(2026, 9, 4))
+        self.assertIsNone(ready)
+        sync_garmin.assert_called_once_with(days=server.MORNING_GARMIN_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
+        self.assertEqual(server.get_kv("morning_checkin_status"), "waiting")
+        self.assertEqual(server.get_kv("morning_checkin_attempt_count"), "0")
+        self.assertTrue(events)
+
     def test_garmin_source_observed_at_uses_latest_nested_valid_date(self):
         observed_at = server.garmin_source_observed_at({
             "calendarDate": "invalid-date",

@@ -17810,47 +17810,73 @@ MORNING_CHECKIN_PROMPT = (
 MORNING_GARMIN_SYNC_DAYS = 2
 
 
+def _start_morning_checkin() -> None:
+    set_kv("morning_checkin_running", "1")
+    set_kv("morning_checkin_status", "working")
+    set_kv("morning_checkin_error", "")
+    publish_state_event("coach", {"status": "changed"})
+
+
+def _morning_checkin_garmin_ready(checkin_day: date) -> bool:
+    configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
+    if not configured:
+        return False
+    try:
+        sync_garmin(days=MORNING_GARMIN_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
+    except Exception:
+        LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
+    if garmin_sleep_ready_for_checkin(checkin_day):
+        return True
+    set_kv("morning_checkin_status", "waiting")
+    if not get_kv("morning_checkin_attempt_count"):
+        set_kv("morning_checkin_attempt_count", "0")
+    publish_state_event("coach", {"status": "changed"})
+    return None
+
+
+def _morning_checkin_attempt() -> int:
+    attempt = int(get_kv("morning_checkin_attempt_count") or 0) + 1
+    set_kv("morning_checkin_attempt_count", str(attempt))
+    return attempt
+
+
+def _wait_for_morning_intervals_sync(sync_result: dict[str, Any]) -> None:
+    if sync_result.get("status") != "already_running":
+        return
+    deadline = time.monotonic() + 120
+    while get_kv("sync_running") == "1" and time.monotonic() < deadline:
+        time.sleep(1)
+
+
+def _complete_morning_checkin(checkin_date: str, attempt: int) -> None:
+    result = chat_with_coach(
+        MORNING_CHECKIN_PROMPT, allow_mutations=False,
+        client_turn_id=f"morning:{checkin_date}" + (f":attempt:{attempt}" if attempt > 1 else ""),
+    )
+    if result.get("status") != "completed" or not result.get("message") or result.get("awaiting_clarification"):
+        raise AppError(502, "Der Morgen-Check-in konnte nicht abgeschlossen werden.")
+    set_kv("morning_checkin_date", checkin_date)
+    set_kv("morning_checkin_status", "ready")
+
+
 @maintenance_operation
 def run_morning_checkin(checkin_date: str) -> None:
     try:
-        set_kv("morning_checkin_running", "1")
-        set_kv("morning_checkin_status", "working")
-        set_kv("morning_checkin_error", "")
-        publish_state_event("coach", {"status": "changed"})
-        garmin_configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
-        if garmin_configured:
-            try:
-                sync_garmin(days=MORNING_GARMIN_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
-            except Exception:
-                LOGGER.warning("Morning Garmin synchronization failed", extra={"event": "morning_garmin_sync_failed"}, exc_info=True)
-            if not garmin_sleep_ready_for_checkin(date.fromisoformat(checkin_date)):
-                set_kv("morning_checkin_status", "waiting")
-                if not get_kv("morning_checkin_attempt_count"):
-                    set_kv("morning_checkin_attempt_count", "0")
-                publish_state_event("coach", {"status": "changed"})
-                return
-        attempt = int(get_kv("morning_checkin_attempt_count") or 0) + 1
-        set_kv("morning_checkin_attempt_count", str(attempt))
-        if garmin_configured:
+        _start_morning_checkin()
+        checkin_day = date.fromisoformat(checkin_date)
+        garmin_ready = _morning_checkin_garmin_ready(checkin_day)
+        if garmin_ready is None:
+            return
+        attempt = _morning_checkin_attempt()
+        if garmin_ready:
             refresh_morning_body_battery(date.fromisoformat(checkin_date))
         sync_result = sync_intervals(
             "Morgen-Check-in",
             activity_days=sync_period("intervals"),
             wait_for_performance=True,
         )
-        if sync_result.get("status") == "already_running":
-            deadline = time.monotonic() + 120
-            while get_kv("sync_running") == "1" and time.monotonic() < deadline:
-                time.sleep(1)
-        result = chat_with_coach(
-            MORNING_CHECKIN_PROMPT,
-            allow_mutations=False,
-            client_turn_id=f"morning:{checkin_date}" + (f":attempt:{attempt}" if attempt > 1 else ""),
-        )
-        if result.get("status") != "completed" or not result.get("message") or result.get("awaiting_clarification"):
-            raise AppError(502, "Der Morgen-Check-in konnte nicht abgeschlossen werden.")
-        set_kv("morning_checkin_date", checkin_date)
-        set_kv("morning_checkin_status", "ready")
+        _wait_for_morning_intervals_sync(sync_result)
+        _complete_morning_checkin(checkin_date, attempt)
     except Exception as exc:
         error = redact_text(str(exc))[:1000]
         set_kv("morning_checkin_status", "error")
