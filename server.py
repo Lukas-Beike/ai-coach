@@ -17218,9 +17218,13 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
 
 def _alternative_planning_steps_repaired(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     """Allow an invalid patch to be repaired by an equivalent plan replacement."""
-    planning_alternatives = {"apply_training_patch", "replace_training_plan"}
+    tools_are_planning_alternatives = (
+        previous["tool"] == "apply_training_patch" and current["tool"] == "replace_training_plan"
+    ) or (
+        previous["tool"] == "replace_training_plan" and current["tool"] == "apply_training_patch"
+    )
     return (
-        {previous["tool"], current["tool"]} == planning_alternatives
+        tools_are_planning_alternatives
         and previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
         and previous.get("request_binding_key")
         and previous["request_binding_key"] == current.get("request_binding_key")
