@@ -22124,108 +22124,147 @@ class RequestHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _handle_public_get(self, path: str) -> bool:
+        if path == "/api/health":
+            self.send_json(200, {"status": "ok", "maintenance": MAINTENANCE_GATE.state()})
+        elif path == "/api/readiness":
+            readiness = readiness_state()
+            self.send_json(200 if readiness["ready"] else 503, readiness)
+        elif path == "/api/auth/status":
+            session = authenticated_session(self)
+            result = {"authenticated": bool(session), "maintenance": MAINTENANCE_GATE.state()}
+            if session:
+                schedule_morning_checkin()
+            self.send_json(200, result)
+        elif path == "/api/bootstrap":
+            require_auth(self)
+            schedule_morning_checkin()
+            self.send_json(200, public_bootstrap())
+        else:
+            return False
+        return True
+
+    def _handle_sync_get(self, path: str) -> bool:
+        if path == "/api/state/events":
+            require_auth(self)
+            self.handle_state_events()
+        elif match := SYNC_JOB_RE.match(path):
+            require_auth(self)
+            self.send_json(200, sync_job_state(match.group(1)))
+        elif path == "/api/sync/status":
+            require_auth(self)
+            self.send_json(200, sync_status_state())
+        elif path == "/api/activities":
+            require_auth(self)
+            query = parse_qs(urlparse(self.path).query)
+            self.send_json(200, paged_activities(
+                query.get("cursor", [None])[0], query.get("limit", [None])[0],
+                query.get("days", [ALL_SYNC_DAYS])[0],
+            ))
+        else:
+            return False
+        return True
+
+    def _handle_coach_get(self, path: str) -> bool:
+        if path == "/api/chat/history":
+            session = require_auth(self)
+            query = parse_qs(urlparse(self.path).query)
+            self.send_json(200, paged_chat_history(
+                query.get("cursor", [None])[0], query.get("limit", [None])[0],
+                query.get("q", [None])[0], session_csrf_hash=session["csrf_hash"],
+            ))
+        elif path == "/api/chat/receipt":
+            session = require_auth(self)
+            query = parse_qs(urlparse(self.path).query)
+            self.send_json(200, coach_command_receipt(
+                query.get("client_turn_id", [None])[0], session["csrf_hash"],
+            ))
+        elif path == "/api/chat/status":
+            session = require_auth(self)
+            self.send_json(200, chat_stream_status(session["csrf_hash"]))
+        else:
+            return False
+        return True
+
+    def _handle_training_get(self, path: str) -> bool:
+        if path == "/api/plan":
+            require_auth(self)
+            query = parse_qs(urlparse(self.path).query)
+            self.send_json(200, public_plan_state(local_only=query.get("local", ["0"])[0] == "1"))
+        elif path == "/api/weather":
+            require_auth(self)
+            query = parse_qs(urlparse(self.path).query)
+            self.send_json(200, public_weather_state(local_only=query.get("local", ["0"])[0] == "1"))
+        elif path == "/api/library":
+            require_auth(self)
+            query = parse_qs(urlparse(self.path).query)
+            self.send_json(200, paged_library(query.get("cursor", [None])[0], query.get("limit", [None])[0]))
+        elif path == "/api/performance":
+            require_auth(self)
+            self.send_json(200, public_performance_state())
+        elif path == "/api/profile":
+            require_auth(self)
+            self.send_json(200, {"profile": get_profile(), "competitions": list_competitions(limit=100)})
+        elif path == "/api/feedback":
+            require_auth(self)
+            self.send_json(200, public_feedback_state())
+        elif path == "/api/context-preview":
+            require_auth(self)
+            self.send_json(200, context_preview())
+        else:
+            return False
+        return True
+
+    def _handle_diagnostics_get(self, path: str) -> bool:
+        if path == "/api/logs":
+            require_auth(self)
+            raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["200"])[0]
+            try:
+                limit = max(1, min(int(raw_limit), 500))
+            except ValueError:
+                limit = 200
+            self.send_json(200, {"entries": recent_log_entries(limit)})
+        elif path == "/api/diagnostics":
+            require_auth(self)
+            self.send_json(200, diagnostic_report())
+        elif path == "/api/diagnostics/capture":
+            require_auth(self)
+            self.send_json(200, diagnostic_capture_status())
+        elif path == "/api/privacy/export":
+            require_auth(self)
+            stream_privacy_export(self)
+        elif path == "/api/privacy/delete/preview":
+            require_auth(self)
+            self.send_json(200, privacy_delete_preview())
+        elif path == "/api/change-history":
+            require_auth(self)
+            raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["100"])[0]
+            try:
+                limit = max(1, min(int(raw_limit), CHANGE_HISTORY_MAX_ROWS))
+            except ValueError:
+                limit = 100
+            self.send_json(200, {"changes": list_change_history(limit)})
+        elif path == "/api/privacy/backup":
+            require_auth(self)
+            stream_database_backup(self)
+        else:
+            return False
+        return True
+
     def do_GET(self) -> None:
         self.request_id = uuid.uuid4().hex[:12]
         try:
             path = urlparse(self.path).path
-            if path == "/api/health":
-                self.send_json(200, {"status": "ok", "maintenance": MAINTENANCE_GATE.state()})
-            elif path == "/api/readiness":
-                readiness = readiness_state()
-                self.send_json(200 if readiness["ready"] else 503, readiness)
-            elif path == "/api/auth/status":
-                session = authenticated_session(self)
-                result = {"authenticated": bool(session), "maintenance": MAINTENANCE_GATE.state()}
-                if session:
-                    schedule_morning_checkin()
-                self.send_json(200, result)
-            elif path == "/api/bootstrap":
-                require_auth(self)
-                schedule_morning_checkin()
-                query = parse_qs(urlparse(self.path).query)
-                self.send_json(200, public_bootstrap())
-            elif path == "/api/state/events":
-                require_auth(self)
-                self.handle_state_events()
-            elif match := SYNC_JOB_RE.match(path):
-                require_auth(self)
-                self.send_json(200, sync_job_state(match.group(1)))
-            elif path == "/api/sync/status":
-                require_auth(self)
-                self.send_json(200, sync_status_state())
-            elif path == "/api/activities":
-                require_auth(self)
-                query = parse_qs(urlparse(self.path).query)
-                self.send_json(200, paged_activities(query.get("cursor", [None])[0], query.get("limit", [None])[0], query.get("days", [ALL_SYNC_DAYS])[0]))
-            elif path == "/api/chat/history":
-                session = require_auth(self)
-                query = parse_qs(urlparse(self.path).query)
-                self.send_json(200, paged_chat_history(query.get("cursor", [None])[0], query.get("limit", [None])[0], query.get("q", [None])[0], session_csrf_hash=session["csrf_hash"]))
-            elif path == "/api/chat/receipt":
-                session = require_auth(self)
-                query = parse_qs(urlparse(self.path).query)
-                self.send_json(200, coach_command_receipt(query.get("client_turn_id", [None])[0], session["csrf_hash"]))
-            elif path == "/api/chat/status":
-                session = require_auth(self)
-                self.send_json(200, chat_stream_status(session["csrf_hash"]))
-            elif path == "/api/plan":
-                require_auth(self)
-                query = parse_qs(urlparse(self.path).query)
-                self.send_json(200, public_plan_state(local_only=query.get("local", ["0"])[0] == "1"))
-            elif path == "/api/weather":
-                require_auth(self)
-                query = parse_qs(urlparse(self.path).query)
-                self.send_json(200, public_weather_state(local_only=query.get("local", ["0"])[0] == "1"))
-            elif path == "/api/library":
-                require_auth(self)
-                query = parse_qs(urlparse(self.path).query)
-                self.send_json(200, paged_library(query.get("cursor", [None])[0], query.get("limit", [None])[0]))
-            elif path == "/api/performance":
-                require_auth(self)
-                self.send_json(200, public_performance_state())
-            elif path == "/api/profile":
-                require_auth(self)
-                self.send_json(200, {"profile": get_profile(), "competitions": list_competitions(limit=100)})
-            elif path == "/api/feedback":
-                require_auth(self)
-                self.send_json(200, public_feedback_state())
-            elif path == "/api/context-preview":
-                require_auth(self)
-                self.send_json(200, context_preview())
-            elif path == "/api/logs":
-                require_auth(self)
-                raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["200"])[0]
-                try:
-                    limit = max(1, min(int(raw_limit), 500))
-                except ValueError:
-                    limit = 200
-                self.send_json(200, {"entries": recent_log_entries(limit)})
-            elif path == "/api/diagnostics":
-                require_auth(self)
-                self.send_json(200, diagnostic_report())
-            elif path == "/api/diagnostics/capture":
-                require_auth(self)
-                self.send_json(200, diagnostic_capture_status())
-            elif path == "/api/privacy/export":
-                require_auth(self)
-                stream_privacy_export(self)
-            elif path == "/api/privacy/delete/preview":
-                require_auth(self)
-                self.send_json(200, privacy_delete_preview())
-            elif path == "/api/change-history":
-                require_auth(self)
-                raw_limit = parse_qs(urlparse(self.path).query).get("limit", ["100"])[0]
-                try:
-                    limit = max(1, min(int(raw_limit), CHANGE_HISTORY_MAX_ROWS))
-                except ValueError:
-                    limit = 100
-                self.send_json(200, {"changes": list_change_history(limit)})
-            elif path == "/api/privacy/backup":
-                require_auth(self)
-                stream_database_backup(self)
-            elif path.startswith("/api/"):
+            handled = (
+                self._handle_public_get(path)
+                or self._handle_sync_get(path)
+                or self._handle_coach_get(path)
+                or self._handle_training_get(path)
+                or self._handle_diagnostics_get(path)
+            )
+            if not handled and path.startswith("/api/"):
                 raise AppError(404, NOT_FOUND_ERROR)
-            else:
+            if not handled:
                 self.send_static(path)
         except AppError as exc:
             if exc.status >= 500:
