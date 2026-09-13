@@ -11499,6 +11499,148 @@ def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str
     return {"ok": not failed, "status": status, "results": results, "failed_object_ids": failed, "retry_scope": "Nur fehlgeschlagene Objekte erneut auswählen." if failed else None}
 
 
+def _planned_workout_update_request(local_id: str, values: Any) -> tuple[str, dict[str, Any], str]:
+    try:
+        normalized_id = str(uuid.UUID(str(local_id)))
+    except (ValueError, AttributeError) as exc:
+        raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
+    if not isinstance(values, dict):
+        raise AppError(400, "Die lokale Planung muss als Objekt gesendet werden.")
+    action = str(values.get("action") or "update").strip().casefold()
+    return normalized_id, values, action
+
+
+def _load_local_planned_workout(db: Any, normalized_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    row = db.execute(
+        "SELECT payload, external_id, sync_state FROM planned_units WHERE local_id = ?", (normalized_id,)
+    ).fetchone()
+    if not row:
+        raise AppError(404, "Lokale Planung nicht gefunden.")
+    try:
+        current = json.loads(row["payload"])
+    except (TypeError, ValueError) as exc:
+        raise AppError(500, CORRUPT_PLANNING_ERROR) from exc
+    if not isinstance(current, dict) or not current.get("date"):
+        raise AppError(403, "Nur lokale geplante Einheiten können bearbeitet werden.")
+    before = {**current, "sync_status": row.get("sync_state") or current.get("sync_status")}
+    return row, current, before
+
+
+def _delete_local_planned_workout(
+    db: Any,
+    normalized_id: str,
+    current: dict[str, Any],
+    before: dict[str, Any],
+    *,
+    bump_planning_revision: bool,
+) -> None:
+    deleted = {**current, "local_deleted": True, "archived": True, "sync_status": "local"}
+    db.execute(
+        "UPDATE planned_units SET payload=?, sync_state='local', sync_dirty=1, sync_conflict='', updated_at=? WHERE local_id = ?",
+        (json.dumps(deleted, ensure_ascii=False), utc_now(), normalized_id),
+    )
+    _record_change(db, "planned_unit", normalized_id, "delete", before, deleted)
+    if bump_planning_revision:
+        _bump_planning_revision(db)
+
+
+def _planned_workout_update_candidate(
+    current: dict[str, Any], action: str, values: dict[str, Any]
+) -> dict[str, Any]:
+    candidate = dict(current)
+    if action in {"archive", "restore"}:
+        candidate["archived"] = action == "archive"
+        if action == "restore":
+            candidate["local_deleted"] = False
+    elif action == "update":
+        for key in ("date", "name", "description", "duration_minutes", "target"):
+            if key in values:
+                candidate[key] = values.get(key)
+        if "type" in values or "sport" in values:
+            candidate["sport"] = values.get("sport") or values.get("type")
+    else:
+        raise AppError(400, "Unbekannte Aktion für lokale Planung.")
+    return candidate
+
+
+def _validate_planned_workout_date(
+    candidate: dict[str, Any],
+    current: dict[str, Any],
+    normalized_id: str,
+    *,
+    skip_calendar_conflict: bool,
+) -> None:
+    candidate["date"] = str(candidate.get("date") or "").strip()
+    try:
+        date.fromisoformat(candidate["date"])
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
+    date_changed = candidate["date"][:10] != str(current.get("date") or "")[:10]
+    if date_changed:
+        old_start = str(current.get("start_date_local") or "")
+        time_suffix = old_start[10:] if len(old_start) > 10 and old_start[10] == "T" else ISO_MIDNIGHT_SUFFIX
+        candidate["start_date_local"] = candidate["date"][:10] + time_suffix
+    if not skip_calendar_conflict and date_changed:
+        conflicts = calendar_conflicts({"date": candidate["date"][:10]}, {normalized_id})
+        if conflicts:
+            raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht verschoben werden.")
+
+
+def _normalized_planned_workout_update(
+    candidate: dict[str, Any],
+    current: dict[str, Any],
+    row: dict[str, Any],
+    normalized_id: str,
+    action: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    normalized = normalize_planned_unit(
+        candidate,
+        local_id=normalized_id,
+        external_id=str(row.get("external_id") or current.get("external_id") or "") or None,
+        sync_status="local",
+    )
+    normalized["source"] = str(current.get("source") or "library")[:40]
+    if action == "update":
+        if "description" in values:
+            normalized["description"] = canonical_workout_zones(
+                normalized["description"],
+                endurance=intervals_workout_sport(normalized.get("sport")) in INTERVALS_ENDURANCE_WORKOUT_TYPES,
+            )
+        seconds = validate_workout_description(normalized)
+        minutes = as_number(normalized.get("duration_minutes"))
+        if seconds is not None or minutes is not None:
+            normalized["moving_time"] = round(seconds if seconds is not None else minutes * 60)
+        if any(key in values for key in ("description", "duration_minutes", "target", "type", "sport")):
+            for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+                normalized.pop(key, None)
+    for key in (
+        "plan_id", "plan_name", "rationale", "remote_event_id", "remote_event_external_id",
+        "private_calendar_adjustment", "local_deleted",
+    ):
+        if current.get(key) is not None:
+            normalized[key] = current[key]
+    return normalized
+
+
+def _save_local_planned_workout_update(
+    db: Any,
+    normalized_id: str,
+    normalized: dict[str, Any],
+    before: dict[str, Any],
+    *,
+    bump_planning_revision: bool,
+) -> None:
+    now = utc_now()
+    db.execute(
+        UPDATE_PLANNED_UNIT_SQL,
+        (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
+    )
+    _record_change(db, "planned_unit", normalized_id, "update", before, {**normalized, "sync_status": "local"})
+    if bump_planning_revision:
+        _bump_planning_revision(db)
+
+
 def update_local_planned_workout(
     local_id: str,
     values: Any,
@@ -11507,95 +11649,25 @@ def update_local_planned_workout(
     bump_planning_revision: bool = True,
 ) -> dict[str, Any]:
     """Edit or remove a dated local plan without writing to a provider."""
-    try:
-        normalized_id = str(uuid.UUID(str(local_id)))
-    except (ValueError, AttributeError) as exc:
-        raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
-    if not isinstance(values, dict):
-        raise AppError(400, "Die lokale Planung muss als Objekt gesendet werden.")
-    action = str(values.get("action") or "update").strip().casefold()
+    normalized_id, values, action = _planned_workout_update_request(local_id, values)
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload, external_id, sync_state FROM planned_units WHERE local_id = ?", (normalized_id,)).fetchone()
-        if not row:
-            raise AppError(404, "Lokale Planung nicht gefunden.")
-        try:
-            current = json.loads(row["payload"])
-        except (TypeError, ValueError) as exc:
-            raise AppError(500, CORRUPT_PLANNING_ERROR) from exc
-        if not isinstance(current, dict) or not current.get("date"):
-            raise AppError(403, "Nur lokale geplante Einheiten können bearbeitet werden.")
-        before = {**current, "sync_status": row.get("sync_state") or current.get("sync_status")}
+        row, current, before = _load_local_planned_workout(db, normalized_id)
         if action == "delete":
-            current["local_deleted"] = True
-            current["archived"] = True
-            current["sync_status"] = "local"
-            db.execute(
-                "UPDATE planned_units SET payload=?, sync_state='local', sync_dirty=1, sync_conflict='', updated_at=? WHERE local_id = ?",
-                (json.dumps(current, ensure_ascii=False), utc_now(), normalized_id),
+            _delete_local_planned_workout(
+                db, normalized_id, current, before, bump_planning_revision=bump_planning_revision
             )
-            _record_change(db, "planned_unit", normalized_id, "delete", before, current)
-            if bump_planning_revision:
-                _bump_planning_revision(db)
             updated = None
-        elif action in {"archive", "restore", "update"}:
-            candidate = dict(current)
-            if action in {"archive", "restore"}:
-                candidate["archived"] = action == "archive"
-                if action == "restore":
-                    candidate["local_deleted"] = False
-            else:
-                for key in ("date", "name", "description", "duration_minutes", "target"):
-                    if key in values:
-                        candidate[key] = values.get(key)
-                if "type" in values or "sport" in values:
-                    candidate["sport"] = values.get("sport") or values.get("type")
-            candidate["date"] = str(candidate.get("date") or "").strip()
-            try:
-                date.fromisoformat(candidate["date"])
-            except (TypeError, ValueError) as exc:
-                raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
-            if candidate["date"][:10] != str(current.get("date") or "")[:10]:
-                old_start = str(current.get("start_date_local") or "")
-                time_suffix = old_start[10:] if len(old_start) > 10 and old_start[10] == "T" else ISO_MIDNIGHT_SUFFIX
-                candidate["start_date_local"] = candidate["date"][:10] + time_suffix
-            if not skip_calendar_conflict and candidate["date"][:10] != str(current.get("date") or "")[:10]:
-                conflicts = calendar_conflicts({"date": candidate["date"][:10]}, {normalized_id})
-                if conflicts:
-                    raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht verschoben werden.")
-            normalized = normalize_planned_unit(
-                candidate,
-                local_id=normalized_id,
-                external_id=str(row.get("external_id") or current.get("external_id") or "") or None,
-                sync_status="local",
-            )
-            normalized["source"] = str(current.get("source") or "library")[:40]
-            if action == "update":
-                if "description" in values:
-                    normalized["description"] = canonical_workout_zones(
-                        normalized["description"],
-                        endurance=intervals_workout_sport(normalized.get("sport")) in INTERVALS_ENDURANCE_WORKOUT_TYPES,
-                    )
-                seconds = validate_workout_description(normalized)
-                minutes = as_number(normalized.get("duration_minutes"))
-                if seconds is not None or minutes is not None:
-                    normalized["moving_time"] = round(seconds if seconds is not None else minutes * 60)
-                if any(key in values for key in ("description", "duration_minutes", "target", "type", "sport")):
-                    for key in ("workout_doc", "icu_training_load", "icu_intensity"):
-                        normalized.pop(key, None)
-            for key in ("plan_id", "plan_name", "rationale", "remote_event_id", "remote_event_external_id", "private_calendar_adjustment", "local_deleted"):
-                if current.get(key) is not None:
-                    normalized[key] = current[key]
-            now = utc_now()
-            db.execute(
-                UPDATE_PLANNED_UNIT_SQL,
-                (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
-            )
-            _record_change(db, "planned_unit", normalized_id, "update", before, {**normalized, "sync_status": "local"})
-            if bump_planning_revision:
-                _bump_planning_revision(db)
-            updated = normalized
         else:
-            raise AppError(400, "Unbekannte Aktion für lokale Planung.")
+            candidate = _planned_workout_update_candidate(current, action, values)
+            _validate_planned_workout_date(
+                candidate, current, normalized_id, skip_calendar_conflict=skip_calendar_conflict
+            )
+            updated = _normalized_planned_workout_update(
+                candidate, current, row, normalized_id, action, values
+            )
+            _save_local_planned_workout_update(
+                db, normalized_id, updated, before, bump_planning_revision=bump_planning_revision
+            )
     if action == "delete":
         publish_state_event("coach", {"status": "changed"})
         return {"status": "deleted", "local_id": normalized_id}
