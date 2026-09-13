@@ -6656,6 +6656,26 @@ def competition_external_id(competition_id: str) -> str:
     return f"{COMPETITION_EXTERNAL_PREFIX}{competition_id}"
 
 
+def competition_event_optional_payload(competition: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if competition.get("moving_time") is not None:
+        payload["moving_time"] = int(competition["moving_time"])
+    distance = competition.get("distance")
+    if distance not in (None, ""):
+        try:
+            normalized_distance = float(str(distance).replace(",", "."))
+            payload["distance"] = int(normalized_distance) if normalized_distance.is_integer() else normalized_distance
+        except ValueError:
+            # Keep free-form values local instead of sending invalid API data.
+            pass
+    if competition.get("target") not in (None, ""):
+        payload["target"] = competition_target(competition.get("target"))
+    if competition.get("intervals_event_id"):
+        remote_id = str(competition["intervals_event_id"])
+        payload["id"] = int(remote_id) if remote_id.isdigit() else remote_id
+    return payload
+
+
 def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
     category = str(competition.get("category") or "").upper()
     if category not in {"RACE_A", "RACE_B", "RACE_C"}:
@@ -6668,22 +6688,7 @@ def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
         "description": str(competition.get("description") or competition.get("notes") or "")[:12000],
         "external_id": str(competition.get("external_id") or competition_external_id(str(competition["id"]))),
     }
-    if competition.get("moving_time") is not None:
-        payload["moving_time"] = int(competition["moving_time"])
-    distance = competition.get("distance")
-    if distance not in (None, ""):
-        try:
-            payload["distance"] = float(str(distance).replace(",", "."))
-            if payload["distance"].is_integer():
-                payload["distance"] = int(payload["distance"])
-        except ValueError:
-            # Keep free-form values local instead of sending invalid API data.
-            pass
-    if competition.get("target") not in (None, ""):
-        payload["target"] = competition_target(competition.get("target"))
-    if competition.get("intervals_event_id"):
-        remote_id = str(competition["intervals_event_id"])
-        payload["id"] = int(remote_id) if remote_id.isdigit() else remote_id
+    payload.update(competition_event_optional_payload(competition))
     return payload
 
 
