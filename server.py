@@ -17659,7 +17659,6 @@ def _chat_with_structured_coach_impl(
                 metadata = _structured_tool_call_metadata(item, tools, command_receipts)
                 name = metadata["name"]
                 call_id = metadata["call_id"]
-                arguments = metadata["arguments"]
                 action = metadata["action"]
                 effect_key = metadata["effect_key"]
                 step_key = metadata["step_key"]
