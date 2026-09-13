@@ -21192,56 +21192,80 @@ def save_settings(values: Any) -> dict[str, Any]:
     return {"status": "ok", "updated": sorted(updates), "restart_required": True}
 
 
+def _diagnostic_frame(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    filename, function, line = value.get("file"), value.get("function"), value.get("line")
+    if not (
+        isinstance(filename, str)
+        and re.fullmatch(r"(?:server\.py|backend/(?:[a-z_]+/)*[a-z_]+\.py)", filename)
+        and isinstance(function, str)
+        and re.fullmatch(r"(?a:(?!\d)\w{1,101})", function)
+        and isinstance(line, int)
+        and 0 < line < 1_000_000
+    ):
+        return None
+    return {"file": filename, "function": function, "line": line}
+
+
+def _diagnostic_error_metadata(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    result: dict[str, Any] = {}
+    for key in ("type", "reason", "validation_reason"):
+        item = value.get(key)
+        if isinstance(item, str) and re.fullmatch(r"(?a:[A-Za-z_]{1,80})", item):
+            result[key] = item
+    provider_code = value.get("provider_error_code")
+    if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
+        result["provider_error_code"] = provider_code
+    if isinstance(value.get("status"), int) and 100 <= value["status"] <= 599:
+        result["status"] = value["status"]
+    frames = [
+        frame for frame in (_diagnostic_frame(item) for item in (value.get("frames") or [])[-8:]) if frame
+    ]
+    if frames:
+        result["frames"] = frames
+    return sanitize_log_value(result)
+
+
+def _diagnostic_command_steps(receipt: dict[str, Any], tools: set[str]) -> list[dict[str, Any]]:
+    steps = []
+    for step in (receipt.get("command_receipts") or [])[:40]:
+        if not isinstance(step, dict):
+            continue
+        result = step.get("result") if isinstance(step.get("result"), dict) else {}
+        steps.append({
+            "tool": step.get("tool") if step.get("tool") in tools else "unknown",
+            "ok": result.get("ok") is True,
+            "error": _diagnostic_error_metadata(step.get("diagnostic_error")),
+        })
+    return steps
+
+
+def _diagnostic_history_entry(row: Any, tools: set[str], statuses: set[str]) -> dict[str, Any]:
+    receipt = _coach_command_receipt(row["receipt"])
+    return {
+        "id": hashlib.sha256(str(row["client_turn_id"]).encode()).hexdigest()[:12],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "status": receipt.get("status") if receipt.get("status") in statuses else "unknown",
+        "response_status": receipt.get("response_status")
+        if receipt.get("response_status") in statuses | {"incomplete"}
+        else None,
+        "awaiting_clarification": receipt.get("awaiting_clarification") is True,
+        "error": _diagnostic_error_metadata(receipt.get("diagnostic_error")),
+        "steps": _diagnostic_command_steps(receipt, tools),
+    }
+
+
 def coach_diagnostic_history() -> list[dict[str, Any]]:
     """Project at most 20 durable commands without dialogue, arguments or results."""
     with DB_LOCK, database() as db:
         rows = db.execute("SELECT client_turn_id, receipt, created_at, updated_at FROM coach_commands ORDER BY created_at DESC, client_turn_id DESC LIMIT 20").fetchall()
     tools = {tool["name"] for tool in COACH_DIALOGUE_TOOLS}
     statuses = {"queued", "running", "completed", "partial", "failed", "cancelled"}
-
-    def error_metadata(value: Any) -> dict[str, Any] | None:
-        if not isinstance(value, dict):
-            return None
-        result = {}
-        for key in ("type", "reason", "validation_reason"):
-            item = value.get(key)
-            if isinstance(item, str) and re.fullmatch(r"(?a:[A-Za-z_]{1,80})", item):
-                result[key] = item
-        provider_code = value.get("provider_error_code")
-        if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
-            result["provider_error_code"] = provider_code
-        if isinstance(value.get("status"), int) and 100 <= value["status"] <= 599:
-            result["status"] = value["status"]
-        frames = []
-        for frame in (value.get("frames") or [])[-8:]:
-            if not isinstance(frame, dict):
-                continue
-            filename, function, line = frame.get("file"), frame.get("function"), frame.get("line")
-            if (isinstance(filename, str) and re.fullmatch(r"(?:server\.py|backend/(?:[a-z_]+/)*[a-z_]+\.py)", filename)
-                    and isinstance(function, str) and re.fullmatch(r"(?a:(?!\d)\w{1,101})", function)
-                    and isinstance(line, int) and 0 < line < 1_000_000):
-                frames.append({"file": filename, "function": function, "line": line})
-        if frames:
-            result["frames"] = frames
-        return sanitize_log_value(result)
-
-    history = []
-    for row in rows:
-        receipt = _coach_command_receipt(row["receipt"])
-        steps = []
-        for step in (receipt.get("command_receipts") or [])[:40]:
-            if not isinstance(step, dict):
-                continue
-            result = step.get("result") if isinstance(step.get("result"), dict) else {}
-            steps.append({"tool": step.get("tool") if step.get("tool") in tools else "unknown",
-                          "ok": result.get("ok") is True, "error": error_metadata(step.get("diagnostic_error"))})
-        history.append({"id": hashlib.sha256(str(row["client_turn_id"]).encode()).hexdigest()[:12],
-            "created_at": row["created_at"], "updated_at": row["updated_at"],
-            "status": receipt.get("status") if receipt.get("status") in statuses else "unknown",
-            "response_status": receipt.get("response_status") if receipt.get("response_status") in statuses | {"incomplete"} else None,
-            "awaiting_clarification": receipt.get("awaiting_clarification") is True,
-            "error": error_metadata(receipt.get("diagnostic_error")), "steps": steps})
-    return history
+    return [_diagnostic_history_entry(row, tools, statuses) for row in rows]
 
 
 def diagnostic_report() -> dict[str, Any]:
