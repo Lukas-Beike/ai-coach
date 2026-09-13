@@ -2269,47 +2269,55 @@ def _sync_job_item_results(result: Any) -> list[dict[str, Any]] | None:
     return [item for item in result["results"] if isinstance(item, dict)]
 
 
-def _sync_job_update_from_result(job_id: str, result: Any, *, fallback_status: str) -> None:
-    """Persist per-object plan-push outcomes and derive the aggregate status."""
-    item_results = _sync_job_item_results(result)
-    if not item_results:
-        _sync_job_update(job_id, fallback_status)
-        return
-    now = utc_now()
-    provider = None
-    job_type = None
-    with DB_LOCK, database() as db:
-        job = db.execute("SELECT provider, type FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
-        if job:
-            provider = job["provider"]
-            job_type = job["type"]
-        stored_items = db.execute("SELECT id, item_key FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)).fetchall()
-        stored_by_key = {str(item.get("item_key") or ""): item for item in stored_items}
-        for index, item in enumerate(item_results):
-            item_key = str(item.get("library_workout_id") or item.get("item_key") or "").strip()
-            target = stored_by_key.get(item_key)
-            if target is None and len(stored_items) == 1:
-                target = stored_items[0]
-            if target is None and index < len(stored_items):
-                target = stored_items[index]
-            if target is None:
-                continue
-            outcome = str(item.get("status") or "error").strip().casefold()
-            item_state = "completed" if outcome in {"synced", "already_synced", "skipped"} else "failed"
-            detail = redact_text(str(item.get("error") or ""))[:500] or None
-            db.execute(
-                "UPDATE sync_job_items SET status=?, remote_id=COALESCE(?, remote_id), error_class=?, error_detail=?, updated_at=? WHERE id=?",
-                (item_state, str(item.get("remote_id") or "").strip() or None, None if item_state == "completed" else "plan_push_error", detail, now, target["id"]),
-            )
-        items = db.execute("SELECT status FROM sync_job_items WHERE job_id=?", (job_id,)).fetchall()
-        item_values = [dict(item) for item in items]
-        status = aggregate_job_status(item_values)
-        completed, total = bounded_progress(item_values)
-        finished = now if status in {"completed", "partial", "failed"} else None
+def _sync_job_result_target(
+    item: dict[str, Any], index: int, stored_items: list[dict[str, Any]],
+    stored_by_key: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    item_key = str(item.get("library_workout_id") or item.get("item_key") or "").strip()
+    target = stored_by_key.get(item_key)
+    if target is None and len(stored_items) == 1:
+        return stored_items[0]
+    return target or (stored_items[index] if index < len(stored_items) else None)
+
+
+def _persist_sync_job_result_items(
+    db: Any, job_id: str, item_results: list[dict[str, Any]], now: str,
+) -> None:
+    stored_items = [dict(item) for item in db.execute(
+        "SELECT id, item_key FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)
+    ).fetchall()]
+    stored_by_key = {str(item.get("item_key") or ""): item for item in stored_items}
+    for index, item in enumerate(item_results):
+        target = _sync_job_result_target(item, index, stored_items, stored_by_key)
+        if target is None:
+            continue
+        outcome = str(item.get("status") or "error").strip().casefold()
+        item_state = "completed" if outcome in {"synced", "already_synced", "skipped"} else "failed"
+        detail = redact_text(str(item.get("error") or ""))[:500] or None
         db.execute(
-            "UPDATE sync_jobs SET status=?, progress_total=?, progress_completed=?, finished_at=?, error_class=?, updated_at=? WHERE id=?",
-            (status, total, completed, finished, None if status == "completed" else "plan_push_error", now, job_id),
+            "UPDATE sync_job_items SET status=?, remote_id=COALESCE(?, remote_id), error_class=?, error_detail=?, updated_at=? WHERE id=?",
+            (item_state, str(item.get("remote_id") or "").strip() or None, None if item_state == "completed" else "plan_push_error", detail, now, target["id"]),
         )
+
+
+def _sync_job_completion_snapshot(
+    db: Any, job_id: str, now: str,
+) -> tuple[str | None, str | None, str, int, int]:
+    job = db.execute("SELECT provider, type FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
+    items = [dict(item) for item in db.execute("SELECT status FROM sync_job_items WHERE job_id=?", (job_id,)).fetchall()]
+    status = aggregate_job_status(items)
+    completed, total = bounded_progress(items)
+    finished = now if status in {"completed", "partial", "failed"} else None
+    db.execute(
+        "UPDATE sync_jobs SET status=?, progress_total=?, progress_completed=?, finished_at=?, error_class=?, updated_at=? WHERE id=?",
+        (status, total, completed, finished, None if status == "completed" else "plan_push_error", now, job_id),
+    )
+    return (job["provider"], job["type"], status, completed, total) if job else (None, None, status, completed, total)
+
+
+def _publish_sync_job_result_event(
+    job_id: str, provider: str | None, job_type: str | None, status: str, completed: int, total: int,
+) -> None:
     if provider and job_type:
         publish_state_event(
             "job",
@@ -2324,65 +2332,82 @@ def _sync_job_update_from_result(job_id: str, result: Any, *, fallback_status: s
         )
 
 
+def _sync_job_update_from_result(job_id: str, result: Any, *, fallback_status: str) -> None:
+    """Persist per-object plan-push outcomes and derive the aggregate status."""
+    item_results = _sync_job_item_results(result)
+    if not item_results:
+        _sync_job_update(job_id, fallback_status)
+        return
+    now = utc_now()
+    with DB_LOCK, database() as db:
+        _persist_sync_job_result_items(db, job_id, item_results, now)
+        provider, job_type, status, completed, total = _sync_job_completion_snapshot(db, job_id, now)
+    _publish_sync_job_result_event(job_id, provider, job_type, status, completed, total)
+
+
+def _historical_sync_window(payload: dict[str, Any], job_type: str, provider: str) -> tuple[int, date | None]:
+    if job_type != "historical_backfill":
+        return int(payload.get("days") or sync_period(provider)), None
+    days = max(1, min(int(payload.get("days") or SYNC_CHUNK_DAYS), SYNC_CHUNK_DAYS))
+    default_end = local_now().date() - timedelta(days=sync_period(provider))
+    end_date = date.fromisoformat(str(payload.get("end_date") or default_end.isoformat())[:10])
+    return days, end_date
+
+
+def _historical_next_end(result: dict[str, Any], historical_end: date | None, days: int) -> None:
+    if historical_end is None:
+        return
+    next_end = historical_end - timedelta(days=days)
+    result["historical_next_end"] = next_end.isoformat() if next_end >= SYNC_EARLIEST_DATE else None
+
+
+def _execute_intervals_sync_job(job: dict[str, Any], payload: dict[str, Any], reason: str) -> dict[str, Any]:
+    days, historical_end = _historical_sync_window(payload, str(job.get("type") or ""), "intervals")
+    sync_kwargs: dict[str, Any] = {"reason": reason, "activity_days": days, "operation_id": job["id"]}
+    if historical_end is not None:
+        sync_kwargs["end_date"] = historical_end
+    result = sync_intervals(**sync_kwargs)
+    _historical_next_end(result, historical_end, days)
+    if result.get("status") == "already_running":
+        return result
+    try:
+        result["competitions"] = sync_competitions(reason=reason, push_local=False, operation_id=job["id"])
+    except Exception:
+        result["status"] = "partial"
+        result["competitions"] = {"status": "error"}
+    return result
+
+
+def _execute_garmin_sync_job(job: dict[str, Any], payload: dict[str, Any], reason: str) -> dict[str, Any]:
+    days, historical_end = _historical_sync_window(payload, str(job.get("type") or ""), "garmin")
+    sync_kwargs: dict[str, Any] = {"days": days, "operation_id": job["id"], "reason": reason}
+    if historical_end is not None and garmin_fixture_path() is None:
+        sync_kwargs["end_date"] = historical_end
+    result = sync_garmin(**sync_kwargs)
+    if historical_end is None and days != ALL_SYNC_DAYS and result.get("status") in {"ok", "partial"}:
+        refresh_morning_body_battery()
+    _historical_next_end(result, historical_end, days)
+    return result
+
+
 def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
     envelope = _sync_job_payload(
-        str(job.get("provider") or ""),
-        str(job.get("type") or ""),
-        _decode_sync_job_payload(job.get("payload")),
+        str(job.get("provider") or ""), str(job.get("type") or ""), _decode_sync_job_payload(job.get("payload")),
     )
-    payload = envelope["payload"]
-    provider = envelope["provider"]
-    job_type = envelope["type"]
+    payload, provider, job_type = envelope["payload"], envelope["provider"], envelope["type"]
     reason = str(payload.get("reason") or "Persistenter Providerjob")
-    if job_type == "performance_refresh" and provider == "intervals":
+    if provider == "intervals" and job_type == "performance_refresh":
         return refresh_current_performance()
-    if job_type == "competition_push" and provider == "intervals":
+    if provider == "intervals" and job_type == "competition_push":
         return sync_competitions(reason=reason, push_local=True, operation_id=job["id"])
-    if job_type == "plan_push" and provider == "intervals":
+    if provider == "intervals" and job_type == "plan_push":
         return _sync_selected_workout_library({"entries": payload.get("entries"), **({"repair": True} if payload.get("repair") else {})})
     if job_type == "plan_push":
         raise AppError(409, "Plan-Push-Jobs werden erst durch den autorisierten Planungsworkflow ausgeführt.", reason="unsupported_job")
     if provider == "intervals":
-        historical_end = None
-        if job_type == "historical_backfill":
-            days = max(1, min(int(payload.get("days") or SYNC_CHUNK_DAYS), SYNC_CHUNK_DAYS))
-            historical_end = date.fromisoformat(str(payload.get("end_date") or (local_now().date() - timedelta(days=sync_period("intervals"))).isoformat())[:10])
-        else:
-            days = int(payload.get("days") or sync_period("intervals"))
-        sync_kwargs = {"reason": reason, "activity_days": days, "operation_id": job["id"]}
-        if historical_end is not None:
-            sync_kwargs["end_date"] = historical_end
-        result = sync_intervals(**sync_kwargs)
-        if historical_end is not None:
-            next_end = historical_end - timedelta(days=days)
-            result["historical_next_end"] = next_end.isoformat() if next_end >= SYNC_EARLIEST_DATE else None
-        if result.get("status") == "already_running":
-            return result
-        try:
-            competition_result = sync_competitions(reason=reason, push_local=False, operation_id=job["id"])
-        except Exception:
-            result["status"] = "partial"
-            result["competitions"] = {"status": "error"}
-        else:
-            result["competitions"] = competition_result
-        return result
+        return _execute_intervals_sync_job(job, payload, reason)
     if provider == "garmin":
-        historical_end = None
-        if job_type == "historical_backfill":
-            days = max(1, min(int(payload.get("days") or SYNC_CHUNK_DAYS), SYNC_CHUNK_DAYS))
-            historical_end = date.fromisoformat(str(payload.get("end_date") or (local_now().date() - timedelta(days=sync_period("garmin"))).isoformat())[:10])
-        else:
-            days = int(payload.get("days") or sync_period("garmin"))
-        sync_kwargs = {"days": days, "operation_id": job["id"], "reason": reason}
-        if historical_end is not None and garmin_fixture_path() is None:
-            sync_kwargs["end_date"] = historical_end
-        result = sync_garmin(**sync_kwargs)
-        if historical_end is None and days != ALL_SYNC_DAYS and result.get("status") in {"ok", "partial"}:
-            refresh_morning_body_battery()
-        if historical_end is not None:
-            next_end = historical_end - timedelta(days=days)
-            result["historical_next_end"] = next_end.isoformat() if next_end >= SYNC_EARLIEST_DATE else None
-        return result
+        return _execute_garmin_sync_job(job, payload, reason)
     if provider == "calendar":
         return sync_external_calendar(reason=reason, operation_id=job["id"])
     if provider == "weather":
