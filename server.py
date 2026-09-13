@@ -9852,7 +9852,7 @@ def _adaptive_preview_calendar_limits(
 def _adaptive_preview_reasons(
     draft: dict[str, Any], feedback: dict[str, Any], illness_pause: dict[str, Any] | None,
     illness_active: bool, severe: bool, high_load: bool, limited: bool,
-    available_minutes: Any, calendar_events: list[dict[str, Any]], calendar_reason: str,
+    available_minutes: Any, calendar_reason: str,
     calendar_limited: bool, no_intensity_limited: bool, weather_reason: str,
 ) -> tuple[list[str], list[str]]:
     reasons: list[str] = []
@@ -9943,7 +9943,7 @@ def _adaptive_preview_change(
         return None
     reasons, blocking_triggers = _adaptive_preview_reasons(
         draft, feedback, illness_pause, state["illness_active"], state["severe"], state["high_load"], state["limited"],
-        state["available_minutes"], state["calendar_events"], state["calendar_reason"], state["calendar_limited"],
+        state["available_minutes"], state["calendar_reason"], state["calendar_limited"],
         state["no_intensity_limited"], state["weather_reason"],
     )
     reason = "; ".join(reasons)
