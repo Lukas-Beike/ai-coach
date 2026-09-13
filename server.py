@@ -10136,45 +10136,64 @@ def compatible_workout_duration(expected_minutes: int, library_minutes: float | 
     return abs(expected_minutes - library_minutes) <= max(10, expected_minutes * 0.2)
 
 
-def find_similar_library_workout(workout: dict[str, Any], library: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
-    """Find an exact or conservative near-match in the cached Intervals.icu library."""
-    expected_type = workout_library_type(workout.get("sport"))
-    expected_text = normalized_workout_text(workout.get("description"))
-    expected_name = normalized_workout_text(workout.get("name"))
+def _similar_library_workout_inputs(workout: dict[str, Any]) -> tuple[str | None, str, str, int] | None:
     try:
         expected_duration = int(workout.get("duration_minutes"))
     except (TypeError, ValueError):
         return None
+    return (
+        workout_library_type(workout.get("sport")),
+        normalized_workout_text(workout.get("description")),
+        normalized_workout_text(workout.get("name")),
+        expected_duration,
+    )
+
+
+def _validated_library_candidate(candidate: dict[str, Any], expected_duration: int) -> bool:
+    candidate_duration = library_workout_duration_minutes(candidate)
+    try:
+        validate_workout_description({
+            **candidate,
+            "duration_minutes": max(5, round(candidate_duration)) if candidate_duration is not None else expected_duration,
+            "target": candidate.get("target") if candidate.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
+        })
+    except AppError:
+        return False
+    return True
+
+
+def _similar_library_candidate_score(
+    candidate: Any, expected_type: str | None, expected_text: str, expected_name: str, expected_duration: int,
+) -> float | None:
+    if not isinstance(candidate, dict) or workout_library_type(candidate.get("type") or candidate.get("sport")) != expected_type:
+        return None
+    candidate_text = normalized_workout_text(candidate.get("description"))
+    if not candidate_text or not compatible_workout_duration(expected_duration, library_workout_duration_minutes(candidate)):
+        return None
+    if not _validated_library_candidate(candidate, expected_duration):
+        return None
+    candidate_name = normalized_workout_text(candidate.get("name"))
+    description_similarity = difflib.SequenceMatcher(None, expected_text, candidate_text).ratio()
+    name_similarity = difflib.SequenceMatcher(None, expected_name, candidate_name).ratio()
+    exact_description = expected_text == candidate_text
+    similar_description = description_similarity >= 0.82
+    similar_named_workout = name_similarity >= 0.9 and description_similarity >= 0.55
+    if not (exact_description or similar_description or similar_named_workout):
+        return None
+    return 1.0 if exact_description else max(description_similarity, (name_similarity + description_similarity) / 2)
+
+
+def find_similar_library_workout(workout: dict[str, Any], library: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    """Find an exact or conservative near-match in the cached Intervals.icu library."""
+    inputs = _similar_library_workout_inputs(workout)
+    if not inputs:
+        return None
+    expected_type, expected_text, expected_name, expected_duration = inputs
     best: tuple[float, dict[str, Any]] | None = None
     for candidate in library if library is not None else list_workout_library():
-        if not isinstance(candidate, dict) or workout_library_type(candidate.get("type") or candidate.get("sport")) != expected_type:
+        score = _similar_library_candidate_score(candidate, expected_type, expected_text, expected_name, expected_duration)
+        if score is None or not isinstance(candidate, dict):
             continue
-        candidate_text = normalized_workout_text(candidate.get("description"))
-        candidate_name = normalized_workout_text(candidate.get("name"))
-        if not candidate_text:
-            continue
-        if not compatible_workout_duration(expected_duration, library_workout_duration_minutes(candidate)):
-            continue
-        # Imported templates may contain prose or metadata that contradicts
-        # their steps. Validate the exact prescription we would copy before
-        # allowing a fuzzy match to replace valid Coach-authored workout text.
-        candidate_duration = library_workout_duration_minutes(candidate)
-        try:
-            validate_workout_description({
-                **candidate,
-                "duration_minutes": max(5, round(candidate_duration)) if candidate_duration is not None else expected_duration,
-                "target": candidate.get("target") if candidate.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
-            })
-        except AppError:
-            continue
-        description_similarity = difflib.SequenceMatcher(None, expected_text, candidate_text).ratio()
-        name_similarity = difflib.SequenceMatcher(None, expected_name, candidate_name).ratio()
-        exact_description = expected_text == candidate_text
-        similar_description = description_similarity >= 0.82
-        similar_named_workout = name_similarity >= 0.9 and description_similarity >= 0.55
-        if not (exact_description or similar_description or similar_named_workout):
-            continue
-        score = 1.0 if exact_description else max(description_similarity, (name_similarity + description_similarity) / 2)
         if best is None or score > best[0]:
             best = (score, candidate)
     return best[1] if best else None
