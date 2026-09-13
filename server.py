@@ -6490,6 +6490,93 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
     return recovery_by_date
 
 
+def _planning_context_day(days: dict[str, dict[str, Any]], day: str) -> dict[str, Any]:
+    return days.setdefault(day, {"date": day, "planned": [], "appointments": []})
+
+
+def _add_planned_context(days: dict[str, dict[str, Any]], planned: list[dict[str, Any]]) -> None:
+    for event in planned:
+        day = _planning_context_date(event.get("start_date_local") or event.get("date"))
+        if day:
+            _planning_context_day(days, day)["planned"].append(selected(event, (
+                "id", "local_id", "remote_id", "name", "type", "category", "start_date_local", "moving_time",
+                "duration_minutes", "is_local", "is_remote",
+            )))
+
+
+def _add_checkin_context(days: dict[str, dict[str, Any]], checkins: list[dict[str, Any]]) -> None:
+    for checkin in checkins:
+        if not isinstance(checkin, dict):
+            continue
+        day = _planning_context_date(checkin.get("checkin_date"))
+        if day:
+            _planning_context_day(days, day)["checkin"] = selected(checkin, PLANNING_CONTEXT_CHECKIN_FIELDS)
+
+
+def _add_calendar_context(days: dict[str, dict[str, Any]], calendar_events: list[dict[str, Any]]) -> None:
+    for event in calendar_events:
+        if not isinstance(event, dict):
+            continue
+        for day in external_calendar_event_dates(event):
+            _planning_context_day(days, day)["appointments"].append(
+                selected(event, PLANNING_CONTEXT_APPOINTMENT_FIELDS)
+            )
+
+
+def _add_feedback_context(days: dict[str, dict[str, Any]]) -> None:
+    for feedback in list_activity_feedback(500):
+        if not isinstance(feedback, dict):
+            continue
+        day = _planning_context_date(feedback.get("activity_date"))
+        if day and feedback.get("notes"):
+            _planning_context_day(days, day).setdefault("activity_feedback", []).append(
+                selected(feedback, ("activity_id", "activity_name", "activity_date", "notes"))
+            )
+
+
+def _add_weather_context(days: dict[str, dict[str, Any]], weather_days: list[dict[str, Any]]) -> None:
+    for weather_day in weather_days:
+        if not isinstance(weather_day, dict):
+            continue
+        day = _planning_context_date(weather_day.get("date"))
+        if day:
+            _planning_context_day(days, day)["weather"] = selected(weather_day, PLANNING_CONTEXT_WEATHER_FIELDS)
+
+
+def _add_planning_context_signals(
+    days: dict[str, dict[str, Any]],
+    planned: list[dict[str, Any]],
+    checkins: list[dict[str, Any]],
+    calendar_events: list[dict[str, Any]],
+    weather_days: list[dict[str, Any]],
+    recovery_by_date: dict[str, dict[str, Any]],
+    health_by_date: dict[str, dict[str, Any]],
+) -> None:
+    _add_planned_context(days, planned)
+    _add_checkin_context(days, checkins)
+    _add_calendar_context(days, calendar_events)
+    _add_feedback_context(days)
+    _add_weather_context(days, weather_days)
+    for day, recovery in recovery_by_date.items():
+        _planning_context_day(days, day)["recovery"] = recovery
+    for day, health in health_by_date.items():
+        _planning_context_day(days, day)["health"] = health
+
+
+def _finalize_planning_context(days: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    for value in days.values():
+        value["planned"].sort(key=lambda event: str(event.get("start_date_local") or event.get("date") or ""))
+        value["appointments"].sort(key=lambda event: str(event.get("start_local") or event.get("event_date") or ""))
+        value.get("activity_feedback", []).sort(key=lambda item: str(item.get("activity_id") or ""))
+        for key in ("checkin", "recovery", "health", "weather"):
+            if not value.get(key):
+                value.pop(key, None)
+        for key in ("planned", "appointments", "activity_feedback"):
+            if not value.get(key):
+                value.pop(key, None)
+    return [days[key] for key in sorted(days)]
+
+
 def daily_planning_context(
     snapshot: dict[str, Any] | None = None,
     planned: list[dict[str, Any]] | None = None,
@@ -6508,65 +6595,10 @@ def daily_planning_context(
     recovery_by_date = _planning_recovery_by_date(snapshot)
     health_by_date = _garmin_daily_health_by_date(garmin_snapshot())
     days: dict[str, dict[str, Any]] = {}
-
-    def day_for(day: str) -> dict[str, Any]:
-        return days.setdefault(day, {"date": day, "planned": [], "appointments": []})
-
-    for event in planned:
-        day = _planning_context_date(event.get("start_date_local") or event.get("date"))
-        if not day:
-            continue
-        day_for(day)["planned"].append(selected(event, (
-            "id", "local_id", "remote_id", "name", "type", "category", "start_date_local", "moving_time",
-            "duration_minutes", "is_local", "is_remote",
-        )))
-    for checkin in checkins:
-        if not isinstance(checkin, dict):
-            continue
-        day = _planning_context_date(checkin.get("checkin_date"))
-        if day:
-            day_for(day)["checkin"] = selected(checkin, PLANNING_CONTEXT_CHECKIN_FIELDS)
-    for event in calendar_events:
-        if not isinstance(event, dict):
-            continue
-        for day in external_calendar_event_dates(event):
-            day_for(day)["appointments"].append(selected(event, PLANNING_CONTEXT_APPOINTMENT_FIELDS))
-    for feedback in list_activity_feedback(500):
-        if not isinstance(feedback, dict):
-            continue
-        day = _planning_context_date(feedback.get("activity_date"))
-        if day and feedback.get("notes"):
-            day_for(day).setdefault("activity_feedback", []).append(selected(feedback, ("activity_id", "activity_name", "activity_date", "notes")))
-    for weather_day in weather_days:
-        if not isinstance(weather_day, dict):
-            continue
-        day = _planning_context_date(weather_day.get("date"))
-        if day:
-            day_for(day)["weather"] = selected(weather_day, PLANNING_CONTEXT_WEATHER_FIELDS)
-    for day, recovery in recovery_by_date.items():
-        day_for(day)["recovery"] = recovery
-    for day, health in health_by_date.items():
-        day_for(day)["health"] = health
-
-    for value in days.values():
-        value["planned"].sort(key=lambda event: str(event.get("start_date_local") or event.get("date") or ""))
-        value["appointments"].sort(key=lambda event: str(event.get("start_local") or event.get("event_date") or ""))
-        value.get("activity_feedback", []).sort(key=lambda item: str(item.get("activity_id") or ""))
-        if not value.get("checkin"):
-            value.pop("checkin", None)
-        if not value.get("recovery"):
-            value.pop("recovery", None)
-        if not value.get("health"):
-            value.pop("health", None)
-        if not value.get("weather"):
-            value.pop("weather", None)
-        if not value["planned"]:
-            value.pop("planned")
-        if not value["appointments"]:
-            value.pop("appointments")
-        if not value.get("activity_feedback"):
-            value.pop("activity_feedback", None)
-    return [days[key] for key in sorted(days)]
+    _add_planning_context_signals(
+        days, planned, checkins, calendar_events, weather_days, recovery_by_date, health_by_date,
+    )
+    return _finalize_planning_context(days)
 
 
 def list_public_calendar_sources() -> list[dict[str, Any]]:
