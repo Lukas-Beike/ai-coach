@@ -9941,6 +9941,22 @@ def _planned_unit_payload_hash(payload: Any) -> str:
     return hashlib.sha256(json.dumps(comparable, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
 
 
+def _planned_unit_metadata(workout: dict[str, Any], normalized: dict[str, Any]) -> dict[str, Any]:
+    metadata = {
+        "sport": normalized.get("type") or intervals_workout_sport(workout.get("sport") or workout.get("type")),
+        "origin": str(workout.get("origin") or workout.get("source") or "coach")[:40],
+    }
+    metadata["source"] = str(workout.get("source") or metadata["origin"])[:40]
+    if workout.get("start_date_local"):
+        metadata["start_date_local"] = str(workout["start_date_local"])[:40]
+    for field, limit in (("status", 80), ("remote_event_id", 120), ("remote_event_external_id", 200)):
+        if workout.get(field) is not None:
+            metadata[field] = str(workout.get(field) or "")[:limit]
+    if workout.get("sync_conflict") is not None:
+        metadata["sync_conflict"] = workout["sync_conflict"]
+    return metadata
+
+
 def normalize_planned_unit(
     workout: dict[str, Any],
     *,
@@ -9958,21 +9974,9 @@ def normalize_planned_unit(
         sync_status=sync_status,
     )
     # Map the canonical local sport to the provider library projection explicitly.
-    normalized["sport"] = normalized.get("type") or intervals_workout_sport(workout.get("sport") or workout.get("type"))
+    normalized.update(_planned_unit_metadata(workout, normalized))
     if normalized.get("moving_time") in (None, "") and normalized.get("duration_minutes") not in (None, ""):
         normalized["moving_time"] = int(normalized["duration_minutes"]) * 60
-    if workout.get("start_date_local"):
-        normalized["start_date_local"] = str(workout["start_date_local"])[:40]
-    normalized["origin"] = str(workout.get("origin") or workout.get("source") or "coach")[:40]
-    normalized["source"] = str(workout.get("source") or normalized["origin"])[:40]
-    if workout.get("status") is not None:
-        normalized["status"] = str(workout.get("status") or "")[:80]
-    if workout.get("remote_event_id") is not None:
-        normalized["remote_event_id"] = str(workout.get("remote_event_id") or "")[:120]
-    if workout.get("remote_event_external_id") is not None:
-        normalized["remote_event_external_id"] = str(workout.get("remote_event_external_id") or "")[:200]
-    if workout.get("sync_conflict") is not None:
-        normalized["sync_conflict"] = workout.get("sync_conflict")
     return normalized
 
 
