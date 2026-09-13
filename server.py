@@ -11897,6 +11897,47 @@ def apply_workout_library_plan(entries: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _library_bulk_entry_id(item: Any) -> str:
+    if not isinstance(item, dict):
+        raise AppError(400, "Jede Bulk-Auswahl muss ein Objekt sein.")
+    try:
+        return str(uuid.UUID(str(item.get("library_workout_id") or item.get("id") or "")))
+    except (ValueError, AttributeError) as exc:
+        raise AppError(400, "Ungültige Bibliothekseinheiten-ID in der Auswahl.") from exc
+
+
+def _library_bulk_entry_date(item: dict[str, Any]) -> str | None:
+    if "date" not in item:
+        return None
+    plan_date = str(item.get("date") or "").strip()
+    try:
+        date.fromisoformat(plan_date)
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Das Bulk-Datum muss das Format JJJJ-MM-TT haben.") from exc
+    return plan_date[:10]
+
+
+def _library_bulk_entry_hash(item: dict[str, Any], *, require_hash: bool) -> str | None:
+    expected_hash = str(item.get("expected_payload_hash") or "").strip().lower()
+    if require_hash and not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
+        raise AppError(400, "Die Bulk-Aktion benötigt aktuelle Payload-Hashes.")
+    if expected_hash and not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
+        raise AppError(400, "Ungültiger Payload-Hash in der Bulk-Auswahl.")
+    return expected_hash or None
+
+
+def _library_bulk_request_entry(item: Any, *, require_hash: bool) -> dict[str, Any]:
+    local_id = _library_bulk_entry_id(item)
+    selected = {"library_workout_id": local_id}
+    plan_date = _library_bulk_entry_date(item)
+    if plan_date:
+        selected["date"] = plan_date
+    expected_hash = _library_bulk_entry_hash(item, require_hash=require_hash)
+    if expected_hash:
+        selected["expected_payload_hash"] = expected_hash
+    return selected
+
+
 def _library_bulk_request_entries(
     entries: Any, *, require_hash: bool = False, max_entries: int = LIBRARY_BULK_MAX_ENTRIES,
 ) -> list[dict[str, Any]]:
@@ -11904,34 +11945,9 @@ def _library_bulk_request_entries(
         raise AppError(400, "Mindestens eine Bibliothekseinheit muss ausgewählt werden.")
     if len(entries) > max_entries:
         raise AppError(400, f"Es können höchstens {max_entries} Bibliothekseinheiten gleichzeitig ausgewählt werden.")
-    result: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in entries:
-        if not isinstance(item, dict):
-            raise AppError(400, "Jede Bulk-Auswahl muss ein Objekt sein.")
-        try:
-            local_id = str(uuid.UUID(str(item.get("library_workout_id") or item.get("id") or "")))
-        except (ValueError, AttributeError) as exc:
-            raise AppError(400, "Ungültige Bibliothekseinheiten-ID in der Auswahl.") from exc
-        if local_id in seen:
-            raise AppError(400, "Eine Bibliothekseinheit darf nur einmal ausgewählt werden.")
-        seen.add(local_id)
-        selected = {"library_workout_id": local_id}
-        if "date" in item:
-            plan_date = str(item.get("date") or "").strip()
-            try:
-                date.fromisoformat(plan_date)
-            except (TypeError, ValueError) as exc:
-                raise AppError(400, "Das Bulk-Datum muss das Format JJJJ-MM-TT haben.") from exc
-            selected["date"] = plan_date[:10]
-        expected_hash = str(item.get("expected_payload_hash") or "").strip().lower()
-        if require_hash and not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
-            raise AppError(400, "Die Bulk-Aktion benötigt aktuelle Payload-Hashes.")
-        if expected_hash:
-            if not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
-                raise AppError(400, "Ungültiger Payload-Hash in der Bulk-Auswahl.")
-            selected["expected_payload_hash"] = expected_hash
-        result.append(selected)
+    result = [_library_bulk_request_entry(item, require_hash=require_hash) for item in entries]
+    if len({item["library_workout_id"] for item in result}) != len(result):
+        raise AppError(400, "Eine Bibliothekseinheit darf nur einmal ausgewählt werden.")
     return result
 
 
