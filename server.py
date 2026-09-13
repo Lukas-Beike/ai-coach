@@ -12247,7 +12247,8 @@ def _sync_selected_planned_library_entry(
         if payload.get("repair"):
             update_planned_unit_sync_state(local_id, "sync_error", str(exc))
         return _library_sync_error(local_id, exc)
-    return {"library_workout_id": local_id, "status": "synced", "calendar_synced": event is not None}
+    calendar_synced = event is not None or bool(payload.get("repair") and repair_batch)
+    return {"library_workout_id": local_id, "status": "synced", "calendar_synced": calendar_synced}
 
 
 def _sync_existing_library_calendar_entry(item: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
