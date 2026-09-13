@@ -13755,10 +13755,47 @@ def repair_incomplete_gemini_tool_history(db: sqlite3.Connection) -> None:
     set_kv("gemini_call_names", "{}", db)
 
 
+def _gemini_selected_raw_attachments(message_attachments: list[list[Any]]) -> set[tuple[int, int]]:
+    candidates: list[tuple[int, int, int]] = []
+    for message_index, attachments in enumerate(message_attachments):
+        for attachment_index, attachment in enumerate(attachments):
+            if isinstance(attachment, dict) and attachment.get("type") in {"image", "gpx", "fit"} and attachment.get("data"):
+                raw_data, _ = provider_attachment_data(attachment)
+                candidates.append((message_index, attachment_index, len(raw_data)))
+    selected: set[tuple[int, int]] = set()
+    remaining_bytes = MAX_GEMINI_INLINE_IMAGE_BYTES
+    for message_index, attachment_index, size in reversed(candidates):
+        if size <= remaining_bytes:
+            selected.add((message_index, attachment_index))
+            remaining_bytes -= size
+    return selected
+
+
+def _gemini_history_parts(message: dict[str, Any], attachments: list[Any], message_index: int, selected_raw: set[tuple[int, int]]) -> list[dict[str, Any]]:
+    content = str(message.get("content") or "").strip()[:6000]
+    if not content:
+        return []
+    parts: list[dict[str, Any]] = [{"text": content}]
+    for attachment_index, attachment in enumerate(attachments):
+        if not isinstance(attachment, dict):
+            continue
+        attachment_type = attachment.get("type")
+        if attachment_type in {"gpx", "fit"}:
+            parts.append({"text": json.dumps({"untrusted_attachment_name": attachment.get("name"),
+                                                f"untrusted_{attachment_type}": attachment.get("summary")}, ensure_ascii=False)})
+        if (message_index, attachment_index) in selected_raw and attachment.get("mime"):
+            data, mime = provider_attachment_data(attachment)
+            parts.append({"inlineData": {"mimeType": mime, "data": data}})
+        elif attachment_type == "image":
+            parts.append({"text": json.dumps({"untrusted_attachment_name": attachment.get("name"), "raw_image_omitted": True}, ensure_ascii=False)})
+        elif attachment_type in {"gpx", "fit"} and attachment.get("data"):
+            parts.append({"text": json.dumps({"untrusted_attachment_name": attachment.get("name"), "raw_file_omitted": True}, ensure_ascii=False)})
+    return parts
+
+
 def _gemini_local_chat_history() -> list[dict[str, Any]]:
     messages = list_messages(limit=20)
     message_attachments = []
-    raw_candidates = []
     for message_index, message in enumerate(messages):
         with DB_LOCK, database() as db:
             row = db.execute(MESSAGE_ATTACHMENTS_QUERY, (message["id"],)).fetchone()
@@ -13768,36 +13805,12 @@ def _gemini_local_chat_history() -> list[dict[str, Any]]:
             attachments = []
         attachments = attachments if isinstance(attachments, list) else []
         message_attachments.append(attachments)
-        for attachment_index, attachment in enumerate(attachments):
-            if isinstance(attachment, dict) and attachment.get("type") in {"image", "gpx", "fit"} and attachment.get("data"):
-                raw_data, _ = provider_attachment_data(attachment)
-                raw_candidates.append((message_index, attachment_index, len(raw_data)))
-    selected_raw = set()
-    remaining_raw_bytes = MAX_GEMINI_INLINE_IMAGE_BYTES
-    for message_index, attachment_index, size in reversed(raw_candidates):
-        if size <= remaining_raw_bytes:
-            selected_raw.add((message_index, attachment_index))
-            remaining_raw_bytes -= size
+    selected_raw = _gemini_selected_raw_attachments(message_attachments)
     history: list[dict[str, Any]] = []
     for message_index, message in enumerate(messages):
         role = "model" if message.get("role") == "assistant" else "user"
-        content = str(message.get("content") or "").strip()[:6000]
-        if content:
-            parts = [{"text": content}]
-            for attachment_index, attachment in enumerate(message_attachments[message_index]):
-                if not isinstance(attachment, dict):
-                    continue
-                attachment_type = attachment.get("type")
-                if attachment_type in {"gpx", "fit"}:
-                    parts.append({"text": json.dumps({"untrusted_attachment_name": attachment.get("name"),
-                                                        f"untrusted_{attachment_type}": attachment.get("summary")}, ensure_ascii=False)})
-                if (message_index, attachment_index) in selected_raw and attachment.get("mime"):
-                    data, mime = provider_attachment_data(attachment)
-                    parts.append({"inlineData": {"mimeType": mime, "data": data}})
-                elif attachment_type == "image":
-                    parts.append({"text": json.dumps({"untrusted_attachment_name": attachment.get("name"), "raw_image_omitted": True}, ensure_ascii=False)})
-                elif attachment_type in {"gpx", "fit"} and attachment.get("data"):
-                    parts.append({"text": json.dumps({"untrusted_attachment_name": attachment.get("name"), "raw_file_omitted": True}, ensure_ascii=False)})
+        parts = _gemini_history_parts(message, message_attachments[message_index], message_index, selected_raw)
+        if parts:
             history.append({"role": role, "parts": parts})
     return _trim_gemini_history(history)
 
