@@ -4654,91 +4654,105 @@ def _saved_daily_history(key: str, db: Any | None = None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _morning_body_battery_cached_result(record: dict[str, Any] | None, checkin_date: date) -> dict[str, Any] | None:
+    if not record or record.get("sleep_date") != checkin_date.isoformat():
+        return None
+    if record.get("status") == "ready":
+        return {"status": "already_loaded", "sleep_date": checkin_date.isoformat()}
+    attempted = _garmin_timestamp(record.get("attempted_at"))
+    if int(record.get("attempts") or 1) >= MORNING_MAX_ATTEMPTS:
+        return {"status": "attempts_exhausted", "sleep_date": checkin_date.isoformat()}
+    if attempted and (datetime.now(timezone.utc) - attempted).total_seconds() < MORNING_RETRY_SECONDS:
+        return {"status": "retry_wait", "sleep_date": checkin_date.isoformat()}
+    return None
+
+
+def _persist_morning_body_battery(
+    checkin_date: date,
+    existing: dict[str, Any] | None,
+    record: dict[str, Any],
+    records: Any = None,
+) -> dict[str, Any]:
+    same_date = existing and existing.get("sleep_date") == checkin_date.isoformat()
+    record["attempts"] = 1 + (int(existing.get("attempts") or 1) if same_date else 0)
+    with DB_LOCK, database() as db:
+        current = garmin_snapshot()
+        if isinstance(records, list):
+            current["body_battery"] = _merge_garmin_records(records, current.get("body_battery"))
+        current["morning_body_battery"] = record
+        set_kv("garmin_snapshot", json.dumps(current, ensure_ascii=False, separators=(",", ":")), db)
+        history = _saved_daily_history(MORNING_BATTERY_HISTORY_KEY, db)
+        for saved in (existing, record):
+            if isinstance(saved, dict) and saved.get("status") == "ready" and saved.get("sleep_date"):
+                history[saved["sleep_date"]] = saved.get("morning", {}).get("value")
+        set_kv(MORNING_BATTERY_HISTORY_KEY, json.dumps(history), db)
+    _set_garmin_error_entries(_garmin_core_error_entries())
+    publish_state_event("provider", {"provider": "garmin", "area": "performance", "status": "ready" if record["status"] == "ready" else "degraded"})
+    return {"status": record["status"], "sleep_date": record["sleep_date"], "records": len(records) if isinstance(records, list) else 0}
+
+
+def _morning_body_battery_remote_payload(checkin_date: date) -> tuple[Any, list[Any]]:
+    client = Garmin(CONFIG.garmin_email or None, CONFIG.garmin_password or None)
+    mfa_status, _ = external_call(
+        "garmin", "login", lambda: client.login(CONFIG.garmin_tokenstore),
+        {"email_configured": bool(CONFIG.garmin_email), "tokenstore_exists": Path(CONFIG.garmin_tokenstore).exists()},
+    )
+    if mfa_status:
+        return {}, []
+    sleep_payload = external_call(
+        "garmin", "morning_sleep", lambda: client.get_sleep_data(checkin_date.isoformat()),
+        {"date": checkin_date.isoformat()},
+    )
+    sleep_start, _sleep_end = _garmin_sleep_bounds(sleep_payload)
+    if sleep_start is None:
+        return sleep_payload, []
+    try:
+        from zoneinfo import ZoneInfo
+        local_zone = ZoneInfo(timezone_name(get_profile().get("timezone")))
+    except Exception:
+        local_zone = local_now().tzinfo or timezone.utc
+    range_start = sleep_start.astimezone(local_zone).date()
+    records = external_call(
+        "garmin", "body_battery",
+        lambda: client.get_body_battery(range_start.isoformat(), checkin_date.isoformat()),
+        {"window_start": range_start.isoformat(), "window_end": checkin_date.isoformat(), "purpose": "morning_recovery"},
+    )
+    return sleep_payload, records if isinstance(records, list) else []
+
+
+def _sync_morning_body_battery_locked(checkin_date: date) -> dict[str, Any]:
+    existing = _garmin_morning_body_battery(garmin_snapshot())
+    cached = _morning_body_battery_cached_result(existing, checkin_date)
+    if cached:
+        return cached
+    if garmin_fixture_path() is not None:
+        payload = load_garmin_fixture(2)
+        sleep_payload = {"dailySleepDTO": latest_garmin_record(payload.get("sleep"))}
+        record = _morning_body_battery_record(checkin_date, sleep_payload, payload.get("body_battery"))
+        return _persist_morning_body_battery(checkin_date, existing, record, payload.get("body_battery"))
+    if Garmin is None or not (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()):
+        return {"status": "not_configured", "sleep_date": checkin_date.isoformat()}
+    try:
+        sleep_payload, records = _morning_body_battery_remote_payload(checkin_date)
+        record = _morning_body_battery_record(checkin_date, sleep_payload, records)
+    except Exception as exc:
+        record = _morning_body_battery_record(checkin_date, {}, [])
+        record["error"] = _safe_diagnostic_error(exc)
+        records = []
+    return _persist_morning_body_battery(checkin_date, existing, record, records)
+
+
 @maintenance_operation
 @garmin_operation
 def sync_garmin_morning_body_battery(checkin_date: date) -> dict[str, Any]:
     """Keep a successful pair; retry unavailable readings with a bounded cooldown."""
-    previous = garmin_snapshot()
-    existing = _garmin_morning_body_battery(previous)
-
-    def cached_result(record: dict[str, Any] | None) -> dict[str, Any] | None:
-        if not record or record.get("sleep_date") != checkin_date.isoformat():
-            return None
-        if record.get("status") == "ready":
-            return {"status": "already_loaded", "sleep_date": checkin_date.isoformat()}
-        attempted = _garmin_timestamp(record.get("attempted_at"))
-        if int(record.get("attempts") or 1) >= MORNING_MAX_ATTEMPTS:
-            return {"status": "attempts_exhausted", "sleep_date": checkin_date.isoformat()}
-        if attempted and (datetime.now(timezone.utc) - attempted).total_seconds() < MORNING_RETRY_SECONDS:
-            return {"status": "retry_wait", "sleep_date": checkin_date.isoformat()}
-        return None
-
-    cached = cached_result(existing)
+    cached = _morning_body_battery_cached_result(_garmin_morning_body_battery(garmin_snapshot()), checkin_date)
     if cached:
         return cached
-
-    def persist(record: dict[str, Any], records: Any = None) -> dict[str, Any]:
-        record["attempts"] = 1 + (int(existing.get("attempts") or 1) if existing and existing.get("sleep_date") == checkin_date.isoformat() else 0)
-        with DB_LOCK, database() as db:
-            current = garmin_snapshot()
-            if isinstance(records, list):
-                current["body_battery"] = _merge_garmin_records(records, current.get("body_battery"))
-            current["morning_body_battery"] = record
-            set_kv("garmin_snapshot", json.dumps(current, ensure_ascii=False, separators=(",", ":")), db)
-            history = _saved_daily_history(MORNING_BATTERY_HISTORY_KEY, db)
-            for saved in (existing, record):
-                if isinstance(saved, dict) and saved.get("status") == "ready" and saved.get("sleep_date"):
-                    history[saved["sleep_date"]] = saved.get("morning", {}).get("value")
-            set_kv(MORNING_BATTERY_HISTORY_KEY, json.dumps(history), db)
-        _set_garmin_error_entries(_garmin_core_error_entries())
-        publish_state_event("provider", {"provider": "garmin", "area": "performance", "status": "ready" if record["status"] == "ready" else "degraded"})
-        return {"status": record["status"], "sleep_date": record["sleep_date"], "records": len(records) if isinstance(records, list) else 0}
-
     if not GARMIN_LOCK.acquire(timeout=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS):
         return {"status": "already_running", "sleep_date": checkin_date.isoformat()}
     try:
-        existing = _garmin_morning_body_battery(garmin_snapshot())
-        cached = cached_result(existing)
-        if cached:
-            return cached
-        if garmin_fixture_path() is not None:
-            payload = load_garmin_fixture(2)
-            sleep_payload = {"dailySleepDTO": latest_garmin_record(payload.get("sleep"))}
-            return persist(_morning_body_battery_record(checkin_date, sleep_payload, payload.get("body_battery")), payload.get("body_battery"))
-        if Garmin is None or not (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()):
-            return {"status": "not_configured", "sleep_date": checkin_date.isoformat()}
-        client = Garmin(CONFIG.garmin_email or None, CONFIG.garmin_password or None)
-        try:
-            mfa_status, _ = external_call(
-                "garmin", "login", lambda: client.login(CONFIG.garmin_tokenstore),
-                {"email_configured": bool(CONFIG.garmin_email), "tokenstore_exists": Path(CONFIG.garmin_tokenstore).exists()},
-            )
-            if mfa_status:
-                return persist(_morning_body_battery_record(checkin_date, {}, []))
-            sleep_payload = external_call(
-                "garmin", "morning_sleep", lambda: client.get_sleep_data(checkin_date.isoformat()),
-                {"date": checkin_date.isoformat()},
-            )
-            sleep_start, _sleep_end = _garmin_sleep_bounds(sleep_payload)
-            if sleep_start is None:
-                return persist(_morning_body_battery_record(checkin_date, sleep_payload, []))
-            try:
-                from zoneinfo import ZoneInfo
-                local_zone = ZoneInfo(timezone_name(get_profile().get("timezone")))
-            except Exception:
-                local_zone = local_now().tzinfo or timezone.utc
-            range_start = sleep_start.astimezone(local_zone).date()
-            records = external_call(
-                "garmin", "body_battery",
-                lambda: client.get_body_battery(range_start.isoformat(), checkin_date.isoformat()),
-                {"window_start": range_start.isoformat(), "window_end": checkin_date.isoformat(), "purpose": "morning_recovery"},
-            )
-            records = records if isinstance(records, list) else []
-            return persist(_morning_body_battery_record(checkin_date, sleep_payload, records), records)
-        except Exception as exc:
-            record = _morning_body_battery_record(checkin_date, {}, [])
-            record["error"] = _safe_diagnostic_error(exc)
-            return persist(record)
+        return _sync_morning_body_battery_locked(checkin_date)
     finally:
         GARMIN_LOCK.release()
 
@@ -4753,6 +4767,151 @@ def refresh_morning_body_battery(checkin_date: date | None = None) -> None:
         sync_garmin_morning_body_battery(checkin_date or local_now().date())
     except Exception as exc:
         LOGGER.warning("Morning Body Battery refresh failed", extra={"event": "morning_body_battery_sync_failed", "context": _safe_diagnostic_error(exc)})
+
+
+def _persist_garmin_sync_payload(
+    payload: dict[str, Any],
+    end_date: date | None,
+    fallback_end: date,
+    *,
+    source: str | None = None,
+    historical_cursor: str | None = None,
+) -> dict[str, Any]:
+    synced_at = payload["synced_at"]
+    complete = garmin_collection_complete(payload)
+    set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    set_kv("last_garmin_sync_at", synced_at)
+    mark_daily_sync("garmin")
+    set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
+    if complete:
+        update_provider_sync_cursor("garmin", "data", str(payload.get("end") or fallback_end.isoformat())[:10], synced_at)
+        if end_date is not None and historical_cursor is not None:
+            update_provider_sync_cursor("garmin", "historical", historical_cursor, synced_at)
+    result = {
+        "status": "ok" if complete else "partial",
+        "synced_at": synced_at,
+        "errors": len(payload.get("errors") or []),
+        "activities": len(payload.get("activities") or []),
+        "pagination": payload["provider_sync"]["pagination"],
+    }
+    if source is not None:
+        result["source"] = source
+    return result
+
+
+def _sync_garmin_fixture_locked(days: int, end_date: date | None) -> dict[str, Any]:
+    set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
+    try:
+        previous = garmin_snapshot()
+        payload = load_garmin_fixture(days)
+        merge_garmin_sources(payload, previous)
+        payload["sport_max_hr"] = merge_garmin_max_hr(
+            garmin_activity_max_hr(payload.get("activities")), previous.get("sport_max_hr")
+        )
+        annotate_garmin_activity_matches(payload)
+        payload.setdefault("provider_sync", {"pagination": {"fixture": {"windows": 1, "records": len(payload.get("activities") or []), "complete": True}}})
+        if isinstance(previous.get("morning_body_battery"), dict):
+            payload["morning_body_battery"] = previous["morning_body_battery"]
+        append_garmin_performance_history(payload, previous)
+        return _persist_garmin_sync_payload(
+            payload,
+            end_date,
+            local_now().date(),
+            source="fixture",
+            historical_cursor=SYNC_EARLIEST_DATE.isoformat(),
+        )
+    except Exception as exc:
+        error = redact_text(str(exc))[:1000]
+        set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
+        raise
+    finally:
+        set_kv("garmin_sync_status", "")
+
+
+def _garmin_remote_collection_options(days: int, end_date: date | None) -> GarminCollectionOptions:
+    return GarminCollectionOptions(
+        include_recovery=end_date is None and days != ALL_SYNC_DAYS,
+        include_current_metrics=end_date is None and days != ALL_SYNC_DAYS,
+    )
+
+
+def _sync_garmin_remote_locked(days: int, end_date: date | None) -> dict[str, Any]:
+    today = end_date or local_now().date()
+    windows = sync_date_windows(days, today)
+    previous = garmin_snapshot()
+    set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
+    try:
+        client = Garmin(CONFIG.garmin_email or None, CONFIG.garmin_password or None)
+        mfa_status, _ = external_call(
+            "garmin",
+            "login",
+            lambda: client.login(CONFIG.garmin_tokenstore),
+            {"email_configured": bool(CONFIG.garmin_email), "tokenstore_exists": Path(CONFIG.garmin_tokenstore).exists()},
+        )
+        if mfa_status:
+            LOGGER.warning(
+                "Garmin login requires MFA",
+                extra={"event": "garmin_mfa_required", "context": {"service": "garmin", "operation": "login"}},
+            )
+            raise AppError(401, "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb des Servers eingerichtet werden.")
+        payload = collect_garmin_data(
+            client,
+            windows,
+            start=windows[0][0],
+            today=today,
+            synced_at=utc_now(),
+            external_call=external_call,
+            redact=redact_text,
+            warn=lambda source, _message, exc: LOGGER.warning(
+                "Garmin data request failed",
+                extra={"event": "garmin_request_failed", "context": {"source": source}},
+                exc_info=(type(exc), exc, exc.__traceback__),
+            ),
+            status=lambda message: set_kv("garmin_sync_status", message),
+            capability_allowed=_garmin_capability_allowed,
+            capability_failure=_garmin_capability_failure,
+            capability_success=_garmin_capability_success,
+            options=_garmin_remote_collection_options(days, end_date),
+        )
+        merge_garmin_sources(payload, previous)
+        payload["activities"] = deduplicate_api_records(payload.get("activities", []))
+        payload["sport_max_hr"] = merge_garmin_max_hr(
+            garmin_activity_max_hr(payload.get("activities")), previous.get("sport_max_hr")
+        )
+        annotate_garmin_activity_matches(payload)
+        append_garmin_performance_history(payload, previous)
+        return _persist_garmin_sync_payload(
+            payload,
+            end_date,
+            windows[-1][1],
+            historical_cursor=windows[0][0].isoformat(),
+        )
+    except Exception as exc:
+        error = redact_text(str(exc))[:1000]
+        set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
+        raise
+    finally:
+        set_kv("garmin_sync_status", "")
+
+
+def _wait_for_existing_garmin_sync() -> dict[str, Any]:
+    previous_sync_at = get_kv("last_garmin_sync_at")
+    deadline = time.monotonic() + GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        remaining = max(0.05, min(1.0, deadline - time.monotonic()))
+        if GARMIN_LOCK.acquire(timeout=remaining):
+            try:
+                current_sync_at = get_kv("last_garmin_sync_at")
+                if current_sync_at and current_sync_at != previous_sync_at:
+                    return {"status": "ok", "waited_for_existing": True, "synced_at": current_sync_at}
+            finally:
+                GARMIN_LOCK.release()
+            break
+    raise AppError(
+        503,
+        "Die laufende Garmin-Synchronisierung konnte nicht abgeschlossen werden.",
+        reason="provider_busy",
+    )
 
 
 @observed_sync("garmin", "data")
@@ -4777,33 +4936,8 @@ def sync_garmin(
         if not GARMIN_LOCK.acquire(blocking=False):
             return {"status": "already_running"}
         try:
-            set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
-            previous = garmin_snapshot()
-            payload = load_garmin_fixture(days)
-            merge_garmin_sources(payload, previous)
-            payload["sport_max_hr"] = merge_garmin_max_hr(
-                garmin_activity_max_hr(payload.get("activities")), previous.get("sport_max_hr")
-            )
-            annotate_garmin_activity_matches(payload)
-            payload.setdefault("provider_sync", {"pagination": {"fixture": {"windows": 1, "records": len(payload.get("activities") or []), "complete": True}}})
-            if isinstance(previous.get("morning_body_battery"), dict):
-                payload["morning_body_battery"] = previous["morning_body_battery"]
-            append_garmin_performance_history(payload, previous)
-            set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
-            set_kv("last_garmin_sync_at", payload["synced_at"])
-            mark_daily_sync("garmin")
-            set_kv("last_garmin_error", "" if not payload.get("errors") else json.dumps(payload["errors"], ensure_ascii=False))
-            if garmin_collection_complete(payload):
-                update_provider_sync_cursor("garmin", "data", payload.get("end", ""), payload["synced_at"])
-            if end_date is not None and garmin_collection_complete(payload):
-                update_provider_sync_cursor("garmin", "historical", SYNC_EARLIEST_DATE.isoformat(), payload["synced_at"])
-            return {"status": "ok" if garmin_collection_complete(payload) else "partial", "source": "fixture", "synced_at": payload["synced_at"], "errors": len(payload.get("errors") or []), "activities": len(payload.get("activities") or []), "pagination": payload["provider_sync"]["pagination"]}
-        except Exception as exc:
-            error = redact_text(str(exc))[:1000]
-            set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
-            raise
+            return _sync_garmin_fixture_locked(days, end_date)
         finally:
-            set_kv("garmin_sync_status", "")
             GARMIN_LOCK.release()
     if not CONFIG.garmin_email and not Path(CONFIG.garmin_tokenstore).exists():
         LOGGER.warning(
@@ -4818,96 +4952,10 @@ def sync_garmin(
     if not GARMIN_LOCK.acquire(blocking=False):
         if not wait_for_existing:
             return {"status": "already_running"}
-        previous_sync_at = get_kv("last_garmin_sync_at")
-        deadline = time.monotonic() + GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS
-        while time.monotonic() < deadline:
-            remaining = max(0.05, min(1.0, deadline - time.monotonic()))
-            if GARMIN_LOCK.acquire(timeout=remaining):
-                try:
-                    current_sync_at = get_kv("last_garmin_sync_at")
-                    if current_sync_at and current_sync_at != previous_sync_at:
-                        return {"status": "ok", "waited_for_existing": True, "synced_at": current_sync_at}
-                finally:
-                    GARMIN_LOCK.release()
-                break
-        raise AppError(
-            503,
-            "Die laufende Garmin-Synchronisierung konnte nicht abgeschlossen werden.",
-            reason="provider_busy",
-        )
+        return _wait_for_existing_garmin_sync()
     try:
-        today = end_date or local_now().date()
-        windows = sync_date_windows(days, today)
-        start = windows[0][0]
-        previous = garmin_snapshot()
-        client = Garmin(CONFIG.garmin_email or None, CONFIG.garmin_password or None)
-        mfa_status, _ = external_call(
-            "garmin",
-            "login",
-            lambda: client.login(CONFIG.garmin_tokenstore),
-            {
-                "email_configured": bool(CONFIG.garmin_email),
-                "tokenstore_exists": Path(CONFIG.garmin_tokenstore).exists(),
-            },
-        )
-        if mfa_status:
-            LOGGER.warning(
-                "Garmin login requires MFA",
-                extra={"event": "garmin_mfa_required", "context": {"service": "garmin", "operation": "login"}},
-            )
-            raise AppError(401, "Garmin verlangt MFA. Ein Tokenstore muss einmalig außerhalb des Servers eingerichtet werden.")
-        set_kv("garmin_sync_status", "Garmin: Synchronisierung läuft…")
-
-        payload = collect_garmin_data(
-            client,
-            windows,
-            start=start,
-            today=today,
-            synced_at=utc_now(),
-            external_call=external_call,
-            redact=redact_text,
-            warn=lambda source, _message, exc: LOGGER.warning(
-                "Garmin data request failed",
-                extra={"event": "garmin_request_failed", "context": {"source": source}},
-                exc_info=(type(exc), exc, exc.__traceback__),
-            ),
-            status=lambda message: set_kv("garmin_sync_status", message),
-            capability_allowed=_garmin_capability_allowed,
-            capability_failure=_garmin_capability_failure,
-            capability_success=_garmin_capability_success,
-            options=GarminCollectionOptions(
-                include_recovery=end_date is None and days != ALL_SYNC_DAYS,
-                include_current_metrics=end_date is None and days != ALL_SYNC_DAYS,
-            ),
-        )
-        merge_garmin_sources(payload, previous)
-        payload["activities"] = deduplicate_api_records(payload.get("activities", []))
-        payload["sport_max_hr"] = merge_garmin_max_hr(
-            garmin_activity_max_hr(payload.get("activities")), previous.get("sport_max_hr")
-        )
-        annotate_garmin_activity_matches(payload)
-        append_garmin_performance_history(payload, previous)
-        set_kv("garmin_snapshot", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
-        set_kv("last_garmin_sync_at", payload["synced_at"])
-        mark_daily_sync("garmin")
-        set_kv("last_garmin_error", "" if not payload["errors"] else json.dumps(payload["errors"], ensure_ascii=False))
-        if garmin_collection_complete(payload):
-            update_provider_sync_cursor("garmin", "data", str(payload.get("end") or windows[-1][1].isoformat())[:10], payload["synced_at"])
-        if end_date is not None and garmin_collection_complete(payload):
-            update_provider_sync_cursor("garmin", "historical", windows[0][0].isoformat(), payload["synced_at"])
-        return {
-            "status": "ok" if garmin_collection_complete(payload) else "partial",
-            "synced_at": payload["synced_at"],
-            "errors": len(payload["errors"]),
-            "activities": len(payload.get("activities") or []),
-            "pagination": payload["provider_sync"]["pagination"],
-        }
-    except Exception as exc:
-        error = redact_text(str(exc))[:1000]
-        set_kv("last_garmin_error", json.dumps([{"source": "sync", "message": error}], ensure_ascii=False))
-        raise
+        return _sync_garmin_remote_locked(days, end_date)
     finally:
-        set_kv("garmin_sync_status", "")
         GARMIN_LOCK.release()
 
 
