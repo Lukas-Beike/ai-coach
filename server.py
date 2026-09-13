@@ -15184,52 +15184,70 @@ def ensure_conversation(provider: str | None = None) -> str:
     return conversation_id
 
 
+def _delete_reset_coach_conversation(conversation_id: str) -> bool:
+    if not conversation_id:
+        return False
+    try:
+        return delete_remote_conversation(conversation_id)
+    except Exception:
+        LOGGER.warning(
+            "Remote OpenAI conversation could not be deleted during reset",
+            extra={"event": "openai_reset_remote_delete_failed"}, exc_info=True,
+        )
+        return False
+
+
+def _cancel_reset_coach_commands(db: sqlite3.Connection, now: str) -> list[str]:
+    active_commands = db.execute(
+        "SELECT client_turn_id, receipt FROM coach_commands WHERE status IN ('queued', 'running')"
+    ).fetchall()
+    operation_ids: list[str] = []
+    for command in active_commands:
+        receipt = _coach_command_receipt(command["receipt"])
+        operation_id = str(receipt.get("operation_id") or "")
+        if operation_id:
+            operation_ids.append(operation_id)
+        receipt.update(status="cancelled", phase="chat_reset", cancel_requested=True, message=None)
+        db.execute(
+            UPDATE_COMMAND_RECEIPT_SQL,
+            (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, command["client_turn_id"]),
+        )
+    return operation_ids
+
+
+def _reset_local_coach_chat_state() -> list[str]:
+    with DB_LOCK, database() as db:
+        operation_ids = _cancel_reset_coach_commands(db, utc_now())
+        db.execute("DELETE FROM messages")
+        set_kv("chat_generation", uuid.uuid4().hex, db)
+        db.execute(
+            "UPDATE coach_plan_artifacts SET status='superseded', updated_at=? WHERE status='draft'",
+            (utc_now(),),
+        )
+        set_kv("coach_pending_request", "null", db)
+    return operation_ids
+
+
+def _request_coach_operation_cancellation(operation_ids: list[str]) -> None:
+    with CHAT_STREAM_LOCK:
+        for operation_id in operation_ids:
+            COACH_JOB_CANCEL_EVENTS.setdefault(operation_id, threading.Event()).set()
+
+
+def _clear_coach_conversation_state() -> None:
+    set_kv("openai_conversation_id", "")
+    set_kv("gemini_conversation_id", "")
+    set_kv("gemini_conversation_history", "[]")
+    set_kv("gemini_call_names", "{}")
+    set_kv("last_chat_reset_at", utc_now())
+
+
 def reset_coach_chat() -> dict[str, Any]:
     """Forget local chat history and delete the stored remote conversation when possible."""
     with OPENAI_CONVERSATION_LOCK:
-        conversation_id = get_kv("openai_conversation_id") or ""
-        remote_deleted = False
-        if conversation_id:
-            try:
-                remote_deleted = delete_remote_conversation(conversation_id)
-            except Exception:
-                LOGGER.warning("Remote OpenAI conversation could not be deleted during reset", extra={"event": "openai_reset_remote_delete_failed"}, exc_info=True)
-        cancelled_operation_ids: list[str] = []
-        with DB_LOCK, database() as db:
-            active_commands = db.execute(
-                "SELECT client_turn_id, receipt FROM coach_commands WHERE status IN ('queued', 'running')"
-            ).fetchall()
-            now = utc_now()
-            for command in active_commands:
-                receipt = _coach_command_receipt(command["receipt"])
-                operation_id = str(receipt.get("operation_id") or "")
-                if operation_id:
-                    cancelled_operation_ids.append(operation_id)
-                receipt.update({
-                    "status": "cancelled",
-                    "phase": "chat_reset",
-                    "cancel_requested": True,
-                    "message": None,
-                })
-                db.execute(
-                    UPDATE_COMMAND_RECEIPT_SQL,
-                    (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, command["client_turn_id"]),
-                )
-            db.execute("DELETE FROM messages")
-            set_kv("chat_generation", uuid.uuid4().hex, db)
-            db.execute(
-                "UPDATE coach_plan_artifacts SET status='superseded', updated_at=? WHERE status='draft'",
-                (utc_now(),),
-            )
-            set_kv("coach_pending_request", "null", db)
-        with CHAT_STREAM_LOCK:
-            for operation_id in cancelled_operation_ids:
-                COACH_JOB_CANCEL_EVENTS.setdefault(operation_id, threading.Event()).set()
-        set_kv("openai_conversation_id", "")
-        set_kv("gemini_conversation_id", "")
-        set_kv("gemini_conversation_history", "[]")
-        set_kv("gemini_call_names", "{}")
-        set_kv("last_chat_reset_at", utc_now())
+        remote_deleted = _delete_reset_coach_conversation(get_kv("openai_conversation_id") or "")
+        _request_coach_operation_cancellation(_reset_local_coach_chat_state())
+        _clear_coach_conversation_state()
     return {"status": "ok", "generation": get_kv("chat_generation"), "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
 
 
