@@ -7015,22 +7015,24 @@ def _competition_remote_indexes(
     )
 
 
-def _competition_dirty_row_action(
+def _competition_remote_match(
     row: dict[str, Any],
     remote_by_external: dict[str, dict[str, Any]],
     remote_by_id: dict[str, dict[str, Any]],
     remote_by_identity: dict[tuple[str, str, str], dict[str, Any]],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    if not supported_competition_sport(row.get("sport")):
-        return None, None
     remote = remote_by_id.get(str(row["intervals_event_id"])) if row.get("intervals_event_id") else None
     if remote is None and row.get("external_id"):
         remote = remote_by_external.get(str(row["external_id"]))
     identity_remote = remote_by_identity.get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
-    if remote is None:
-        remote = identity_remote
+    return remote or identity_remote, identity_remote
+
+
+def _competition_conflict_action(
+    row: dict[str, Any], remote: dict[str, Any] | None, identity_remote: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     if identity_remote and row.get("sync_state") != "local_override":
-        return None, {
+        return {
             "type": "conflict",
             "local_id": str(row["id"]),
             "remote_id": str(identity_remote.get("id") or ""),
@@ -7040,7 +7042,7 @@ def _competition_dirty_row_action(
             "reason": "remote_identity_changed",
         }
     if row.get("intervals_event_id") and remote is None:
-        return None, {
+        return {
             "type": "conflict",
             "local_id": str(row["id"]),
             "remote_id": str(row.get("intervals_event_id") or ""),
@@ -7049,6 +7051,21 @@ def _competition_dirty_row_action(
             "sport": str(row.get("sport") or ""),
             "reason": "remote_missing",
         }
+    return None
+
+
+def _competition_dirty_row_action(
+    row: dict[str, Any],
+    remote_by_external: dict[str, dict[str, Any]],
+    remote_by_id: dict[str, dict[str, Any]],
+    remote_by_identity: dict[tuple[str, str, str], dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not supported_competition_sport(row.get("sport")):
+        return None, None
+    remote, identity_remote = _competition_remote_match(row, remote_by_external, remote_by_id, remote_by_identity)
+    conflict = _competition_conflict_action(row, remote, identity_remote)
+    if conflict:
+        return None, conflict
     payload = competition_event_payload(row)
     return payload, {
         "type": "change" if remote is not None else "create",
