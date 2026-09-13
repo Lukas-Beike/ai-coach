@@ -17837,43 +17837,71 @@ def _mark_local_competitions_authoritative() -> int:
     return len(rows)
 
 
+def _repair_manifest_rows(db: Any, period: dict[str, str]) -> list[dict[str, Any]]:
+    return db.execute(
+        "SELECT local_id, payload FROM planned_units "
+        "WHERE substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) BETWEEN ? AND "
+        "? ORDER BY local_id", (period["start"], period["end"]),
+    ).fetchall()
+
+
+def _repair_manifest_entries(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    return [
+        {"library_workout_id": row["local_id"], "expected_payload_hash": _library_payload_hash(row["payload"])}
+        for row in rows
+    ]
+
+
+def _validate_repair_manifest_selection(
+    arguments: dict[str, Any], intent: dict[str, Any], rows: list[dict[str, Any]], entries: list[dict[str, str]],
+    current_revision: int,
+) -> None:
+    supplied = arguments.get("entries")
+    if supplied is None:
+        _require_coach_scope(intent, "local_plan")
+        expected = arguments.get("expected_revision")
+        if type(expected) is not int or expected != current_revision:
+            raise AppError(409, "Lies die aktuelle Planung vor der vollstaendigen Reparatur erneut.", reason="planning_revision_conflict")
+        return
+    selected = _library_bulk_request_entries(supplied, require_hash=True)
+    if {entry["library_workout_id"] for entry in selected} != {row["local_id"] for row in rows}:
+        raise AppError(409, "Die Reparaturauswahl umfasst nicht den vollstaendigen Zeitraum. Nutze die aktuelle expected_revision ohne entries fuer das komplette serverseitige Manifest.", reason="incomplete_repair_selection")
+    hashes = {entry["library_workout_id"]: entry["expected_payload_hash"] for entry in selected}
+    for entry in entries:
+        local_id = entry["library_workout_id"]
+        _require_coach_scope(intent, "planned_unit:" + local_id, "library_workout:" + local_id)
+        if hashes[local_id] != entry["expected_payload_hash"]:
+            raise AppError(409, "Die ausgewaehlte Planung wurde geaendert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
+
+
+def _validate_repair_manifest_workouts(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        workout = json.loads(row["payload"])
+        if not workout.get("archived") and not workout.get("local_deleted"):
+            validate_workout_description(workout)
+
+
+def _refresh_repair_manifest_hashes(db: Any, entries: list[dict[str, str]]) -> None:
+    for entry in entries:
+        row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
+        entry["expected_payload_hash"] = _library_payload_hash(row["payload"])
+
+
 def _coach_repair_manifest(arguments: dict[str, Any], intent: dict[str, Any]) -> list[dict[str, str]]:
     """Validate one complete period before splitting its manifest into jobs."""
     period = intent.get("_repair_period")
     if not period or intent.get("_sync_all_pending"):
         raise AppError(400, "Reparatur-Sync braucht einen vollstaendigen zukuenftigen Zeitraum.", reason="request_sync")
-    supplied = arguments.get("entries")
     with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT local_id, payload FROM planned_units "
-            "WHERE substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) BETWEEN ? AND ? "
-            "ORDER BY local_id", (period["start"], period["end"]),
-        ).fetchall()
-        entries = [{"library_workout_id": row["local_id"], "expected_payload_hash": _library_payload_hash(row["payload"])} for row in rows]
-        if supplied is None:
-            _require_coach_scope(intent, "local_plan")
-            revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
-            expected = arguments.get("expected_revision")
-            if type(expected) is not int or expected != int((revision or {}).get("revision") or 0):
-                raise AppError(409, "Lies die aktuelle Planung vor der vollstaendigen Reparatur erneut.", reason="planning_revision_conflict")
-        else:
-            selected = _library_bulk_request_entries(supplied, require_hash=True)
-            if {entry["library_workout_id"] for entry in selected} != {row["local_id"] for row in rows}:
-                raise AppError(409, "Die Reparaturauswahl umfasst nicht den vollstaendigen Zeitraum. Nutze die aktuelle expected_revision ohne entries fuer das komplette serverseitige Manifest.", reason="incomplete_repair_selection")
-            hashes = {entry["library_workout_id"]: entry["expected_payload_hash"] for entry in selected}
-            for entry in entries:
-                _require_coach_scope(intent, "planned_unit:" + entry["library_workout_id"], "library_workout:" + entry["library_workout_id"])
-                if hashes[entry["library_workout_id"]] != entry["expected_payload_hash"]:
-                    raise AppError(409, "Die ausgewaehlte Planung wurde geaendert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
-        for row in rows:
-            workout = json.loads(row["payload"])
-            if not workout.get("archived") and not workout.get("local_deleted"):
-                validate_workout_description(workout)
+        rows = _repair_manifest_rows(db, period)
+        entries = _repair_manifest_entries(rows)
+        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
+        current_revision = int((revision or {}).get("revision") or 0)
+        _validate_repair_manifest_selection(arguments, intent, rows, entries, current_revision)
+        _validate_repair_manifest_workouts(rows)
         if rows:
             _mark_local_planning_authoritative([row["local_id"] for row in rows])
-        for entry in entries:
-            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
-            entry["expected_payload_hash"] = _library_payload_hash(row["payload"])
+        _refresh_repair_manifest_hashes(db, entries)
     return entries
 
 
