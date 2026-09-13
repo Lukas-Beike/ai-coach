@@ -8413,25 +8413,64 @@ def calendar_activity_identity(activity: Any) -> tuple[Any, ...] | None:
     )
 
 
-def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[int, dict[str, Any]]:
-    """Match completed activities to planned workouts without reusing one activity."""
-    activity_rows = [item for item in activities if isinstance(item, dict)]
-    unused = set(range(len(activity_rows)))
-    matches: dict[int, dict[str, Any]] = {}
-    workout_rows = [(index, event) for index, event in enumerate(planned) if is_planned_workout_event(event)]
+def _planned_workout_rows(planned: list[Any]) -> list[tuple[int, dict[str, Any]]]:
+    return [(index, event) for index, event in enumerate(planned) if is_planned_workout_event(event)]
+
+
+def _activities_by_paired_event_id(activity_rows: list[dict[str, Any]]) -> dict[str, list[int]]:
     by_paired_id: dict[str, list[int]] = {}
     for activity_index, activity in enumerate(activity_rows):
         paired_id = first_present(activity, ("paired_event_id", "pairedEventId"))
         if paired_id not in (None, ""):
             by_paired_id.setdefault(str(paired_id), []).append(activity_index)
+    return by_paired_id
+
+
+def _paired_activity_match(
+    event: dict[str, Any], activity_rows: list[dict[str, Any]], by_paired_id: dict[str, list[int]], unused: set[int],
+) -> int | None:
+    event_id = first_present(event, ("id", "event_id"))
+    if event_id in (None, ""):
+        return None
+    candidates = [index for index in by_paired_id.get(str(event_id), []) if index in unused]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda index: str(activity_rows[index].get("start_date_local") or ""))
+
+
+def _unpaired_activity_match(event: dict[str, Any], activity_rows: list[dict[str, Any]], unused: set[int]) -> int | None:
+    event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
+    event_kind = activity_kind(event)
+    if event_kind == "other":
+        return None
+    event_start = activity_datetime(first_present(event, ("start_date_local", "date", "start")))
+    candidates: list[tuple[float, int]] = []
+    for activity_index in unused:
+        activity = activity_rows[activity_index]
+        if first_present(activity, ("paired_event_id", "pairedEventId")) not in (None, ""):
+            continue
+        if _record_date(first_present(activity, ("start_date_local", "start_date", "start"))) != event_date:
+            continue
+        if activity_kind(activity) != event_kind:
+            continue
+        activity_start = activity_datetime(first_present(activity, ("start_date_local", "start_date", "start")))
+        distance = abs((activity_start - event_start).total_seconds()) if activity_start and event_start else 0
+        candidates.append((distance, activity_index))
+    return min(candidates)[1] if candidates else None
+
+
+def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[int, dict[str, Any]]:
+    """Match completed activities to planned workouts without reusing one activity."""
+    activity_rows = [item for item in activities if isinstance(item, dict)]
+    unused = set(range(len(activity_rows)))
+    matches: dict[int, dict[str, Any]] = {}
+    workout_rows = _planned_workout_rows(planned)
+    by_paired_id = _activities_by_paired_event_id(activity_rows)
 
     # paired_event_id is the reliable Intervals.icu association.
     for event_index, event in workout_rows:
-        event_id = first_present(event, ("id", "event_id"))
-        candidates = [index for index in by_paired_id.get(str(event_id), []) if index in unused] if event_id not in (None, "") else []
-        if candidates:
-            candidates.sort(key=lambda index: str(activity_rows[index].get("start_date_local") or ""))
-            selected_index = candidates[0]
+        selected_index = _paired_activity_match(event, activity_rows, by_paired_id, unused)
+        if selected_index is not None:
             matches[event_index] = activity_rows[selected_index]
             unused.remove(selected_index)
 
@@ -8440,26 +8479,8 @@ def match_planned_workouts(planned: list[Any], activities: list[Any]) -> dict[in
     for event_index, event in workout_rows:
         if event_index in matches:
             continue
-        event_date = _record_date(first_present(event, ("start_date_local", "date", "start")))
-        event_kind = activity_kind(event)
-        if event_kind == "other":
-            continue
-        event_start = activity_datetime(first_present(event, ("start_date_local", "date", "start")))
-        candidates = []
-        for activity_index in unused:
-            activity = activity_rows[activity_index]
-            if first_present(activity, ("paired_event_id", "pairedEventId")) not in (None, ""):
-                continue
-            if _record_date(first_present(activity, ("start_date_local", "start_date", "start"))) != event_date:
-                continue
-            if activity_kind(activity) != event_kind:
-                continue
-            activity_start = activity_datetime(first_present(activity, ("start_date_local", "start_date", "start")))
-            distance = abs((activity_start - event_start).total_seconds()) if activity_start and event_start else 0
-            candidates.append((distance, activity_index))
-        if candidates:
-            candidates.sort()
-            selected_index = candidates[0][1]
+        selected_index = _unpaired_activity_match(event, activity_rows, unused)
+        if selected_index is not None:
             matches[event_index] = activity_rows[selected_index]
             unused.remove(selected_index)
     return matches
@@ -8531,14 +8552,12 @@ def workout_compliance(event: dict[str, Any], activity: dict[str, Any] | None, t
     return result
 
 
-def planning_compliance_state(planned: list[Any], activities: list[Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Add unit compliance and return aggregate weekly compliance metrics."""
-    normalized_planned = [dict(item) for item in planned if isinstance(item, dict)]
-    matches = match_planned_workouts(normalized_planned, activities)
-    today = local_now().date()
+def _planning_compliance_rows(
+    planned: list[dict[str, Any]], matches: dict[int, dict[str, Any]], today: date,
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     enriched: list[dict[str, Any]] = []
     week_rows: dict[str, list[dict[str, Any]]] = {}
-    for index, event in enumerate(normalized_planned):
+    for index, event in enumerate(planned):
         if not is_planned_workout_event(event):
             enriched.append(event)
             continue
@@ -8551,38 +8570,54 @@ def planning_compliance_state(planned: list[Any], activities: list[Any]) -> tupl
             continue
         week_start = event_day - timedelta(days=event_day.weekday())
         week_rows.setdefault(week_start.isoformat(), []).append(compliance)
+    return enriched, week_rows
 
-    weekly: list[dict[str, Any]] = []
-    for week_start, rows in sorted(week_rows.items()):
-        planned_count = len(rows)
-        completed_count = sum(1 for compliance in rows if compliance["status"] == "completed")
-        all_have_load = all(compliance.get("planned_load") is not None and compliance["planned_load"] > 0 for compliance in rows)
-        load_available = all(compliance["status"] != "completed" or compliance.get("actual_load") is not None for compliance in rows)
-        if all_have_load and load_available:
-            basis = "training_load"
-            planned_value = sum(float(compliance["planned_load"]) for compliance in rows)
-            actual_value = sum(float(compliance.get("actual_load") or 0) for compliance in rows)
-        else:
-            all_have_duration = all(compliance.get("planned_duration") is not None and compliance["planned_duration"] > 0 for compliance in rows)
-            duration_available = all(compliance["status"] != "completed" or compliance.get("actual_duration") is not None for compliance in rows)
-            if not all_have_duration or not duration_available:
-                basis, planned_value, actual_value = None, None, None
-            else:
-                basis = "duration"
-                planned_value = sum(float(compliance["planned_duration"]) for compliance in rows)
-                actual_value = sum(float(compliance.get("actual_duration") or 0) for compliance in rows)
-        percentage = round(actual_value * 100 / planned_value) if planned_value else None
-        weekly.append({
-            "week_start": week_start,
-            "week_end": (date.fromisoformat(week_start) + timedelta(days=6)).isoformat(),
-            "planned_units": planned_count,
-            "completed_units": completed_count,
-            "unit_percentage": round(completed_count * 100 / planned_count) if planned_count else None,
-            "percentage": percentage,
-            "basis": basis,
-            "planned_value": round(planned_value, 2) if planned_value is not None else None,
-            "actual_value": round(actual_value, 2) if actual_value is not None else None,
-        })
+
+def _weekly_compliance_values(rows: list[dict[str, Any]]) -> tuple[str | None, float | None, float | None]:
+    all_have_load = all(compliance.get("planned_load") is not None and compliance["planned_load"] > 0 for compliance in rows)
+    load_available = all(compliance["status"] != "completed" or compliance.get("actual_load") is not None for compliance in rows)
+    if all_have_load and load_available:
+        return (
+            "training_load",
+            sum(float(compliance["planned_load"]) for compliance in rows),
+            sum(float(compliance.get("actual_load") or 0) for compliance in rows),
+        )
+    all_have_duration = all(compliance.get("planned_duration") is not None and compliance["planned_duration"] > 0 for compliance in rows)
+    duration_available = all(compliance["status"] != "completed" or compliance.get("actual_duration") is not None for compliance in rows)
+    if all_have_duration and duration_available:
+        return (
+            "duration",
+            sum(float(compliance["planned_duration"]) for compliance in rows),
+            sum(float(compliance.get("actual_duration") or 0) for compliance in rows),
+        )
+    return None, None, None
+
+
+def _weekly_compliance_row(week_start: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    planned_count = len(rows)
+    completed_count = sum(1 for compliance in rows if compliance["status"] == "completed")
+    basis, planned_value, actual_value = _weekly_compliance_values(rows)
+    percentage = round(actual_value * 100 / planned_value) if planned_value else None
+    return {
+        "week_start": week_start,
+        "week_end": (date.fromisoformat(week_start) + timedelta(days=6)).isoformat(),
+        "planned_units": planned_count,
+        "completed_units": completed_count,
+        "unit_percentage": round(completed_count * 100 / planned_count) if planned_count else None,
+        "percentage": percentage,
+        "basis": basis,
+        "planned_value": round(planned_value, 2) if planned_value is not None else None,
+        "actual_value": round(actual_value, 2) if actual_value is not None else None,
+    }
+
+
+def planning_compliance_state(planned: list[Any], activities: list[Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Add unit compliance and return aggregate weekly compliance metrics."""
+    normalized_planned = [dict(item) for item in planned if isinstance(item, dict)]
+    matches = match_planned_workouts(normalized_planned, activities)
+    enriched, week_rows = _planning_compliance_rows(normalized_planned, matches, local_now().date())
+
+    weekly = [_weekly_compliance_row(week_start, rows) for week_start, rows in sorted(week_rows.items())]
     return enriched, weekly
 
 
