@@ -17949,6 +17949,53 @@ def run_morning_checkin(checkin_date: str) -> None:
         MORNING_CHECKIN_LOCK.release()
 
 
+def _reserve_morning_checkin(checkin_date: str) -> bool:
+    with DB_LOCK, database() as db:
+        pending_job = db.execute(
+            "SELECT 1 FROM coach_commands WHERE status IN ('queued', 'running') "
+            "AND json_extract(receipt, '$.request_kind')='morning_checkin' LIMIT 1"
+        ).fetchone()
+        if pending_job:
+            return False
+        same_day = get_kv("morning_checkin_attempted", db) == checkin_date
+        attempts = int(get_kv("morning_checkin_attempt_count", db) or 0) if same_day else 0
+        last_attempt = _garmin_timestamp(get_kv("morning_checkin_attempted_at", db)) if same_day else None
+        retry_pending = bool(last_attempt and (datetime.now(timezone.utc) - last_attempt).total_seconds() < MORNING_RETRY_SECONDS)
+        if attempts >= MORNING_MAX_ATTEMPTS or retry_pending:
+            return False
+        if not same_day:
+            set_kv("morning_checkin_attempt_count", "0", db)
+        set_kv("morning_checkin_attempted", checkin_date, db)
+        set_kv("morning_checkin_attempted_at", utc_now(), db)
+    return True
+
+
+def _run_scheduled_morning_checkin(checkin_date: str, generation: int) -> None:
+    admitted = False
+    try:
+        with MAINTENANCE_GATE.operation(generation):
+            admitted = True
+            run_morning_checkin(checkin_date)
+    except AppError as exc:
+        if exc.reason not in {"maintenance", "operation_invalidated"}:
+            raise
+    finally:
+        if not admitted:
+            MORNING_CHECKIN_LOCK.release()
+
+
+def _start_scheduled_morning_checkin(checkin_date: str) -> None:
+    generation = MAINTENANCE_GATE.current_generation()
+    try:
+        threading.Thread(
+            target=lambda: _run_scheduled_morning_checkin(checkin_date, generation),
+            daemon=True,
+        ).start()
+    except Exception:
+        MORNING_CHECKIN_LOCK.release()
+        raise
+
+
 @maintenance_operation
 def schedule_morning_checkin() -> None:
     checkin_date = morning_checkin_date()
@@ -17959,43 +18006,14 @@ def schedule_morning_checkin() -> None:
     if not MORNING_CHECKIN_LOCK.acquire(blocking=False):
         return
     try:
-        with DB_LOCK, database() as db:
-            if db.execute("SELECT 1 FROM coach_commands WHERE status IN ('queued', 'running') AND json_extract(receipt, '$.request_kind')='morning_checkin' LIMIT 1").fetchone():
-                MORNING_CHECKIN_LOCK.release()
-                return
-            same_day = get_kv("morning_checkin_attempted", db) == checkin_date
-            attempts = int(get_kv("morning_checkin_attempt_count", db) or 0) if same_day else 0
-            last_attempt = _garmin_timestamp(get_kv("morning_checkin_attempted_at", db)) if same_day else None
-            if attempts >= MORNING_MAX_ATTEMPTS or (last_attempt and (datetime.now(timezone.utc) - last_attempt).total_seconds() < MORNING_RETRY_SECONDS):
-                MORNING_CHECKIN_LOCK.release()
-                return
-            if not same_day:
-                set_kv("morning_checkin_attempt_count", "0", db)
-            set_kv("morning_checkin_attempted", checkin_date, db)
-            set_kv("morning_checkin_attempted_at", utc_now(), db)
+        reserved = _reserve_morning_checkin(checkin_date)
     except Exception:
         MORNING_CHECKIN_LOCK.release()
         raise
-    generation = MAINTENANCE_GATE.current_generation()
-
-    def run_scheduled() -> None:
-        admitted = False
-        try:
-            with MAINTENANCE_GATE.operation(generation):
-                admitted = True
-                run_morning_checkin(checkin_date)
-        except AppError as exc:
-            if exc.reason not in {"maintenance", "operation_invalidated"}:
-                raise
-        finally:
-            if not admitted:
-                MORNING_CHECKIN_LOCK.release()
-
-    try:
-        threading.Thread(target=run_scheduled, daemon=True).start()
-    except Exception:
+    if not reserved:
         MORNING_CHECKIN_LOCK.release()
-        raise
+        return
+    _start_scheduled_morning_checkin(checkin_date)
 
 
 def bootstrap_provider_states(freshness: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
