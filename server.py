@@ -9762,17 +9762,22 @@ def sync_illness_pause_to_intervals(pause: dict[str, Any]) -> dict[str, Any]:
     return {"status": "ok", "synced": len(pushed), "category": ILLNESS_CALENDAR_CATEGORY}
 
 
-def adaptive_replan_preview() -> dict[str, Any]:
-    today_date = local_now().date()
-    today = today_date.isoformat()
-    feedback = local_feedback_context().get("today") or {}
-    weather = weather_state(refresh=False)
-    weather_days = {
-        str(day.get("date")): day
-        for day in weather.get("days", [])
-        if isinstance(day, dict) and day.get("date")
-    }
-    signals: list[str] = []
+def _adaptive_preview_calendar_context(today: str) -> tuple[list[str], dict[str, list[dict[str, Any]]]]:
+    signals = []
+    events_by_date: dict[str, list[dict[str, Any]]] = {}
+    for event in list_external_calendar_events(1000):
+        if not bool(event.get("training_relevant", True)):
+            continue
+        for day in external_calendar_event_dates(event):
+            events_by_date.setdefault(day, []).append(event)
+    for event_date, events in events_by_date.items():
+        if event_date >= today:
+            signals.append(f"family calendar on {event_date}: {len(events)} event(s)")
+    return signals, events_by_date
+
+
+def _adaptive_preview_feedback_signals(feedback: dict[str, Any]) -> list[str]:
+    signals = []
     if feedback.get("illness"):
         signals.append("illness reported")
     if feedback.get("pain"):
@@ -9783,116 +9788,190 @@ def adaptive_replan_preview() -> dict[str, Any]:
         signals.append("high subjective stress")
     if feedback.get("motivation") is not None and feedback["motivation"] <= 2:
         signals.append("low motivation")
+    return signals
+
+
+def _adaptive_preview_approve_existing_pause(
+    illness_pause: dict[str, Any] | None, today: str,
+) -> dict[str, Any] | None:
+    previous = latest_illness_pause_state()
+    if not illness_pause or not previous:
+        return illness_pause
+    previous_status, previous_pause = previous
+    same_pause = (
+        previous_status in {"applied", "partial"}
+        and str(previous_pause.get("start_date") or "") == today
+        and str(previous_pause.get("illness") or "") == illness_pause["illness"]
+    )
+    if same_pause:
+        illness_pause["approved"] = True
+    return illness_pause
+
+
+def _adaptive_preview_environment(
+    today_date: date, today: str, feedback: dict[str, Any],
+) -> tuple[list[str], dict[str, Any], dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]]:
+    weather = weather_state(refresh=False)
+    weather_days = {
+        str(day.get("date")): day
+        for day in weather.get("days", [])
+        if isinstance(day, dict) and day.get("date")
+    }
+    signals = _adaptive_preview_feedback_signals(feedback)
     illness_pause = illness_pause_forecast(feedback, today_date)
-    previous_illness_pause = latest_illness_pause_state()
-    if illness_pause and previous_illness_pause:
-        previous_status, previous_pause = previous_illness_pause
-        if (
-            previous_status in {"applied", "partial"}
-            and str(previous_pause.get("start_date") or "") == today
-            and str(previous_pause.get("illness") or "") == illness_pause["illness"]
-        ):
-            illness_pause["approved"] = True
-    external_events = list_external_calendar_events(1000)
-    events_by_date: dict[str, list[dict[str, Any]]] = {}
-    for event in external_events:
-        if not bool(event.get("training_relevant", True)):
-            continue
-        for day in external_calendar_event_dates(event):
-            events_by_date.setdefault(day, []).append(event)
-    for event_date, events in events_by_date.items():
-        if event_date >= today:
-            signals.append(f"family calendar on {event_date}: {len(events)} event(s)")
-    severe = bool(feedback.get("pain") or (feedback.get("soreness") or 0) >= 8)
-    high_load = bool((feedback.get("stress") or 0) >= 8 or (feedback.get("motivation") is not None and feedback.get("motivation") <= 2))
+    illness_pause = _adaptive_preview_approve_existing_pause(illness_pause, today)
+    calendar_signals, events_by_date = _adaptive_preview_calendar_context(today)
+    signals.extend(calendar_signals)
+    return signals, illness_pause, events_by_date, weather_days
+
+
+def _adaptive_preview_calendar_limits(
+    draft: dict[str, Any], calendar_events: list[dict[str, Any]], duration: float | None,
+) -> tuple[int | None, str, bool, bool]:
+    if not calendar_events:
+        return None, "", False, False
+    total_minutes = sum(int(event.get("duration_minutes") or 0) for event in calendar_events)
+    longest_event = max(calendar_events, key=lambda event: int(event.get("duration_minutes") or 0))
+    all_day = any(bool(event.get("all_day")) for event in calendar_events)
+    if all_day or total_minutes >= 240:
+        calendar_limit = 45
+    elif total_minutes >= 120:
+        calendar_limit = 60
+    else:
+        calendar_limit = 75
+    calendar_reason = (
+        f"family calendar has {len(calendar_events)} event(s), including "
+        f"'{longest_event.get('name') or 'calendar event'}' for about {total_minutes} minutes"
+    )
+    no_intensity = [event for event in calendar_events if bool(event.get("no_intensity"))]
+    no_intensity_limited = bool(no_intensity) and workout_is_hard(draft)
+    calendar_limited = workout_is_hard(draft) or (duration is not None and duration > calendar_limit)
+    return calendar_limit, calendar_reason, no_intensity_limited, calendar_limited
+
+
+def _adaptive_preview_reasons(
+    draft: dict[str, Any], feedback: dict[str, Any], illness_pause: dict[str, Any] | None,
+    illness_active: bool, severe: bool, high_load: bool, limited: bool,
+    available_minutes: Any, calendar_events: list[dict[str, Any]], calendar_reason: str,
+    calendar_limited: bool, no_intensity_limited: bool, weather_reason: str,
+) -> tuple[list[str], list[str]]:
+    reasons: list[str] = []
+    blocking_triggers: list[str] = []
+    if illness_active:
+        reasons.append(f"illness reported; sport pause through {illness_pause['end_date']}")
+        blocking_triggers.append("illness")
+    if severe:
+        reasons.append("pain or high soreness reported")
+        if feedback.get("pain"):
+            blocking_triggers.append("injury")
+    if high_load and workout_is_hard(draft):
+        reasons.append("recovery signal suggests reducing intensity")
+    if limited and not severe:
+        reasons.append(f"only {available_minutes} minutes are available")
+    if calendar_limited:
+        reasons.append(calendar_reason)
+        blocking_triggers.append("calendar")
+    if no_intensity_limited:
+        reasons.append("calendar marker [NO_INTENSITY] requests an easy session")
+        if "calendar" not in blocking_triggers:
+            blocking_triggers.append("calendar")
+    if weather_reason:
+        reasons.append(weather_reason)
+        blocking_triggers.append("weather")
+    return reasons, blocking_triggers
+
+
+def _adaptive_preview_change_state(
+    draft: dict[str, Any], *, today: str, today_date: date, feedback: dict[str, Any],
+    illness_pause: dict[str, Any] | None, events_by_date: dict[str, list[dict[str, Any]]],
+    weather_days: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not draft.get("date") or str(draft.get("date") or "") < today:
+        return None
+    draft_date = str(draft.get("date") or "")[:10]
+    duration = as_number(draft.get("duration_minutes"))
     available_minutes = feedback.get("available_minutes")
-    changes: list[dict[str, Any]] = []
-    for draft in list_planned_units(500):
-        if not draft.get("date") or str(draft.get("date") or "") < today:
-            continue
-        draft_date = str(draft.get("date") or "")[:10]
-        illness_active = bool(illness_pause and not illness_pause.get("approved") and illness_pause["start_date"] <= draft_date <= illness_pause["end_date"])
-        duration = as_number(draft.get("duration_minutes"))
-        limited = available_minutes is not None and duration is not None and duration > available_minutes
-        calendar_events = events_by_date.get(str(draft.get("date") or ""), [])
-        weather_reason = _weather_adaptive_reason(draft, weather_days, today_date)
-        calendar_limit: int | None = None
-        calendar_reason = ""
-        if calendar_events:
-            total_event_minutes = sum(int(event.get("duration_minutes") or 0) for event in calendar_events)
-            longest_event = max(calendar_events, key=lambda event: int(event.get("duration_minutes") or 0))
-            all_day = any(bool(event.get("all_day")) for event in calendar_events)
-            if all_day or total_event_minutes >= 240:
-                calendar_limit = 45
-            elif total_event_minutes >= 120:
-                calendar_limit = 60
-            else:
-                calendar_limit = 75
-            calendar_reason = (
-                f"family calendar has {len(calendar_events)} event(s), including "
-                f"'{longest_event.get('name') or 'calendar event'}' for about {total_event_minutes} minutes"
-            )
-        no_intensity_events = [event for event in calendar_events if bool(event.get("no_intensity"))]
-        no_intensity_limited = bool(no_intensity_events) and workout_is_hard(draft)
-        calendar_limited = bool(calendar_events) and (
-            workout_is_hard(draft) or (duration is not None and calendar_limit is not None and duration > calendar_limit)
+    calendar_events = events_by_date.get(str(draft.get("date") or ""), [])
+    calendar_limit, calendar_reason, no_intensity_limited, calendar_limited = _adaptive_preview_calendar_limits(
+        draft, calendar_events, duration,
+    )
+    return {
+        "illness_active": bool(illness_pause and not illness_pause.get("approved") and illness_pause["start_date"] <= draft_date <= illness_pause["end_date"]),
+        "severe": bool(feedback.get("pain") or (feedback.get("soreness") or 0) >= 8),
+        "high_load": bool((feedback.get("stress") or 0) >= 8 or (feedback.get("motivation") is not None and feedback.get("motivation") <= 2)),
+        "available_minutes": available_minutes, "duration": duration,
+        "limited": available_minutes is not None and duration is not None and duration > available_minutes,
+        "calendar_events": calendar_events, "weather_reason": _weather_adaptive_reason(draft, weather_days, today_date),
+        "calendar_limit": calendar_limit, "calendar_reason": calendar_reason,
+        "no_intensity_limited": no_intensity_limited, "calendar_limited": calendar_limited,
+    }
+
+
+def _adaptive_preview_replacement(
+    draft: dict[str, Any], reason: str, state: dict[str, Any],
+) -> dict[str, Any]:
+    limits = [limit for limit in (
+        state["calendar_limit"] if state["calendar_limited"] else None,
+        WEATHER_ADAPTIVE_MAX_MINUTES if state["weather_reason"] else None,
+    ) if limit is not None]
+    if state["illness_active"]:
+        replacement = illness_pause_replacement(draft, reason)
+    else:
+        replacement = adaptive_recovery_replacement(
+            draft, reason, state["available_minutes"] if state["limited"] else None,
+            min(limits) if limits else None,
         )
-        if illness_active or severe or (high_load and workout_is_hard(draft)) or limited or calendar_limited or no_intensity_limited or weather_reason:
-            reasons: list[str] = []
-            blocking_triggers: list[str] = []
-            if illness_active:
-                reasons.append(f"illness reported; sport pause through {illness_pause['end_date']}")
-                blocking_triggers.append("illness")
-            if severe:
-                reasons.append("pain or high soreness reported")
-                if feedback.get("pain"):
-                    blocking_triggers.append("injury")
-            if high_load and workout_is_hard(draft):
-                reasons.append("recovery signal suggests reducing intensity")
-            if limited and not severe:
-                reasons.append(f"only {available_minutes} minutes are available")
-            if calendar_limited:
-                reasons.append(calendar_reason)
-                blocking_triggers.append("calendar")
-            if no_intensity_limited:
-                reasons.append("calendar marker [NO_INTENSITY] requests an easy session")
-                if "calendar" not in blocking_triggers:
-                    blocking_triggers.append("calendar")
-            if weather_reason:
-                reasons.append(weather_reason)
-                blocking_triggers.append("weather")
-            reason = "; ".join(reasons)
-            adaptive_limits = [
-                limit for limit in (
-                    calendar_limit if calendar_limited else None,
-                    WEATHER_ADAPTIVE_MAX_MINUTES if weather_reason else None,
-                ) if limit is not None
-            ]
-            if illness_active:
-                replacement = illness_pause_replacement(draft, reason)
-            else:
-                replacement = adaptive_recovery_replacement(
-                    draft,
-                    reason,
-                    available_minutes if limited else None,
-                    min(adaptive_limits) if adaptive_limits else None,
-                )
-            if calendar_limited:
-                replacement["private_calendar_adjustment"] = private_calendar_adjustment_context(
-                    draft, calendar_events, replacement, calendar_reason,
-                )
-            changes.append({
-                "library_workout_id": draft["id"], "date": draft.get("date"), "name": draft.get("name"),
-                "blocking_triggers": blocking_triggers,
-                "external_events": calendar_events,
-                "before": {"duration_minutes": draft.get("duration_minutes"), "description": draft.get("description")},
-                "after": {"name": "Krankheitspause" if illness_active else replacement.get("name"),
-                          "duration_minutes": 0 if illness_active else replacement["duration_minutes"],
-                          "description": "Sportpause; die geplante Einheit wird archiviert." if illness_active else replacement["description"],
-                          "rationale": replacement["rationale"]},
-                "source_fingerprint": adaptive_workout_fingerprint(draft),
-                "payload": replacement,
-            })
+    if state["calendar_limited"]:
+        replacement["private_calendar_adjustment"] = private_calendar_adjustment_context(
+            draft, state["calendar_events"], replacement, state["calendar_reason"],
+        )
+    return replacement
+
+
+def _adaptive_preview_change(
+    draft: dict[str, Any], *, today: str, today_date: date, feedback: dict[str, Any],
+    illness_pause: dict[str, Any] | None, events_by_date: dict[str, list[dict[str, Any]]],
+    weather_days: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    state = _adaptive_preview_change_state(
+        draft, today=today, today_date=today_date, feedback=feedback,
+        illness_pause=illness_pause, events_by_date=events_by_date, weather_days=weather_days,
+    )
+    if state is None:
+        return None
+    if not (state["illness_active"] or state["severe"] or (state["high_load"] and workout_is_hard(draft)) or state["limited"] or state["calendar_limited"] or state["no_intensity_limited"] or state["weather_reason"]):
+        return None
+    reasons, blocking_triggers = _adaptive_preview_reasons(
+        draft, feedback, illness_pause, state["illness_active"], state["severe"], state["high_load"], state["limited"],
+        state["available_minutes"], state["calendar_events"], state["calendar_reason"], state["calendar_limited"],
+        state["no_intensity_limited"], state["weather_reason"],
+    )
+    reason = "; ".join(reasons)
+    replacement = _adaptive_preview_replacement(draft, reason, state)
+    return {
+        "library_workout_id": draft["id"], "date": draft.get("date"), "name": draft.get("name"),
+        "blocking_triggers": blocking_triggers, "external_events": state["calendar_events"],
+        "before": {"duration_minutes": draft.get("duration_minutes"), "description": draft.get("description")},
+        "after": {"name": "Krankheitspause" if state["illness_active"] else replacement.get("name"),
+                  "duration_minutes": 0 if state["illness_active"] else replacement["duration_minutes"],
+                  "description": "Sportpause; die geplante Einheit wird archiviert." if state["illness_active"] else replacement["description"],
+                  "rationale": replacement["rationale"]},
+        "source_fingerprint": adaptive_workout_fingerprint(draft), "payload": replacement,
+    }
+
+
+def adaptive_replan_preview() -> dict[str, Any]:
+    today_date = local_now().date()
+    today = today_date.isoformat()
+    feedback = local_feedback_context().get("today") or {}
+    signals, illness_pause, events_by_date, weather_days = _adaptive_preview_environment(today_date, today, feedback)
+    changes = [
+        change for draft in list_planned_units(500)
+        if (change := _adaptive_preview_change(
+            draft, today=today, today_date=today_date, feedback=feedback,
+            illness_pause=illness_pause, events_by_date=events_by_date, weather_days=weather_days,
+        )) is not None
+    ]
     change_message = "Keine zukünftigen lokalen Einheiten müssen angepasst werden." if not changes else f"{len(changes)} zukünftige lokale Einheit(en) brauchen eine Prüfung."
     if illness_pause and not illness_pause.get("approved"):
         message = f"Krankheitsprognose: {illness_pause['recommended_pause_days']} Tage Sportpause bis {illness_pause['end_date']}. {change_message}"
