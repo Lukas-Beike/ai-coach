@@ -11791,38 +11791,44 @@ def sync_local_workout_library_entry(local_id: str) -> dict[str, Any]:
             raise
 
 
-def apply_workout_library_plan(
-    entries: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Apply local library templates to the local plan only."""
+def _validate_library_plan_entries(entries: Any) -> list[dict[str, Any]]:
     if not isinstance(entries, list) or not entries:
         raise AppError(400, "Mindestens eine Bibliothekseinheit ist erforderlich.")
     if len(entries) > 14:
         raise AppError(400, "Es können höchstens 14 Bibliothekseinheiten gleichzeitig eingeplant werden.")
-    requested: list[dict[str, Any]] = []
+    return entries
+
+
+def _library_plan_request(db: sqlite3.Connection, item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise AppError(400, "Jede Planung muss ein Objekt sein.")
+    try:
+        workout_id = str(uuid.UUID(str(item.get("library_workout_id") or "")))
+    except (ValueError, AttributeError) as exc:
+        raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
+    plan_date = str(item.get("date") or "").strip()
+    try:
+        date.fromisoformat(plan_date)
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
+    row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (workout_id,)).fetchone()
+    if not row:
+        raise AppError(404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.")
+    try:
+        workout = json.loads(row["payload"])
+    except (TypeError, ValueError) as exc:
+        raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
+    if not isinstance(workout, dict):
+        raise AppError(500, CORRUPT_LIBRARY_ERROR)
+    return {"library_workout_id": workout_id, "date": plan_date, "workout": workout}
+
+
+def _library_plan_requests(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     with DB_LOCK, database() as db:
-        for item in entries:
-            if not isinstance(item, dict):
-                raise AppError(400, "Jede Planung muss ein Objekt sein.")
-            try:
-                workout_id = str(uuid.UUID(str(item.get("library_workout_id") or "")))
-            except (ValueError, AttributeError) as exc:
-                raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
-            plan_date = str(item.get("date") or "").strip()
-            try:
-                date.fromisoformat(plan_date)
-            except (TypeError, ValueError) as exc:
-                raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
-            row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (workout_id,)).fetchone()
-            if not row:
-                raise AppError(404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.")
-            try:
-                workout = json.loads(row["payload"])
-            except (TypeError, ValueError) as exc:
-                raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
-            if not isinstance(workout, dict):
-                raise AppError(500, CORRUPT_LIBRARY_ERROR)
-            requested.append({"library_workout_id": workout_id, "date": plan_date, "workout": workout})
+        return [_library_plan_request(db, item) for item in entries]
+
+
+def _library_plan_conflicts(requested: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     conflicts: list[dict[str, Any]] = []
     seen_dates: dict[str, str] = {}
@@ -11842,40 +11848,50 @@ def apply_workout_library_plan(
         request["already_planned"] = already_planned
         if not already_planned:
             conflicts.extend(calendar_conflicts({"date": plan_date}, {workout_id}))
-    if conflicts:
-        descriptions = ", ".join(f"{item.get('date')}: {item.get('name') or 'Einheit'}" for item in conflicts[:8])
-        suffix = " Weitere Konflikte wurden nicht aufgelistet." if len(conflicts) > 8 else ""
-        raise AppError(409, f"Planung wegen bestehender Kalendereinheiten nicht möglich: {descriptions}.{suffix}")
+    return conflicts
 
-    planned: list[dict[str, Any]] = []
-    for request in requested:
-        source = request["workout"]
-        if request["already_planned"]:
-            local_entry = source
-            local_status = "already_planned"
-        else:
-            local_entry = create_local_planned_unit({
-                "date": request["date"],
-                "sport": source.get("type") or source.get("sport") or "Ride",
-                "name": source.get("name") or "Bibliotheks-Einheit",
-                "description": source.get("description") or "",
-                "duration_minutes": source.get("duration_minutes") or max(5, round(float(source.get("moving_time") or 300) / 60)),
-                "target": source.get("target") or "AUTO",
-                "source": "library",
-                "rationale": "Aus der lokalen Trainingsbibliothek übernommen.",
-            })
-            local_status = "local"
-        planned.append({
-            "library_workout_id": request["library_workout_id"],
+
+def _raise_library_plan_conflicts(conflicts: list[dict[str, Any]]) -> None:
+    if not conflicts:
+        return
+    descriptions = ", ".join(f"{item.get('date')}: {item.get('name') or 'Einheit'}" for item in conflicts[:8])
+    suffix = " Weitere Konflikte wurden nicht aufgelistet." if len(conflicts) > 8 else ""
+    raise AppError(409, f"Planung wegen bestehender Kalendereinheiten nicht möglich: {descriptions}.{suffix}")
+
+def _apply_library_plan_request(request: dict[str, Any]) -> dict[str, Any]:
+    source = request["workout"]
+    if request["already_planned"]:
+        local_entry = source
+        local_status = "already_planned"
+    else:
+        local_entry = create_local_planned_unit({
             "date": request["date"],
-            "status": local_status,
-            "library_entry": local_entry,
+            "sport": source.get("type") or source.get("sport") or "Ride",
+            "name": source.get("name") or "Bibliotheks-Einheit",
+            "description": source.get("description") or "",
+            "duration_minutes": source.get("duration_minutes") or max(5, round(float(source.get("moving_time") or 300) / 60)),
+            "target": source.get("target") or "AUTO",
+            "source": "library",
+            "rationale": "Aus der lokalen Trainingsbibliothek übernommen.",
         })
+        local_status = "local"
+    return {
+        "library_workout_id": request["library_workout_id"],
+        "date": request["date"],
+        "status": local_status,
+        "library_entry": local_entry,
+    }
 
-    status = "local"
+
+def apply_workout_library_plan(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply local library templates to the local plan only."""
+    requested = _library_plan_requests(_validate_library_plan_entries(entries))
+    _raise_library_plan_conflicts(_library_plan_conflicts(requested))
+    planned = [_apply_library_plan_request(request) for request in requested]
+
     publish_state_event("coach", {"status": "changed"})
     return {
-        "status": status,
+        "status": "local",
         "planned": planned,
         "local_planned": len(planned),
     }
