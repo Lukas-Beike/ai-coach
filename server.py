@@ -16284,6 +16284,19 @@ def _structured_coach_athlete_record_result(
     return None
 
 
+def _stage_structured_training_plan(
+    arguments: dict[str, Any], intent: dict[str, Any], conversation_id: str, client_turn_id: str,
+) -> dict[str, Any]:
+    if "stage_training_plan" not in _structured_authorized_operations(intent):
+        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+    _require_coach_scope(intent, "local_plan")
+    payload = _structured_artifact_payload(arguments)
+    _validate_structured_plan_limits(payload)
+    payload = {**payload, "workouts": [normalize_workout(workout) for workout in payload["workouts"]]}
+    _validate_plan_calendar(payload["workouts"])
+    return _stage_coach_artifact(conversation_id, client_turn_id, payload)
+
+
 def _structured_coach_tool_result(
     name: str,
     arguments: dict[str, Any],
@@ -16304,14 +16317,7 @@ def _structured_coach_tool_result(
     if athlete_record_result is not None:
         return athlete_record_result
     if name == "stage_training_plan":
-        if "stage_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        _require_coach_scope(intent, "local_plan")
-        payload = _structured_artifact_payload(arguments)
-        _validate_structured_plan_limits(payload)
-        payload = {**payload, "workouts": [normalize_workout(workout) for workout in payload["workouts"]]}
-        _validate_plan_calendar(payload["workouts"])
-        return _stage_coach_artifact(conversation_id, client_turn_id, payload)
+        return _stage_structured_training_plan(arguments, intent, conversation_id, client_turn_id)
     if name == "commit_training_plan":
         if "commit_training_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
