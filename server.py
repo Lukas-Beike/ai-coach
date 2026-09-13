@@ -4422,28 +4422,36 @@ def garmin_source_observed_at(value: Any) -> str | None:
     return max(dates, default=None)
 
 
+GARMIN_COLLECTION_SOURCES = ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr")
+GARMIN_METRIC_SOURCES = ("heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp", "running_threshold", "weight")
+
+
+def _merge_garmin_source(
+    payload: dict[str, Any], previous: dict[str, Any], freshness: dict[str, Any], failed: set[Any], pagination: dict[str, Any], source: str,
+) -> None:
+    incoming = payload.get(source)
+    complete = source not in failed and pagination.get(source, {}).get("complete", True)
+    if incoming:
+        freshness[source] = {
+            "freshness": "current" if complete else "partial",
+            "fetched_at": payload["synced_at"],
+            "observed_at": garmin_source_observed_at(incoming),
+        }
+    elif source in previous:
+        freshness[source] = {**freshness.get(source, {}), "freshness": "stale"}
+    if source in GARMIN_COLLECTION_SOURCES and (source in previous or source in payload):
+        payload[source] = _merge_garmin_records(incoming, previous.get(source))
+    elif not incoming and source in previous:
+        payload[source] = previous[source]
+
+
 def merge_garmin_sources(payload: dict[str, Any], previous: dict[str, Any]) -> None:
     """Keep source-owned fetch/observation dates through partial reads and backfills."""
-    collections = ("sleep", "hrv", "body_battery", "activities", "daily_stats", "resting_hr")
-    metrics = ("heart_rate_zones", "readiness", "race_predictions", "max_metrics", "cycling_ftp", "running_threshold", "weight")
     freshness = {source: dict(details) for source, details in (previous.get("source_freshness") or {}).items()}
     failed = {error.get("source") for error in payload.get("errors") or [] if isinstance(error, dict)}
     pagination = (payload.get("provider_sync") or {}).get("pagination") or {}
-    for source in (*collections, *metrics):
-        incoming = payload.get(source)
-        complete = source not in failed and pagination.get(source, {}).get("complete", True)
-        if incoming:
-            freshness[source] = {
-                "freshness": "current" if complete else "partial",
-                "fetched_at": payload["synced_at"],
-                "observed_at": garmin_source_observed_at(incoming),
-            }
-        elif source in previous:
-            freshness[source] = {**freshness.get(source, {}), "freshness": "stale"}
-        if source in collections and (source in previous or source in payload):
-            payload[source] = _merge_garmin_records(incoming, previous.get(source))
-        elif not incoming and source in previous:
-            payload[source] = previous[source]
+    for source in (*GARMIN_COLLECTION_SOURCES, *GARMIN_METRIC_SOURCES):
+        _merge_garmin_source(payload, previous, freshness, failed, pagination, source)
     payload["source_freshness"] = freshness
     if isinstance(previous.get("morning_body_battery"), dict):
         payload["morning_body_battery"] = previous["morning_body_battery"]
@@ -4542,6 +4550,17 @@ def _garmin_sleep_bounds(payload: Any) -> tuple[datetime | None, datetime | None
     return None, None
 
 
+def _garmin_body_battery_sample(sample: Any) -> tuple[str, dict[str, Any]] | None:
+    if not isinstance(sample, (list, tuple)) or len(sample) < 2:
+        return None
+    observed_at = _garmin_timestamp(sample[0])
+    level = as_number(sample[1])
+    if observed_at is None or level is None or not 0 <= float(level) <= 100:
+        return None
+    key = observed_at.isoformat()
+    return key, {"observed_at": key, "value": int(round(float(level)))}
+
+
 def _garmin_body_battery_samples(records: Any) -> list[dict[str, Any]]:
     """Return validated timestamp/level samples from Garmin's daily reports."""
     values = records if isinstance(records, list) else [records]
@@ -4553,14 +4572,10 @@ def _garmin_body_battery_samples(records: Any) -> list[dict[str, Any]]:
         if not isinstance(raw_samples, list):
             continue
         for sample in raw_samples:
-            if not isinstance(sample, (list, tuple)) or len(sample) < 2:
-                continue
-            observed_at = _garmin_timestamp(sample[0])
-            level = as_number(sample[1])
-            if observed_at is None or level is None or not 0 <= float(level) <= 100:
-                continue
-            key = observed_at.isoformat()
-            samples[key] = {"observed_at": key, "value": int(round(float(level)))}
+            parsed = _garmin_body_battery_sample(sample)
+            if parsed:
+                key, value = parsed
+                samples[key] = value
     return sorted(samples.values(), key=lambda sample: sample["observed_at"])
 
 
