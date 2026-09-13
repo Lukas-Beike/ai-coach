@@ -12043,6 +12043,27 @@ def plan_library_workout_remote(workout_id: str, workout: dict[str, Any], plan_d
     return IntervalsClient().plan_library_workout(workout_id, workout, plan_date)
 
 
+def _persist_library_calendar_identity(local_id: str, event: dict[str, Any]) -> None:
+    with DB_LOCK, database() as db:
+        row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
+        if not row:
+            return
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            return
+        payload["remote_event_id"] = str(event["id"])
+        remote_event_external_id = str(event.get("external_id") or "").strip()
+        if remote_event_external_id:
+            payload["remote_event_external_id"] = remote_event_external_id
+        db.execute(
+            "UPDATE workout_library SET payload=?, updated_at=? WHERE local_id=?",
+            (json.dumps(payload, ensure_ascii=False), utc_now(), local_id),
+        )
+
+
 def _sync_local_workout_calendar_entry(local_id: str, synced: dict[str, Any]) -> dict[str, Any] | None:
     """Upsert a dated local library entry in the remote training calendar."""
     planned_date = str(synced.get("date") or "").strip()[:10]
@@ -12054,22 +12075,7 @@ def _sync_local_workout_calendar_entry(local_id: str, synced: dict[str, Any]) ->
     event = plan_library_workout_remote(external_id, synced, planned_date)
     if not isinstance(event, dict) or not str(event.get("id") or "").strip():
         raise AppError(502, "Intervals.icu hat keine geplante Bibliothekseinheit zurückgegeben.")
-    with DB_LOCK, database() as db:
-        row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
-        if row:
-            try:
-                payload = json.loads(row["payload"] or "{}")
-            except (TypeError, ValueError):
-                payload = {}
-            if isinstance(payload, dict):
-                payload["remote_event_id"] = str(event["id"])
-                remote_event_external_id = str(event.get("external_id") or "").strip()
-                if remote_event_external_id:
-                    payload["remote_event_external_id"] = remote_event_external_id
-                db.execute(
-                    "UPDATE workout_library SET payload=?, updated_at=? WHERE local_id=?",
-                    (json.dumps(payload, ensure_ascii=False), utc_now(), local_id),
-                )
+    _persist_library_calendar_identity(local_id, event)
     return event
 
 
