@@ -16085,43 +16085,9 @@ def _enqueue_coach_plan_push(entries: list[dict[str, str]], sync_job_ids: list[s
     }
 
 
-def _structured_coach_tool_result(
-    name: str,
-    arguments: dict[str, Any],
-    *,
-    intent: dict[str, Any],
-    conversation_id: str,
-    client_turn_id: str,
-    session_csrf_hash: str,
-    sync_job_ids: list[str],
-    cancel_event: threading.Event | None = None,
-) -> dict[str, Any]:
+def _structured_coach_read_result(name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
     if name == "read_profile":
         return {"ok": True, "profile": get_profile()}
-    if name == "update_profile":
-        if name not in _structured_authorized_operations(intent):
-            raise AppError(403, "Dieser Auftrag erlaubt keine Profiländerung.", reason="intent_scope_denied")
-        _require_coach_scope(intent, "local_profile")
-        changes = arguments.get("changes")
-        if not isinstance(changes, list) or not 1 <= len(changes) <= len(DEFAULT_PROFILE):
-            raise AppError(400, "Die Profiländerung benötigt gültige Felder.", reason="tool_arguments_invalid")
-        with DB_LOCK, database():
-            current = get_profile()
-            updated = dict(current)
-            seen = set()
-            for change in changes:
-                if (not isinstance(change, dict) or set(change) != {"field", "expected_value", "value"}
-                        or not isinstance(change.get("field"), str) or change["field"] not in DEFAULT_PROFILE
-                        or change["field"] in seen
-                        or any(not isinstance(change.get(key), str) or len(change[key]) > 4000 for key in ("expected_value", "value"))):
-                    raise AppError(400, "Die Profiländerung enthält ungültige oder doppelte Felder.", reason="tool_arguments_invalid")
-                field = change["field"]
-                seen.add(field)
-                if current[field] != change["expected_value"]:
-                    raise AppError(409, "Das Profil wurde inzwischen geändert. Lies es erneut und ergänze den aktuellen Stand.", reason="profile_conflict")
-                updated[field] = change["value"]
-            saved = save_profile(updated)
-        return {"ok": True, "stored_locally": True, "updated_fields": sorted(seen), "profile": saved}
     if name == "read_training_state":
         return {"ok": True, **_structured_training_state(include_inactive=bool(arguments.get("include_inactive")), cursor=arguments.get("cursor"), limit=arguments.get("limit"))}
     if name == "list_recent_activities":
@@ -16155,6 +16121,101 @@ def _structured_coach_tool_result(
         return {"ok": True, "competitions": list_competitions()}
     if name == "list_training_plans":
         return {"ok": True, "training_plans": list_training_plans(100)}
+    return None
+
+
+def _structured_coach_profile_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
+    if "update_profile" not in _structured_authorized_operations(intent):
+        raise AppError(403, "Dieser Auftrag erlaubt keine Profiländerung.", reason="intent_scope_denied")
+    _require_coach_scope(intent, "local_profile")
+    changes = arguments.get("changes")
+    if not isinstance(changes, list) or not 1 <= len(changes) <= len(DEFAULT_PROFILE):
+        raise AppError(400, "Die Profiländerung benötigt gültige Felder.", reason="tool_arguments_invalid")
+    with DB_LOCK, database():
+        current = get_profile()
+        updated = dict(current)
+        seen = set()
+        for change in changes:
+            if (not isinstance(change, dict) or set(change) != {"field", "expected_value", "value"}
+                    or not isinstance(change.get("field"), str) or change["field"] not in DEFAULT_PROFILE
+                    or change["field"] in seen
+                    or any(not isinstance(change.get(key), str) or len(change[key]) > 4000 for key in ("expected_value", "value"))):
+                raise AppError(400, "Die Profiländerung enthält ungültige oder doppelte Felder.", reason="tool_arguments_invalid")
+            field = change["field"]
+            seen.add(field)
+            if current[field] != change["expected_value"]:
+                raise AppError(409, "Das Profil wurde inzwischen geändert. Lies es erneut und ergänze den aktuellen Stand.", reason="profile_conflict")
+            updated[field] = change["value"]
+        saved = save_profile(updated)
+    return {"ok": True, "stored_locally": True, "updated_fields": sorted(seen), "profile": saved}
+
+
+def _structured_coach_athlete_record_result(
+    name: str, arguments: dict[str, Any], intent: dict[str, Any],
+) -> dict[str, Any] | None:
+    if name == "save_checkin":
+        if "save_checkin" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Check-in nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "local_checkin")
+        return {"ok": True, **save_coach_checkin(_structured_action_payload(arguments))}
+    if name == "save_activity_feedback":
+        if "save_activity_feedback" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt dieses Aktivitätsfeedback nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "activity_feedback")
+        payload = _structured_action_payload(arguments)
+        return {
+            "ok": True,
+            "stored_locally": True,
+            **save_coach_activity_feedback(
+                payload.get("activity_id"),
+                {
+                    "activity_name": payload.get("activity_name"),
+                    "activity_date": payload.get("activity_date"),
+                    "notes": payload.get("notes"),
+                },
+            ),
+        }
+    if name == "delete_activity_feedback":
+        if "delete_activity_feedback" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Feedbackänderung nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "activity_feedback")
+        activity_id = str(arguments.get("activity_id") or "").strip()
+        return {"ok": True, "stored_locally": True, **save_activity_feedback(activity_id, {"notes": ""})}
+    if name == "save_competition":
+        if "save_competition" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
+        payload = _structured_action_payload(arguments)
+        competition_id = str(payload.get("competition_id") or "").strip()
+        _require_coach_scope(intent, f"competition:{competition_id}" if competition_id else "local_competitions")
+        return {"ok": True, **save_coach_competition(payload)}
+    if name == "delete_competition":
+        if "delete_competition" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
+        competition_id = str(arguments.get("competition_id") or "").strip()
+        _require_coach_scope(intent, f"competition:{competition_id}")
+        return {"ok": True, **delete_coach_competition(competition_id)}
+    return None
+
+
+def _structured_coach_tool_result(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    intent: dict[str, Any],
+    conversation_id: str,
+    client_turn_id: str,
+    session_csrf_hash: str,
+    sync_job_ids: list[str],
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    read_result = _structured_coach_read_result(name, arguments)
+    if read_result is not None:
+        return read_result
+    if name == "update_profile":
+        return _structured_coach_profile_result(arguments, intent)
+    athlete_record_result = _structured_coach_athlete_record_result(name, arguments, intent)
+    if athlete_record_result is not None:
+        return athlete_record_result
     if name == "stage_training_plan":
         if "stage_training_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
@@ -16280,47 +16341,6 @@ def _structured_coach_tool_result(
             local_id = str(entry.get("library_workout_id") or "").strip()
             _require_coach_scope(intent, f"library_workout:{local_id}", "local_plan")
         return {"ok": True, "stored_locally": True, **apply_workout_library_plan(entries)}
-    if name == "save_checkin":
-        if "save_checkin" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Check-in nicht.", reason="intent_scope_denied")
-        _require_coach_scope(intent, "local_checkin")
-        return {"ok": True, **save_coach_checkin(_structured_action_payload(arguments))}
-    if name == "save_activity_feedback":
-        if "save_activity_feedback" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt dieses Aktivitätsfeedback nicht.", reason="intent_scope_denied")
-        _require_coach_scope(intent, "activity_feedback")
-        payload = _structured_action_payload(arguments)
-        return {
-            "ok": True,
-            "stored_locally": True,
-            **save_coach_activity_feedback(
-                payload.get("activity_id"),
-                {
-                    "activity_name": payload.get("activity_name"),
-                    "activity_date": payload.get("activity_date"),
-                    "notes": payload.get("notes"),
-                },
-            ),
-        }
-    if name == "delete_activity_feedback":
-        if "delete_activity_feedback" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Feedbackänderung nicht.", reason="intent_scope_denied")
-        _require_coach_scope(intent, "activity_feedback")
-        activity_id = str(arguments.get("activity_id") or "").strip()
-        return {"ok": True, "stored_locally": True, **save_activity_feedback(activity_id, {"notes": ""})}
-    if name == "save_competition":
-        if "save_competition" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
-        payload = _structured_action_payload(arguments)
-        competition_id = str(payload.get("competition_id") or "").strip()
-        _require_coach_scope(intent, f"competition:{competition_id}" if competition_id else "local_competitions")
-        return {"ok": True, **save_coach_competition(payload)}
-    if name == "delete_competition":
-        if "delete_competition" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
-        competition_id = str(arguments.get("competition_id") or "").strip()
-        _require_coach_scope(intent, f"competition:{competition_id}")
-        return {"ok": True, **delete_coach_competition(competition_id)}
     if name == "start_provider_refresh":
         if "start_provider_refresh" not in _structured_authorized_operations(intent):
             raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
