@@ -13867,7 +13867,7 @@ def height_in_cm(value: Any) -> float | int | None:
 
 def _performance_snapshot_inputs(
     snapshot: dict[str, Any],
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], list[Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     athlete = snapshot.get("athlete") if isinstance(snapshot.get("athlete"), dict) else {}
     wellness_rows = [row for row in snapshot.get("recent_wellness", []) if isinstance(row, dict)] if isinstance(snapshot.get("recent_wellness"), list) else []
     activities = snapshot.get("recent_activities") if isinstance(snapshot.get("recent_activities"), list) else []
@@ -13876,7 +13876,7 @@ def _performance_snapshot_inputs(
     run = sport_setting(athlete, "run")
     wellness_ride = sport_info_setting(latest_wellness, "ride")
     wellness_run = sport_info_setting(latest_wellness, "run")
-    return athlete, wellness_rows, activities, latest_wellness, ride, run, wellness_ride, wellness_run
+    return athlete, activities, latest_wellness, ride, run, wellness_ride, wellness_run
 
 
 def _latest_ride_activity(activities: list[Any]) -> dict[str, Any]:
@@ -13990,7 +13990,7 @@ def _performance_vo2_and_prediction_metrics(
 
 
 def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    athlete, wellness_rows, activities, latest_wellness, ride, run, wellness_ride, wellness_run = _performance_snapshot_inputs(snapshot)
+    athlete, activities, latest_wellness, ride, run, wellness_ride, wellness_run = _performance_snapshot_inputs(snapshot)
     latest_ride_activity = _latest_ride_activity(activities)
     latest_ride_eftp = first_present(latest_ride_activity, ("icu_eftp", "eftp", "eFTP"))
     current_ride_eftp = intervals_eftp_value(ride) or intervals_eftp_value(wellness_ride)
@@ -14436,18 +14436,14 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
     recovery = _performance_recovery_context(garmin, latest_wellness, wellness_rows, today)
     sleep_hours = recovery["sleep_hours"]
     sleep_source = recovery["sleep_source"]
-    sleep_average = recovery["sleep_average"]
     sleep_score = recovery["sleep_score"]
     sleep_score_source = recovery["sleep_score_source"]
     resting_hr = recovery["resting_hr"]
     resting_hr_source = recovery["resting_hr_source"]
-    resting_hr_average = recovery["resting_hr_average"]
     hrv = recovery["hrv"]
     hrv_source = recovery["hrv_source"]
-    hrv_average = recovery["hrv_average"]
     readiness_current = recovery["readiness"]
     readiness_source = recovery["readiness_source"]
-    readiness_average = recovery["readiness_average"]
     metrics = api_performance_metrics(snapshot)
     load_context = _performance_load_context(activities, wellness_rows, latest_wellness, today)
     load = load_context["load"]
