@@ -16921,6 +16921,415 @@ def _structured_coach_apply_library_plan_result(arguments: dict[str, Any], inten
     return {"ok": True, "stored_locally": True, **apply_workout_library_plan(entries)}
 
 
+def _commit_structured_training_plan(
+    arguments: dict[str, Any], intent: dict[str, Any], conversation_id: str,
+) -> dict[str, Any]:
+    if "commit_training_plan" not in _structured_authorized_operations(intent):
+        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+    artifact_id = str(intent.get("artifact_id") or "").strip()
+    if not artifact_id:
+        raise AppError(400, "Zum Speichern wird ein lokales Planartefakt benötigt.", reason="artifact_required")
+    if str(arguments.get("artifact_id") or artifact_id).strip() != artifact_id:
+        raise AppError(403, "Das Planartefakt stimmt nicht mit der klassifizierten Aktion überein.", reason="intent_scope_denied")
+    _require_coach_scope(intent, f"artifact:{artifact_id}")
+    return _persist_committed_training_plan(artifact_id, conversation_id, intent)
+
+
+def _persist_committed_training_plan(
+    artifact_id: str, conversation_id: str, intent: dict[str, Any],
+) -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        artifact = db.execute("SELECT * FROM coach_plan_artifacts WHERE id=?", (artifact_id,)).fetchone()
+        if not artifact:
+            raise AppError(404, "Planartefakt nicht gefunden.", reason="artifact_not_found")
+        if artifact["status"] == "committed":
+            return {"ok": True, "status": "already_applied", "artifact_id": artifact_id}
+        if artifact["status"] != "draft":
+            raise AppError(409, "Das Planartefakt ist nicht mehr verfügbar.", reason="artifact_not_available")
+        _validate_committed_training_plan(db, artifact, artifact_id, conversation_id, intent)
+        payload = json.loads(artifact["payload"] or "{}")
+        _validate_structured_plan_limits(payload)
+        entries = save_workout_library_entries(
+            payload.get("workouts") or [],
+            plan_name=str(payload.get("plan_name") or "Coach-Plan"),
+            goal=str(payload.get("goal") or ""),
+        )
+        updated = db.execute(
+            "UPDATE coach_plan_artifacts SET status='committed', updated_at=? WHERE id=? AND conversation_id=? AND status='draft'",
+            (utc_now(), artifact_id, conversation_id),
+        )
+        if updated.rowcount != 1:
+            raise AppError(409, "Das Planartefakt wurde inzwischen verarbeitet.", reason="artifact_revision_conflict")
+        return {"ok": True, "status": "committed", "artifact_id": artifact_id, "library_entry_ids": [entry["id"] for entry in entries]}
+
+
+def _validate_committed_training_plan(
+    db: Any, artifact: dict[str, Any], artifact_id: str, conversation_id: str, intent: dict[str, Any],
+) -> None:
+    if str(artifact.get("conversation_id") or "") != str(conversation_id):
+        if not intent.get("_artifact_explicit"):
+            raise AppError(409, "Der Planentwurf gehört zu einer anderen Coach-Unterhaltung; bitte bestätige die Artefakt-ID.", reason="artifact_conversation_conflict")
+        db.execute(
+            "UPDATE coach_plan_artifacts SET conversation_id=?, updated_at=? WHERE id=? AND status='draft'",
+            (conversation_id, utc_now(), artifact_id),
+        )
+    revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
+    current_revision = int((revision_row or {}).get("revision") or 0)
+    if int(artifact["base_revision"] or 0) != current_revision:
+        raise AppError(409, "Der lokale Plan wurde inzwischen geändert.", reason="planning_revision_conflict")
+
+
+def _replace_structured_coach_training_plan(
+    arguments: dict[str, Any], intent: dict[str, Any],
+) -> dict[str, Any]:
+    if "replace_training_plan" not in _structured_authorized_operations(intent):
+        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+    selected_plan_ids = sorted(
+        token.split(":", 1)[1] for token in _coach_scope_values(intent)
+        if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1]
+    )
+    if len(selected_plan_ids) > 1:
+        raise AppError(400, "Ein Planersatz darf nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
+    if not selected_plan_ids and "local_plan" not in _coach_scope_values(intent):
+        raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst diesen Plan nicht.", reason="intent_scope_denied")
+    return _replace_structured_training_plan(
+        {**arguments, "period": intent.get("period"), "constraints": (intent.get("request") or {}).get("constraints", [])},
+        selected_plan_id=selected_plan_ids[0] if selected_plan_ids else None,
+    )
+
+
+def _validate_structured_training_change_scopes(
+    changes: list[Any], intent: dict[str, Any], selected_plan_ids: list[str],
+) -> None:
+    for change in changes:
+        if not isinstance(change, dict):
+            continue
+        action = str(change.get("action") or "update").strip().casefold()
+        if action == "create":
+            _require_coach_scope(intent, "local_plan", "local_plan_create")
+            requested_plan_id = str(change.get("plan_id") or "").strip()
+            if requested_plan_id and requested_plan_id not in selected_plan_ids:
+                raise AppError(403, "Die neue Einheit darf nur dem benannten Trainingsplan zugeordnet werden.", reason="intent_scope_denied")
+        elif change.get("local_id"):
+            local_id = str(change["local_id"]).strip()
+            allowed_scopes = (f"planned_unit:{local_id}",)
+            if "local_plan_create" not in _coach_scope_values(intent):
+                allowed_scopes += ("local_plan",)
+            _require_coach_scope(intent, *allowed_scopes)
+
+
+def _apply_structured_coach_training_changes(
+    arguments: dict[str, Any], intent: dict[str, Any],
+) -> dict[str, Any]:
+    if "apply_training_changes" not in _structured_authorized_operations(intent):
+        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+    changes = arguments.get("changes")
+    if not isinstance(changes, list):
+        raise AppError(400, "Coach-Änderungen müssen als Liste gesendet werden.", reason="invalid_change")
+    selected_plan_ids = sorted(
+        token.split(":", 1)[1] for token in _coach_scope_values(intent)
+        if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1]
+    )
+    if len(selected_plan_ids) > 1:
+        raise AppError(400, "Die Änderungen dürfen nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
+    _validate_structured_training_change_scopes(changes, intent, selected_plan_ids)
+    return _apply_structured_training_changes(
+        arguments,
+        require_revision=bool(intent.get("bulk_change")),
+        authorized_plan_id=selected_plan_ids[0] if selected_plan_ids else None,
+    )
+
+
+def _structured_coach_plan_tool_result(
+    name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
+    conversation_id: str, client_turn_id: str,
+) -> dict[str, Any] | None:
+    if name == "stage_training_plan":
+        return _stage_structured_training_plan(arguments, intent, conversation_id, client_turn_id)
+    if name == "commit_training_plan":
+        return _commit_structured_training_plan(arguments, intent, conversation_id)
+    if name == "replace_training_plan":
+        return _replace_structured_coach_training_plan(arguments, intent)
+    if name == "apply_training_changes":
+        return _apply_structured_coach_training_changes(arguments, intent)
+    if name == "manage_training_templates":
+        return _structured_coach_training_template_result(arguments, intent)
+    if name == "apply_workout_library_plan":
+        return _structured_coach_apply_library_plan_result(arguments, intent)
+    return None
+
+
+def _start_structured_provider_refresh(
+    arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str],
+    cancel_event: threading.Event | None,
+) -> dict[str, Any]:
+    if "start_provider_refresh" not in _structured_authorized_operations(intent):
+        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+    provider = str(intent.get("target_system") or "")
+    _require_coach_scope(intent, f"{provider}_refresh")
+    if not arguments.pop("_wait_for_completion", False):
+        job = enqueue_sync_job(provider, "refresh", arguments, requested_by="coach")
+        sync_job_ids.append(job["id"])
+        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
+    if provider != "intervals":
+        raise AppError(400, "Ein synchroner Vorababruf ist nur fuer Intervals.icu zulaessig.", reason="invalid_refresh_request")
+    return _run_structured_intervals_refresh(provider, arguments, cancel_event)
+
+
+def _run_structured_intervals_refresh(
+    provider: str, arguments: dict[str, Any], cancel_event: threading.Event | None,
+) -> dict[str, Any]:
+    try:
+        activity_days = int(arguments.get("days"))
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, "Der synchrone Aktivitaetsabruf benoetigt einen gueltigen Zeitraum.", reason="invalid_refresh_request") from exc
+    if activity_days != ALL_SYNC_DAYS and not 1 <= activity_days <= 3660:
+        raise AppError(400, "Der Synchronisationszeitraum ist zu gross.", reason="invalid_refresh_request")
+    sync_kwargs: dict[str, Any] = {"activity_days": activity_days, "wait_for_existing": True, "wait_for_performance": True}
+    if cancel_event is not None:
+        sync_kwargs["cancel_event"] = cancel_event
+    result = sync_intervals("Chat-Anfrage", **sync_kwargs)
+    if result.get("status") == "already_running":
+        raise AppError(503, "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.", reason="provider_busy")
+    try:
+        completed_days = int(result.get("activity_days"))
+    except (TypeError, ValueError):
+        completed_days = 0
+    covers_requested_window = (
+        completed_days == ALL_SYNC_DAYS and activity_days >= 1
+    ) or (
+        activity_days == ALL_SYNC_DAYS and completed_days == ALL_SYNC_DAYS
+    ) or (
+        activity_days >= 1 and completed_days >= activity_days
+    )
+    if result.get("waited_for_existing") and not covers_requested_window:
+        result = _retry_structured_intervals_refresh(activity_days, cancel_event)
+        try:
+            completed_days = int(result.get("activity_days"))
+        except (TypeError, ValueError):
+            completed_days = activity_days
+    return {"ok": True, "status": "completed", "provider": provider, "activity_days": completed_days, "synchronous_refresh": True}
+
+
+def _retry_structured_intervals_refresh(
+    activity_days: int, cancel_event: threading.Event | None,
+) -> dict[str, Any]:
+    retry_kwargs: dict[str, Any] = {"activity_days": activity_days, "wait_for_existing": False}
+    if cancel_event is not None:
+        retry_kwargs["cancel_event"] = cancel_event
+    result = sync_intervals("Chat-Anfrage", **retry_kwargs)
+    if result.get("status") == "already_running":
+        raise AppError(503, "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.", reason="provider_busy")
+    return result
+
+
+def _queue_structured_performance_refresh(
+    arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str],
+) -> dict[str, Any]:
+    if "refresh_current_performance" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
+        raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Refresh nicht.", reason="intent_scope_denied")
+    _require_coach_scope(intent, "intervals_refresh")
+    job = enqueue_sync_job(
+        "intervals", "performance_refresh",
+        {"reason": str(arguments.get("reason") or "Coach-Anfrage")},
+        requested_by="coach",
+    )
+    sync_job_ids.append(job["id"])
+    return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
+
+
+def _sync_structured_plan_without_entries(intent: dict[str, Any]) -> list[dict[str, Any]]:
+    if intent.get("_sync_created_entries_only"):
+        raise AppError(409, "Die neu erstellte Planung muss vor der Synchronisierung lokal gespeichert sein.", reason="plan_commit_required")
+    if not intent.get("_sync_changed_entries_only"):
+        _require_coach_scope(intent, "local_plan")
+        _mark_local_planning_authoritative()
+        return _pending_plan_push_entries()
+    changed_ids = {str(value).strip() for value in intent.get("_changed_sync_entry_ids") or [] if str(value).strip()}
+    if not changed_ids:
+        raise AppError(409, "Die geänderten Planungseinheiten müssen vor der Synchronisierung feststehen.", reason="plan_changes_required")
+    pending_by_id = {entry["library_workout_id"]: entry for entry in _pending_plan_push_entries()}
+    if not changed_ids.issubset(pending_by_id):
+        raise AppError(403, "Die Synchronisierung muss genau die in diesem Turn geänderten Einheiten umfassen.", reason="intent_scope_denied")
+    normalized_entries = [pending_by_id[local_id] for local_id in sorted(changed_ids)]
+    for entry in normalized_entries:
+        _require_coach_scope(intent, f"planned_unit:{entry['library_workout_id']}", f"library_workout:{entry['library_workout_id']}")
+    _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
+    return normalized_entries
+
+
+def _validate_selected_plan_sync_entries(
+    entries: list[dict[str, Any]], intent: dict[str, Any],
+) -> list[dict[str, Any]]:
+    authorized_ids = {
+        str(value).strip()
+        for key in ("_replacement_sync_entry_ids", "_created_sync_entry_ids", "_changed_sync_entry_ids")
+        for value in intent.get(key) or [] if str(value).strip()
+    }
+    normalized_entries = _library_bulk_request_entries(
+        entries,
+        require_hash=True,
+        max_entries=COACH_TRAINING_CHANGE_LIMIT if authorized_ids or intent.get("_sync_all_pending") else LIBRARY_BULK_MAX_ENTRIES,
+    )
+    normalized_ids = {entry["library_workout_id"] for entry in normalized_entries}
+    if intent.get("_sync_all_pending") and normalized_ids != {entry["library_workout_id"] for entry in _pending_plan_push_entries()}:
+        raise AppError(403, "Die Synchronisierung muss alle offenen Einheiten der lokalen Bibliothek umfassen.", reason="intent_scope_denied")
+    if authorized_ids and normalized_ids != authorized_ids:
+        raise AppError(403, "Die Synchronisierung muss genau die in diesem Turn erstellten Einheiten umfassen.", reason="intent_scope_denied")
+    if intent.get("_sync_all_pending"):
+        _require_coach_scope(intent, "local_plan")
+    else:
+        for entry in normalized_entries:
+            _require_coach_scope(intent, f"planned_unit:{entry['library_workout_id']}", f"library_workout:{entry['library_workout_id']}")
+    return normalized_entries
+
+
+def _persist_selected_plan_sync_entries(
+    normalized_entries: list[dict[str, Any]], arguments: dict[str, Any],
+) -> None:
+    with DB_LOCK, database() as db:
+        for entry in normalized_entries:
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
+            if not row or _library_payload_hash(row["payload"]) != entry["expected_payload_hash"]:
+                raise AppError(409, "Die ausgewählte Planung wurde geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
+            if arguments.get("repair"):
+                workout = json.loads(row["payload"])
+                if not workout.get("local_deleted") and not workout.get("archived"):
+                    validate_workout_description(workout)
+        _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
+        for entry in normalized_entries:
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
+            entry["expected_payload_hash"] = _library_payload_hash(row["payload"])
+
+
+def _sync_structured_plan_entries(
+    entries: list[dict[str, Any]], arguments: dict[str, Any], intent: dict[str, Any],
+) -> list[dict[str, Any]]:
+    normalized_entries = _validate_selected_plan_sync_entries(entries, intent)
+    _persist_selected_plan_sync_entries(normalized_entries, arguments)
+    return normalized_entries
+
+
+def _sync_structured_training_plan(
+    arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str],
+) -> dict[str, Any]:
+    if "start_intervals_plan_sync" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
+        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+    entries = arguments.get("entries")
+    if "repair" in arguments and type(arguments["repair"]) is not bool:
+        raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
+    if arguments.get("repair"):
+        manifest = _coach_repair_manifest(arguments, intent)
+        return _enqueue_coach_plan_push(manifest, sync_job_ids, reason=str(arguments.get("reason") or "Coach-Reparatur"), repair=True)
+    if entries is None:
+        normalized_entries = _sync_structured_plan_without_entries(intent)
+    else:
+        normalized_entries = _sync_structured_plan_entries(entries, arguments, intent)
+    return _enqueue_coach_plan_push(
+        normalized_entries, sync_job_ids, reason=str(arguments.get("reason") or "Coach-Anfrage"),
+        **({"repair": True} if arguments.get("repair") else {}),
+    )
+
+
+def _resolve_structured_sync_conflict(
+    arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str],
+) -> dict[str, Any]:
+    if "resolve_training_sync_conflict" not in _structured_authorized_operations(intent):
+        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+    local_id = str(arguments.get("local_id") or "").strip()
+    strategy = str(arguments.get("strategy") or "keep_local").strip().casefold()
+    if local_id:
+        _require_coach_scope(intent, f"planned_unit:{local_id}", f"competition:{local_id}")
+        with DB_LOCK, database() as db:
+            planned = db.execute("SELECT 1 FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
+        if planned:
+            return {"ok": True, **resolve_planned_unit_conflict(local_id, strategy)}
+        return {"ok": True, **resolve_competition_conflict(local_id, strategy)}
+    job_id = str(arguments.get("job_id") or "").strip()
+    _require_coach_scope(intent, f"sync_job:{job_id}")
+    previous_job = sync_job_state(job_id)
+    provider = previous_job["provider"]
+    push = previous_job["type"] in {"plan_push", "competition_push"}
+    _require_coach_scope(intent, "intervals_sync" if push else f"{provider}_refresh")
+    if intent.get("target_system") != provider or bool((intent.get("request") or {}).get("remote_write")) != push:
+        raise AppError(403, "Die Wiederholung benötigt den passenden Anbieterauftrag.", reason="request_target")
+    job = resolve_sync_job(job_id, {"action": "retry"})
+    sync_job_ids.append(job_id)
+    return {"ok": True, "status": "queued", "job": job}
+
+
+def _structured_coach_sync_tool_result(
+    name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
+    sync_job_ids: list[str],
+) -> dict[str, Any] | None:
+    if name == "start_intervals_plan_sync":
+        return _sync_structured_training_plan(arguments, intent, sync_job_ids)
+    if name == "get_sync_job":
+        job_id = str(arguments.get("job_id") or "").strip()
+        if job_id not in sync_job_ids:
+            _require_coach_scope(intent, f"sync_job:{job_id}")
+        return {"ok": True, "job": sync_job_state(job_id)}
+    if name == "sync_competitions":
+        if "sync_competitions" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "local_competitions")
+        _mark_local_competitions_authoritative()
+        job = enqueue_sync_job("intervals", "competition_push", {"reason": str(arguments.get("reason") or "Bestätigter Coach-Auftrag")}, requested_by="coach")
+        sync_job_ids.append(job["id"])
+        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
+    if name == "resolve_training_sync_conflict":
+        return _resolve_structured_sync_conflict(arguments, intent, sync_job_ids)
+    return None
+
+
+def _structured_coach_misc_tool_result(
+    name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
+    conversation_id: str, client_turn_id: str, session_csrf_hash: str,
+) -> dict[str, Any] | None:
+    if name == "preview_adaptive_replan":
+        if "preview_adaptive_replan" not in _structured_authorized_operations(intent):
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+        _require_coach_scope(intent, "adaptive_replan")
+        return {"ok": True, **adaptive_replan_preview()}
+    if name == "apply_adaptive_replan":
+        return _apply_structured_adaptive_replan(arguments, intent, client_turn_id)
+    if name == "update_training_plan":
+        if "update_training_plan" not in _structured_authorized_operations(intent):
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+        payload = _structured_action_payload(arguments)
+        plan_id = str(payload.get("plan_id") or "").strip()
+        _require_coach_scope(intent, f"{TRAINING_PLAN_SCOPE_PREFIX}{plan_id}", "local_plan")
+        return {"ok": True, **update_training_plan(plan_id, payload)}
+    if name == "undo_training_change":
+        if "undo_training_change" not in _structured_authorized_operations(intent):
+            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+        change_id = str(arguments.get("change_id") or "").strip()
+        _require_coach_scope(intent, f"change:{change_id}")
+        return {"ok": True, **_history_preview(change_id, session_csrf_hash)}
+    return None
+
+
+def _apply_structured_adaptive_replan(
+    arguments: dict[str, Any], intent: dict[str, Any], client_turn_id: str,
+) -> dict[str, Any]:
+    if "apply_adaptive_replan" not in _structured_authorized_operations(intent):
+        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+    adjustment_id = str(arguments.get("adjustment_id") or "").strip()
+    _require_coach_scope(intent, f"adaptive_replan:{adjustment_id}", "adaptive_replan")
+    sync_illness = bool(arguments.get("sync_illness_to_intervals"))
+    if sync_illness and (intent.get("target_system") != "intervals" or "intervals_sync" not in _coach_scope_values(intent)):
+        raise AppError(403, "Der Intervals.icu-Sync der Krankheitspause muss ausdrücklich benannt werden.", reason="intent_scope_denied")
+    latest = latest_replan_preview()
+    if not latest or str(latest.get("id")) != adjustment_id or latest.get("status") != "preview":
+        raise AppError(409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen.")
+    with DB_LOCK, database() as db:
+        current_user = db.execute(SELECT_USER_MESSAGE_SQL, (client_turn_id,)).fetchone()
+        publication = db.execute("SELECT id FROM messages WHERE id=? AND role='assistant'", (latest.get("published_message_id"),)).fetchone()
+    if not current_user or not publication or current_user["id"] <= publication["id"] or current_user["id"] not in (intent.get("request") or {}).get("source_message_ids", []):
+        raise AppError(403, "Die Vorschau muss zuerst angezeigt und in einer folgenden Nachricht freigegeben werden.", reason="adaptive_approval_required")
+    return {"ok": True, **apply_adaptive_replan(adjustment_id, sync_illness_to_intervals=sync_illness)}
+
+
 def _structured_coach_tool_result(
     name: str,
     arguments: dict[str, Any],
@@ -16940,350 +17349,26 @@ def _structured_coach_tool_result(
     athlete_record_result = _structured_coach_athlete_record_result(name, arguments, intent)
     if athlete_record_result is not None:
         return athlete_record_result
-    if name == "stage_training_plan":
-        return _stage_structured_training_plan(arguments, intent, conversation_id, client_turn_id)
-    if name == "commit_training_plan":
-        if "commit_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        artifact_id = str(intent.get("artifact_id") or "").strip()
-        if not artifact_id:
-            raise AppError(400, "Zum Speichern wird ein lokales Planartefakt benötigt.", reason="artifact_required")
-        if str(arguments.get("artifact_id") or artifact_id).strip() != artifact_id:
-            raise AppError(403, "Das Planartefakt stimmt nicht mit der klassifizierten Aktion überein.", reason="intent_scope_denied")
-        _require_coach_scope(intent, f"artifact:{artifact_id}")
-        with DB_LOCK, database() as db:
-            artifact = db.execute("SELECT * FROM coach_plan_artifacts WHERE id=?", (artifact_id,)).fetchone()
-            if not artifact:
-                raise AppError(404, "Planartefakt nicht gefunden.", reason="artifact_not_found")
-            if artifact["status"] == "committed":
-                return {"ok": True, "status": "already_applied", "artifact_id": artifact_id}
-            if artifact["status"] != "draft":
-                raise AppError(409, "Das Planartefakt ist nicht mehr verfügbar.", reason="artifact_not_available")
-            if str(artifact.get("conversation_id") or "") != str(conversation_id):
-                if not intent.get("_artifact_explicit"):
-                    raise AppError(409, "Der Planentwurf gehört zu einer anderen Coach-Unterhaltung; bitte bestätige die Artefakt-ID.", reason="artifact_conversation_conflict")
-                db.execute(
-                    "UPDATE coach_plan_artifacts SET conversation_id=?, updated_at=? WHERE id=? AND status='draft'",
-                    (conversation_id, utc_now(), artifact_id),
-                )
-            revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
-            current_revision = int((revision_row or {}).get("revision") or 0)
-            if int(artifact["base_revision"] or 0) != current_revision:
-                raise AppError(409, "Der lokale Plan wurde inzwischen geändert.", reason="planning_revision_conflict")
-            payload = json.loads(artifact["payload"] or "{}")
-            _validate_structured_plan_limits(payload)
-            entries = save_workout_library_entries(
-                payload.get("workouts") or [],
-                plan_name=str(payload.get("plan_name") or "Coach-Plan"),
-                goal=str(payload.get("goal") or ""),
-            )
-            updated = db.execute(
-                "UPDATE coach_plan_artifacts SET status='committed', updated_at=? WHERE id=? AND conversation_id=? AND status='draft'",
-                (utc_now(), artifact_id, conversation_id),
-            )
-            if updated.rowcount != 1:
-                raise AppError(409, "Das Planartefakt wurde inzwischen verarbeitet.", reason="artifact_revision_conflict")
-            return {"ok": True, "status": "committed", "artifact_id": artifact_id, "library_entry_ids": [entry["id"] for entry in entries]}
-    if name == "replace_training_plan":
-        if "replace_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        selected_plan_ids = sorted(token.split(":", 1)[1] for token in _coach_scope_values(intent) if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1])
-        if len(selected_plan_ids) > 1:
-            raise AppError(400, "Ein Planersatz darf nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
-        if not selected_plan_ids and "local_plan" not in _coach_scope_values(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst diesen Plan nicht.", reason="intent_scope_denied")
-        return _replace_structured_training_plan({**arguments, "period": intent.get("period"), "constraints": (intent.get("request") or {}).get("constraints", [])}, selected_plan_id=selected_plan_ids[0] if selected_plan_ids else None)
-    if name == "apply_training_changes":
-        if "apply_training_changes" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        changes = arguments.get("changes")
-        if not isinstance(changes, list):
-            raise AppError(400, "Coach-Änderungen müssen als Liste gesendet werden.", reason="invalid_change")
-        selected_plan_ids = sorted(
-            token.split(":", 1)[1] for token in _coach_scope_values(intent)
-            if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1]
-        )
-        if len(selected_plan_ids) > 1:
-            raise AppError(400, "Die Änderungen dürfen nur einen konkret benannten Trainingsplan auswählen.", reason="intent_scope_denied")
-        for change in changes:
-            if not isinstance(change, dict):
-                continue
-            action = str(change.get("action") or "update").strip().casefold()
-            if action == "create":
-                _require_coach_scope(intent, "local_plan", "local_plan_create")
-                requested_plan_id = str(change.get("plan_id") or "").strip()
-                if requested_plan_id and requested_plan_id not in selected_plan_ids:
-                    raise AppError(403, "Die neue Einheit darf nur dem benannten Trainingsplan zugeordnet werden.", reason="intent_scope_denied")
-            elif change.get("local_id"):
-                local_id = str(change["local_id"]).strip()
-                allowed_scopes = (f"planned_unit:{local_id}",)
-                if "local_plan_create" not in _coach_scope_values(intent):
-                    allowed_scopes += ("local_plan",)
-                _require_coach_scope(intent, *allowed_scopes)
-        return _apply_structured_training_changes(
-            arguments,
-            require_revision=bool(intent.get("bulk_change")),
-            authorized_plan_id=selected_plan_ids[0] if selected_plan_ids else None,
-        )
-    if name == "manage_training_templates":
-        return _structured_coach_training_template_result(arguments, intent)
-    if name == "apply_workout_library_plan":
-        return _structured_coach_apply_library_plan_result(arguments, intent)
+    plan_result = _structured_coach_plan_tool_result(
+        name, arguments, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
+    )
+    if plan_result is not None:
+        return plan_result
     if name == "start_provider_refresh":
-        if "start_provider_refresh" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        provider = str(intent.get("target_system") or "")
-        _require_coach_scope(intent, f"{provider}_refresh")
-        if arguments.pop("_wait_for_completion", False):
-            if provider != "intervals":
-                raise AppError(400, "Ein synchroner Vorababruf ist nur fuer Intervals.icu zulaessig.", reason="invalid_refresh_request")
-            try:
-                activity_days = int(arguments.get("days"))
-            except (TypeError, ValueError) as exc:
-                raise AppError(400, "Der synchrone Aktivitaetsabruf benoetigt einen gueltigen Zeitraum.", reason="invalid_refresh_request") from exc
-            if activity_days != ALL_SYNC_DAYS and not 1 <= activity_days <= 3660:
-                raise AppError(400, "Der Synchronisationszeitraum ist zu gross.", reason="invalid_refresh_request")
-            sync_kwargs: dict[str, Any] = {"activity_days": activity_days, "wait_for_existing": True}
-            if cancel_event is not None:
-                sync_kwargs["cancel_event"] = cancel_event
-            sync_kwargs["wait_for_performance"] = True
-            result = sync_intervals("Chat-Anfrage", **sync_kwargs)
-            if result.get("status") == "already_running":
-                raise AppError(503, "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.", reason="provider_busy")
-            try:
-                completed_days = int(result.get("activity_days"))
-            except (TypeError, ValueError):
-                completed_days = 0
-            covers_requested_window = (
-                completed_days == ALL_SYNC_DAYS and activity_days >= 1
-            ) or (
-                activity_days == ALL_SYNC_DAYS and completed_days == ALL_SYNC_DAYS
-            ) or (
-                activity_days >= 1 and completed_days >= activity_days
-            )
-            if result.get("waited_for_existing") and not covers_requested_window:
-                retry_kwargs: dict[str, Any] = {"activity_days": activity_days, "wait_for_existing": False}
-                if cancel_event is not None:
-                    retry_kwargs["cancel_event"] = cancel_event
-                result = sync_intervals("Chat-Anfrage", **retry_kwargs)
-                if result.get("status") == "already_running":
-                    raise AppError(503, "Die aktuelle Intervals.icu-Synchronisierung ist noch nicht abgeschlossen.", reason="provider_busy")
-                try:
-                    completed_days = int(result.get("activity_days"))
-                except (TypeError, ValueError):
-                    completed_days = activity_days
-            return {"ok": True, "status": "completed", "provider": provider, "activity_days": completed_days, "synchronous_refresh": True}
-        job = enqueue_sync_job(provider, "refresh", arguments, requested_by="coach")
-        sync_job_ids.append(job["id"])
-        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
+        return _start_structured_provider_refresh(arguments, intent, sync_job_ids, cancel_event)
     if name == "refresh_current_performance":
-        if "refresh_current_performance" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Refresh nicht.", reason="intent_scope_denied")
-        _require_coach_scope(intent, "intervals_refresh")
-        job = enqueue_sync_job(
-            "intervals", "performance_refresh",
-            {"reason": str(arguments.get("reason") or "Coach-Anfrage")},
-            requested_by="coach",
-        )
-        sync_job_ids.append(job["id"])
-        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
-    if name == "start_intervals_plan_sync":
-        if "start_intervals_plan_sync" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        entries = arguments.get("entries")
-        if "repair" in arguments and type(arguments["repair"]) is not bool:
-            raise AppError(400, "repair muss ein Boolean sein.", reason="invalid_job_request")
-        if arguments.get("repair"):
-            manifest = _coach_repair_manifest(arguments, intent)
-            return _enqueue_coach_plan_push(manifest, sync_job_ids, reason=str(arguments.get("reason") or "Coach-Reparatur"), repair=True)
-        if entries is None:
-            if intent.get("_sync_created_entries_only"):
-                raise AppError(
-                    409,
-                    "Die neu erstellte Planung muss vor der Synchronisierung lokal gespeichert sein.",
-                    reason="plan_commit_required",
-                )
-            if intent.get("_sync_changed_entries_only"):
-                changed_ids = {
-                    str(value).strip() for value in intent.get("_changed_sync_entry_ids") or []
-                    if str(value).strip()
-                }
-                if not changed_ids:
-                    raise AppError(
-                        409,
-                        "Die geänderten Planungseinheiten müssen vor der Synchronisierung feststehen.",
-                        reason="plan_changes_required",
-                    )
-                pending_entries = _pending_plan_push_entries()
-                pending_by_id = {entry["library_workout_id"]: entry for entry in pending_entries}
-                if not changed_ids.issubset(pending_by_id):
-                    raise AppError(
-                        403,
-                        "Die Synchronisierung muss genau die in diesem Turn geänderten Einheiten umfassen.",
-                        reason="intent_scope_denied",
-                    )
-                normalized_entries = [pending_by_id[local_id] for local_id in sorted(changed_ids)]
-                for entry in normalized_entries:
-                    _require_coach_scope(
-                        intent,
-                        f"planned_unit:{entry['library_workout_id']}",
-                        f"library_workout:{entry['library_workout_id']}",
-                    )
-                _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
-            else:
-                _require_coach_scope(intent, "local_plan")
-                _mark_local_planning_authoritative()
-                normalized_entries = _pending_plan_push_entries()
-        else:
-            replacement_ids = {
-                str(value).strip() for value in intent.get("_replacement_sync_entry_ids") or []
-                if str(value).strip()
-            }
-            created_ids = {
-                str(value).strip() for value in intent.get("_created_sync_entry_ids") or []
-                if str(value).strip()
-            }
-            changed_ids = {
-                str(value).strip() for value in intent.get("_changed_sync_entry_ids") or []
-                if str(value).strip()
-            }
-            authorized_ids = replacement_ids | created_ids | changed_ids
-            normalized_entries = _library_bulk_request_entries(
-                entries,
-                require_hash=True,
-                max_entries=(
-                    COACH_TRAINING_CHANGE_LIMIT
-                    if authorized_ids or intent.get("_sync_all_pending")
-                    else LIBRARY_BULK_MAX_ENTRIES
-                ),
-            )
-            normalized_ids = {entry["library_workout_id"] for entry in normalized_entries}
-            if intent.get("_sync_all_pending"):
-                pending_ids = {
-                    entry["library_workout_id"] for entry in _pending_plan_push_entries()
-                }
-                if normalized_ids != pending_ids:
-                    raise AppError(
-                        403,
-                        "Die Synchronisierung muss alle offenen Einheiten der lokalen Bibliothek umfassen.",
-                        reason="intent_scope_denied",
-                    )
-            if authorized_ids and normalized_ids != authorized_ids:
-                raise AppError(
-                    403,
-                    "Die Synchronisierung muss genau die in diesem Turn erstellten Einheiten umfassen.",
-                    reason="intent_scope_denied",
-                )
-            if intent.get("_sync_all_pending"):
-                _require_coach_scope(intent, "local_plan")
-            else:
-                for entry in normalized_entries:
-                    _require_coach_scope(
-                        intent,
-                        f"planned_unit:{entry['library_workout_id']}",
-                        f"library_workout:{entry['library_workout_id']}",
-                    )
-            with DB_LOCK, database() as db:
-                for entry in normalized_entries:
-                    row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
-                    if not row or _library_payload_hash(row["payload"]) != entry["expected_payload_hash"]:
-                        raise AppError(409, "Die ausgewählte Planung wurde geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
-                    if arguments.get("repair"):
-                        workout = json.loads(row["payload"])
-                        if not workout.get("local_deleted") and not workout.get("archived"):
-                            validate_workout_description(workout)
-                _mark_local_planning_authoritative([entry["library_workout_id"] for entry in normalized_entries])
-                # Marking a conflict as locally authoritative changes the payload.
-                # Queue hashes of that validated, updated state.
-                for entry in normalized_entries:
-                    row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (entry["library_workout_id"],)).fetchone()
-                    entry["expected_payload_hash"] = _library_payload_hash(row["payload"])
-        return _enqueue_coach_plan_push(
-            normalized_entries,
-            sync_job_ids,
-            reason=str(arguments.get("reason") or "Coach-Anfrage"),
-            **({"repair": True} if arguments.get("repair") else {}),
-        )
-    if name == "get_sync_job":
-        job_id = str(arguments.get("job_id") or "").strip()
-        if job_id not in sync_job_ids:
-            _require_coach_scope(intent, f"sync_job:{job_id}")
-        return {"ok": True, "job": sync_job_state(job_id)}
-    if name == "sync_competitions":
-        if "sync_competitions" not in _structured_authorized_operations(intent) or intent.get("target_system") != "intervals":
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.", reason="intent_scope_denied")
-        _require_coach_scope(intent, "local_competitions")
-        _mark_local_competitions_authoritative()
-        job = enqueue_sync_job(
-            "intervals", "competition_push",
-            {"reason": str(arguments.get("reason") or "Bestätigter Coach-Auftrag")},
-            requested_by="coach",
-        )
-        sync_job_ids.append(job["id"])
-        return {"ok": True, "status": "queued", "sync_job_id": job["id"]}
-    if name == "resolve_training_sync_conflict":
-        if "resolve_training_sync_conflict" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        payload = arguments
-        local_id = str(payload.get("local_id") or "").strip()
-        strategy = str(payload.get("strategy") or "keep_local").strip().casefold()
-        if local_id:
-            _require_coach_scope(intent, f"planned_unit:{local_id}", f"competition:{local_id}")
-            with DB_LOCK, database() as db:
-                planned = db.execute("SELECT 1 FROM planned_units WHERE local_id=?", (local_id,)).fetchone()
-            if planned:
-                return {"ok": True, **resolve_planned_unit_conflict(local_id, strategy)}
-            return {"ok": True, **resolve_competition_conflict(local_id, strategy)}
-        job_id = str(arguments.get("job_id") or "").strip()
-        _require_coach_scope(intent, f"sync_job:{job_id}")
-        previous_job = sync_job_state(job_id)
-        provider = previous_job["provider"]
-        push = previous_job["type"] in {"plan_push", "competition_push"}
-        _require_coach_scope(intent, "intervals_sync" if push else f"{provider}_refresh")
-        if intent.get("target_system") != provider or bool((intent.get("request") or {}).get("remote_write")) != push:
-            raise AppError(403, "Die Wiederholung benötigt den passenden Anbieterauftrag.", reason="request_target")
-        job = resolve_sync_job(job_id, {"action": "retry"})
-        sync_job_ids.append(job_id)
-        return {"ok": True, "status": "queued", "job": job}
-    if name == "preview_adaptive_replan":
-        if "preview_adaptive_replan" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        _require_coach_scope(intent, "adaptive_replan")
-        return {"ok": True, **adaptive_replan_preview()}
-    if name == "apply_adaptive_replan":
-        if "apply_adaptive_replan" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        payload = arguments
-        adjustment_id = str(payload.get("adjustment_id") or "").strip()
-        _require_coach_scope(intent, f"adaptive_replan:{adjustment_id}", "adaptive_replan")
-        sync_illness = bool(payload.get("sync_illness_to_intervals"))
-        if sync_illness and (
-            intent.get("target_system") != "intervals"
-            or "intervals_sync" not in _coach_scope_values(intent)
-        ):
-            raise AppError(403, "Der Intervals.icu-Sync der Krankheitspause muss ausdrücklich benannt werden.", reason="intent_scope_denied")
-        latest = latest_replan_preview()
-        if not latest or str(latest.get("id")) != adjustment_id or latest.get("status") != "preview":
-            raise AppError(409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen.")
-        with DB_LOCK, database() as db:
-            current_user = db.execute(SELECT_USER_MESSAGE_SQL, (client_turn_id,)).fetchone()
-            publication = db.execute("SELECT id FROM messages WHERE id=? AND role='assistant'", (latest.get("published_message_id"),)).fetchone()
-        if not current_user or not publication or current_user["id"] <= publication["id"] or current_user["id"] not in (intent.get("request") or {}).get("source_message_ids", []):
-            raise AppError(403, "Die Vorschau muss zuerst angezeigt und in einer folgenden Nachricht freigegeben werden.", reason="adaptive_approval_required")
-        return {"ok": True, **apply_adaptive_replan(adjustment_id, sync_illness_to_intervals=sync_illness)}
-    if name == "update_training_plan":
-        if "update_training_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        payload = _structured_action_payload(arguments)
-        plan_id = str(payload.get("plan_id") or "").strip()
-        _require_coach_scope(intent, f"{TRAINING_PLAN_SCOPE_PREFIX}{plan_id}", "local_plan")
-        return {"ok": True, **update_training_plan(plan_id, payload)}
-    if name == "undo_training_change":
-        if "undo_training_change" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        change_id = str(arguments.get("change_id") or "").strip()
-        _require_coach_scope(intent, f"change:{change_id}")
-        return {"ok": True, **_history_preview(change_id, session_csrf_hash)}
+        return _queue_structured_performance_refresh(arguments, intent, sync_job_ids)
+    sync_result = _structured_coach_sync_tool_result(
+        name, arguments, intent=intent, sync_job_ids=sync_job_ids,
+    )
+    if sync_result is not None:
+        return sync_result
+    misc_result = _structured_coach_misc_tool_result(
+        name, arguments, intent=intent, conversation_id=conversation_id,
+        client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash,
+    )
+    if misc_result is not None:
+        return misc_result
     raise AppError(400, "Unbekanntes Coach-Werkzeug.", reason="unknown_coach_tool")
 
 
