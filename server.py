@@ -19322,15 +19322,21 @@ def _wait_for_coach_response_retry(delay: int, cancel_event: threading.Event | N
         time.sleep(delay)
 
 
+@dataclass(frozen=True)
+class _StructuredCoachResponseAttemptContext:
+    request_payload: dict[str, Any]
+    context: dict[str, Any]
+    message: str
+    command_receipts: list[dict[str, Any]]
+    attachments: list[dict[str, Any]]
+    client_turn_id: str
+    recovery_state: dict[str, bool]
+
+
 def _structured_coach_response_attempt(
     payload: dict[str, Any],
     *,
-    request_payload: dict[str, Any],
-    context: dict[str, Any],
-    message: str,
-    command_receipts: list[dict[str, Any]],
-    attachments: list[dict[str, Any]],
-    client_turn_id: str,
+    attempt_context: _StructuredCoachResponseAttemptContext,
     ai_provider: str,
     background_owned: bool,
     on_text_delta: Any,
@@ -19360,9 +19366,10 @@ def _structured_coach_response_attempt(
         if resumed is not None:
             return resumed
         if _recover_invalid_structured_conversation(
-            exc, payload, request_payload, context=context, message=message,
-            command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
-            ai_provider=ai_provider, recovery_state=recovery_state,
+            exc, payload, attempt_context.request_payload, context=attempt_context.context,
+            message=attempt_context.message, command_receipts=attempt_context.command_receipts,
+            attachments=attempt_context.attachments, client_turn_id=attempt_context.client_turn_id,
+            ai_provider=ai_provider, recovery_state=attempt_context.recovery_state,
             request_delta_emitted=state["request_delta_emitted"], attempt=attempt,
         ):
             state["resume_id"] = ""
@@ -19395,6 +19402,15 @@ def _structured_coach_response(
     resume_id: str = "",
 ) -> dict[str, Any]:
     state: dict[str, Any] = {"request_delta_emitted": False, "resume_id": resume_id}
+    attempt_context = _StructuredCoachResponseAttemptContext(
+        request_payload=request_payload,
+        context=context,
+        message=message,
+        command_receipts=command_receipts,
+        attachments=attachments,
+        client_turn_id=client_turn_id,
+        recovery_state=recovery_state,
+    )
 
     def on_delta(delta: str) -> None:
         state["request_delta_emitted"] = True
@@ -19416,12 +19432,7 @@ def _structured_coach_response(
         _raise_chat_cancelled(cancel_event)
         response = _structured_coach_response_attempt(
             payload,
-            request_payload=request_payload,
-            context=context,
-            message=message,
-            command_receipts=command_receipts,
-            attachments=attachments,
-            client_turn_id=client_turn_id,
+            attempt_context=attempt_context,
             ai_provider=ai_provider,
             background_owned=background_owned,
             on_text_delta=on_text_delta,
