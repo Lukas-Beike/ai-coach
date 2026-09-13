@@ -9051,41 +9051,56 @@ def _calendar_conflict_record(item: dict[str, Any], source: str, match: str) -> 
     }
 
 
-def calendar_conflicts(
-    workout: dict[str, Any],
-    exclude_library_ids: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    conflicts = []
-    excluded = exclude_library_ids or set()
+def _calendar_conflict_sources() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     with DB_LOCK, database() as db:
-        rows = db.execute(
+        rows = [dict(row) for row in db.execute(
             "SELECT local_id, payload FROM planned_units "
             "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
             "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0"
-        ).fetchall()
-        competitions = [dict(row) for row in db.execute("SELECT id, name, event_date, start_date_local, moving_time FROM competitions").fetchall()]
+        ).fetchall()]
+        competitions = [dict(row) for row in db.execute(
+            "SELECT id, name, event_date, start_date_local, moving_time FROM competitions"
+        ).fetchall()]
+    return rows, competitions
+
+
+def _local_calendar_library_entries(rows: list[dict[str, Any]], excluded: set[str]) -> list[dict[str, Any]]:
+    entries = []
     for row in rows:
         local_id = str(row.get("local_id") or "")
         if local_id in excluded:
             continue
         try:
-            library_entry = json.loads(row.get("payload") or "{}")
+            entry = json.loads(row.get("payload") or "{}")
         except (TypeError, ValueError):
             continue
-        if not isinstance(library_entry, dict) or library_entry.get("source") not in {"coach", "library", "intervals"}:
-            continue
-        matches, match = _calendar_items_conflict(workout, library_entry)
+        if isinstance(entry, dict) and entry.get("source") in {"coach", "library", "intervals"}:
+            entries.append({**entry, "local_id": local_id})
+    return entries
+
+
+def _calendar_conflicts_for_items(workout: dict[str, Any], items: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
+    conflicts = []
+    for item in items:
+        matches, match = _calendar_items_conflict(workout, item)
         if matches:
-            conflicts.append(_calendar_conflict_record({**library_entry, "local_id": local_id}, "local_library", match))
-    for competition in competitions:
-        matches, match = _calendar_items_conflict(workout, competition)
-        if matches:
-            conflicts.append(_calendar_conflict_record(competition, "local_competition", match))
-    for event in list_external_calendar_events(1000, training_relevant_only=True):
-        matches, match = _calendar_items_conflict(workout, event)
-        if matches:
-            conflicts.append(_calendar_conflict_record(event, "external_calendar", match))
+            conflicts.append(_calendar_conflict_record(item, source, match))
     return conflicts
+
+
+def calendar_conflicts(
+    workout: dict[str, Any],
+    exclude_library_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    excluded = exclude_library_ids or set()
+    rows, competitions = _calendar_conflict_sources()
+    library_entries = _local_calendar_library_entries(rows, excluded)
+    external_events = list_external_calendar_events(1000, training_relevant_only=True)
+    return (
+        _calendar_conflicts_for_items(workout, library_entries, "local_library")
+        + _calendar_conflicts_for_items(workout, competitions, "local_competition")
+        + _calendar_conflicts_for_items(workout, external_events, "external_calendar")
+    )
 
 
 def save_workout_library_entries(
