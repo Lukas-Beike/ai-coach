@@ -17196,6 +17196,84 @@ def _stage_coach_artifact(conversation_id: str, client_turn_id: str, payload: di
     return {"ok": True, "status": "draft", "artifact_id": artifact_id, "base_revision": base_revision}
 
 
+def _validated_training_date(value: Any) -> str:
+    candidate_date = str(value or "").strip()[:10]
+    try:
+        date.fromisoformat(candidate_date)
+    except ValueError as exc:
+        raise AppError(400, INVALID_PLANNING_DATE_ERROR, reason="invalid_change") from exc
+    return candidate_date
+
+
+def _record_created_training_change(
+    change: dict[str, Any], change_identity: str,
+    final_dates: dict[str, str], final_active: dict[str, bool],
+) -> None:
+    candidate_date = str(change.get("date") or "").strip()[:10]
+    if not candidate_date:
+        raise AppError(400, "Eine neue geplante Einheit benötigt ein Datum.", reason="invalid_change")
+    final_dates[change_identity] = _validated_training_date(candidate_date)
+    final_active[change_identity] = True
+
+
+def _record_existing_training_change(
+    change: dict[str, Any], change_identity: str, db: Any,
+    original_dates: dict[str, str], final_dates: dict[str, str],
+    final_active: dict[str, bool], restore_identities: set[str],
+) -> None:
+    action = str(change.get("action") or "update").strip().casefold()
+    if action == "restore":
+        restore_identities.add(change_identity)
+    local_id = str(change.get("local_id") or "").strip()
+    row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
+    if not row:
+        return
+    try:
+        current = json.loads(row.get("payload") or "{}")
+    except (TypeError, ValueError):
+        current = {}
+    if not isinstance(current, dict):
+        return
+    current_date = str(current.get("date") or "").strip()[:10]
+    if current_date:
+        original_dates.setdefault(change_identity, current_date)
+    final_active.setdefault(change_identity, not bool(current.get("archived")) and not bool(current.get("local_deleted")))
+    if action in {"delete", "archive"}:
+        final_active[change_identity] = False
+        return
+    if action == "restore":
+        final_active[change_identity] = True
+    candidate_date = str(change.get("date") or final_dates.get(change_identity) or current.get("date") or "").strip()[:10]
+    if candidate_date:
+        final_dates[change_identity] = _validated_training_date(candidate_date)
+
+
+def _validate_training_change_dates(
+    final_dates: dict[str, str], final_active: dict[str, bool],
+    original_dates: dict[str, str], restore_identities: set[str],
+    batch_ids: set[str],
+) -> None:
+    occupied_dates: dict[str, str] = {}
+    for change_identity, candidate_date in final_dates.items():
+        if not final_active.get(change_identity, True):
+            continue
+        previous_identity = occupied_dates.get(candidate_date)
+        if previous_identity is not None and previous_identity != change_identity:
+            raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
+        occupied_dates[candidate_date] = change_identity
+    dates_needing_calendar_check = {
+        candidate_date for change_identity, candidate_date in final_dates.items()
+        if final_active.get(change_identity, True) and (
+            change_identity.startswith("create:")
+            or original_dates.get(change_identity) != candidate_date
+            or change_identity in restore_identities
+        )
+    }
+    for candidate_date in dates_needing_calendar_check:
+        if calendar_conflicts({"date": candidate_date}, batch_ids):
+            raise AppError(409, f"Für den {candidate_date} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
+
+
 def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> None:
     """Validate all final dates before applying any member of a batch."""
     batch_ids = {str(change.get("local_id") or "").strip() for change in changes}
@@ -17206,76 +17284,14 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
     restore_identities: set[str] = set()
     for index, change in enumerate(changes):
         local_id = str(change.get("local_id") or "").strip()
-        action = str(change.get("action") or "update").strip().casefold()
         change_identity = local_id or f"create:{index}"
-        if action == "create":
-            candidate_date = str(change.get("date") or "").strip()[:10]
-            if not candidate_date:
-                raise AppError(400, "Eine neue geplante Einheit benötigt ein Datum.", reason="invalid_change")
-            try:
-                date.fromisoformat(candidate_date)
-            except ValueError as exc:
-                raise AppError(400, INVALID_PLANNING_DATE_ERROR, reason="invalid_change") from exc
-            final_active[change_identity] = True
-            final_dates[change_identity] = candidate_date
+        if str(change.get("action") or "update").strip().casefold() == "create":
+            _record_created_training_change(change, change_identity, final_dates, final_active)
             continue
-        if action == "restore":
-            restore_identities.add(change_identity)
-        row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
-        if not row:
-            continue
-        try:
-            current = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
-            current = {}
-        if not isinstance(current, dict):
-            continue
-        current_date = str(current.get("date") or "").strip()[:10]
-        if current_date:
-            original_dates.setdefault(change_identity, current_date)
-        final_active.setdefault(
-            change_identity,
-            not bool(current.get("archived")) and not bool(current.get("local_deleted")),
+        _record_existing_training_change(
+            change, change_identity, db, original_dates, final_dates, final_active, restore_identities,
         )
-        if action in {"delete", "archive"}:
-            final_active[change_identity] = False
-            continue
-        if action == "restore":
-            final_active[change_identity] = True
-        candidate_date = str(
-            change.get("date") or final_dates.get(change_identity) or current.get("date") or ""
-        ).strip()[:10]
-        if not candidate_date:
-            continue
-        try:
-            date.fromisoformat(candidate_date)
-        except ValueError as exc:
-            raise AppError(400, INVALID_PLANNING_DATE_ERROR, reason="invalid_change") from exc
-        final_dates[change_identity] = candidate_date
-    occupied_dates: dict[str, str] = {}
-    for change_identity, candidate_date in final_dates.items():
-        if not final_active.get(change_identity, True):
-            continue
-        previous_identity = occupied_dates.get(candidate_date)
-        if previous_identity is not None and previous_identity != change_identity:
-            raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {candidate_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
-        occupied_dates[candidate_date] = change_identity
-    dates_needing_calendar_check = {
-        candidate_date
-        for change_identity, candidate_date in final_dates.items()
-        if (
-            final_active.get(change_identity, True)
-            and (
-                change_identity.startswith("create:")
-                or original_dates.get(change_identity) != candidate_date
-                or change_identity in restore_identities
-            )
-        )
-    }
-    for candidate_date in dates_needing_calendar_check:
-        conflicts = calendar_conflicts({"date": candidate_date}, batch_ids)
-        if conflicts:
-            raise AppError(409, f"Für den {candidate_date} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
+    _validate_training_change_dates(final_dates, final_active, original_dates, restore_identities, batch_ids)
 
 
 def _prepare_structured_training_change(change: dict[str, Any]) -> dict[str, Any]:
