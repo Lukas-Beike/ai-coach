@@ -14811,27 +14811,22 @@ def _active_background_coach_job(session_csrf_hash: str, operation_id: str | Non
     return None
 
 
-def enqueue_background_coach_job(
+def _background_coach_request(
     message: str,
     client_turn_id: str,
-    session_csrf_hash: str,
-    *,
-    operation_id: str | None = None,
-    cancel_event: threading.Event | None = None,
-    request_kind: str | None = None,
-    attachments: Any = None,
-) -> dict[str, Any]:
-    """Persist a long Coach turn before returning control to the browser."""
+    request_kind: str | None,
+    attachments: Any,
+) -> tuple[str, str, str | None, list[dict[str, Any]], dict[str, Any]]:
     message = str(message or "").strip()
     client_turn_id = str(client_turn_id or "").strip()
     request_kind = str(request_kind or "").strip() or None
     if request_kind not in {None, "morning_checkin"}:
         raise AppError(400, "Unbekannte Coach-Schnellaktion.", reason="invalid_request_kind")
     try:
-        attachments = validate_attachments(attachments)
+        validated_attachments = validate_attachments(attachments)
     except ValueError:
         raise AppError(400, "Ungültiger Anhang. Erlaubt: bis zu 4 GPX-, FIT-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 5 MB.", reason="invalid_attachment") from None
-    if attachments and not message:
+    if validated_attachments and not message:
         message = "Bitte analysiere die angehängten Dateien."
     scope = coach_execution_scope()
     if not message or len(message) > 12_000:
@@ -14840,32 +14835,55 @@ def enqueue_background_coach_job(
         raise AppError(400, "client_turn_id muss eine begrenzte, nicht leere Kennung sein.", reason="invalid_client_turn")
     if not scope["background"]:
         raise AppError(400, "Diese Coach-Anfrage benötigt keinen Hintergrundauftrag.", reason="background_not_required")
-    active = _active_background_coach_job(session_csrf_hash)
-    if active and active["client_turn_id"] != client_turn_id:
-        raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
-    operation_id = operation_id or uuid.uuid4().hex
-    now = utc_now()
-    session_key = _coach_session_key(session_csrf_hash)
+    return message, client_turn_id, request_kind, validated_attachments, scope
+
+
+def _background_coach_provider_settings(attachments: list[dict[str, Any]]) -> tuple[str, str, str]:
     ai_provider = selected_ai_provider()
     model = selected_model(ai_provider)
     thinking_level = selected_thinking_level()
     if ai_provider == "gemini" and gemini_inline_image_bytes(attachments) > MAX_GEMINI_INLINE_IMAGE_BYTES:
         raise AppError(413, "Die ausgewählten Dateien sind für eine Gemini-Anfrage zusammen zu groß. Sende weniger Dateien oder wähle OpenAI.", reason="gemini_attachment_request_too_large")
+    return ai_provider, model, thinking_level
+
+
+def _existing_background_coach_job_response(
+    existing: dict[str, Any],
+    session_csrf_hash: str,
+    scope: dict[str, Any],
+) -> dict[str, Any]:
+    receipt = _coach_command_receipt(existing.get("receipt"))
+    _require_command_owner(receipt, session_csrf_hash)
+    if receipt.get("mode") != "background":
+        raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
+    return {
+        "status": "completed" if existing.get("status") == "completed" else "queued",
+        "mode": "background",
+        "operation_id": receipt.get("operation_id"),
+        "plan_scope": receipt.get("plan_scope") or scope,
+    }
+
+
+def _persist_background_coach_job(
+    message: str,
+    client_turn_id: str,
+    session_csrf_hash: str,
+    operation_id: str,
+    request_kind: str | None,
+    attachments: list[dict[str, Any]],
+    scope: dict[str, Any],
+    session_key: str,
+    ai_provider: str,
+    model: str,
+    thinking_level: str,
+) -> tuple[dict[str, Any] | None, int | None]:
+    now = utc_now()
     with DB_LOCK, database() as db:
         existing = db.execute(
             "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)
         ).fetchone()
         if existing:
-            receipt = _coach_command_receipt(existing.get("receipt"))
-            _require_command_owner(receipt, session_csrf_hash)
-            if receipt.get("mode") != "background":
-                raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
-            return {
-                "status": "completed" if existing.get("status") == "completed" else "queued",
-                "mode": "background",
-                "operation_id": receipt.get("operation_id"),
-                "plan_scope": receipt.get("plan_scope") or scope,
-            }
+            return _existing_background_coach_job_response(existing, session_csrf_hash, scope), None
         user_message = CHAT_REPOSITORY.add(db, "user", message, client_turn_id=client_turn_id)
         attachment_json = json.dumps(attachments, ensure_ascii=False, separators=(",", ":"))
         stored_attachment_bytes = db.execute("SELECT COALESCE(SUM(length(attachments)), 0) AS total FROM messages").fetchone()["total"]
@@ -14895,7 +14913,36 @@ def enqueue_background_coach_job(
             "VALUES (?, ?, NULL, '{}', 'local', 'queued', ?, ?, ?)",
             (uuid.uuid4().hex, client_turn_id, json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), now, now),
         )
-    publish_state_event("coach", {"message_id": user_message.get("id"), "role": "user", "client_turn_id": client_turn_id})
+    return None, user_message["id"]
+
+
+def enqueue_background_coach_job(
+    message: str,
+    client_turn_id: str,
+    session_csrf_hash: str,
+    *,
+    operation_id: str | None = None,
+    cancel_event: threading.Event | None = None,
+    request_kind: str | None = None,
+    attachments: Any = None,
+) -> dict[str, Any]:
+    """Persist a long Coach turn before returning control to the browser."""
+    message, client_turn_id, request_kind, attachments, scope = _background_coach_request(
+        message, client_turn_id, request_kind, attachments
+    )
+    active = _active_background_coach_job(session_csrf_hash)
+    if active and active["client_turn_id"] != client_turn_id:
+        raise AppError(409, "Für diese Sitzung läuft bereits eine Coach-Anfrage.", reason="chat_already_running")
+    operation_id = operation_id or uuid.uuid4().hex
+    session_key = _coach_session_key(session_csrf_hash)
+    ai_provider, model, thinking_level = _background_coach_provider_settings(attachments)
+    existing_response, user_message_id = _persist_background_coach_job(
+        message, client_turn_id, session_csrf_hash, operation_id, request_kind, attachments,
+        scope, session_key, ai_provider, model, thinking_level,
+    )
+    if existing_response:
+        return existing_response
+    publish_state_event("coach", {"message_id": user_message_id, "role": "user", "client_turn_id": client_turn_id})
     with CHAT_STREAM_LOCK:
         COACH_JOB_CANCEL_EVENTS[operation_id] = cancel_event or threading.Event()
     COACH_JOB_WAKE.set()
