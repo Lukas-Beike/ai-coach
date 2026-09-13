@@ -17284,7 +17284,7 @@ def _structured_coach_sync_tool_result(
 
 def _structured_coach_misc_tool_result(
     name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
-    conversation_id: str, client_turn_id: str, session_csrf_hash: str,
+    client_turn_id: str, session_csrf_hash: str,
 ) -> dict[str, Any] | None:
     if name == "preview_adaptive_replan":
         if "preview_adaptive_replan" not in _structured_authorized_operations(intent):
@@ -17364,7 +17364,7 @@ def _structured_coach_tool_result(
     if sync_result is not None:
         return sync_result
     misc_result = _structured_coach_misc_tool_result(
-        name, arguments, intent=intent, conversation_id=conversation_id,
+        name, arguments, intent=intent,
         client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash,
     )
     if misc_result is not None:
