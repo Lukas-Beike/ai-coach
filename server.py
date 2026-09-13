@@ -10851,7 +10851,7 @@ def create_local_planned_unit(
     return entry
 
 
-def list_planned_units(limit: int = 500, include_archived: bool = False, *, future_only: bool = False) -> list[dict[str, Any]]:
+def _planned_unit_rows(limit: int, include_archived: bool, future_only: bool) -> list[Any]:
     with DB_LOCK, database() as db:
         clauses = []
         params: list[Any] = []
@@ -10869,26 +10869,35 @@ def list_planned_units(limit: int = 500, include_archived: bool = False, *, futu
             f"{where} ORDER BY json_extract(payload, '$.date'), lower(json_extract(payload, '$.name')), local_id LIMIT ?",
             (*params, max(1, min(int(limit) * (2 if include_archived else 1), 1000))),
         ).fetchall()
-    result: list[dict[str, Any]] = []
-    for row in rows:
+    return rows
+
+
+def _planned_unit_payload(row: Any, include_archived: bool) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(row.get("payload") or "{}")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or (not include_archived and payload.get("archived")):
+        return None
+    payload["id"] = str(row.get("local_id") or payload.get("id") or "")
+    payload["local_id"] = payload["id"]
+    payload["sync_status"] = str(row.get("sync_state") or payload.get("sync_status") or "local")
+    if row.get("sync_error"):
+        payload["sync_error"] = str(row["sync_error"])[:1000]
+    if row.get("sync_conflict"):
         try:
-            payload = json.loads(row.get("payload") or "{}")
+            payload["sync_conflict"] = json.loads(row["sync_conflict"])
         except (TypeError, ValueError):
-            continue
-        if not isinstance(payload, dict) or (not include_archived and payload.get("archived")):
-            continue
-        payload["id"] = str(row.get("local_id") or payload.get("id") or "")
-        payload["local_id"] = payload["id"]
-        payload["sync_status"] = str(row.get("sync_state") or payload.get("sync_status") or "local")
-        if row.get("sync_error"):
-            payload["sync_error"] = str(row["sync_error"])[:1000]
-        if row.get("sync_conflict"):
-            try:
-                payload["sync_conflict"] = json.loads(row["sync_conflict"])
-            except (TypeError, ValueError):
-                payload["sync_conflict"] = {"raw": str(row["sync_conflict"])[:1000]}
-        result.append(payload)
-    return result
+            payload["sync_conflict"] = {"raw": str(row["sync_conflict"])[:1000]}
+    return payload
+
+
+def list_planned_units(limit: int = 500, include_archived: bool = False, *, future_only: bool = False) -> list[dict[str, Any]]:
+    return [
+        payload
+        for row in _planned_unit_rows(limit, include_archived, future_only)
+        if (payload := _planned_unit_payload(row, include_archived)) is not None
+    ]
 
 
 def create_local_workout_library_entry(workout: dict[str, Any], db: Any | None = None) -> dict[str, Any]:
@@ -11287,13 +11296,20 @@ def _canonical_linked_remote(
     return linked
 
 
-def _canonical_local_event(entry: dict[str, Any], linked: dict[str, Any] | None) -> dict[str, Any]:
+def _canonical_local_event_identity(
+    entry: dict[str, Any], linked: dict[str, Any] | None,
+) -> tuple[str, str, str, str, str, str]:
     local_id = str(entry.get("id") or entry.get("local_id") or "")
     event_date = str(entry.get("date") or "")[:10]
     local_status = str(entry.get("sync_status") or "local")
     remote_id = str(linked.get("id") or entry.get("remote_event_id") or "") if linked else str(entry.get("remote_event_id") or "")
     remote_external_id = str(linked.get("external_id") or entry.get("remote_event_external_id") or "") if linked else str(entry.get("remote_event_external_id") or "")
     sync_status = local_status if local_status not in {"", "synced"} or not linked else "synced"
+    return local_id, event_date, local_status, remote_id, remote_external_id, sync_status
+
+
+def _canonical_local_event(entry: dict[str, Any], linked: dict[str, Any] | None) -> dict[str, Any]:
+    local_id, event_date, _local_status, remote_id, remote_external_id, sync_status = _canonical_local_event_identity(entry, linked)
     result_event = {
         **entry,
         "id": remote_id or local_id,
