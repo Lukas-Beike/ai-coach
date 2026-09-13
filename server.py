@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, NoReturn
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
@@ -7798,29 +7798,25 @@ def _urlopen_interruptibly(request: Request, timeout: int, cancel_event: threadi
     return result["response"]
 
 
-def http_json(
-    method: str,
-    url: str,
-    payload: Any | None = None,
-    headers: dict[str, str] | None = None,
-    timeout: int = 45,
-    service: str | None = None,
-    raw_body: bytes | None = None,
-    content_type: str | None = None,
-    cancel_event: threading.Event | None = None,
-) -> Any:
-    initialise_logging()
+def _http_request_body(payload: Any | None, raw_body: bytes | None) -> bytes | None:
     if raw_body is not None and payload is not None:
         raise ValueError("payload and raw_body are mutually exclusive")
     if raw_body is not None:
-        body = raw_body
-    elif payload is not None:
-        body = json.dumps(payload).encode("utf-8")
-    else:
-        body = None
+        return raw_body
+    return json.dumps(payload).encode("utf-8") if payload is not None else None
+
+
+def _http_request_parts(
+    method: str,
+    url: str,
+    body: bytes | None,
+    headers: dict[str, str] | None,
+    timeout: int,
+    service: str | None,
+) -> tuple[Request, Any, dict[str, str], dict[str, Any]]:
     request_headers = {"Accept": JSON_MEDIA_TYPE, "User-Agent": f"IntervalsCoach/{APP_VERSION}"}
     if body is not None:
-        request_headers["Content-Type"] = content_type or JSON_MEDIA_TYPE
+        request_headers["Content-Type"] = JSON_MEDIA_TYPE
     request_headers.update(headers or {})
     request = Request(url, data=body, headers=request_headers, method=method)
     parsed_url = urlparse(url)
@@ -7834,10 +7830,17 @@ def http_json(
     }
     operation_context = OPERATION_CONTEXT.get()
     if operation_context:
-        request_context.update({"operation_id": operation_context["operation_id"], "trigger": operation_context["trigger"], "phase": request_context["path"].rsplit("/", 1)[-1] or "request"})
+        request_context.update({
+            "operation_id": operation_context["operation_id"],
+            "trigger": operation_context["trigger"],
+            "phase": request_context["path"].rsplit("/", 1)[-1] or "request",
+        })
     if parsed_url.query:
         request_context["query_keys"] = sorted(parse_qs(parsed_url.query, keep_blank_values=True))
-    started = time.perf_counter()
+    return request, parsed_url, request_headers, request_context
+
+
+def _log_http_request_started(request_context: dict[str, Any], parsed_url: Any, request_headers: dict[str, str]) -> None:
     LOGGER.info(EXTERNAL_HTTP_STARTED_EVENT, extra={"event": "external_request_started", "context": request_context})
     capture_diagnostic_event("external_http_started", {
         "service": request_context["service"],
@@ -7848,165 +7851,232 @@ def http_json(
         "request_bytes": request_context["request_bytes"],
         "content_type": request_headers.get("Content-Type"),
     })
+
+
+def _read_http_response(response: Any, cancel_event: threading.Event | None) -> bytes:
+    if cancel_event is not None:
+        cancel_event._provider_response = response
+    try:
+        _raise_chat_cancelled(cancel_event)
+        try:
+            raw = response.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
+        except TypeError:  # Small fake responses in unit tests may not accept a size.
+            raw = response.read()
+    finally:
+        if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
+            cancel_event._provider_response = None
+    if len(raw) > MAX_EXTERNAL_RESPONSE_BYTES:
+        raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.")
+    return raw
+
+
+def _http_success_result(
+    response: Any,
+    cancel_event: threading.Event | None,
+    service: str | None,
+    request_context: dict[str, Any],
+    parsed_url: Any,
+    started: float,
+) -> Any:
+    raw = _read_http_response(response, cancel_event)
+    result = json.loads(raw) if raw else None
+    if service == "openai":
+        record_openai_rate_limits(getattr(response, "headers", None))
+        record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
+    status = getattr(response, "status", None) or getattr(response, "code", None) or 200
+    LOGGER.info(
+        EXTERNAL_HTTP_COMPLETED_EVENT,
+        extra={
+            "event": "external_request_completed",
+            "context": {
+                **request_context,
+                "status": status,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                "response_bytes": len(raw),
+                **external_result_context(result),
+            },
+        },
+    )
+    capture_diagnostic_event("external_http_completed", {
+        "service": request_context["service"],
+        "method": request_context["method"],
+        "host": _safe_url_netloc(parsed_url),
+        "path": request_context["path"],
+        "status": status,
+        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+        "response_bytes": len(raw),
+        "headers": _safe_response_headers(getattr(response, "headers", None)),
+        "response": diagnostic_capture_response(result),
+    })
+    return result
+
+
+def _capture_http_failure(
+    request_context: dict[str, Any], parsed_url: Any, started: float, error: BaseException, *, error_bytes: int | None = None,
+    headers: Any = None,
+) -> None:
+    context: dict[str, Any] = {
+        "service": request_context["service"],
+        "method": request_context["method"],
+        "host": _safe_url_netloc(parsed_url),
+        "path": request_context["path"],
+        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+        "error": _safe_diagnostic_error(error),
+    }
+    if error_bytes is not None:
+        context["error_bytes"] = error_bytes
+    if headers is not None:
+        context["headers"] = _safe_response_headers(headers)
+    capture_diagnostic_event("external_http_failed", context)
+
+
+def _handle_http_error(
+    exc: HTTPError,
+    service: str | None,
+    request_context: dict[str, Any],
+    parsed_url: Any,
+    started: float,
+) -> NoReturn:
+    raw_error = _read_http_error_body(exc)
+    if service == "openai":
+        record_openai_rate_limits(getattr(exc, "headers", None))
+        error_details = openai_error_details(exc.code, raw_error)
+        record_openai_status(error_details)
+    elif service == "gemini":
+        error_details = gemini_error_details(exc.code, raw_error)
+    else:
+        error_details = None
+    LOGGER.exception(
+        "Upstream HTTP request failed",
+        extra={
+            "event": "upstream_http_error",
+            "context": {
+                **request_context,
+                "status": exc.code,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                "error_type": type(exc).__name__,
+                **({"reason": error_details["reason"]} if error_details else {}),
+            },
+        },
+        exc_info=True,
+    )
+    _capture_http_failure(
+        request_context,
+        parsed_url,
+        started,
+        exc,
+        error_bytes=len(raw_error),
+        headers=getattr(exc, "headers", None),
+    )
+    if error_details:
+        if service == "gemini":
+            _record_gemini_status("error", error_details["message"], reason=error_details["reason"], status=exc.code)
+        status = exc.code if service == "gemini" or exc.code == 429 else 502
+        raise AppError(status, error_details["message"], reason=error_details["reason"]) from exc
+    raise AppError(502, upstream_http_error_message(exc.code, raw_error, service), reason="provider_http_error") from exc
+
+
+def _handle_http_network_error(
+    exc: OSError | ValueError,
+    service: str | None,
+    request_context: dict[str, Any],
+    parsed_url: Any,
+    started: float,
+    cancel_event: threading.Event | None,
+) -> NoReturn:
+    if cancel_event is not None and cancel_event.is_set():
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
+    if service == "openai":
+        record_openai_status({
+            "state": "error",
+            "reason": "network_error",
+            "message": "OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung prüfen und später erneut versuchen.",
+            "http_status": None,
+            "updated_at": utc_now(),
+        })
+    LOGGER.exception(
+        "Upstream service is unavailable",
+        extra={
+            "event": "upstream_network_error",
+            "context": {
+                **request_context,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                "error_type": type(exc).__name__,
+                "error": redact_text(str(exc))[:500],
+            },
+        },
+        exc_info=True,
+    )
+    _capture_http_failure(request_context, parsed_url, started, exc)
+    raise provider_error(service, "network") from exc
+
+
+def _handle_http_app_error(exc: AppError, request_context: dict[str, Any], parsed_url: Any, started: float) -> NoReturn:
+    _capture_http_failure(request_context, parsed_url, started, exc)
+    raise exc
+
+
+def _handle_http_client_error(
+    exc: BaseException, service: str | None, request_context: dict[str, Any], parsed_url: Any, started: float,
+) -> NoReturn:
+    if service == "openai":
+        record_openai_status({
+            "state": "error",
+            "reason": "client_error",
+            "message": "Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte später erneut versuchen.",
+            "http_status": None,
+            "updated_at": utc_now(),
+        })
+    LOGGER.exception(
+        "External HTTP request failed while processing response",
+        extra={
+            "event": "external_request_failed",
+            "context": {
+                **request_context,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                "error_type": type(exc).__name__,
+                "error": redact_text(str(exc))[:500],
+            },
+        },
+        exc_info=True,
+    )
+    _capture_http_failure(request_context, parsed_url, started, exc)
+    raise provider_error(service, "client") from exc
+
+
+def http_json(
+    method: str,
+    url: str,
+    payload: Any | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: int = 45,
+    service: str | None = None,
+    raw_body: bytes | None = None,
+    content_type: str | None = None,
+    cancel_event: threading.Event | None = None,
+) -> Any:
+    initialise_logging()
+    body = _http_request_body(payload, raw_body)
+    request, parsed_url, request_headers, request_context = _http_request_parts(
+        method, url, body, headers, timeout, service,
+    )
+    if content_type is not None and body is not None:
+        request_headers["Content-Type"] = content_type
+        request = Request(url, data=body, headers=request_headers, method=method)
+    started = time.perf_counter()
+    _log_http_request_started(request_context, parsed_url, request_headers)
     try:
         _raise_chat_cancelled(cancel_event)
         with _urlopen_interruptibly(request, timeout, cancel_event) as response:
-            if cancel_event is not None:
-                cancel_event._provider_response = response
-            try:
-                _raise_chat_cancelled(cancel_event)
-                try:
-                    raw = response.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
-                except TypeError:  # Small fake responses in unit tests may not accept a size.
-                    raw = response.read()
-            finally:
-                if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
-                    cancel_event._provider_response = None
-            if len(raw) > MAX_EXTERNAL_RESPONSE_BYTES:
-                raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.")
-            result = json.loads(raw) if raw else None
-            if service == "openai":
-                record_openai_rate_limits(getattr(response, "headers", None))
-                record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
-            LOGGER.info(
-                EXTERNAL_HTTP_COMPLETED_EVENT,
-                extra={
-                    "event": "external_request_completed",
-                    "context": {
-                        **request_context,
-                        "status": getattr(response, "status", None) or getattr(response, "code", None) or 200,
-                        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                        "response_bytes": len(raw),
-                        **external_result_context(result),
-                    },
-                },
-            )
-            capture_diagnostic_event("external_http_completed", {
-                "service": request_context["service"],
-                "method": request_context["method"],
-                "host": _safe_url_netloc(parsed_url),
-                "path": request_context["path"],
-                "status": getattr(response, "status", None) or getattr(response, "code", None) or 200,
-                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                "response_bytes": len(raw),
-                "headers": _safe_response_headers(getattr(response, "headers", None)),
-                "response": diagnostic_capture_response(result),
-            })
-            return result
+            return _http_success_result(response, cancel_event, service, request_context, parsed_url, started)
     except HTTPError as exc:
-        raw_error = _read_http_error_body(exc)
-        if service == "openai":
-            record_openai_rate_limits(getattr(exc, "headers", None))
-            error_details = openai_error_details(exc.code, raw_error)
-            record_openai_status(error_details)
-        elif service == "gemini":
-            error_details = gemini_error_details(exc.code, raw_error)
-        else:
-            error_details = None
-        LOGGER.exception(
-            "Upstream HTTP request failed",
-            extra={
-                "event": "upstream_http_error",
-                "context": {
-                    **request_context,
-                    "status": exc.code,
-                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                    "error_type": type(exc).__name__,
-                    **({"reason": error_details["reason"]} if error_details else {}),
-                },
-            },
-            exc_info=True,
-        )
-        capture_diagnostic_event("external_http_failed", {
-            "service": request_context["service"],
-            "method": request_context["method"],
-            "host": _safe_url_netloc(parsed_url),
-            "path": request_context["path"],
-            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-            "error": _safe_diagnostic_error(exc),
-            "headers": _safe_response_headers(getattr(exc, "headers", None)),
-            "error_bytes": len(raw_error),
-        })
-        if error_details:
-            if service == "gemini":
-                _record_gemini_status("error", error_details["message"], reason=error_details["reason"], status=exc.code)
-            status = exc.code if service == "gemini" or exc.code == 429 else 502
-            raise AppError(status, error_details["message"], reason=error_details["reason"]) from exc
-        raise AppError(502, upstream_http_error_message(exc.code, raw_error, service), reason="provider_http_error") from exc
+        _handle_http_error(exc, service, request_context, parsed_url, started)
     except (OSError, ValueError) as exc:
-        if cancel_event is not None and cancel_event.is_set():
-            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        if service == "openai":
-            record_openai_status({
-                "state": "error",
-                "reason": "network_error",
-                "message": "OpenAI ist nicht erreichbar. Bitte Netzwerkverbindung prüfen und später erneut versuchen.",
-                "http_status": None,
-                "updated_at": utc_now(),
-            })
-        LOGGER.exception(
-            "Upstream service is unavailable",
-            extra={
-                "event": "upstream_network_error",
-                "context": {
-                    **request_context,
-                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                    "error_type": type(exc).__name__,
-                    "error": redact_text(str(exc))[:500],
-                },
-            },
-            exc_info=True,
-        )
-        capture_diagnostic_event("external_http_failed", {
-            "service": request_context["service"],
-            "method": request_context["method"],
-            "host": _safe_url_netloc(parsed_url),
-            "path": request_context["path"],
-            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-            "error": _safe_diagnostic_error(exc),
-        })
-        raise provider_error(service, "network") from exc
+        _handle_http_network_error(exc, service, request_context, parsed_url, started, cancel_event)
     except AppError as exc:
-        capture_diagnostic_event("external_http_failed", {
-            "service": request_context["service"],
-            "method": request_context["method"],
-            "host": _safe_url_netloc(parsed_url),
-            "path": request_context["path"],
-            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-            "error": _safe_diagnostic_error(exc),
-        })
-        raise
+        _handle_http_app_error(exc, request_context, parsed_url, started)
     except Exception as exc:
-        if service == "openai":
-            record_openai_status({
-                "state": "error",
-                "reason": "client_error",
-                "message": "Die OpenAI-Antwort konnte nicht verarbeitet werden. Bitte später erneut versuchen.",
-                "http_status": None,
-                "updated_at": utc_now(),
-            })
-        LOGGER.exception(
-            "External HTTP request failed while processing response",
-            extra={
-                "event": "external_request_failed",
-                "context": {
-                    **request_context,
-                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                    "error_type": type(exc).__name__,
-                    "error": redact_text(str(exc))[:500],
-                },
-            },
-            exc_info=True,
-        )
-        capture_diagnostic_event("external_http_failed", {
-            "service": request_context["service"],
-            "method": request_context["method"],
-            "host": _safe_url_netloc(parsed_url),
-            "path": request_context["path"],
-            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-            "error": _safe_diagnostic_error(exc),
-        })
-        raise provider_error(service, "client") from exc
+        _handle_http_client_error(exc, service, request_context, parsed_url, started)
 
 
 def is_outdoor_activity(event: Any) -> bool:
