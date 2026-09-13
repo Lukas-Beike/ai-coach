@@ -22826,7 +22826,7 @@ def _startup_historical_backfill_payload(provider: str) -> dict[str, Any] | None
     if cursor and str(cursor) <= SYNC_EARLIEST_DATE.isoformat():
         return None
     try:
-        resume_end = date.fromisoformat(str(cursor)[0:10]) - timedelta(days=1) if cursor else None
+        resume_end = date.fromisoformat(str(cursor)[:10]) - timedelta(days=1) if cursor else None
     except ValueError:
         resume_end = None
     payload: dict[str, Any] = {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}
