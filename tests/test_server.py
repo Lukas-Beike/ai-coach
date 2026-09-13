@@ -357,6 +357,18 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["items"][0]["status"], "failed")
         self.assertEqual(state["progress"], {"completed": 1, "total": 1})
 
+    def test_repair_batch_reports_calendar_sync_before_deferred_verification(self):
+        item = {"library_workout_id": str(uuid.uuid4()), "expected_payload_hash": "a" * 64}
+        repair_batch = Mock()
+        with patch.object(server, "_repair_local_planned_unit_calendar_entry", return_value=None) as repair:
+            result = server._sync_selected_planned_library_entry(
+                item, {"repair": True}, repair_batch,
+            )
+
+        repair.assert_called_once_with(item["library_workout_id"], item["expected_payload_hash"], batch=repair_batch)
+        self.assertEqual(result["status"], "synced")
+        self.assertTrue(result["calendar_synced"])
+
 
     def test_structured_commit_rejects_model_artifact_outside_classified_scope(self):
         artifact = server._stage_coach_artifact(
@@ -639,6 +651,17 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(server._execute_sync_job(competition_job)["pushed"], 1)
         performance.assert_called_once_with()
         competitions.assert_called_once_with(reason="Coach request", push_local=True, operation_id="job-competition")
+
+    def test_normalized_intervals_job_type_dispatches_targeted_operation(self):
+        refresh_job = {
+            "id": "job-normalized-performance", "provider": "intervals", "type": " PERFORMANCE_REFRESH ",
+            "payload": json.dumps({"reason": "Coach request"}),
+        }
+        with patch.object(server, "refresh_current_performance", return_value={"status": "ok"}) as performance, patch.object(
+            server, "sync_intervals", side_effect=AssertionError("normalized job fell through to full sync")
+        ):
+            self.assertEqual(server._execute_sync_job(refresh_job)["status"], "ok")
+        performance.assert_called_once_with()
 
     def test_intervals_job_delegates_performance_follow_up_to_common_sync_path(self):
         refresh_job = {
@@ -1988,7 +2011,7 @@ class CoachTests(unittest.TestCase):
 
     def test_daily_sync_loop_uses_local_provider_markers(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
-        loop = source[source.index("def daily_sync_loop"):source.index("def enqueue_startup_sync_jobs")]
+        loop = source[source.index("def daily_sync_loop"):source.index("def _startup_historical_backfill_payload")]
         self.assertIn('daily_sync_due("calendar")', loop)
         self.assertIn('daily_sync_due("garmin")', loop)
         self.assertIn('daily_sync_due("intervals")', loop)
@@ -2203,8 +2226,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('/views.js?v=217', index)
         self.assertIn('/forms.js?v=217', index)
         self.assertIn('/components.js?v=217', index)
-        self.assertIn('/app.js?v=219', index)
-        self.assertIn('intervals-coach-v219', service_worker)
+        self.assertIn('/app.js?v=220', index)
+        self.assertIn('intervals-coach-v220', service_worker)
         self.assertIn('"/navigation.js?v=217"', service_worker)
         self.assertIn('"/state.js?v=217"', service_worker)
         self.assertIn('"/views.js?v=217"', service_worker)
@@ -2237,7 +2260,7 @@ class CoachTests(unittest.TestCase):
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
         self.assertLess(index.index('/forms.js?v=217'), index.index('/components.js?v=217'))
-        self.assertLess(index.index('/components.js?v=217'), index.index('/app.js?v=219'))
+        self.assertLess(index.index('/components.js?v=217'), index.index('/app.js?v=220'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -7652,7 +7675,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('"/forms.js?v=217"', source)
         self.assertIn('"/components.js?v=217"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=219"', source)
+        self.assertIn('"/app.js?v=220"', source)
         self.assertIn('"/icon.svg?v=217"', source)
         self.assertIn('"/styles.css?v=217"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
