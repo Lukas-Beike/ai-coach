@@ -13064,6 +13064,120 @@ def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any],
     return normalized, remote_id, identity
 
 
+def _remote_planned_unit_existing_state(
+    current_row: Any, incoming: dict[str, Any], incoming_hash: str,
+) -> tuple[dict[str, Any], str]:
+    try:
+        current = json.loads(current_row.get("payload") or "{}")
+    except (TypeError, ValueError):
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    state = str(current_row.get("sync_state") or "synced")
+    baseline = str(current_row.get("baseline_hash") or "")
+    local_changed = bool(int(current_row.get("sync_dirty") or 0)) or state in {"local", "sync_error", "conflict"}
+    remote_changed = bool(baseline and baseline != incoming_hash) or (not baseline and _planned_unit_payload_hash(current) != incoming_hash)
+    if local_changed and remote_changed:
+        return current, "conflict"
+    if local_changed:
+        return current, "preserve"
+    if state == "synced" and not remote_changed:
+        return current, "unchanged"
+    return current, "update"
+
+
+def _update_remote_planned_conflict(
+    db: Any, current_row: Any, current: dict[str, Any], incoming: dict[str, Any], now: str,
+) -> None:
+    conflict = {"type": "remote_changed", "remote": incoming, "detected_at": now}
+    current["sync_status"] = "conflict"
+    db.execute(
+        "UPDATE planned_units SET sync_state='conflict', sync_dirty=1, sync_conflict=?, sync_error=NULL, payload=?, updated_at=? WHERE local_id=?",
+        (json.dumps(conflict, ensure_ascii=False), json.dumps(current, ensure_ascii=False), now, current_row["local_id"]),
+    )
+
+
+def _update_remote_planned_clean(
+    db: Any, current_row: Any, current: dict[str, Any], incoming: dict[str, Any],
+    identity: str, incoming_hash: str, now: str,
+) -> None:
+    incoming["id"] = str(current_row.get("local_id") or incoming["id"])
+    for key in ("plan_id", "plan_name", "rationale", "archived", "private_calendar_adjustment"):
+        if current.get(key) is not None:
+            incoming[key] = current[key]
+    db.execute(
+        "UPDATE planned_units SET external_id=?, payload=?, sync_dirty=0, sync_state='synced', sync_error=NULL, sync_conflict='', baseline_hash=?, last_synced_at=?, updated_at=? WHERE local_id=?",
+        (identity, json.dumps({**incoming, "sync_status": "synced"}, ensure_ascii=False), incoming_hash, now, now, current_row["local_id"]),
+    )
+
+
+def _upsert_remote_planned_event(
+    db: Any, incoming: dict[str, Any], remote_id: str, identity: str, now: str,
+) -> tuple[int, int, int, bool]:
+    current_row = db.execute(
+        "SELECT * FROM planned_units WHERE json_extract(payload, '$.remote_event_id')=? OR external_id=? LIMIT 1",
+        (remote_id, identity),
+    ).fetchone()
+    incoming_hash = _planned_unit_payload_hash(incoming)
+    if not current_row:
+        incoming["sync_status"] = "synced"
+        _insert_planned_unit(db, incoming, sync_dirty=0, sync_state="synced", baseline_hash=incoming_hash, last_synced_at=now)
+        return 1, 0, 0, True
+    current, state = _remote_planned_unit_existing_state(current_row, incoming, incoming_hash)
+    if state == "conflict":
+        _update_remote_planned_conflict(db, current_row, current, incoming, now)
+        return 0, 0, 1, True
+    if state != "update":
+        return 0, 0, 0, False
+    _update_remote_planned_clean(db, current_row, current, incoming, identity, incoming_hash, now)
+    return 0, 1, 0, True
+
+
+def _remote_calendar_window(
+    incoming_dates: list[str], calendar_start: str | None, calendar_end: str | None,
+) -> tuple[str | None, str | None]:
+    valid_dates = [value for value in incoming_dates if re.fullmatch(DATE_ONLY_PATTERN, value)]
+    start_value = str(calendar_start or "")[:10]
+    end_value = str(calendar_end or "")[:10]
+    window_start = start_value if re.fullmatch(DATE_ONLY_PATTERN, start_value) else (min(valid_dates) if valid_dates else None)
+    window_end = end_value if re.fullmatch(DATE_ONLY_PATTERN, end_value) else (max(valid_dates) if valid_dates else None)
+    return window_start, window_end
+
+
+def _mark_missing_remote_planned_units(
+    db: Any, rows: list[Any], seen_ids: set[str], window_start: str | None, window_end: str | None, now: str,
+) -> tuple[int, bool]:
+    conflicts = 0
+    mutated = False
+    for row in rows:
+        try:
+            payload = json.loads(row.get("payload") or "{}")
+        except (TypeError, ValueError):
+            continue
+        remote_id = str(payload.get("remote_event_id") or "")
+        row_date = str(payload.get("date") or "")[:10]
+        if not remote_id or remote_id in seen_ids or not window_start or not window_end or not (window_start <= row_date <= window_end):
+            continue
+        state = str(row.get("sync_state") or "synced")
+        if state == "synced":
+            payload["sync_status"] = "remote_missing"
+            db.execute(
+                "UPDATE planned_units SET sync_state='remote_missing', sync_dirty=0, payload=?, updated_at=? WHERE local_id=?",
+                (json.dumps(payload, ensure_ascii=False), now, row["local_id"]),
+            )
+            mutated = True
+        elif state in {"local", "sync_error"}:
+            payload["sync_status"] = "conflict"
+            conflict = {"type": "remote_missing", "detected_at": now}
+            db.execute(
+                "UPDATE planned_units SET sync_state='conflict', sync_dirty=1, sync_conflict=?, payload=?, updated_at=? WHERE local_id=?",
+                (json.dumps(conflict, ensure_ascii=False), json.dumps(payload, ensure_ascii=False), now, row["local_id"]),
+            )
+            conflicts += 1
+            mutated = True
+    return conflicts, mutated
+
+
 def upsert_remote_planned_units(
     events: list[Any] | None,
     *,
@@ -13090,97 +13204,23 @@ def upsert_remote_planned_units(
             incoming, remote_id, identity = prepared
             seen_ids.add(remote_id)
             incoming_dates.append(str(incoming.get("date") or "")[:10])
-            current_row = db.execute(
-                "SELECT * FROM planned_units WHERE json_extract(payload, '$.remote_event_id')=? OR external_id=? LIMIT 1",
-                (remote_id, identity),
-            ).fetchone()
-            incoming_hash = _planned_unit_payload_hash(incoming)
-            if not current_row:
-                incoming["sync_status"] = "synced"
-                _insert_planned_unit(db, incoming, sync_dirty=0, sync_state="synced", baseline_hash=incoming_hash, last_synced_at=now)
-                imported += 1
-                mutated = True
-                continue
-            try:
-                current = json.loads(current_row.get("payload") or "{}")
-            except (TypeError, ValueError):
-                current = {}
-            if not isinstance(current, dict):
-                current = {}
-            state = str(current_row.get("sync_state") or "synced")
-            baseline = str(current_row.get("baseline_hash") or "")
-            local_changed = bool(int(current_row.get("sync_dirty") or 0)) or state in {"local", "sync_error", "conflict"}
-            remote_changed = bool(baseline and baseline != incoming_hash) or (not baseline and _planned_unit_payload_hash(current) != incoming_hash)
-            if local_changed and remote_changed:
-                conflict = {"type": "remote_changed", "remote": incoming, "detected_at": now}
-                current["sync_status"] = "conflict"
-                db.execute(
-                    "UPDATE planned_units SET sync_state='conflict', sync_dirty=1, sync_conflict=?, sync_error=NULL, payload=?, updated_at=? WHERE local_id=?",
-                    (json.dumps(conflict, ensure_ascii=False), json.dumps(current, ensure_ascii=False), now, current_row["local_id"]),
-                )
-                conflicts += 1
-                mutated = True
-                continue
-            if local_changed:
-                # The provider is still at the stored baseline. Preserve the
-                # local dirty row and let the explicit push send it; a read
-                # sync must never turn a local-only edit into a remote copy.
-                continue
-            if state == "synced" and not remote_changed:
-                # An unchanged clean provider row must not invalidate a
-                # pending local plan operation's optimistic-concurrency read.
-                continue
-            incoming["id"] = str(current_row.get("local_id") or incoming["id"])
-            for key in ("plan_id", "plan_name", "rationale", "archived", "private_calendar_adjustment"):
-                if current.get(key) is not None:
-                    incoming[key] = current[key]
-            db.execute(
-                "UPDATE planned_units SET external_id=?, payload=?, sync_dirty=0, sync_state='synced', sync_error=NULL, sync_conflict='', baseline_hash=?, last_synced_at=?, updated_at=? WHERE local_id=?",
-                (identity, json.dumps({**incoming, "sync_status": "synced"}, ensure_ascii=False), incoming_hash, now, now, current_row["local_id"]),
+            imported_delta, updated_delta, conflict_delta, mutated_delta = _upsert_remote_planned_event(
+                db, incoming, remote_id, identity, now,
             )
-            updated += 1
-            mutated = True
+            imported += imported_delta
+            updated += updated_delta
+            conflicts += conflict_delta
+            mutated = mutated or mutated_delta
         rows = db.execute("SELECT local_id, payload, sync_state FROM planned_units WHERE json_extract(payload, '$.remote_event_id') IS NOT NULL").fetchall()
         # The provider request is a bounded calendar window. Only interpret a
         # missing event as a remote deletion when the row falls inside the
         # successfully received window; never tombstone units beyond it.
-        valid_dates = [value for value in incoming_dates if re.fullmatch(DATE_ONLY_PATTERN, value)]
-        calendar_start_value = str(calendar_start or "")[:10]
-        if re.fullmatch(DATE_ONLY_PATTERN, calendar_start_value):
-            window_start = calendar_start_value
-        elif valid_dates:
-            window_start = min(valid_dates)
-        else:
-            window_start = None
-        calendar_end_value = str(calendar_end or "")[:10]
-        if re.fullmatch(DATE_ONLY_PATTERN, calendar_end_value):
-            window_end = calendar_end_value
-        elif valid_dates:
-            window_end = max(valid_dates)
-        else:
-            window_end = None
-        for row in rows:
-            try:
-                payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError):
-                continue
-            remote_id = str(payload.get("remote_event_id") or "")
-            if not remote_id or remote_id in seen_ids:
-                continue
-            row_date = str(payload.get("date") or "")[:10]
-            if not window_start or not window_end or not (window_start <= row_date <= window_end):
-                continue
-            state = str(row.get("sync_state") or "synced")
-            if state == "synced":
-                payload["sync_status"] = "remote_missing"
-                db.execute("UPDATE planned_units SET sync_state='remote_missing', sync_dirty=0, payload=?, updated_at=? WHERE local_id=?", (json.dumps(payload, ensure_ascii=False), now, row["local_id"]))
-                mutated = True
-            elif state in {"local", "sync_error"}:
-                payload["sync_status"] = "conflict"
-                conflict = {"type": "remote_missing", "detected_at": now}
-                db.execute("UPDATE planned_units SET sync_state='conflict', sync_dirty=1, sync_conflict=?, payload=?, updated_at=? WHERE local_id=?", (json.dumps(conflict, ensure_ascii=False), json.dumps(payload, ensure_ascii=False), now, row["local_id"]))
-                conflicts += 1
-                mutated = True
+        window_start, window_end = _remote_calendar_window(incoming_dates, calendar_start, calendar_end)
+        missing_conflicts, missing_mutated = _mark_missing_remote_planned_units(
+            db, rows, seen_ids, window_start, window_end, now,
+        )
+        conflicts += missing_conflicts
+        mutated = mutated or missing_mutated
         if mutated:
             _bump_planning_revision(db)
     return {"imported": imported, "updated": updated, "conflicts": conflicts}
