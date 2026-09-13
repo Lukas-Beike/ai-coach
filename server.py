@@ -10006,6 +10006,71 @@ def planning_state() -> dict[str, Any]:
     return {"season": season_plan_summary(), "latest_replan": latest_replan_preview(), **current_adaptive_replan_status()}
 
 
+LIBRARY_WORKOUT_FIELDS = {
+    "name", "description", "type", "moving_time", "duration_minutes", "distance", "target",
+    "workout_doc", "icu_training_load", "icu_intensity", "indoor", "tags", "folder_id",
+    "date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_marked", "local_deleted",
+    "remote_event_id", "remote_event_external_id", "category", "paired_event_id",
+}
+
+
+def _library_workout_local_id(workout: dict[str, Any], local_id: str | None) -> str:
+    requested_local_id = str(local_id or workout.get("local_id") or "").strip()
+    raw_id = str(workout.get("id") or "").strip()
+    if not requested_local_id and raw_id:
+        try:
+            requested_local_id = str(uuid.UUID(raw_id))
+        except (ValueError, AttributeError):
+            requested_local_id = ""
+    if requested_local_id:
+        try:
+            return str(uuid.UUID(requested_local_id))
+        except (ValueError, AttributeError) as exc:
+            raise AppError(400, "Bibliothekseinheit ohne gültige lokale UUID.") from exc
+    return str(uuid.uuid4())
+
+
+def _library_workout_external_id(
+    workout: dict[str, Any], external_id: str | None, local_id: str,
+) -> str | None:
+    raw_id = str(workout.get("id") or "").strip()
+    # An explicit stored mapping is authoritative. Otherwise the provider's
+    # resource id is the external identity; a local UUID must never become its
+    # own external ID.
+    resolved_external_id = str(external_id or "").strip()
+    if not resolved_external_id:
+        resolved_external_id = raw_id if raw_id and raw_id != local_id else str(workout.get("external_id") or "").strip()
+    return resolved_external_id or None
+
+
+def _library_workout_ids(workout: dict[str, Any], local_id: str | None, external_id: str | None) -> tuple[str, str | None]:
+    resolved_local_id = _library_workout_local_id(workout, local_id)
+    return resolved_local_id, _library_workout_external_id(workout, external_id, resolved_local_id)
+
+
+def _library_workout_projection(workout: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in workout.items() if key in LIBRARY_WORKOUT_FIELDS}
+
+
+
+def _normalize_library_workout_text_fields(result: dict[str, Any]) -> None:
+    result["name"] = str(result.get("name") or "Bibliotheks-Einheit")[:200]
+    result["description"] = str(result.get("description") or "")[:12000]
+    result["type"] = intervals_workout_sport(result.get("type"))
+    for field, limit in (("date", 10), ("rationale", 2000), ("plan_name", 200), ("source", 40)):
+        if result.get(field):
+            result[field] = str(result[field])[:limit]
+
+
+def _normalize_library_workout_duration(result: dict[str, Any]) -> None:
+    if result.get("duration_minutes") is not None or result.get("moving_time") is None:
+        return
+    try:
+        result["duration_minutes"] = max(5, round(float(result["moving_time"]) / 60))
+    except (TypeError, ValueError):
+        pass
+
+
 def normalize_library_workout(
     workout: Any,
     *,
@@ -10015,58 +10080,13 @@ def normalize_library_workout(
 ) -> dict[str, Any]:
     if not isinstance(workout, dict):
         raise AppError(400, "Jede Bibliothekseinheit muss ein Objekt sein.")
-    raw_id = str(workout.get("id") or "").strip()
-    requested_local_id = str(local_id or workout.get("local_id") or "").strip()
-    if not requested_local_id and raw_id:
-        try:
-            requested_local_id = str(uuid.UUID(raw_id))
-        except (ValueError, AttributeError):
-            requested_local_id = ""
-    if requested_local_id:
-        try:
-            resolved_local_id = str(uuid.UUID(requested_local_id))
-        except (ValueError, AttributeError) as exc:
-            raise AppError(400, "Bibliothekseinheit ohne gültige lokale UUID.") from exc
-    else:
-        resolved_local_id = str(uuid.uuid4())
-    # An explicit stored mapping is authoritative. Otherwise the provider's
-    # resource id is the external identity; a local UUID must never become its
-    # own external ID.
-    resolved_external_id = str(external_id or "").strip()
-    if not resolved_external_id:
-        if raw_id and raw_id != resolved_local_id:
-            resolved_external_id = raw_id
-        else:
-            resolved_external_id = str(workout.get("external_id") or "").strip()
-    resolved_external_id = resolved_external_id or None
-    result = {
-        key: value for key, value in workout.items()
-        if key in {
-            "name", "description", "type", "moving_time", "duration_minutes", "distance", "target",
-            "workout_doc", "icu_training_load", "icu_intensity", "indoor", "tags", "folder_id",
-            "date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_marked", "local_deleted",
-            "remote_event_id", "remote_event_external_id", "category", "paired_event_id",
-        }
-    }
+    resolved_local_id, resolved_external_id = _library_workout_ids(workout, local_id, external_id)
+    result = _library_workout_projection(workout)
     result["id"] = resolved_local_id
     result["external_id"] = resolved_external_id
     result["sync_status"] = sync_status
-    result["name"] = str(result.get("name") or "Bibliotheks-Einheit")[:200]
-    result["description"] = str(result.get("description") or "")[:12000]
-    result["type"] = intervals_workout_sport(result.get("type"))
-    if result.get("duration_minutes") is None and result.get("moving_time") is not None:
-        try:
-            result["duration_minutes"] = max(5, round(float(result["moving_time"]) / 60))
-        except (TypeError, ValueError):
-            pass
-    if result.get("date"):
-        result["date"] = str(result["date"])[:10]
-    if result.get("rationale"):
-        result["rationale"] = str(result["rationale"])[:2000]
-    if result.get("plan_name"):
-        result["plan_name"] = str(result["plan_name"])[:200]
-    if result.get("source"):
-        result["source"] = str(result["source"])[:40]
+    _normalize_library_workout_text_fields(result)
+    _normalize_library_workout_duration(result)
     result["archived"] = bool(result.get("archived"))
     result["local_marked"] = bool(result.get("local_marked"))
     result["local_deleted"] = bool(result.get("local_deleted"))
