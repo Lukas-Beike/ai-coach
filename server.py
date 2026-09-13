@@ -16887,6 +16887,36 @@ def _save_coach_question(arguments: dict[str, Any], context: dict[str, Any]) -> 
     return {"ok": True, "status": "needs_clarification", "question": question}
 
 
+def _validate_training_patch_schedule(
+    changes: list[dict[str, Any]], workouts: list[dict[str, Any]], ids: list[str], db: Any,
+) -> None:
+    """Reject patch combinations that would overlap local planned dates."""
+    _validate_training_change_batch(changes, db)
+    final_dates = set()
+    for change in changes:
+        if change.get("action") not in {"delete", "archive"}:
+            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (change["local_id"],)).fetchone()
+            final_dates.add(str(change.get("date") or json.loads(row["payload"])["date"])[:10])
+    for workout in workouts:
+        day = workout["date"][:10]
+        if day in final_dates or calendar_conflicts({"date": day}, set(ids)):
+            raise AppError(409, f"Für den {day} besteht ein Kalenderkonflikt.", reason="plan_date_conflict")
+        final_dates.add(day)
+
+
+def _store_training_patch_constraints(
+    created: list[dict[str, Any]], ids: list[str], constraints: list[str], db: Any,
+) -> None:
+    """Attach the approved request constraints to every affected plan."""
+    plan_ids = {str(item.get("plan_id") or "") for item in created}
+    for local_id in ids:
+        row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
+        plan_ids.add(str(json.loads(row["payload"]).get("plan_id") or ""))
+    if constraints:
+        for plan_id in plan_ids - {""}:
+            set_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id, json.dumps(constraints, ensure_ascii=False), db)
+
+
 def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
     """Validate the final schedule, then commit all related changes together."""
     changes, raw_workouts = arguments.get("changes", []), arguments.get("workouts", [])
@@ -16902,27 +16932,11 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
         revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
         if type(arguments.get("expected_revision")) is not int or arguments["expected_revision"] != revision:
             raise AppError(409, "Der Plan wurde inzwischen geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
-        _validate_training_change_batch(changes, db)
-        final_dates = set()
-        for change in changes:
-            if change.get("action") not in {"delete", "archive"}:
-                row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (change["local_id"],)).fetchone()
-                final_dates.add(str(change.get("date") or json.loads(row["payload"])["date"])[:10])
-        for workout in workouts:
-            day = workout["date"][:10]
-            if day in final_dates or calendar_conflicts({"date": day}, set(ids)):
-                raise AppError(409, f"Für den {day} besteht ein Kalenderkonflikt.", reason="plan_date_conflict")
-            final_dates.add(day)
+        _validate_training_patch_schedule(changes, workouts, ids, db)
         changed = _apply_structured_training_changes(arguments, require_revision=True) if changes else {"changes": []}
         plan_name = str(arguments.get("plan_name") or ("Coach-Plan" if action["request"]["constraints"] else ""))
         created = save_workout_library_entries(workouts, plan_name, str(arguments.get("goal") or "")) if workouts else []
-        plan_ids = {str(item.get("plan_id") or "") for item in created}
-        for local_id in ids:
-            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
-            plan_ids.add(str(json.loads(row["payload"]).get("plan_id") or ""))
-        for plan_id in plan_ids - {""}:
-            if action["request"]["constraints"]:
-                set_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id, json.dumps(action["request"]["constraints"], ensure_ascii=False), db)
+        _store_training_patch_constraints(created, ids, action["request"]["constraints"], db)
         revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
     return {"ok": True, "status": "applied", "planning_revision": revision, "changes": changed["changes"], "library_entry_ids": [item["id"] for item in created]}
 
