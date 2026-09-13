@@ -6509,65 +6509,100 @@ def _normalise_coach_competition_id(value: Any, required: bool = False) -> str:
         raise AppError(400, "Ungültige lokale Wettkampf-ID.") from exc
 
 
-def save_coach_competition(arguments: Any) -> dict[str, Any]:
-    """Create or update one competition without replacing the athlete profile."""
+COACH_COMPETITION_REQUIRED_FIELDS = ("name", "event_date", "sport", "priority")
+COACH_COMPETITION_OPTIONAL_FIELDS = (
+    "start_date_local", "distance", "target", "course_profile", "notes", "description",
+)
+
+
+def _existing_coach_competition(competition_id: str) -> dict[str, Any] | None:
+    if not competition_id:
+        return None
+    with DB_LOCK, database() as db:
+        existing = COMPETITION_REPOSITORY.get(db, competition_id)
+    if not existing:
+        raise AppError(404, COMPETITION_NOT_FOUND_ERROR)
+    return existing
+
+
+def _merge_coach_competition_update(
+    value: dict[str, Any], arguments: dict[str, Any], existing: dict[str, Any] | None,
+) -> None:
+    if not existing:
+        return
+    for field in COACH_COMPETITION_REQUIRED_FIELDS:
+        if field not in arguments:
+            value[field] = existing.get(field)
+    # The tool schema is deliberately explicit, but preserve existing optional
+    # fields when a model supplies empty placeholders during a simple rename or
+    # date change.
+    for field in COACH_COMPETITION_OPTIONAL_FIELDS:
+        if value.get(field) in (None, "") and existing.get(field) not in (None, ""):
+            value[field] = existing[field]
+    if value.get("moving_time") is None and existing.get("moving_time") is not None:
+        value["moving_time"] = existing["moving_time"]
+
+
+def _normalized_coach_competition(arguments: Any) -> dict[str, str]:
     value = coach_competition_payload(arguments)
-    raw_id = str(value.get("id") or "").strip()
-    competition_id = _normalise_coach_competition_id(raw_id)
+    competition_id = _normalise_coach_competition_id(value.get("id"))
     if competition_id:
         value["id"] = competition_id
-    existing_row = None
-    if competition_id:
-        with DB_LOCK, database() as db:
-            existing_row = COMPETITION_REPOSITORY.get(db, competition_id)
-        if not existing_row:
-            raise AppError(404, COMPETITION_NOT_FOUND_ERROR)
-        for field in ("name", "event_date", "sport", "priority"):
-            if field not in arguments:
-                value[field] = existing_row.get(field)
-        # The tool schema is deliberately explicit, but preserve existing
-        # optional fields when a model supplies empty placeholders during a
-        # simple rename/date change.
-        for field in ("start_date_local", "distance", "target", "course_profile", "notes", "description"):
-            if value.get(field) in (None, "") and existing_row.get(field) not in (None, ""):
-                value[field] = existing_row[field]
-        if value.get("moving_time") is None and existing_row.get("moving_time") is not None:
-            value["moving_time"] = existing_row["moving_time"]
+    _merge_coach_competition_update(value, arguments, _existing_coach_competition(competition_id))
     normalized = normalize_competition(value)
     if competition_id:
         normalized["id"] = competition_id
+    return normalized
+
+
+def _insert_coach_competition(db: sqlite3.Connection, competition: dict[str, str], now: str) -> None:
+    db.execute(
+        "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)",
+        (
+            competition["id"], competition["name"], competition["event_date"], competition["sport"],
+            competition["priority"], competition["distance"], competition["target"], competition["course_profile"],
+            competition["notes"], competition["category"], competition["start_date_local"], competition["description"],
+            competition["moving_time"], now, now,
+        ),
+    )
+
+
+def _update_coach_competition(db: sqlite3.Connection, competition: dict[str, str], now: str) -> None:
+    db.execute(
+        "UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?",
+        (
+            competition["name"], competition["event_date"], competition["sport"], competition["priority"],
+            competition["distance"], competition["target"], competition["course_profile"], competition["notes"],
+            competition["category"], competition["start_date_local"], competition["description"], competition["moving_time"],
+            now, competition["id"],
+        ),
+    )
+
+
+def _save_normalized_coach_competition(competition: dict[str, str]) -> tuple[str, dict[str, Any] | None]:
     now = utc_now()
     with DB_LOCK, database() as db:
-        existing = COMPETITION_REPOSITORY.get(db, normalized["id"])
+        existing = COMPETITION_REPOSITORY.get(db, competition["id"])
         if not existing:
             count = db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()["count"]
             if count >= 20:
                 raise AppError(400, "Es können maximal 20 Wettkämpfe gespeichert werden.")
-            db.execute(
-                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)",
-                (
-                    normalized["id"], normalized["name"], normalized["event_date"], normalized["sport"],
-                    normalized["priority"], normalized["distance"], normalized["target"], normalized["course_profile"],
-                    normalized["notes"], normalized["category"], normalized["start_date_local"], normalized["description"],
-                    normalized["moving_time"], now, now,
-                ),
-            )
+            _insert_coach_competition(db, competition, now)
             status = "created"
             before = None
         else:
-            db.execute(
-                "UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?",
-                (
-                    normalized["name"], normalized["event_date"], normalized["sport"], normalized["priority"],
-                    normalized["distance"], normalized["target"], normalized["course_profile"], normalized["notes"],
-                    normalized["category"], normalized["start_date_local"], normalized["description"], normalized["moving_time"],
-                    now, normalized["id"],
-                ),
-            )
+            _update_coach_competition(db, competition, now)
             status = "updated"
             before = existing
-        _record_change(db, "competition", normalized["id"], "create" if status == "created" else "update", before, {**normalized, "sync_state": "local"})
+        _record_change(db, "competition", competition["id"], "create" if status == "created" else "update", before, {**competition, "sync_state": "local"})
+    return status, before
+
+
+def save_coach_competition(arguments: Any) -> dict[str, Any]:
+    """Create or update one competition without replacing the athlete profile."""
+    normalized = _normalized_coach_competition(arguments)
+    status, _ = _save_normalized_coach_competition(normalized)
     saved = next(item for item in list_competitions() if item["id"] == normalized["id"])
     return {"status": status, "competition": saved, "competitions": list_competitions()}
 
