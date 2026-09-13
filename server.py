@@ -2390,50 +2390,81 @@ def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
     raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
 
 
+def _sync_job_fallback_status(result: Any) -> str:
+    result_status = result.get("status") if isinstance(result, dict) else "ok"
+    if result_status == "already_running":
+        raise AppError(409, "Der Provider ist noch beschäftigt.", reason="temporary_error")
+    if result_status == "partial":
+        return "partial"
+    return "failed" if result_status in {"error", "failed"} else "completed"
+
+
+def _queue_next_historical_backfill(job: dict[str, Any], result: Any, fallback_status: str) -> None:
+    if not (
+        job.get("type") == "historical_backfill"
+        and fallback_status == "completed"
+        and isinstance(result, dict)
+        and result.get("historical_next_end")
+    ):
+        return
+    enqueue_sync_job(
+        job["provider"],
+        "historical_backfill",
+        {
+            "days": SYNC_CHUNK_DAYS,
+            "end_date": result["historical_next_end"],
+            "reason": "fortgesetzter historischer Backfill",
+        },
+        requested_by="backfill",
+    )
+
+
+def _requeue_claimed_sync_job(job: dict[str, Any], error_class: str, detail: str) -> bool:
+    attempts = int(job.get("attempts") or 1)
+    if not is_retryable_error(error_class) or attempts >= SYNC_JOB_MAX_ATTEMPTS:
+        return False
+    delay = retry_delay(attempts, base_seconds=SYNC_JOB_RETRY_BASE_SECONDS, max_seconds=SYNC_JOB_RETRY_MAX_SECONDS)
+    now = utc_now()
+    available = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
+    with DB_LOCK, database() as db:
+        db.execute(
+            "UPDATE sync_job_items SET status='queued', error_class=?, error_detail=?, updated_at=? WHERE job_id=?",
+            (error_class, detail, now, job["id"]),
+        )
+        db.execute(
+            "UPDATE sync_jobs SET status='queued', available_at=?, finished_at=NULL, error_class=?, updated_at=? WHERE id=?",
+            (available, error_class, now, job["id"]),
+        )
+    SYNC_JOB_WAKE.set()
+    return True
+
+
+def _record_claimed_sync_job_failure(job: dict[str, Any], exc: BaseException) -> None:
+    error_class = _sync_job_error_class(exc)
+    detail = redact_text(str(getattr(exc, "message", "") or exc))[:500]
+    if _requeue_claimed_sync_job(job, error_class, detail):
+        return
+    _sync_job_update(job["id"], "failed", error_class=error_class, error_detail=detail)
+    LOGGER.error(
+        "Persistent synchronization job failed",
+        extra={"event": "sync_job_failed", "context": {
+            "job_id": job["id"],
+            "provider": job.get("provider"),
+            "type": job.get("type"),
+            "error_class": error_class,
+        }},
+    )
+
+
 @claimed_maintenance_operation
 def _run_claimed_sync_job(job: dict[str, Any]) -> None:
-    job_id = job["id"]
     try:
         result = _execute_sync_job(job)
-        result_status = result.get("status") if isinstance(result, dict) else "ok"
-        if result_status == "already_running":
-            raise AppError(409, "Der Provider ist noch beschäftigt.", reason="temporary_error")
-        if result_status == "partial":
-            fallback_status = "partial"
-        elif result_status in {"error", "failed"}:
-            fallback_status = "failed"
-        else:
-            fallback_status = "completed"
-        _sync_job_update_from_result(job_id, result, fallback_status=fallback_status)
-        if job.get("type") == "historical_backfill" and fallback_status == "completed" and isinstance(result, dict) and result.get("historical_next_end"):
-            enqueue_sync_job(
-                job["provider"], "historical_backfill",
-                {"days": SYNC_CHUNK_DAYS, "end_date": result["historical_next_end"], "reason": "fortgesetzter historischer Backfill"},
-                requested_by="backfill",
-            )
+        fallback_status = _sync_job_fallback_status(result)
+        _sync_job_update_from_result(job["id"], result, fallback_status=fallback_status)
+        _queue_next_historical_backfill(job, result, fallback_status)
     except Exception as exc:
-        error_class = _sync_job_error_class(exc)
-        detail = redact_text(str(getattr(exc, "message", "") or exc))[:500]
-        if is_retryable_error(error_class) and int(job.get("attempts") or 1) < SYNC_JOB_MAX_ATTEMPTS:
-            delay = retry_delay(int(job.get("attempts") or 1), base_seconds=SYNC_JOB_RETRY_BASE_SECONDS, max_seconds=SYNC_JOB_RETRY_MAX_SECONDS)
-            now = utc_now()
-            available = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
-            with DB_LOCK, database() as db:
-                db.execute(
-                    "UPDATE sync_job_items SET status='queued', error_class=?, error_detail=?, updated_at=? WHERE job_id=?",
-                    (error_class, detail, now, job_id),
-                )
-                db.execute(
-                    "UPDATE sync_jobs SET status='queued', available_at=?, finished_at=NULL, error_class=?, updated_at=? WHERE id=?",
-                    (available, error_class, now, job_id),
-                )
-            SYNC_JOB_WAKE.set()
-            return
-        _sync_job_update(job_id, "failed", error_class=error_class, error_detail=detail)
-        LOGGER.error(
-            "Persistent synchronization job failed",
-            extra={"event": "sync_job_failed", "context": {"job_id": job_id, "provider": job.get("provider"), "type": job.get("type"), "error_class": error_class}},
-        )
+        _record_claimed_sync_job_failure(job, exc)
 
 
 def _sync_job_worker_loop() -> None:
