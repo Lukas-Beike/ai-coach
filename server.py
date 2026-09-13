@@ -11127,6 +11127,9 @@ class _RepairCalendarContext:
     newest: str
 
 
+PLANNED_CALENDAR_RECHECK_ERROR = "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen."
+
+
 def _repair_calendar_context(local_id: str, expected_hash: str, batch: _RepairCalendarBatch | None) -> _RepairCalendarContext:
     with DB_LOCK, database() as db:
         row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
@@ -11174,25 +11177,31 @@ def _repair_calendar_recheck(context: _RepairCalendarContext, message: str) -> N
         raise AppError(409, message, reason="planning_revision_conflict")
 
 
+def _repair_calendar_event_is_invalid(context: _RepairCalendarContext, event: dict[str, Any], belongs_elsewhere: bool) -> bool:
+    return (
+        belongs_elsewhere or event.get("category") != "WORKOUT"
+        or str(event.get("start_date_local") or "")[:10] < context.today.isoformat()
+        or event.get("paired_activity_id") or event.get("paired_event_id")
+    )
+
+
+def _repair_calendar_event_is_ambiguous(context: _RepairCalendarContext, event: dict[str, Any], belongs_elsewhere: bool) -> bool:
+    return (
+        not context.removing and not belongs_elsewhere and event.get("category") == "WORKOUT"
+        and str(event.get("start_date_local") or "").startswith(context.planned_date.isoformat())
+        and str(event.get("name") or "").strip().casefold() == str(context.workout.get("name") or "").strip().casefold()
+    )
+
+
 def _repair_calendar_related_event(context: _RepairCalendarContext, event: dict[str, Any]) -> bool:
     event_id = str(event.get("id") or "")
     belongs_elsewhere = event_id in context.other_remote_ids or str(event.get("external_id") or "") in context.other_external_ids
     identified = bool(event_id and (event_id == context.remote_id or str(event.get("external_id") or "") in context.identities))
     if identified:
-        invalid = (
-            belongs_elsewhere or event.get("category") != "WORKOUT"
-            or str(event.get("start_date_local") or "")[:10] < context.today.isoformat()
-            or event.get("paired_activity_id") or event.get("paired_event_id")
-        )
-        if invalid:
+        if _repair_calendar_event_is_invalid(context, event, belongs_elsewhere):
             raise AppError(409, "Eine zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
         return True
-    same_name = (
-        not context.removing and not belongs_elsewhere and event.get("category") == "WORKOUT"
-        and str(event.get("start_date_local") or "").startswith(context.planned_date.isoformat())
-        and str(event.get("name") or "").strip().casefold() == str(context.workout.get("name") or "").strip().casefold()
-    )
-    if same_name:
+    if _repair_calendar_event_is_ambiguous(context, event, belongs_elsewhere):
         raise AppError(409, "Eine gleichnamige Remote-Einheit am selben Tag ist nicht eindeutig zugeordnet. Keine automatische Kopie oder Loeschung durchgefuehrt.", reason="intervals_workout_identity_ambiguous")
     return False
 
@@ -11225,7 +11234,7 @@ def _repair_calendar_upsert(context: _RepairCalendarContext, keeper: dict[str, A
         payload["id"] = str(keeper["id"])
         payload["external_id"] = str(keeper.get("external_id") or payload["external_id"])
     context.identities.add(payload["external_id"])
-    _repair_calendar_recheck(context, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.")
+    _repair_calendar_recheck(context, PLANNED_CALENDAR_RECHECK_ERROR)
     response = context.client.upsert_calendar_events([payload])
     result = response[0] if isinstance(response, list) and len(response) == 1 else None
     if not isinstance(result, dict) or not result.get("id"):
@@ -11235,7 +11244,7 @@ def _repair_calendar_upsert(context: _RepairCalendarContext, keeper: dict[str, A
         context.batch.remember({**result, "external_id": payload["external_id"]})
     with DB_LOCK:
         try:
-            _repair_calendar_recheck(context, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.")
+            _repair_calendar_recheck(context, PLANNED_CALENDAR_RECHECK_ERROR)
         except AppError:
             update_planned_unit_sync_state(context.local_id, "sync_error", "Planung waehrend der Reparatur geaendert.", remote_event={**result, "external_id": payload["external_id"]})
             raise
@@ -11252,7 +11261,7 @@ def _repair_calendar_delete_duplicates(context: _RepairCalendarContext, related:
     for event in related:
         if not context.removing and str(event["id"]) == context.remote_id:
             continue
-        _repair_calendar_recheck(context, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.")
+        _repair_calendar_recheck(context, PLANNED_CALENDAR_RECHECK_ERROR)
         context.client.delete_event(str(event["id"]))
         if context.batch:
             context.batch.forget(str(event["id"]))
@@ -11274,7 +11283,7 @@ def _repair_calendar_completion(context: _RepairCalendarContext) -> Callable[[li
             validate_intervals_workout_result(context.workout, event)
             verified = event
         with DB_LOCK:
-            _repair_calendar_recheck(context, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.")
+            _repair_calendar_recheck(context, PLANNED_CALENDAR_RECHECK_ERROR)
             update_planned_unit_sync_state(context.local_id, "synced", remote_event=verified)
         return verified
     return complete
