@@ -13348,7 +13348,7 @@ def _start_full_provider_resync(keys: dict[str, str], label: str) -> None:
     set_kv(keys["status"], f"{label}: vollständiger Resync läuft…")
 
 
-def _complete_full_provider_resync(keys: dict[str, str], result: dict[str, Any]) -> str:
+def _complete_full_provider_resync(keys: dict[str, str]) -> str:
     finished_at = utc_now()
     set_kv(keys["last_at"], finished_at)
     set_kv(keys["error"], "")
@@ -13399,7 +13399,7 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
         # good snapshot and all athlete-owned records remain recoverable.
         _start_full_provider_resync(keys, label)
         result = _run_full_provider_resync(provider, operation_id, FULL_RESYNC_LABEL)
-        finished_at = _complete_full_provider_resync(keys, result)
+        finished_at = _complete_full_provider_resync(keys)
         operation_result = result
         operation_succeeded = True
         return {"status": "ok", "source": provider, "resynced_at": finished_at, **result}
