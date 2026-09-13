@@ -13065,7 +13065,7 @@ def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any],
 
 
 def _remote_planned_unit_existing_state(
-    current_row: Any, incoming: dict[str, Any], incoming_hash: str,
+    current_row: Any, incoming_hash: str,
 ) -> tuple[dict[str, Any], str]:
     try:
         current = json.loads(current_row.get("payload") or "{}")
@@ -13123,7 +13123,7 @@ def _upsert_remote_planned_event(
         incoming["sync_status"] = "synced"
         _insert_planned_unit(db, incoming, sync_dirty=0, sync_state="synced", baseline_hash=incoming_hash, last_synced_at=now)
         return 1, 0, 0, True
-    current, state = _remote_planned_unit_existing_state(current_row, incoming, incoming_hash)
+    current, state = _remote_planned_unit_existing_state(current_row, incoming_hash)
     if state == "conflict":
         _update_remote_planned_conflict(db, current_row, current, incoming, now)
         return 0, 0, 1, True
@@ -13139,8 +13139,14 @@ def _remote_calendar_window(
     valid_dates = [value for value in incoming_dates if re.fullmatch(DATE_ONLY_PATTERN, value)]
     start_value = str(calendar_start or "")[:10]
     end_value = str(calendar_end or "")[:10]
-    window_start = start_value if re.fullmatch(DATE_ONLY_PATTERN, start_value) else (min(valid_dates) if valid_dates else None)
-    window_end = end_value if re.fullmatch(DATE_ONLY_PATTERN, end_value) else (max(valid_dates) if valid_dates else None)
+    if re.fullmatch(DATE_ONLY_PATTERN, start_value):
+        window_start = start_value
+    else:
+        window_start = min(valid_dates) if valid_dates else None
+    if re.fullmatch(DATE_ONLY_PATTERN, end_value):
+        window_end = end_value
+    else:
+        window_end = max(valid_dates) if valid_dates else None
     return window_start, window_end
 
 
