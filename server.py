@@ -13254,7 +13254,7 @@ def provider_resync_state(provider: str) -> dict[str, Any]:
     }
 
 
-def full_provider_resync(provider: str, operation_id: str | None = None) -> dict[str, Any]:
+def _validate_full_provider_resync(provider: str) -> None:
     if provider not in PROVIDER_RESYNC_KEYS:
         raise AppError(400, "Unbekannte Anbindung.")
     if provider == "intervals" and not CONFIG.intervals_api_key:
@@ -13265,11 +13265,27 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
     ):
         raise AppError(503, "Garmin ist nicht konfiguriert oder nicht verfügbar.")
 
+
+def _full_provider_resync_details(provider: str) -> tuple[Any, dict[str, str], str]:
     gate = INTERVALS_RESYNC_GATE if provider == "intervals" else GARMIN_RESYNC_GATE
+    return gate, PROVIDER_RESYNC_KEYS[provider], PROVIDER_INTERVALS_NAME if provider == "intervals" else "Garmin"
+
+
+def _run_full_provider_resync(provider: str, operation_id: str, reason: str) -> dict[str, Any]:
+    if provider == "intervals":
+        result = sync_intervals(FULL_RESYNC_LABEL, activity_days=ALL_SYNC_DAYS, operation_id=operation_id)
+        return {
+            **result,
+            "competitions": sync_competitions(FULL_RESYNC_LABEL, push_local=False, operation_id=operation_id),
+        }
+    return sync_garmin(days=ALL_SYNC_DAYS, operation_id=operation_id, reason=reason)
+
+
+def full_provider_resync(provider: str, operation_id: str | None = None) -> dict[str, Any]:
+    _validate_full_provider_resync(provider)
+    gate, keys, label = _full_provider_resync_details(provider)
     if not gate.begin_reset():
         return {"status": "already_running", "source": provider}
-    keys = PROVIDER_RESYNC_KEYS[provider]
-    label = PROVIDER_INTERVALS_NAME if provider == "intervals" else "Garmin"
     operation_id = operation_id or uuid.uuid4().hex
     operation_token = OPERATION_CONTEXT.set({"operation_id": operation_id, "trigger": "full_resync"})
     operation_started = time.perf_counter()
@@ -13285,15 +13301,7 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
         # replace data only after a successful provider response, so the last
         # good snapshot and all athlete-owned records remain recoverable.
         set_kv(keys["status"], f"{label}: vollständiger Resync läuft…")
-        if provider == "intervals":
-            result = sync_intervals(FULL_RESYNC_LABEL, activity_days=ALL_SYNC_DAYS, operation_id=operation_id)
-            competition_result = sync_competitions(FULL_RESYNC_LABEL, push_local=False, operation_id=operation_id)
-            result = {
-                **result,
-                "competitions": competition_result,
-            }
-        else:
-            result = sync_garmin(days=ALL_SYNC_DAYS, operation_id=operation_id, reason=FULL_RESYNC_LABEL)
+        result = _run_full_provider_resync(provider, operation_id, FULL_RESYNC_LABEL)
         finished_at = utc_now()
         set_kv(keys["last_at"], finished_at)
         set_kv(keys["error"], "")
