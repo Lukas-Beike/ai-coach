@@ -15245,19 +15245,25 @@ def _require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
         raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.", reason="intent_scope_denied")
 
 
-def _structured_training_state(*, include_inactive: bool = False, cursor: Any = None, limit: Any = None) -> dict[str, Any]:
-    today = local_now().date().isoformat()
-    page_size = api_page_limit(limit, COACH_TRAINING_CHANGE_LIMIT, COACH_TRAINING_CHANGE_LIMIT)
-    decoded = decode_page_cursor(cursor)
+def _structured_training_state_after_key(
+    decoded: Any, cursor: Any, revision_number: int, include_inactive: bool, today: str,
+) -> list[str]:
     if cursor and (not isinstance(decoded, dict) or not isinstance(decoded.get("key"), list)
                    or len(decoded["key"]) != 3 or not all(isinstance(value, str) for value in decoded["key"])):
         raise AppError(400, "Ungueltiger Planungscursor.", reason="invalid_page_cursor")
+    if decoded and (decoded.get("revision") != revision_number or decoded.get("include_inactive") != include_inactive or decoded.get("today") != today):
+        raise AppError(409, "Die Planung hat sich waehrend des Lesens geaendert. Alle Seiten erneut lesen.", reason="planning_revision_conflict")
+    return decoded["key"] if decoded else ["", "", ""]
+
+
+def _structured_training_state_snapshot(
+    *, include_inactive: bool, cursor: Any, today: str, page_size: int,
+) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]]]:
+    decoded = decode_page_cursor(cursor)
     with DB_LOCK, database() as db:
         revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         revision_number = int((revision or {}).get("revision") or 0)
-        if decoded and (decoded.get("revision") != revision_number or decoded.get("include_inactive") != include_inactive or decoded.get("today") != today):
-            raise AppError(409, "Die Planung hat sich waehrend des Lesens geaendert. Alle Seiten erneut lesen.", reason="planning_revision_conflict")
-        after = decoded["key"] if decoded else ["", "", ""]
+        after = _structured_training_state_after_key(decoded, cursor, revision_number, include_inactive, today)
         planned_rows = db.execute(
             "SELECT local_id, sync_state, payload, COALESCE(json_extract(payload, '$.date'), '') AS plan_date, "
             "lower(COALESCE(json_extract(payload, '$.name'), '')) AS sort_name FROM planned_units "
@@ -15272,39 +15278,59 @@ def _structured_training_state(*, include_inactive: bool = False, cursor: Any = 
             "SELECT local_id, sync_state, payload FROM workout_library "
             "WHERE json_extract(payload, '$.date') IS NULL ORDER BY updated_at DESC LIMIT 100"
         ).fetchall()
+    return revision_number, planned_rows, template_rows
 
-    def target_ref(row: dict[str, Any], *, planned: bool) -> dict[str, Any] | None:
-        try:
-            payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
-            return None
-        if not isinstance(payload, dict):
-            return None
-        return {
-            "local_id": str(row.get("local_id") or ""),
-            "name": str(payload.get("name") or "")[:200],
-            "sport": str(payload.get("sport") or payload.get("type") or "")[:80],
-            "date": str(payload.get("date") or "")[:10] or None,
-            "archived": bool(payload.get("archived")),
-            "local_deleted": bool(payload.get("local_deleted")) if planned else False,
-            "sync_status": str(row.get("sync_state") or payload.get("sync_status") or "local"),
-            "expected_payload_hash": _library_payload_hash(row.get("payload")),
-        }
 
+def _structured_training_target_ref(row: dict[str, Any], *, planned: bool) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(row.get("payload") or "{}")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "local_id": str(row.get("local_id") or ""),
+        "name": str(payload.get("name") or "")[:200],
+        "sport": str(payload.get("sport") or payload.get("type") or "")[:80],
+        "date": str(payload.get("date") or "")[:10] or None,
+        "archived": bool(payload.get("archived")),
+        "local_deleted": bool(payload.get("local_deleted")) if planned else False,
+        "sync_status": str(row.get("sync_state") or payload.get("sync_status") or "local"),
+        "expected_payload_hash": _library_payload_hash(row.get("payload")),
+    }
+
+
+def _structured_training_state_page(
+    planned_rows: list[dict[str, Any]], *, page_size: int, revision_number: int, include_inactive: bool, today: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     has_more = len(planned_rows) > page_size
-    planned_rows = planned_rows[:page_size]
+    page_rows = planned_rows[:page_size]
     next_cursor = encode_page_cursor({
         "revision": revision_number, "include_inactive": include_inactive, "today": today,
-        "key": [planned_rows[-1]["plan_date"], planned_rows[-1]["sort_name"], planned_rows[-1]["local_id"]],
+        "key": [page_rows[-1]["plan_date"], page_rows[-1]["sort_name"], page_rows[-1]["local_id"]],
     }) if has_more else None
+    return page_rows, {"has_more": has_more, "next_cursor": next_cursor, "limit": page_size}
+
+
+def _structured_training_state(*, include_inactive: bool = False, cursor: Any = None, limit: Any = None) -> dict[str, Any]:
+    today = local_now().date().isoformat()
+    page_size = api_page_limit(limit, COACH_TRAINING_CHANGE_LIMIT, COACH_TRAINING_CHANGE_LIMIT)
+    revision_number, planned_rows, template_rows = _structured_training_state_snapshot(
+        include_inactive=include_inactive, cursor=cursor, today=today, page_size=page_size,
+    )
+    planned_rows, page = _structured_training_state_page(
+        planned_rows, page_size=page_size, revision_number=revision_number,
+        include_inactive=include_inactive, today=today,
+    )
+
     return {
         "planning_revision": revision_number,
         "artifact_refs": coach_dialogue_artifact_refs(),
         "competitions": list_competitions(),
         "training_plans": list_training_plans(100),
-        "planned_units": [ref for row in planned_rows if (ref := target_ref(row, planned=True)) is not None],
-        "planned_units_page": {"has_more": has_more, "next_cursor": next_cursor, "limit": page_size},
-        "training_templates": [ref for row in template_rows if (ref := target_ref(row, planned=False)) is not None],
+        "planned_units": [ref for row in planned_rows if (ref := _structured_training_target_ref(row, planned=True)) is not None],
+        "planned_units_page": page,
+        "training_templates": [ref for row in template_rows if (ref := _structured_training_target_ref(row, planned=False)) is not None],
         "jobs": sync_jobs_state(),
     }
 

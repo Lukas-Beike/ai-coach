@@ -5771,6 +5771,25 @@ class CoachTests(unittest.TestCase):
             state = server._structured_training_state()
         self.assertEqual([item["local_id"] for item in state["planned_units"]], [item["id"] for item in active])
 
+    def test_structured_training_state_rejects_cursor_from_changed_revision(self):
+        with patch.object(server, "COACH_TRAINING_CHANGE_LIMIT", 1):
+            server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=1)).isoformat(),
+                "sport": "Ride", "name": "First", "description": "- 30m 60% easy",
+            })
+            server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=2)).isoformat(),
+                "sport": "Ride", "name": "Second", "description": "- 30m 60% easy",
+            })
+            first_page = server._structured_training_state()
+            server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=3)).isoformat(),
+                "sport": "Ride", "name": "Changed", "description": "- 30m 60% easy",
+            })
+            with self.assertRaises(server.AppError) as raised:
+                server._structured_training_state(cursor=first_page["planned_units_page"]["next_cursor"])
+        self.assertEqual(raised.exception.reason, "planning_revision_conflict")
+
     def test_bulk_training_changes_require_revision_and_hashes(self):
         planned = server.create_local_planned_unit({
             "date": (date.today() + timedelta(days=1)).isoformat(),
