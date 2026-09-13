@@ -2626,34 +2626,38 @@ def provider_freshness_state() -> list[dict[str, Any]]:
     return result
 
 
+def _audit_projection_fields(entity_type: str) -> set[str]:
+    fields_by_entity = {
+        "profile": CHANGE_HISTORY_PROFILE_FIELDS,
+        "workout_library": CHANGE_HISTORY_LIBRARY_FIELDS,
+        "planned_unit": CHANGE_HISTORY_PLANNED_UNIT_FIELDS,
+        "competition": CHANGE_HISTORY_COMPETITION_FIELDS,
+        "training_plan": CHANGE_HISTORY_PLAN_FIELDS,
+    }
+    try:
+        return fields_by_entity[entity_type]
+    except KeyError as exc:
+        raise ValueError("unsupported change-history entity") from exc
+
+
+def _audit_payload_projection(value: Any) -> Any:
+    """Flatten persisted workout payloads without exposing non-audit fields."""
+    if not isinstance(value, dict) or not isinstance(value.get("payload"), str):
+        return value
+    try:
+        payload = json.loads(value["payload"])
+    except (TypeError, ValueError):
+        payload = {}
+    return {**payload, "sync_status": value.get("sync_state") or payload.get("sync_status")}
+
+
 def _audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:
     """Return the small, local-only representation allowed in change history."""
     if value is None:
         return None
-    if entity_type == "profile":
-        fields = CHANGE_HISTORY_PROFILE_FIELDS
-    elif entity_type == "workout_library":
-        fields = CHANGE_HISTORY_LIBRARY_FIELDS
-        if isinstance(value, dict) and isinstance(value.get("payload"), str):
-            try:
-                payload = json.loads(value["payload"])
-            except (TypeError, ValueError):
-                payload = {}
-            value = {**payload, "sync_status": value.get("sync_state") or payload.get("sync_status")}
-    elif entity_type == "planned_unit":
-        fields = CHANGE_HISTORY_PLANNED_UNIT_FIELDS
-        if isinstance(value, dict) and isinstance(value.get("payload"), str):
-            try:
-                payload = json.loads(value["payload"])
-            except (TypeError, ValueError):
-                payload = {}
-            value = {**payload, "sync_status": value.get("sync_state") or payload.get("sync_status")}
-    elif entity_type == "competition":
-        fields = CHANGE_HISTORY_COMPETITION_FIELDS
-    elif entity_type == "training_plan":
-        fields = CHANGE_HISTORY_PLAN_FIELDS
-    else:
-        raise ValueError("unsupported change-history entity")
+    fields = _audit_projection_fields(entity_type)
+    if entity_type in {"workout_library", "planned_unit"}:
+        value = _audit_payload_projection(value)
     if not isinstance(value, dict):
         return None
     result: dict[str, Any] = {}
