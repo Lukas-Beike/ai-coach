@@ -11314,29 +11314,36 @@ def _planned_calendar_sync_recheck(normalized_id: str, original_payload: str) ->
         raise AppError(409, "Die Planung wurde waehrend der Synchronisation geaendert.", reason="planning_revision_conflict")
 
 
+def _planned_calendar_remote_event_is_invalid(remote_id: str, event: Any) -> bool:
+    return (
+        not isinstance(event, dict) or str(event.get("id") or "") != remote_id
+        or event.get("category") != "WORKOUT"
+        or str(event.get("start_date_local") or "")[:10] < local_now().date().isoformat()
+        or event.get("paired_activity_id") or event.get("paired_event_id")
+    )
+
+
+def _delete_planned_calendar_remote_event(remote_id: str, normalized_id: str, original_payload: str) -> None:
+    client = IntervalsClient()
+    athlete = quote(client.config.intervals_athlete_id, safe="")
+    try:
+        event = client.get(f"/athlete/{athlete}/events/{quote(remote_id, safe='')}")
+    except AppError as exc:
+        if exc.status != 404 and not (isinstance(exc.__cause__, HTTPError) and exc.__cause__.code == 404):
+            raise
+        return
+    if _planned_calendar_remote_event_is_invalid(remote_id, event):
+        raise AppError(409, "Die zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
+    _planned_calendar_sync_recheck(normalized_id, original_payload)
+    client.delete_event(remote_id)
+
+
 def _remove_planned_calendar_event(normalized_id: str, row: Any, workout: dict[str, Any]) -> None:
     remote_id = str(workout.get("remote_event_id") or "").strip()
     if remote_id:
         if not CONFIG.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR)
-        client = IntervalsClient()
-        athlete = quote(client.config.intervals_athlete_id, safe="")
-        try:
-            event = client.get(f"/athlete/{athlete}/events/{quote(remote_id, safe='')}")
-        except AppError as exc:
-            if exc.status != 404 and not (isinstance(exc.__cause__, HTTPError) and exc.__cause__.code == 404):
-                raise
-        else:
-            invalid = (
-                not isinstance(event, dict) or str(event.get("id") or "") != remote_id
-                or event.get("category") != "WORKOUT"
-                or str(event.get("start_date_local") or "")[:10] < local_now().date().isoformat()
-                or event.get("paired_activity_id") or event.get("paired_event_id")
-            )
-            if invalid:
-                raise AppError(409, "Die zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
-            _planned_calendar_sync_recheck(normalized_id, row["payload"])
-            client.delete_event(remote_id)
+        _delete_planned_calendar_remote_event(remote_id, normalized_id, row["payload"])
     with DB_LOCK:
         _planned_calendar_sync_recheck(normalized_id, row["payload"])
         update_planned_unit_sync_state(normalized_id, "synced")
