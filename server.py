@@ -11325,71 +11325,96 @@ def save_snapshot_view(snapshot: dict[str, Any]) -> None:
         SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot.get("synced_at") or utc_now())
 
 
-def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
-    """Edit, archive, restore, or remove a local library template."""
+def _workout_library_entry_id(local_id: str) -> str:
     try:
-        normalized_id = str(uuid.UUID(str(local_id)))
+        return str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
         raise AppError(400, "Ungültige Bibliothekseinheiten-ID.") from exc
+
+
+def _stored_workout_library_entry(db: sqlite3.Connection, local_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    row = db.execute("SELECT payload, external_id FROM workout_library WHERE local_id=?", (local_id,)).fetchone()
+    if not row:
+        raise AppError(404, "Bibliothekseinheit nicht gefunden.")
+    try:
+        current = json.loads(row["payload"])
+    except (TypeError, ValueError) as exc:
+        raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
+    if not isinstance(current, dict):
+        raise AppError(500, CORRUPT_LIBRARY_ERROR)
+    if current.get("date"):
+        raise AppError(409, "Geplante lokale Einheiten werden im Kalender bearbeitet.")
+    return dict(row), current
+
+
+def _workout_library_update_candidate(current: dict[str, Any], action: str, values: dict[str, Any]) -> dict[str, Any]:
+    candidate = dict(current)
+    if action in {"archive", "restore"}:
+        candidate["archived"] = action == "archive"
+        return candidate
+    if action != "update":
+        raise AppError(400, "Unbekannte Aktion für die Bibliothekseinheit.")
+    for key in ("name", "description", "duration_minutes", "target"):
+        if key in values:
+            candidate[key] = values.get(key)
+    if "type" in values or "sport" in values:
+        candidate["type"] = values.get("type") or values.get("sport")
+    return candidate
+
+
+def _updated_workout_library_entry(
+    current: dict[str, Any], row: dict[str, Any], local_id: str, action: str, values: dict[str, Any],
+) -> dict[str, Any]:
+    normalized = normalize_library_workout(
+        _workout_library_update_candidate(current, action, values),
+        local_id=local_id,
+        external_id=str(row.get("external_id") or "") or None,
+        sync_status="local",
+    )
+    if action == "update":
+        seconds = validate_workout_description(normalized)
+        minutes = as_number(normalized.get("duration_minutes"))
+        if seconds is not None or minutes is not None:
+            normalized["moving_time"] = round(seconds if seconds is not None else minutes * 60)
+        if any(key in values for key in ("description", "duration_minutes", "target", "type", "sport")):
+            for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+                normalized.pop(key, None)
+    for key in ("source", "rationale", "plan_id", "plan_name", "private_calendar_adjustment"):
+        if current.get(key) is not None:
+            normalized[key] = current[key]
+    return normalized
+
+
+def _delete_local_workout_library_entry(db: sqlite3.Connection, local_id: str, row: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:
+    if row.get("external_id"):
+        raise AppError(409, "Synchronisierte Bibliothekseinheiten können nicht lokal gelöscht werden. Archiviere sie stattdessen.")
+    db.execute("DELETE FROM workout_library WHERE local_id=?", (local_id,))
+    _record_change(db, "workout_library", local_id, "delete", before, None)
+    return {"status": "deleted", "local_id": local_id}
+
+
+def update_workout_library_entry(local_id: str, values: Any) -> dict[str, Any]:
+    """Edit, archive, restore, or remove a local library template."""
+    normalized_id = _workout_library_entry_id(local_id)
     if not isinstance(values, dict):
         raise AppError(400, "Die Bibliothekseinheit muss als Objekt gesendet werden.")
     action = str(values.get("action") or "update").strip().casefold()
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload, external_id FROM workout_library WHERE local_id=?", (normalized_id,)).fetchone()
-        if not row:
-            raise AppError(404, "Bibliothekseinheit nicht gefunden.")
-        try:
-            current = json.loads(row["payload"])
-        except (TypeError, ValueError) as exc:
-            raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
-        if not isinstance(current, dict):
-            raise AppError(500, CORRUPT_LIBRARY_ERROR)
-        if current.get("date"):
-            raise AppError(409, "Geplante lokale Einheiten werden im Kalender bearbeitet.")
+        row, current = _stored_workout_library_entry(db, normalized_id)
         before = {**current, "sync_status": row.get("sync_state") or current.get("sync_status")}
         if action == "delete":
-            if row.get("external_id"):
-                raise AppError(409, "Synchronisierte Bibliothekseinheiten können nicht lokal gelöscht werden. Archiviere sie stattdessen.")
-            db.execute("DELETE FROM workout_library WHERE local_id=?", (normalized_id,))
-            _record_change(db, "workout_library", normalized_id, "delete", before, None)
-            publish_state_event("coach", {"status": "changed"})
-            return {"status": "deleted", "local_id": normalized_id}
-        candidate = dict(current)
-        if action in {"archive", "restore"}:
-            candidate["archived"] = action == "archive"
-        elif action == "update":
-            for key in ("name", "description", "duration_minutes", "target"):
-                if key in values:
-                    candidate[key] = values.get(key)
-            if "type" in values or "sport" in values:
-                candidate["type"] = values.get("type") or values.get("sport")
+            result = _delete_local_workout_library_entry(db, normalized_id, row, before)
         else:
-            raise AppError(400, "Unbekannte Aktion für die Bibliothekseinheit.")
-        normalized = normalize_library_workout(
-            candidate,
-            local_id=normalized_id,
-            external_id=str(row.get("external_id") or "") or None,
-            sync_status="local",
-        )
-        if action == "update":
-            seconds = validate_workout_description(normalized)
-            minutes = as_number(normalized.get("duration_minutes"))
-            if seconds is not None or minutes is not None:
-                normalized["moving_time"] = round(seconds if seconds is not None else minutes * 60)
-            if any(key in values for key in ("description", "duration_minutes", "target", "type", "sport")):
-                for key in ("workout_doc", "icu_training_load", "icu_intensity"):
-                    normalized.pop(key, None)
-        for key in ("source", "rationale", "plan_id", "plan_name", "private_calendar_adjustment"):
-            if current.get(key) is not None:
-                normalized[key] = current[key]
-        now = utc_now()
-        db.execute(
-            "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
-            (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
-        )
-        _record_change(db, "workout_library", normalized_id, "update", before, {**normalized, "sync_status": "local"})
+            normalized = _updated_workout_library_entry(current, row, normalized_id, action, values)
+            now = utc_now()
+            db.execute(
+                "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
+                (json.dumps(normalized, ensure_ascii=False), now, normalized_id),
+            )
+            _record_change(db, "workout_library", normalized_id, "update", before, {**normalized, "sync_status": "local"})
+            result = {"status": "local", "local_id": normalized_id, "library_entry": normalized}
     publish_state_event("coach", {"status": "changed"})
-    return {"status": "local", "local_id": normalized_id, "library_entry": normalized}
+    return result
 
 
 def update_workout_library_sync_state(local_id: str, state: str, error: str | None = None) -> None:
