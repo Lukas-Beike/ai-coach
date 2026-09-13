@@ -20328,7 +20328,7 @@ def _chat_provider_settings(background_receipt: dict[str, Any]) -> tuple[str, st
 
 
 def _resume_background_chat_command(
-    existing_command: dict[str, Any] | None, background_owned: bool, conversation_id: str,
+    background_owned: bool, conversation_id: str,
     structured_intent: dict[str, Any], client_turn_id: str,
 ) -> None:
     if not background_owned:
@@ -20356,7 +20356,7 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     existing_conversation_id = str((existing_command or {}).get("conversation_id") or "")
     conversation_id = existing_conversation_id or ensure_conversation(ai_provider)
     structured_intent = {"allow_mutations": allow_mutations}
-    _resume_background_chat_command(existing_command, background_owned, conversation_id, structured_intent, client_turn_id)
+    _resume_background_chat_command(background_owned, conversation_id, structured_intent, client_turn_id)
     return _chat_with_structured_coach(
         message, intent=structured_intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
         session_csrf_hash=session_csrf_hash, on_text_delta=on_text_delta, cancel_event=cancel_event,
