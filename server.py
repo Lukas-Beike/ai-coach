@@ -17903,6 +17903,60 @@ def _recover_structured_coach_conversation(
     LOGGER.warning("Coach conversation recovered from local context", extra={"event": "coach_conversation_recovered"})
 
 
+def _resume_background_coach_response(
+    exc: AppError, payload: dict[str, Any], resume_id: str, checkpoint: Callable[[str], None],
+    cancel_event: threading.Event | None, *, background_owned: bool, ai_provider: str,
+) -> dict[str, Any] | None:
+    resumable = (
+        background_owned and ai_provider == "openai" and resume_id
+        and exc.reason in {"provider_unavailable", "provider_timeout", "invalid_response"}
+        and (cancel_event is None or not cancel_event.is_set())
+    )
+    if not resumable:
+        return None
+    return responses_background_request(
+        payload, response_id=resume_id, on_response_id=checkpoint, cancel_event=cancel_event,
+    )
+
+
+def _recover_invalid_structured_conversation(
+    exc: AppError, payload: dict[str, Any], request_payload: dict[str, Any], *,
+    context: dict[str, Any], message: str, command_receipts: list[dict[str, Any]],
+    attachments: list[dict[str, Any]], client_turn_id: str, ai_provider: str,
+    recovery_state: dict[str, bool], request_delta_emitted: bool, attempt: int,
+) -> bool:
+    can_recover = (
+        ai_provider == "openai" and exc.reason == "conversation_state_invalid"
+        and not recovery_state["conversation_recovered"] and not request_delta_emitted and attempt < 2
+    )
+    if not can_recover:
+        return False
+    recovery_state["conversation_recovered"] = True
+    _recover_structured_coach_conversation(
+        payload, request_payload, context=context, message=message,
+        command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
+    )
+    return True
+
+
+def _response_retry_delay(exc: AppError, *, ai_provider: str, attempt: int, request_delta_emitted: bool) -> int | None:
+    rate_limited = exc.reason == "rate_limit_exceeded" or getattr(exc, "provider_error_code", None) == "rate_limit_exceeded"
+    if ai_provider != "openai" or not rate_limited or attempt == 2 or request_delta_emitted:
+        return None
+    return 5 * (attempt + 1)
+
+
+def _wait_for_coach_response_retry(delay: int, cancel_event: threading.Event | None, attempt: int) -> None:
+    LOGGER.warning(
+        "Coach response rate limited; retrying",
+        extra={"event": "coach_response_retry", "context": {"attempt": attempt + 1, "retry_in_seconds": delay}},
+    )
+    if cancel_event is not None:
+        cancel_event.wait(delay)
+    else:
+        time.sleep(delay)
+
+
 def _structured_coach_response(
     payload: dict[str, Any],
     *,
@@ -17953,46 +18007,92 @@ def _structured_coach_response(
                 ai_provider=ai_provider,
             )
         except AppError as exc:
-            resume_after_transport_failure = (
-                background_owned and ai_provider == "openai" and resume_id
-                and exc.reason in {"provider_unavailable", "provider_timeout", "invalid_response"}
-                and not cancel_event.is_set()
+            resumed = _resume_background_coach_response(
+                exc, payload, resume_id, checkpoint, cancel_event,
+                background_owned=background_owned, ai_provider=ai_provider,
             )
-            if resume_after_transport_failure:
-                return responses_background_request(
-                    payload,
-                    response_id=resume_id,
-                    on_response_id=checkpoint,
-                    cancel_event=cancel_event,
-                )
-            can_recover = (
-                ai_provider == "openai" and exc.reason == "conversation_state_invalid"
-                and not recovery_state["conversation_recovered"] and not request_delta_emitted and attempt < 2
-            )
-            if can_recover:
-                recovery_state["conversation_recovered"] = True
-                _recover_structured_coach_conversation(
-                    payload,
-                    request_payload,
-                    context=context,
-                    message=message,
-                    command_receipts=command_receipts,
-                    attachments=attachments,
-                    client_turn_id=client_turn_id,
-                )
+            if resumed is not None:
+                return resumed
+            if _recover_invalid_structured_conversation(
+                exc, payload, request_payload, context=context, message=message,
+                command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
+                ai_provider=ai_provider, recovery_state=recovery_state,
+                request_delta_emitted=request_delta_emitted, attempt=attempt,
+            ):
                 resume_id = ""
                 continue
-            rate_limited = exc.reason == "rate_limit_exceeded" or getattr(exc, "provider_error_code", None) == "rate_limit_exceeded"
-            if ai_provider != "openai" or not rate_limited or attempt == 2 or request_delta_emitted:
+            delay = _response_retry_delay(
+                exc, ai_provider=ai_provider, attempt=attempt, request_delta_emitted=request_delta_emitted,
+            )
+            if delay is None:
                 raise
             resume_id = ""
-            delay = 5 * (attempt + 1)
-            LOGGER.warning("Coach response rate limited; retrying", extra={"event": "coach_response_retry", "context": {"attempt": attempt + 1, "retry_in_seconds": delay}})
-            if cancel_event is not None:
-                cancel_event.wait(delay)
-            else:
-                time.sleep(delay)
+            _wait_for_coach_response_retry(delay, cancel_event, attempt)
     raise AppError(502, "Der KI-Dienst konnte die Antwort nicht fertigstellen.", reason="response_failed")
+
+
+def _mark_resolved_coach_receipts(command_receipts: list[dict[str, Any]], failures: list[dict[str, Any]]) -> None:
+    for entry in command_receipts:
+        if not entry.get("result", {}).get("ok"):
+            entry["resolved"] = not any(entry is failure for failure in failures)
+
+
+def _coach_effects(command_receipts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    internal_tools = STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
+    return [
+        entry for entry in command_receipts
+        if entry.get("result", {}).get("ok") and entry["tool"] not in internal_tools
+    ]
+
+
+def _structured_coach_outcome_text(
+    response: dict[str, Any], question: str, failures: list[dict[str, Any]], effects: list[dict[str, Any]],
+) -> tuple[str, bool, bool]:
+    text = question or output_text(response)
+    incomplete_answer = response.get("status") == "incomplete"
+    missing_answer = not text or incomplete_answer
+    if incomplete_answer:
+        text += "\nDie Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."
+    if failures and not question:
+        text = "Ein Teil des Auftrags konnte noch nicht ausgeführt werden." if effects else "Der Auftrag konnte noch nicht ausgeführt werden."
+        text += "\n" + coach_failure_lines(failures, {entry["tool"] for entry in failures})
+        if effects:
+            text += "\nGespeichert beziehungsweise beauftragt: " + "; ".join(coach_effect_label(entry) for entry in effects) + "."
+    if not text:
+        text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Antwort konnte nicht abgeschlossen werden. Bitte versuche es erneut."
+    return text, incomplete_answer, missing_answer
+
+
+def _persist_structured_coach_pending_request(
+    command_receipts: list[dict[str, Any]], effects: list[dict[str, Any]], *, failures: list[dict[str, Any]],
+    incomplete_answer: bool, question: str, cancelled: bool, allow_mutations: bool,
+    context: dict[str, Any], message: str,
+) -> None:
+    if (failures or incomplete_answer) and allow_mutations and not cancelled and not question:
+        last_request = next((entry.get("request") for entry in reversed(command_receipts) if entry.get("request")), None)
+        pending_request = context.get("pending_request") or {}
+        set_kv("coach_pending_request", json.dumps({
+            "summary": (last_request or pending_request).get("summary") or message,
+            "source_message_ids": (last_request or {}).get("source_message_ids") or [context["current_user_message_id"]],
+            "status": "failed",
+            "question": None,
+            "completed_steps": [{"tool": entry["tool"], "status": entry["result"].get("status")} for entry in effects],
+        }, ensure_ascii=False))
+    if effects and not question and not failures and not incomplete_answer and allow_mutations:
+        set_kv("coach_pending_request", "null")
+
+
+def _structured_coach_outcome_status(
+    *, question: str, incomplete_answer: bool, failures: list[dict[str, Any]],
+    missing_answer: bool, effects: list[dict[str, Any]], cancelled: bool,
+) -> str:
+    if question:
+        return "completed"
+    if incomplete_answer or ((failures or missing_answer) and effects):
+        return "partial"
+    if failures or missing_answer:
+        return "failed"
+    return "cancelled" if cancelled else "completed"
 
 
 def _structured_coach_outcome(
@@ -18006,46 +18106,18 @@ def _structured_coach_outcome(
     message: str,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     failures = _unresolved_coach_steps(command_receipts)
-    for entry in command_receipts:
-        if not entry.get("result", {}).get("ok"):
-            entry["resolved"] = not any(entry is failure for failure in failures)
-    internal_tools = STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
-    effects = [
-        entry for entry in command_receipts
-        if entry.get("result", {}).get("ok") and entry["tool"] not in internal_tools
-    ]
-    text = question or output_text(response)
-    incomplete_answer = response.get("status") == "incomplete"
-    missing_answer = not text or incomplete_answer
-    if incomplete_answer:
-        text += "\nDie Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."
-    if failures and not question:
-        text = "Ein Teil des Auftrags konnte noch nicht ausgeführt werden." if effects else "Der Auftrag konnte noch nicht ausgeführt werden."
-        text += "\n" + coach_failure_lines(failures, {entry["tool"] for entry in failures})
-        if effects:
-            text += "\nGespeichert beziehungsweise beauftragt: " + "; ".join(coach_effect_label(entry) for entry in effects) + "."
-    if not text:
-        text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Antwort konnte nicht abgeschlossen werden. Bitte versuche es erneut."
-    if (failures or incomplete_answer) and allow_mutations and not cancelled and not question:
-        last_request = next((entry.get("request") for entry in reversed(command_receipts) if entry.get("request")), None)
-        pending_request = context.get("pending_request") or {}
-        set_kv("coach_pending_request", json.dumps({
-            "summary": (last_request or pending_request).get("summary") or message,
-            "source_message_ids": (last_request or {}).get("source_message_ids") or [context["current_user_message_id"]],
-            "status": "failed",
-            "question": None,
-            "completed_steps": [{"tool": entry["tool"], "status": entry["result"].get("status")} for entry in effects],
-        }, ensure_ascii=False))
-    if effects and not question and not failures and not incomplete_answer and allow_mutations:
-        set_kv("coach_pending_request", "null")
-    if question:
-        status = "completed"
-    elif incomplete_answer or ((failures or missing_answer) and effects):
-        status = "partial"
-    elif failures or missing_answer:
-        status = "failed"
-    else:
-        status = "cancelled" if cancelled else "completed"
+    _mark_resolved_coach_receipts(command_receipts, failures)
+    effects = _coach_effects(command_receipts)
+    text, incomplete_answer, missing_answer = _structured_coach_outcome_text(response, question, failures, effects)
+    _persist_structured_coach_pending_request(
+        command_receipts, effects, failures=failures, incomplete_answer=incomplete_answer,
+        question=question, cancelled=cancelled, allow_mutations=allow_mutations,
+        context=context, message=message,
+    )
+    status = _structured_coach_outcome_status(
+        question=question, incomplete_answer=incomplete_answer, failures=failures,
+        missing_answer=missing_answer, effects=effects, cancelled=cancelled,
+    )
     return status, text, failures
 
 
