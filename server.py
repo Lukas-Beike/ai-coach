@@ -17565,8 +17565,7 @@ def _apply_structured_training_changes(
     }
 
 
-def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_plan_id: str | None = None) -> dict[str, Any]:
-    """Atomically replace future local Coach/library sessions with a new plan."""
+def _prepare_structured_plan_replacement(arguments: dict[str, Any]) -> tuple[dict[str, Any], int, list[dict[str, Any]], str, str, dict[str, str]]:
     payload = _structured_artifact_payload(arguments)
     _validate_structured_plan_limits(payload)
     try:
@@ -17576,9 +17575,14 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
     workouts = [normalize_workout(workout) for workout in payload["workouts"]]
     plan_name = str(payload.get("plan_name") or "").strip()[:200]
     if not plan_name:
-        raise AppError(400, "Ein vollstÃ¤ndiger Planersatz benÃ¶tigt einen Namen.", reason="invalid_plan")
+        raise AppError(400, "Ein vollständiger Planersatz benötigt einen Namen.", reason="invalid_plan")
     today = local_now().date().isoformat()
     period = arguments.get("period") or {"start": today, "end": "9999-12-31"}
+    _validate_replacement_workouts(workouts, today, period)
+    return payload, expected_revision, workouts, plan_name, today, period
+
+
+def _validate_replacement_workouts(workouts: list[dict[str, Any]], today: str, period: dict[str, str]) -> None:
     dates: set[str] = set()
     for workout in workouts:
         workout_date = str(workout.get("date") or "")[:10]
@@ -17587,108 +17591,156 @@ def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_pla
         if workout_date in dates:
             raise AppError(409, f"Der Plan enthält mehrere Einheiten für den {workout_date}; pro Tag ist eine Einheit möglich.", reason="plan_date_conflict")
         dates.add(workout_date)
+
+
+def _replacement_existing_state(
+    db: Any, arguments: dict[str, Any], selected_plan_id: str | None, period: dict[str, str], today: str,
+) -> tuple[list[dict[str, Any]], set[str], set[str], list[tuple[dict[str, Any], dict[str, Any]]]]:
+    rows = db.execute(
+        "SELECT local_id, payload FROM planned_units "
+        "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
+        "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
+        "AND (? = '' OR json_extract(payload, '$.plan_id') = ?) "
+        "AND (? <> '' OR COALESCE(json_extract(payload, '$.source'), 'coach') IN ('coach', 'library')) "
+        "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) BETWEEN ? AND ?",
+        (selected_plan_id or "", selected_plan_id or "", selected_plan_id or "", period["start"], period["end"]),
+    ).fetchall()
+    replace_ids = {str(row.get("local_id") or "") for row in rows if row.get("local_id")}
+    archived_rows = db.execute(
+        "SELECT local_id FROM planned_units "
+        "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 1 "
+        "OR (COALESCE(json_extract(payload, '$.archived'), 0) = 1 "
+        "AND (external_id IS NULL OR external_id = ''))"
+    ).fetchall()
+    ignored_calendar_ids = replace_ids | {str(row.get("local_id") or "") for row in archived_rows if row.get("local_id")}
+    superseded_plan_ids: set[str] = {selected_plan_id} if selected_plan_id else set()
+    if not selected_plan_id and not arguments.get("period"):
+        metadata_rows = db.execute(
+            "SELECT id FROM training_plans WHERE status <> 'archived' AND end_date >= ?", (today,),
+        ).fetchall()
+        superseded_plan_ids.update(str(row.get("id") or "") for row in metadata_rows if row.get("id"))
+    existing_entries = _replacement_entries(rows, superseded_plan_ids)
+    return rows, ignored_calendar_ids, superseded_plan_ids, existing_entries
+
+
+def _replacement_entries(
+    rows: list[dict[str, Any]], superseded_plan_ids: set[str],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    existing_entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for row in rows:
+        try:
+            current = json.loads(row.get("payload") or "{}")
+        except (TypeError, ValueError) as exc:
+            raise AppError(409, "Eine bestehende lokale Planung ist beschädigt.", reason="invalid_plan") from exc
+        if not isinstance(current, dict):
+            raise AppError(409, "Eine bestehende lokale Planung ist beschädigt.", reason="invalid_plan")
+        existing_entries.append((dict(row), current))
+        plan_id = str(current.get("plan_id") or "").strip()
+        if plan_id:
+            superseded_plan_ids.add(plan_id)
+    return existing_entries
+
+
+def _validate_replacement_calendar(workouts: list[dict[str, Any]], ignored_calendar_ids: set[str]) -> None:
+    for workout in workouts:
+        if calendar_conflicts({"date": workout["date"]}, ignored_calendar_ids):
+            raise AppError(409, f"Für den {workout['date']} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
+
+
+def _archive_replacement_entries(
+    db: Any, existing_entries: list[tuple[dict[str, Any], dict[str, Any]]], now: str,
+) -> None:
+    for row, current in existing_entries:
+        before = {**current, "sync_status": "local"}
+        current.update({"local_deleted": True, "archived": True, "sync_status": "local"})
+        db.execute(
+            "UPDATE planned_units SET payload=?, sync_state='local', sync_dirty=1, sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
+            (json.dumps(current, ensure_ascii=False), now, row["local_id"]),
+        )
+        _record_change(db, "planned_unit", row["local_id"], "delete", before, current, source="coach_replacement")
+
+
+def _archive_superseded_training_plans(db: Any, plan_ids: set[str], now: str) -> None:
+    for plan_id in plan_ids:
+        plan = TRAINING_PLAN_REPOSITORY.get(db, plan_id)
+        remaining = db.execute(
+            "SELECT 1 FROM planned_units WHERE json_extract(payload, '$.plan_id')=? "
+            "AND COALESCE(json_extract(payload, '$.archived'), 0)=0 "
+            "AND COALESCE(json_extract(payload, '$.local_deleted'), 0)=0 LIMIT 1", (plan_id,),
+        ).fetchone()
+        if remaining or not plan or plan.get("status") == "archived":
+            continue
+        archived_plan = {**plan, "status": "archived"}
+        TRAINING_PLAN_REPOSITORY.update(
+            db, plan_id, archived_plan["name"], archived_plan["goal"], archived_plan["start_date"],
+            archived_plan["end_date"], "archived", now,
+        )
+        _record_change(db, "training_plan", plan_id, "update", plan, archived_plan, source="coach_replacement")
+
+
+def _create_replacement_plan(
+    db: Any, payload: dict[str, Any], plan_name: str, now: str,
+) -> str:
+    goal = str(payload.get("goal") or "").strip()[:2000]
+    plan_id = str(uuid.uuid4()) if plan_name else ""
+    if not plan_id:
+        return plan_id
+    sorted_dates = sorted(workout["date"] for workout in payload["workouts"])
+    TRAINING_PLAN_REPOSITORY.create(db, plan_id, plan_name, goal, sorted_dates[0], sorted_dates[-1], "planned", now)
+    _record_change(db, "training_plan", plan_id, "create", None, {
+        "id": plan_id, "name": plan_name, "goal": goal,
+        "start_date": sorted_dates[0], "end_date": sorted_dates[-1], "status": "planned",
+    }, source="coach_replacement")
+    return plan_id
+
+
+def _copy_replacement_constraints(
+    db: Any, arguments: dict[str, Any], plan_id: str, superseded_plan_ids: set[str],
+) -> None:
+    if not plan_id:
+        return
+    constraints = arguments.get("constraints") or list(dict.fromkeys(
+        item for old_id in sorted(superseded_plan_ids)
+        for item in json.loads(get_kv(COACH_PLAN_CONSTRAINTS_PREFIX + old_id) or "[]")
+    ))
+    if constraints:
+        set_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id, json.dumps(constraints, ensure_ascii=False), db)
+
+
+def _create_replacement_units(
+    db: Any, workouts: list[dict[str, Any]], plan_id: str, plan_name: str,
+) -> list[dict[str, Any]]:
+    created: list[dict[str, Any]] = []
+    for workout in workouts:
+        entry_payload = {**workout, "source": "coach"}
+        if plan_id:
+            entry_payload.update({"plan_id": plan_id, "plan_name": plan_name})
+        created.append(create_local_planned_unit(
+            entry_payload, db=db, bump_planning_revision=False, change_source="coach_replacement",
+        ))
+    return created
+
+
+def _replace_structured_training_plan(arguments: dict[str, Any], *, selected_plan_id: str | None = None) -> dict[str, Any]:
+    """Atomically replace future local Coach/library sessions with a new plan."""
+    payload, expected_revision, workouts, plan_name, today, period = _prepare_structured_plan_replacement(arguments)
     with DB_LOCK, database() as db:
         revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
         current_revision = int((revision_row or {}).get("revision") or 0)
         if expected_revision != current_revision:
             raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
-        rows = db.execute(
-            "SELECT local_id, payload FROM planned_units "
-            "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
-            "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
-            "AND (? = '' OR json_extract(payload, '$.plan_id') = ?) "
-            "AND (? <> '' OR COALESCE(json_extract(payload, '$.source'), 'coach') IN ('coach', 'library')) "
-            "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) BETWEEN ? AND ?",
-            (selected_plan_id or "", selected_plan_id or "", selected_plan_id or "", period["start"], period["end"]),
-        ).fetchall()
-        replace_ids = {str(row.get("local_id") or "") for row in rows if row.get("local_id")}
-        archived_rows = db.execute(
-            "SELECT local_id FROM planned_units "
-            "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 1 "
-            "OR (COALESCE(json_extract(payload, '$.archived'), 0) = 1 "
-            "AND (external_id IS NULL OR external_id = ''))"
-        ).fetchall()
-        ignored_calendar_ids = replace_ids | {
-            str(row.get("local_id") or "") for row in archived_rows if row.get("local_id")
-        }
-        existing_entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
-        superseded_plan_ids: set[str] = {selected_plan_id} if selected_plan_id else set()
-        if not selected_plan_id and not arguments.get("period"):
-            metadata_rows = db.execute(
-                "SELECT id FROM training_plans "
-                "WHERE status <> 'archived' AND end_date >= ?",
-                (today,),
-            ).fetchall()
-            superseded_plan_ids.update(
-                str(row.get("id") or "") for row in metadata_rows if row.get("id")
-            )
-        for row in rows:
-            try:
-                current = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError) as exc:
-                raise AppError(409, "Eine bestehende lokale Planung ist beschädigt.", reason="invalid_plan") from exc
-            if not isinstance(current, dict):
-                raise AppError(409, "Eine bestehende lokale Planung ist beschädigt.", reason="invalid_plan")
-            existing_entries.append((dict(row), current))
-            plan_id = str(current.get("plan_id") or "").strip()
-            if plan_id:
-                superseded_plan_ids.add(plan_id)
-        _reserve_change_history_capacity(
-            db, len(rows) + len(superseded_plan_ids) + len(workouts) + 1,
+        rows, ignored_calendar_ids, superseded_plan_ids, existing_entries = _replacement_existing_state(
+            db, arguments, selected_plan_id, period, today,
         )
-        # Validate every external/calendar conflict before changing any row.
-        for workout in workouts:
-            if calendar_conflicts({"date": workout["date"]}, ignored_calendar_ids):
-                raise AppError(409, f"Für den {workout['date']} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
+        _reserve_change_history_capacity(db, len(rows) + len(superseded_plan_ids) + len(workouts) + 1)
+        _validate_replacement_calendar(workouts, ignored_calendar_ids)
         now = utc_now()
-        for row, current in existing_entries:
-            before = {**current, "sync_status": "local"}
-            current.update({"local_deleted": True, "archived": True, "sync_status": "local"})
-            db.execute(
-                "UPDATE planned_units SET payload=?, sync_state='local', sync_dirty=1, sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
-                (json.dumps(current, ensure_ascii=False), now, row["local_id"]),
-            )
-            _record_change(db, "planned_unit", row["local_id"], "delete", before, current, source="coach_replacement")
-        for superseded_plan_id in superseded_plan_ids:
-            superseded_plan = TRAINING_PLAN_REPOSITORY.get(db, superseded_plan_id)
-            remaining = db.execute(
-                "SELECT 1 FROM planned_units WHERE json_extract(payload, '$.plan_id')=? "
-                "AND COALESCE(json_extract(payload, '$.archived'), 0)=0 "
-                "AND COALESCE(json_extract(payload, '$.local_deleted'), 0)=0 LIMIT 1", (superseded_plan_id,),
-            ).fetchone()
-            if remaining or not superseded_plan or superseded_plan.get("status") == "archived":
-                continue
-            archived_plan = {**superseded_plan, "status": "archived"}
-            TRAINING_PLAN_REPOSITORY.update(
-                db, superseded_plan_id, archived_plan["name"], archived_plan["goal"],
-                archived_plan["start_date"], archived_plan["end_date"], "archived", now,
-            )
-            _record_change(db, "training_plan", superseded_plan_id, "update", superseded_plan, archived_plan, source="coach_replacement")
-        goal = str(payload.get("goal") or "").strip()[:2000]
-        plan_id = str(uuid.uuid4()) if plan_name else ""
-        if plan_id:
-            sorted_dates = sorted(workout["date"] for workout in workouts)
-            TRAINING_PLAN_REPOSITORY.create(db, plan_id, plan_name, goal, sorted_dates[0], sorted_dates[-1], "planned", now)
-            _record_change(db, "training_plan", plan_id, "create", None, {
-                "id": plan_id, "name": plan_name, "goal": goal,
-                "start_date": sorted_dates[0], "end_date": sorted_dates[-1], "status": "planned",
-            }, source="coach_replacement")
-        if plan_id:
-            constraints = arguments.get("constraints") or list(dict.fromkeys(
-                item for old_id in sorted(superseded_plan_ids)
-                for item in json.loads(get_kv(COACH_PLAN_CONSTRAINTS_PREFIX + old_id) or "[]")
-            ))
-            if constraints:
-                set_kv(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id, json.dumps(constraints, ensure_ascii=False), db)
-        created: list[dict[str, Any]] = []
-        for workout in workouts:
-            entry_payload = {**workout, "source": "coach"}
-            if plan_id:
-                entry_payload.update({"plan_id": plan_id, "plan_name": plan_name})
-            entry = create_local_planned_unit(
-                entry_payload, db=db, bump_planning_revision=False, change_source="coach_replacement"
-            )
-            created.append(entry)
+        _archive_replacement_entries(db, existing_entries, now)
+        _archive_superseded_training_plans(db, superseded_plan_ids, now)
+        replacement_payload = {**payload, "workouts": workouts}
+        plan_id = _create_replacement_plan(db, replacement_payload, plan_name, now)
+        _copy_replacement_constraints(db, arguments, plan_id, superseded_plan_ids)
+        created = _create_replacement_units(db, workouts, plan_id, plan_name)
         if rows or created or plan_id:
             _bump_planning_revision(db)
         revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
