@@ -20261,8 +20261,6 @@ def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
     }
 
 
-@maintenance_operation
-@serialise_conversation
 def _validated_chat_request(message: str, client_turn_id: str, cancel_event: threading.Event | None) -> tuple[str, str]:
     _raise_chat_cancelled(cancel_event)
     message = message.strip()
@@ -20340,6 +20338,8 @@ def _resume_background_chat_command(
         )
 
 
+@maintenance_operation
+@serialise_conversation
 def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str, background_job: bool = False) -> dict[str, Any]:
     message, client_turn_id = _validated_chat_request(message, client_turn_id, cancel_event)
     existing_command, background_receipt, background_owned = _chat_command_state(
