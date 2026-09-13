@@ -16180,37 +16180,34 @@ def _enqueue_coach_plan_push(entries: list[dict[str, str]], sync_job_ids: list[s
     }
 
 
+def _structured_bounded_integer(
+    arguments: dict[str, Any], key: str, default: int, maximum: int, error: str,
+) -> int:
+    try:
+        return max(1, min(int(arguments.get(key, default)), maximum))
+    except (TypeError, ValueError) as exc:
+        raise AppError(400, error, reason="invalid_list_request") from exc
+
+
 def _structured_coach_read_result(name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
     if name == "read_profile":
         return {"ok": True, "profile": get_profile()}
     if name == "read_training_state":
         return {"ok": True, **_structured_training_state(include_inactive=bool(arguments.get("include_inactive")), cursor=arguments.get("cursor"), limit=arguments.get("limit"))}
     if name == "list_recent_activities":
-        try:
-            days = max(1, min(int(arguments.get("days", 30)), 3660))
-            limit = max(1, min(int(arguments.get("limit", 100)), 500))
-        except (TypeError, ValueError) as exc:
-            raise AppError(400, "Aktivitätszeitraum oder Limit ist ungültig.", reason="invalid_list_request") from exc
+        days = _structured_bounded_integer(arguments, "days", 30, 3660, "Aktivitätszeitraum oder Limit ist ungültig.")
+        limit = _structured_bounded_integer(arguments, "limit", 100, 500, "Aktivitätszeitraum oder Limit ist ungültig.")
         return {"ok": True, **list_recent_activities(days=days, limit=limit)}
     if name == "get_activity_details":
         return get_activity_details(arguments.get("activity_id"))
     if name == "list_workout_library":
-        try:
-            limit = max(1, min(int(arguments.get("limit", 100)), 500))
-        except (TypeError, ValueError) as exc:
-            raise AppError(400, "Bibliothekslimit ist ungültig.", reason="invalid_list_request") from exc
+        limit = _structured_bounded_integer(arguments, "limit", 100, 500, "Bibliothekslimit ist ungültig.")
         return {"ok": True, "templates": list_workout_library(limit, include_archived=bool(arguments.get("include_archived")))}
     if name == "list_planned_workouts":
-        try:
-            limit = max(1, min(int(arguments.get("limit", 100)), COACH_TRAINING_CHANGE_LIMIT))
-        except (TypeError, ValueError) as exc:
-            raise AppError(400, "Planungslimit ist ungültig.", reason="invalid_list_request") from exc
+        limit = _structured_bounded_integer(arguments, "limit", 100, COACH_TRAINING_CHANGE_LIMIT, "Planungslimit ist ungültig.")
         return {"ok": True, **list_coach_planned_workouts(limit)}
     if name == "list_change_history":
-        try:
-            limit = max(1, min(int(arguments.get("limit", 100)), 500))
-        except (TypeError, ValueError) as exc:
-            raise AppError(400, "Historienlimit ist ungültig.", reason="invalid_list_request") from exc
+        limit = _structured_bounded_integer(arguments, "limit", 100, 500, "Historienlimit ist ungültig.")
         return {"ok": True, "changes": list_change_history(limit)}
     if name == "list_competitions":
         return {"ok": True, "competitions": list_competitions()}
