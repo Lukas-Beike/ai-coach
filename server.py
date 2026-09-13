@@ -13416,6 +13416,21 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
             OPERATION_CONTEXT.reset(operation_token)
 
 
+def _completed_intervals_sync_result(
+    current_sync_at: str, wait_for_performance: bool, cancel_event: threading.Event | None,
+) -> dict[str, Any]:
+    try:
+        completed_activity_days = int(get_kv("last_sync_activity_days") or 0)
+    except (TypeError, ValueError):
+        completed_activity_days = 0
+    if wait_for_performance:
+        _wait_for_performance_refresh(cancel_event=cancel_event)
+    return {
+        "status": "ok", "waited_for_existing": True, "synced_at": current_sync_at,
+        **({"activity_days": completed_activity_days} if completed_activity_days > 0 or completed_activity_days == ALL_SYNC_DAYS else {}),
+    }
+
+
 def _wait_for_existing_intervals_sync(
     wait_for_performance: bool, cancel_event: threading.Event | None, previous_sync_at: str | None,
 ) -> dict[str, Any]:
@@ -13428,16 +13443,7 @@ def _wait_for_existing_intervals_sync(
         try:
             current_sync_at = get_kv("last_sync_at")
             if current_sync_at and current_sync_at != previous_sync_at:
-                try:
-                    completed_activity_days = int(get_kv("last_sync_activity_days") or 0)
-                except (TypeError, ValueError):
-                    completed_activity_days = 0
-                if wait_for_performance:
-                    _wait_for_performance_refresh(cancel_event=cancel_event)
-                return {
-                    "status": "ok", "waited_for_existing": True, "synced_at": current_sync_at,
-                    **({"activity_days": completed_activity_days} if completed_activity_days > 0 or completed_activity_days == ALL_SYNC_DAYS else {}),
-                }
+                return _completed_intervals_sync_result(current_sync_at, wait_for_performance, cancel_event)
             last_error = redact_text(get_kv("last_sync_error") or "")
             detail = f" {last_error[:300]}" if last_error else ""
             raise AppError(
@@ -13782,36 +13788,46 @@ def actual_atl_series(wellness_rows: list[dict[str, Any]], activities: list[Any]
     return _atl_series_from_rows(dated_wellness, _activity_load_by_date(activities, anchor))
 
 
+def _wellness_eftp_value(row: dict[str, Any], cutoff: date, anchor: date) -> float | None:
+    try:
+        row_date = date.fromisoformat(str(row.get("id") or row.get("date") or "")[:10])
+    except ValueError:
+        return None
+    if not cutoff <= row_date <= anchor:
+        return None
+    info = sport_info_setting(row, "ride")
+    value = bounded_performance_metric("cycling_eftp_watts", first_present(info, ("eftp", "eFTP")))
+    return float(value) if value is not None else None
+
+
+def _activity_eftp_value(activity: Any, cutoff: date, anchor: date) -> float | None:
+    if not isinstance(activity, dict):
+        return None
+    try:
+        activity_date = date.fromisoformat(str(activity.get("start_date_local") or "")[:10])
+    except ValueError:
+        return None
+    if not cutoff <= activity_date <= anchor:
+        return None
+    raw_type = str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold()
+    if not any(term in raw_type for term in ("ride", "rad", "bike", "cycling")):
+        return None
+    value = bounded_performance_metric("cycling_eftp_watts", first_present(activity, ("icu_eftp", "eftp", "eFTP")))
+    return float(value) if value is not None else None
+
+
 def eftp_30_day_average(wellness_rows: list[dict[str, Any]], activities: list[Any], end_date: date | None = None) -> float | None:
     anchor = end_date or local_now().date()
     cutoff = anchor - timedelta(days=29)
     values: list[float] = []
     for row in wellness_rows:
-        try:
-            row_date = date.fromisoformat(str(row.get("id") or row.get("date") or "")[:10])
-        except ValueError:
-            continue
-        if not cutoff <= row_date <= anchor:
-            continue
-        info = sport_info_setting(row, "ride")
-        value = bounded_performance_metric("cycling_eftp_watts", first_present(info, ("eftp", "eFTP")))
+        value = _wellness_eftp_value(row, cutoff, anchor)
         if value is not None:
-            values.append(float(value))
+            values.append(value)
     for activity in activities:
-        if not isinstance(activity, dict):
-            continue
-        try:
-            activity_date = date.fromisoformat(str(activity.get("start_date_local") or "")[:10])
-        except ValueError:
-            continue
-        if not cutoff <= activity_date <= anchor:
-            continue
-        raw_type = str(first_present(activity, ("type", "sport", "sport_type", "activity_type", "name")) or "").casefold()
-        if not any(term in raw_type for term in ("ride", "rad", "bike", "cycling")):
-            continue
-        value = bounded_performance_metric("cycling_eftp_watts", first_present(activity, ("icu_eftp", "eftp", "eFTP")))
+        value = _activity_eftp_value(activity, cutoff, anchor)
         if value is not None:
-            values.append(float(value))
+            values.append(value)
     return round(sum(values) / len(values), 1) if values else None
 
 
@@ -14375,53 +14391,64 @@ def activity_performance_validation(
     }
 
 
+def _garmin_sleep_recovery(
+    garmin: dict[str, Any], latest_wellness: dict[str, Any], today: date,
+) -> dict[str, Any] | None:
+    sleep_seconds, _ = garmin_recovery_metric(garmin, "sleep", ("sleepTimeSeconds", "sleepDuration"))
+    sleep_score, _ = garmin_recovery_metric(
+        garmin, "sleep", ("sleepScore", "overallSleepScore"), lambda value: _garmin_bounded_metric(value, 0, 100)
+    )
+    sleep_hours, sleep_date = garmin_recovery_metric(garmin, "sleep", ("sleep_hours",), as_number)
+    if sleep_hours is None and sleep_seconds is not None:
+        sleep_hours = round(float(sleep_seconds) / 3600, 1)
+    if sleep_hours is None:
+        return None
+    sleep_average = garmin_recovery_average(
+        garmin, "sleep", ("sleepTimeSeconds", "sleepDuration"), 7, today,
+        lambda value: round(float(value) / 3600, 1) if as_number(value) is not None else None,
+    )
+    if sleep_average is None:
+        sleep_average = garmin_recovery_average(garmin, "sleep", ("sleep_hours",), 7, today)
+    resolved_score = sleep_score if sleep_score is not None else first_present(latest_wellness, ("sleepScore",))
+    return {
+        "sleep_hours": sleep_hours, "sleep_source": GARMIN_PERFORMANCE_SOURCE,
+        "sleep_average": sleep_average, "sleep_score": resolved_score,
+        "sleep_score_source": GARMIN_PERFORMANCE_SOURCE if sleep_score is not None else (PROVIDER_INTERVALS_WELLNESS_NAME if resolved_score is not None else None),
+        "sleep_date": sleep_date,
+    }
+
+
+def _intervals_sleep_recovery(
+    latest_wellness: dict[str, Any], wellness_rows: list[dict[str, Any]], today: date,
+) -> dict[str, Any]:
+    sleep_seconds = first_present(latest_wellness, ("sleepSecs",))
+    try:
+        sleep_hours = round(float(sleep_seconds) / 3600, 1) if sleep_seconds is not None else None
+    except (TypeError, ValueError):
+        sleep_hours = None
+    sleep_average = wellness_average(wellness_rows, ("sleepSecs", "sleep_seconds"), 7, today, 3600)
+    if sleep_average is None:
+        sleep_average = wellness_average(wellness_rows, ("sleep_hours",), 7, today)
+    return {
+        "sleep_hours": sleep_hours,
+        "sleep_source": PROVIDER_INTERVALS_WELLNESS_NAME if sleep_hours is not None else None,
+        "sleep_average": sleep_average,
+        "sleep_score": first_present(latest_wellness, ("sleepScore",)),
+        "sleep_score_source": PROVIDER_INTERVALS_WELLNESS_NAME if first_present(latest_wellness, ("sleepScore",)) is not None else None,
+        "sleep_date": None,
+    }
+
+
 def _performance_sleep_recovery(
     garmin: dict[str, Any],
     latest_wellness: dict[str, Any],
     wellness_rows: list[dict[str, Any]],
     today: date,
 ) -> dict[str, Any]:
-    garmin_sleep_seconds, _ = garmin_recovery_metric(garmin, "sleep", ("sleepTimeSeconds", "sleepDuration"))
-    garmin_sleep_score, _ = garmin_recovery_metric(
-        garmin, "sleep", ("sleepScore", "overallSleepScore"), lambda value: _garmin_bounded_metric(value, 0, 100)
-    )
-    garmin_sleep_hours, garmin_sleep_date = garmin_recovery_metric(garmin, "sleep", ("sleep_hours",), as_number)
-    if garmin_sleep_hours is None and garmin_sleep_seconds is not None:
-        garmin_sleep_hours = round(float(garmin_sleep_seconds) / 3600, 1)
-    if garmin_sleep_hours is not None:
-        sleep_hours = garmin_sleep_hours
-        sleep_source = GARMIN_PERFORMANCE_SOURCE
-        sleep_average = garmin_recovery_average(
-            garmin, "sleep", ("sleepTimeSeconds", "sleepDuration"), 7, today,
-            lambda value: round(float(value) / 3600, 1) if as_number(value) is not None else None,
-        )
-        if sleep_average is None:
-            sleep_average = garmin_recovery_average(garmin, "sleep", ("sleep_hours",), 7, today)
-    else:
-        sleep_seconds = first_present(latest_wellness, ("sleepSecs",))
-        try:
-            sleep_hours = round(float(sleep_seconds) / 3600, 1) if sleep_seconds is not None else None
-        except (TypeError, ValueError):
-            sleep_hours = None
-        sleep_source = PROVIDER_INTERVALS_WELLNESS_NAME if sleep_hours is not None else None
-        sleep_average = wellness_average(wellness_rows, ("sleepSecs", "sleep_seconds"), 7, today, 3600)
-        if sleep_average is None:
-            sleep_average = wellness_average(wellness_rows, ("sleep_hours",), 7, today)
-    sleep_score = garmin_sleep_score if garmin_sleep_score is not None else first_present(latest_wellness, ("sleepScore",))
-    if garmin_sleep_score is not None:
-        sleep_score_source = GARMIN_PERFORMANCE_SOURCE
-    elif sleep_score is not None:
-        sleep_score_source = PROVIDER_INTERVALS_WELLNESS_NAME
-    else:
-        sleep_score_source = None
-    return {
-        "sleep_hours": sleep_hours,
-        "sleep_source": sleep_source,
-        "sleep_average": sleep_average,
-        "sleep_score": sleep_score,
-        "sleep_score_source": sleep_score_source,
-        "sleep_date": garmin_sleep_date,
-    }
+    garmin_recovery = _garmin_sleep_recovery(garmin, latest_wellness, today)
+    if garmin_recovery is not None:
+        return garmin_recovery
+    return _intervals_sleep_recovery(latest_wellness, wellness_rows, today)
 
 
 def _performance_recovery_metric(
@@ -14835,6 +14862,34 @@ def structured_athlete_context(snapshot: dict[str, Any] | None = None) -> dict[s
     }
 
 
+def _compact_coach_library_item(
+    chosen: list[dict[str, Any]], items: list[dict[str, Any]], index: int,
+) -> None:
+    if index >= len(items) or len(chosen) >= COACH_LIBRARY_LIMIT:
+        return
+    compacted = selected(items[index], (
+        "id", "name", "description", "type", "moving_time", "distance", "target",
+        "icu_training_load", "icu_intensity", "indoor", "tags",
+    ))
+    if "name" in compacted:
+        compacted["name"] = str(compacted["name"])[:200]
+    if "description" in compacted:
+        compacted["description"] = str(compacted["description"])[:COACH_LIBRARY_DESCRIPTION_LIMIT]
+    if isinstance(compacted.get("tags"), list):
+        compacted["tags"] = [str(tag)[:80] for tag in compacted["tags"][:10]]
+    chosen.append(compacted)
+
+
+def _balanced_coach_library_items(by_type: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    chosen: list[dict[str, Any]] = []
+    for index in range(max((len(items) for items in by_type.values()), default=0)):
+        for workout_type in sorted(by_type):
+            _compact_coach_library_item(chosen, by_type[workout_type], index)
+        if len(chosen) >= COACH_LIBRARY_LIMIT:
+            break
+    return chosen
+
+
 def coach_workout_library() -> list[dict[str, Any]]:
     """Return a small, balanced template catalogue for the coach prompt."""
     # Dated entries are local planned units and are projected separately in the
@@ -14849,25 +14904,7 @@ def coach_workout_library() -> list[dict[str, Any]]:
         workout_type = workout_library_type(workout.get("type") or workout.get("sport"))
         by_type.setdefault(workout_type, []).append(workout)
 
-    chosen: list[dict[str, Any]] = []
-    for index in range(max((len(items) for items in by_type.values()), default=0)):
-        for workout_type in sorted(by_type):
-            items = by_type[workout_type]
-            if index < len(items) and len(chosen) < COACH_LIBRARY_LIMIT:
-                compacted = selected(items[index], (
-                    "id", "name", "description", "type", "moving_time", "distance", "target",
-                    "icu_training_load", "icu_intensity", "indoor", "tags",
-                ))
-                if "name" in compacted:
-                    compacted["name"] = str(compacted["name"])[:200]
-                if "description" in compacted:
-                    compacted["description"] = str(compacted["description"])[:COACH_LIBRARY_DESCRIPTION_LIMIT]
-                if isinstance(compacted.get("tags"), list):
-                    compacted["tags"] = [str(tag)[:80] for tag in compacted["tags"][:10]]
-                chosen.append(compacted)
-        if len(chosen) >= COACH_LIBRARY_LIMIT:
-            break
-    return chosen
+    return _balanced_coach_library_items(by_type)
 
 
 def build_training_context() -> str:
