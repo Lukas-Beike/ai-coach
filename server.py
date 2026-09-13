@@ -11362,6 +11362,22 @@ def _workout_library_update_candidate(current: dict[str, Any], action: str, valu
     return candidate
 
 
+def _reconcile_updated_library_workout_content(normalized: dict[str, Any], values: dict[str, Any]) -> None:
+    seconds = validate_workout_description(normalized)
+    minutes = as_number(normalized.get("duration_minutes"))
+    if seconds is not None or minutes is not None:
+        normalized["moving_time"] = round(seconds if seconds is not None else minutes * 60)
+    if any(key in values for key in ("description", "duration_minutes", "target", "type", "sport")):
+        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+            normalized.pop(key, None)
+
+
+def _preserve_library_workout_metadata(normalized: dict[str, Any], current: dict[str, Any]) -> None:
+    for key in ("source", "rationale", "plan_id", "plan_name", "private_calendar_adjustment"):
+        if current.get(key) is not None:
+            normalized[key] = current[key]
+
+
 def _updated_workout_library_entry(
     current: dict[str, Any], row: dict[str, Any], local_id: str, action: str, values: dict[str, Any],
 ) -> dict[str, Any]:
@@ -11372,16 +11388,8 @@ def _updated_workout_library_entry(
         sync_status="local",
     )
     if action == "update":
-        seconds = validate_workout_description(normalized)
-        minutes = as_number(normalized.get("duration_minutes"))
-        if seconds is not None or minutes is not None:
-            normalized["moving_time"] = round(seconds if seconds is not None else minutes * 60)
-        if any(key in values for key in ("description", "duration_minutes", "target", "type", "sport")):
-            for key in ("workout_doc", "icu_training_load", "icu_intensity"):
-                normalized.pop(key, None)
-    for key in ("source", "rationale", "plan_id", "plan_name", "private_calendar_adjustment"):
-        if current.get(key) is not None:
-            normalized[key] = current[key]
+        _reconcile_updated_library_workout_content(normalized, values)
+    _preserve_library_workout_metadata(normalized, current)
     return normalized
 
 
