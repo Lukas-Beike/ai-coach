@@ -18031,25 +18031,23 @@ def _structured_coach_response(
     raise AppError(502, "Der KI-Dienst konnte die Antwort nicht fertigstellen.", reason="response_failed")
 
 
-def _structured_coach_outcome(
-    response: dict[str, Any],
-    command_receipts: list[dict[str, Any]],
-    *,
-    question: str,
-    cancelled: bool,
-    allow_mutations: bool,
-    context: dict[str, Any],
-    message: str,
-) -> tuple[str, str, list[dict[str, Any]]]:
-    failures = _unresolved_coach_steps(command_receipts)
+def _mark_resolved_coach_receipts(command_receipts: list[dict[str, Any]], failures: list[dict[str, Any]]) -> None:
     for entry in command_receipts:
         if not entry.get("result", {}).get("ok"):
             entry["resolved"] = not any(entry is failure for failure in failures)
+
+
+def _coach_effects(command_receipts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     internal_tools = STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
-    effects = [
+    return [
         entry for entry in command_receipts
         if entry.get("result", {}).get("ok") and entry["tool"] not in internal_tools
     ]
+
+
+def _structured_coach_outcome_text(
+    response: dict[str, Any], question: str, failures: list[dict[str, Any]], effects: list[dict[str, Any]],
+) -> tuple[str, bool, bool]:
     text = question or output_text(response)
     incomplete_answer = response.get("status") == "incomplete"
     missing_answer = not text or incomplete_answer
@@ -18062,6 +18060,14 @@ def _structured_coach_outcome(
             text += "\nGespeichert beziehungsweise beauftragt: " + "; ".join(coach_effect_label(entry) for entry in effects) + "."
     if not text:
         text = "Ergebnis: " + "; ".join(coach_effect_label(entry) for entry in effects) if effects else "Die Antwort konnte nicht abgeschlossen werden. Bitte versuche es erneut."
+    return text, incomplete_answer, missing_answer
+
+
+def _persist_structured_coach_pending_request(
+    command_receipts: list[dict[str, Any]], effects: list[dict[str, Any]], *, failures: list[dict[str, Any]],
+    incomplete_answer: bool, question: str, cancelled: bool, allow_mutations: bool,
+    context: dict[str, Any], message: str,
+) -> None:
     if (failures or incomplete_answer) and allow_mutations and not cancelled and not question:
         last_request = next((entry.get("request") for entry in reversed(command_receipts) if entry.get("request")), None)
         pending_request = context.get("pending_request") or {}
@@ -18074,14 +18080,44 @@ def _structured_coach_outcome(
         }, ensure_ascii=False))
     if effects and not question and not failures and not incomplete_answer and allow_mutations:
         set_kv("coach_pending_request", "null")
+
+
+def _structured_coach_outcome_status(
+    *, question: str, incomplete_answer: bool, failures: list[dict[str, Any]],
+    missing_answer: bool, effects: list[dict[str, Any]], cancelled: bool,
+) -> str:
     if question:
-        status = "completed"
-    elif incomplete_answer or ((failures or missing_answer) and effects):
-        status = "partial"
-    elif failures or missing_answer:
-        status = "failed"
-    else:
-        status = "cancelled" if cancelled else "completed"
+        return "completed"
+    if incomplete_answer or ((failures or missing_answer) and effects):
+        return "partial"
+    if failures or missing_answer:
+        return "failed"
+    return "cancelled" if cancelled else "completed"
+
+
+def _structured_coach_outcome(
+    response: dict[str, Any],
+    command_receipts: list[dict[str, Any]],
+    *,
+    question: str,
+    cancelled: bool,
+    allow_mutations: bool,
+    context: dict[str, Any],
+    message: str,
+) -> tuple[str, str, list[dict[str, Any]]]:
+    failures = _unresolved_coach_steps(command_receipts)
+    _mark_resolved_coach_receipts(command_receipts, failures)
+    effects = _coach_effects(command_receipts)
+    text, incomplete_answer, missing_answer = _structured_coach_outcome_text(response, question, failures, effects)
+    _persist_structured_coach_pending_request(
+        command_receipts, effects, failures=failures, incomplete_answer=incomplete_answer,
+        question=question, cancelled=cancelled, allow_mutations=allow_mutations,
+        context=context, message=message,
+    )
+    status = _structured_coach_outcome_status(
+        question=question, incomplete_answer=incomplete_answer, failures=failures,
+        missing_answer=missing_answer, effects=effects, cancelled=cancelled,
+    )
     return status, text, failures
 
 
