@@ -6987,6 +6987,190 @@ def _competition_remote_events(client: Any, local_rows: list[dict[str, Any]]) ->
     ]
 
 
+def _competition_sync_records() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    with DB_LOCK, database() as db:
+        tombstones = [dict(row) for row in db.execute("SELECT * FROM competition_sync_tombstones ORDER BY created_at").fetchall()]
+        local_rows = [dict(row) for row in db.execute("SELECT * FROM competitions ORDER BY event_date, priority, name").fetchall()]
+    return tombstones, local_rows
+
+
+def _delete_competition_tombstones(
+    client: Any, plan: dict[str, Any], tombstones: list[dict[str, Any]], push_local: bool,
+) -> int:
+    identifiers = plan["delete_identifiers"]
+    if not push_local or not identifiers:
+        return 0
+    client.bulk_delete_events(identifiers)
+    with DB_LOCK, database() as db:
+        db.executemany(
+            "DELETE FROM competition_sync_tombstones WHERE id=? AND created_at=?",
+            [(row["id"], row["created_at"]) for row in tombstones],
+        )
+    return len(identifiers)
+
+
+def _competition_sync_remote_indexes(plan: dict[str, Any], pushed: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    remote_events = [*plan["remote_events"], *pushed]
+    return {
+        "by_external": {str(event.get("external_id")): event for event in remote_events if event.get("external_id")},
+        "by_id": {str(event.get("id")): event for event in remote_events if event.get("id")},
+        "by_identity": plan["remote_by_identity"],
+        "pushed_by_external": {str(event.get("external_id")): event for event in pushed if event.get("external_id")},
+        "pushed_by_id": {str(event.get("id")): event for event in pushed if event.get("id")},
+        "remote_events": remote_events,
+    }
+
+
+def _competition_sync_remote_match(
+    row: dict[str, Any], indexes: dict[str, dict[str, Any]],
+) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None]:
+    external_id = str(row.get("external_id") or competition_external_id(str(row["id"])))
+    remote = indexes["pushed_by_external"].get(external_id) or indexes["by_external"].get(external_id)
+    if not remote and row.get("intervals_event_id"):
+        remote_id = str(row["intervals_event_id"])
+        remote = indexes["pushed_by_id"].get(remote_id) or indexes["by_id"].get(remote_id)
+    identity_remote = indexes["by_identity"].get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
+    return external_id, remote, identity_remote
+
+
+def _record_competition_sync_conflict(
+    db: sqlite3.Connection, row: dict[str, Any], now: str, conflict: dict[str, Any] | str,
+) -> None:
+    payload = conflict if isinstance(conflict, str) else json.dumps(conflict, ensure_ascii=False)
+    db.execute(UPDATE_COMPETITION_CONFLICT_SQL, (payload, now, row["id"]))
+
+
+def _remote_missing_competition_conflict(now: str) -> str:
+    return json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False)
+
+
+def _reconcile_dirty_competition(
+    db: sqlite3.Connection,
+    row: dict[str, Any],
+    remote: dict[str, Any] | None,
+    identity_remote: dict[str, Any] | None,
+    external_id: str,
+    now: str,
+    push_local: bool,
+) -> int:
+    if identity_remote and not remote and row.get("sync_state") != "local_override":
+        _record_competition_sync_conflict(db, row, now, competition_conflict_payload(identity_remote, "identity_only"))
+        return 1
+    remote = remote or identity_remote
+    if not push_local:
+        if remote:
+            _record_competition_sync_conflict(db, row, now, competition_conflict_payload(remote, "remote_changed"))
+            return 1
+        if row.get("intervals_event_id"):
+            _record_competition_sync_conflict(db, row, now, _remote_missing_competition_conflict(now))
+            return 1
+        return 0
+    if remote:
+        db.execute(
+            "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
+            (str(remote.get("id") or row.get("intervals_event_id") or "") or None, external_id, now, now, row["id"]),
+        )
+        return 0
+    if row.get("intervals_event_id"):
+        _record_competition_sync_conflict(db, row, now, _remote_missing_competition_conflict(now))
+        return 1
+    return 0
+
+
+def _reconcile_synced_competition(
+    db: sqlite3.Connection, row: dict[str, Any], remote: dict[str, Any] | None, external_id: str, now: str, push_local: bool,
+) -> tuple[int, int]:
+    if remote:
+        data = remote_competition_data(remote)
+        if data:
+            db.execute(
+                "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
+                (
+                    data["name"], data["event_date"], data["start_date_local"], data["sport"], data["priority"],
+                    data["category"], data["distance"], data["target"], data["description"], data["moving_time"],
+                    data["notes"], data["intervals_event_id"] or str(row.get("intervals_event_id") or "") or None,
+                    external_id, now, now, row["id"],
+                ),
+            )
+            return 1, 0
+        return 0, 0
+    if row.get("intervals_event_id") and push_local:
+        _record_competition_sync_conflict(db, row, now, _remote_missing_competition_conflict(now))
+        return 0, 1
+    return 0, 0
+
+
+def _synchronize_existing_competitions(
+    db: sqlite3.Connection, local_rows: list[dict[str, Any]], indexes: dict[str, dict[str, Any]], now: str, push_local: bool,
+) -> tuple[int, int]:
+    updated = 0
+    conflicts = 0
+    for row in local_rows:
+        current = db.execute(SELECT_COMPETITION_SQL, (row["id"],)).fetchone()
+        if current is None or dict(current) != row:
+            continue  # A newer local edit or deletion is authoritative.
+        external_id, remote, identity_remote = _competition_sync_remote_match(row, indexes)
+        if row.get("sync_dirty"):
+            conflicts += _reconcile_dirty_competition(db, row, remote, identity_remote, external_id, now, push_local)
+            continue
+        changed, conflicted = _reconcile_synced_competition(db, row, remote, external_id, now, push_local)
+        updated += changed
+        conflicts += conflicted
+    return updated, conflicts
+
+
+def _remote_competition_local_id(
+    remote: dict[str, Any], data: dict[str, Any], existing: dict[str, Any],
+) -> str | None:
+    external_id = str(remote.get("external_id") or "")
+    if external_id.startswith(COMPETITION_EXTERNAL_PREFIX):
+        candidate = external_id[len(COMPETITION_EXTERNAL_PREFIX):]
+        if candidate in existing:
+            return candidate
+    if remote.get("id") is not None:
+        remote_id = str(remote["id"])
+        linked = next((key for key, row in existing.items() if str(row.get("intervals_event_id") or "") == remote_id), None)
+        if linked is not None:
+            return linked
+    remote_key = competition_sync_key(data)
+    return next((key for key, row in existing.items() if competition_sync_key(row) == remote_key), None)
+
+
+def _suppressed_competition_identifiers(db: sqlite3.Connection, tombstones: list[dict[str, Any]]) -> tuple[set[str], set[str]]:
+    suppressed = tombstones + [dict(row) for row in db.execute("SELECT * FROM competition_sync_tombstones")]
+    return (
+        {str(row["intervals_event_id"]) for row in suppressed if row.get("intervals_event_id")},
+        {str(row["external_id"]) for row in suppressed if row.get("external_id")},
+    )
+
+
+def _import_remote_competitions(
+    db: sqlite3.Connection, remote_events: list[dict[str, Any]], tombstones: list[dict[str, Any]], now: str,
+) -> int:
+    existing = {str(row["id"]): row for row in db.execute("SELECT * FROM competitions").fetchall()}
+    suppressed_ids, suppressed_external = _suppressed_competition_identifiers(db, tombstones)
+    imported = 0
+    for remote in remote_events:
+        if str(remote.get("id") or "") in suppressed_ids or str(remote.get("external_id") or "") in suppressed_external:
+            continue
+        data = remote_competition_data(remote)
+        if not data or _remote_competition_local_id(remote, data, existing) is not None or len(existing) >= 20:
+            continue
+        local_id = str(uuid.uuid4())
+        external_id = str(remote.get("external_id") or competition_external_id(local_id))
+        db.execute(
+            "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, intervals_event_id, external_id, sync_dirty, sync_state, sync_conflict, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'synced', '', ?, ?, ?)",
+            (
+                local_id, data["name"], data["event_date"], data["sport"], data["priority"], data["distance"],
+                data["target"], "", data["notes"], data["category"], data["start_date_local"], data["description"],
+                data["moving_time"], data["intervals_event_id"], external_id, now, now, now,
+            ),
+        )
+        existing[local_id] = {"id": local_id, "name": data["name"], "event_date": data["event_date"], "sport": data["sport"]}
+        imported += 1
+    return imported
+
+
 @observed_sync("intervals", "competitions")
 @maintenance_operation
 @intervals_operation
@@ -7003,137 +7187,21 @@ def sync_competitions(
         set_kv("competition_sync_running", "1")
         set_kv("competition_sync_status", "Zielwettkämpfe werden synchronisiert…")
         client = IntervalsClient()
-        with DB_LOCK, database() as db:
-            tombstones = [dict(row) for row in db.execute("SELECT * FROM competition_sync_tombstones ORDER BY created_at").fetchall()]
-            local_rows = [dict(row) for row in db.execute("SELECT * FROM competitions ORDER BY event_date, priority, name").fetchall()]
-        deleted_remote = 0
+        tombstones, local_rows = _competition_sync_records()
         remote_events = _competition_remote_events(client, local_rows)
         # A full local reset must import the cloud state without exporting
         # anything that may have been entered locally while the import runs.
         plan = _competition_sync_plan(local_rows, tombstones, remote_events)
-        remote_by_external = plan["remote_by_external"]
-        remote_by_id = plan["remote_by_id"]
-        remote_by_identity = plan["remote_by_identity"]
         outbound = plan["outbound"] if push_local else []
         skipped = plan["skipped"]
-        if push_local and plan["delete_identifiers"]:
-            client.bulk_delete_events(plan["delete_identifiers"])
-            deleted_remote = len(plan["delete_identifiers"])
-            with DB_LOCK, database() as db:
-                db.executemany("DELETE FROM competition_sync_tombstones WHERE id=? AND created_at=?",
-                               [(row["id"], row["created_at"]) for row in tombstones])
+        deleted_remote = _delete_competition_tombstones(client, plan, tombstones, push_local)
         pushed = client.upsert_competition_events(outbound) if push_local and outbound else []
-        pushed_by_external = {str(event.get("external_id")): event for event in pushed if event.get("external_id")}
-        pushed_by_id = {str(event.get("id")): event for event in pushed if event.get("id")}
-        remote_events.extend(pushed)
-        remote_by_external = {str(event.get("external_id")): event for event in remote_events if event.get("external_id")}
-        remote_by_id = {str(event.get("id")): event for event in remote_events if event.get("id")}
+        indexes = _competition_sync_remote_indexes(plan, pushed)
         now = utc_now()
-        imported = 0
-        updated = 0
         removed = 0
-        conflicts = 0
         with DB_LOCK, database() as db:
-            for row in local_rows:
-                current = db.execute(SELECT_COMPETITION_SQL, (row["id"],)).fetchone()
-                if current is None or dict(current) != row:
-                    continue  # A newer local edit or deletion is authoritative.
-                external_id = str(row.get("external_id") or competition_external_id(str(row["id"])))
-                remote = pushed_by_external.get(external_id) or remote_by_external.get(external_id)
-                if not remote and row.get("intervals_event_id"):
-                    remote = pushed_by_id.get(str(row["intervals_event_id"])) or remote_by_id.get(str(row["intervals_event_id"]))
-                identity_remote = remote_by_identity.get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
-                if row.get("sync_dirty") and identity_remote and not remote and row.get("sync_state") != "local_override":
-                    db.execute(
-                        UPDATE_COMPETITION_CONFLICT_SQL,
-                        (competition_conflict_payload(identity_remote, "identity_only"), now, row["id"]),
-                    )
-                    conflicts += 1
-                    continue
-                if not remote:
-                    remote = identity_remote
-                if row.get("sync_dirty"):
-                    if not push_local:
-                        if remote:
-                            db.execute(
-                                UPDATE_COMPETITION_CONFLICT_SQL,
-                                (competition_conflict_payload(remote, "remote_changed"), now, row["id"]),
-                            )
-                            conflicts += 1
-                        elif row.get("intervals_event_id"):
-                            db.execute(
-                                UPDATE_COMPETITION_CONFLICT_SQL,
-                                (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
-                            )
-                            conflicts += 1
-                        continue
-                    if remote:
-                        db.execute(
-                            "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
-                            (str(remote.get("id") or row.get("intervals_event_id") or "") or None, external_id, now, now, row["id"]),
-                        )
-                    elif row.get("intervals_event_id"):
-                        db.execute(
-                            UPDATE_COMPETITION_CONFLICT_SQL,
-                            (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
-                        )
-                        conflicts += 1
-                    continue
-                if remote:
-                    data = remote_competition_data(remote)
-                    if data:
-                        db.execute(
-                            "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
-                            (
-                                data["name"], data["event_date"], data["start_date_local"], data["sport"], data["priority"],
-                                data["category"], data["distance"], data["target"], data["description"], data["moving_time"],
-                                data["notes"], data["intervals_event_id"] or str(row.get("intervals_event_id") or "") or None,
-                                external_id, now, now, row["id"],
-                            ),
-                        )
-                        updated += 1
-                elif row.get("intervals_event_id") and push_local:
-                    db.execute(
-                        UPDATE_COMPETITION_CONFLICT_SQL,
-                        (json.dumps({"type": "remote_missing", "detected_at": now}, ensure_ascii=False), now, row["id"]),
-                    )
-                    conflicts += 1
-
-            existing = {str(row["id"]): row for row in db.execute("SELECT * FROM competitions").fetchall()}
-            suppressed = tombstones + [dict(row) for row in db.execute("SELECT * FROM competition_sync_tombstones")]
-            suppressed_ids = {str(row["intervals_event_id"]) for row in suppressed if row.get("intervals_event_id")}
-            suppressed_external = {str(row["external_id"]) for row in suppressed if row.get("external_id")}
-            for remote in remote_events:
-                if str(remote.get("id") or "") in suppressed_ids or str(remote.get("external_id") or "") in suppressed_external:
-                    continue
-                data = remote_competition_data(remote)
-                if not data:
-                    continue
-                external_id = str(remote.get("external_id") or "")
-                local_id = None
-                if external_id.startswith(COMPETITION_EXTERNAL_PREFIX):
-                    candidate = external_id[len(COMPETITION_EXTERNAL_PREFIX):]
-                    if candidate in existing:
-                        local_id = candidate
-                if local_id is None and remote.get("id") is not None:
-                    local_id = next((key for key, row in existing.items() if str(row.get("intervals_event_id") or "") == str(remote["id"])), None)
-                if local_id is None:
-                    remote_key = competition_sync_key(data)
-                    local_id = next((key for key, row in existing.items() if competition_sync_key(row) == remote_key), None)
-                if local_id is not None or len(existing) >= 20:
-                    continue
-                local_id = str(uuid.uuid4())
-                adopted_external_id = external_id or competition_external_id(local_id)
-                db.execute(
-                    "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, intervals_event_id, external_id, sync_dirty, sync_state, sync_conflict, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'synced', '', ?, ?, ?)",
-                    (
-                        local_id, data["name"], data["event_date"], data["sport"], data["priority"], data["distance"],
-                        data["target"], "", data["notes"], data["category"], data["start_date_local"], data["description"],
-                        data["moving_time"], data["intervals_event_id"], adopted_external_id, now, now, now,
-                    ),
-                )
-                existing[local_id] = {"id": local_id, "name": data["name"], "event_date": data["event_date"], "sport": data["sport"]}
-                imported += 1
+            updated, conflicts = _synchronize_existing_competitions(db, local_rows, indexes, now, push_local)
+            imported = _import_remote_competitions(db, indexes["remote_events"], tombstones, now)
         set_kv("last_competition_sync_at", now)
         set_kv("last_competition_sync_error", "")
         publish_state_event("coach", {"status": "changed"})
