@@ -4509,6 +4509,44 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(history[-2]["parts"][0]["functionCall"]["name"], "save_checkin")
         self.assertEqual(history[-1]["parts"][0]["functionResponse"]["name"], "save_checkin")
 
+    def test_structured_command_failure_response_keeps_confirmed_sync_effects(self):
+        commands = [{"tool": "start_intervals_plan_sync", "result": {"ok": True, "status": "queued"}}]
+        status, text, question, cancelled = server._structured_command_failure_response(
+            server.AppError(429, "Provider limit", reason="rate_limit_exceeded"), commands, commands, [], ["start_intervals_plan_sync"],
+        )
+        self.assertEqual(status, "partial")
+        self.assertIsNone(question)
+        self.assertFalse(cancelled)
+        self.assertIn("Anfragelimit", text)
+        self.assertIn("bleibt bestehen", text)
+        self.assertIn("Noch offen", text)
+
+    def test_structured_command_failure_response_keeps_completed_clarification(self):
+        commands = [
+            {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}},
+            {"tool": "clarify_coach_request", "result": {"ok": True, "question": "Wie fühlst du dich?"}},
+        ]
+        status, text, question, cancelled = server._structured_command_failure_response(
+            server.AppError(502, "Provider error", reason="provider_unavailable"), commands, commands[:1], [], [],
+        )
+        self.assertEqual(status, "completed")
+        self.assertTrue(text.startswith("Wie fühlst du dich?"))
+        self.assertIn("Bereits erfolgreich ausgefuehrt", text)
+        self.assertEqual(question, "Wie fühlst du dich?")
+        self.assertFalse(cancelled)
+
+    def test_structured_command_failure_response_keeps_partial_cancelled_effect(self):
+        commands = [
+            {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}},
+            {"tool": "clarify_coach_request", "result": {"ok": True, "question": "Wie fühlst du dich?"}},
+        ]
+        status, _text, question, cancelled = server._structured_command_failure_response(
+            server.AppError(499, "Cancelled", reason="chat_cancelled"), commands, commands[:1], [], [],
+        )
+        self.assertEqual(status, "partial")
+        self.assertEqual(question, "Wie fühlst du dich?")
+        self.assertTrue(cancelled)
+
     def test_gemini_history_trimming_keeps_complete_tool_exchanges(self):
         history = [
             {"role": "user", "parts": [{"text": "Starte die Planung."}]},
