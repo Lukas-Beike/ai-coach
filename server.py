@@ -17827,7 +17827,7 @@ def _start_morning_checkin() -> None:
     publish_state_event("coach", {"status": "changed"})
 
 
-def _morning_checkin_garmin_ready(checkin_day: date) -> bool:
+def _morning_checkin_garmin_ready(checkin_day: date) -> bool | None:
     configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
     if not configured:
         return False
