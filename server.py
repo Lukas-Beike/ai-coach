@@ -4282,18 +4282,30 @@ def _merge_garmin_records(incoming: Any, previous: Any) -> list[Any]:
     return merged
 
 
+def garmin_record_observation_date(record: dict[str, Any]) -> str | None:
+    raw_date = first_present(record, (
+        "calendarDate", "summaryDate", "date", "measurementDate", "timestampGMT", "timestamp", "startTimeLocal", "startTimeGMT",
+    ))
+    try:
+        return date.fromisoformat(str(_garmin_record_date(raw_date))).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def garmin_nested_records(record: dict[str, Any]) -> list[Any]:
+    return [item for item in record.values() if isinstance(item, (dict, list))]
+
+
 def garmin_source_observed_at(value: Any) -> str | None:
     dates: list[str] = []
     pending = [value]
     while pending:
         record = pending.pop()
         if isinstance(record, dict):
-            raw_date = first_present(record, ("calendarDate", "summaryDate", "date", "measurementDate", "timestampGMT", "timestamp", "startTimeLocal", "startTimeGMT"))
-            try:
-                dates.append(date.fromisoformat(str(_garmin_record_date(raw_date))).isoformat())
-            except (TypeError, ValueError):
-                pass
-            pending.extend(item for item in record.values() if isinstance(item, (dict, list)))
+            observed_at = garmin_record_observation_date(record)
+            if observed_at:
+                dates.append(observed_at)
+            pending.extend(garmin_nested_records(record))
         elif isinstance(record, list):
             pending.extend(record)
     return max(dates, default=None)

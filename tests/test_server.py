@@ -4200,6 +4200,16 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(start, datetime(2026, 9, 3, 21, 30, tzinfo=timezone.utc))
         self.assertEqual(end, datetime(2026, 9, 4, 5, 45, tzinfo=timezone.utc))
 
+    def test_garmin_source_observed_at_uses_latest_nested_valid_date(self):
+        observed_at = server.garmin_source_observed_at({
+            "calendarDate": "invalid-date",
+            "nested": [
+                {"summaryDate": "2026-09-03"},
+                {"startTimeGMT": "2026-09-05T06:00:00+00:00"},
+            ],
+        })
+        self.assertEqual(observed_at, "2026-09-05")
+
     def test_morning_body_battery_loads_once_for_the_sleep_window(self):
         class FakeGarmin:
             sleep_calls = []
