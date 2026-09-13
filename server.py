@@ -8993,38 +8993,48 @@ def normalize_workout(workout: Any) -> dict[str, Any]:
     return draft
 
 
+def _naive_calendar_datetime(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", UTC_OFFSET_SUFFIX))
+    except (TypeError, ValueError):
+        return None
+    return parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+
+
+def _calendar_duration_minutes(value: dict[str, Any], default_minutes: int) -> int:
+    duration = value.get("duration_minutes")
+    if duration in (None, "") and value.get("moving_time") not in (None, ""):
+        duration = float(value["moving_time"]) / 60
+    try:
+        return max(1, int(float(duration))) if duration not in (None, "") else default_minutes
+    except (TypeError, ValueError):
+        return default_minutes
+
+
+def _calendar_interval_end(value: dict[str, Any], start: datetime, default_minutes: int) -> datetime:
+    end = _naive_calendar_datetime(first_present(value, ("end_date_local", "end_local", "end")))
+    if end is None:
+        end = start + timedelta(minutes=_calendar_duration_minutes(value, default_minutes))
+    return max(end, start + timedelta(minutes=1))
+
+
 def _calendar_interval(value: dict[str, Any], default_minutes: int = 60) -> tuple[datetime, datetime, bool] | None:
     raw_start = first_present(value, ("start_date_local", "start_local", "start", "date"))
     if raw_start in (None, ""):
         return None
     raw_start = str(raw_start).strip()
-    try:
-        if len(raw_start) == 10:
-            start = datetime.combine(date.fromisoformat(raw_start[:10]), datetime.min.time())
-            return start, start + timedelta(days=1), False
-        start = datetime.fromisoformat(raw_start.replace("Z", UTC_OFFSET_SUFFIX))
-    except (TypeError, ValueError):
+    if len(raw_start) == 10:
+        try:
+            start = datetime.combine(date.fromisoformat(raw_start), datetime.min.time())
+        except ValueError:
+            return None
+        return start, start + timedelta(days=1), False
+    start = _naive_calendar_datetime(raw_start)
+    if start is None:
         return None
-    if start.tzinfo is not None:
-        start = start.replace(tzinfo=None)
-    raw_end = first_present(value, ("end_date_local", "end_local", "end"))
-    end = None
-    if raw_end not in (None, ""):
-        try:
-            end = datetime.fromisoformat(str(raw_end).strip().replace("Z", UTC_OFFSET_SUFFIX))
-            if end.tzinfo is not None:
-                end = end.replace(tzinfo=None)
-        except (TypeError, ValueError):
-            end = None
-    if end is None:
-        duration = value.get("duration_minutes")
-        if duration in (None, "") and value.get("moving_time") not in (None, ""):
-            duration = float(value["moving_time"]) / 60
-        try:
-            duration_minutes = max(1, int(float(duration))) if duration not in (None, "") else default_minutes
-        except (TypeError, ValueError):
-            duration_minutes = default_minutes
-        end = start + timedelta(minutes=duration_minutes)
+    end = _calendar_interval_end(value, start, default_minutes)
     return start, max(end, start + timedelta(minutes=1)), True
 
 
@@ -9051,41 +9061,56 @@ def _calendar_conflict_record(item: dict[str, Any], source: str, match: str) -> 
     }
 
 
-def calendar_conflicts(
-    workout: dict[str, Any],
-    exclude_library_ids: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    conflicts = []
-    excluded = exclude_library_ids or set()
+def _calendar_conflict_sources() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     with DB_LOCK, database() as db:
-        rows = db.execute(
+        rows = [dict(row) for row in db.execute(
             "SELECT local_id, payload FROM planned_units "
             "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
             "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0"
-        ).fetchall()
-        competitions = [dict(row) for row in db.execute("SELECT id, name, event_date, start_date_local, moving_time FROM competitions").fetchall()]
+        ).fetchall()]
+        competitions = [dict(row) for row in db.execute(
+            "SELECT id, name, event_date, start_date_local, moving_time FROM competitions"
+        ).fetchall()]
+    return rows, competitions
+
+
+def _local_calendar_library_entries(rows: list[dict[str, Any]], excluded: set[str]) -> list[dict[str, Any]]:
+    entries = []
     for row in rows:
         local_id = str(row.get("local_id") or "")
         if local_id in excluded:
             continue
         try:
-            library_entry = json.loads(row.get("payload") or "{}")
+            entry = json.loads(row.get("payload") or "{}")
         except (TypeError, ValueError):
             continue
-        if not isinstance(library_entry, dict) or library_entry.get("source") not in {"coach", "library", "intervals"}:
-            continue
-        matches, match = _calendar_items_conflict(workout, library_entry)
+        if isinstance(entry, dict) and entry.get("source") in {"coach", "library", "intervals"}:
+            entries.append({**entry, "local_id": local_id})
+    return entries
+
+
+def _calendar_conflicts_for_items(workout: dict[str, Any], items: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
+    conflicts = []
+    for item in items:
+        matches, match = _calendar_items_conflict(workout, item)
         if matches:
-            conflicts.append(_calendar_conflict_record({**library_entry, "local_id": local_id}, "local_library", match))
-    for competition in competitions:
-        matches, match = _calendar_items_conflict(workout, competition)
-        if matches:
-            conflicts.append(_calendar_conflict_record(competition, "local_competition", match))
-    for event in list_external_calendar_events(1000, training_relevant_only=True):
-        matches, match = _calendar_items_conflict(workout, event)
-        if matches:
-            conflicts.append(_calendar_conflict_record(event, "external_calendar", match))
+            conflicts.append(_calendar_conflict_record(item, source, match))
     return conflicts
+
+
+def calendar_conflicts(
+    workout: dict[str, Any],
+    exclude_library_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    excluded = exclude_library_ids or set()
+    rows, competitions = _calendar_conflict_sources()
+    library_entries = _local_calendar_library_entries(rows, excluded)
+    external_events = list_external_calendar_events(1000, training_relevant_only=True)
+    return (
+        _calendar_conflicts_for_items(workout, library_entries, "local_library")
+        + _calendar_conflicts_for_items(workout, competitions, "local_competition")
+        + _calendar_conflicts_for_items(workout, external_events, "external_calendar")
+    )
 
 
 def save_workout_library_entries(
