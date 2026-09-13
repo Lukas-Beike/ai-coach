@@ -8691,6 +8691,10 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(failed[("intervals", "activities")]["state"], "error")
             self.assertEqual(failed[("intervals", "activities")]["error_code"], "network_error")
             self.assertIsNone(failed[("intervals", "activities")]["next_retry_at"])
+            with patch.object(server, "CONFIG", replace(config, intervals_api_key="")):
+                unconfigured = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            self.assertEqual(unconfigured[("intervals", "activities")]["state"], "not_configured")
+            self.assertEqual(unconfigured[("intervals", "activities")]["error_code"], "network_error")
             server.enqueue_sync_job(
                 "intervals", "refresh", {"days": 1},
                 requested_by="test", available_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),

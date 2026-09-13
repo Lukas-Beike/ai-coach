@@ -2584,11 +2584,19 @@ def _provider_fallback_error_code(fallback_error: bool) -> str | None:
     return "provider_error" if fallback_error else None
 
 
+def _provider_freshness_error_code(row: dict[str, Any] | None, fallback_error: bool) -> str | None:
+    if row:
+        error_code = str(row.get("error_code") or "")
+        if error_code:
+            return error_code
+    return _provider_fallback_error_code(fallback_error)
+
+
 def _provider_freshness_status(
     key: tuple[str, str], configured: bool, row: dict[str, Any] | None, last_good: Any, fallback_error: bool,
 ) -> tuple[str, str | None]:
     if not configured:
-        return "not_configured", None
+        return "not_configured", _provider_freshness_error_code(row, fallback_error)
     if row:
         status = row["status"]
         if status == "running":
