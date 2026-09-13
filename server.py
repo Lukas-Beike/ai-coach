@@ -16469,30 +16469,40 @@ def _structured_authorized_operations(intent: dict[str, Any]) -> set[str]:
     return operations
 
 
+def _coach_dialogue_pending_messages(db: Any, messages: list[dict[str, Any]], pending: dict[str, Any] | None) -> None:
+    if not pending:
+        return
+    known_ids = {item["id"] for item in messages}
+    for message_id in pending.get("source_message_ids", []):
+        if message_id in known_ids:
+            continue
+        row = db.execute("SELECT id, role, content, created_at FROM messages WHERE id=? AND role='user'", (message_id,)).fetchone()
+        if row:
+            messages.append(dict(row))
+            known_ids.add(message_id)
+
+
+def _coach_dialogue_command_result(row: dict[str, Any]) -> dict[str, Any]:
+    previous = _coach_command_receipt(row["receipt"])
+    return {"client_turn_id": row["client_turn_id"], "status": previous.get("status"),
+        "sync_job_ids": (previous.get("sync_job_ids") or [])[:40],
+        "steps": [{"tool": step.get("tool"), "ok": step.get("result", {}).get("ok"),
+                   "status": step.get("result", {}).get("status"), "reason": step.get("result", {}).get("reason"),
+                   "scope": ((step.get("request") or {}).get("scope") or [])[:40],
+                   "scope_truncated": len((step.get("request") or {}).get("scope") or []) > 40,
+                   "artifact_id": step.get("result", {}).get("artifact_id")}
+                  for step in previous.get("command_receipts", [])[:40]]}
+
+
 def coach_dialogue_context(client_turn_id: str) -> dict[str, Any]:
     """Local dialogue survives provider switches; remote conversations are not authority."""
     messages = list_messages(24)
     with DB_LOCK, database() as db:
         current = db.execute(SELECT_USER_MESSAGE_SQL, (client_turn_id,)).fetchone()
         pending = json.loads(get_kv("coach_pending_request") or "null")
-        if pending:
-            for message_id in pending.get("source_message_ids", []):
-                if not any(item["id"] == message_id for item in messages):
-                    row = db.execute("SELECT id, role, content, created_at FROM messages WHERE id=? AND role='user'", (message_id,)).fetchone()
-                    if row:
-                        messages.append(dict(row))
+        _coach_dialogue_pending_messages(db, messages, pending)
         recent_rows = db.execute("SELECT c.client_turn_id, c.receipt FROM coach_commands c WHERE c.status='completed' AND EXISTS (SELECT 1 FROM messages m WHERE m.client_turn_id=c.client_turn_id) ORDER BY c.created_at DESC LIMIT 12").fetchall()
-        recent_results = []
-        for row in recent_rows:
-            previous = _coach_command_receipt(row["receipt"])
-            recent_results.append({"client_turn_id": row["client_turn_id"], "status": previous.get("status"),
-                "sync_job_ids": (previous.get("sync_job_ids") or [])[:40],
-                "steps": [{"tool": step.get("tool"), "ok": step.get("result", {}).get("ok"),
-                           "status": step.get("result", {}).get("status"), "reason": step.get("result", {}).get("reason"),
-                           "scope": ((step.get("request") or {}).get("scope") or [])[:40],
-                           "scope_truncated": len((step.get("request") or {}).get("scope") or []) > 40,
-                           "artifact_id": step.get("result", {}).get("artifact_id")}
-                          for step in previous.get("command_receipts", [])[:40]]})
+        recent_results = [_coach_dialogue_command_result(row) for row in recent_rows]
     now = local_now()
     return {
         "local_date": now.date().isoformat(), "timezone": timezone_name(get_profile().get("timezone")),
