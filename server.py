@@ -18423,21 +18423,195 @@ def _execute_structured_coach_tool(
         )
 
 
-def _chat_with_structured_coach_impl(
-    message: str, *, intent: dict[str, Any], conversation_id: str, client_turn_id: str,
-    on_text_delta: Any = None, cancel_event: threading.Event | None = None,
-    session_csrf_hash: str = "", background_job: bool = False,
-    ai_provider: str | None = None, model: str | None = None, thinking_level: str | None = None,
+def _structured_tool_call_failure(
+    exc: BaseException, *, name: str, call_id: str, effect_key: str, step_key: str,
+    repair_key: str | None, scope_repair_key: str | None, request_binding_key: str | None,
+    plan_effect_key: str | None, action: dict[str, Any], command_receipts: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    ai_provider = ai_provider or selected_ai_provider()
+    result = {
+        "ok": False,
+        "reason": getattr(exc, "reason", "tool_arguments_invalid"),
+        "error": str(exc) if isinstance(exc, AppError) else "Die Werkzeugargumente sind ungültig. Prüfe das Schema und den aktuellen Zustand und korrigiere den Aufruf.",
+    }
+    validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
+    if validation_reason and re.fullmatch(r"request_[a-z_]{1,72}", validation_reason):
+        result["validation_reason"] = validation_reason
+    if not result["reason"]:
+        result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
+    technical_error = _coach_error_metadata(exc)
+    command_receipts.append({
+        "call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key,
+        "repair_key": repair_key, "scope_repair_key": scope_repair_key,
+        "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key,
+        "request": action.get("request"), "result": result, "diagnostic_error": technical_error,
+    })
+    LOGGER.warning("Coach step failed", extra={
+        "event": "coach_tool_failed",
+        "context": {"tool": name if name in {tool["name"] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error},
+    })
+    return result
+
+
+def _execute_structured_coach_tool_call(
+    item: dict[str, Any], *, tools: list[dict[str, Any]], command_receipts: list[dict[str, Any]],
+    question: str, cancelled: bool, context: dict[str, Any], allow_mutations: bool,
+    conversation_id: str, client_turn_id: str, session_csrf_hash: str,
+    sync_job_ids: list[str], cancel_event: threading.Event | None, request_payload: dict[str, Any],
+    model_instructions: str,
+) -> tuple[str, str, dict[str, Any], dict[str, Any], str]:
+    name = str(item.get("name") or "")
+    call_id = str(item.get("call_id") or "")
+    action = {"operation": name, "authorization_scope": []}
+    effect_key = _coach_action_hash({"tool": name, "arguments": item.get("arguments")})
+    step_key = name
+    repair_key = scope_repair_key = request_binding_key = plan_effect_key = None
+    try:
+        metadata = _structured_tool_call_metadata(item, tools, command_receipts)
+        name, call_id = metadata["name"], metadata["call_id"]
+        action = metadata["action"]
+        effect_key, step_key = metadata["effect_key"], metadata["step_key"]
+        repair_key = metadata["repair_key"]
+        scope_repair_key = metadata["scope_repair_key"]
+        request_binding_key = metadata["request_binding_key"]
+        plan_effect_key = metadata["plan_effect_key"]
+        cached = _cached_structured_tool_call(metadata, command_receipts)
+        if cached:
+            result = cached["result"]
+        else:
+            action = _prepare_structured_tool_execution(
+                metadata, command_receipts, question=question, cancelled=cancelled,
+                context=context, allow_mutations=allow_mutations,
+            )
+            local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan"}
+            with (DB_LOCK if local_transaction else nullcontext()), (database() if local_transaction else nullcontext()):
+                result = _execute_structured_coach_tool(
+                    metadata, action=action, context=context, conversation_id=conversation_id,
+                    client_turn_id=client_turn_id, session_csrf_hash=session_csrf_hash,
+                    sync_job_ids=sync_job_ids, cancel_event=cancel_event,
+                )
+                command_receipts.append({
+                    "call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key,
+                    "repair_key": repair_key, "scope_repair_key": scope_repair_key,
+                    "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key,
+                    "request": action.get("request"), "result": result,
+                })
+                _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
+        if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
+            model_instructions = build_training_context() + "\n\n" + COACH_DIALOGUE_INSTRUCTIONS
+        if action.get("period"):
+            scope = coach_execution_scope(action)
+            request_payload["max_output_tokens"] = COACH_LONG_PLAN_MAX_OUTPUT_TOKENS if scope["planning"] else COACH_DEFAULT_MAX_OUTPUT_TOKENS
+            _merge_coach_command_receipt(client_turn_id, {"plan_scope": scope})
+    except (AppError, ValueError, TypeError, KeyError) as exc:
+        result = _structured_tool_call_failure(
+            exc, name=name, call_id=call_id, effect_key=effect_key, step_key=step_key,
+            repair_key=repair_key, scope_repair_key=scope_repair_key,
+            request_binding_key=request_binding_key, plan_effect_key=plan_effect_key,
+            action=action, command_receipts=command_receipts,
+        )
+    return name, call_id, result, action, model_instructions
+
+
+def _structured_coach_function_calls(response: dict[str, Any]) -> list[dict[str, Any]]:
+    return [item for item in response.get("output", []) if isinstance(item, dict) and item.get("type") == "function_call"]
+
+
+def _record_structured_coach_tool_output(
+    *, name: str, call_id: str, result: dict[str, Any], outputs: list[dict[str, Any]],
+    pending: list[dict[str, str]], command_receipts: list[dict[str, Any]], client_turn_id: str,
+    question: str, cancelled: bool,
+) -> tuple[str, bool, list[dict[str, str]]]:
+    outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
+    pending = [entry for entry in pending if entry["call_id"] != call_id]
+    _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "pending_tool_calls": pending,
+        "phase": "executing_tools" if pending else "waiting_final_response", "pending_tool_outputs": outputs if not pending else []})
+    if name == "clarify_coach_request" and result.get("ok"):
+        question = result["question"]
+    if name == "cancel_coach_request" and result.get("ok"):
+        cancelled = True
+    return question, cancelled, pending
+
+
+def _structured_coach_followup_response(
+    response: dict[str, Any], *, outputs: list[dict[str, Any]], request_payload: dict[str, Any],
+    model_instructions: str, question: str, cancelled: bool, rounds: int, ai_provider: str,
+    context: dict[str, Any], message: str, command_receipts: list[dict[str, Any]],
+    attachments: list[dict[str, Any]], client_turn_id: str, background_owned: bool,
+    on_text_delta: Any, cancel_event: threading.Event | None, recovery_state: dict[str, bool],
+) -> dict[str, Any]:
+    followup = {**request_payload, "instructions": model_instructions, "input": outputs,
+                "tool_choice": "none" if question or cancelled or rounds >= COACH_TOOL_MAX_ROUNDS else "auto"}
+    if ai_provider == "openai" and response.get("id") and not followup.get("conversation"):
+        followup["previous_response_id"] = response["id"]
+    return _structured_coach_response(
+        followup, request_payload=request_payload, context=context, message=message,
+        command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
+        ai_provider=ai_provider, background_owned=background_owned, on_text_delta=on_text_delta,
+        cancel_event=cancel_event, recovery_state=recovery_state,
+    )
+
+
+def _run_structured_coach_tool_rounds(
+    response: dict[str, Any], *, rounds: int, question: str, cancelled: bool,
+    tools: list[dict[str, Any]], command_receipts: list[dict[str, Any]], sync_job_ids: list[str],
+    context: dict[str, Any], allow_mutations: bool, conversation_id: str, client_turn_id: str,
+    session_csrf_hash: str, cancel_event: threading.Event | None, ai_provider: str,
+    request_payload: dict[str, Any], model_instructions: str, message: str, attachments: list[dict[str, Any]],
+    background_owned: bool, on_text_delta: Any, recovery_state: dict[str, bool],
+) -> tuple[dict[str, Any], int, str, bool, str]:
+    while rounds < COACH_TOOL_MAX_ROUNDS:
+        calls = _structured_coach_function_calls(response)
+        if not calls:
+            break
+        pending = [{"call_id": str(item.get("call_id") or ""), "tool": str(item.get("name") or "")} for item in calls]
+        _merge_coach_command_receipt(client_turn_id, {"phase": "executing_tools", "pending_tool_calls": pending, "pending_tool_outputs": []})
+        outputs = []
+        for item in calls:
+            _raise_chat_cancelled(cancel_event)
+            name, call_id, result, action, model_instructions = _execute_structured_coach_tool_call(
+                item,
+                tools=tools,
+                command_receipts=command_receipts,
+                question=question,
+                cancelled=cancelled,
+                context=context,
+                allow_mutations=allow_mutations,
+                conversation_id=conversation_id,
+                client_turn_id=client_turn_id,
+                session_csrf_hash=session_csrf_hash,
+                sync_job_ids=sync_job_ids,
+                cancel_event=cancel_event,
+                request_payload=request_payload,
+                model_instructions=model_instructions,
+            )
+            question, cancelled, pending = _record_structured_coach_tool_output(
+                name=name, call_id=call_id, result=result, outputs=outputs, pending=pending,
+                command_receipts=command_receipts, client_turn_id=client_turn_id,
+                question=question, cancelled=cancelled,
+            )
+        rounds += 1
+        _merge_coach_command_receipt(client_turn_id, {"tool_rounds": rounds})
+        response = _structured_coach_followup_response(
+            response, outputs=outputs, request_payload=request_payload, model_instructions=model_instructions,
+            question=question, cancelled=cancelled, rounds=rounds, ai_provider=ai_provider,
+            context=context, message=message, command_receipts=command_receipts, attachments=attachments,
+            client_turn_id=client_turn_id, background_owned=background_owned, on_text_delta=on_text_delta,
+            cancel_event=cancel_event, recovery_state=recovery_state,
+        )
+        _merge_coach_command_receipt(client_turn_id, {"pending_tool_outputs": []})
+        if question or cancelled:
+            break
+    return response, rounds, question, cancelled, model_instructions
+
+
+def _structured_coach_turn_request(
+    message: str, *, intent: dict[str, Any], conversation_id: str, client_turn_id: str,
+    session_csrf_hash: str, background_job: bool, ai_provider: str, model: str | None,
+    thinking_level: str | None, on_text_delta: Any, cancel_event: threading.Event | None,
+) -> dict[str, Any]:
     receipt = _structured_coach_receipt(
-        message,
-        intent=intent,
-        conversation_id=conversation_id,
-        client_turn_id=client_turn_id,
-        session_csrf_hash=session_csrf_hash,
-        ai_provider=ai_provider,
-        model=model,
+        message, intent=intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
+        session_csrf_hash=session_csrf_hash, ai_provider=ai_provider, model=model,
     )
     attachments, has_prior_openai_attachments = _structured_coach_attachments(receipt)
     retain_openai_attachment_context = ai_provider == "openai" and bool(attachments or has_prior_openai_attachments)
@@ -18449,155 +18623,147 @@ def _chat_with_structured_coach_impl(
     sync_job_ids = list(receipt.get("sync_job_ids") or [])
     tools = COACH_DIALOGUE_TOOLS if allow_mutations else [tool for tool in COACH_DIALOGUE_TOOLS if tool["name"] in STRUCTURED_READ_ONLY_TOOLS]
     model_instructions, request_payload = _structured_coach_request_payload(
-        message=message,
-        context=context,
-        command_receipts=command_receipts,
-        tools=tools,
-        allow_mutations=allow_mutations,
-        ai_provider=ai_provider,
-        model=model,
-        thinking_level=thinking_level,
-        conversation_id=conversation_id,
-        attachments=attachments,
+        message=message, context=context, command_receipts=command_receipts, tools=tools,
+        allow_mutations=allow_mutations, ai_provider=ai_provider, model=model,
+        thinking_level=thinking_level, conversation_id=conversation_id, attachments=attachments,
         retain_openai_attachment_context=retain_openai_attachment_context,
         has_prior_openai_attachments=has_prior_openai_attachments,
     )
     recovery_state = {"conversation_recovered": False}
+    resume_id = _apply_structured_coach_replay(
+        receipt, request_payload, ai_provider=ai_provider, background_owned=background_owned,
+    )
+    response = _structured_coach_response(
+        request_payload, request_payload=request_payload, context=context, message=message,
+        command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
+        ai_provider=ai_provider, background_owned=background_owned, on_text_delta=on_text_delta,
+        cancel_event=cancel_event, recovery_state=recovery_state, resume_id=resume_id,
+    )
+    return {
+        "receipt": receipt, "context": context, "command_receipts": command_receipts,
+        "sync_job_ids": sync_job_ids, "allow_mutations": allow_mutations, "tools": tools,
+        "model_instructions": model_instructions, "request_payload": request_payload,
+        "recovery_state": recovery_state, "attachments": attachments,
+        "background_owned": background_owned, "response": response,
+    }
+
+
+def _apply_structured_coach_replay(
+    receipt: dict[str, Any], request_payload: dict[str, Any], *, ai_provider: str, background_owned: bool,
+) -> str:
     resume_id = str(receipt.get("openai_response_id") or "") if background_owned and ai_provider == "openai" else ""
     if resume_id and receipt.get("response_input"):
         request_payload["input"] = receipt["response_input"]
         if receipt.get("previous_response_id") and not request_payload.get("conversation"):
             request_payload["previous_response_id"] = receipt["previous_response_id"]
-    # Persisted outputs are replayed after a crash between effects and the next request.
     if background_owned and receipt.get("pending_tool_outputs"):
         request_payload["input"] = receipt["pending_tool_outputs"]
         if ai_provider == "openai" and resume_id and not request_payload.get("conversation"):
             request_payload["previous_response_id"] = resume_id
         resume_id = ""
-    response = _structured_coach_response(
-        request_payload,
-        request_payload=request_payload,
-        context=context,
-        message=message,
-        command_receipts=command_receipts,
-        attachments=attachments,
+    return resume_id
+
+
+def _structured_coach_final_receipt(
+    receipt: dict[str, Any], *, status: str, response: dict[str, Any], client_turn_id: str,
+    command_receipts: list[dict[str, Any]], sync_job_ids: list[str], intent: dict[str, Any],
+    rounds: int, failures: list[dict[str, Any]], awaiting_clarification: bool,
+) -> dict[str, Any]:
+    final_receipt = {
+        **receipt,
+        "status": status,
+        "awaiting_clarification": awaiting_clarification,
+        "response_status": response.get("status") if response.get("status") in {"completed", "incomplete", "failed", "cancelled"} else None,
+        "client_turn_id": client_turn_id, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids,
+        "intent": intent, "tool_rounds": rounds, "pending_operations": sorted({entry["tool"] for entry in failures}),
+        "proposed_actions": [entry["result"]["proposed_action"] for entry in command_receipts if entry.get("result", {}).get("proposed_action")],
+    }
+    for key in ("openai_response_id", "pending_tool_outputs", "pending_tool_calls", "response_input", "previous_response_id"):
+        final_receipt.pop(key, None)
+    return final_receipt
+
+
+def _persist_structured_coach_final_receipt(
+    final_receipt: dict[str, Any], *, client_turn_id: str, command_receipts: list[dict[str, Any]],
+    ai_provider: str,
+) -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        current_command = db.execute(
+            "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,),
+        ).fetchone()
+        if current_command and current_command["status"] == "completed":
+            return _coach_command_receipt(current_command["receipt"])
+        final_receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", final_receipt["text"], client_turn_id=client_turn_id)
+        for step in command_receipts:
+            if step["tool"] == "preview_adaptive_replan" and step.get("result", {}).get("ok"):
+                preview_id = step["result"].get("id")
+                preview_row = db.execute("SELECT payload FROM plan_adjustments WHERE id=? AND status='preview'", (preview_id,)).fetchone()
+                if preview_row:
+                    preview_payload = json.loads(preview_row["payload"])
+                    preview_payload["published_message_id"] = final_receipt["message"]["id"]
+                    db.execute("UPDATE plan_adjustments SET payload=? WHERE id=?", (json.dumps(preview_payload, ensure_ascii=False), preview_id))
+        set_kv("last_coach_ai_provider", ai_provider, db)
+        db.execute(UPDATE_COMMAND_RECEIPT_SQL, (json.dumps({key: value for key, value in final_receipt.items() if key != "text"}, ensure_ascii=False), utc_now(), client_turn_id))
+    final_receipt.pop("text", None)
+    publish_state_event("coach", {"message_id": final_receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
+    return final_receipt
+
+
+def _chat_with_structured_coach_impl(
+    message: str, *, intent: dict[str, Any], conversation_id: str, client_turn_id: str,
+    on_text_delta: Any = None, cancel_event: threading.Event | None = None,
+    session_csrf_hash: str = "", background_job: bool = False,
+    ai_provider: str | None = None, model: str | None = None, thinking_level: str | None = None,
+) -> dict[str, Any]:
+    ai_provider = ai_provider or selected_ai_provider()
+    state = _structured_coach_turn_request(
+        message,
+        intent=intent,
+        conversation_id=conversation_id,
         client_turn_id=client_turn_id,
+        session_csrf_hash=session_csrf_hash,
+        background_job=background_job,
         ai_provider=ai_provider,
-        background_owned=background_owned,
+        model=model,
+        thinking_level=thinking_level,
         on_text_delta=on_text_delta,
         cancel_event=cancel_event,
-        recovery_state=recovery_state,
-        resume_id=resume_id,
     )
-    rounds = int(receipt.get("tool_rounds") or 0)
-    question = ""
-    cancelled = False
-    while rounds < COACH_TOOL_MAX_ROUNDS:
-        calls = [item for item in response.get("output", []) if isinstance(item, dict) and item.get("type") == "function_call"]
-        if not calls:
-            break
-        pending = [{"call_id": str(item.get("call_id") or ""), "tool": str(item.get("name") or "")} for item in calls]
-        _merge_coach_command_receipt(client_turn_id, {"phase": "executing_tools", "pending_tool_calls": pending, "pending_tool_outputs": []})
-        outputs = []
-        for item in calls:
-            _raise_chat_cancelled(cancel_event)
-            name, call_id = str(item.get("name") or ""), str(item.get("call_id") or "")
-            if not call_id or len(call_id) > 200:
-                raise AppError(400, "Ein Werkzeugaufruf konnte nicht zugeordnet werden.", reason="invalid_tool_call")
-            action = {"operation": name, "authorization_scope": []}
-            effect_key = _coach_action_hash({"tool": name, "arguments": item.get("arguments")})
-            step_key = name
-            scope_repair_key = None
-            request_binding_key = None
-            plan_effect_key = None
-            repair_key = None
-            try:
-                metadata = _structured_tool_call_metadata(item, tools, command_receipts)
-                name = metadata["name"]
-                call_id = metadata["call_id"]
-                action = metadata["action"]
-                effect_key = metadata["effect_key"]
-                step_key = metadata["step_key"]
-                repair_key = metadata["repair_key"]
-                scope_repair_key = metadata["scope_repair_key"]
-                request_binding_key = metadata["request_binding_key"]
-                plan_effect_key = metadata["plan_effect_key"]
-                cached = _cached_structured_tool_call(metadata, command_receipts)
-                if cached:
-                    result = cached["result"]
-                else:
-                    action = _prepare_structured_tool_execution(
-                        metadata,
-                        command_receipts,
-                        question=question,
-                        cancelled=cancelled,
-                        context=context,
-                        allow_mutations=allow_mutations,
-                    )
-                    local_transaction = name not in {"start_provider_refresh", "apply_adaptive_replan"}
-                    with (DB_LOCK if local_transaction else nullcontext()), (database() if local_transaction else nullcontext()):
-                        result = _execute_structured_coach_tool(
-                            metadata,
-                            action=action,
-                            context=context,
-                            conversation_id=conversation_id,
-                            client_turn_id=client_turn_id,
-                            session_csrf_hash=session_csrf_hash,
-                            sync_job_ids=sync_job_ids,
-                            cancel_event=cancel_event,
-                        )
-                        command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key,
-                                                 "request": action.get("request"), "result": result})
-                        _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "sync_job_ids": sync_job_ids})
-                    if result.get("synchronous_refresh") or (name == "get_sync_job" and result.get("ok")):
-                        model_instructions = build_training_context() + "\n\n" + COACH_DIALOGUE_INSTRUCTIONS
-                    if action.get("period"):
-                        scope = coach_execution_scope(action)
-                        request_payload["max_output_tokens"] = COACH_LONG_PLAN_MAX_OUTPUT_TOKENS if scope["planning"] else COACH_DEFAULT_MAX_OUTPUT_TOKENS
-                        _merge_coach_command_receipt(client_turn_id, {"plan_scope": scope})
-            except (AppError, ValueError, TypeError, KeyError) as exc:
-                result = {"ok": False, "reason": getattr(exc, "reason", "tool_arguments_invalid"),
-                          "error": str(exc) if isinstance(exc, AppError) else "Die Werkzeugargumente sind ungültig. Prüfe das Schema und den aktuellen Zustand und korrigiere den Aufruf."}
-                validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
-                if validation_reason and re.fullmatch(r"request_[a-z_]{1,72}", validation_reason):
-                    result["validation_reason"] = validation_reason
-                if not result["reason"]:
-                    result["reason"] = "tool_arguments_invalid" if isinstance(exc, AppError) and exc.status == 400 else "tool_failed"
-                technical_error = _coach_error_metadata(exc)
-                command_receipts.append({"call_id": call_id, "tool": name, "effect_key": effect_key, "step_key": step_key, "repair_key": repair_key, "scope_repair_key": scope_repair_key, "request_binding_key": request_binding_key, "plan_effect_key": plan_effect_key, "request": action.get("request"), "result": result, "diagnostic_error": technical_error})
-                LOGGER.warning("Coach step failed", extra={"event": "coach_tool_failed", "context": {"tool": name if name in {tool['name'] for tool in COACH_DIALOGUE_TOOLS} else "unknown", **technical_error}})
-            outputs.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps(result, ensure_ascii=False)})
-            pending = [entry for entry in pending if entry["call_id"] != call_id]
-            _merge_coach_command_receipt(client_turn_id, {"command_receipts": command_receipts, "pending_tool_calls": pending,
-                "phase": "executing_tools" if pending else "waiting_final_response", "pending_tool_outputs": outputs if not pending else []})
-            if name == "clarify_coach_request" and result.get("ok"):
-                question = result["question"]
-            if name == "cancel_coach_request" and result.get("ok"):
-                cancelled = True
-        rounds += 1
-        _merge_coach_command_receipt(client_turn_id, {"tool_rounds": rounds})
-        followup = {**request_payload, "instructions": model_instructions, "input": outputs,
-                    "tool_choice": "none" if question or cancelled or rounds >= COACH_TOOL_MAX_ROUNDS else "auto"}
-        if ai_provider == "openai" and response.get("id") and not followup.get("conversation"):
-            followup["previous_response_id"] = response["id"]
-        # Clear replay outputs only after the next response has been checkpointed.
-        response = _structured_coach_response(
-            followup,
-            request_payload=request_payload,
-            context=context,
-            message=message,
-            command_receipts=command_receipts,
-            attachments=attachments,
-            client_turn_id=client_turn_id,
-            ai_provider=ai_provider,
-            background_owned=background_owned,
-            on_text_delta=on_text_delta,
-            cancel_event=cancel_event,
-            recovery_state=recovery_state,
-        )
-        _merge_coach_command_receipt(client_turn_id, {"pending_tool_outputs": []})
-        if question or cancelled:
-            break
+    receipt = state["receipt"]
+    context = state["context"]
+    command_receipts = state["command_receipts"]
+    sync_job_ids = state["sync_job_ids"]
+    allow_mutations = state["allow_mutations"]
+    tools = state["tools"]
+    request_payload = state["request_payload"]
+    model_instructions = state["model_instructions"]
+    attachments = state["attachments"]
+    background_owned = state["background_owned"]
+    recovery_state = state["recovery_state"]
+    response = state["response"]
+    response, rounds, question, cancelled, model_instructions = _run_structured_coach_tool_rounds(
+        response,
+        rounds=int(receipt.get("tool_rounds") or 0),
+        question="",
+        cancelled=False,
+        tools=tools,
+        command_receipts=command_receipts,
+        sync_job_ids=sync_job_ids,
+        context=context,
+        allow_mutations=allow_mutations,
+        conversation_id=conversation_id,
+        client_turn_id=client_turn_id,
+        session_csrf_hash=session_csrf_hash,
+        cancel_event=cancel_event,
+        ai_provider=ai_provider,
+        request_payload=request_payload,
+        model_instructions=model_instructions,
+        message=message,
+        attachments=attachments,
+        background_owned=background_owned,
+        on_text_delta=on_text_delta,
+        recovery_state=recovery_state,
+    )
     status, text, failures = _structured_coach_outcome(
         response,
         command_receipts,
@@ -18607,33 +18773,25 @@ def _chat_with_structured_coach_impl(
         context=context,
         message=message,
     )
-    final_receipt = {**receipt, "status": status, "awaiting_clarification": bool(question),
-        "response_status": response.get("status") if response.get("status") in {"completed", "incomplete", "failed", "cancelled"} else None,
-        "client_turn_id": client_turn_id, "command_receipts": command_receipts, "sync_job_ids": sync_job_ids,
-        "intent": intent, "tool_rounds": rounds, "pending_operations": sorted({entry["tool"] for entry in failures}),
-        "proposed_actions": [entry["result"]["proposed_action"] for entry in command_receipts if entry.get("result", {}).get("proposed_action")]}
-    for key in ("openai_response_id", "pending_tool_outputs", "pending_tool_calls", "response_input", "previous_response_id"):
-        final_receipt.pop(key, None)
-    with DB_LOCK, database() as db:
-        current_command = db.execute(
-            "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,),
-        ).fetchone()
-        if current_command and current_command["status"] == "completed":
-            return _coach_command_receipt(current_command["receipt"])
-        final_receipt["message"] = CHAT_REPOSITORY.add(db, "assistant", text, client_turn_id=client_turn_id)
-        for step in command_receipts:
-            if step["tool"] == "preview_adaptive_replan" and step.get("result", {}).get("ok"):
-                preview_id = step["result"].get("id")
-                preview_row = db.execute("SELECT payload FROM plan_adjustments WHERE id=? AND status='preview'", (preview_id,)).fetchone()
-                if preview_row:
-                    preview_payload = json.loads(preview_row["payload"])
-                    preview_payload["published_message_id"] = final_receipt["message"]["id"]
-                    db.execute("UPDATE plan_adjustments SET payload=? WHERE id=?", (json.dumps(preview_payload, ensure_ascii=False), preview_id))
-        set_kv("last_coach_ai_provider", ai_provider or selected_ai_provider(), db)
-        db.execute(UPDATE_COMMAND_RECEIPT_SQL,
-                   (json.dumps(final_receipt, ensure_ascii=False), utc_now(), client_turn_id))
-    publish_state_event("coach", {"message_id": final_receipt["message"]["id"], "role": "assistant", "client_turn_id": client_turn_id})
-    return final_receipt
+    final_receipt = _structured_coach_final_receipt(
+        receipt,
+        status=status,
+        response=response,
+        client_turn_id=client_turn_id,
+        command_receipts=command_receipts,
+        sync_job_ids=sync_job_ids,
+        intent=intent,
+        rounds=rounds,
+        failures=failures,
+        awaiting_clarification=bool(question),
+    )
+    final_receipt["text"] = text
+    return _persist_structured_coach_final_receipt(
+        final_receipt,
+        client_turn_id=client_turn_id,
+        command_receipts=command_receipts,
+        ai_provider=ai_provider,
+    )
 
 
 def _require_command_owner(receipt: dict[str, Any], session_csrf_hash: str) -> None:
