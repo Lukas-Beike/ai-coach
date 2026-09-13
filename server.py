@@ -8993,38 +8993,48 @@ def normalize_workout(workout: Any) -> dict[str, Any]:
     return draft
 
 
+def _naive_calendar_datetime(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", UTC_OFFSET_SUFFIX))
+    except (TypeError, ValueError):
+        return None
+    return parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+
+
+def _calendar_duration_minutes(value: dict[str, Any], default_minutes: int) -> int:
+    duration = value.get("duration_minutes")
+    if duration in (None, "") and value.get("moving_time") not in (None, ""):
+        duration = float(value["moving_time"]) / 60
+    try:
+        return max(1, int(float(duration))) if duration not in (None, "") else default_minutes
+    except (TypeError, ValueError):
+        return default_minutes
+
+
+def _calendar_interval_end(value: dict[str, Any], start: datetime, default_minutes: int) -> datetime:
+    end = _naive_calendar_datetime(first_present(value, ("end_date_local", "end_local", "end")))
+    if end is None:
+        end = start + timedelta(minutes=_calendar_duration_minutes(value, default_minutes))
+    return max(end, start + timedelta(minutes=1))
+
+
 def _calendar_interval(value: dict[str, Any], default_minutes: int = 60) -> tuple[datetime, datetime, bool] | None:
     raw_start = first_present(value, ("start_date_local", "start_local", "start", "date"))
     if raw_start in (None, ""):
         return None
     raw_start = str(raw_start).strip()
-    try:
-        if len(raw_start) == 10:
-            start = datetime.combine(date.fromisoformat(raw_start[:10]), datetime.min.time())
-            return start, start + timedelta(days=1), False
-        start = datetime.fromisoformat(raw_start.replace("Z", UTC_OFFSET_SUFFIX))
-    except (TypeError, ValueError):
+    if len(raw_start) == 10:
+        try:
+            start = datetime.combine(date.fromisoformat(raw_start), datetime.min.time())
+        except ValueError:
+            return None
+        return start, start + timedelta(days=1), False
+    start = _naive_calendar_datetime(raw_start)
+    if start is None:
         return None
-    if start.tzinfo is not None:
-        start = start.replace(tzinfo=None)
-    raw_end = first_present(value, ("end_date_local", "end_local", "end"))
-    end = None
-    if raw_end not in (None, ""):
-        try:
-            end = datetime.fromisoformat(str(raw_end).strip().replace("Z", UTC_OFFSET_SUFFIX))
-            if end.tzinfo is not None:
-                end = end.replace(tzinfo=None)
-        except (TypeError, ValueError):
-            end = None
-    if end is None:
-        duration = value.get("duration_minutes")
-        if duration in (None, "") and value.get("moving_time") not in (None, ""):
-            duration = float(value["moving_time"]) / 60
-        try:
-            duration_minutes = max(1, int(float(duration))) if duration not in (None, "") else default_minutes
-        except (TypeError, ValueError):
-            duration_minutes = default_minutes
-        end = start + timedelta(minutes=duration_minutes)
+    end = _calendar_interval_end(value, start, default_minutes)
     return start, max(end, start + timedelta(minutes=1)), True
 
 
