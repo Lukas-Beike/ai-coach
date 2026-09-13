@@ -475,7 +475,9 @@ function syncPollLeaseAvailable() {
     localStorage.setItem(SYNC_POLL_LEASE_KEY, JSON.stringify(lease));
     const verified = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
     return verified?.token === state.syncPoll.leaseToken;
-  } catch (_) { // Privacy settings can deny storage; fail open to keep sync available.
+  } catch {
+    // Deliberately ignore storage-access exceptions: privacy settings can deny
+    // localStorage, and sync must remain available without the optional lease.
     return true;
   }
 }
