@@ -15899,6 +15899,172 @@ def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
+def _consume_openai_sse_event(
+    data_lines: list[str], event_name: str, on_text_delta: Any,
+    on_response_id: Callable[[str], None] | None,
+) -> tuple[dict[str, Any] | None, str, list[str]]:
+    if not data_lines:
+        return None, "", []
+    raw_event = "\n".join(data_lines)
+    if raw_event.strip() == "[DONE]":
+        return None, "", []
+    try:
+        event = json.loads(raw_event)
+    except json.JSONDecodeError as exc:
+        raise AppError(502, "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.", reason="invalid_response") from exc
+    kind = event_name or str(event.get("type") or "")
+    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+    if kind in {"response.created", "response.in_progress"} and isinstance(candidate, dict):
+        response_id = str(candidate.get("id") or "").strip()
+        if response_id and on_response_id is not None:
+            on_response_id(response_id)
+    final_response = None
+    if kind == "response.output_text.delta":
+        delta = event.get("delta")
+        if isinstance(delta, str) and delta:
+            on_text_delta(delta)
+    elif kind in {"response.completed", "response.incomplete", "response.failed"}:
+        candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+        if isinstance(candidate, dict):
+            final_response = candidate
+    return final_response, "", []
+
+
+def _read_openai_stream_response(
+    request: Request, cancel_event: threading.Event | None, on_text_delta: Any,
+    on_response_id: Callable[[str], None] | None, stream_state: dict[str, int],
+) -> dict[str, Any] | None:
+    final_response: dict[str, Any] | None = None
+    event_name = ""
+    data_lines: list[str] = []
+    with urlopen(request, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS) as response:
+        if cancel_event is not None:
+            cancel_event._openai_response = response
+        record_openai_rate_limits(getattr(response, "headers", None))
+        record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
+        for raw_line in response:
+            _raise_chat_cancelled(cancel_event)
+            stream_state["bytes"] += len(raw_line)
+            if stream_state["bytes"] > MAX_EXTERNAL_RESPONSE_BYTES:
+                raise AppError(502, "Die Streaming-Antwort von OpenAI ist zu groß.", reason="response_too_large")
+            line = raw_line.decode("utf-8").rstrip("\r\n")
+            if not line:
+                event_response, event_name, data_lines = _consume_openai_sse_event(
+                    data_lines, event_name, on_text_delta, on_response_id,
+                )
+                if event_response is not None:
+                    final_response = event_response
+            elif line.startswith("event:"):
+                event_name = line[6:].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[5:].lstrip())
+        event_response, _, _ = _consume_openai_sse_event(
+            data_lines, event_name, on_text_delta, on_response_id,
+        )
+        if event_response is not None:
+            final_response = event_response
+    return final_response
+
+
+def _log_openai_stream_failure(
+    context: dict[str, Any], started: float, stream_bytes: int,
+    reason: str, status: int, *, level: int = logging.WARNING,
+) -> None:
+    LOGGER.log(
+        level,
+        "External HTTP request failed",
+        extra={
+            "event": "external_request_failed",
+            "context": {
+                **context, "status": status, "reason": reason,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                "response_bytes": stream_bytes,
+            },
+        },
+    )
+
+
+def _capture_openai_stream_failure(
+    status: int, reason: str, started: float, stream_bytes: int,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    details = {
+        "service": "openai", "status": status, "reason": reason,
+        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+        "response_bytes": stream_bytes,
+    }
+    if extra:
+        details.update(extra)
+    capture_diagnostic_event("openai_stream_failed", details)
+
+
+def _handle_openai_stream_app_error(
+    exc: AppError, cancel_event: threading.Event | None, final_response: dict[str, Any] | None,
+    context: dict[str, Any], started: float, stream_bytes: int,
+) -> NoReturn:
+    if cancel_event is not None and cancel_event.is_set() and final_response is None:
+        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+    reason = exc.reason or "request_failed"
+    _log_openai_stream_failure(context, started, stream_bytes, reason, exc.status, level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING)
+    _capture_openai_stream_failure(exc.status, reason, started, stream_bytes)
+    raise exc
+
+
+def _handle_openai_stream_disconnect(
+    final_response: dict[str, Any] | None,
+    context: dict[str, Any], started: float, stream_bytes: int,
+) -> NoReturn:
+    if final_response is None:
+        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+    _log_openai_stream_failure(context, started, stream_bytes, "client_disconnected", 499, level=logging.INFO)
+    _capture_openai_stream_failure(499, "client_disconnected", started, stream_bytes)
+    raise ClientDisconnected()
+
+
+def _handle_openai_stream_http_error(
+    exc: HTTPError, context: dict[str, Any], started: float, stream_bytes: int,
+) -> NoReturn:
+    raw_error = _read_http_error_body(exc)
+    status = int(getattr(exc, "code", 502) or 502)
+    details = openai_error_details(status, raw_error)
+    record_openai_status(details)
+    reason = safe_openai_log_reason(details["reason"])
+    _log_openai_stream_failure(context, started, stream_bytes, reason, status)
+    _capture_openai_stream_failure(status, details["reason"], started, stream_bytes, openai_error_diagnostic_details(raw_error, getattr(exc, "headers", None)))
+    raise AppError(status, details["message"], reason=details["reason"]) from exc
+
+
+def _handle_openai_stream_timeout(
+    exc: TimeoutError, cancel_event: threading.Event | None,
+    context: dict[str, Any], started: float, stream_bytes: int,
+) -> NoReturn:
+    if cancel_event is not None and cancel_event.is_set():
+        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        _log_openai_stream_failure(context, started, stream_bytes, "chat_cancelled", 499, level=logging.INFO)
+        _capture_openai_stream_failure(499, "chat_cancelled", started, stream_bytes)
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
+    details = {"state": "error", "reason": "provider_timeout", "message": "OpenAI hat nicht rechtzeitig geantwortet.", "http_status": 504}
+    record_openai_status(details)
+    _log_openai_stream_failure(context, started, stream_bytes, "provider_timeout", 504)
+    _capture_openai_stream_failure(504, "provider_timeout", started, stream_bytes)
+    raise AppError(504, details["message"], reason="provider_timeout") from exc
+
+
+def _handle_openai_stream_network_error(
+    exc: OSError | ValueError, cancel_event: threading.Event | None,
+    context: dict[str, Any], started: float, stream_bytes: int,
+) -> NoReturn:
+    if cancel_event is not None and cancel_event.is_set():
+        record_openai_usage({"usage": {}}, "responses_stream_cancelled")
+        _log_openai_stream_failure(context, started, stream_bytes, "chat_cancelled", 499, level=logging.INFO)
+        _capture_openai_stream_failure(499, "chat_cancelled", started, stream_bytes)
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
+    record_openai_status({"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503})
+    _log_openai_stream_failure(context, started, stream_bytes, "provider_unavailable", 503)
+    _capture_openai_stream_failure(503, "provider_unavailable", started, stream_bytes)
+    raise AppError(503, "OpenAI ist vorübergehend nicht verfügbar.", reason="provider_unavailable") from exc
+
+
 def openai_stream_request(
     payload: dict[str, Any],
     on_text_delta: Any,
@@ -15942,82 +16108,18 @@ def openai_stream_request(
         "request_bytes": len(body),
     })
     final_response: dict[str, Any] | None = None
-    stream_bytes = 0
-    event_name = ""
-    data_lines: list[str] = []
-
-    def log_failure(reason: str, status: int, *, level: int = logging.WARNING) -> None:
-        LOGGER.log(
-            level,
-            "External HTTP request failed",
-            extra={
-                "event": "external_request_failed",
-                "context": {
-                    **context,
-                    "status": status,
-                    "reason": reason,
-                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                    "response_bytes": stream_bytes,
-                },
-            },
-        )
-
-    def handle_event() -> None:
-        nonlocal final_response, event_name, data_lines
-        if not data_lines:
-            event_name = ""
-            return
-        raw_event = "\n".join(data_lines)
-        if raw_event.strip() == "[DONE]":
-            event_name = ""
-            data_lines = []
-            return
-        try:
-            event = json.loads(raw_event)
-        except json.JSONDecodeError as exc:
-            raise AppError(502, "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.", reason="invalid_response") from exc
-        kind = event_name or str(event.get("type") or "")
-        candidate = event.get("response") if isinstance(event.get("response"), dict) else event
-        if kind in {"response.created", "response.in_progress"} and isinstance(candidate, dict):
-            response_id = str(candidate.get("id") or "").strip()
-            if response_id and on_response_id is not None:
-                on_response_id(response_id)
-        if kind == "response.output_text.delta":
-            delta = event.get("delta")
-            if isinstance(delta, str) and delta:
-                on_text_delta(delta)
-        elif kind in {"response.completed", "response.incomplete", "response.failed"}:
-            candidate = event.get("response") if isinstance(event.get("response"), dict) else event
-            if isinstance(candidate, dict):
-                final_response = candidate
-        event_name = ""
-        data_lines = []
-
+    stream_state = {"bytes": 0}
     try:
         _raise_chat_cancelled(cancel_event)
-        with urlopen(request, timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS) as response:
-            if cancel_event is not None:
-                cancel_event._openai_response = response
-            record_openai_rate_limits(getattr(response, "headers", None))
-            record_openai_success(getattr(response, "status", None) or getattr(response, "code", None) or 200)
-            for raw_line in response:
-                _raise_chat_cancelled(cancel_event)
-                stream_bytes += len(raw_line)
-                if stream_bytes > MAX_EXTERNAL_RESPONSE_BYTES:
-                    raise AppError(502, "Die Streaming-Antwort von OpenAI ist zu groß.", reason="response_too_large")
-                line = raw_line.decode("utf-8").rstrip("\r\n")
-                if not line:
-                    handle_event()
-                elif line.startswith("event:"):
-                    event_name = line[6:].strip()
-                elif line.startswith("data:"):
-                    data_lines.append(line[5:].lstrip())
-            handle_event()
+        final_response = _read_openai_stream_response(
+            request, cancel_event, on_text_delta, on_response_id, stream_state,
+        )
         _raise_chat_cancelled(cancel_event)
         if final_response is None:
             raise AppError(502, "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.", reason="invalid_response")
         final_response = _validate_openai_response(OPENAI_RESPONSES_PATH, final_response)
         record_openai_usage(final_response, "responses_stream")
+        stream_bytes = stream_state["bytes"]
         capture_diagnostic_event("openai_stream_completed", {
             "service": "openai", "status": 200,
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
@@ -16029,60 +16131,15 @@ def openai_stream_request(
         )
         return final_response
     except AppError as exc:
-        if cancel_event is not None and cancel_event.is_set() and final_response is None:
-            record_openai_usage({"usage": {}}, "responses_stream_cancelled")
-        log_failure(exc.reason or "request_failed", exc.status, level=logging.INFO if exc.reason == "chat_cancelled" else logging.WARNING)
-        capture_diagnostic_event("openai_stream_failed", {
-            "service": "openai", "status": exc.status, "reason": exc.reason or "request_failed",
-            "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
-        })
-        raise
+        _handle_openai_stream_app_error(exc, cancel_event, final_response, context, started, stream_state["bytes"])
     except ClientDisconnected:
-        if final_response is None:
-            record_openai_usage({"usage": {}}, "responses_stream_cancelled")
-        log_failure("client_disconnected", 499, level=logging.INFO)
-        capture_diagnostic_event("openai_stream_failed", {
-            "service": "openai", "status": 499, "reason": "client_disconnected",
-            "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
-        })
-        raise
+        _handle_openai_stream_disconnect(final_response, context, started, stream_state["bytes"])
     except HTTPError as exc:
-        raw_error = _read_http_error_body(exc)
-        status = int(getattr(exc, "code", 502) or 502)
-        details = openai_error_details(status, raw_error)
-        record_openai_status(details)
-        log_failure(safe_openai_log_reason(details["reason"]), status)
-        capture_diagnostic_event("openai_stream_failed", {
-            "service": "openai", "status": status, "reason": details["reason"],
-            "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
-            **openai_error_diagnostic_details(raw_error, getattr(exc, "headers", None)),
-        })
-        raise AppError(status, details["message"], reason=details["reason"]) from exc
+        _handle_openai_stream_http_error(exc, context, started, stream_state["bytes"])
     except TimeoutError as exc:
-        if cancel_event is not None and cancel_event.is_set():
-            record_openai_usage({"usage": {}}, "responses_stream_cancelled")
-            log_failure("chat_cancelled", 499, level=logging.INFO)
-            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        details = {"state": "error", "reason": "provider_timeout", "message": "OpenAI hat nicht rechtzeitig geantwortet.", "http_status": 504}
-        record_openai_status(details)
-        log_failure("provider_timeout", 504)
-        capture_diagnostic_event("openai_stream_failed", {
-            "service": "openai", "status": 504, "reason": "provider_timeout",
-            "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
-        })
-        raise AppError(504, details["message"], reason="provider_timeout") from exc
+        _handle_openai_stream_timeout(exc, cancel_event, context, started, stream_state["bytes"])
     except (OSError, ValueError) as exc:
-        if cancel_event is not None and cancel_event.is_set():
-            record_openai_usage({"usage": {}}, "responses_stream_cancelled")
-            log_failure("chat_cancelled", 499, level=logging.INFO)
-            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
-        record_openai_status({"state": "error", "reason": "provider_unavailable", "message": "OpenAI ist vorübergehend nicht verfügbar.", "http_status": 503})
-        log_failure("provider_unavailable", 503)
-        capture_diagnostic_event("openai_stream_failed", {
-            "service": "openai", "status": 503, "reason": "provider_unavailable",
-            "duration_ms": round((time.perf_counter() - started) * 1000, 1), "response_bytes": stream_bytes,
-        })
-        raise AppError(503, "OpenAI ist vorübergehend nicht verfügbar.", reason="provider_unavailable") from exc
+        _handle_openai_stream_network_error(exc, cancel_event, context, started, stream_state["bytes"])
 
 
 def responses_stream_request(
