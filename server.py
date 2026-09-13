@@ -12177,6 +12177,32 @@ def workout_library_sync_summary() -> dict[str, int]:
     return summary
 
 
+def _intervals_calendar_window(snapshot: dict[str, Any]) -> dict[str, str]:
+    provider_sync = snapshot.get("provider_sync", {})
+    calendar_window = provider_sync.get("calendar_window") if isinstance(provider_sync, dict) else None
+    if isinstance(calendar_window, dict):
+        return calendar_window
+    today = local_now().date()
+    return {
+        "start": (today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)).isoformat(),
+        "end": (today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat(),
+    }
+
+
+def _intervals_connection_state(
+    configured: bool, running: bool, error: str | None, last_sync_at: str | None, last_library_sync_at: str | None,
+) -> str:
+    if not configured:
+        return "not_configured"
+    if running:
+        return "syncing"
+    if error:
+        return "error"
+    if last_sync_at or last_library_sync_at:
+        return "connected"
+    return "configured"
+
+
 def intervals_public_state(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return connection health without exposing Intervals credentials."""
     configured = bool(CONFIG.intervals_api_key)
@@ -12193,23 +12219,8 @@ def intervals_public_state(snapshot: dict[str, Any] | None = None) -> dict[str, 
     running = SYNC_LOCK.locked() or WORKOUT_LIBRARY_SYNC_LOCK.locked()
     error = last_sync_error or last_library_sync_error
     snapshot = snapshot if isinstance(snapshot, dict) else (latest_snapshot() or {})
-    calendar_window = snapshot.get("provider_sync", {}).get("calendar_window") if isinstance(snapshot, dict) else None
-    if not isinstance(calendar_window, dict):
-        today = local_now().date()
-        calendar_window = {
-            "start": (today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)).isoformat(),
-            "end": (today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat(),
-        }
-    if not configured:
-        state = "not_configured"
-    elif running:
-        state = "syncing"
-    elif error:
-        state = "error"
-    elif last_sync_at or last_library_sync_at:
-        state = "connected"
-    else:
-        state = "configured"
+    calendar_window = _intervals_calendar_window(snapshot)
+    state = _intervals_connection_state(configured, running, error, last_sync_at, last_library_sync_at)
     return {
         "configured": configured,
         "state": state,
