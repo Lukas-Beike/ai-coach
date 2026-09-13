@@ -11338,15 +11338,23 @@ def _delete_planned_calendar_remote_event(remote_id: str, normalized_id: str, or
     client.delete_event(remote_id)
 
 
+def _require_intervals_calendar_access() -> None:
+    if not CONFIG.intervals_api_key:
+        raise AppError(503, INTERVALS_API_KEY_ERROR)
+
+
+def _mark_planned_calendar_removed(normalized_id: str, original_payload: str) -> None:
+    with DB_LOCK:
+        _planned_calendar_sync_recheck(normalized_id, original_payload)
+        update_planned_unit_sync_state(normalized_id, "synced")
+
+
 def _remove_planned_calendar_event(normalized_id: str, row: Any, workout: dict[str, Any]) -> None:
     remote_id = str(workout.get("remote_event_id") or "").strip()
     if remote_id:
-        if not CONFIG.intervals_api_key:
-            raise AppError(503, INTERVALS_API_KEY_ERROR)
+        _require_intervals_calendar_access()
         _delete_planned_calendar_remote_event(remote_id, normalized_id, row["payload"])
-    with DB_LOCK:
-        _planned_calendar_sync_recheck(normalized_id, row["payload"])
-        update_planned_unit_sync_state(normalized_id, "synced")
+    _mark_planned_calendar_removed(normalized_id, row["payload"])
 
 
 def _planned_calendar_event_payload(normalized_id: str, workout: dict[str, Any]) -> dict[str, Any]:
