@@ -19005,6 +19005,29 @@ def _append_planning_command_scope(intent: dict[str, Any], operation: str, argum
         _append_template_command_scope(intent, arguments.get("templates"))
 
 
+def _planning_command_intent(payload: dict[str, Any], operation: str) -> dict[str, Any]:
+    return {
+        "intent": "local_action", "operation": operation, "target_system": "local",
+        "artifact_id": str(payload.get("artifact_id") or "").strip() or None,
+        "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
+    }
+
+
+def _prepare_commit_planning_command(
+    payload: dict[str, Any], arguments: dict[str, Any], intent: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_id = str(payload.get("artifact_id") or "").strip()
+    if not artifact_id:
+        raise AppError(400, "Zum Speichern wird ein Planartefakt benötigt.", reason="artifact_required")
+    intent["authorization_scope"].append(f"artifact:{artifact_id}")
+    expected_revision = payload.get("expected_revision")
+    with DB_LOCK, database() as db:
+        row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
+    if expected_revision is not None and int(expected_revision) != int((row or {}).get("revision") or 0):
+        raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
+    return {**arguments, "artifact_id": artifact_id}
+
+
 def _prepare_planning_command(payload: Any) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
     if not isinstance(payload, dict):
         raise AppError(400, "Das Planungskommando muss ein Objekt sein.", reason="invalid_planning_command")
@@ -19017,22 +19040,9 @@ def _prepare_planning_command(payload: Any) -> tuple[str, str, dict[str, Any], d
     arguments = payload.get("arguments")
     if not isinstance(arguments, dict):
         raise AppError(400, "Das Planungskommando benoetigt arguments.", reason="invalid_planning_command")
-    intent = {
-        "intent": "local_action", "operation": operation, "target_system": "local",
-        "artifact_id": str(payload.get("artifact_id") or "").strip() or None,
-        "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
-    }
+    intent = _planning_command_intent(payload, operation)
     if operation == "commit_training_plan":
-        artifact_id = str(payload.get("artifact_id") or "").strip()
-        if not artifact_id:
-            raise AppError(400, "Zum Speichern wird ein Planartefakt benötigt.", reason="artifact_required")
-        intent["authorization_scope"].append(f"artifact:{artifact_id}")
-        expected_revision = payload.get("expected_revision")
-        with DB_LOCK, database() as db:
-            row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
-        if expected_revision is not None and int(expected_revision) != int((row or {}).get("revision") or 0):
-            raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
-        arguments = {**arguments, "artifact_id": artifact_id}
+        arguments = _prepare_commit_planning_command(payload, arguments, intent)
     else:
         _append_planning_command_scope(intent, operation, arguments)
     return client_turn_id, operation, arguments, intent
