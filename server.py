@@ -16952,47 +16952,66 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
     return {"ok": True, "status": "applied", "planning_revision": revision, "changes": changed["changes"], "library_entry_ids": [item["id"] for item in created]}
 
 
-def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Corrections resolve the same step, never a different object with the same tool."""
-    def repaired(previous, current):
-        if previous["tool"] != current["tool"]:
-            planning_alternatives = {"apply_training_patch", "replace_training_plan"}
-            return (
-                {previous["tool"], current["tool"]} == planning_alternatives
-                and previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
-                and previous.get("request_binding_key")
-                and previous["request_binding_key"] == current.get("request_binding_key")
-                and previous.get("plan_effect_key")
-                and previous["plan_effect_key"] == current.get("plan_effect_key")
-            )
-        if previous["tool"] == "update_profile" and previous.get("result", {}).get("reason") == "profile_conflict":
-            # A later profile write repairs a conflict only when it retries the
-            # same fields. Independent updates in the same profile scope must
-            # leave the original failed fact visible and pending.
-            previous_fields = previous.get("repair_key", {}).get("profile_fields")
-            current_fields = current.get("repair_key", {}).get("profile_fields")
-            if not previous_fields or previous_fields != current_fields:
-                return False
-        if (previous.get("result", {}).get("reason") == "request_scope"
-                and previous.get("scope_repair_key")
-                and previous["scope_repair_key"] == current.get("scope_repair_key")):
-            return True
-        before, after = previous.get("request") or {}, current.get("request") or {}
-        if not before:
-            return previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
-        if before.get("target") != after.get("target"):
-            return False
-        if (current["tool"] == "start_intervals_plan_sync" and after.get("sync_scope") == "all_pending"
-                and before.get("sync_scope") in {"selected", "all_pending"}):
-            return True
-        return (before.get("period") == after.get("period")
-                and set(before.get("scope") or []) == set(after.get("scope") or []))
+def _alternative_planning_steps_repaired(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Allow an invalid patch to be repaired by an equivalent plan replacement."""
+    planning_alternatives = {"apply_training_patch", "replace_training_plan"}
+    return (
+        {previous["tool"], current["tool"]} == planning_alternatives
+        and previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
+        and previous.get("request_binding_key")
+        and previous["request_binding_key"] == current.get("request_binding_key")
+        and previous.get("plan_effect_key")
+        and previous["plan_effect_key"] == current.get("plan_effect_key")
+    )
 
+
+def _profile_repair_fields(entry: dict[str, Any]) -> Any:
+    repair_key = entry.get("repair_key")
+    return repair_key.get("profile_fields") if isinstance(repair_key, dict) else None
+
+
+def _profile_steps_repaired(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """A profile-conflict retry must affect the same fields."""
+    if previous["tool"] != "update_profile" or previous.get("result", {}).get("reason") != "profile_conflict":
+        return True
+    previous_fields = _profile_repair_fields(previous)
+    current_fields = _profile_repair_fields(current)
+    return bool(previous_fields) and previous_fields == current_fields
+
+
+def _matching_coach_steps_repaired(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Compare equivalent actions without allowing one object to repair another."""
+    before, after = previous.get("request") or {}, current.get("request") or {}
+    if not before:
+        return previous.get("result", {}).get("reason") in {"request_invalid", "tool_arguments_invalid"}
+    if before.get("target") != after.get("target"):
+        return False
+    if (current["tool"] == "start_intervals_plan_sync" and after.get("sync_scope") == "all_pending"
+            and before.get("sync_scope") in {"selected", "all_pending"}):
+        return True
+    return (before.get("period") == after.get("period")
+            and set(before.get("scope") or []) == set(after.get("scope") or []))
+
+
+def _coach_steps_repaired(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Corrections resolve the same step, never a different object with the same tool."""
+    if previous["tool"] != current["tool"]:
+        return _alternative_planning_steps_repaired(previous, current)
+    if not _profile_steps_repaired(previous, current):
+        return False
+    if (previous.get("result", {}).get("reason") == "request_scope"
+            and previous.get("scope_repair_key")
+            and previous["scope_repair_key"] == current.get("scope_repair_key")):
+        return True
+    return _matching_coach_steps_repaired(previous, current)
+
+
+def _unresolved_coach_steps(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     latest = {}
     for entry in entries:
         if entry.get("result", {}).get("ok"):
             latest = {key: previous for key, previous in latest.items()
-                      if not repaired(previous, entry)}
+                      if not _coach_steps_repaired(previous, entry)}
         latest[entry.get("step_key") or entry["tool"]] = entry
     return [entry for entry in latest.values() if not entry.get("result", {}).get("ok")]
 
