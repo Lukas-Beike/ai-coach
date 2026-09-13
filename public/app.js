@@ -3188,17 +3188,15 @@ function metricToneClass(label, value) {
   return "metric-form-bad";
 }
 
-function displayMetric(root, label, metricData, formatter = null, editable = null) {
-  const item = document.createElement("div");
-  const metric = document.createElement("strong");
-  const caption = document.createElement("span");
+function metricValueParts(metricData) {
+  return {
+    value: metricData && typeof metricData === "object" ? metricData.value : metricData,
+    unit: metricData && typeof metricData === "object" ? metricData.unit : "",
+  };
+}
+
+function metricSourceDetails(metricData) {
   const source = document.createElement("small");
-  const value = metricData && typeof metricData === "object" ? metricData.value : metricData;
-  const unit = metricData && typeof metricData === "object" ? metricData.unit : "";
-  if (value == null) metric.textContent = "—";
-  else if (formatter) metric.textContent = formatter(value);
-  else metric.textContent = `${value}${unit ? " " + unit : ""}`;
-  caption.textContent = label;
   source.textContent = metricData?.source || "Nicht verfügbar";
   const freshnessLabel = { stale: "Veraltet", partial: "Teilweise aktualisiert", unknown: "Aktualität unbekannt" }[metricData?.freshness];
   if (freshnessLabel) source.textContent += ` · ${freshnessLabel}`;
@@ -3210,49 +3208,73 @@ function displayMetric(root, label, metricData, formatter = null, editable = nul
   } else if (metricData?.measurement_status === "unknown") source.textContent += " · Messdatum unbekannt";
   else if (metricData?.measurement_status === "future") source.textContent += " · Messdatum liegt in der Zukunft";
   source.title = [metricData?.note || metricData?.source || "", metricData?.fetched_at ? `Abgerufen ${formatTime(metricData.fetched_at)}` : ""].filter(Boolean).join(" · ");
+  source.className = metricSourceClass(metricData?.source);
+  if (metricData?.source === "Garmin Connect") source.className = "metric-garmin";
+  return source;
+}
+
+function metricComparisonBadge(comparison) {
+  const details = comparisonText(comparison);
+  if (!details) return null;
+  const badge = document.createElement("small");
+  badge.className = `metric-comparison ${details.className}`;
+  badge.textContent = details.text;
+  badge.title = details.title;
+  return badge;
+}
+
+function metricEditor(item, metric, label, value, editable) {
+  if (!editable?.key) return null;
+  item.classList.add("metric-editable");
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "metric-edit-button";
+  edit.textContent = "✎";
+  edit.title = `${label} bearbeiten`;
+  edit.setAttribute("aria-label", edit.title);
+  const input = document.createElement("input");
+  input.className = "metric-edit-input";
+  input.type = "number";
+  input.step = editable.step || "any";
+  input.min = editable.min ?? "0";
+  input.value = state.data?.profile?.[editable.key] || (value == null ? "" : value);
+  input.hidden = true;
+  edit.addEventListener("click", () => {
+    const editing = item.classList.toggle("editing");
+    input.hidden = !editing;
+    metric.hidden = editing;
+    edit.textContent = editing ? "✓" : "✎";
+    edit.title = editing ? "Wert speichern" : `${label} bearbeiten`;
+    edit.setAttribute("aria-label", edit.title);
+    if (editing) { input.focus(); input.select(); }
+    else saveInlineMetric(editable.key, input.value, edit);
+  });
+  return { edit, input };
+}
+
+function displayMetric(root, label, metricData, formatter = null, editable = null) {
+  const item = document.createElement("div");
+  const metric = document.createElement("strong");
+  const caption = document.createElement("span");
+  const source = metricSourceDetails(metricData);
+  const { value, unit } = metricValueParts(metricData);
+  if (value == null) metric.textContent = "—";
+  else if (formatter) metric.textContent = formatter(value);
+  else metric.textContent = `${value}${unit ? " " + unit : ""}`;
+  caption.textContent = label;
   for (const className of [metricSourceClass(metricData?.source), metricToneClass(label, value)]) {
     if (className) item.classList.add(className);
   }
-  source.className = metricSourceClass(metricData?.source);
-  if (metricData?.source === "Garmin Connect") source.className = "metric-garmin";
   const valueRow = document.createElement("div");
   valueRow.className = "metric-value-row";
   valueRow.append(metric);
-  const comparison = comparisonText(metricData?.comparison);
-  if (comparison) {
-    const badge = document.createElement("small");
-    badge.className = `metric-comparison ${comparison.className}`;
-    badge.textContent = comparison.text;
-    badge.title = comparison.title;
+  const badge = metricComparisonBadge(metricData?.comparison);
+  if (badge) {
     valueRow.append(badge);
   }
-  if (editable?.key) {
-    item.classList.add("metric-editable");
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "metric-edit-button";
-    edit.textContent = "✎";
-    edit.title = `${label} bearbeiten`;
-    edit.setAttribute("aria-label", `${label} bearbeiten`);
-    const input = document.createElement("input");
-    input.className = "metric-edit-input";
-    input.type = "number";
-    input.step = editable.step || "any";
-    input.min = editable.min ?? "0";
-    if (state.data?.profile?.[editable.key]) input.value = state.data.profile[editable.key];
-    else input.value = value == null ? "" : value;
-    input.hidden = true;
-    edit.addEventListener("click", () => {
-      const editing = item.classList.toggle("editing");
-      input.hidden = !editing;
-      metric.hidden = editing;
-      edit.textContent = editing ? "✓" : "✎";
-      edit.title = editing ? "Wert speichern" : `${label} bearbeiten`;
-      edit.setAttribute("aria-label", edit.title);
-      if (editing) { input.focus(); input.select(); }
-      else saveInlineMetric(editable.key, input.value, edit);
-    });
-    item.append(valueRow, input, caption, source, edit);
+  const editor = metricEditor(item, metric, label, value, editable);
+  if (editor) {
+    item.append(valueRow, editor.input, caption, source, editor.edit);
   } else {
     item.append(valueRow, caption, source);
   }
@@ -3850,6 +3872,107 @@ function latestAssistantMessageKey(messages) {
   return `fallback:${message.created_at || ""}:${message.content || ""}`;
 }
 
+function resetChatAfterGenerationChange(currentTurn) {
+  if (state.chatRequest?.message) {
+    state.rejectedMessages.push({ role: "user", content: state.chatRequest.message, client_turn_id: currentTurn,
+      error: "Der Chat wurde zurückgesetzt. Prüfe den Verlauf, bevor du diese Nachricht erneut sendest." });
+  }
+  state.chatGeneration += 1;
+  state.chatStream?.controller.abort();
+  state.chatStream = null;
+  state.chatRequest = null;
+  state.chatServerOperationId = null;
+  state.busy = false;
+  rememberChatTurn(null);
+}
+
+function applyChatGenerationChange(payload, result) {
+  const previousAssistantKey = latestAssistantMessageKey(payload.messages);
+  const generationChanged = state.data?.messages_generation !== undefined && result.generation !== state.data.messages_generation;
+  const currentTurn = state.chatRequest?.clientTurnId;
+  const currentTurnRetained = currentTurn && result.messages.some((message) => message.client_turn_id === currentTurn);
+  if (generationChanged) {
+    state.coachActionProposals = [];
+    state.coachReceipts = [];
+    if (!currentTurnRetained) resetChatAfterGenerationChange(currentTurn);
+  }
+  return { previousAssistantKey, generationChanged, currentTurn, currentTurnRetained };
+}
+
+function applyChatResult(payload, result, chatContentVersion) {
+  if (!Array.isArray(result.messages)) throw new Error("Die Nachrichtenbestätigung fehlt.");
+  const { previousAssistantKey, generationChanged, currentTurn, currentTurnRetained } = applyChatGenerationChange(payload, result);
+  const retainedMessages = generationChanged
+    ? (state.data?.messages || []).filter((message) => currentTurnRetained && message.client_turn_id === currentTurn)
+    : undefined;
+  const messages = mergeChatMessages(result.messages, retainedMessages);
+  payload.messages_generation = result.generation;
+  const nextAssistantKey = latestAssistantMessageKey(messages);
+  if (state.initialStateLoaded && baseRoute() !== "coach" && nextAssistantKey && nextAssistantKey !== previousAssistantKey) {
+    state.chatResponseScrollPending = true;
+    const nextAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+    state.chatResponseMessageId = nextAssistant?.id ?? null;
+  }
+  Object.assign(payload, { messages, messages_next_cursor: result.next_cursor });
+  if (chatContentVersion === state.chatContentVersion && Array.isArray(result.proposed_actions)) {
+    state.coachActionProposals = result.proposed_actions;
+    state.chatProposalRefreshPending = false;
+  }
+}
+
+function loadStateRequests(areas, query) {
+  const requests = [];
+  if (areas.has("chat")) requests.push(["chat", api("/api/chat/history?limit=100")]);
+  if (areas.has("activities")) requests.push(["activities", api("/api/activities?limit=250")]);
+  if (areas.has("plan")) requests.push(["plan", api(`/api/plan${query}`)]);
+  if (areas.has("weather") && !areas.has("plan")) requests.push(["weather", api(`/api/weather${query}`)]);
+  if (areas.has("library")) requests.push(["library", api("/api/library?limit=100")]);
+  if (areas.has("performance")) requests.push(["performance", api("/api/performance")]);
+  if (areas.has("feedback")) requests.push(["feedback", api("/api/feedback")]);
+  if (areas.has("profile")) requests.push(["profile", api("/api/profile")]);
+  return Promise.all(requests.map(async ([area, request]) => {
+    try { return [area, await request, null]; }
+    catch (error) { return [area, null, error]; }
+  }));
+}
+
+function applyLoadedArea(payload, area, result, error, bootstrap, chatGeneration, chatContentVersion) {
+  if (area === "chat" && chatGeneration !== state.chatGeneration) return { applied: false };
+  if (error) return { applied: false, error: `${area}: ${error.message}` };
+  if (area === "chat") applyChatResult(payload, result, chatContentVersion);
+  if (area === "activities") Object.assign(payload, { activities: result.activities || [], activities_next_cursor: result.next_cursor });
+  if (area === "plan") Object.assign(payload, result);
+  if (area === "weather") Object.assign(payload, { weather: result });
+  if (area === "library") Object.assign(payload, { library: result.workouts || [], library_next_cursor: result.next_cursor });
+  if (area === "performance") Object.assign(payload, result);
+  if (area === "feedback") Object.assign(payload, result);
+  if (area === "profile") Object.assign(payload, { profile: result.profile || bootstrap.profile, competitions: result.competitions || bootstrap.competitions });
+  state.loadedAreas.add(area);
+  return { applied: true, area };
+}
+
+function mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion) {
+  const failures = [];
+  const appliedAreas = [];
+  results.forEach(([area, result, error]) => {
+    const outcome = applyLoadedArea(payload, area, result, error, bootstrap, chatGeneration, chatContentVersion);
+    if (outcome.error) failures.push(outcome.error);
+    if (outcome.applied) appliedAreas.push(outcome.area);
+  });
+  return { failures, appliedAreas };
+}
+
+function applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration) {
+  payload.state_versions = { ...state.data?.state_versions };
+  for (const area of appliedAreas) {
+    if (area === "chat" && chatGeneration !== state.chatGeneration) continue;
+    const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", "garmin"] }[area] || [area];
+    for (const key of versionKeys) {
+      if (bootstrap.state_versions?.[key] !== undefined) payload.state_versions[key] = bootstrap.state_versions[key];
+    }
+  }
+}
+
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
@@ -3867,19 +3990,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       if (existing[key] !== undefined) payload[key] = existing[key];
     });
     const areas = new Set(requestedAreas || ["chat", "activities", "plan", "library", "performance", "feedback", "profile"]);
-    const requests = [];
-    if (areas.has("chat")) requests.push(["chat", api("/api/chat/history?limit=100")]);
-    if (areas.has("activities")) requests.push(["activities", api("/api/activities?limit=250")]);
-    if (areas.has("plan")) requests.push(["plan", api(`/api/plan${query}`)]);
-    if (areas.has("weather") && !areas.has("plan")) requests.push(["weather", api(`/api/weather${query}`)]);
-    if (areas.has("library")) requests.push(["library", api("/api/library?limit=100")]);
-    if (areas.has("performance")) requests.push(["performance", api("/api/performance")]);
-    if (areas.has("feedback")) requests.push(["feedback", api("/api/feedback")]);
-    if (areas.has("profile")) requests.push(["profile", api("/api/profile")]);
-    const domainData = Promise.all(requests.map(async ([area, request]) => {
-      try { return [area, await request, null]; }
-      catch (error) { return [area, null, error]; }
-    }));
+    const domainData = loadStateRequests(areas, query);
     if (initialLoad && requestSequence === state.loadSequence) {
       render(payload);
       finishAppShellLoading();
@@ -3888,70 +3999,8 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     if (sessionGeneration !== state.sessionGeneration || requestSequence !== state.loadSequence) return;
     // Incorporate changes that arrived while these requests were in flight.
     payload.messages = state.data?.messages || [];
-    const failures = [];
-    const appliedAreas = [];
-    results.forEach(([area, result, error]) => {
-      if (area === "chat" && chatGeneration !== state.chatGeneration) return;
-      if (error) { failures.push(`${area}: ${error.message}`); return; }
-      if (area === "chat") {
-        if (!Array.isArray(result.messages)) throw new Error("Die Nachrichtenbestätigung fehlt.");
-        const previousAssistantKey = latestAssistantMessageKey(payload.messages);
-        const generationChanged = state.data?.messages_generation !== undefined && result.generation !== state.data.messages_generation;
-        const currentTurn = state.chatRequest?.clientTurnId;
-        const currentTurnRetained = currentTurn && result.messages.some((message) => message.client_turn_id === currentTurn);
-        if (generationChanged) {
-          state.coachActionProposals = [];
-          state.coachReceipts = [];
-          if (!currentTurnRetained) {
-            if (state.chatRequest?.message) {
-              state.rejectedMessages.push({ role: "user", content: state.chatRequest.message, client_turn_id: currentTurn,
-                error: "Der Chat wurde zurückgesetzt. Prüfe den Verlauf, bevor du diese Nachricht erneut sendest." });
-            }
-            state.chatGeneration += 1;
-            state.chatStream?.controller.abort();
-            state.chatStream = null;
-            state.chatRequest = null;
-            state.chatServerOperationId = null;
-            state.busy = false;
-            rememberChatTurn(null);
-          }
-        }
-        const retainedMessages = generationChanged
-          ? (state.data?.messages || []).filter((message) => currentTurnRetained && message.client_turn_id === currentTurn)
-          : undefined;
-        const messages = mergeChatMessages(result.messages, retainedMessages);
-        payload.messages_generation = result.generation;
-
-        const nextAssistantKey = latestAssistantMessageKey(messages);
-        if (state.initialStateLoaded && baseRoute() !== "coach" && nextAssistantKey && nextAssistantKey !== previousAssistantKey) {
-          state.chatResponseScrollPending = true;
-          const nextAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-          state.chatResponseMessageId = nextAssistant?.id ?? null;
-        }
-        Object.assign(payload, { messages, messages_next_cursor: result.next_cursor });
-        if (chatContentVersion === state.chatContentVersion && Array.isArray(result.proposed_actions)) {
-          state.coachActionProposals = result.proposed_actions;
-          state.chatProposalRefreshPending = false;
-        }
-      }
-      if (area === "activities") Object.assign(payload, { activities: result.activities || [], activities_next_cursor: result.next_cursor });
-      if (area === "plan") Object.assign(payload, result);
-      if (area === "weather") Object.assign(payload, { weather: result });
-      if (area === "library") Object.assign(payload, { library: result.workouts || [], library_next_cursor: result.next_cursor });
-      if (area === "performance") Object.assign(payload, result);
-      if (area === "feedback") Object.assign(payload, result);
-      if (area === "profile") Object.assign(payload, { profile: result.profile || bootstrap.profile, competitions: result.competitions || bootstrap.competitions });
-      state.loadedAreas.add(area);
-      appliedAreas.push(area);
-    });
-    payload.state_versions = { ...state.data?.state_versions };
-    for (const area of appliedAreas) {
-      if (area === "chat" && chatGeneration !== state.chatGeneration) continue;
-      const versionKeys = { feedback: ["checkins", "activity_feedback"], performance: ["performance", "garmin"] }[area] || [area];
-      for (const key of versionKeys) {
-        if (bootstrap.state_versions?.[key] !== undefined) payload.state_versions[key] = bootstrap.state_versions[key];
-      }
-    }
+    const { failures, appliedAreas } = mergeLoadedResults(payload, results, bootstrap, chatGeneration, chatContentVersion);
+    applyLoadedStateVersions(payload, appliedAreas, bootstrap, chatGeneration);
     if (requestSequence === state.loadSequence) render(payload);
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
