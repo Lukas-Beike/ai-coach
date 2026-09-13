@@ -8059,6 +8059,41 @@ def _weather_window_score(event: dict[str, Any], summary: dict[str, Any]) -> flo
     )
 
 
+def _weather_interval_is_usable(
+    interval: list[dict[str, float | int | str]],
+    duration_hours: int,
+    window_start: int,
+    window_end: int,
+) -> bool:
+    if len(interval) < duration_hours:
+        return False
+    start_hour = int(interval[0]["hour"])
+    if start_hour < window_start or start_hour + duration_hours > window_end:
+        return False
+    return all(int(item["hour"]) == start_hour + offset for offset, item in enumerate(interval))
+
+
+def _weather_candidate_windows(
+    event: dict[str, Any],
+    rows: list[dict[str, float | int | str]],
+    target_date: date,
+    duration_hours: int,
+) -> list[tuple[float, int, list[dict[str, float | int | str]], str]]:
+    candidates: list[tuple[float, int, list[dict[str, float | int | str]], str]] = []
+    for window_start, window_end, availability in _weather_training_windows(target_date):
+        for start in range(len(rows)):
+            interval = rows[start:start + duration_hours]
+            if not _weather_interval_is_usable(interval, duration_hours, window_start, window_end):
+                continue
+            summary = _weather_interval_summary(interval)
+            convenience_penalty = 2 if availability == WORKDAY_TIME_LABEL else 0
+            candidates.append((
+                _weather_window_score(event, summary) + convenience_penalty,
+                int(interval[0]["hour"]), interval, availability,
+            ))
+    return candidates
+
+
 def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> dict[str, Any] | None:
     event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
     if not re.fullmatch(DATE_ONLY_PATTERN, event_date):
@@ -8072,25 +8107,7 @@ def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> 
         return None
     duration_minutes = max(5, min(600, round((_weather_number(event.get("moving_time")) or 3600) / 60)))
     duration_hours = max(1, math.ceil(duration_minutes / 60))
-    candidates: list[tuple[float, int, list[dict[str, float | int | str]], str]] = []
-    windows = _weather_training_windows(target_date)
-    for window_start, window_end, availability in windows:
-        for start in range(0, len(rows)):
-            interval = rows[start:start + duration_hours]
-            if len(interval) < duration_hours:
-                continue
-            start_hour = int(interval[0]["hour"])
-            end_hour = start_hour + duration_hours
-            if start_hour < window_start or end_hour > window_end:
-                continue
-            if any(int(item["hour"]) != start_hour + offset for offset, item in enumerate(interval)):
-                continue
-            summary = _weather_interval_summary(interval)
-            score = _weather_window_score(event, summary)
-            # When the forecast is equally good, prefer a practical daytime slot
-            # over the narrow pre-work window. Weather remains the dominant factor.
-            convenience_penalty = 2 if availability == WORKDAY_TIME_LABEL else 0
-            candidates.append((score + convenience_penalty, start_hour, interval, availability))
+    candidates = _weather_candidate_windows(event, rows, target_date, duration_hours)
     if not candidates:
         return None
     _, start_hour, best, availability = min(candidates, key=lambda item: (item[0], item[1]))
@@ -8124,29 +8141,33 @@ def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> 
     return recommendation
 
 
+def _overlay_weather_values(base: dict[str, Any], short: dict[str, Any]) -> None:
+    base_times = base.get("time") if isinstance(base.get("time"), list) else []
+    short_times = short.get("time") if isinstance(short.get("time"), list) else []
+    positions = {str(value): index for index, value in enumerate(base_times)}
+    for key, short_values in short.items():
+        if key == "time" or not isinstance(short_values, list):
+            continue
+        base_values = base.get(key)
+        if not isinstance(base_values, list) or len(base_values) != len(base_times):
+            continue
+        for short_index, timestamp in enumerate(short_times):
+            base_index = positions.get(str(timestamp))
+            if base_index is not None and short_index < len(short_values):
+                base_values[base_index] = short_values[short_index]
+
+
 def _merge_weather_forecasts(long_forecast: dict[str, Any], short_forecast: dict[str, Any]) -> dict[str, Any]:
     """Overlay the higher-resolution ICON-D2 range on the long forecast."""
     merged = json.loads(json.dumps(long_forecast))
     for section_name in ("hourly", "daily"):
         base = merged.get(section_name) if isinstance(merged.get(section_name), dict) else {}
         short = short_forecast.get(section_name) if isinstance(short_forecast.get(section_name), dict) else {}
-        base_times = base.get("time") if isinstance(base.get("time"), list) else []
-        short_times = short.get("time") if isinstance(short.get("time"), list) else []
-        positions = {str(value): index for index, value in enumerate(base_times)}
-        for key, short_values in short.items():
-            if key == "time" or not isinstance(short_values, list):
-                continue
-            base_values = base.get(key)
-            if not isinstance(base_values, list) or len(base_values) != len(base_times):
-                continue
-            for short_index, timestamp in enumerate(short_times):
-                base_index = positions.get(str(timestamp))
-                if base_index is not None and short_index < len(short_values):
-                    base_values[base_index] = short_values[short_index]
+        _overlay_weather_values(base, short)
     return merged
 
 
-def _fetch_weather_forecast(query: str) -> dict[str, Any]:
+def _weather_geocoded_location(query: str) -> dict[str, Any]:
     geocode_url = "https://geocoding-api.open-meteo.com/v1/search?" + urlencode({
         "name": query[:200], "count": 1, "language": "de", "format": "json",
     })
@@ -8157,7 +8178,7 @@ def _fetch_weather_forecast(query: str) -> dict[str, Any]:
     longitude = _weather_number(location_result.get("longitude")) if location_result else None
     if latitude is None or longitude is None:
         raise AppError(400, "Der Wetterort wurde nicht gefunden.")
-    location = {
+    return {
         "name": str(location_result.get("name") or query)[:200],
         "country": str(location_result.get("country") or "")[:100],
         "country_code": str(location_result.get("country_code") or "").upper()[:2],
@@ -8165,12 +8186,15 @@ def _fetch_weather_forecast(query: str) -> dict[str, Any]:
         "longitude": longitude,
         "timezone": str(location_result.get("timezone") or "")[:80],
     }
+
+
+def _weather_forecast_params(location: dict[str, Any], days: int, model: str) -> dict[str, Any]:
     forecast_params = {
-        "latitude": latitude,
-        "longitude": longitude,
+        "latitude": location["latitude"],
+        "longitude": location["longitude"],
         "timezone": "auto",
-        "forecast_days": WEATHER_FORECAST_DAYS,
-        "models": "ecmwf_ifs",
+        "forecast_days": days,
+        "models": model,
         "hourly": ",".join((
             "temperature_2m", "apparent_temperature", "precipitation_probability", "rain", "showers",
             "snowfall", "weather_code", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m",
@@ -8181,25 +8205,187 @@ def _fetch_weather_forecast(query: str) -> dict[str, Any]:
             "snowfall_sum", "wind_speed_10m_max", "wind_gusts_10m_max", "wind_direction_10m_dominant", "sunrise", "sunset",
         )),
     }
+    return forecast_params
+
+
+def _weather_forecast_is_complete(forecast: Any) -> bool:
+    return isinstance(forecast, dict) and isinstance(forecast.get("daily"), dict) and isinstance(forecast.get("hourly"), dict)
+
+
+def _weather_fetch_icon_d2(location: dict[str, Any], params: dict[str, Any], forecast: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    if location["country_code"] != "DE" or not (
+        NRW_LATITUDE_BOUNDS[0] <= location["latitude"] <= NRW_LATITUDE_BOUNDS[1]
+        and NRW_LONGITUDE_BOUNDS[0] <= location["longitude"] <= NRW_LONGITUDE_BOUNDS[1]
+    ):
+        return forecast, "ECMWF IFS HRES (3–14 Tage)"
+    short_params = dict(params)
+    short_params["forecast_days"] = WEATHER_ICON_D2_DAYS
+    short_params["models"] = "icon_d2"
+    try:
+        short_forecast = http_json(
+            "GET",
+            "https://api.open-meteo.com/v1/forecast?" + urlencode(short_params),
+            timeout=10,
+            service="open-meteo-forecast-icon-d2",
+        )
+        if _weather_forecast_is_complete(short_forecast):
+            return _merge_weather_forecasts(forecast, short_forecast), "ICON-D2 (0–2 Tage) + ECMWF IFS HRES (3–14 Tage)"
+    except Exception as exc:
+        LOGGER.warning("ICON-D2 weather synchronization failed; using ECMWF", extra={"event": "weather_icon_d2_failed", "context": {"error_type": type(exc).__name__}})
+    return forecast, "ECMWF IFS HRES (3–14 Tage)"
+
+
+def _fetch_weather_forecast(query: str) -> dict[str, Any]:
+    location = _weather_geocoded_location(query)
+    forecast_params = _weather_forecast_params(location, WEATHER_FORECAST_DAYS, "ecmwf_ifs")
     forecast_url = "https://api.open-meteo.com/v1/forecast?" + urlencode(forecast_params)
     forecast = http_json("GET", forecast_url, timeout=10, service="open-meteo-forecast-ecmwf")
-    if not isinstance(forecast, dict) or not isinstance(forecast.get("daily"), dict) or not isinstance(forecast.get("hourly"), dict):
+    if not _weather_forecast_is_complete(forecast):
         raise AppError(502, "Open-Meteo hat keine vollständige Wettervorhersage geliefert.")
-    model = "ECMWF IFS HRES (3–14 Tage)"
-    in_nrw = location["country_code"] == "DE" and NRW_LATITUDE_BOUNDS[0] <= latitude <= NRW_LATITUDE_BOUNDS[1] and NRW_LONGITUDE_BOUNDS[0] <= longitude <= NRW_LONGITUDE_BOUNDS[1]
-    if in_nrw:
-        short_params = dict(forecast_params)
-        short_params["forecast_days"] = WEATHER_ICON_D2_DAYS
-        short_params["models"] = "icon_d2"
-        short_url = "https://api.open-meteo.com/v1/forecast?" + urlencode(short_params)
-        try:
-            short_forecast = http_json("GET", short_url, timeout=10, service="open-meteo-forecast-icon-d2")
-            if isinstance(short_forecast, dict) and isinstance(short_forecast.get("daily"), dict) and isinstance(short_forecast.get("hourly"), dict):
-                forecast = _merge_weather_forecasts(forecast, short_forecast)
-                model = "ICON-D2 (0–2 Tage) + ECMWF IFS HRES (3–14 Tage)"
-        except Exception as exc:
-            LOGGER.warning("ICON-D2 weather synchronization failed; using ECMWF", extra={"event": "weather_icon_d2_failed", "context": {"error_type": type(exc).__name__}})
+    forecast, model = _weather_fetch_icon_d2(location, forecast_params, forecast)
     return {"query": query[:200], "location": location, "model": model, "forecast": forecast, "fetched_at": utc_now()}
+
+
+@dataclass
+class _WeatherCacheState:
+    query: str
+    cached: dict[str, Any]
+    failure: dict[str, Any]
+    previous_failure_count: int
+    cache_matches: bool
+    cache_age: float
+    error: str | None = None
+    refreshed: bool = False
+
+
+def _weather_cache_state(query: str) -> _WeatherCacheState:
+    try:
+        cached = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
+    except (TypeError, json.JSONDecodeError):
+        cached = {}
+    if not isinstance(cached, dict):
+        cached = {}
+    try:
+        failure = json.loads(get_kv(WEATHER_FAILURE_KEY) or "{}")
+    except (TypeError, ValueError):
+        failure = {}
+    if not isinstance(failure, dict):
+        failure = {}
+    try:
+        previous_failure_count = max(0, int(failure.get("count") or 0))
+    except (TypeError, ValueError):
+        previous_failure_count = 0
+    cache_matches = cached.get("query") == query and isinstance(cached.get("forecast"), dict)
+    fetched_at = str(cached.get("fetched_at") or "") if cache_matches else ""
+    try:
+        cache_age = (datetime.now(timezone.utc) - datetime.fromisoformat(fetched_at.replace("Z", UTC_OFFSET_SUFFIX))).total_seconds()
+    except (TypeError, ValueError):
+        cache_age = float("inf")
+    error = "Wetterdaten sind veraltet." if cache_matches and (cache_age >= WEATHER_CACHE_SECONDS or failure) else None
+    return _WeatherCacheState(query, cached, failure, previous_failure_count, cache_matches, cache_age, error)
+
+
+def _weather_retry_wait(failure: dict[str, Any]) -> float:
+    try:
+        retry_at = str(failure.get("retry_at") or "")
+        return (datetime.fromisoformat(retry_at.replace("Z", UTC_OFFSET_SUFFIX)) - datetime.now(timezone.utc)).total_seconds()
+    except (TypeError, ValueError):
+        return 0
+
+
+def _record_weather_refresh_failure(state: _WeatherCacheState, exc: Exception, refresh_id: str | None) -> None:
+    if refresh_id:
+        _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
+    state.error = exc.message if isinstance(exc, AppError) and exc.status == 400 else "Wetterdaten konnten derzeit nicht aktualisiert werden."
+    failure_count = state.previous_failure_count + 1
+    delay = min(WEATHER_RETRY_BASE_SECONDS * (2 ** min(failure_count - 1, 5)), WEATHER_RETRY_MAX_SECONDS)
+    set_kv(WEATHER_FAILURE_KEY, json.dumps({
+        "count": failure_count, "failed_at": utc_now(),
+        "retry_at": (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat(),
+    }, ensure_ascii=False))
+    LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
+
+
+def _refresh_weather_state(state: _WeatherCacheState, force: bool, track_refresh: bool) -> bool:
+    if not (force or not state.cache_matches or state.cache_age >= WEATHER_CACHE_SECONDS):
+        return False
+    retry_wait = _weather_retry_wait(state.failure)
+    if retry_wait > 0 and not force:
+        state.error = "Wetterdaten konnten nach einem Fehler noch nicht erneut geladen werden."
+        return False
+    refresh_id = None
+    if track_refresh:
+        operation = OPERATION_CONTEXT.get() or {}
+        refresh_id = _provider_refresh_start(
+            "weather", "forecast", operation.get("operation_id") or uuid.uuid4().hex,
+            operation.get("trigger") or operation_trigger("background"),
+        )
+    try:
+        with WEATHER_LOCK:
+            refreshed_cache = _fetch_weather_forecast(state.query)
+            with DB_LOCK, database():
+                if get_profile().get("weather_location", "").strip()[:200] != state.query:
+                    if refresh_id:
+                        _provider_refresh_finish(refresh_id, "skipped", "location_changed")
+                    return True
+                _remember_calendar_weather(state.cached if state.cache_matches else {}, refreshed_cache)
+                state.cached = refreshed_cache
+                set_kv(WEATHER_CACHE_KEY, json.dumps(state.cached, ensure_ascii=False, separators=(",", ":")))
+                set_kv(WEATHER_FAILURE_KEY, "")
+                state.cache_matches = True
+                state.refreshed = True
+                state.error = None
+        if refresh_id:
+            _provider_refresh_finish(refresh_id, "success", "complete")
+    except Exception as exc:
+        _record_weather_refresh_failure(state, exc, refresh_id)
+    return False
+
+
+def _weather_recommendations(planned: list[dict[str, Any]] | None, forecast: dict[str, Any]) -> list[dict[str, Any]]:
+    today = local_now().date()
+    recommendations = []
+    for event in planned or []:
+        if not is_outdoor_activity(event):
+            continue
+        event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
+        try:
+            event_day = date.fromisoformat(event_date)
+        except ValueError:
+            continue
+        if not today <= event_day <= today + timedelta(days=WEATHER_RECOMMENDATION_DAYS - 1):
+            continue
+        recommendation = _weather_recommendation(event, forecast)
+        if recommendation:
+            recommendations.append(recommendation)
+    return recommendations
+
+
+def _weather_unavailable_state(refresh: bool, error: str | None) -> dict[str, Any]:
+    if not refresh:
+        return {"configured": True, "state": "loading", "provider": "Open-Meteo", "days": [], "recommendations": [], "loading": True, "message": "Wetterdaten werden nachgeladen."}
+    return {"configured": True, "state": "error", "provider": "Open-Meteo", "days": [], "recommendations": [], "error": error or "Wetterdaten sind nicht verfügbar."}
+
+
+def _weather_ready_state(state: _WeatherCacheState, planned: list[dict[str, Any]] | None) -> dict[str, Any]:
+    forecast = state.cached["forecast"]
+    result = {
+        "configured": True,
+        "state": "stale" if state.error else "ready",
+        "provider": "Open-Meteo",
+        "attribution": "Wetterdaten: Open-Meteo.com (CC BY 4.0)",
+        "model": state.cached.get("model"),
+        "location": state.cached.get("location"),
+        "fetched_at": state.cached.get("fetched_at"),
+        "days": _weather_daily_summary(forecast),
+        "recommendations": _weather_recommendations(planned, forecast),
+    }
+    if state.error:
+        result["error"] = state.error
+        result["stale"] = True
+    if state.refreshed:
+        result["_refreshed"] = True
+    return result
 
 
 @maintenance_operation
@@ -8213,121 +8399,12 @@ def weather_state(
     query = get_profile().get("weather_location", "").strip()[:200]
     if not query:
         return {"configured": False, "state": "not_configured", "provider": "Open-Meteo", "days": [], "recommendations": [], "message": "Hinterlege im Profil einen Wetterort (Stadt oder PLZ)."}
-    try:
-        cached = json.loads(get_kv(WEATHER_CACHE_KEY) or "{}")
-    except (TypeError, json.JSONDecodeError):
-        cached = {}
-    try:
-        failure = json.loads(get_kv(WEATHER_FAILURE_KEY) or "{}")
-    except (TypeError, ValueError):
-        failure = {}
-    if not isinstance(failure, dict):
-        failure = {}
-    try:
-        previous_failure_count = max(0, int(failure.get("count") or 0))
-    except (TypeError, ValueError):
-        previous_failure_count = 0
-    cache_matches = isinstance(cached, dict) and cached.get("query") == query and isinstance(cached.get("forecast"), dict)
-    fetched_at = str(cached.get("fetched_at") or "") if cache_matches else ""
-    try:
-        cache_age = (datetime.now(timezone.utc) - datetime.fromisoformat(fetched_at.replace("Z", UTC_OFFSET_SUFFIX))).total_seconds()
-    except (TypeError, ValueError):
-        cache_age = float("inf")
-    error = "Wetterdaten sind veraltet." if cache_matches and (cache_age >= WEATHER_CACHE_SECONDS or failure) else None
-    refreshed = False
-    if refresh and (force or not cache_matches or cache_age >= WEATHER_CACHE_SECONDS):
-        retry_at = str(failure.get("retry_at") or "")
-        try:
-            retry_wait = (datetime.fromisoformat(retry_at.replace("Z", UTC_OFFSET_SUFFIX)) - datetime.now(timezone.utc)).total_seconds()
-        except (TypeError, ValueError):
-            retry_wait = 0
-        if retry_wait > 0 and not force:
-            error = "Wetterdaten konnten nach einem Fehler noch nicht erneut geladen werden."
-        else:
-            refresh_id = None
-            if track_refresh:
-                operation = OPERATION_CONTEXT.get() or {}
-                refresh_id = _provider_refresh_start(
-                    "weather", "forecast", operation.get("operation_id") or uuid.uuid4().hex,
-                    operation.get("trigger") or operation_trigger("background"),
-                )
-            try:
-                with WEATHER_LOCK:
-                    refreshed_cache = _fetch_weather_forecast(query)
-                    with DB_LOCK, database():
-                        if get_profile().get("weather_location", "").strip()[:200] != query:
-                            if refresh_id:
-                                _provider_refresh_finish(refresh_id, "skipped", "location_changed")
-                            return weather_state(planned, refresh=False)
-                        _remember_calendar_weather(cached if cache_matches else {}, refreshed_cache)
-                        cached = refreshed_cache
-                        set_kv(WEATHER_CACHE_KEY, json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
-                        set_kv(WEATHER_FAILURE_KEY, "")
-                        cache_matches = True
-                        refreshed = True
-                        error = None
-                if refresh_id:
-                    _provider_refresh_finish(refresh_id, "success", "complete")
-            except AppError as exc:
-                if refresh_id:
-                    _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
-                error = exc.message if exc.status == 400 else "Wetterdaten konnten derzeit nicht aktualisiert werden."
-                failure_count = previous_failure_count + 1
-                delay = min(WEATHER_RETRY_BASE_SECONDS * (2 ** min(failure_count - 1, 5)), WEATHER_RETRY_MAX_SECONDS)
-                set_kv(WEATHER_FAILURE_KEY, json.dumps({"count": failure_count, "failed_at": utc_now(), "retry_at": (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()}, ensure_ascii=False))
-                LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
-            except Exception as exc:
-                if refresh_id:
-                    _provider_refresh_finish(refresh_id, "error", "failed", error_code=_provider_refresh_error_code(exc))
-                error = "Wetterdaten konnten derzeit nicht aktualisiert werden."
-                failure_count = previous_failure_count + 1
-                delay = min(WEATHER_RETRY_BASE_SECONDS * (2 ** min(failure_count - 1, 5)), WEATHER_RETRY_MAX_SECONDS)
-                set_kv(WEATHER_FAILURE_KEY, json.dumps({"count": failure_count, "failed_at": utc_now(), "retry_at": (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()}, ensure_ascii=False))
-                LOGGER.warning("Weather synchronization failed", extra={"event": "weather_sync_failed", "context": {"error_type": type(exc).__name__}})
-    if not cache_matches:
-        if not refresh:
-            return {
-                "configured": True,
-                "state": "loading",
-                "provider": "Open-Meteo",
-                "days": [],
-                "recommendations": [],
-                "loading": True,
-                "message": "Wetterdaten werden nachgeladen.",
-            }
-        return {"configured": True, "state": "error", "provider": "Open-Meteo", "days": [], "recommendations": [], "error": error or "Wetterdaten sind nicht verfügbar."}
-    forecast = cached.get("forecast")
-    recommendations = []
-    today = local_now().date()
-    for event in planned or []:
-        if not is_outdoor_activity(event):
-            continue
-        event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
-        try:
-            if not today <= date.fromisoformat(event_date) <= today + timedelta(days=WEATHER_RECOMMENDATION_DAYS - 1):
-                continue
-        except ValueError:
-            continue
-        recommendation = _weather_recommendation(event, forecast)
-        if recommendation:
-            recommendations.append(recommendation)
-    result = {
-        "configured": True,
-        "state": "stale" if error else "ready",
-        "provider": "Open-Meteo",
-        "attribution": "Wetterdaten: Open-Meteo.com (CC BY 4.0)",
-        "model": cached.get("model"),
-        "location": cached.get("location"),
-        "fetched_at": cached.get("fetched_at"),
-        "days": _weather_daily_summary(forecast),
-        "recommendations": recommendations,
-    }
-    if error:
-        result["error"] = error
-        result["stale"] = True
-    if refreshed:
-        result["_refreshed"] = True
-    return result
+    state = _weather_cache_state(query)
+    if refresh and _refresh_weather_state(state, force, track_refresh):
+        return weather_state(planned, refresh=False)
+    if not state.cache_matches:
+        return _weather_unavailable_state(refresh, state.error)
+    return _weather_ready_state(state, planned)
 
 
 def _remember_calendar_weather(*caches: dict[str, Any]) -> None:
