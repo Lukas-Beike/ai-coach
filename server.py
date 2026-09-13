@@ -21135,8 +21135,7 @@ SETTINGS_VALUE_KEYS = ("GARMIN_EMAIL", "GARMINTOKENS", "GARMIN_FIXTURE_PATH")
 SETTINGS_KEYS = SETTINGS_SECRET_KEYS + SETTINGS_VALUE_KEYS
 
 
-def save_settings(values: Any) -> dict[str, Any]:
-    """Update explicitly submitted settings without ever returning their values."""
+def _submitted_settings(values: Any) -> dict[str, str]:
     if not isinstance(values, dict):
         raise AppError(400, "Die Einstellungen müssen als Objekt gesendet werden.")
     updates: dict[str, str] = {}
@@ -21148,14 +21147,17 @@ def save_settings(values: Any) -> dict[str, Any]:
             updates[key] = raw
     if not updates:
         raise AppError(400, "Keine neuen Zugangsdaten oder Einstellungen eingegeben.")
-    # The data directory is the persistent Docker/Unraid mount. A settings file
-    # there survives container restarts, unlike a file written into the image.
-    env_path = DATA_DIR / ".env"
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return updates
+
+
+def _read_settings_file(env_path: Path) -> list[str]:
     try:
-        lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+        return env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
     except OSError as exc:
         raise AppError(500, f".env konnte nicht gelesen werden: {exc}") from exc
+
+
+def _rewrite_settings_lines(lines: list[str], updates: dict[str, str]) -> list[str]:
     seen: set[str] = set()
     rewritten: list[str] = []
     for line in lines:
@@ -21172,6 +21174,17 @@ def save_settings(values: Any) -> dict[str, Any]:
         # Make a local restart inherit the newly submitted values. The value
         # is never returned to the browser or written to an application log.
         os.environ[key] = value
+    return rewritten
+
+
+def save_settings(values: Any) -> dict[str, Any]:
+    """Update explicitly submitted settings without ever returning their values."""
+    updates = _submitted_settings(values)
+    # The data directory is the persistent Docker/Unraid mount. A settings file
+    # there survives container restarts, unlike a file written into the image.
+    env_path = DATA_DIR / ".env"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    rewritten = _rewrite_settings_lines(_read_settings_file(env_path), updates)
     try:
         env_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
     except OSError as exc:
