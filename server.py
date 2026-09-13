@@ -14410,10 +14410,16 @@ def _garmin_sleep_recovery(
     if sleep_average is None:
         sleep_average = garmin_recovery_average(garmin, "sleep", ("sleep_hours",), 7, today)
     resolved_score = sleep_score if sleep_score is not None else first_present(latest_wellness, ("sleepScore",))
+    if sleep_score is not None:
+        sleep_score_source = GARMIN_PERFORMANCE_SOURCE
+    elif resolved_score is not None:
+        sleep_score_source = PROVIDER_INTERVALS_WELLNESS_NAME
+    else:
+        sleep_score_source = None
     return {
         "sleep_hours": sleep_hours, "sleep_source": GARMIN_PERFORMANCE_SOURCE,
         "sleep_average": sleep_average, "sleep_score": resolved_score,
-        "sleep_score_source": GARMIN_PERFORMANCE_SOURCE if sleep_score is not None else (PROVIDER_INTERVALS_WELLNESS_NAME if resolved_score is not None else None),
+        "sleep_score_source": sleep_score_source,
         "sleep_date": sleep_date,
     }
 
