@@ -11289,8 +11289,7 @@ def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | N
         return _sync_local_planned_unit_calendar_entry_unlocked(local_id)
 
 
-def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str, Any] | None:
-    """Push one approved local calendar unit; this is never called by planning mutations."""
+def _load_planned_calendar_entry(local_id: str) -> tuple[str, Any, dict[str, Any]]:
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
@@ -11305,38 +11304,45 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
         raise AppError(500, CORRUPT_PLANNING_ERROR) from exc
     if not isinstance(workout, dict):
         raise AppError(500, CORRUPT_PLANNING_ERROR)
-    # Future planning is local-authoritative, so an approved push uses the
-    # preserved local payload without a separate conflict decision.
-    if workout.get("local_deleted") or workout.get("archived"):
-        def recheck_removal():
-            with DB_LOCK, database() as db:
-                current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (normalized_id,)).fetchone()
-                if not current or _library_payload_hash(current["payload"]) != _library_payload_hash(row["payload"]):
-                    raise AppError(409, "Die Planung wurde waehrend der Synchronisation geaendert.", reason="planning_revision_conflict")
+    return normalized_id, row, workout
 
-        remote_id = str(workout.get("remote_event_id") or "").strip()
-        if remote_id:
-            if not CONFIG.intervals_api_key:
-                raise AppError(503, INTERVALS_API_KEY_ERROR)
-            client = IntervalsClient()
-            athlete = quote(client.config.intervals_athlete_id, safe="")
-            try:
-                event = client.get(f"/athlete/{athlete}/events/{quote(remote_id, safe='')}")
-            except AppError as exc:
-                if exc.status != 404 and not (isinstance(exc.__cause__, HTTPError) and exc.__cause__.code == 404):
-                    raise
-            else:
-                if (not isinstance(event, dict) or str(event.get("id") or "") != remote_id
-                        or event.get("category") != "WORKOUT"
-                        or str(event.get("start_date_local") or "")[:10] < local_now().date().isoformat()
-                        or event.get("paired_activity_id") or event.get("paired_event_id")):
-                    raise AppError(409, "Die zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
-                recheck_removal()
-                client.delete_event(remote_id)
-        with DB_LOCK:
-            recheck_removal()
-            update_planned_unit_sync_state(normalized_id, "synced")
-        return None
+
+def _planned_calendar_sync_recheck(normalized_id: str, original_payload: str) -> None:
+    with DB_LOCK, database() as db:
+        current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (normalized_id,)).fetchone()
+    if not current or _library_payload_hash(current["payload"]) != _library_payload_hash(original_payload):
+        raise AppError(409, "Die Planung wurde waehrend der Synchronisation geaendert.", reason="planning_revision_conflict")
+
+
+def _remove_planned_calendar_event(normalized_id: str, row: Any, workout: dict[str, Any]) -> None:
+    remote_id = str(workout.get("remote_event_id") or "").strip()
+    if remote_id:
+        if not CONFIG.intervals_api_key:
+            raise AppError(503, INTERVALS_API_KEY_ERROR)
+        client = IntervalsClient()
+        athlete = quote(client.config.intervals_athlete_id, safe="")
+        try:
+            event = client.get(f"/athlete/{athlete}/events/{quote(remote_id, safe='')}")
+        except AppError as exc:
+            if exc.status != 404 and not (isinstance(exc.__cause__, HTTPError) and exc.__cause__.code == 404):
+                raise
+        else:
+            invalid = (
+                not isinstance(event, dict) or str(event.get("id") or "") != remote_id
+                or event.get("category") != "WORKOUT"
+                or str(event.get("start_date_local") or "")[:10] < local_now().date().isoformat()
+                or event.get("paired_activity_id") or event.get("paired_event_id")
+            )
+            if invalid:
+                raise AppError(409, "Die zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
+            _planned_calendar_sync_recheck(normalized_id, row["payload"])
+            client.delete_event(remote_id)
+    with DB_LOCK:
+        _planned_calendar_sync_recheck(normalized_id, row["payload"])
+        update_planned_unit_sync_state(normalized_id, "synced")
+
+
+def _planned_calendar_event_payload(normalized_id: str, workout: dict[str, Any]) -> dict[str, Any]:
     event_payload = workout_event_payload(normalized_id, workout)
     remote_external_id = str(workout.get("remote_event_external_id") or "").strip()
     if remote_external_id:
@@ -11345,6 +11351,27 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
         # Provider event IDs are also stable identities. Retain them when a
         # provider event has no external_id.
         event_payload["id"] = str(workout["remote_event_id"])[:120]
+    return event_payload
+
+
+def _persist_planned_calendar_sync_error(normalized_id: str, event: dict[str, Any], event_payload: dict[str, Any], exc: AppError) -> None:
+    # The write happened. Preserve its identity so repair/retry updates the
+    # same event even when provider parsing failed.
+    update_planned_unit_sync_state(
+        normalized_id, "sync_error", str(exc),
+        remote_event={**event, "external_id": event.get("external_id") or event_payload.get("external_id")},
+    )
+
+
+def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str, Any] | None:
+    """Push one approved local calendar unit; this is never called by planning mutations."""
+    normalized_id, row, workout = _load_planned_calendar_entry(local_id)
+    # Future planning is local-authoritative, so an approved push uses the
+    # preserved local payload without a separate conflict decision.
+    if workout.get("local_deleted") or workout.get("archived"):
+        _remove_planned_calendar_event(normalized_id, row, workout)
+        return None
+    event_payload = _planned_calendar_event_payload(normalized_id, workout)
     if not CONFIG.intervals_api_key:
         raise AppError(503, INTERVALS_API_KEY_ERROR)
     result = IntervalsClient().upsert_calendar_events([event_payload])
@@ -11354,12 +11381,7 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
     try:
         validate_intervals_workout_result(workout, event)
     except AppError as exc:
-        # The write happened. Preserve its identity so repair/retry updates the
-        # same event even when provider parsing failed.
-        update_planned_unit_sync_state(
-            normalized_id, "sync_error", str(exc),
-            remote_event={**event, "external_id": event.get("external_id") or event_payload.get("external_id")},
-        )
+        _persist_planned_calendar_sync_error(normalized_id, event, event_payload, exc)
         raise
     # Keep the client-generated external identity when the provider omits it
     # from the response. This makes retries idempotent.
