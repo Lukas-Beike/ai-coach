@@ -2011,7 +2011,7 @@ class CoachTests(unittest.TestCase):
 
     def test_daily_sync_loop_uses_local_provider_markers(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
-        loop = source[source.index("def daily_sync_loop"):source.index("def enqueue_startup_sync_jobs")]
+        loop = source[source.index("def daily_sync_loop"):source.index("def _startup_historical_backfill_payload")]
         self.assertIn('daily_sync_due("calendar")', loop)
         self.assertIn('daily_sync_due("garmin")', loop)
         self.assertIn('daily_sync_due("intervals")', loop)
