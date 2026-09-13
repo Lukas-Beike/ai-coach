@@ -6298,26 +6298,28 @@ def _add_planning_recovery_value(
     recovery.setdefault("sources", {})[metric_name] = source
 
 
-def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Build a small date-indexed recovery view from Intervals and Garmin."""
-    recovery_by_date: dict[str, dict[str, Any]] = {}
+def _planning_sleep_hours(record: dict[str, Any], seconds_fields: tuple[str, ...]) -> float | None:
+    sleep_hours = as_number(record.get("sleep_hours"))
+    sleep_seconds = first_present(record, seconds_fields)
+    if sleep_hours is not None or sleep_seconds in (None, ""):
+        return sleep_hours
+    try:
+        return round(float(sleep_seconds) / 3600, 1)
+    except (TypeError, ValueError):
+        return None
 
-    wellness_rows = snapshot.get("recent_wellness") if isinstance(snapshot.get("recent_wellness"), list) else []
-    for row in wellness_rows:
+
+def _add_intervals_planning_recovery(
+    recovery_by_date: dict[str, dict[str, Any]], rows: list[Any],
+) -> None:
+    for row in rows:
         if not isinstance(row, dict):
             continue
         record_date = _planning_context_date(first_present(row, ("id", "date", "calendarDate")))
         if not record_date:
             continue
         recovery = recovery_by_date.setdefault(record_date, {})
-        sleep_seconds = first_present(row, ("sleepSecs", "sleep_seconds"))
-        sleep_hours = as_number(row.get("sleep_hours"))
-        if sleep_hours is None and sleep_seconds not in (None, ""):
-            try:
-                sleep_hours = round(float(sleep_seconds) / 3600, 1)
-            except (TypeError, ValueError):
-                sleep_hours = None
-        _add_planning_recovery_value(recovery, "sleep_hours", sleep_hours, PROVIDER_INTERVALS_WELLNESS_NAME)
+        _add_planning_recovery_value(recovery, "sleep_hours", _planning_sleep_hours(row, ("sleepSecs", "sleep_seconds")), PROVIDER_INTERVALS_WELLNESS_NAME)
         _add_planning_recovery_value(recovery, "sleep_score", first_present(row, ("sleepScore", "overallSleepScore")), PROVIDER_INTERVALS_WELLNESS_NAME)
         _add_planning_recovery_value(recovery, "hrv", first_present(row, ("hrv", "hrv_ms")), PROVIDER_INTERVALS_WELLNESS_NAME)
         _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(row, ("readiness", "readinessScore", "readiness_score", "trainingReadiness", "training_readiness"))), PROVIDER_INTERVALS_WELLNESS_NAME)
@@ -6325,37 +6327,26 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         for metric_name, keys in (("ctl", ("ctl", "ctLoad")), ("atl", ("atl", "atlLoad")), ("tsb", ("tsb", "form"))):
             _add_planning_recovery_value(recovery, metric_name, first_present(row, keys), PROVIDER_INTERVALS_WELLNESS_NAME)
 
-    garmin = garmin_snapshot()
-    for section, source_name in (
-        ("sleep", PROVIDER_GARMIN_NAME),
-        ("hrv", PROVIDER_GARMIN_NAME),
-        ("resting_hr", PROVIDER_GARMIN_NAME),
-        ("readiness", PROVIDER_GARMIN_NAME),
-    ):
+
+def _add_garmin_planning_recovery_record(recovery: dict[str, Any], section: str, record: dict[str, Any]) -> None:
+    if section == "sleep":
+        _add_planning_recovery_value(recovery, "sleep_hours", _planning_sleep_hours(record, ("sleepTimeSeconds", "sleepDuration")), PROVIDER_GARMIN_NAME, overwrite=True)
+        _add_planning_recovery_value(recovery, "sleep_score", first_present(record, ("sleepScore", "overallSleepScore")), PROVIDER_GARMIN_NAME, overwrite=True)
+    elif section == "hrv":
+        _add_planning_recovery_value(recovery, "hrv", first_present(record, ("hrvLastNight", "lastNightAvg", "hrvWeeklyAvg", "weeklyAvg")), PROVIDER_GARMIN_NAME, overwrite=True)
+    elif section == "resting_hr":
+        _add_planning_recovery_value(recovery, "resting_hr", first_present(record, ("restingHeartRate", "restingHR", "resting_heart_rate")), PROVIDER_GARMIN_NAME, overwrite=True)
+    else:
+        _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(record, ("trainingReadinessScore", "overallReadinessScore", "readinessScore", "score", "trainingReadiness"))), PROVIDER_GARMIN_NAME)
+
+
+def _add_garmin_planning_recovery(recovery_by_date: dict[str, dict[str, Any]], garmin: dict[str, Any]) -> None:
+    for section in ("sleep", "hrv", "resting_hr", "readiness"):
         for record_date, record in _dated_garmin_recovery_records(garmin.get(section)):
-            recovery = recovery_by_date.setdefault(record_date, {})
-            if section == "sleep":
-                sleep_seconds = first_present(record, ("sleepTimeSeconds", "sleepDuration"))
-                sleep_hours = as_number(record.get("sleep_hours"))
-                if sleep_hours is None and sleep_seconds not in (None, ""):
-                    try:
-                        sleep_hours = round(float(sleep_seconds) / 3600, 1)
-                    except (TypeError, ValueError):
-                        sleep_hours = None
-                _add_planning_recovery_value(recovery, "sleep_hours", sleep_hours, source_name, overwrite=True)
-                _add_planning_recovery_value(recovery, "sleep_score", first_present(record, ("sleepScore", "overallSleepScore")), source_name, overwrite=True)
-            elif section == "hrv":
-                _add_planning_recovery_value(recovery, "hrv", first_present(record, ("hrvLastNight", "lastNightAvg", "hrvWeeklyAvg", "weeklyAvg")), source_name, overwrite=True)
-            elif section == "resting_hr":
-                _add_planning_recovery_value(
-                    recovery,
-                    "resting_hr",
-                    first_present(record, ("restingHeartRate", "restingHR", "resting_heart_rate")),
-                    source_name,
-                    overwrite=True,
-                )
-            elif section == "readiness":
-                _add_planning_recovery_value(recovery, "readiness", readiness_score_value(first_present(record, ("trainingReadinessScore", "overallReadinessScore", "readinessScore", "score", "trainingReadiness"))), source_name)
+            _add_garmin_planning_recovery_record(recovery_by_date.setdefault(record_date, {}), section, record)
+
+
+def _add_morning_battery_recovery(recovery_by_date: dict[str, dict[str, Any]], garmin: dict[str, Any]) -> None:
     for day, value in _saved_daily_history(MORNING_BATTERY_HISTORY_KEY).items():
         record_date = _planning_context_date(day)
         if record_date and as_number(value) is not None:
@@ -6365,8 +6356,18 @@ def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         record_date = _planning_context_date(morning_body_battery.get("sleep_date"))
         morning = morning_body_battery.get("morning")
         if record_date and isinstance(morning, dict):
-            recovery = recovery_by_date.setdefault(record_date, {})
-            _add_planning_recovery_value(recovery, "body_battery", morning.get("value"), PROVIDER_GARMIN_NAME, overwrite=True)
+            _add_planning_recovery_value(recovery_by_date.setdefault(record_date, {}), "body_battery", morning.get("value"), PROVIDER_GARMIN_NAME, overwrite=True)
+
+
+def _planning_recovery_by_date(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Build a small date-indexed recovery view from Intervals and Garmin."""
+    recovery_by_date: dict[str, dict[str, Any]] = {}
+
+    wellness_rows = snapshot.get("recent_wellness") if isinstance(snapshot.get("recent_wellness"), list) else []
+    garmin = garmin_snapshot()
+    _add_intervals_planning_recovery(recovery_by_date, wellness_rows)
+    _add_garmin_planning_recovery(recovery_by_date, garmin)
+    _add_morning_battery_recovery(recovery_by_date, garmin)
     return recovery_by_date
 
 
