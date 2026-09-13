@@ -9806,26 +9806,7 @@ def coach_quick_actions_state() -> dict[str, Any]:
         get_kv("morning_checkin_status") == "ready"
         and get_kv("morning_checkin_date") == today.isoformat()
     )
-    preview = latest_replan_preview()
-    blockers: list[dict[str, Any]] = []
-    if isinstance(preview, dict) and preview.get("status") == "preview":
-        horizon = today + timedelta(days=2)
-        for change in preview.get("changes", []) if isinstance(preview.get("changes"), list) else []:
-            if not isinstance(change, dict):
-                continue
-            try:
-                change_date = date.fromisoformat(str(change.get("date") or "")[:10])
-            except (TypeError, ValueError):
-                continue
-            trigger_values = change.get("blocking_triggers")
-            triggers = {str(value) for value in trigger_values} if isinstance(trigger_values, list) else set()
-            relevant = sorted(triggers.intersection({"calendar", "illness", "injury", "weather"}))
-            if today <= change_date <= horizon and relevant:
-                blockers.append({
-                    "date": change_date.isoformat(),
-                    "name": str(change.get("name") or PLANNED_WORKOUT_LABEL)[:200],
-                    "triggers": relevant,
-                })
+    blockers = _adaptive_quick_action_blockers(latest_replan_preview(), today)
     return {
         "morning_checkin": not morning_done,
         "analyze_latest_activity": True,
@@ -9833,6 +9814,31 @@ def coach_quick_actions_state() -> dict[str, Any]:
         "plan_blockers": blockers,
         "horizon_days": 3,
     }
+
+
+def _adaptive_quick_action_blockers(preview: dict[str, Any] | None, today: date) -> list[dict[str, Any]]:
+    if not isinstance(preview, dict) or preview.get("status") != "preview":
+        return []
+    horizon = today + timedelta(days=2)
+    blockers = []
+    changes = preview.get("changes") if isinstance(preview.get("changes"), list) else []
+    for change in changes:
+        if not isinstance(change, dict):
+            continue
+        try:
+            change_date = date.fromisoformat(str(change.get("date") or "")[:10])
+        except (TypeError, ValueError):
+            continue
+        trigger_values = change.get("blocking_triggers")
+        triggers = {str(value) for value in trigger_values} if isinstance(trigger_values, list) else set()
+        relevant = sorted(triggers.intersection({"calendar", "illness", "injury", "weather"}))
+        if today <= change_date <= horizon and relevant:
+            blockers.append({
+                "date": change_date.isoformat(),
+                "name": str(change.get("name") or PLANNED_WORKOUT_LABEL)[:200],
+                "triggers": relevant,
+            })
+    return blockers
 
 
 def latest_illness_pause_state() -> tuple[str, dict[str, Any]] | None:
@@ -10172,6 +10178,33 @@ def adaptive_replan_preview() -> dict[str, Any]:
     return {"id": adjustment_id, "status": "preview", **preview}
 
 
+def _illness_checkin_values(existing: Any, illness: str, marker: str) -> tuple[str, str]:
+    existing_illness = str(existing.get("illness") or "").strip()
+    combined_illness = existing_illness or illness
+    if existing_illness and illness and illness not in existing_illness:
+        combined_illness = f"{existing_illness}; {illness}"[:CHECKIN_TEXT_LIMITS["illness"]]
+    notes = str(existing.get("notes") or "").strip()
+    if marker not in notes:
+        notes = f"{notes} · {marker}".strip(" ·")[:CHECKIN_TEXT_LIMITS["notes"]]
+    return combined_illness, notes
+
+
+def _upsert_illness_checkin(db: Any, date_key: str, illness: str, marker: str, now: str) -> None:
+    existing = db.execute("SELECT illness, notes FROM athlete_checkins WHERE checkin_date=?", (date_key,)).fetchone()
+    if existing:
+        combined_illness, notes = _illness_checkin_values(existing, illness, marker)
+        db.execute(
+            "UPDATE athlete_checkins SET illness=?, notes=?, updated_at=? WHERE checkin_date=?",
+            (combined_illness, notes, now, date_key),
+        )
+        return
+    db.execute(
+        "INSERT INTO athlete_checkins(checkin_date, soreness, stress, motivation, session_rpe, day_form, illness, pain, available_minutes, availability_notes, notes, created_at, updated_at) "
+        "VALUES (?, NULL, NULL, NULL, NULL, '', ?, '', NULL, '', ?, ?, ?)",
+        (date_key, illness, marker, now, now),
+    )
+
+
 def _fill_illness_checkins(db: Any, pause: dict[str, Any], now: str) -> int:
     illness = str(pause.get("illness") or "Krankheit").strip()[:CHECKIN_TEXT_LIMITS["illness"]]
     start = date.fromisoformat(str(pause["start_date"])[:10])
@@ -10181,22 +10214,7 @@ def _fill_illness_checkins(db: Any, pause: dict[str, Any], now: str) -> int:
     current = start
     while current <= end:
         date_key = current.isoformat()
-        existing = db.execute("SELECT illness, notes FROM athlete_checkins WHERE checkin_date=?", (date_key,)).fetchone()
-        if existing:
-            existing_illness = str(existing.get("illness") or "").strip()
-            combined_illness = existing_illness or illness
-            if existing_illness and illness and illness not in existing_illness:
-                combined_illness = f"{existing_illness}; {illness}"[:CHECKIN_TEXT_LIMITS["illness"]]
-            notes = str(existing.get("notes") or "").strip()
-            if marker not in notes:
-                notes = f"{notes} · {marker}".strip(" ·")[:CHECKIN_TEXT_LIMITS["notes"]]
-            db.execute("UPDATE athlete_checkins SET illness=?, notes=?, updated_at=? WHERE checkin_date=?", (combined_illness, notes, now, date_key))
-        else:
-            db.execute(
-                "INSERT INTO athlete_checkins(checkin_date, soreness, stress, motivation, session_rpe, day_form, illness, pain, available_minutes, availability_notes, notes, created_at, updated_at) "
-                "VALUES (?, NULL, NULL, NULL, NULL, '', ?, '', NULL, '', ?, ?, ?)",
-                (date_key, illness, marker, now, now),
-            )
+        _upsert_illness_checkin(db, date_key, illness, marker, now)
         filled += 1
         current += timedelta(days=1)
     return filled
