@@ -20261,46 +20261,60 @@ def chat_stream_status(session_csrf_hash: str) -> dict[str, Any]:
     }
 
 
-@maintenance_operation
-@serialise_conversation
-def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str, background_job: bool = False) -> dict[str, Any]:
+def _validated_chat_request(message: str, client_turn_id: str, cancel_event: threading.Event | None) -> tuple[str, str]:
     _raise_chat_cancelled(cancel_event)
     message = message.strip()
     if not message:
         raise AppError(400, "Die Nachricht darf nicht leer sein.")
     if len(message) > 12_000:
         raise AppError(400, "Die Nachricht ist zu lang.")
-    structured_intent: dict[str, Any] | None = None
-    background_receipt: dict[str, Any] = {}
-    existing_conversation_id = ""
     client_turn_id = str(client_turn_id).strip()
     if not client_turn_id or len(client_turn_id) > 120:
         raise AppError(400, "client_turn_id muss eine begrenzte, nicht leere Kennung sein.", reason="invalid_client_turn")
+    return message, client_turn_id
+
+
+def _recover_stale_chat_command(
+    db: Any, existing_command: dict[str, Any], background_owned: bool, client_turn_id: str,
+) -> dict[str, Any]:
+    if not existing_command or existing_command.get("status") != "running" or background_owned:
+        return existing_command
+    age = db.execute(
+        "SELECT (julianday('now') - julianday(?)) * 86400 AS age", (existing_command.get("updated_at"),)
+    ).fetchone()
+    if float((age or {}).get("age") or 0) <= COACH_COMMAND_STALE_SECONDS:
+        return existing_command
+    try:
+        recovered = json.loads(existing_command.get("receipt") or "{}")
+    except (TypeError, ValueError):
+        recovered = {}
+    if not isinstance(recovered, dict):
+        recovered = {}
+    recovered.update({"status": "failed", "error": "Die vorherige Coach-Verarbeitung wurde nach einem Prozessabbruch wieder freigegeben."})
+    db.execute(
+        "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
+        (json.dumps(recovered, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id),
+    )
+    return {"status": "completed", "receipt": json.dumps(recovered)}
+
+
+def _chat_command_state(
+    client_turn_id: str, session_csrf_hash: str, background_job: bool,
+) -> tuple[dict[str, Any] | None, dict[str, Any], bool]:
     with DB_LOCK, database() as db:
-        existing_command = db.execute("SELECT conversation_id, intent, receipt, status, updated_at FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
+        existing_command = db.execute(
+            "SELECT conversation_id, intent, receipt, status, updated_at FROM coach_commands WHERE client_turn_id=?",
+            (client_turn_id,),
+        ).fetchone()
         background_receipt = _coach_command_receipt((existing_command or {}).get("receipt"))
         if existing_command:
             _require_command_owner(background_receipt, session_csrf_hash)
         background_owned = bool(background_job and background_receipt.get("mode") == "background")
-        if existing_command and existing_command.get("status") == "running":
-            age = db.execute("SELECT (julianday('now') - julianday(?)) * 86400 AS age", (existing_command.get("updated_at"),)).fetchone()
-            if not background_owned and float((age or {}).get("age") or 0) > COACH_COMMAND_STALE_SECONDS:
-                try:
-                    recovered = json.loads(existing_command.get("receipt") or "{}")
-                except (TypeError, ValueError):
-                    recovered = {}
-                if not isinstance(recovered, dict):
-                    recovered = {}
-                recovered.update({"status": "failed", "error": "Die vorherige Coach-Verarbeitung wurde nach einem Prozessabbruch wieder freigegeben."})
-                db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'", (json.dumps(recovered, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id))
-                existing_command = {"status": "completed", "receipt": json.dumps(recovered)}
-    if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
-        try:
-            return coach_command_receipt(client_turn_id, session_csrf_hash)
-        except (TypeError, ValueError):
-            pass
-    if existing_command and not background_owned:
-        raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
+        existing_command = _recover_stale_chat_command(db, existing_command, background_owned, client_turn_id)
+    return existing_command, background_receipt, background_owned
+
+
+def _chat_provider_settings(background_receipt: dict[str, Any]) -> tuple[str, str, str]:
     ai_provider = str(background_receipt.get("ai_provider") or selected_ai_provider()).casefold()
     if ai_provider not in {"openai", "gemini"}:
         ai_provider = selected_ai_provider()
@@ -20308,13 +20322,41 @@ def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta
     thinking_level = str(background_receipt.get("thinking_level") or selected_thinking_level()).casefold()
     if thinking_level not in {"low", "medium", "high"}:
         thinking_level = selected_thinking_level()
+    return ai_provider, model, thinking_level
+
+
+def _resume_background_chat_command(
+    background_owned: bool, conversation_id: str,
+    structured_intent: dict[str, Any], client_turn_id: str,
+) -> None:
+    if not background_owned:
+        return
+    with DB_LOCK, database() as db:
+        db.execute(
+            "UPDATE coach_commands SET conversation_id=?, intent=?, status='running', updated_at=? WHERE client_turn_id=?",
+            (conversation_id, json.dumps(structured_intent), utc_now(), client_turn_id),
+        )
+
+
+@maintenance_operation
+@serialise_conversation
+def chat_with_coach(message: str, *, allow_mutations: bool = True, on_text_delta: Any = None, cancel_event: threading.Event | None = None, session_csrf_hash: str = "", client_turn_id: str, background_job: bool = False) -> dict[str, Any]:
+    message, client_turn_id = _validated_chat_request(message, client_turn_id, cancel_event)
+    existing_command, background_receipt, background_owned = _chat_command_state(
+        client_turn_id, session_csrf_hash, background_job,
+    )
+    if existing_command and existing_command.get("status") == "completed" and existing_command.get("receipt"):
+        try:
+            return coach_command_receipt(client_turn_id, session_csrf_hash)
+        except (TypeError, ValueError):
+            pass
+    if existing_command and not background_owned:
+        raise AppError(409, "Diese Coach-Nachricht wird bereits verarbeitet.", reason="client_turn_in_progress")
+    ai_provider, model, thinking_level = _chat_provider_settings(background_receipt)
     existing_conversation_id = str((existing_command or {}).get("conversation_id") or "")
     conversation_id = existing_conversation_id or ensure_conversation(ai_provider)
     structured_intent = {"allow_mutations": allow_mutations}
-    if background_owned:
-        with DB_LOCK, database() as db:
-            db.execute("UPDATE coach_commands SET conversation_id=?, intent=?, status='running', updated_at=? WHERE client_turn_id=?",
-                       (conversation_id, json.dumps(structured_intent), utc_now(), client_turn_id))
+    _resume_background_chat_command(background_owned, conversation_id, structured_intent, client_turn_id)
     return _chat_with_structured_coach(
         message, intent=structured_intent, conversation_id=conversation_id, client_turn_id=client_turn_id,
         session_csrf_hash=session_csrf_hash, on_text_delta=on_text_delta, cancel_event=cancel_event,
