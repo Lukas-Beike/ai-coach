@@ -4530,6 +4530,19 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(trimmed[0]["parts"][0]["text"], "Frage 0")
         self.assertFalse(any("functionResponse" in part for content in trimmed for part in content["parts"]))
 
+    def test_gemini_history_parts_preserve_safe_attachment_boundary(self):
+        attachments = [
+            {"type": "image", "name": "photo.jpg", "data": "raw-image", "mime": "image/jpeg"},
+            {"type": "gpx", "name": "route.gpx", "data": "raw-file", "summary": {"distance": 12}},
+        ]
+        omitted = server._gemini_history_parts({"content": "Review this"}, attachments, 0, set())
+        self.assertEqual(omitted[0], {"text": "Review this"})
+        self.assertIn("raw_image_omitted", omitted[1]["text"])
+        self.assertIn("untrusted_gpx", omitted[2]["text"])
+        self.assertIn("raw_file_omitted", omitted[3]["text"])
+        selected = server._gemini_history_parts({"content": "Review this"}, attachments, 0, {(0, 0)})
+        self.assertEqual(selected[1]["inlineData"], {"mimeType": "image/jpeg", "data": "raw-image"})
+
     def test_gemini_rebuilds_history_from_the_shared_local_dialogue(self):
         server.add_message("user", "Was war mein letzter Schwerpunkt?")
         server.add_message("assistant", "Der Schwerpunkt war die Schwelle.")
