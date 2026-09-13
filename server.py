@@ -16297,6 +16297,29 @@ def _stage_structured_training_plan(
     return _stage_coach_artifact(conversation_id, client_turn_id, payload)
 
 
+def _structured_coach_training_template_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
+    if "manage_training_templates" not in _structured_authorized_operations(intent):
+        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+    templates = arguments.get("templates")
+    if not isinstance(templates, list) or not 1 <= len(templates) <= 28 or not all(isinstance(item, dict) for item in templates):
+        raise AppError(400, "Ein Coach-Kommando darf 1 bis 28 Vorlagenänderungen enthalten.", reason="template_limit")
+    # Nested domain writes share one transaction; any invalid element rolls back the batch.
+    with DB_LOCK, database():
+        results = []
+        for template in templates:
+            action = str(template.get("action") or "create").strip().casefold()
+            if action in {"update", "archive", "restore", "delete"}:
+                local_id = str(template.get("local_id") or "").strip()
+                _require_coach_scope(intent, f"library_workout:{local_id}", "local_template")
+                results.append(update_workout_library_entry(local_id, template))
+                continue
+            if action != "create":
+                raise AppError(400, "Unbekannte Aktion für die Bibliothekseinheit.", reason="invalid_template_action")
+            _require_coach_scope(intent, "local_template")
+            results.append(create_local_library_template(template))
+    return {"ok": True, "stored_locally": True, "templates": results, "template": results[0] if len(results) == 1 else None}
+
+
 def _structured_coach_tool_result(
     name: str,
     arguments: dict[str, Any],
@@ -16402,26 +16425,7 @@ def _structured_coach_tool_result(
             authorized_plan_id=selected_plan_ids[0] if selected_plan_ids else None,
         )
     if name == "manage_training_templates":
-        if "manage_training_templates" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        templates = arguments.get("templates")
-        if not isinstance(templates, list) or not 1 <= len(templates) <= 28 or not all(isinstance(item, dict) for item in templates):
-            raise AppError(400, "Ein Coach-Kommando darf 1 bis 28 Vorlagenänderungen enthalten.", reason="template_limit")
-        # Nested domain writes share one transaction; any invalid element rolls back the batch.
-        with DB_LOCK, database():
-            results = []
-            for template in templates:
-                action = str(template.get("action") or "create").strip().casefold()
-                if action in {"update", "archive", "restore", "delete"}:
-                    local_id = str(template.get("local_id") or "").strip()
-                    _require_coach_scope(intent, f"library_workout:{local_id}", "local_template")
-                    results.append(update_workout_library_entry(local_id, template))
-                    continue
-                if action != "create":
-                    raise AppError(400, "Unbekannte Aktion für die Bibliothekseinheit.", reason="invalid_template_action")
-                _require_coach_scope(intent, "local_template")
-                results.append(create_local_library_template(template))
-        return {"ok": True, "stored_locally": True, "templates": results, "template": results[0] if len(results) == 1 else None}
+        return _structured_coach_training_template_result(arguments, intent)
     if name == "apply_workout_library_plan":
         if "apply_workout_library_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
