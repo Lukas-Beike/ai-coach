@@ -19838,63 +19838,88 @@ def restore_database_backup(payload: bytes) -> dict[str, Any]:
         return _restore_database_backup(payload)
 
 
-def _restore_database_backup(payload: bytes) -> dict[str, Any]:
+def _temporary_restore_database(payload: bytes) -> Path:
     if not payload or len(payload) > MAX_BACKUP_BYTES:
         raise AppError(413, "Das Datenbank-Backup ist leer oder zu groß.")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     temporary_path = DATA_DIR / f".intervals-coach-restore-{uuid.uuid4().hex}.db"
-    previous_backup_name: str | None = None
+    temporary_path.write_bytes(payload)
+    return temporary_path
+
+
+def _validate_restore_connection(connection: Any) -> None:
+    if CONFIG.app_password:
+        _configure_cipher(connection, CONFIG.app_password)
+    connection.execute("PRAGMA foreign_keys = ON")
+    if not database_schema_is_current(connection):
+        raise AppError(400, "Das Backup entspricht nicht exakt dem aktuellen Datenbankschema.")
+    integrity = connection.execute("PRAGMA integrity_check").fetchone()
+    if connection.execute("PRAGMA foreign_key_check").fetchall():
+        raise AppError(400, "Das Backup enthält ungültige Fremdschlüssel.")
+    if not integrity or str(integrity["integrity_check"]).casefold() != "ok":
+        raise AppError(400, "Die Integritätsprüfung des Backups ist fehlgeschlagen.")
+    # Never restore sessions captured in a backup. The current browser is
+    # forced to authenticate again after the replacement.
+    connection.execute("DELETE FROM sessions")
+    connection.commit()
+
+
+def _validate_restore_database(temporary_path: Path) -> None:
+    backend = sqlite_backend if SQLCIPHER_AVAILABLE else sqlite3
+    if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
+        raise AppError(503, "SQLCipher ist für die Wiederherstellung nicht verfügbar.")
+    connection = backend.connect(temporary_path, timeout=20)
+    connection.row_factory = database_row_factory
     try:
-        temporary_path.write_bytes(payload)
-        backend = sqlite_backend if SQLCIPHER_AVAILABLE else sqlite3
-        if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
-            raise AppError(503, "SQLCipher ist für die Wiederherstellung nicht verfügbar.")
-        connection = backend.connect(temporary_path, timeout=20)
-        connection.row_factory = database_row_factory
-        try:
-            if CONFIG.app_password:
-                _configure_cipher(connection, CONFIG.app_password)
-            connection.execute("PRAGMA foreign_keys = ON")
-            if not database_schema_is_current(connection):
-                raise AppError(400, "Das Backup entspricht nicht exakt dem aktuellen Datenbankschema.")
-            integrity = connection.execute("PRAGMA integrity_check").fetchone()
-            if connection.execute("PRAGMA foreign_key_check").fetchall():
-                raise AppError(400, "Das Backup enthält ungültige Fremdschlüssel.")
-            if not integrity or str(integrity["integrity_check"]).casefold() != "ok":
-                raise AppError(400, "Die Integritätsprüfung des Backups ist fehlgeschlagen.")
-            # Never restore sessions captured in a backup. The current browser
-            # is forced to authenticate again after the replacement.
-            connection.execute("DELETE FROM sessions")
-            connection.commit()
-        finally:
-            connection.close()
-        with DB_LOCK:
-            _checkpoint_database_locked()
-            with database_manager().restore_drain():
-                backup_path = DATA_DIR / f"{DB_PATH.name}.pre-restore-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-                if DB_PATH.exists():
-                    shutil.copy2(DB_PATH, backup_path)
-                    previous_backup_name = backup_path.name
-                for sidecar in (Path(f"{DB_PATH}-wal"), Path(f"{DB_PATH}-shm")):
-                    try:
-                        sidecar.unlink()
-                    except FileNotFoundError:
-                        pass
-                os.replace(temporary_path, DB_PATH)
-        resume_interrupted_sync_jobs()
-        resume_interrupted_coach_jobs()
-        SYNC_JOB_WAKE.set()
-        COACH_JOB_WAKE.set()
+        _validate_restore_connection(connection)
+    finally:
+        connection.close()
+
+
+def _replace_database_with_restore(temporary_path: Path) -> str | None:
+    previous_backup_name: str | None = None
+    with DB_LOCK:
+        _checkpoint_database_locked()
+        with database_manager().restore_drain():
+            backup_path = DATA_DIR / f"{DB_PATH.name}.pre-restore-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+            if DB_PATH.exists():
+                shutil.copy2(DB_PATH, backup_path)
+                previous_backup_name = backup_path.name
+            for sidecar in (Path(f"{DB_PATH}-wal"), Path(f"{DB_PATH}-shm")):
+                try:
+                    sidecar.unlink()
+                except FileNotFoundError:
+                    pass
+            os.replace(temporary_path, DB_PATH)
+    return previous_backup_name
+
+
+def _resume_after_database_restore() -> None:
+    resume_interrupted_sync_jobs()
+    resume_interrupted_coach_jobs()
+    SYNC_JOB_WAKE.set()
+    COACH_JOB_WAKE.set()
+
+
+def _restore_database_backup(payload: bytes) -> dict[str, Any]:
+    temporary_path: Path | None = None
+    try:
+        temporary_path = _temporary_restore_database(payload)
+        _validate_restore_database(temporary_path)
+        previous_backup_name = _replace_database_with_restore(temporary_path)
+        temporary_path = None
+        _resume_after_database_restore()
         return {"status": "ok", "restored": True, "previous_database_backup": previous_backup_name}
     except AppError:
         raise
     except Exception as exc:
         raise AppError(400, f"Das Datenbank-Backup konnte nicht validiert werden: {redact_text(str(exc))[:300]}") from exc
     finally:
-        try:
-            temporary_path.unlink()
-        except FileNotFoundError:
-            pass
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def delete_remote_conversation(conversation_id: str) -> bool:
