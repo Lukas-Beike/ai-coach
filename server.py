@@ -16252,214 +16252,274 @@ def _validate_training_change_batch(changes: list[dict[str, Any]], db: Any) -> N
             raise AppError(409, f"Für den {candidate_date} existiert bereits eine lokale Kalendereinheit.", reason="plan_date_conflict")
 
 
-def _apply_structured_training_changes(
-    arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
-) -> dict[str, Any]:
+def _prepare_structured_training_change(change: dict[str, Any]) -> dict[str, Any]:
+    action = str(change.get("action") or "update").strip().casefold()
+    if action != "create":
+        return change
+    if change.get("local_id"):
+        raise AppError(400, "Eine neue geplante Einheit darf keine lokale ID vorgeben.", reason="invalid_change")
+    required_fields = ("date", "sport", "name", "description", "duration_minutes", "target", "rationale")
+    missing_fields = [
+        field for field in required_fields
+        if field not in change or change[field] is None or (isinstance(change[field], str) and not change[field].strip())
+    ]
+    if missing_fields:
+        raise AppError(400, "Eine neue geplante Einheit benötigt alle Workout-Felder.", reason="invalid_change")
+    if change.get("target") not in {"AUTO", "POWER", "HR", "PACE"}:
+        raise AppError(400, "Das Workout-Ziel muss AUTO, POWER, HR oder PACE sein.", reason="invalid_change")
+    normalized = normalize_workout(change)
+    prepared = {"action": "create", **{key: normalized[key] for key in (
+        "date", "sport", "name", "description", "duration_minutes", "target", "rationale"
+    )}}
+    if "plan_id" in change:
+        prepared["plan_id"] = str(change.get("plan_id") or "").strip()
+    return prepared
+
+
+def _prepare_structured_training_changes(arguments: dict[str, Any]) -> list[dict[str, Any]]:
     changes = arguments.get("changes") or []
     if not isinstance(changes, list) or not changes or len(changes) > COACH_TRAINING_CHANGE_LIMIT:
-        raise AppError(
-            400,
-            f"Ein Coach-Kommando darf höchstens {COACH_TRAINING_CHANGE_LIMIT} Änderungen enthalten.",
-            reason="change_limit",
-        )
-    prepared_changes: list[dict[str, Any]] = []
+        raise AppError(400, f"Ein Coach-Kommando darf höchstens {COACH_TRAINING_CHANGE_LIMIT} Änderungen enthalten.", reason="change_limit")
+    prepared = []
     for change in changes:
         if not isinstance(change, dict):
             raise AppError(400, "Jede Planänderung muss ein Objekt sein.", reason="invalid_change")
-        action = str(change.get("action") or "update").strip().casefold()
-        if action == "create":
-            if change.get("local_id"):
-                raise AppError(400, "Eine neue geplante Einheit darf keine lokale ID vorgeben.", reason="invalid_change")
-            required_fields = ("date", "sport", "name", "description", "duration_minutes", "target", "rationale")
-            missing_fields = [
-                field for field in required_fields
-                if field not in change or change[field] is None or (
-                    isinstance(change[field], str) and not change[field].strip()
-                )
-            ]
-            if missing_fields:
-                raise AppError(
-                    400,
-                    "Eine neue geplante Einheit benötigt alle Workout-Felder.",
-                    reason="invalid_change",
-                )
-            target = change.get("target")
-            if target not in {"AUTO", "POWER", "HR", "PACE"}:
-                raise AppError(400, "Das Workout-Ziel muss AUTO, POWER, HR oder PACE sein.", reason="invalid_change")
-            normalized = normalize_workout(change)
-            prepared_change = {
-                "action": "create",
-                **{key: normalized[key] for key in (
-                    "date", "sport", "name", "description", "duration_minutes", "target", "rationale"
-                )},
-            }
-            if "plan_id" in change:
-                prepared_change["plan_id"] = str(change.get("plan_id") or "").strip()
-            prepared_changes.append(prepared_change)
-        else:
-            prepared_changes.append(change)
-    changes = prepared_changes
-    with DB_LOCK, database() as db:
-        revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
-        current_revision = int((revision_row or {}).get("revision") or 0)
-        expected_revision = arguments.get("expected_revision")
-        if require_revision and expected_revision is None:
-            raise AppError(400, "Eine vollständige Planänderung benötigt die gelesene Planrevision.", reason="planning_revision_required")
-        if expected_revision is not None and int(expected_revision) != current_revision:
-            raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
-        for change in changes:
-            action = str(change.get("action") or "update").strip().casefold()
-            if action == "create":
-                continue
-            if not change.get("local_id"):
-                raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
-            expected_hash = str(change.get("expected_payload_hash") or "").strip().lower()
-            if require_revision and not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
-                raise AppError(400, "Eine vollständige Planänderung benötigt aktuelle Payload-Hashes.", reason="payload_hash_required")
-            if expected_hash:
-                row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (str(change["local_id"]),)).fetchone()
-                if not row or _library_payload_hash(row["payload"]) != expected_hash:
-                    raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
-        _validate_training_change_batch(changes, db)
-        referenced_memberships: set[str] = set()
-        plans_needing_bounds: set[str] = set()
-        for change in changes:
-            action = str(change.get("action") or "update").strip().casefold()
-            local_id = str(change.get("local_id") or "").strip()
-            if action == "create" or not local_id:
-                continue
-            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
-            if not row:
-                continue
-            try:
-                current = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError):
-                current = {}
-            if isinstance(current, dict):
-                membership = str(current.get("plan_id") or "").strip()
-                referenced_memberships.add(membership)
-                changes_bounds = action in {"delete", "archive", "restore"} or (
-                    action == "update" and "date" in change
-                    and not str(change.get("date") or "").startswith(str(current.get("date") or "")[:10])
-                )
-                if membership and changes_bounds:
-                    plans_needing_bounds.add(membership)
-        derived_plan: dict[str, str] = {}
-        if len(referenced_memberships) == 1:
-            membership = next(iter(referenced_memberships))
-            candidate_plan = TRAINING_PLAN_REPOSITORY.get(db, membership) if membership else None
-            if candidate_plan and candidate_plan.get("status") != "archived":
-                derived_plan = {
-                    "plan_id": str(candidate_plan["id"]),
-                    "plan_name": str(candidate_plan.get("name") or "")[:200],
-                }
-        authorized_plan_id = str(authorized_plan_id or "").strip()
-        if authorized_plan_id:
-            authorized_plan = TRAINING_PLAN_REPOSITORY.get(db, authorized_plan_id)
-            if not authorized_plan or authorized_plan.get("status") == "archived":
-                raise AppError(409, "Der benannte Trainingsplan ist nicht aktiv.", reason="plan_not_available")
-            if derived_plan and derived_plan["plan_id"] != authorized_plan_id:
-                raise AppError(403, "Die Planreferenzen der Änderung sind nicht eindeutig.", reason="intent_scope_denied")
-            derived_plan = {
-                "plan_id": str(authorized_plan["id"]),
-                "plan_name": str(authorized_plan.get("name") or "")[:200],
-            }
-        for change in changes:
-            if str(change.get("action") or "update").strip().casefold() != "create":
-                continue
-            requested_plan_id = str(change.get("plan_id") or "").strip() if "plan_id" in change else None
-            if requested_plan_id is not None:
-                if requested_plan_id and requested_plan_id != derived_plan.get("plan_id"):
-                    raise AppError(
-                        403,
-                        "Eine neue Einheit darf nur dem eindeutig abgeleiteten Plan zugeordnet werden.",
-                        reason="intent_scope_denied",
-                    )
-            if requested_plan_id or ("plan_id" not in change and derived_plan):
-                plans_needing_bounds.add(derived_plan["plan_id"])
-        applied = []
-        for change in changes:
-            if str(change.get("action") or "update").strip().casefold() == "create":
-                entry_payload = {**change, "source": "coach"}
-                if "plan_id" not in change:
-                    entry_payload.update(derived_plan)
-                elif not str(change.get("plan_id") or "").strip():
-                    entry_payload.pop("plan_id", None)
-                    entry_payload.pop("plan_name", None)
-                else:
-                    entry_payload.update(derived_plan)
-                applied.append({
-                    "local_id": create_local_planned_unit(
-                        entry_payload, db=db, bump_planning_revision=False
-                    )["id"],
-                    "status": "local",
-                })
+        prepared.append(_prepare_structured_training_change(change))
+    return prepared
+
+
+def _validate_structured_training_revision(
+    arguments: dict[str, Any], *, require_revision: bool, db: Any,
+) -> int:
+    revision_row = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
+    current_revision = int((revision_row or {}).get("revision") or 0)
+    expected_revision = arguments.get("expected_revision")
+    if require_revision and expected_revision is None:
+        raise AppError(400, "Eine vollständige Planänderung benötigt die gelesene Planrevision.", reason="planning_revision_required")
+    if expected_revision is not None and int(expected_revision) != current_revision:
+        raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
+    return current_revision
+
+
+def _validate_structured_training_change_hash(
+    change: dict[str, Any], *, require_revision: bool, db: Any,
+) -> None:
+    if not change.get("local_id"):
+        raise AppError(400, "Jede Planänderung benötigt eine lokale ID.", reason="invalid_change")
+    expected_hash = str(change.get("expected_payload_hash") or "").strip().lower()
+    if require_revision and not re.fullmatch(PAYLOAD_HASH_PATTERN, expected_hash):
+        raise AppError(400, "Eine vollständige Planänderung benötigt aktuelle Payload-Hashes.", reason="payload_hash_required")
+    if expected_hash:
+        row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (str(change["local_id"]),)).fetchone()
+        if not row or _library_payload_hash(row["payload"]) != expected_hash:
+            raise AppError(409, "Eine Planänderung ist inzwischen veraltet.", reason="payload_hash_conflict")
+
+
+def _validate_structured_training_change_hashes(
+    changes: list[dict[str, Any]], *, require_revision: bool, db: Any,
+) -> None:
+    for change in changes:
+        if str(change.get("action") or "update").strip().casefold() != "create":
+            _validate_structured_training_change_hash(change, require_revision=require_revision, db=db)
+
+
+def _validate_structured_training_change_revisions(
+    changes: list[dict[str, Any]], arguments: dict[str, Any], *, require_revision: bool, db: Any,
+) -> int:
+    current_revision = _validate_structured_training_revision(
+        arguments, require_revision=require_revision, db=db,
+    )
+    _validate_structured_training_change_hashes(changes, require_revision=require_revision, db=db)
+    _validate_training_change_batch(changes, db)
+    return current_revision
+
+
+def _structured_training_membership_update(
+    change: dict[str, Any], db: Any,
+) -> tuple[str | None, str | None]:
+    action = str(change.get("action") or "update").strip().casefold()
+    local_id = str(change.get("local_id") or "").strip()
+    if action == "create" or not local_id:
+        return None, None
+    row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
+    if not row:
+        return None, None
+    try:
+        current = json.loads(row.get("payload") or "{}")
+    except (TypeError, ValueError):
+        current = {}
+    if not isinstance(current, dict):
+        return None, None
+    membership = str(current.get("plan_id") or "").strip()
+    if _structured_training_change_moves_bounds(action, change, current) and membership:
+        return membership, membership
+    return membership, None
+
+
+def _structured_training_change_moves_bounds(
+    action: str, change: dict[str, Any], current: dict[str, Any],
+) -> bool:
+    if action in {"delete", "archive", "restore"}:
+        return True
+    return action == "update" and "date" in change and not str(change.get("date") or "").startswith(
+        str(current.get("date") or "")[:10]
+    )
+
+
+def _collect_structured_training_memberships(
+    changes: list[dict[str, Any]], db: Any,
+) -> tuple[set[str], set[str]]:
+    referenced_memberships: set[str] = set()
+    plans_needing_bounds: set[str] = set()
+    for change in changes:
+        membership, bounds_membership = _structured_training_membership_update(change, db)
+        if membership is not None:
+            referenced_memberships.add(membership)
+        if bounds_membership:
+            plans_needing_bounds.add(bounds_membership)
+    return referenced_memberships, plans_needing_bounds
+
+
+def _derived_structured_training_plan(
+    referenced_memberships: set[str], db: Any,
+) -> dict[str, str]:
+    derived_plan: dict[str, str] = {}
+    if len(referenced_memberships) == 1:
+        membership = next(iter(referenced_memberships))
+        candidate_plan = TRAINING_PLAN_REPOSITORY.get(db, membership) if membership else None
+        if candidate_plan and candidate_plan.get("status") != "archived":
+            derived_plan = {"plan_id": str(candidate_plan["id"]), "plan_name": str(candidate_plan.get("name") or "")[:200]}
+    return derived_plan
+
+
+def _apply_authorized_structured_training_plan(
+    derived_plan: dict[str, str], authorized_plan_id: str | None, db: Any,
+) -> dict[str, str]:
+    authorized_plan_id = str(authorized_plan_id or "").strip()
+    if not authorized_plan_id:
+        return derived_plan
+    authorized_plan = TRAINING_PLAN_REPOSITORY.get(db, authorized_plan_id)
+    if not authorized_plan or authorized_plan.get("status") == "archived":
+        raise AppError(409, "Der benannte Trainingsplan ist nicht aktiv.", reason="plan_not_available")
+    if derived_plan and derived_plan["plan_id"] != authorized_plan_id:
+        raise AppError(403, "Die Planreferenzen der Änderung sind nicht eindeutig.", reason="intent_scope_denied")
+    return {"plan_id": str(authorized_plan["id"]), "plan_name": str(authorized_plan.get("name") or "")[:200]}
+
+
+def _resolve_structured_training_plan_reference(
+    referenced_memberships: set[str], authorized_plan_id: str | None, db: Any,
+) -> dict[str, str]:
+    derived_plan = _derived_structured_training_plan(referenced_memberships, db)
+    derived_plan = _apply_authorized_structured_training_plan(derived_plan, authorized_plan_id, db)
+    return derived_plan
+
+
+def _validate_structured_training_create_plan_ids(
+    changes: list[dict[str, Any]], derived_plan: dict[str, str], plans_needing_bounds: set[str],
+) -> None:
+    for change in changes:
+        if str(change.get("action") or "update").strip().casefold() != "create":
+            continue
+        requested_plan_id = str(change.get("plan_id") or "").strip() if "plan_id" in change else None
+        if requested_plan_id and requested_plan_id != derived_plan.get("plan_id"):
+            raise AppError(403, "Eine neue Einheit darf nur dem eindeutig abgeleiteten Plan zugeordnet werden.", reason="intent_scope_denied")
+        if requested_plan_id or ("plan_id" not in change and derived_plan):
+            plans_needing_bounds.add(derived_plan["plan_id"])
+
+
+def _derive_structured_training_plan(
+    changes: list[dict[str, Any]], authorized_plan_id: str | None, db: Any,
+) -> tuple[dict[str, str], set[str]]:
+    referenced_memberships, plans_needing_bounds = _collect_structured_training_memberships(changes, db)
+    derived_plan = _resolve_structured_training_plan_reference(referenced_memberships, authorized_plan_id, db)
+    _validate_structured_training_create_plan_ids(changes, derived_plan, plans_needing_bounds)
+    return derived_plan, plans_needing_bounds
+
+
+def _apply_structured_training_change_rows(
+    changes: list[dict[str, Any]], derived_plan: dict[str, str], db: Any,
+) -> list[dict[str, Any]]:
+    applied = []
+    for change in changes:
+        if str(change.get("action") or "update").strip().casefold() == "create":
+            entry_payload = {**change, "source": "coach"}
+            if "plan_id" not in change:
+                entry_payload.update(derived_plan)
+            elif not str(change.get("plan_id") or "").strip():
+                entry_payload.pop("plan_id", None)
+                entry_payload.pop("plan_name", None)
             else:
-                applied.append(update_local_planned_workout(
-                    change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
-                ))
+                entry_payload.update(derived_plan)
+            applied.append({"local_id": create_local_planned_unit(entry_payload, db=db, bump_planning_revision=False)["id"], "status": "local"})
+        else:
+            applied.append(update_local_planned_workout(
+                change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
+            ))
+    return applied
+
+
+def _structured_training_plan_member_dates(plan_id: str, db: Any) -> list[str]:
+    rows = db.execute(
+        "SELECT payload FROM planned_units "
+        "WHERE json_extract(payload, '$.plan_id') = ? "
+        "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
+        "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
+        (plan_id,),
+    ).fetchall()
+    dates = []
+    for row in rows:
+        try:
+            payload = json.loads(row.get("payload") or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if isinstance(payload, dict) and str(payload.get("date") or "")[:10]:
+            dates.append(str(payload["date"])[:10])
+    return dates
+
+
+def _update_structured_training_plan_bound(plan_id: str, db: Any) -> None:
+    plan = TRAINING_PLAN_REPOSITORY.get(db, plan_id)
+    member_dates = _structured_training_plan_member_dates(plan_id, db)
+    if not plan or not member_dates:
+        return
+    next_start, next_end = min(member_dates), max(member_dates)
+    if plan.get("start_date") == next_start and plan.get("end_date") == next_end:
+        return
+    updated_at = utc_now()
+    updated_plan = {**plan, "start_date": next_start, "end_date": next_end, "updated_at": updated_at}
+    TRAINING_PLAN_REPOSITORY.update(
+        db, plan_id, updated_plan["name"], updated_plan.get("goal") or "", next_start, next_end,
+        updated_plan.get("status") or "planned", updated_at,
+    )
+    _record_change(db, "training_plan", plan_id, "update", plan, updated_plan, source="coach_apply")
+
+
+def _update_structured_training_plan_bounds(plans_needing_bounds: set[str], db: Any) -> None:
+    for plan_id in sorted(plans_needing_bounds):
+        _update_structured_training_plan_bound(plan_id, db)
+
+
+def _apply_structured_training_changes(
+    arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
+) -> dict[str, Any]:
+    changes = _prepare_structured_training_changes(arguments)
+    with DB_LOCK, database() as db:
+        current_revision = _validate_structured_training_change_revisions(
+            changes, arguments, require_revision=require_revision, db=db,
+        )
+        derived_plan, plans_needing_bounds = _derive_structured_training_plan(changes, authorized_plan_id, db)
+        applied = _apply_structured_training_change_rows(changes, derived_plan, db)
         _bump_planning_revision(db)
-        for affected_plan_id in sorted(plans_needing_bounds):
-            plan = TRAINING_PLAN_REPOSITORY.get(db, affected_plan_id)
-            member_rows = db.execute(
-                "SELECT payload FROM planned_units "
-                "WHERE json_extract(payload, '$.plan_id') = ? "
-                "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
-                "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
-                (affected_plan_id,),
-            ).fetchall()
-            member_dates = []
-            for row in member_rows:
-                try:
-                    payload = json.loads(row.get("payload") or "{}")
-                except (TypeError, ValueError):
-                    payload = {}
-                if isinstance(payload, dict) and str(payload.get("date") or "")[:10]:
-                    member_dates.append(str(payload["date"])[:10])
-            if plan and member_dates:
-                next_start = min(member_dates)
-                next_end = max(member_dates)
-                if plan.get("start_date") != next_start or plan.get("end_date") != next_end:
-                    updated_at = utc_now()
-                    updated_plan = {
-                        **plan,
-                        "start_date": next_start,
-                        "end_date": next_end,
-                        "updated_at": updated_at,
-                    }
-                    TRAINING_PLAN_REPOSITORY.update(
-                        db,
-                        affected_plan_id,
-                        updated_plan["name"],
-                        updated_plan.get("goal") or "",
-                        next_start,
-                        next_end,
-                        updated_plan.get("status") or "planned",
-                        updated_at,
-                    )
-                    _record_change(
-                        db,
-                        "training_plan",
-                        affected_plan_id,
-                        "update",
-                        plan,
-                        updated_plan,
-                        source="coach_apply",
-                    )
+        _update_structured_training_plan_bounds(plans_needing_bounds, db)
         revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
     publish_state_event("planning", {"status": "changed"})
-    result_changes = [
-        {"local_id": item.get("local_id"), "status": item.get("status")}
-        for item in applied
-    ]
+    result_changes = [{"local_id": item.get("local_id"), "status": item.get("status")} for item in applied]
     return {
         "ok": True,
         "status": "applied",
         "planning_revision": int((revision or {}).get("revision") or current_revision),
         "changes": result_changes,
-        "library_entry_ids": list(dict.fromkeys(
-            item["local_id"] for item in result_changes if item.get("local_id")
-        )),
+        "library_entry_ids": list(dict.fromkeys(item["local_id"] for item in result_changes if item.get("local_id"))),
     }
 
 
