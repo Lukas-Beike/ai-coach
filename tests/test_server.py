@@ -4535,6 +4535,18 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(question, "Wie fühlst du dich?")
         self.assertFalse(cancelled)
 
+    def test_structured_command_failure_response_keeps_partial_cancelled_effect(self):
+        commands = [
+            {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}},
+            {"tool": "clarify_coach_request", "result": {"ok": True, "question": "Wie fühlst du dich?"}},
+        ]
+        status, _text, question, cancelled = server._structured_command_failure_response(
+            server.AppError(499, "Cancelled", reason="chat_cancelled"), commands, commands[:1], [], [],
+        )
+        self.assertEqual(status, "partial")
+        self.assertEqual(question, "Wie fühlst du dich?")
+        self.assertTrue(cancelled)
+
     def test_gemini_history_trimming_keeps_complete_tool_exchanges(self):
         history = [
             {"role": "user", "parts": [{"text": "Starte die Planung."}]},
