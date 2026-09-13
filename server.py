@@ -6407,7 +6407,7 @@ def public_calendar_state(db: Any | None = None) -> dict[str, Any]:
     return {"sources": [dict(row) for row in sources], "candidates": [dict(row) for row in candidates]}
 
 
-def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
+def _validated_athlete_context(profile: Any, competitions: Any) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
     if not isinstance(profile, dict):
         raise AppError(400, "Das Profil muss ein Objekt sein.")
     if not isinstance(competitions, list):
@@ -6419,6 +6419,47 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
     competition_ids = [competition["id"] for competition in normalized_competitions]
     if len(competition_ids) != len(set(competition_ids)):
         raise AppError(400, "Wettkampf-IDs müssen eindeutig sein.")
+    return normalized_profile, normalized_competitions, competition_ids
+
+
+def _record_removed_competition_tombstones(existing: dict[str, Any], retained_ids: set[str], now: str, db: Any) -> None:
+    for removed_id, row in existing.items():
+        if removed_id not in retained_ids and (row.get("intervals_event_id") or row.get("external_id")):
+            db.execute("INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)", (str(uuid.uuid4()), row.get("intervals_event_id"), row.get("external_id"), now))
+
+
+def _save_athlete_profile(normalized_profile: dict[str, Any], db: Any) -> None:
+    previous_profile_payload = PROFILE_REPOSITORY.get(db)
+    try:
+        previous_profile = normalize_profile(json.loads(previous_profile_payload or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        previous_profile = dict(DEFAULT_PROFILE)
+    set_kv("profile", json.dumps(normalized_profile, ensure_ascii=False), db)
+    _invalidate_weather_cache_if_location_changed(previous_profile, normalized_profile, db)
+    _record_change(db, "profile", "profile", "update", previous_profile, normalized_profile)
+
+
+def _save_athlete_competition(competition: dict[str, Any], existing: dict[str, Any], now: str, db: Any) -> None:
+    db.execute(
+        "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 1, 'local', '', ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, event_date=excluded.event_date, sport=excluded.sport, priority=excluded.priority, distance=excluded.distance, target=excluded.target, course_profile=excluded.course_profile, notes=excluded.notes, category=excluded.category, start_date_local=excluded.start_date_local, description=excluded.description, moving_time=excluded.moving_time, external_id=COALESCE(excluded.external_id, competitions.external_id), sync_dirty=1, sync_state='local', sync_conflict='', updated_at=excluded.updated_at",
+        (competition["id"], competition["name"], competition["event_date"], competition["sport"], competition["priority"], competition["distance"], competition["target"], competition["course_profile"], competition["notes"], competition["category"], competition["start_date_local"], competition["description"], competition["moving_time"], competition["external_id"], now, now),
+    )
+    _record_change(db, "competition", competition["id"], "create" if competition["id"] not in existing else "update", existing.get(competition["id"]), {**competition, "sync_state": "local"})
+
+
+def _delete_removed_athlete_competitions(existing: dict[str, Any], competition_ids: list[str], retained_ids: set[str], db: Any) -> None:
+    for removed_id, row in existing.items():
+        if removed_id not in retained_ids:
+            _record_change(db, "competition", removed_id, "delete", dict(row), None)
+    if competition_ids:
+        placeholders = ",".join("?" for _ in competition_ids)
+        db.execute(f"DELETE FROM competitions WHERE id NOT IN ({placeholders})", competition_ids)
+    else:
+        db.execute("DELETE FROM competitions")
+
+
+def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
+    normalized_profile, normalized_competitions, competition_ids = _validated_athlete_context(profile, competitions)
     now = utc_now()
     with DB_LOCK, database() as db:
         existing = {
@@ -6426,52 +6467,11 @@ def save_athlete_context(profile: Any, competitions: Any) -> dict[str, Any]:
             for row in db.execute("SELECT * FROM competitions").fetchall()
         }
         retained_ids = set(competition_ids)
-        for removed_id, row in existing.items():
-            if removed_id not in retained_ids and (row.get("intervals_event_id") or row.get("external_id")):
-                db.execute(
-                    "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)",
-                    (str(uuid.uuid4()), row.get("intervals_event_id"), row.get("external_id"), now),
-                )
-        previous_profile_payload = PROFILE_REPOSITORY.get(db)
-        try:
-            previous_profile = normalize_profile(json.loads(previous_profile_payload or "{}"))
-        except (TypeError, json.JSONDecodeError):
-            previous_profile = dict(DEFAULT_PROFILE)
-        set_kv("profile", json.dumps(normalized_profile, ensure_ascii=False), db)
-        _invalidate_weather_cache_if_location_changed(previous_profile, normalized_profile, db)
-        _record_change(db, "profile", "profile", "update", previous_profile, normalized_profile)
+        _record_removed_competition_tombstones(existing, retained_ids, now, db)
+        _save_athlete_profile(normalized_profile, db)
         for competition in normalized_competitions:
-            db.execute(
-                "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 1, 'local', '', ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET name=excluded.name, event_date=excluded.event_date, sport=excluded.sport, "
-                "priority=excluded.priority, distance=excluded.distance, target=excluded.target, "
-                "course_profile=excluded.course_profile, notes=excluded.notes, category=excluded.category, "
-                "start_date_local=excluded.start_date_local, description=excluded.description, moving_time=excluded.moving_time, "
-                "external_id=COALESCE(excluded.external_id, competitions.external_id), sync_dirty=1, sync_state='local', sync_conflict='', updated_at=excluded.updated_at",
-                (
-                    competition["id"], competition["name"], competition["event_date"], competition["sport"],
-                    competition["priority"], competition["distance"], competition["target"],
-                    competition["course_profile"], competition["notes"], competition["category"],
-                    competition["start_date_local"], competition["description"], competition["moving_time"],
-                    competition["external_id"], now, now,
-                ),
-            )
-            _record_change(
-                db, "competition", competition["id"],
-                "create" if competition["id"] not in existing else "update",
-                existing.get(competition["id"]), {**competition, "sync_state": "local"},
-            )
-        if competition_ids:
-            placeholders = ",".join("?" for _ in competition_ids)
-            for removed_id, row in existing.items():
-                if removed_id not in retained_ids:
-                    _record_change(db, "competition", removed_id, "delete", dict(row), None)
-            db.execute(f"DELETE FROM competitions WHERE id NOT IN ({placeholders})", competition_ids)
-        else:
-            for removed_id, row in existing.items():
-                _record_change(db, "competition", removed_id, "delete", dict(row), None)
-            db.execute("DELETE FROM competitions")
+            _save_athlete_competition(competition, existing, now, db)
+        _delete_removed_athlete_competitions(existing, competition_ids, retained_ids, db)
     return {"profile": normalized_profile, "competitions": list_competitions()}
 
 
