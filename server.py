@@ -9527,6 +9527,54 @@ def calendar_conflicts(
     )
 
 
+def _create_training_plan_record(
+    db: Any, plan_id: str, workouts: list[dict[str, Any]], plan_name: str, goal: str, now: str,
+) -> None:
+    dates = sorted(item["date"] for item in workouts)
+    name = plan_name.strip()[:200]
+    bounded_goal = goal.strip()[:2000]
+    TRAINING_PLAN_REPOSITORY.create(db, plan_id, name, bounded_goal, dates[0], dates[-1], "planned", now)
+    _record_change(db, "training_plan", plan_id, "create", None, {
+        "id": plan_id, "name": name, "goal": bounded_goal,
+        "start_date": dates[0], "end_date": dates[-1], "status": "planned",
+    })
+
+
+def _planned_workout_for_storage(
+    workout: dict[str, Any], templates: list[dict[str, Any]], plan_id: str, plan_name: str,
+) -> dict[str, Any]:
+    match = find_similar_library_workout(workout, templates)
+    if match is None:
+        stored = {**workout, "source": "coach"}
+    else:
+        match_duration = library_workout_duration_minutes(match)
+        stored = {
+            **workout,
+            "sport": match.get("type") or workout["sport"],
+            "name": match.get("name") or workout["name"],
+            "description": match.get("description") or workout["description"],
+            "duration_minutes": max(5, round(match_duration)) if match_duration is not None else workout["duration_minutes"],
+            "target": match.get("target") if match.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
+            "source": "library",
+        }
+        LOGGER.info(
+            "Reusing matching workout library template for local plan",
+            extra={"event": "workout_library_match", "context": {"library_workout_id": str(match["id"])}},
+        )
+    return {**stored, **({"plan_id": plan_id, "plan_name": plan_name.strip()[:200]} if plan_id else {})}
+
+
+def _save_local_plan_entries(
+    db: Any, workouts: list[dict[str, Any]], templates: list[dict[str, Any]], plan_id: str, plan_name: str, now: str,
+) -> list[dict[str, Any]]:
+    created = []
+    for workout in workouts:
+        stored = _planned_workout_for_storage(workout, templates, plan_id, plan_name)
+        entry = create_local_planned_unit(stored, db=db, bump_planning_revision=False)
+        created.append({**entry, "created_at": now, "updated_at": now})
+    return created
+
+
 def save_workout_library_entries(
     workouts: list[dict[str, Any]],
     plan_name: str = "",
@@ -9537,46 +9585,13 @@ def save_workout_library_entries(
         raise AppError(400, "Mindestens eine Einheit ist erforderlich.")
     normalized_workouts = [normalize_workout(item) for item in workouts]
     plan_id = str(uuid.uuid4()) if plan_name.strip() else ""
-    created: list[dict[str, Any]] = []
     now = utc_now()
     with DB_LOCK, database() as db:
-        # Dated entries are plan history, not reusable templates. A matching
-        # undated template is copied locally for this plan date; otherwise the
-        # newly planned session itself becomes a local library entry.
         templates = [item for item in list_workout_library() if not item.get("date")]
         if plan_id:
-            dates = sorted(item["date"] for item in normalized_workouts)
-            TRAINING_PLAN_REPOSITORY.create(
-                db, plan_id, plan_name.strip()[:200], goal.strip()[:2000], dates[0], dates[-1], "planned", now
-            )
-            _record_change(db, "training_plan", plan_id, "create", None, {
-                "id": plan_id, "name": plan_name.strip()[:200], "goal": goal.strip()[:2000],
-                "start_date": dates[0], "end_date": dates[-1], "status": "planned",
-            })
+            _create_training_plan_record(db, plan_id, normalized_workouts, plan_name, goal, now)
         _validate_plan_calendar(normalized_workouts)
-        for workout in normalized_workouts:
-            match = find_similar_library_workout(workout, templates)
-            if match is not None:
-                match_duration = library_workout_duration_minutes(match)
-                workout = {
-                    **workout,
-                    "sport": match.get("type") or workout["sport"],
-                    "name": match.get("name") or workout["name"],
-                    "description": match.get("description") or workout["description"],
-                    "duration_minutes": max(5, round(match_duration)) if match_duration is not None else workout["duration_minutes"],
-                    "target": match.get("target") if match.get("target") in {"AUTO", "POWER", "HR", "PACE"} else "AUTO",
-                    "source": "library",
-                }
-                LOGGER.info(
-                    "Reusing matching workout library template for local plan",
-                    extra={"event": "workout_library_match", "context": {"library_workout_id": str(match["id"])}},
-                )
-            else:
-                workout = {**workout, "source": "coach"}
-            if plan_id:
-                workout = {**workout, "plan_id": plan_id, "plan_name": plan_name.strip()[:200]}
-            entry = create_local_planned_unit(workout, db=db, bump_planning_revision=False)
-            created.append({**entry, "created_at": now, "updated_at": now})
+        created = _save_local_plan_entries(db, normalized_workouts, templates, plan_id, plan_name, now)
         if created:
             _bump_planning_revision(db)
     return created
@@ -10573,6 +10588,15 @@ def _bump_planning_revision(db: Any, amount: int = 1) -> None:
             raise AppError(500, "Die lokale Planrevision fehlt; die Datenbank muss repariert werden.", reason="database_corrupt")
 
 
+def _persist_local_planned_unit(
+    db: Any, entry: dict[str, Any], local_id: str, *, bump_planning_revision: bool, change_source: str,
+) -> None:
+    _insert_planned_unit(db, entry)
+    _record_change(db, "planned_unit", local_id, "create", None, entry, source=change_source)
+    if bump_planning_revision:
+        _bump_planning_revision(db)
+
+
 def create_local_planned_unit(
     workout: dict[str, Any],
     db: Any | None = None,
@@ -10584,16 +10608,10 @@ def create_local_planned_unit(
     entry = normalize_planned_unit(workout, local_id=local_id, external_id=None, sync_status="local")
     validate_workout_description(entry)
     if db is not None:
-        _insert_planned_unit(db, entry)
-        _record_change(db, "planned_unit", local_id, "create", None, entry, source=change_source)
-        if bump_planning_revision:
-            _bump_planning_revision(db)
+        _persist_local_planned_unit(db, entry, local_id, bump_planning_revision=bump_planning_revision, change_source=change_source)
     else:
         with DB_LOCK, database() as own_db:
-            _insert_planned_unit(own_db, entry)
-            _record_change(own_db, "planned_unit", local_id, "create", None, entry, source=change_source)
-            if bump_planning_revision:
-                _bump_planning_revision(own_db)
+            _persist_local_planned_unit(own_db, entry, local_id, bump_planning_revision=bump_planning_revision, change_source=change_source)
     return entry
 
 
