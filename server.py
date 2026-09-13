@@ -22784,57 +22784,97 @@ def daily_sync_loop() -> None:
                 LOGGER.error("Daily synchronization scheduling failed", extra={"event": "daily_sync_failed"})
 
 
-@maintenance_operation
-def schedule_daily_sync_jobs() -> None:
-    if get_profile().get("weather_location", "").strip():
-        if not _sync_job_active("weather"):
-            enqueue_sync_job("weather", "refresh", {"force": False, "reason": "dreistündliche automatische Aktualisierung"}, requested_by="scheduler")
-    if CONFIG.calendar_ical_url and daily_sync_due("calendar"):
-        if not _sync_job_active("calendar"):
-            enqueue_sync_job("calendar", "refresh", {"reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
-    if garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists())):
-        if daily_sync_due("garmin"):
-            if not _sync_job_active("garmin"):
-                enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
+def _scheduler_garmin_configured() -> bool:
+    return garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
+
+
+def _schedule_daily_weather_job() -> None:
+    if not get_profile().get("weather_location", "").strip() or _sync_job_active("weather"):
+        return
+    enqueue_sync_job("weather", "refresh", {"force": False, "reason": "dreistündliche automatische Aktualisierung"}, requested_by="scheduler")
+
+
+def _schedule_daily_calendar_job() -> None:
+    if not CONFIG.calendar_ical_url or not daily_sync_due("calendar") or _sync_job_active("calendar"):
+        return
+    enqueue_sync_job("calendar", "refresh", {"reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
+
+
+def _schedule_daily_garmin_job() -> None:
+    if not _scheduler_garmin_configured() or not daily_sync_due("garmin") or _sync_job_active("garmin"):
+        return
+    enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
+
+
+def _schedule_daily_intervals_job() -> None:
     if not CONFIG.intervals_api_key or not daily_sync_due("intervals") or get_kv("sync_running") == "1" or INTERVALS_RESYNC_GATE.is_resetting():
         return
     if not _sync_job_active("intervals"):
         enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": DAILY_AUTO_UPDATE_LABEL}, requested_by="scheduler")
 
 
-def enqueue_startup_sync_jobs() -> None:
-    """Queue configured startup refreshes without duplicating resumed jobs."""
+@maintenance_operation
+def schedule_daily_sync_jobs() -> None:
+    _schedule_daily_weather_job()
+    _schedule_daily_calendar_job()
+    _schedule_daily_garmin_job()
+    _schedule_daily_intervals_job()
+
+
+def _startup_historical_backfill_payload(provider: str) -> dict[str, Any] | None:
+    cursor = provider_sync_cursor(provider, "historical").get("cursor")
+    if cursor and str(cursor) <= SYNC_EARLIEST_DATE.isoformat():
+        return None
+    try:
+        resume_end = date.fromisoformat(str(cursor)[0:10]) - timedelta(days=1) if cursor else None
+    except ValueError:
+        resume_end = None
+    payload: dict[str, Any] = {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}
+    if resume_end is not None:
+        payload["end_date"] = resume_end.isoformat()
+    return payload
+
+
+def _enqueue_startup_calendar_job() -> None:
     if CONFIG.calendar_ical_url and not _sync_job_active("calendar", "refresh"):
         enqueue_sync_job("calendar", "refresh", {"reason": "startup"}, requested_by="startup")
-    if CONFIG.intervals_api_key and not _sync_job_active("intervals", "refresh"):
+
+
+def _enqueue_startup_intervals_jobs() -> None:
+    if not CONFIG.intervals_api_key:
+        return
+    if not _sync_job_active("intervals", "refresh"):
         enqueue_sync_job("intervals", "refresh", {"days": sync_period("intervals"), "reason": "startup"}, requested_by="startup")
-    if CONFIG.intervals_api_key and not _sync_job_active("intervals", "historical_backfill"):
-        cursor = provider_sync_cursor("intervals", "historical").get("cursor")
-        if not cursor or str(cursor) > SYNC_EARLIEST_DATE.isoformat():
-            try:
-                resume_end = date.fromisoformat(str(cursor)[:10]) - timedelta(days=1) if cursor else None
-            except ValueError:
-                resume_end = None
-            payload = {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}
-            if resume_end is not None:
-                payload["end_date"] = resume_end.isoformat()
-            enqueue_sync_job("intervals", "historical_backfill", payload, requested_by="startup")
-    garmin_configured = garmin_fixture_path() is not None or (Garmin is not None and (CONFIG.garmin_email or Path(CONFIG.garmin_tokenstore).exists()))
-    if garmin_configured and not _sync_job_active("garmin", "refresh"):
+    if _sync_job_active("intervals", "historical_backfill"):
+        return
+    payload = _startup_historical_backfill_payload("intervals")
+    if payload is not None:
+        enqueue_sync_job("intervals", "historical_backfill", payload, requested_by="startup")
+
+
+def _enqueue_startup_garmin_jobs() -> None:
+    if not _scheduler_garmin_configured():
+        return
+    if not _sync_job_active("garmin", "refresh"):
         enqueue_sync_job("garmin", "refresh", {"days": sync_period("garmin"), "reason": "startup"}, requested_by="startup")
-    if garmin_configured and not _sync_job_active("garmin", "historical_backfill"):
-        cursor = provider_sync_cursor("garmin", "historical").get("cursor")
-        if not cursor or str(cursor) > SYNC_EARLIEST_DATE.isoformat():
-            try:
-                resume_end = date.fromisoformat(str(cursor)[:10]) - timedelta(days=1) if cursor else None
-            except ValueError:
-                resume_end = None
-            payload = {"days": SYNC_CHUNK_DAYS, "reason": "startup historical backfill"}
-            if resume_end is not None:
-                payload["end_date"] = resume_end.isoformat()
-            enqueue_sync_job("garmin", "historical_backfill", payload, requested_by="startup")
+    if _sync_job_active("garmin", "historical_backfill"):
+        return
+    payload = _startup_historical_backfill_payload("garmin")
+    if payload is not None:
+        enqueue_sync_job("garmin", "historical_backfill", payload, requested_by="startup")
+
+
+def _enqueue_startup_weather_job() -> None:
     if get_profile().get("weather_location", "").strip() and not _sync_job_active("weather", "refresh"):
         enqueue_sync_job("weather", "refresh", {"force": True, "reason": "startup"}, requested_by="startup")
+
+
+def enqueue_startup_sync_jobs() -> None:
+    """Queue configured startup refreshes without duplicating resumed jobs."""
+    _enqueue_startup_calendar_job()
+    _enqueue_startup_intervals_jobs()
+    _enqueue_startup_garmin_jobs()
+    _enqueue_startup_weather_job()
 
 
 def main() -> None:
