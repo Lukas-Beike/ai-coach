@@ -3282,6 +3282,18 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.competition_event_payload(competition)["type"], "Ride")
         self.assertEqual(server.competition_event_payload(competition)["distance"], 250000)
 
+    def test_competition_event_optional_payload_excludes_invalid_distance(self):
+        payload = server.competition_event_optional_payload({
+            "moving_time": "3600",
+            "distance": "not-a-distance",
+            "target": "Finish",
+            "intervals_event_id": "external-race-id",
+        })
+        self.assertEqual(payload["moving_time"], 3600)
+        self.assertNotIn("distance", payload)
+        self.assertEqual(payload["target"], "Finish")
+        self.assertEqual(payload["id"], "external-race-id")
+
     def test_remote_competition_updates_all_intervals_event_fields(self):
         data = server.remote_competition_data({
             "id": 42, "category": "RACE_C", "start_date_local": "2026-09-20T07:15:00",
