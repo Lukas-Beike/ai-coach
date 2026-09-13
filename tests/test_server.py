@@ -4521,6 +4521,19 @@ class CoachTests(unittest.TestCase):
         self.assertIn("bleibt bestehen", text)
         self.assertIn("Noch offen", text)
 
+    def test_structured_command_failure_response_keeps_completed_clarification(self):
+        commands = [
+            {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}},
+            {"tool": "clarify_coach_request", "result": {"ok": True, "question": "Wie fühlst du dich?"}},
+        ]
+        status, text, question, cancelled = server._structured_command_failure_response(
+            server.AppError(502, "Provider error", reason="provider_unavailable"), commands, commands[:1], [], [],
+        )
+        self.assertEqual(status, "completed")
+        self.assertEqual(text, "Wie fühlst du dich?")
+        self.assertEqual(question, "Wie fühlst du dich?")
+        self.assertFalse(cancelled)
+
     def test_gemini_history_trimming_keeps_complete_tool_exchanges(self):
         history = [
             {"role": "user", "parts": [{"text": "Starte die Planung."}]},

@@ -17366,7 +17366,7 @@ def _structured_command_failure_response(
     failures: list[dict[str, Any]], pending: list[str],
 ) -> tuple[str, str, str | None, bool]:
     status, text, question, cancelled = _structured_command_failure_base_response(error, commands)
-    if successes:
+    if successes and not question:
         status = "partial"
     return status, _structured_command_failure_effect_text(text, commands, successes, failures, pending), question, cancelled
 
