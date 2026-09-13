@@ -11968,75 +11968,107 @@ def _sync_selected_workout_library(payload: dict[str, Any]) -> dict[str, Any]:
     return _sync_selected_workout_library_unlocked(payload)
 
 
+def _selected_library_sync_row(local_id: str) -> tuple[dict[str, Any] | None, bool]:
+    with DB_LOCK, database() as db:
+        row = db.execute(
+            "SELECT payload, sync_state FROM workout_library WHERE local_id=?", (local_id,)
+        ).fetchone()
+        if row:
+            return row, False
+        row = db.execute(
+            "SELECT payload, sync_state FROM planned_units WHERE local_id=?", (local_id,)
+        ).fetchone()
+    return row, bool(row)
+
+
+def _library_sync_error(local_id: str, exc: Exception) -> dict[str, Any]:
+    return {"library_workout_id": local_id, "status": "error", "error": redact_text(str(exc))[:500]}
+
+
+def _sync_selected_planned_library_entry(
+    item: dict[str, Any], payload: dict[str, Any], repair_batch: _RepairCalendarBatch | None,
+) -> dict[str, Any]:
+    local_id = item["library_workout_id"]
+    try:
+        if payload.get("repair"):
+            event = _repair_local_planned_unit_calendar_entry(
+                local_id, item["expected_payload_hash"], batch=repair_batch
+            )
+        else:
+            event = _sync_local_planned_unit_calendar_entry(local_id)
+    except Exception as exc:
+        if payload.get("repair"):
+            update_planned_unit_sync_state(local_id, "sync_error", str(exc))
+        return _library_sync_error(local_id, exc)
+    return {"library_workout_id": local_id, "status": "synced", "calendar_synced": event is not None}
+
+
+def _sync_existing_library_calendar_entry(item: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+    local_id = item["library_workout_id"]
+    try:
+        synced = json.loads(row["payload"] or "{}")
+    except (TypeError, ValueError):
+        synced = {}
+    if not isinstance(synced, dict) or not synced.get("date") or synced.get("remote_event_id"):
+        return {"library_workout_id": local_id, "status": "already_synced"}
+    try:
+        _sync_local_workout_calendar_entry(local_id, synced)
+    except Exception as exc:
+        return _library_sync_error(local_id, exc)
+    return {"library_workout_id": local_id, "status": "synced", "calendar_synced": True}
+
+
+def _sync_pending_library_entry(item: dict[str, Any]) -> dict[str, Any]:
+    local_id = item["library_workout_id"]
+    try:
+        synced = sync_local_workout_library_entry(local_id)
+        calendar_event = _sync_local_workout_calendar_entry(local_id, synced)
+    except Exception as exc:
+        return _library_sync_error(local_id, exc)
+    return {
+        "library_workout_id": local_id,
+        "status": "synced",
+        "external_id": bool(synced.get("external_id")),
+        "calendar_synced": calendar_event is not None,
+    }
+
+
+def _sync_selected_library_entry(
+    item: dict[str, Any], payload: dict[str, Any], repair_batch: _RepairCalendarBatch | None,
+) -> dict[str, Any]:
+    local_id = item["library_workout_id"]
+    row, is_planned = _selected_library_sync_row(local_id)
+    if not row:
+        return {"library_workout_id": local_id, "status": "conflict", "error": "Einheit nicht gefunden"}
+    if _library_payload_hash(row["payload"]) != item["expected_payload_hash"]:
+        return {"library_workout_id": local_id, "status": "conflict", "error": "Seit der Vorschau geändert"}
+    if is_planned:
+        return _sync_selected_planned_library_entry(item, payload, repair_batch)
+    if row.get("sync_state") == "synced":
+        return _sync_existing_library_calendar_entry(item, row)
+    return _sync_pending_library_entry(item)
+
+
+def _verify_selected_library_repair(
+    results: list[dict[str, Any]], repair_batch: _RepairCalendarBatch | None,
+) -> None:
+    if not repair_batch:
+        return
+    verification = repair_batch.verify()
+    for item in results:
+        error = verification.get(item["library_workout_id"])
+        if error is not None:
+            update_planned_unit_sync_state(item["library_workout_id"], "sync_error", str(error))
+            item.update(status="error", error=redact_text(str(error))[:500], calendar_synced=False)
+
+
 def _sync_selected_workout_library_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, INTERVALS_API_KEY_ERROR)
     requested = _library_bulk_request_entries(payload.get("entries"), require_hash=True)
     repair_batch = _RepairCalendarBatch(requested) if payload.get("repair") else None
-    results: list[dict[str, Any]] = []
-    for item in requested:
-        with DB_LOCK, database() as db:
-            row = db.execute(
-                "SELECT payload, sync_state FROM workout_library WHERE local_id=?",
-                (item["library_workout_id"],),
-            ).fetchone()
-            is_planned = False
-            if not row:
-                row = db.execute(
-                    "SELECT payload, sync_state FROM planned_units WHERE local_id=?",
-                    (item["library_workout_id"],),
-                ).fetchone()
-                is_planned = bool(row)
-        if not row:
-            results.append({"library_workout_id": item["library_workout_id"], "status": "conflict", "error": "Einheit nicht gefunden"})
-            continue
-        if _library_payload_hash(row["payload"]) != item["expected_payload_hash"]:
-            results.append({"library_workout_id": item["library_workout_id"], "status": "conflict", "error": "Seit der Vorschau geändert"})
-            continue
-        if is_planned:
-            try:
-                if payload.get("repair"):
-                    event = _repair_local_planned_unit_calendar_entry(item["library_workout_id"], item["expected_payload_hash"], batch=repair_batch)
-                else:
-                    event = _sync_local_planned_unit_calendar_entry(item["library_workout_id"])
-                results.append({"library_workout_id": item["library_workout_id"], "status": "synced", "calendar_synced": event is not None})
-            except Exception as exc:
-                if payload.get("repair"):
-                    update_planned_unit_sync_state(item["library_workout_id"], "sync_error", str(exc))
-                results.append({"library_workout_id": item["library_workout_id"], "status": "error", "error": redact_text(str(exc))[:500]})
-            continue
-        if row.get("sync_state") == "synced":
-            try:
-                synced = json.loads(row["payload"] or "{}")
-            except (TypeError, ValueError):
-                synced = {}
-            if not isinstance(synced, dict) or not synced.get("date") or synced.get("remote_event_id"):
-                results.append({"library_workout_id": item["library_workout_id"], "status": "already_synced"})
-                continue
-            try:
-                _sync_local_workout_calendar_entry(item["library_workout_id"], synced)
-                results.append({"library_workout_id": item["library_workout_id"], "status": "synced", "calendar_synced": True})
-            except Exception as exc:
-                results.append({"library_workout_id": item["library_workout_id"], "status": "error", "error": redact_text(str(exc))[:500]})
-            continue
-        try:
-            synced = sync_local_workout_library_entry(item["library_workout_id"])
-            calendar_event = _sync_local_workout_calendar_entry(item["library_workout_id"], synced)
-            results.append({
-                "library_workout_id": item["library_workout_id"],
-                "status": "synced",
-                "external_id": bool(synced.get("external_id")),
-                "calendar_synced": calendar_event is not None,
-            })
-        except Exception as exc:
-            results.append({"library_workout_id": item["library_workout_id"], "status": "error", "error": redact_text(str(exc))[:500]})
-    if repair_batch:
-        verification = repair_batch.verify()
-        for item in results:
-            error = verification.get(item["library_workout_id"])
-            if error is not None:
-                update_planned_unit_sync_state(item["library_workout_id"], "sync_error", str(error))
-                item.update(status="error", error=redact_text(str(error))[:500], calendar_synced=False)
+    results = [_sync_selected_library_entry(item, payload, repair_batch) for item in requested]
+    _verify_selected_library_repair(results, repair_batch)
     failed = [item["library_workout_id"] for item in results if item["status"] in {"error", "conflict"}]
     if not failed:
         status = "ok"
