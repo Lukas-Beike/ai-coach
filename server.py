@@ -12430,25 +12430,39 @@ def merge_historical_snapshot(current: dict[str, Any] | None, historical: dict[s
     return merged
 
 
-def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any], str, str] | None:
-    if str(event.get("category") or "WORKOUT").upper() != "WORKOUT":
-        return None
+def _remote_planned_unit_id(event: dict[str, Any]) -> str | None:
     remote_id = str(event.get("id") or "").strip()
-    if not remote_id:
-        return None
+    return remote_id or None
+
+
+def _remote_planned_unit_date(event: dict[str, Any]) -> str | None:
     event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
     try:
         if date.fromisoformat(event_date) < local_now().date():
             return None
     except ValueError:
         return None
+    return event_date
+
+
+def _remote_planned_unit_duration(event: dict[str, Any]) -> int:
+    moving_time = event.get("moving_time")
+    try:
+        return max(5, round(float(moving_time) / 60)) if moving_time not in (None, "") else 30
+    except (TypeError, ValueError):
+        return 30
+
+
+def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any], str, str] | None:
+    if str(event.get("category") or "WORKOUT").upper() != "WORKOUT":
+        return None
+    remote_id = _remote_planned_unit_id(event)
+    event_date = _remote_planned_unit_date(event)
+    if not remote_id or not event_date:
+        return None
     remote_external_id = str(event.get("external_id") or "").strip()
     identity = remote_external_id or f"intervals-event-{remote_id}"
     moving_time = event.get("moving_time")
-    try:
-        duration_minutes = max(5, round(float(moving_time) / 60)) if moving_time not in (None, "") else 30
-    except (TypeError, ValueError):
-        duration_minutes = 30
     payload = {
         "date": event_date,
         "start_date_local": event.get("start_date_local") or event.get("start") or event_date + ISO_MIDNIGHT_SUFFIX,
@@ -12456,7 +12470,7 @@ def _remote_planned_unit_payload(event: dict[str, Any]) -> tuple[dict[str, Any],
         "type": event.get("type") or event.get("sport") or "Ride",
         "name": event.get("name") or "Intervals.icu-Einheit",
         "description": event.get("description") or "",
-        "duration_minutes": duration_minutes,
+        "duration_minutes": _remote_planned_unit_duration(event),
         "moving_time": moving_time,
         "target": event.get("target") or "AUTO",
         "source": "intervals",
