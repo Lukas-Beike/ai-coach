@@ -8757,6 +8757,17 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["failed_object_ids"], [second["id"]])
         self.assertEqual([call.args[0] for call in sync_entry.call_args_list], [first["id"], second["id"]])
 
+    def test_coach_dialogue_command_result_bounds_receipt_details(self):
+        row = {"client_turn_id": "turn-1", "receipt": json.dumps({
+            "status": "completed", "sync_job_ids": list(range(50)),
+            "command_receipts": [{"tool": "save_checkin", "result": {"ok": True, "status": "saved"}, "request": {"scope": list(range(50))}}],
+        })}
+        result = server._coach_dialogue_command_result(row)
+        self.assertEqual(result["client_turn_id"], "turn-1")
+        self.assertEqual(len(result["sync_job_ids"]), 40)
+        self.assertTrue(result["steps"][0]["scope_truncated"])
+        self.assertEqual(len(result["steps"][0]["scope"]), 40)
+
 
 if __name__ == "__main__":
     unittest.main()
