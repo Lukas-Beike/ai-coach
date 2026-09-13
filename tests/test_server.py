@@ -3316,6 +3316,11 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(data["distance"], "21097")
         self.assertEqual(data["target"], "Sub 2:00")
 
+    def test_remote_competition_helpers_normalize_invalid_duration_and_fractional_distance(self):
+        self.assertIsNone(server.remote_competition_moving_time("not-a-duration"))
+        self.assertEqual(server.remote_competition_distance(42195.5), "42195.5")
+        self.assertEqual(server.remote_competition_distance("42.195 km"), "42195")
+
     def test_past_workout_is_rejected(self):
         old = (date.today() - timedelta(days=4)).isoformat()
         with self.assertRaises(server.AppError):
