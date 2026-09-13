@@ -16150,6 +16150,53 @@ def _structured_coach_profile_result(arguments: dict[str, Any], intent: dict[str
     return {"ok": True, "stored_locally": True, "updated_fields": sorted(seen), "profile": saved}
 
 
+def _structured_coach_athlete_record_result(
+    name: str, arguments: dict[str, Any], intent: dict[str, Any],
+) -> dict[str, Any] | None:
+    if name == "save_checkin":
+        if "save_checkin" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Check-in nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "local_checkin")
+        return {"ok": True, **save_coach_checkin(_structured_action_payload(arguments))}
+    if name == "save_activity_feedback":
+        if "save_activity_feedback" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt dieses Aktivitätsfeedback nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "activity_feedback")
+        payload = _structured_action_payload(arguments)
+        return {
+            "ok": True,
+            "stored_locally": True,
+            **save_coach_activity_feedback(
+                payload.get("activity_id"),
+                {
+                    "activity_name": payload.get("activity_name"),
+                    "activity_date": payload.get("activity_date"),
+                    "notes": payload.get("notes"),
+                },
+            ),
+        }
+    if name == "delete_activity_feedback":
+        if "delete_activity_feedback" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Feedbackänderung nicht.", reason="intent_scope_denied")
+        _require_coach_scope(intent, "activity_feedback")
+        activity_id = str(arguments.get("activity_id") or "").strip()
+        return {"ok": True, "stored_locally": True, **save_activity_feedback(activity_id, {"notes": ""})}
+    if name == "save_competition":
+        if "save_competition" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
+        payload = _structured_action_payload(arguments)
+        competition_id = str(payload.get("competition_id") or "").strip()
+        _require_coach_scope(intent, f"competition:{competition_id}" if competition_id else "local_competitions")
+        return {"ok": True, **save_coach_competition(payload)}
+    if name == "delete_competition":
+        if "delete_competition" not in _structured_authorized_operations(intent):
+            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
+        competition_id = str(arguments.get("competition_id") or "").strip()
+        _require_coach_scope(intent, f"competition:{competition_id}")
+        return {"ok": True, **delete_coach_competition(competition_id)}
+    return None
+
+
 def _structured_coach_tool_result(
     name: str,
     arguments: dict[str, Any],
@@ -16166,6 +16213,9 @@ def _structured_coach_tool_result(
         return read_result
     if name == "update_profile":
         return _structured_coach_profile_result(arguments, intent)
+    athlete_record_result = _structured_coach_athlete_record_result(name, arguments, intent)
+    if athlete_record_result is not None:
+        return athlete_record_result
     if name == "stage_training_plan":
         if "stage_training_plan" not in _structured_authorized_operations(intent):
             raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
@@ -16291,47 +16341,6 @@ def _structured_coach_tool_result(
             local_id = str(entry.get("library_workout_id") or "").strip()
             _require_coach_scope(intent, f"library_workout:{local_id}", "local_plan")
         return {"ok": True, "stored_locally": True, **apply_workout_library_plan(entries)}
-    if name == "save_checkin":
-        if "save_checkin" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diesen Check-in nicht.", reason="intent_scope_denied")
-        _require_coach_scope(intent, "local_checkin")
-        return {"ok": True, **save_coach_checkin(_structured_action_payload(arguments))}
-    if name == "save_activity_feedback":
-        if "save_activity_feedback" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt dieses Aktivitätsfeedback nicht.", reason="intent_scope_denied")
-        _require_coach_scope(intent, "activity_feedback")
-        payload = _structured_action_payload(arguments)
-        return {
-            "ok": True,
-            "stored_locally": True,
-            **save_coach_activity_feedback(
-                payload.get("activity_id"),
-                {
-                    "activity_name": payload.get("activity_name"),
-                    "activity_date": payload.get("activity_date"),
-                    "notes": payload.get("notes"),
-                },
-            ),
-        }
-    if name == "delete_activity_feedback":
-        if "delete_activity_feedback" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Feedbackänderung nicht.", reason="intent_scope_denied")
-        _require_coach_scope(intent, "activity_feedback")
-        activity_id = str(arguments.get("activity_id") or "").strip()
-        return {"ok": True, "stored_locally": True, **save_activity_feedback(activity_id, {"notes": ""})}
-    if name == "save_competition":
-        if "save_competition" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
-        payload = _structured_action_payload(arguments)
-        competition_id = str(payload.get("competition_id") or "").strip()
-        _require_coach_scope(intent, f"competition:{competition_id}" if competition_id else "local_competitions")
-        return {"ok": True, **save_coach_competition(payload)}
-    if name == "delete_competition":
-        if "delete_competition" not in _structured_authorized_operations(intent):
-            raise AppError(403, "Die strukturierte Coach-Autorisierung erlaubt diese Aktion in diesem Turn nicht.", reason="intent_scope_denied")
-        competition_id = str(arguments.get("competition_id") or "").strip()
-        _require_coach_scope(intent, f"competition:{competition_id}")
-        return {"ok": True, **delete_coach_competition(competition_id)}
     if name == "start_provider_refresh":
         if "start_provider_refresh" not in _structured_authorized_operations(intent):
             raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
