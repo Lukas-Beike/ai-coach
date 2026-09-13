@@ -22432,85 +22432,113 @@ class RequestHandler(BaseHTTPRequestHandler):
             unregister_chat_stream(session["csrf_hash"], operation_id)
             self.close_connection = True
 
+    def _handle_coach_post(self, path: str, session: dict[str, Any]) -> bool:
+        if path == "/api/transcribe":
+            content_type = self.headers.get("Content-Type", "")
+            self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
+        elif path == "/api/planning/commands":
+            self.send_json(200, execute_planning_command(
+                self.read_json(), conversation_id=ensure_conversation(), session_csrf_hash=session["csrf_hash"],
+            ))
+        elif path == "/api/coach/actions/confirm":
+            self.send_json(200, confirm_coach_action_preview(
+                self.read_json().get("proposal_id"), session["csrf_hash"],
+            ))
+        elif path == "/api/coach/actions/execute":
+            payload = self.read_json()
+            self.send_json(200, execute_coach_action(
+                payload.get("action_token"), session["csrf_hash"], payload.get("payload_hash"),
+            ))
+        elif path == "/api/chat/stream":
+            self.handle_chat_stream(session)
+        elif path == "/api/chat":
+            payload = self.read_json(MAX_REQUEST_BYTES)
+            client_turn_id = str(payload.get("client_turn_id") or "").strip()
+            if not client_turn_id:
+                raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
+            self.send_json(202, enqueue_background_coach_job(
+                str(payload.get("message", "")), client_turn_id, session["csrf_hash"],
+                request_kind=payload.get("request_kind"), attachments=payload.get("attachments"),
+            ))
+        elif path == "/api/chat/reset":
+            self.send_json(200, reset_coach_chat())
+        elif path == "/api/feedback":
+            self.send_json(200, save_checkin(self.read_json()))
+        else:
+            return False
+        return True
+
+    def _handle_sync_post(self, path: str) -> bool:
+        if path == "/api/sync/jobs":
+            payload = self.read_json()
+            if not isinstance(payload, dict):
+                raise AppError(400, "Ein Synchronisationsjob muss als Objekt gesendet werden.", reason="invalid_job_request")
+            envelope = payload.get("payload")
+            if envelope is None:
+                envelope = {key: payload[key] for key in ("days", "force", "reason") if key in payload}
+            self.send_json(202, enqueue_sync_job(
+                payload.get("provider"), payload.get("type", "refresh"), envelope, requested_by="user",
+            ))
+        elif match := SYNC_JOB_RESOLVE_RE.match(path):
+            self.send_json(200, resolve_sync_job(match.group(1), self.read_json()))
+        elif path == "/api/sync":
+            payload = self.read_json()
+            days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))
+            self.send_json(202, enqueue_sync_job(
+                "intervals", "refresh", {"days": days, "reason": "manual"}, requested_by="user",
+            ))
+        elif path == "/api/intervals/full-resync":
+            self._handle_full_resync("intervals")
+        elif path == "/api/performance/refresh":
+            self.send_json(200, refresh_current_performance())
+        elif path == "/api/garmin/sync":
+            payload = self.read_json()
+            days = set_sync_period("garmin", payload.get("days", sync_period("garmin")))
+            self.send_json(202, enqueue_sync_job(
+                "garmin", "refresh", {"days": days, "reason": "manual"}, requested_by="user",
+            ))
+        elif path == "/api/external-calendar/sync":
+            self.send_json(202, enqueue_sync_job("calendar", "refresh", {"reason": "manuell"}, requested_by="user"))
+        elif path == "/api/weather/sync":
+            self.send_json(202, enqueue_sync_job(
+                "weather", "refresh", {"reason": "manuell", "force": True}, requested_by="user",
+            ))
+        elif path == "/api/garmin/full-resync":
+            self._handle_full_resync("garmin")
+        else:
+            return False
+        return True
+
+    def _handle_full_resync(self, provider: str) -> None:
+        payload = self.read_json()
+        if payload.get("confirm") != "FULL_RESYNC":
+            raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
+        self.send_json(200, full_provider_resync(provider, operation_id=uuid.uuid4().hex))
+
+    def _handle_data_post(self, path: str, session: dict[str, Any]) -> bool:
+        if path == "/api/change-history/undo/preview":
+            self.send_json(200, _history_preview(self.read_json().get("change_id"), session["csrf_hash"]))
+        elif path == "/api/diagnostics/capture":
+            self.send_json(200, set_diagnostic_capture(self.read_json().get("enabled")))
+        elif path == "/api/privacy/delete":
+            payload = self.read_json()
+            if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
+                raise AppError(400, "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.")
+            self.send_json(200, delete_local_data())
+        elif path == "/api/change-history/undo":
+            self.send_json(200, _apply_change_undo(self.read_json()))
+        else:
+            return False
+        return True
+
     def handle_authenticated_post(self, path: str, session: dict[str, Any]) -> None:
-            if path == "/api/transcribe":
-                content_type = self.headers.get("Content-Type", "")
-                self.send_json(200, transcribe_audio(self.read_audio_body(), content_type))
-            elif path == "/api/planning/commands":
-                self.send_json(200, execute_planning_command(self.read_json(), conversation_id=ensure_conversation(), session_csrf_hash=session["csrf_hash"]))
-            elif path == "/api/sync/jobs":
-                payload = self.read_json()
-                if not isinstance(payload, dict):
-                    raise AppError(400, "Ein Synchronisationsjob muss als Objekt gesendet werden.", reason="invalid_job_request")
-                envelope = payload.get("payload")
-                if envelope is None:
-                    envelope = {key: payload[key] for key in ("days", "force", "reason") if key in payload}
-                job = enqueue_sync_job(
-                    payload.get("provider"),
-                    payload.get("type", "refresh"),
-                    envelope,
-                    requested_by="user",
-                )
-                self.send_json(202, job)
-            elif match := SYNC_JOB_RESOLVE_RE.match(path):
-                self.send_json(200, resolve_sync_job(match.group(1), self.read_json()))
-            elif path == "/api/change-history/undo/preview":
-                self.send_json(200, _history_preview(self.read_json().get("change_id"), session["csrf_hash"]))
-            elif path == "/api/coach/actions/confirm":
-                self.send_json(200, confirm_coach_action_preview(self.read_json().get("proposal_id"), session["csrf_hash"]))
-            elif path == "/api/coach/actions/execute":
-                payload = self.read_json()
-                self.send_json(200, execute_coach_action(payload.get("action_token"), session["csrf_hash"], payload.get("payload_hash")))
-            elif path == "/api/chat/stream":
-                self.handle_chat_stream(session)
-            elif path == "/api/chat":
-                payload = self.read_json(MAX_REQUEST_BYTES)
-                client_turn_id = str(payload.get("client_turn_id") or "").strip()
-                if not client_turn_id:
-                    raise AppError(400, "client_turn_id ist für Coach-Nachrichten erforderlich.", reason="invalid_client_turn")
-                message = str(payload.get("message", ""))
-                self.send_json(202, enqueue_background_coach_job(
-                    message, client_turn_id, session["csrf_hash"], request_kind=payload.get("request_kind"), attachments=payload.get("attachments"),
-                ))
-            elif path == "/api/sync":
-                payload = self.read_json()
-                days = set_sync_period("intervals", payload.get("days", sync_period("intervals")))
-                self.send_json(202, enqueue_sync_job("intervals", "refresh", {"days": days, "reason": "manual"}, requested_by="user"))
-            elif path == "/api/diagnostics/capture":
-                self.send_json(200, set_diagnostic_capture(self.read_json().get("enabled")))
-            elif path == "/api/intervals/full-resync":
-                payload = self.read_json()
-                if payload.get("confirm") != "FULL_RESYNC":
-                    raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
-                self.send_json(200, full_provider_resync("intervals", operation_id=uuid.uuid4().hex))
-            elif path == "/api/performance/refresh":
-                self.send_json(200, refresh_current_performance())
-            elif path == "/api/garmin/sync":
-                payload = self.read_json()
-                days = set_sync_period("garmin", payload.get("days", sync_period("garmin")))
-                self.send_json(202, enqueue_sync_job("garmin", "refresh", {"days": days, "reason": "manual"}, requested_by="user"))
-            elif path == "/api/external-calendar/sync":
-                self.send_json(202, enqueue_sync_job("calendar", "refresh", {"reason": "manuell"}, requested_by="user"))
-            elif path == "/api/weather/sync":
-                self.send_json(202, enqueue_sync_job("weather", "refresh", {"reason": "manuell", "force": True}, requested_by="user"))
-            elif path == "/api/garmin/full-resync":
-                payload = self.read_json()
-                if payload.get("confirm") != "FULL_RESYNC":
-                    raise AppError(400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden.")
-                self.send_json(200, full_provider_resync("garmin", operation_id=uuid.uuid4().hex))
-            elif path == "/api/chat/reset":
-                self.send_json(200, reset_coach_chat())
-            elif path == "/api/privacy/delete":
-                payload = self.read_json()
-                if payload.get("confirm") != "LOKALE DATEN LÖSCHEN":
-                    raise AppError(400, "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.")
-                self.send_json(200, delete_local_data())
-            elif path == "/api/feedback":
-                self.send_json(200, save_checkin(self.read_json()))
-            elif path == "/api/change-history/undo":
-                self.send_json(200, _apply_change_undo(self.read_json()))
-            else:
-                raise AppError(404, NOT_FOUND_ERROR)
+        handled = (
+            self._handle_coach_post(path, session)
+            or self._handle_sync_post(path)
+            or self._handle_data_post(path, session)
+        )
+        if not handled:
+            raise AppError(404, NOT_FOUND_ERROR)
 
     def do_PUT(self) -> None:
         try:
