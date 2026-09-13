@@ -65,58 +65,86 @@ function listItemFromMarkdownLine(line) {
   return { type: "ol", text: trimmed.slice(digitCount + 1).trimStart() };
 }
 
+function closeMarkdownList(state, output) {
+  if (state.listType) output.push(`</${state.listType}>`);
+  state.listType = null;
+}
+
+function flushMarkdownParagraph(state, output) {
+  if (!state.paragraph.length) return;
+  output.push(`<p>${inlineMarkdown(state.paragraph.join("\n")).replaceAll("\n", "<br>")}</p>`);
+  state.paragraph = [];
+}
+
+function toggleMarkdownCode(state, output) {
+  flushMarkdownParagraph(state, output);
+  closeMarkdownList(state, output);
+  if (state.inCode) output.push(`<pre><code>${escapeHtml(state.codeLines.join("\n"))}</code></pre>`);
+  state.codeLines = [];
+  state.inCode = !state.inCode;
+}
+
+function isHorizontalRule(line) {
+  const value = line.trim();
+  return value.length >= 3 && (value.split("").every((character) => character === "-")
+    || value.split("").every((character) => character === "*"));
+}
+
+function renderMarkdownHeading(heading, state, output) {
+  flushMarkdownParagraph(state, output);
+  closeMarkdownList(state, output);
+  let headingText = heading.text.trim();
+  while (headingText.endsWith("#")) headingText = headingText.slice(0, -1).trimEnd();
+  output.push(`<h${heading.level}>${inlineMarkdown(headingText)}</h${heading.level}>`);
+}
+
+function renderMarkdownListItem(item, state, output) {
+  flushMarkdownParagraph(state, output);
+  if (state.listType !== item.type) {
+    closeMarkdownList(state, output);
+    output.push(`<${item.type}>`);
+    state.listType = item.type;
+  }
+  output.push(`<li>${inlineMarkdown(item.text)}</li>`);
+}
+
+function renderMarkdownLine(line, state, output) {
+  const heading = headingFromMarkdownLine(line);
+  if (heading) return renderMarkdownHeading(heading, state, output);
+  if (isHorizontalRule(line)) {
+    flushMarkdownParagraph(state, output);
+    closeMarkdownList(state, output);
+    output.push("<hr>");
+    return;
+  }
+  const listItem = listItemFromMarkdownLine(line);
+  if (listItem) return renderMarkdownListItem(listItem, state, output);
+  const quote = /^\s*>\s?(.*)$/.exec(line);
+  if (quote) {
+    flushMarkdownParagraph(state, output);
+    closeMarkdownList(state, output);
+    output.push(`<blockquote>${inlineMarkdown(quote[1])}</blockquote>`);
+    return;
+  }
+  closeMarkdownList(state, output);
+  state.paragraph.push(line);
+}
+
 function markdownToHtml(markdown) {
   const lines = String(markdown || "").replaceAll("\r", "").split("\n");
   const output = [];
-  let paragraph = [];
-  let listType = null;
-  let inCode = false;
-  let codeLines = [];
-
-  const closeList = () => {
-    if (listType) output.push(`</${listType}>`);
-    listType = null;
-  };
-  const flushParagraph = () => {
-    if (paragraph.length) {
-      output.push(`<p>${inlineMarkdown(paragraph.join("\n")).replaceAll("\n", "<br>")}</p>`);
-      paragraph = [];
-    }
-  };
-
+  const state = { paragraph: [], listType: null, inCode: false, codeLines: [] };
   for (const line of lines) {
-    if (line.trimStart().startsWith("```")) {
-      flushParagraph(); closeList();
-      if (inCode) {
-        output.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-        codeLines = [];
-      }
-      inCode = !inCode;
-      continue;
-    }
-    if (inCode) { codeLines.push(line); continue; }
-    if (!line.trim()) { flushParagraph(); closeList(); continue; }
-    const heading = headingFromMarkdownLine(line);
-    if (heading) { flushParagraph(); closeList(); output.push(`<h${heading.level}>${inlineMarkdown(heading.text.replace(/#+$/, "").trim())}</h${heading.level}>`); continue; }
-    const horizontalRule = line.trim();
-    const isHorizontalRule = horizontalRule.length >= 3
-      && (horizontalRule.split("").every((character) => character === "-")
-        || horizontalRule.split("").every((character) => character === "*"));
-    if (isHorizontalRule) { flushParagraph(); closeList(); output.push("<hr>"); continue; }
-    const listItem = listItemFromMarkdownLine(line);
-    if (listItem) {
-      flushParagraph();
-      const nextType = listItem.type;
-      if (listType !== nextType) { closeList(); output.push(`<${nextType}>`); listType = nextType; }
-      output.push(`<li>${inlineMarkdown(listItem.text)}</li>`);
-      continue;
-    }
-    const quote = /^\s*>\s?(.*)$/.exec(line);
-    if (quote) { flushParagraph(); closeList(); output.push(`<blockquote>${inlineMarkdown(quote[1])}</blockquote>`); continue; }
-    closeList(); paragraph.push(line);
+    if (line.trimStart().startsWith("```")) toggleMarkdownCode(state, output);
+    else if (state.inCode) state.codeLines.push(line);
+    else if (!line.trim()) {
+      flushMarkdownParagraph(state, output);
+      closeMarkdownList(state, output);
+    } else renderMarkdownLine(line, state, output);
   }
-  if (inCode) output.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-  flushParagraph(); closeList();
+  if (state.inCode) output.push(`<pre><code>${escapeHtml(state.codeLines.join("\n"))}</code></pre>`);
+  flushMarkdownParagraph(state, output);
+  closeMarkdownList(state, output);
   return output.join("");
 }
 
@@ -164,18 +192,13 @@ function plannedEventDate(event) {
 function weatherIcon(code) {
   const number = Number(code);
   if (!Number.isFinite(number)) return "🌡️";
-  if (number === 0) return "☀️";
-  if (number === 1) return "🌤️";
-  if (number === 2) return "⛅";
-  if (number === 3) return "☁️";
-  if ([45, 48].includes(number)) return "🌫️";
-  if (number >= 51 && number <= 57) return "🌦️";
-  if (number >= 61 && number <= 67) return "🌧️";
-  if (number >= 71 && number <= 77) return number === 75 ? "❄️" : "🌨️";
-  if (number >= 80 && number <= 82) return number === 80 ? "🌦️" : "🌧️";
-  if (number >= 85 && number <= 86) return "🌨️";
-  if (number >= 95) return "⛈️";
-  return "🌤️";
+  const exact = { 0: "☀️", 1: "🌤️", 2: "⛅", 3: "☁️", 45: "🌫️", 48: "🌫️", 75: "❄️" };
+  if (exact[number]) return exact[number];
+  const range = [
+    [51, 57, "🌦️"], [61, 67, "🌧️"], [71, 74, "🌨️"], [76, 77, "🌨️"],
+    [80, 80, "🌦️"], [81, 82, "🌧️"], [85, 86, "🌨️"], [95, Number.POSITIVE_INFINITY, "⛈️"],
+  ].find(([minimum, maximum]) => number >= minimum && number <= maximum);
+  return range?.[2] || "🌤️";
 }
 
 function weatherIconFor(item) {

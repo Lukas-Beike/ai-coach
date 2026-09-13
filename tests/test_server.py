@@ -1834,6 +1834,24 @@ class CoachTests(unittest.TestCase):
         event = server.publish_state_event("job", {"job_id": "job-1", "status": "completed", "progress": {"completed": 1, "total": 1}})
         self.assertEqual(server.state_events_since(event["event_id"] - 1)["events"][0]["data"]["progress"]["completed"], 1)
 
+    def test_state_event_batch_sends_events_and_resets_for_gaps(self):
+        handler = object.__new__(server.RequestHandler)
+        sent = []
+        handler.send_sse_event = lambda event, payload, event_id=None: sent.append((event, payload, event_id))
+        since, gap = handler.send_state_event_batch({
+            "gap": False,
+            "latest_event_id": 5,
+            "events": [
+                {"event_id": 4, "event": "provider", "data": {"status": "running"}},
+                {"event_id": 5, "event": "provider", "data": {"status": "completed"}},
+            ],
+        }, 3)
+        self.assertEqual((since, gap), (5, False))
+        self.assertEqual(sent[-1], ("provider", {"status": "completed"}, 5))
+        since, gap = handler.send_state_event_batch({"gap": True, "latest_event_id": 9, "events": []}, since)
+        self.assertEqual((since, gap), (9, True))
+        self.assertEqual(sent[-1], ("reset", {"reason": "gap", "latest_event_id": 9}, 9))
+
     def test_bootstrap_reuses_one_database_connection_for_local_reads(self):
         with patch.object(server.sqlite3, "connect", wraps=sqlite3.connect) as connect:
             server.public_bootstrap()
@@ -2174,24 +2192,24 @@ class CoachTests(unittest.TestCase):
         components = (Path(__file__).resolve().parents[1] / "public" / "components.js").read_text(encoding="utf-8")
         self.assertIn('"Wartungsmodus aktiv"', app)
         self.assertIn('status.maintenance', app)
-        self.assertIn("window.AppApi = Object.freeze({ audio, request, responseError });", api_client)
+        self.assertIn("globalThis.AppApi = Object.freeze({ audio, request, responseError });", api_client)
         self.assertIn("globalThis.AppApi.request(path, options, () =>", app)
         self.assertIn("globalThis.AppApi.audio(path, blob, () =>", app)
         self.assertIn("Array.isArray(result.model_options)", app)
         self.assertIn("renderModel(model)", app)
-        self.assertIn('/api.js?v=212', index)
-        self.assertIn('/navigation.js?v=212', index)
-        self.assertIn('/state.js?v=212', index)
-        self.assertIn('/views.js?v=212', index)
-        self.assertIn('/forms.js?v=212', index)
-        self.assertIn('/components.js?v=212', index)
-        self.assertIn('/app.js?v=212', index)
-        self.assertIn('intervals-coach-v212', service_worker)
-        self.assertIn('"/navigation.js?v=212"', service_worker)
-        self.assertIn('"/state.js?v=212"', service_worker)
-        self.assertIn('"/views.js?v=212"', service_worker)
-        self.assertIn('"/forms.js?v=212"', service_worker)
-        self.assertIn('"/components.js?v=212"', service_worker)
+        self.assertIn('/api.js?v=217', index)
+        self.assertIn('/navigation.js?v=217', index)
+        self.assertIn('/state.js?v=217', index)
+        self.assertIn('/views.js?v=217', index)
+        self.assertIn('/forms.js?v=217', index)
+        self.assertIn('/components.js?v=217', index)
+        self.assertIn('/app.js?v=219', index)
+        self.assertIn('intervals-coach-v219', service_worker)
+        self.assertIn('"/navigation.js?v=217"', service_worker)
+        self.assertIn('"/state.js?v=217"', service_worker)
+        self.assertIn('"/views.js?v=217"', service_worker)
+        self.assertIn('"/forms.js?v=217"', service_worker)
+        self.assertIn('"/components.js?v=217"', service_worker)
         self.assertIn('id="connectivityNotice"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="diagnosticCaptureToggle"', index)
@@ -2218,8 +2236,8 @@ class CoachTests(unittest.TestCase):
         self.assertIn('function restoreDialogFocus(', components)
         self.assertNotIn('function showAccessibleDialog(', app)
         self.assertNotIn('function restoreDialogFocus(', app)
-        self.assertLess(index.index('/forms.js?v=212'), index.index('/components.js?v=212'))
-        self.assertLess(index.index('/components.js?v=212'), index.index('/app.js?v=212'))
+        self.assertLess(index.index('/forms.js?v=217'), index.index('/components.js?v=217'))
+        self.assertLess(index.index('/components.js?v=217'), index.index('/app.js?v=219'))
         self.assertIn('aria-describedby="checkinDescription"', index)
         self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn('path == "/api/state/events"', Path(__file__).resolve().parents[1].joinpath("server.py").read_text(encoding="utf-8"))
@@ -2261,7 +2279,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn('id="coachReceipts"', index)
         self.assertIn('function renderCoachOverview(data)', app)
         self.assertIn('function renderCoachReceipts()', app)
-        self.assertIn('if (hiddenChatReceiptTools.has(entry.tool) && !failedSync && !failedSyncJob) continue;', app)
+        self.assertIn('if (HIDDEN_CHAT_RECEIPT_TOOLS.has(entry.tool) && !failedSync && !failedSyncJob) return false;', app)
         self.assertIn('"get_sync_job"', app)
         self.assertIn('"start_intervals_plan_sync"', app)
         self.assertNotIn('id="chatOperationLabel"', index)
@@ -2534,6 +2552,10 @@ class CoachTests(unittest.TestCase):
         unsupported = weekly.replace(b"FREQ=WEEKLY;WKST=SU;BYDAY=TU,TH", b"FREQ=HOURLY;COUNT=2")
         with self.assertRaises(server.AppError):
             server.parse_ical_calendar(unsupported)
+        for malformed_byday in (b"BYDAY=MO,", b"BYDAY=MO,,TU", b"BYDAY=,"):
+            malformed = weekly.replace(b"BYDAY=TU,TH", malformed_byday)
+            with self.assertRaises(server.AppError):
+                server.parse_ical_calendar(malformed)
 
     def test_ical_parser_applies_google_rdate_and_recurring_exceptions(self):
         payload = (
@@ -2955,6 +2977,7 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(enriched[1]["compliance"]["status"], "missed")
         self.assertEqual(enriched[1]["compliance"]["percentage"], 0)
         self.assertNotIn("compliance", enriched[2])
+
         current_week = next(item for item in weekly if item["week_start"] == (today - timedelta(days=today.weekday())).isoformat())
         if today.weekday() == 0:
             # On Monday, yesterday belongs to the previous calendar week.
@@ -2974,6 +2997,15 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(current_week["unit_percentage"], 50)
             self.assertEqual(current_week["percentage"], 40)
             self.assertEqual(current_week["basis"], "training_load")
+
+    def test_workout_compliance_uses_duration_and_unavailable_fallbacks(self):
+        today = date(2026, 9, 12)
+        duration_event = {"start_date_local": today.isoformat(), "moving_time": 3600}
+        duration_activity = {"id": "done", "start_date_local": today.isoformat(), "moving_time": 2700}
+        duration = server.workout_compliance(duration_event, duration_activity, today)
+        self.assertEqual((duration["basis"], duration["percentage"]), ("duration", 75))
+        unavailable = server.workout_compliance({"start_date_local": today.isoformat()}, duration_activity, today)
+        self.assertEqual((unavailable["basis"], unavailable["percentage"]), ("unavailable", 100))
 
     def test_training_calendar_adds_unplanned_completed_activities_without_duplicating_matches(self):
         today = date(2026, 8, 26)
@@ -3250,6 +3282,26 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.competition_event_payload(competition)["type"], "Ride")
         self.assertEqual(server.competition_event_payload(competition)["distance"], 250000)
 
+    def test_competition_normalization_helpers_validate_category_and_fallback_id(self):
+        category, priority = server.competition_category_and_priority({"priority": "a"}, "Race")
+        self.assertEqual((category, priority), ("RACE_A", "A"))
+        self.assertRegex(server.competition_normalized_id("not-a-uuid"), server.UUID_PATTERN)
+        with self.assertRaises(server.AppError) as error:
+            server.competition_category_and_priority({"priority": "Z"}, "Race")
+        self.assertEqual(error.exception.status, 400)
+
+    def test_competition_event_optional_payload_excludes_invalid_distance(self):
+        payload = server.competition_event_optional_payload({
+            "moving_time": "3600",
+            "distance": "not-a-distance",
+            "target": "Finish",
+            "intervals_event_id": "external-race-id",
+        })
+        self.assertEqual(payload["moving_time"], 3600)
+        self.assertNotIn("distance", payload)
+        self.assertEqual(payload["target"], "Finish")
+        self.assertEqual(payload["id"], "external-race-id")
+
     def test_remote_competition_updates_all_intervals_event_fields(self):
         data = server.remote_competition_data({
             "id": 42, "category": "RACE_C", "start_date_local": "2026-09-20T07:15:00",
@@ -3263,6 +3315,11 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(data["moving_time"], 7200)
         self.assertEqual(data["distance"], "21097")
         self.assertEqual(data["target"], "Sub 2:00")
+
+    def test_remote_competition_helpers_normalize_invalid_duration_and_fractional_distance(self):
+        self.assertIsNone(server.remote_competition_moving_time("not-a-duration"))
+        self.assertEqual(server.remote_competition_distance(42195.5), "42195.5")
+        self.assertEqual(server.remote_competition_distance("42.195 km"), "42195")
 
     def test_past_workout_is_rejected(self):
         old = (date.today() - timedelta(days=4)).isoformat()
@@ -3350,6 +3407,12 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["run_10k_seconds"]["value"], 2740)
         self.assertEqual(result["run_half_marathon_seconds"]["value"], 6150)
         self.assertEqual(result["run_5k_seconds"]["source"], "Garmin Connect")
+
+    def test_garmin_duration_parser_normalizes_colon_delimited_times(self):
+        self.assertEqual(server._garmin_duration_seconds("01:42:30"), 6150)
+        self.assertEqual(server._garmin_duration_seconds("42:30"), 2550)
+        self.assertIsNone(server._garmin_duration_seconds("01:02:03:04"))
+        self.assertIsNone(server._garmin_duration_seconds("00:00"))
 
     def test_garmin_values_have_priority_in_performance_metrics(self):
         server.set_kv("garmin_snapshot", json.dumps({
@@ -4151,6 +4214,40 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(record["before_sleep"]["value"], 57)
         self.assertEqual(record["morning"]["value"], 78)
 
+    def test_garmin_sleep_bounds_prefers_valid_nested_daily_sleep(self):
+        start, end = server._garmin_sleep_bounds({
+            "dailySleepDTO": {
+                "sleepStartTimestampGMT": "2026-09-03T21:30:00+00:00",
+                "sleepEndTimestampGMT": "2026-09-04T05:45:00+00:00",
+            },
+            "invalid": {"startTimestampGMT": "2026-09-05T06:00:00+00:00", "endTimestampGMT": "2026-09-05T05:00:00+00:00"},
+        })
+        self.assertEqual(start, datetime(2026, 9, 3, 21, 30, tzinfo=timezone.utc))
+        self.assertEqual(end, datetime(2026, 9, 4, 5, 45, tzinfo=timezone.utc))
+
+    def test_morning_checkin_garmin_gate_waits_for_fresh_sleep(self):
+        events = []
+        with patch.object(server, "garmin_fixture_path", return_value="fixture.json"), \
+             patch.object(server, "sync_garmin") as sync_garmin, \
+             patch.object(server, "garmin_sleep_ready_for_checkin", return_value=False), \
+             patch.object(server, "publish_state_event", side_effect=lambda *args: events.append(args)):
+            ready = server._morning_checkin_garmin_ready(date(2026, 9, 4))
+        self.assertIsNone(ready)
+        sync_garmin.assert_called_once_with(days=server.MORNING_GARMIN_SYNC_DAYS, reason="Morgen-Check-in", wait_for_existing=True)
+        self.assertEqual(server.get_kv("morning_checkin_status"), "waiting")
+        self.assertEqual(server.get_kv("morning_checkin_attempt_count"), "0")
+        self.assertTrue(events)
+
+    def test_garmin_source_observed_at_uses_latest_nested_valid_date(self):
+        observed_at = server.garmin_source_observed_at({
+            "calendarDate": "invalid-date",
+            "nested": [
+                {"summaryDate": "2026-09-03"},
+                {"startTimeGMT": "2026-09-05T06:00:00+00:00"},
+            ],
+        })
+        self.assertEqual(observed_at, "2026-09-05")
+
     def test_morning_body_battery_loads_once_for_the_sleep_window(self):
         class FakeGarmin:
             sleep_calls = []
@@ -4425,6 +4522,44 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(history[-2]["parts"][0]["functionCall"]["name"], "save_checkin")
         self.assertEqual(history[-1]["parts"][0]["functionResponse"]["name"], "save_checkin")
 
+    def test_structured_command_failure_response_keeps_confirmed_sync_effects(self):
+        commands = [{"tool": "start_intervals_plan_sync", "result": {"ok": True, "status": "queued"}}]
+        status, text, question, cancelled = server._structured_command_failure_response(
+            server.AppError(429, "Provider limit", reason="rate_limit_exceeded"), commands, commands, [], ["start_intervals_plan_sync"],
+        )
+        self.assertEqual(status, "partial")
+        self.assertIsNone(question)
+        self.assertFalse(cancelled)
+        self.assertIn("Anfragelimit", text)
+        self.assertIn("bleibt bestehen", text)
+        self.assertIn("Noch offen", text)
+
+    def test_structured_command_failure_response_keeps_completed_clarification(self):
+        commands = [
+            {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}},
+            {"tool": "clarify_coach_request", "result": {"ok": True, "question": "Wie fühlst du dich?"}},
+        ]
+        status, text, question, cancelled = server._structured_command_failure_response(
+            server.AppError(502, "Provider error", reason="provider_unavailable"), commands, commands[:1], [], [],
+        )
+        self.assertEqual(status, "completed")
+        self.assertTrue(text.startswith("Wie fühlst du dich?"))
+        self.assertIn("Bereits erfolgreich ausgefuehrt", text)
+        self.assertEqual(question, "Wie fühlst du dich?")
+        self.assertFalse(cancelled)
+
+    def test_structured_command_failure_response_keeps_partial_cancelled_effect(self):
+        commands = [
+            {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}},
+            {"tool": "clarify_coach_request", "result": {"ok": True, "question": "Wie fühlst du dich?"}},
+        ]
+        status, _text, question, cancelled = server._structured_command_failure_response(
+            server.AppError(499, "Cancelled", reason="chat_cancelled"), commands, commands[:1], [], [],
+        )
+        self.assertEqual(status, "partial")
+        self.assertEqual(question, "Wie fühlst du dich?")
+        self.assertTrue(cancelled)
+
     def test_gemini_history_trimming_keeps_complete_tool_exchanges(self):
         history = [
             {"role": "user", "parts": [{"text": "Starte die Planung."}]},
@@ -4445,6 +4580,19 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(len(trimmed), 58)
         self.assertEqual(trimmed[0]["parts"][0]["text"], "Frage 0")
         self.assertFalse(any("functionResponse" in part for content in trimmed for part in content["parts"]))
+
+    def test_gemini_history_parts_preserve_safe_attachment_boundary(self):
+        attachments = [
+            {"type": "image", "name": "photo.jpg", "data": "raw-image", "mime": "image/jpeg"},
+            {"type": "gpx", "name": "route.gpx", "data": "raw-file", "summary": {"distance": 12}},
+        ]
+        omitted = server._gemini_history_parts({"content": "Review this"}, attachments, 0, set())
+        self.assertEqual(omitted[0], {"text": "Review this"})
+        self.assertIn("raw_image_omitted", omitted[1]["text"])
+        self.assertIn("untrusted_gpx", omitted[2]["text"])
+        self.assertIn("raw_file_omitted", omitted[3]["text"])
+        selected = server._gemini_history_parts({"content": "Review this"}, attachments, 0, {(0, 0)})
+        self.assertEqual(selected[1]["inlineData"], {"mimeType": "image/jpeg", "data": "raw-image"})
 
     def test_gemini_rebuilds_history_from_the_shared_local_dialogue(self):
         server.add_message("user", "Was war mein letzter Schwerpunkt?")
@@ -5201,6 +5349,26 @@ class CoachTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in result["planned_workouts"]], ["Future workout"])
         self.assertEqual(result["activity_rollups_by_sport"]["Radfahren"]["last_7_days"]["sessions"], 7)
 
+    def test_future_coach_planned_workouts_excludes_invalid_and_past_dates(self):
+        today = date(2026, 9, 13)
+        planned = server.future_coach_planned_workouts([
+            {"name": "Later", "date": "2026-09-15"},
+            {"name": "Invalid", "date": "not-a-date"},
+            {"name": "Past", "start_date_local": "2026-09-12"},
+            {"name": "Today", "date": "2026-09-13"},
+        ], today)
+        self.assertEqual([item["name"] for item in planned], ["Today", "Later"])
+
+    def test_activity_rollup_ignores_invalid_values_and_outside_dates(self):
+        anchor = date(2026, 9, 12)
+        rollup = server.activity_rollup([
+            {"start_date_local": "2026-09-12", "moving_time": "3600", "icu_training_load": "42.5"},
+            {"start_date_local": "2026-09-11", "moving_time": "invalid", "icu_training_load": None},
+            {"start_date_local": "not-a-date", "moving_time": 7200, "icu_training_load": 90},
+            {"start_date_local": "2026-09-01", "moving_time": 7200, "icu_training_load": 90},
+        ], 2, anchor)
+        self.assertEqual(rollup, {"days": 2, "sessions": 2, "duration_hours": 1.0, "training_load": 42.5})
+
     def test_coach_intervals_context_is_deterministic_for_same_timestamps_and_missing_sports(self):
         today = server.local_now().date()
         snapshot = {
@@ -5653,6 +5821,25 @@ class CoachTests(unittest.TestCase):
             }) for index in (2, 3)]
             state = server._structured_training_state()
         self.assertEqual([item["local_id"] for item in state["planned_units"]], [item["id"] for item in active])
+
+    def test_structured_training_state_rejects_cursor_from_changed_revision(self):
+        with patch.object(server, "COACH_TRAINING_CHANGE_LIMIT", 1):
+            server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=1)).isoformat(),
+                "sport": "Ride", "name": "First", "description": "- 30m 60% easy",
+            })
+            server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=2)).isoformat(),
+                "sport": "Ride", "name": "Second", "description": "- 30m 60% easy",
+            })
+            first_page = server._structured_training_state()
+            server.create_local_planned_unit({
+                "date": (date.today() + timedelta(days=3)).isoformat(),
+                "sport": "Ride", "name": "Changed", "description": "- 30m 60% easy",
+            })
+            with self.assertRaises(server.AppError) as raised:
+                server._structured_training_state(cursor=first_page["planned_units_page"]["next_cursor"])
+        self.assertEqual(raised.exception.reason, "planning_revision_conflict")
 
     def test_bulk_training_changes_require_revision_and_hashes(self):
         planned = server.create_local_planned_unit({
@@ -7458,16 +7645,16 @@ class CoachTests(unittest.TestCase):
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
-        self.assertIn('"/api.js?v=212"', source)
-        self.assertIn('"/navigation.js?v=212"', source)
-        self.assertIn('"/state.js?v=212"', source)
-        self.assertIn('"/views.js?v=212"', source)
-        self.assertIn('"/forms.js?v=212"', source)
-        self.assertIn('"/components.js?v=212"', source)
+        self.assertIn('"/api.js?v=217"', source)
+        self.assertIn('"/navigation.js?v=217"', source)
+        self.assertIn('"/state.js?v=217"', source)
+        self.assertIn('"/views.js?v=217"', source)
+        self.assertIn('"/forms.js?v=217"', source)
+        self.assertIn('"/components.js?v=217"', source)
         self.assertIn('"/forms.js"', source)
-        self.assertIn('"/app.js?v=212"', source)
-        self.assertIn('"/icon.svg?v=212"', source)
-        self.assertIn('"/styles.css?v=212"', source)
+        self.assertIn('"/app.js?v=219"', source)
+        self.assertIn('"/icon.svg?v=217"', source)
+        self.assertIn('"/styles.css?v=217"', source)
         self.assertIn('pathname.startsWith("/api/")', source)
         self.assertIn('event.request.method !== "GET"', source)
         self.assertIn("const VERSIONED_ASSETS = new Set", source)
@@ -7793,6 +7980,11 @@ class CoachTests(unittest.TestCase):
         self.assertIn("422", raised.exception.message)
         self.assertIn("Invalid workout type", raised.exception.message)
 
+    def test_intervals_validation_error_uses_top_level_detail_after_empty_error(self):
+        raw_error = json.dumps({"error": "", "message": "Invalid workout type"}).encode("utf-8")
+        details = server.upstream_http_error_message(422, raw_error, "intervals")
+        self.assertIn("Invalid workout type", details)
+
     def test_intervals_public_state_reports_sync_health(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
@@ -7990,6 +8182,10 @@ class CoachTests(unittest.TestCase):
             details = server.openai_error_details(429, json.dumps({"error": {"code": code}}).encode("utf-8"))
             self.assertEqual(details["reason"], code)
             self.assertIn("Limit", details["message"])
+
+    def test_openai_log_reasons_are_static_allowlisted_values(self):
+        self.assertEqual(server.safe_openai_log_reason("project_spend_limit_exceeded"), "usage_limit_exceeded")
+        self.assertEqual(server.safe_openai_log_reason("provider-private-message"), "http_error")
 
     def test_openai_conversation_lock_retry_uses_structured_reason(self):
         calls = []
@@ -8389,6 +8585,14 @@ class CoachTests(unittest.TestCase):
         state = server.garmin_public_state()
         self.assertTrue(state["last_error"])
 
+    def test_diagnostic_response_shape_keeps_only_structure(self):
+        shape = server.diagnostic_response_shape({"athlete_name": "Ada", "nested": [{"secret": "hidden"}], "invalid key": 1})
+        self.assertEqual(shape["type"], "object")
+        self.assertEqual(shape["fields"], ["athlete_name", "nested", "[nonstandard]"])
+        self.assertEqual(shape["sample"], {"type": "string", "length": 3})
+        self.assertNotIn("Ada", json.dumps(shape))
+        self.assertEqual(server.diagnostic_response_shape([{"token": "hidden"}])["item_shape"]["fields"], ["token"])
+
     def test_garmin_sdk_calls_log_operation_and_result_summary(self):
         server.initialise_logging()
         result = server.external_call(
@@ -8405,6 +8609,29 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(completed["context"]["service"], "garmin")
         self.assertEqual(completed["context"]["operation"], "get_sleep_daily")
         self.assertEqual(completed["context"]["result_items"], 1)
+
+    def test_coach_action_preview_input_validates_safe_action_contract(self):
+        values = {
+            "action_type": "undo_change",
+            "target_system": "local",
+            "object_ids": {"history_id": "change-1"},
+            "diff": {"fields": {"name": {"changed": True}}},
+            "payload": {"history_id": "change-1"},
+        }
+        self.assertEqual(
+            server.validated_coach_action_preview_input(values),
+            ("undo_change", "local", values["object_ids"], values["diff"], values["payload"]),
+        )
+        for invalid in (
+            None,
+            {**values, "action_type": "unknown"},
+            {**values, "target_system": "intervals"},
+            {**values, "diff": {}},
+            {**values, "payload": []},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(server.AppError) as error:
+                server.validated_coach_action_preview_input(invalid)
+            self.assertEqual(error.exception.status, 400)
 
     def test_change_history_records_safe_diff_and_explicit_undo(self):
         server.save_profile({"name": "Ada", "weight_kg": "71"})
@@ -8464,6 +8691,10 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(failed[("intervals", "activities")]["state"], "error")
             self.assertEqual(failed[("intervals", "activities")]["error_code"], "network_error")
             self.assertIsNone(failed[("intervals", "activities")]["next_retry_at"])
+            with patch.object(server, "CONFIG", replace(config, intervals_api_key="")):
+                unconfigured = {(item["provider"], item["area"]): item for item in server.provider_freshness_state()}
+            self.assertEqual(unconfigured[("intervals", "activities")]["state"], "not_configured")
+            self.assertEqual(unconfigured[("intervals", "activities")]["error_code"], "network_error")
             server.enqueue_sync_job(
                 "intervals", "refresh", {"days": 1},
                 requested_by="test", available_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
@@ -8501,7 +8732,7 @@ class CoachTests(unittest.TestCase):
         self.assertIn("async function retryProvider(provider, button)", app)
         self.assertIn('provider === "intervals"', app)
         self.assertIn('provider === "weather"', app)
-        self.assertIn('v=212', index)
+        self.assertIn('v=217', index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
@@ -8529,6 +8760,17 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(result["results"][1]["status"], "error")
         self.assertEqual(result["failed_object_ids"], [second["id"]])
         self.assertEqual([call.args[0] for call in sync_entry.call_args_list], [first["id"], second["id"]])
+
+    def test_coach_dialogue_command_result_bounds_receipt_details(self):
+        row = {"client_turn_id": "turn-1", "receipt": json.dumps({
+            "status": "completed", "sync_job_ids": list(range(50)),
+            "command_receipts": [{"tool": "save_checkin", "result": {"ok": True, "status": "saved"}, "request": {"scope": list(range(50))}}],
+        })}
+        result = server._coach_dialogue_command_result(row)
+        self.assertEqual(result["client_turn_id"], "turn-1")
+        self.assertEqual(len(result["sync_job_ids"]), 40)
+        self.assertTrue(result["steps"][0]["scope_truncated"])
+        self.assertEqual(len(result["steps"][0]["scope"]), 40)
 
 
 if __name__ == "__main__":

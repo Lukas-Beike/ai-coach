@@ -16,6 +16,10 @@ SPEC.loader.exec_module(release_source)
 
 
 class WorkflowSourceTests(unittest.TestCase):
+    def test_daily_release_limits_default_token_permissions(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/weekly-release.yml").read_text(encoding="utf-8")
+        self.assertIn("permissions:\n  contents: read", workflow)
+
     def test_executed_source_is_bound_to_the_workflow_event(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/publish-container.yml").read_text(encoding="utf-8")
@@ -71,7 +75,11 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("ready_for_review", workflow)
         self.assertIn("issue_comment:", workflow)
         self.assertIn("pullRequest.draft !== true", workflow)
-        self.assertIn("uses: ./.github/actions/codex-review-gate", workflow)
+        self.assertRegex(
+            workflow,
+            r"uses: Lukas-Beike/ai-coach/\.github/actions/codex-review-gate@[0-9a-f]{40}",
+        )
+        self.assertNotIn("actions/checkout", workflow)
         self.assertRegex(
             workflow,
             r"(?ms)  gate:.*?    permissions:\n      contents: read\n      issues: read\n      pull-requests: read\n      checks: write",
@@ -132,8 +140,8 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertIn("if: needs.discover.outputs.has_pull_requests == 'true'", workflow)
         self.assertIn("matrix.pullRequestNumber", workflow)
         self.assertIn("matrix.baseRef", workflow)
-        self.assertIn("ref: develop", workflow)
-        self.assertIn("ref: main", workflow)
+        self.assertNotIn("ref: develop", workflow)
+        self.assertNotIn("ref: main", workflow)
         self.assertNotIn("steps.resolve_base.outputs.base_sha", workflow)
         self.assertIn("EXPECTED_BASE_REF: ${{ matrix.baseRef }}", workflow)
         self.assertIn("cancel-in-progress: true", workflow)

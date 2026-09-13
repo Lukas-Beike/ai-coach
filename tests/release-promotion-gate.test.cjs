@@ -291,8 +291,8 @@ test('dispatch refuses an ordinary main PR and malformed PR numbers', async () =
   }
 });
 
-test('manual events use the current protected develop action before main is updated', () => {
-  function checkoutEnabled(stepName, baseRef, eventName, exempt = false) {
+test('manual events use the current protected action without checking out pull-request code', () => {
+  function actionEnabled(stepName, baseRef, eventName, exempt = false) {
     const step = workflow.split(`- name: ${stepName}\n`)[1].split('\n      - name:', 1)[0];
     const condition = step.match(/^        if: (.+)$/m)[1];
     return new Function('matrix', 'github', `return (${condition});`)(
@@ -307,11 +307,21 @@ test('manual events use the current protected develop action before main is upda
   }
   for (const event of ['workflow_dispatch', 'issue_comment', 'pull_request_target', 'push']) {
     const fromDevelop = ['workflow_dispatch', 'issue_comment'].includes(event);
-    assert.equal(checkoutEnabled('Check out trusted develop workflow sources', 'main', event), fromDevelop);
-    assert.equal(checkoutEnabled('Check out trusted main workflow sources', 'main', event), !fromDevelop);
-    assert.equal(checkoutEnabled('Check out trusted develop workflow sources', 'develop', event), true);
-    assert.equal(checkoutEnabled('Check out trusted main workflow sources', 'develop', event), false);
-    assert.equal(checkoutEnabled('Check out trusted develop workflow sources', 'main', event, true), false);
-    assert.equal(checkoutEnabled('Check out trusted main workflow sources', 'main', event, true), false);
+    const pushEvent = event === 'push';
+    assert.equal(actionEnabled('Run trusted develop Codex gate', 'main', event), !pushEvent && fromDevelop);
+    assert.equal(actionEnabled('Run trusted main Codex gate', 'main', event), !pushEvent && !fromDevelop);
+    assert.equal(actionEnabled('Run trusted develop Codex gate', 'develop', event), !pushEvent);
+    assert.equal(actionEnabled('Run trusted main Codex gate', 'develop', event), false);
+    assert.equal(actionEnabled('Run trusted develop Codex gate', 'main', event, true), false);
+    assert.equal(actionEnabled('Run trusted main Codex gate', 'main', event, true), false);
   }
 });
+
+test('privileged review gate uses a pinned protected action without checkout', () => {
+  assert.doesNotMatch(workflow, /actions\/checkout/);
+  assert.match(
+    workflow,
+    /uses: Lukas-Beike\/ai-coach\/\.github\/actions\/codex-review-gate@[0-9a-f]{40}/,
+  );
+});
+
