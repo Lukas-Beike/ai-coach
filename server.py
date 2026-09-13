@@ -2592,7 +2592,7 @@ def _provider_freshness_status(
     if row:
         status = row["status"]
         if status == "running":
-            return "syncing", None
+            return "syncing", _provider_fallback_error_code(fallback_error)
         if status == "error":
             state = "stale" if last_good else "error"
             return state, row.get("error_code")
