@@ -10014,31 +10014,38 @@ LIBRARY_WORKOUT_FIELDS = {
 }
 
 
-def _library_workout_ids(workout: dict[str, Any], local_id: str | None, external_id: str | None) -> tuple[str, str | None]:
-    raw_id = str(workout.get("id") or "").strip()
+def _library_workout_local_id(workout: dict[str, Any], local_id: str | None) -> str:
     requested_local_id = str(local_id or workout.get("local_id") or "").strip()
+    raw_id = str(workout.get("id") or "").strip()
     if not requested_local_id and raw_id:
         try:
             requested_local_id = str(uuid.UUID(raw_id))
         except (ValueError, AttributeError):
-            requested_local_id = ""
+            pass
     if requested_local_id:
         try:
-            resolved_local_id = str(uuid.UUID(requested_local_id))
+            return str(uuid.UUID(requested_local_id))
         except (ValueError, AttributeError) as exc:
             raise AppError(400, "Bibliothekseinheit ohne gültige lokale UUID.") from exc
-    else:
-        resolved_local_id = str(uuid.uuid4())
+    return str(uuid.uuid4())
+
+
+def _library_workout_external_id(
+    workout: dict[str, Any], external_id: str | None, local_id: str,
+) -> str | None:
+    raw_id = str(workout.get("id") or "").strip()
     # An explicit stored mapping is authoritative. Otherwise the provider's
     # resource id is the external identity; a local UUID must never become its
     # own external ID.
     resolved_external_id = str(external_id or "").strip()
     if not resolved_external_id:
-        if raw_id and raw_id != resolved_local_id:
-            resolved_external_id = raw_id
-        else:
-            resolved_external_id = str(workout.get("external_id") or "").strip()
-    return resolved_local_id, resolved_external_id or None
+        resolved_external_id = raw_id if raw_id and raw_id != local_id else str(workout.get("external_id") or "").strip()
+    return resolved_external_id or None
+
+
+def _library_workout_ids(workout: dict[str, Any], local_id: str | None, external_id: str | None) -> tuple[str, str | None]:
+    resolved_local_id = _library_workout_local_id(workout, local_id)
+    return resolved_local_id, _library_workout_external_id(workout, external_id, resolved_local_id)
 
 
 def _library_workout_projection(workout: dict[str, Any]) -> dict[str, Any]:
