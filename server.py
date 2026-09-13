@@ -10500,7 +10500,7 @@ def _preserve_remote_library_metadata(entry: dict[str, Any], existing: dict[str,
             entry[metadata_key] = existing_payload[metadata_key]
 
 
-def _upsert_remote_library_workout(
+def _persist_remote_library_workout_entry(
     db: sqlite3.Connection, workout: dict[str, Any], existing: dict[str, Any] | None,
     local_id: str, external_id: str, now: str,
 ) -> dict[str, Any]:
@@ -10555,7 +10555,7 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
             ).fetchone()
             local_id = str(existing.get("local_id") or existing.get("id") or uuid.uuid4()) if existing else str(uuid.uuid4())
             preserved = _preserved_dirty_library_workout(existing, local_id, external_id)
-            normalized.append(preserved or _upsert_remote_library_workout(
+            normalized.append(preserved or _persist_remote_library_workout_entry(
                 db, workout, existing, local_id, external_id, now
             ))
         if remove_missing:
