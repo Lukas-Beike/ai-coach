@@ -5336,7 +5336,7 @@ def _resolve_calendar_addresses(hostname: str, *, status: int) -> list[ipaddress
     return addresses
 
 
-def fetch_calendar_feed(url: str) -> bytes:
+def _calendar_feed_request(url: str) -> tuple[str, int, bytes]:
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").rstrip(".").casefold()
     port = parsed.port or 443
@@ -5356,6 +5356,68 @@ def fetch_calendar_feed(url: str) -> bytes:
         ).encode("ascii")
     except UnicodeError as exc:
         raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.") from exc
+    return hostname, port, request_bytes
+
+
+def _calendar_fetch_remaining(deadline: float) -> float:
+    remaining = deadline - time.perf_counter()
+    if remaining <= 0:
+        raise TimeoutError("calendar request deadline exceeded")
+    return remaining
+
+
+def _fetch_calendar_address(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    port: int,
+    hostname: str,
+    tls_context: ssl.SSLContext,
+    request_bytes: bytes,
+    deadline: float,
+) -> tuple[bytes, int]:
+    raw_socket = None
+    tls_socket = None
+    try:
+        raw_socket = socket.create_connection(
+            (str(address), port), timeout=min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, _calendar_fetch_remaining(deadline))
+        )
+        tls_socket = tls_context.wrap_socket(raw_socket, server_hostname=hostname)
+        raw_socket = None
+        tls_socket.settimeout(min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, _calendar_fetch_remaining(deadline)))
+        tls_socket.sendall(request_bytes)
+        response = HTTPResponse(tls_socket, method="GET")
+        response.begin()
+        if 300 <= response.status < 400:
+            raise AppError(400, "Der Kalender-Feed darf nicht auf eine andere Adresse weiterleiten.")
+        if response.status >= 400:
+            raise AppError(502, f"Der Kalender-Feed antwortete mit HTTP {response.status}.")
+        payload = response.read(MAX_EXTERNAL_CALENDAR_BYTES + 1)
+        if len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
+            raise AppError(413, "Der Kalender-Feed ist zu groß.")
+        return payload, response.status
+    finally:
+        if tls_socket is not None:
+            tls_socket.close()
+        if raw_socket is not None:
+            raw_socket.close()
+
+
+def _calendar_fetch_failure_log(request_context: dict[str, Any], started: float, error: AppError, timed_out: bool) -> None:
+    LOGGER.exception(
+        "External calendar request failed",
+        extra={
+            "event": "external_request_failed",
+            "context": {
+                **request_context,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                "status": error.status,
+                "error_code": "timeout" if timed_out or error.status == 504 else "provider_error",
+            },
+        },
+    )
+
+
+def fetch_calendar_feed(url: str) -> bytes:
+    hostname, port, request_bytes = _calendar_feed_request(url)
     tls_context = ssl.create_default_context()
     tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
     # Resolve immediately before connecting and connect only to these checked
@@ -5377,40 +5439,15 @@ def fetch_calendar_feed(url: str) -> bytes:
         deadline = started + CALENDAR_FETCH_TIMEOUT_SECONDS
         last_network_error: OSError | None = None
         for address in addresses:
-            remaining = deadline - time.perf_counter()
-            if remaining <= 0:
-                timed_out = True
-                break
-            raw_socket = None
-            tls_socket = None
             try:
-                raw_socket = socket.create_connection(
-                    (str(address), port), timeout=min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, remaining)
-                )
-                tls_socket = tls_context.wrap_socket(raw_socket, server_hostname=hostname)
-                raw_socket = None
-                remaining = deadline - time.perf_counter()
-                if remaining <= 0:
-                    timed_out = True
-                    break
-                tls_socket.settimeout(min(CALENDAR_CONNECTION_TIMEOUT_SECONDS, remaining))
-                tls_socket.sendall(request_bytes)
-                response = HTTPResponse(tls_socket, method="GET")
-                response.begin()
-                if 300 <= response.status < 400:
-                    raise AppError(400, "Der Kalender-Feed darf nicht auf eine andere Adresse weiterleiten.")
-                if response.status >= 400:
-                    raise AppError(502, f"Der Kalender-Feed antwortete mit HTTP {response.status}.")
-                payload = response.read(MAX_EXTERNAL_CALENDAR_BYTES + 1)
-                if len(payload) > MAX_EXTERNAL_CALENDAR_BYTES:
-                    raise AppError(413, "Der Kalender-Feed ist zu groß.")
+                payload, status = _fetch_calendar_address(address, port, hostname, tls_context, request_bytes, deadline)
                 LOGGER.info(
                     EXTERNAL_HTTP_COMPLETED_EVENT,
                     extra={
                         "event": "external_request_completed",
                         "context": {
                             **request_context,
-                            "status": response.status,
+                            "status": status,
                             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                             "response_bytes": len(payload),
                         },
@@ -5426,27 +5463,11 @@ def fetch_calendar_feed(url: str) -> bytes:
             except OSError as exc:
                 last_network_error = exc
                 continue
-            finally:
-                if tls_socket is not None:
-                    tls_socket.close()
-                if raw_socket is not None:
-                    raw_socket.close()
         if timed_out:
             raise AppError(504, "Der Kalender-Feed hat nicht rechtzeitig geantwortet.")
         raise AppError(502, "Der Kalender-Feed konnte nicht geladen werden.") from last_network_error
     except AppError as exc:
-        LOGGER.exception(
-            "External calendar request failed",
-            extra={
-                "event": "external_request_failed",
-                "context": {
-                    **request_context,
-                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                    "status": exc.status,
-                    "error_code": "timeout" if timed_out or exc.status == 504 else "provider_error",
-                },
-            },
-        )
+        _calendar_fetch_failure_log(request_context, started, exc, timed_out)
         raise
 
 
