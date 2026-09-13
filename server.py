@@ -10021,7 +10021,7 @@ def _library_workout_local_id(workout: dict[str, Any], local_id: str | None) -> 
         try:
             requested_local_id = str(uuid.UUID(raw_id))
         except (ValueError, AttributeError):
-            pass
+            requested_local_id = ""
     if requested_local_id:
         try:
             return str(uuid.UUID(requested_local_id))
