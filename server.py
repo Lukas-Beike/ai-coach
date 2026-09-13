@@ -11890,15 +11890,9 @@ def _persist_planned_calendar_sync_error(normalized_id: str, event: dict[str, An
     )
 
 
-def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str, Any] | None:
-    """Push one approved local calendar unit; this is never called by planning mutations."""
-    normalized_id, row, workout = _load_planned_calendar_entry(local_id)
-    # Future planning is local-authoritative, so an approved push uses the
-    # preserved local payload without a separate conflict decision.
-    if workout.get("local_deleted") or workout.get("archived"):
-        _remove_planned_calendar_event(normalized_id, row, workout)
-        return None
-    event_payload = _planned_calendar_event_payload(normalized_id, workout)
+def _remote_planned_calendar_event(
+    normalized_id: str, workout: dict[str, Any], event_payload: dict[str, Any],
+) -> dict[str, Any]:
     if not CONFIG.intervals_api_key:
         raise AppError(503, INTERVALS_API_KEY_ERROR)
     result = IntervalsClient().upsert_calendar_events([event_payload])
@@ -11910,6 +11904,19 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
     except AppError as exc:
         _persist_planned_calendar_sync_error(normalized_id, event, event_payload, exc)
         raise
+    return event
+
+
+def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str, Any] | None:
+    """Push one approved local calendar unit; this is never called by planning mutations."""
+    normalized_id, row, workout = _load_planned_calendar_entry(local_id)
+    # Future planning is local-authoritative, so an approved push uses the
+    # preserved local payload without a separate conflict decision.
+    if workout.get("local_deleted") or workout.get("archived"):
+        _remove_planned_calendar_event(normalized_id, row, workout)
+        return None
+    event_payload = _planned_calendar_event_payload(normalized_id, workout)
+    event = _remote_planned_calendar_event(normalized_id, workout, event_payload)
     # Keep the client-generated external identity when the provider omits it
     # from the response. This makes retries idempotent.
     update_planned_unit_sync_state(
@@ -11923,9 +11930,7 @@ def _sync_local_planned_unit_calendar_entry_unlocked(local_id: str) -> dict[str,
 LIBRARY_SYNC_PREVIEW_TTL_SECONDS = 10 * 60
 
 
-def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any]], str]:
-    summary = {"new": 0, "changed": 0, "missing": 0, "error_retry": 0, "planned": 0, "conflict": 0}
-    entries: list[dict[str, Any]] = []
+def _workout_library_sync_rows() -> tuple[list[Any], list[Any]]:
     with DB_LOCK, database() as db:
         rows = db.execute(
             "SELECT local_id, external_id, sync_state, payload FROM workout_library "
@@ -11935,40 +11940,56 @@ def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any
             "SELECT local_id, external_id, sync_state, payload FROM planned_units "
             "WHERE sync_state IN ('local', 'sync_error', 'remote_missing', 'conflict') ORDER BY local_id"
         ).fetchall()
+    return rows, planned_rows
+
+
+def _workout_library_sync_category(state: str, is_planned: bool, has_remote_id: bool) -> str:
+    if state == "conflict":
+        return "conflict"
+    if state == "remote_missing":
+        return "missing"
+    if is_planned:
+        return "planned"
+    if state == "sync_error":
+        return "error_retry"
+    return "changed" if has_remote_id else "new"
+
+
+def _workout_library_sync_entry(row: Any, planned_local_ids: set[str]) -> tuple[str, bool, dict[str, Any]]:
+    state = str(row.get("sync_state") or "local")
+    payload = str(row.get("payload") or "")
+    try:
+        payload_data = json.loads(payload)
+    except (TypeError, ValueError):
+        payload_data = {}
+    planned_date = str(payload_data.get("date") or "").strip()[:10] if isinstance(payload_data, dict) else ""
+    local_id = str(row.get("local_id") or "")
+    is_planned = local_id in planned_local_ids
+    category = _workout_library_sync_category(state, is_planned, bool(row.get("external_id")))
+    return category, is_planned, {
+        "local_id": local_id,
+        "status": state,
+        "category": category,
+        "has_remote_id": bool(row.get("external_id")),
+        "planned_date": planned_date or None,
+        "syncs_calendar": is_planned,
+        "entity": "planned_unit" if is_planned else "workout_library",
+        "payload_hash": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+    }
+
+
+def _workout_library_sync_snapshot() -> tuple[dict[str, int], list[dict[str, Any]], str]:
+    summary = {"new": 0, "changed": 0, "missing": 0, "error_retry": 0, "planned": 0, "conflict": 0}
+    entries: list[dict[str, Any]] = []
+    rows, planned_rows = _workout_library_sync_rows()
     planned_local_ids = {str(row.get("local_id") or "") for row in planned_rows}
     for row in [*rows, *planned_rows]:
-        state = str(row.get("sync_state") or "local")
-        payload = str(row.get("payload") or "")
-        try:
-            payload_data = json.loads(payload)
-        except (TypeError, ValueError):
-            payload_data = {}
-        planned_date = str(payload_data.get("date") or "").strip()[:10] if isinstance(payload_data, dict) else ""
-        is_planned = str(row.get("local_id") or "") in planned_local_ids
-        if state == "conflict":
-            category = "conflict"
-        elif state == "remote_missing":
-            category = "missing"
-        elif is_planned:
-            category = "planned"
-        elif state == "sync_error":
-            category = "error_retry"
-        else:
-            category = "changed" if row.get("external_id") else "new"
+        category, is_planned, entry = _workout_library_sync_entry(row, planned_local_ids)
         if is_planned:
             summary["planned"] += 1
         if category != "planned":
             summary[category] += 1
-        entries.append({
-            "local_id": str(row.get("local_id") or ""),
-            "status": state,
-            "category": category,
-            "has_remote_id": bool(row.get("external_id")),
-            "planned_date": planned_date or None,
-            "syncs_calendar": is_planned,
-            "entity": "planned_unit" if is_planned else "workout_library",
-            "payload_hash": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
-        })
+        entries.append(entry)
     fingerprint = hashlib.sha256(
         json.dumps({"summary": summary, "entries": entries}, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
