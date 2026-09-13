@@ -357,6 +357,18 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(state["items"][0]["status"], "failed")
         self.assertEqual(state["progress"], {"completed": 1, "total": 1})
 
+    def test_repair_batch_reports_calendar_sync_before_deferred_verification(self):
+        item = {"library_workout_id": str(uuid.uuid4()), "expected_payload_hash": "a" * 64}
+        repair_batch = Mock()
+        with patch.object(server, "_repair_local_planned_unit_calendar_entry", return_value=None) as repair:
+            result = server._sync_selected_planned_library_entry(
+                item, {"repair": True}, repair_batch,
+            )
+
+        repair.assert_called_once_with(item["library_workout_id"], item["expected_payload_hash"], batch=repair_batch)
+        self.assertEqual(result["status"], "synced")
+        self.assertTrue(result["calendar_synced"])
+
 
     def test_structured_commit_rejects_model_artifact_outside_classified_scope(self):
         artifact = server._stage_coach_artifact(
