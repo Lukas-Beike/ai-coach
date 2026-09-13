@@ -9941,6 +9941,22 @@ def _planned_unit_payload_hash(payload: Any) -> str:
     return hashlib.sha256(json.dumps(comparable, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
 
 
+def _planned_unit_metadata(workout: dict[str, Any], normalized: dict[str, Any]) -> dict[str, Any]:
+    metadata = {
+        "sport": normalized.get("type") or intervals_workout_sport(workout.get("sport") or workout.get("type")),
+        "origin": str(workout.get("origin") or workout.get("source") or "coach")[:40],
+    }
+    metadata["source"] = str(workout.get("source") or metadata["origin"])[:40]
+    if workout.get("start_date_local"):
+        metadata["start_date_local"] = str(workout["start_date_local"])[:40]
+    for field, limit in (("status", 80), ("remote_event_id", 120), ("remote_event_external_id", 200)):
+        if workout.get(field) is not None:
+            metadata[field] = str(workout.get(field) or "")[:limit]
+    if workout.get("sync_conflict") is not None:
+        metadata["sync_conflict"] = workout["sync_conflict"]
+    return metadata
+
+
 def normalize_planned_unit(
     workout: dict[str, Any],
     *,
@@ -9958,21 +9974,9 @@ def normalize_planned_unit(
         sync_status=sync_status,
     )
     # Map the canonical local sport to the provider library projection explicitly.
-    normalized["sport"] = normalized.get("type") or intervals_workout_sport(workout.get("sport") or workout.get("type"))
+    normalized.update(_planned_unit_metadata(workout, normalized))
     if normalized.get("moving_time") in (None, "") and normalized.get("duration_minutes") not in (None, ""):
         normalized["moving_time"] = int(normalized["duration_minutes"]) * 60
-    if workout.get("start_date_local"):
-        normalized["start_date_local"] = str(workout["start_date_local"])[:40]
-    normalized["origin"] = str(workout.get("origin") or workout.get("source") or "coach")[:40]
-    normalized["source"] = str(workout.get("source") or normalized["origin"])[:40]
-    if workout.get("status") is not None:
-        normalized["status"] = str(workout.get("status") or "")[:80]
-    if workout.get("remote_event_id") is not None:
-        normalized["remote_event_id"] = str(workout.get("remote_event_id") or "")[:120]
-    if workout.get("remote_event_external_id") is not None:
-        normalized["remote_event_external_id"] = str(workout.get("remote_event_external_id") or "")[:200]
-    if workout.get("sync_conflict") is not None:
-        normalized["sync_conflict"] = workout.get("sync_conflict")
     return normalized
 
 
@@ -11265,7 +11269,7 @@ def sync_browser_state(
     return result
 
 
-def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
+def _load_local_library_workout_for_sync(local_id: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
     try:
         normalized_id = str(uuid.UUID(str(local_id)))
     except (ValueError, AttributeError) as exc:
@@ -11281,34 +11285,41 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
         local_workout = json.loads(row["payload"])
     except (TypeError, ValueError) as exc:
         raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
-    if row.get("external_id") and row.get("sync_state") == "synced":
-        return local_workout
-    validate_workout_description(local_workout)
-    update_workout_library_sync_state(normalized_id, "syncing")
-    if row.get("external_id") and row.get("sync_state") != "remote_missing":
-        remote_workout = IntervalsClient().update_library_workout(str(row["external_id"]), local_workout)
-        remote_workout = {**remote_workout, "id": str(row["external_id"])}
-    else:
-        remote_workouts = IntervalsClient().get_workout_library()
-        remote_workout = next((item for item in remote_workouts if library_workout_matches(local_workout, item)), None)
-        if remote_workout is None:
-            created = IntervalsClient().create_library_workouts([local_workout])
-            remote_workout = created[0] if created and isinstance(created[0], dict) else None
-    if not remote_workout or not str(remote_workout.get("id") or "").strip():
+    return normalized_id, row, local_workout
+
+
+def _upsert_remote_library_workout(row: dict[str, Any], local_workout: dict[str, Any]) -> dict[str, Any] | None:
+    external_id = str(row.get("external_id") or "")
+    if external_id and row.get("sync_state") != "remote_missing":
+        updated = IntervalsClient().update_library_workout(external_id, local_workout)
+        return {**updated, "id": external_id}
+    remote_workouts = IntervalsClient().get_workout_library()
+    recovered = next((item for item in remote_workouts if library_workout_matches(local_workout, item)), None)
+    if recovered is not None:
+        return recovered
+    created = IntervalsClient().create_library_workouts([local_workout])
+    return created[0] if created and isinstance(created[0], dict) else None
+
+
+def _store_library_workout_remote_identity(local_id: str, local_workout: dict[str, Any], remote_workout: dict[str, Any]) -> str:
+    external_id = str(remote_workout.get("id") or "").strip()
+    if not external_id:
         raise AppError(502, "Die Bibliothekseinheit konnte nicht zu Intervals.icu übertragen werden.")
     # Keep a newly created identity even if the provider could not parse its
     # contents. A retry must update this resource, never create a duplicate.
     with DB_LOCK, database() as db:
         db.execute(
             "UPDATE workout_library SET external_id=?, payload=? WHERE local_id=?",
-            (str(remote_workout["id"]), json.dumps({**local_workout, "external_id": str(remote_workout["id"])}, ensure_ascii=False), normalized_id),
+            (external_id, json.dumps({**local_workout, "external_id": external_id}, ensure_ascii=False), local_id),
         )
+    return external_id
+
+
+def _finish_library_workout_sync(local_id: str, external_id: str, local_workout: dict[str, Any], remote_workout: dict[str, Any]) -> dict[str, Any]:
     validate_intervals_workout_result(local_workout, remote_workout)
-    remote_workout = {**local_workout, **remote_workout}
-    external_id = str(remote_workout["id"])
     synced = normalize_library_workout(
-        remote_workout,
-        local_id=normalized_id,
+        {**local_workout, **remote_workout},
+        local_id=local_id,
         external_id=external_id,
         sync_status="synced",
     )
@@ -11316,11 +11327,22 @@ def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
     with DB_LOCK, database() as db:
         db.execute(
             "UPDATE workout_library SET external_id=?, payload=?, sync_dirty=0, sync_state='synced', sync_error=NULL, last_synced_at=?, updated_at=? WHERE local_id=?",
-            (external_id, json.dumps(synced, ensure_ascii=False), now, now, normalized_id),
+            (external_id, json.dumps(synced, ensure_ascii=False), now, now, local_id),
         )
     set_kv("last_library_sync_at", now)
     set_kv("last_library_sync_error", "")
     return synced
+
+
+def _sync_local_workout_library_entry_unlocked(local_id: str) -> dict[str, Any]:
+    normalized_id, row, local_workout = _load_local_library_workout_for_sync(local_id)
+    if row.get("external_id") and row.get("sync_state") == "synced":
+        return local_workout
+    validate_workout_description(local_workout)
+    update_workout_library_sync_state(normalized_id, "syncing")
+    remote_workout = _upsert_remote_library_workout(row, local_workout)
+    external_id = _store_library_workout_remote_identity(normalized_id, local_workout, remote_workout or {})
+    return _finish_library_workout_sync(normalized_id, external_id, local_workout, remote_workout or {})
 
 
 @maintenance_operation
