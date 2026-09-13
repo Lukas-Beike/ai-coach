@@ -10468,6 +10468,76 @@ def create_local_library_template(workout: dict[str, Any]) -> dict[str, Any]:
     })
 
 
+def _preserved_dirty_library_workout(existing: dict[str, Any] | None, local_id: str, external_id: str) -> dict[str, Any] | None:
+    if not existing or not int(existing.get("sync_dirty") or 0) or existing.get("sync_state") not in {"local", "sync_error"}:
+        return None
+    try:
+        local_payload = json.loads(existing.get("payload") or "{}")
+    except (TypeError, ValueError):
+        local_payload = {}
+    if not isinstance(local_payload, dict):
+        return None
+    return normalize_library_workout(
+        local_payload, local_id=local_id, external_id=external_id,
+        sync_status=str(existing.get("sync_state") or "local"),
+    )
+
+
+def _preserve_remote_library_metadata(entry: dict[str, Any], existing: dict[str, Any] | None) -> None:
+    if not existing:
+        return
+    try:
+        existing_payload = json.loads(existing.get("payload") or "{}")
+    except (TypeError, ValueError):
+        existing_payload = {}
+    if not isinstance(existing_payload, dict):
+        return
+    for metadata_key in (
+        "date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment",
+        "archived", "local_marked", "local_deleted",
+    ):
+        if existing_payload.get(metadata_key) is not None:
+            entry[metadata_key] = existing_payload[metadata_key]
+
+
+def _persist_remote_library_workout_entry(
+    db: sqlite3.Connection, workout: dict[str, Any], existing: dict[str, Any] | None,
+    local_id: str, external_id: str, now: str,
+) -> dict[str, Any]:
+    entry = normalize_library_workout(workout, local_id=local_id, external_id=external_id, sync_status="synced")
+    _preserve_remote_library_metadata(entry, existing)
+    storage_id = existing["id"] if existing else local_id
+    db.execute(
+        "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, ?, ?, 0, 'synced', NULL, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET local_id=excluded.local_id, external_id=excluded.external_id, payload=excluded.payload, sync_dirty=0, sync_state='synced', sync_error=NULL, last_synced_at=excluded.last_synced_at, updated_at=excluded.updated_at",
+        (storage_id, local_id, external_id, json.dumps(entry, ensure_ascii=False), now, now),
+    )
+    return entry
+
+
+def _mark_missing_remote_library_workouts(db: sqlite3.Connection, seen_external_ids: set[str], now: str) -> None:
+    remote_rows = db.execute(
+        "SELECT id, external_id, sync_dirty, sync_state, payload FROM workout_library WHERE external_id IS NOT NULL"
+    ).fetchall()
+    for row in remote_rows:
+        external_id = str(row.get("external_id") or "")
+        if not external_id or external_id in seen_external_ids:
+            continue
+        if int(row.get("sync_dirty") or 0) or str(row.get("sync_state") or "") in {"local", "sync_error"}:
+            continue
+        try:
+            payload = json.loads(row.get("payload") or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        payload["sync_status"] = "remote_missing"
+        db.execute(
+            "UPDATE workout_library SET payload=?, sync_dirty=0, sync_state='remote_missing', sync_error=NULL, updated_at=? WHERE id=?",
+            (json.dumps(payload, ensure_ascii=False), now, row["id"]),
+        )
+
+
 def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool = False) -> list[dict[str, Any]]:
     """Merge remote templates while preserving local-only library entries."""
     normalized: list[dict[str, Any]] = []
@@ -10484,65 +10554,12 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
                 (external_id,),
             ).fetchone()
             local_id = str(existing.get("local_id") or existing.get("id") or uuid.uuid4()) if existing else str(uuid.uuid4())
-            if existing and int(existing.get("sync_dirty") or 0) and existing.get("sync_state") in {"local", "sync_error"}:
-                try:
-                    local_payload = json.loads(existing.get("payload") or "{}")
-                except (TypeError, ValueError):
-                    local_payload = {}
-                if isinstance(local_payload, dict):
-                    normalized.append(normalize_library_workout(
-                        local_payload,
-                        local_id=local_id,
-                        external_id=external_id,
-                        sync_status=str(existing.get("sync_state") or "local"),
-                    ))
-                    seen_external_ids.add(external_id)
-                    continue
-            entry = normalize_library_workout(
-                workout,
-                local_id=local_id,
-                external_id=external_id,
-                sync_status="synced",
-            )
-            if existing:
-                try:
-                    existing_payload = json.loads(
-                        db.execute("SELECT payload FROM workout_library WHERE id = ?", (existing["id"],)).fetchone()["payload"]
-                    )
-                except (TypeError, ValueError, KeyError):
-                    existing_payload = {}
-                if isinstance(existing_payload, dict):
-                    for metadata_key in ("date", "rationale", "plan_id", "plan_name", "source", "private_calendar_adjustment", "archived", "local_marked", "local_deleted"):
-                        if existing_payload.get(metadata_key) is not None:
-                            entry[metadata_key] = existing_payload[metadata_key]
-            normalized.append(entry)
-            storage_id = existing["id"] if existing else local_id
-            db.execute(
-                "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, ?, ?, 0, 'synced', NULL, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET local_id=excluded.local_id, external_id=excluded.external_id, payload=excluded.payload, sync_dirty=0, sync_state='synced', sync_error=NULL, last_synced_at=excluded.last_synced_at, updated_at=excluded.updated_at",
-                (storage_id, local_id, external_id, json.dumps(entry, ensure_ascii=False), now, now),
-            )
+            preserved = _preserved_dirty_library_workout(existing, local_id, external_id)
+            normalized.append(preserved or _persist_remote_library_workout_entry(
+                db, workout, existing, local_id, external_id, now
+            ))
         if remove_missing:
-            remote_rows = db.execute(
-                "SELECT id, external_id, sync_dirty, sync_state, payload FROM workout_library WHERE external_id IS NOT NULL"
-            ).fetchall()
-            for row in remote_rows:
-                external_id = str(row.get("external_id") or "")
-                if not external_id or external_id in seen_external_ids:
-                    continue
-                if int(row.get("sync_dirty") or 0) or str(row.get("sync_state") or "") in {"local", "sync_error"}:
-                    continue
-                try:
-                    payload = json.loads(row.get("payload") or "{}")
-                except (TypeError, ValueError):
-                    payload = {}
-                if not isinstance(payload, dict):
-                    payload = {}
-                payload["sync_status"] = "remote_missing"
-                db.execute(
-                    "UPDATE workout_library SET payload=?, sync_dirty=0, sync_state='remote_missing', sync_error=NULL, updated_at=? WHERE id=?",
-                    (json.dumps(payload, ensure_ascii=False), now, row["id"]),
-                )
+            _mark_missing_remote_library_workouts(db, seen_external_ids, now)
     return normalized
 
 
