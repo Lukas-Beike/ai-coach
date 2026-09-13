@@ -16320,6 +16320,20 @@ def _structured_coach_training_template_result(arguments: dict[str, Any], intent
     return {"ok": True, "stored_locally": True, "templates": results, "template": results[0] if len(results) == 1 else None}
 
 
+def _structured_coach_apply_library_plan_result(arguments: dict[str, Any], intent: dict[str, Any]) -> dict[str, Any]:
+    if "apply_workout_library_plan" not in _structured_authorized_operations(intent):
+        raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
+    entries = arguments.get("entries")
+    if not isinstance(entries, list):
+        raise AppError(400, "Bibliothekseinheiten müssen als Liste gesendet werden.", reason="invalid_library_plan")
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise AppError(400, "Jede Bibliothekseinheit muss ein Objekt sein.", reason="invalid_library_plan")
+        local_id = str(entry.get("library_workout_id") or "").strip()
+        _require_coach_scope(intent, f"library_workout:{local_id}", "local_plan")
+    return {"ok": True, "stored_locally": True, **apply_workout_library_plan(entries)}
+
+
 def _structured_coach_tool_result(
     name: str,
     arguments: dict[str, Any],
@@ -16427,17 +16441,7 @@ def _structured_coach_tool_result(
     if name == "manage_training_templates":
         return _structured_coach_training_template_result(arguments, intent)
     if name == "apply_workout_library_plan":
-        if "apply_workout_library_plan" not in _structured_authorized_operations(intent):
-            raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
-        entries = arguments.get("entries")
-        if not isinstance(entries, list):
-            raise AppError(400, "Bibliothekseinheiten müssen als Liste gesendet werden.", reason="invalid_library_plan")
-        for entry in entries:
-            if not isinstance(entry, dict):
-                raise AppError(400, "Jede Bibliothekseinheit muss ein Objekt sein.", reason="invalid_library_plan")
-            local_id = str(entry.get("library_workout_id") or "").strip()
-            _require_coach_scope(intent, f"library_workout:{local_id}", "local_plan")
-        return {"ok": True, "stored_locally": True, **apply_workout_library_plan(entries)}
+        return _structured_coach_apply_library_plan_result(arguments, intent)
     if name == "start_provider_refresh":
         if "start_provider_refresh" not in _structured_authorized_operations(intent):
             raise AppError(403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied")
