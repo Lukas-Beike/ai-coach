@@ -11673,6 +11673,30 @@ def _validate_planned_workout_date(
             raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht verschoben werden.")
 
 
+def _reconcile_updated_planned_workout_content(normalized: dict[str, Any], values: dict[str, Any]) -> None:
+    if "description" in values:
+        normalized["description"] = canonical_workout_zones(
+            normalized["description"],
+            endurance=intervals_workout_sport(normalized.get("sport")) in INTERVALS_ENDURANCE_WORKOUT_TYPES,
+        )
+    seconds = validate_workout_description(normalized)
+    minutes = as_number(normalized.get("duration_minutes"))
+    if seconds is not None or minutes is not None:
+        normalized["moving_time"] = round(seconds if seconds is not None else minutes * 60)
+    if any(key in values for key in ("description", "duration_minutes", "target", "type", "sport")):
+        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+            normalized.pop(key, None)
+
+
+def _preserve_local_planned_workout_metadata(normalized: dict[str, Any], current: dict[str, Any]) -> None:
+    for key in (
+        "plan_id", "plan_name", "rationale", "remote_event_id", "remote_event_external_id",
+        "private_calendar_adjustment", "local_deleted",
+    ):
+        if current.get(key) is not None:
+            normalized[key] = current[key]
+
+
 def _normalized_planned_workout_update(
     candidate: dict[str, Any],
     current: dict[str, Any],
@@ -11689,24 +11713,8 @@ def _normalized_planned_workout_update(
     )
     normalized["source"] = str(current.get("source") or "library")[:40]
     if action == "update":
-        if "description" in values:
-            normalized["description"] = canonical_workout_zones(
-                normalized["description"],
-                endurance=intervals_workout_sport(normalized.get("sport")) in INTERVALS_ENDURANCE_WORKOUT_TYPES,
-            )
-        seconds = validate_workout_description(normalized)
-        minutes = as_number(normalized.get("duration_minutes"))
-        if seconds is not None or minutes is not None:
-            normalized["moving_time"] = round(seconds if seconds is not None else minutes * 60)
-        if any(key in values for key in ("description", "duration_minutes", "target", "type", "sport")):
-            for key in ("workout_doc", "icu_training_load", "icu_intensity"):
-                normalized.pop(key, None)
-    for key in (
-        "plan_id", "plan_name", "rationale", "remote_event_id", "remote_event_external_id",
-        "private_calendar_adjustment", "local_deleted",
-    ):
-        if current.get(key) is not None:
-            normalized[key] = current[key]
+        _reconcile_updated_planned_workout_content(normalized, values)
+    _preserve_local_planned_workout_metadata(normalized, current)
     return normalized
 
 
