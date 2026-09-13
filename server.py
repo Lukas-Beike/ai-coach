@@ -5154,6 +5154,36 @@ def competition_target(value: Any) -> str:
     return str(value or "").strip()[:COMPETITION_TEXT_LIMITS["target"]]
 
 
+def competition_category_and_priority(value: dict[str, Any], name: str) -> tuple[str, str]:
+    category = str(value.get("category") or "").strip().upper()
+    if category in {"RACE_A", "RACE_B", "RACE_C"}:
+        return category, category.rsplit("_", 1)[-1]
+    priority = str(value.get("priority") or "B").strip().upper()
+    if priority not in {"A", "B", "C"}:
+        raise AppError(400, f"Die Kategorie für „{name}“ muss RACE_A, RACE_B oder RACE_C sein.")
+    return f"RACE_{priority}", priority
+
+
+def competition_normalized_id(value: Any) -> str:
+    try:
+        return str(uuid.UUID(str(value or "").strip()))
+    except (ValueError, AttributeError):
+        return str(uuid.uuid4())
+
+
+def competition_normalized_text_fields(value: dict[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for field, limit in COMPETITION_TEXT_LIMITS.items():
+        if field in {"name", "external_id", "description"}:
+            continue
+        default = "Cycling" if field == "sport" else ""
+        result[field] = competition_target(value.get(field)) if field == "target" else str(value.get(field) or default).strip()[:limit]
+    result["distance"] = competition_distance(value.get("distance"))
+    result["description"] = str(value.get("description") or value.get("notes") or "").strip()[:COMPETITION_TEXT_LIMITS["description"]]
+    result["external_id"] = str(value.get("external_id") or "").strip()[:COMPETITION_TEXT_LIMITS["external_id"]]
+    return result
+
+
 def normalize_competition(value: Any) -> dict[str, str]:
     if not isinstance(value, dict):
         raise AppError(400, "Jeder Wettkampf muss ein Objekt sein.")
@@ -5161,20 +5191,9 @@ def normalize_competition(value: Any) -> dict[str, str]:
     if not name:
         raise AppError(400, "Jeder Wettkampf benötigt einen Namen.")
     event_date, start_date_local = competition_start(value.get("start_date_local"), value.get("event_date"))
-    category = str(value.get("category") or "").strip().upper()
-    if category not in {"RACE_A", "RACE_B", "RACE_C"}:
-        priority = str(value.get("priority") or "B").strip().upper()
-        if priority not in {"A", "B", "C"}:
-            raise AppError(400, f"Die Kategorie für „{name}“ muss RACE_A, RACE_B oder RACE_C sein.")
-        category = f"RACE_{priority}"
-    priority = category.rsplit("_", 1)[-1]
-    raw_id = str(value.get("id") or "").strip()
-    try:
-        competition_id = str(uuid.UUID(raw_id))
-    except (ValueError, AttributeError):
-        competition_id = str(uuid.uuid4())
+    category, priority = competition_category_and_priority(value, name)
     result = {
-        "id": competition_id,
+        "id": competition_normalized_id(value.get("id")),
         "name": name,
         "event_date": event_date,
         "start_date_local": start_date_local,
@@ -5182,16 +5201,7 @@ def normalize_competition(value: Any) -> dict[str, str]:
         "category": category,
         "moving_time": competition_moving_time(value.get("moving_time")),
     }
-    for field, limit in COMPETITION_TEXT_LIMITS.items():
-        if field == "name":
-            continue
-        if field in {"external_id", "description"}:
-            continue
-        default = "Cycling" if field == "sport" else ""
-        result[field] = competition_target(value.get(field)) if field == "target" else str(value.get(field) or default).strip()[:limit]
-    result["distance"] = competition_distance(value.get("distance"))
-    result["description"] = str(value.get("description") or value.get("notes") or "").strip()[:COMPETITION_TEXT_LIMITS["description"]]
-    result["external_id"] = str(value.get("external_id") or "").strip()[:COMPETITION_TEXT_LIMITS["external_id"]]
+    result.update(competition_normalized_text_fields(value))
     return result
 
 

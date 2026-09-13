@@ -3282,6 +3282,14 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(server.competition_event_payload(competition)["type"], "Ride")
         self.assertEqual(server.competition_event_payload(competition)["distance"], 250000)
 
+    def test_competition_normalization_helpers_validate_category_and_fallback_id(self):
+        category, priority = server.competition_category_and_priority({"priority": "a"}, "Race")
+        self.assertEqual((category, priority), ("RACE_A", "A"))
+        self.assertRegex(server.competition_normalized_id("not-a-uuid"), server.UUID_PATTERN)
+        with self.assertRaises(server.AppError) as error:
+            server.competition_category_and_priority({"priority": "Z"}, "Race")
+        self.assertEqual(error.exception.status, 400)
+
     def test_competition_event_optional_payload_excludes_invalid_distance(self):
         payload = server.competition_event_optional_payload({
             "moving_time": "3600",
