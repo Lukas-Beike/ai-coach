@@ -9671,6 +9671,18 @@ def workout_is_hard(workout: dict[str, Any]) -> bool:
     return any(term in text for term in ("interval", "vo2", "threshold", "tempo", "sprint", "race", "105%", "110%", "115%"))
 
 
+def _adaptive_recovery_description(sport: str, duration: int) -> str:
+    descriptions = {
+        "Run": f"- {duration}m Z1 HR Easy aerobic run at conversational effort",
+        "Swim": f"- {duration}m Z1 Pace Easy relaxed swim with controlled breathing",
+        "OpenWaterSwim": f"- {duration}m Z1 Pace Easy relaxed swim with controlled breathing",
+        "WeightTraining": f"- {duration}m Mobility and easy strength; stop if pain increases",
+        "Ride": f"- {duration}m 50-65% Easy endurance ride",
+        "VirtualRide": f"- {duration}m 50-65% Easy endurance ride",
+    }
+    return descriptions.get(sport, f"- {duration}m Z1 HR Easy aerobic session at conversational effort")
+
+
 def adaptive_recovery_replacement(
     workout: dict[str, Any],
     reason: str,
@@ -9679,23 +9691,11 @@ def adaptive_recovery_replacement(
 ) -> dict[str, Any]:
     sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
     duration_limit = int(available_minutes or workout.get("duration_minutes") or 30)
-    if max_minutes is not None:
-        duration_limit = min(duration_limit, int(max_minutes))
-    duration = max(15, min(duration_limit, 90))
-    if sport == "Run":
-        description = f"- {duration}m Z1 HR Easy aerobic run at conversational effort"
-    elif sport in {"Swim", "OpenWaterSwim"}:
-        description = f"- {duration}m Z1 Pace Easy relaxed swim with controlled breathing"
-    elif sport == "WeightTraining":
-        description = f"- {duration}m Mobility and easy strength; stop if pain increases"
-    elif sport in {"Ride", "VirtualRide"}:
-        description = f"- {duration}m 50-65% Easy endurance ride"
-    else:
-        description = f"- {duration}m Z1 HR Easy aerobic session at conversational effort"
+    duration = max(15, min(min(duration_limit, int(max_minutes)) if max_minutes is not None else duration_limit, 90))
     return {
         **workout,
         "duration_minutes": duration,
-        "description": description,
+        "description": _adaptive_recovery_description(sport, duration),
         "target": "AUTO",
         "rationale": f"Adaptive adjustment: {reason}. The original workout remains available in the local library history.",
     }
@@ -10051,6 +10051,33 @@ def _adaptive_preview_replacement(
     return replacement
 
 
+def _adaptive_preview_needs_change(draft: dict[str, Any], state: dict[str, Any]) -> bool:
+    return bool(
+        state["illness_active"] or state["severe"] or
+        (state["high_load"] and workout_is_hard(draft)) or state["limited"] or
+        state["calendar_limited"] or state["no_intensity_limited"] or state["weather_reason"]
+    )
+
+
+def _adaptive_preview_change_result(
+    draft: dict[str, Any], state: dict[str, Any], replacement: dict[str, Any],
+    blocking_triggers: list[str],
+) -> dict[str, Any]:
+    illness_active = state["illness_active"]
+    return {
+        "library_workout_id": draft["id"], "date": draft.get("date"), "name": draft.get("name"),
+        "blocking_triggers": blocking_triggers, "external_events": state["calendar_events"],
+        "before": {"duration_minutes": draft.get("duration_minutes"), "description": draft.get("description")},
+        "after": {
+            "name": "Krankheitspause" if illness_active else replacement.get("name"),
+            "duration_minutes": 0 if illness_active else replacement["duration_minutes"],
+            "description": "Sportpause; die geplante Einheit wird archiviert." if illness_active else replacement["description"],
+            "rationale": replacement["rationale"],
+        },
+        "source_fingerprint": adaptive_workout_fingerprint(draft), "payload": replacement,
+    }
+
+
 def _adaptive_preview_change(
     draft: dict[str, Any], *, today: str, today_date: date, feedback: dict[str, Any],
     illness_pause: dict[str, Any] | None, events_by_date: dict[str, list[dict[str, Any]]],
@@ -10062,7 +10089,7 @@ def _adaptive_preview_change(
     )
     if state is None:
         return None
-    if not (state["illness_active"] or state["severe"] or (state["high_load"] and workout_is_hard(draft)) or state["limited"] or state["calendar_limited"] or state["no_intensity_limited"] or state["weather_reason"]):
+    if not _adaptive_preview_needs_change(draft, state):
         return None
     reasons, blocking_triggers = _adaptive_preview_reasons(
         draft, feedback, illness_pause, state["illness_active"], state["severe"], state["high_load"], state["limited"],
@@ -10071,16 +10098,7 @@ def _adaptive_preview_change(
     )
     reason = "; ".join(reasons)
     replacement = _adaptive_preview_replacement(draft, reason, state)
-    return {
-        "library_workout_id": draft["id"], "date": draft.get("date"), "name": draft.get("name"),
-        "blocking_triggers": blocking_triggers, "external_events": state["calendar_events"],
-        "before": {"duration_minutes": draft.get("duration_minutes"), "description": draft.get("description")},
-        "after": {"name": "Krankheitspause" if state["illness_active"] else replacement.get("name"),
-                  "duration_minutes": 0 if state["illness_active"] else replacement["duration_minutes"],
-                  "description": "Sportpause; die geplante Einheit wird archiviert." if state["illness_active"] else replacement["description"],
-                  "rationale": replacement["rationale"]},
-        "source_fingerprint": adaptive_workout_fingerprint(draft), "payload": replacement,
-    }
+    return _adaptive_preview_change_result(draft, state, replacement, blocking_triggers)
 
 
 def adaptive_replan_preview() -> dict[str, Any]:
