@@ -8280,15 +8280,16 @@ def _calendar_weather_state(weather: dict[str, Any]) -> dict[str, Any]:
     return {**weather, "days": [days[day] for day in sorted(days)]}
 
 
-def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict[str, Any]], today: date) -> str | None:
-    """Return a reason when a long outdoor ride is not reasonable in the near forecast."""
-    if not is_outdoor_activity(event) or not is_cycling_activity(event):
-        return None
+def _weather_adaptive_duration_minutes(event: dict[str, Any]) -> float | int:
     duration_minutes = as_number(event.get("duration_minutes"))
     if duration_minutes is None:
         duration_minutes = (_weather_number(event.get("moving_time")) or 0) / 60
-    if duration_minutes < WEATHER_ADAPTIVE_LONG_RIDE_MINUTES:
-        return None
+    return duration_minutes
+
+
+def _weather_adaptive_forecast(
+    event: dict[str, Any], weather_days: dict[str, dict[str, Any]], today: date,
+) -> tuple[str, dict[str, Any]] | None:
     event_date = str(event.get("date") or event.get("start_date_local") or "")[:10]
     try:
         target_date = date.fromisoformat(event_date)
@@ -8299,6 +8300,10 @@ def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict
     forecast = weather_days.get(event_date)
     if not isinstance(forecast, dict):
         return None
+    return event_date, forecast
+
+
+def _weather_adaptive_precipitation(forecast: dict[str, Any]) -> tuple[bool, bool, float | int | None, float | int, float | int]:
     code = forecast.get("weather_code")
     try:
         code = int(code) if code is not None else None
@@ -8323,9 +8328,12 @@ def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict
     persistent_snow = code in snow_codes and (
         (probability is not None and probability >= 70) or snowfall >= 2
     )
-    if not persistent_rain and not persistent_snow:
-        return None
-    condition = "anhaltenden Regen" if persistent_rain else "anhaltenden Schneefall"
+    return persistent_rain, persistent_snow, probability, rain_total, snowfall
+
+
+def _weather_adaptive_details(
+    persistent_rain: bool, probability: float | int | None, rain_total: float | int, snowfall: float | int,
+) -> str:
     details = []
     if probability is not None:
         details.append(f"bis zu {round(probability)} % Niederschlagswahrscheinlichkeit")
@@ -8333,7 +8341,24 @@ def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict
         amount = rain_total if persistent_rain else snowfall
         unit = "mm Regen" if persistent_rain else "cm Schnee"
         details.append(f"ca. {amount:g} {unit}")
-    detail_text = f" ({', '.join(details)})" if details else ""
+    return f" ({', '.join(details)})" if details else ""
+
+
+def _weather_adaptive_reason(event: dict[str, Any], weather_days: dict[str, dict[str, Any]], today: date) -> str | None:
+    """Return a reason when a long outdoor ride is not reasonable in the near forecast."""
+    if not is_outdoor_activity(event) or not is_cycling_activity(event):
+        return None
+    if _weather_adaptive_duration_minutes(event) < WEATHER_ADAPTIVE_LONG_RIDE_MINUTES:
+        return None
+    forecast_result = _weather_adaptive_forecast(event, weather_days, today)
+    if not forecast_result:
+        return None
+    event_date, forecast = forecast_result
+    persistent_rain, persistent_snow, probability, rain_total, snowfall = _weather_adaptive_precipitation(forecast)
+    if not persistent_rain and not persistent_snow:
+        return None
+    condition = "anhaltenden Regen" if persistent_rain else "anhaltenden Schneefall"
+    detail_text = _weather_adaptive_details(persistent_rain, probability, rain_total, snowfall)
     return f"Wetterprognose für {event_date}: {condition}{detail_text}; lange Outdoor-Ausfahrt nicht sinnvoll"
 
 
