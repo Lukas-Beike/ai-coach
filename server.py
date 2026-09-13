@@ -17677,35 +17677,40 @@ def _pending_plan_push_entries() -> list[dict[str, str]]:
     ]
 
 
+def _local_planning_authoritative_rows(local_ids: set[str], db: Any) -> list[dict[str, Any]]:
+    if local_ids:
+        placeholders = ",".join("?" for _ in local_ids)
+        return db.execute(
+            f"SELECT local_id, payload FROM planned_units WHERE local_id IN ({placeholders})",
+            tuple(local_ids),
+        ).fetchall()
+    return db.execute(
+        "SELECT local_id, payload FROM planned_units WHERE sync_state IN ('conflict', 'remote_missing', 'sync_error')"
+    ).fetchall()
+
+
+def _mark_local_planning_row_authoritative(row: dict[str, Any], now: str, db: Any) -> bool:
+    try:
+        payload = json.loads(row.get("payload") or "{}")
+    except (TypeError, ValueError):
+        payload = {}
+    if not isinstance(payload, dict) or payload.get("local_deleted"):
+        return False
+    payload["sync_status"] = "local"
+    db.execute(
+        UPDATE_PLANNED_UNIT_SQL,
+        (json.dumps(payload, ensure_ascii=False), now, row["local_id"]),
+    )
+    return True
+
+
 def _mark_local_planning_authoritative(local_ids: list[str] | None = None) -> int:
     """Make selected local planning rows authoritative before an explicit push."""
     normalized_ids = {str(value).strip() for value in (local_ids or []) if str(value).strip()}
     with DB_LOCK, database() as db:
-        if normalized_ids:
-            placeholders = ",".join("?" for _ in normalized_ids)
-            rows = db.execute(
-                f"SELECT local_id, payload FROM planned_units WHERE local_id IN ({placeholders})",
-                tuple(normalized_ids),
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT local_id, payload FROM planned_units WHERE sync_state IN ('conflict', 'remote_missing', 'sync_error')"
-            ).fetchall()
         now = utc_now()
-        changed = 0
-        for row in rows:
-            try:
-                payload = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError):
-                payload = {}
-            if not isinstance(payload, dict) or payload.get("local_deleted"):
-                continue
-            payload["sync_status"] = "local"
-            db.execute(
-                UPDATE_PLANNED_UNIT_SQL,
-                (json.dumps(payload, ensure_ascii=False), now, row["local_id"]),
-            )
-            changed += 1
+        rows = _local_planning_authoritative_rows(normalized_ids, db)
+        changed = sum(_mark_local_planning_row_authoritative(row, now, db) for row in rows)
         if changed:
             _bump_planning_revision(db)
     return changed
@@ -18855,8 +18860,33 @@ def _dialogue_effect_key(name: str, arguments: dict[str, Any]) -> str:
     return _coach_action_hash({"tool": name, "arguments": {key: value for key, value in arguments.items() if key != "_request"}, "binding": binding})
 
 
-def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf_hash: str = "") -> dict[str, Any]:
-    """Execute one explicitly validated local planning command idempotently."""
+def _append_template_command_scope(intent: dict[str, Any], templates: Any) -> None:
+    if not isinstance(templates, list):
+        raise AppError(400, "Vorlagenaenderungen benoetigen eine Liste.", reason="template_limit")
+    for template in templates:
+        if not isinstance(template, dict):
+            raise AppError(400, "Jede Vorlagenaenderung muss ein Objekt sein.", reason="template_limit")
+        if str(template.get("action") or "create") in {"update", "archive", "restore", "delete"}:
+            intent["authorization_scope"].append(f"library_workout:{template.get('local_id') or ''}")
+        else:
+            intent["authorization_scope"].append("local_template")
+
+
+def _append_planning_command_scope(intent: dict[str, Any], operation: str, arguments: dict[str, Any]) -> None:
+    if operation == "apply_training_changes":
+        changes = arguments.get("changes") if isinstance(arguments.get("changes"), list) else []
+        for change in changes:
+            if isinstance(change, dict) and change.get("local_id"):
+                intent["authorization_scope"].append(f"planned_unit:{change['local_id']}")
+            elif isinstance(change, dict) and str(change.get("action") or "update").strip().casefold() == "create":
+                intent["authorization_scope"].append("local_plan")
+    elif operation == "replace_training_plan":
+        intent["authorization_scope"].append("local_plan")
+    elif operation == "manage_training_templates":
+        _append_template_command_scope(intent, arguments.get("templates"))
+
+
+def _prepare_planning_command(payload: Any) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
     if not isinstance(payload, dict):
         raise AppError(400, "Das Planungskommando muss ein Objekt sein.", reason="invalid_planning_command")
     client_turn_id = str(payload.get("client_turn_id") or "").strip()
@@ -18865,18 +18895,14 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
         raise AppError(400, "client_turn_id ist für Planungskommandos erforderlich.", reason="invalid_client_turn")
     if operation not in {"commit_training_plan", "replace_training_plan", "apply_training_changes", "manage_training_templates"}:
         raise AppError(400, "Das Planungskommando ist nicht zulässig.", reason="invalid_planning_command")
-    intent = {
-        "intent": "local_action",
-        "operation": operation,
-        "target_system": "local",
-        "artifact_id": str(payload.get("artifact_id") or "").strip() or None,
-        "ambiguities": [],
-        "authorization_scope": [],
-        "follow_up_operations": [],
-    }
     arguments = payload.get("arguments")
     if not isinstance(arguments, dict):
         raise AppError(400, "Das Planungskommando benoetigt arguments.", reason="invalid_planning_command")
+    intent = {
+        "intent": "local_action", "operation": operation, "target_system": "local",
+        "artifact_id": str(payload.get("artifact_id") or "").strip() or None,
+        "ambiguities": [], "authorization_scope": [], "follow_up_operations": [],
+    }
     if operation == "commit_training_plan":
         artifact_id = str(payload.get("artifact_id") or "").strip()
         if not artifact_id:
@@ -18888,27 +18914,15 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
         if expected_revision is not None and int(expected_revision) != int((row or {}).get("revision") or 0):
             raise AppError(409, STALE_PLANNING_REVISION_ERROR, reason="planning_revision_conflict")
         arguments = {**arguments, "artifact_id": artifact_id}
-    elif operation == "apply_training_changes":
-        changes = arguments.get("changes") if isinstance(arguments.get("changes"), list) else []
-        for change in changes:
-            if isinstance(change, dict) and change.get("local_id"):
-                intent["authorization_scope"].append(f"planned_unit:{change['local_id']}")
-            elif isinstance(change, dict) and str(change.get("action") or "update").strip().casefold() == "create":
-                intent["authorization_scope"].append("local_plan")
-    elif operation == "replace_training_plan":
-        intent["authorization_scope"].append("local_plan")
-    elif operation == "manage_training_templates":
-        templates = arguments.get("templates")
-        if not isinstance(templates, list):
-            raise AppError(400, "Vorlagenaenderungen benoetigen eine Liste.", reason="template_limit")
-        for template in templates:
-            if not isinstance(template, dict):
-                raise AppError(400, "Jede Vorlagenaenderung muss ein Objekt sein.", reason="template_limit")
-            if str(template.get("action") or "create") in {"update", "archive", "restore", "delete"}:
-                intent["authorization_scope"].append(f"library_workout:{template.get('local_id') or ''}")
-            else:
-                intent["authorization_scope"].append("local_template")
-    command_identity = {"client_turn_id": client_turn_id, "session_key": _coach_session_key(session_csrf_hash), "effect_key": _coach_action_hash({"operation": operation, "arguments": arguments})}
+    else:
+        _append_planning_command_scope(intent, operation, arguments)
+    return client_turn_id, operation, arguments, intent
+
+
+def _claim_planning_command(
+    client_turn_id: str, conversation_id: str, session_csrf_hash: str,
+    payload: dict[str, Any], intent: dict[str, Any], command_identity: dict[str, Any],
+) -> dict[str, Any] | None:
     with DB_LOCK, database() as db:
         existing = db.execute("SELECT conversation_id, status, receipt FROM coach_commands WHERE client_turn_id=?", (client_turn_id,)).fetchone()
         if existing:
@@ -18926,6 +18940,13 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
             "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, 'local', ?, 'running', ?, ?, ?)",
             (uuid.uuid4().hex, client_turn_id, conversation_id, json.dumps(intent, separators=(",", ":")), payload.get("artifact_id"), json.dumps(command_identity), utc_now(), utc_now()),
         )
+    return None
+
+
+def _execute_claimed_planning_command(
+    client_turn_id: str, operation: str, arguments: dict[str, Any], intent: dict[str, Any],
+    conversation_id: str, session_csrf_hash: str, command_identity: dict[str, Any],
+) -> None:
     try:
         with DB_LOCK, database() as db:
             sync_job_ids: list[str] = []
@@ -18934,6 +18955,16 @@ def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf
             db.execute("UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'", (json.dumps(receipt, ensure_ascii=False, separators=(",", ":")), utc_now(), client_turn_id))
     except Exception as exc:
         _persist_structured_command_failure(client_turn_id, intent, exc)
+
+
+def execute_planning_command(payload: Any, *, conversation_id: str, session_csrf_hash: str = "") -> dict[str, Any]:
+    """Execute one explicitly validated local planning command idempotently."""
+    client_turn_id, operation, arguments, intent = _prepare_planning_command(payload)
+    command_identity = {"client_turn_id": client_turn_id, "session_key": _coach_session_key(session_csrf_hash), "effect_key": _coach_action_hash({"operation": operation, "arguments": arguments})}
+    existing_receipt = _claim_planning_command(client_turn_id, conversation_id, session_csrf_hash, payload, intent, command_identity)
+    if existing_receipt:
+        return existing_receipt
+    _execute_claimed_planning_command(client_turn_id, operation, arguments, intent, conversation_id, session_csrf_hash, command_identity)
     return coach_command_receipt(client_turn_id, session_csrf_hash)
 
 
