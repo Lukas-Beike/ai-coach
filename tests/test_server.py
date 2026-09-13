@@ -4509,6 +4509,18 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(history[-2]["parts"][0]["functionCall"]["name"], "save_checkin")
         self.assertEqual(history[-1]["parts"][0]["functionResponse"]["name"], "save_checkin")
 
+    def test_structured_command_failure_response_keeps_confirmed_sync_effects(self):
+        commands = [{"tool": "start_intervals_plan_sync", "result": {"ok": True, "status": "queued"}}]
+        status, text, question, cancelled = server._structured_command_failure_response(
+            server.AppError(429, "Provider limit", reason="rate_limit_exceeded"), commands, commands, [], ["start_intervals_plan_sync"],
+        )
+        self.assertEqual(status, "partial")
+        self.assertIsNone(question)
+        self.assertFalse(cancelled)
+        self.assertIn("Anfragelimit", text)
+        self.assertIn("bleibt bestehen", text)
+        self.assertIn("Noch offen", text)
+
     def test_gemini_history_trimming_keeps_complete_tool_exchanges(self):
         history = [
             {"role": "user", "parts": [{"text": "Starte die Planung."}]},
