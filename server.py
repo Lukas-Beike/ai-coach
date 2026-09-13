@@ -2881,137 +2881,185 @@ def _history_preview(change_id: Any, session_csrf_hash: str) -> dict[str, Any]:
     }
 
 
-def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
+def _undo_history_state(
+    db: sqlite3.Connection, payload: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
     change_id = str(payload.get("change_id") or "").strip()
     if not re.fullmatch(UUID_PATTERN, change_id):
         raise AppError(400, "Ungültige Änderungshistorie-ID.")
+    row = db.execute("SELECT * FROM change_history WHERE id=?", (change_id,)).fetchone()
+    if not row:
+        raise AppError(404, "Änderung nicht gefunden.")
+    history = dict(row)
+    if history["action"] not in {"create", "update", "delete"}:
+        raise AppError(409, "Eine Undo-Aktion kann nicht erneut zurückgenommen werden.")
+    current, current_projection = _history_current(db, history["entity_type"], history["entity_id"])
+    expected = str(payload.get("expected_current_hash") or "")
+    if expected != history["after_hash"] or _audit_hash(current_projection) != expected:
+        raise AppError(409, "Die lokale Änderung wurde inzwischen weiter geändert; Undo wurde abgebrochen.")
+    target, _ = _history_target(history)
+    return history, current, target
+
+
+def _undo_profile_change(
+    db: sqlite3.Connection, entity_id: str, current: dict[str, Any] | None, target: dict[str, Any] | None, history: dict[str, Any],
+) -> dict[str, Any]:
+    restored = dict(current or DEFAULT_PROFILE)
+    restored.update(target or DEFAULT_PROFILE)
+    after = normalize_profile(restored)
+    PROFILE_REPOSITORY.set(db, json.dumps(after, ensure_ascii=False))
+    return after
+
+
+def _undo_workout_library_change(
+    db: sqlite3.Connection, entity_id: str, current: dict[str, Any] | None, target: dict[str, Any] | None, history: dict[str, Any],
+) -> dict[str, Any] | None:
+    if target is None:
+        db.execute("DELETE FROM workout_library WHERE local_id=?", (entity_id,))
+        return None
+    if not current:
+        restored = normalize_library_workout(target, local_id=entity_id, external_id=None, sync_status="local")
+        now = utc_now()
+        db.execute(INSERT_LIBRARY_SQL, (entity_id, entity_id, json.dumps(restored, ensure_ascii=False), now))
+        return restored
+    try:
+        restored = normalize_library_workout(
+            {**json.loads(current["payload"]), **target}, local_id=entity_id,
+            external_id=current.get("external_id"), sync_status="local",
+        )
+    except (TypeError, ValueError) as exc:
+        raise AppError(409, "Die Bibliothekseinheit kann nicht wiederhergestellt werden.") from exc
+    db.execute(
+        "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?",
+        (json.dumps(restored, ensure_ascii=False), utc_now(), entity_id),
+    )
+    return {**restored, "sync_status": "local"}
+
+
+def _undo_competition_change(
+    db: sqlite3.Connection, entity_id: str, current: dict[str, Any] | None, target: dict[str, Any] | None, history: dict[str, Any],
+) -> dict[str, Any] | None:
+    if target is None:
+        db.execute("DELETE FROM competitions WHERE id=?", (entity_id,))
+        return None
+    normalized = normalize_competition({**(current or {}), **target, "id": entity_id})
+    if current:
+        db.execute(
+            "UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?",
+            (normalized["name"], normalized["event_date"], normalized["sport"], normalized["priority"], normalized["distance"], normalized["target"], normalized["course_profile"], normalized["notes"], normalized["category"], normalized["start_date_local"], normalized["description"], normalized["moving_time"], utc_now(), entity_id),
+        )
+    else:
+        now = utc_now()
+        db.execute(
+            "INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)",
+            (entity_id, normalized["name"], normalized["event_date"], normalized["sport"], normalized["priority"], normalized["distance"], normalized["target"], normalized["course_profile"], normalized["notes"], normalized["category"], normalized["start_date_local"], normalized["description"], normalized["moving_time"], now, now),
+        )
+    return {**normalized, "sync_state": "local"}
+
+
+def _planned_unit_undo_state(
+    current_payload: dict[str, Any], target: dict[str, Any], history: dict[str, Any],
+) -> tuple[str, bool, bool]:
+    restore_date = str(target.get("date") or current_payload.get("date") or "")[:10]
+    restoring_deletion = history.get("action") == "delete"
+    archived = bool(target["archived"]) if "archived" in target else not restoring_deletion and bool(current_payload.get("archived"))
+    local_deleted = bool(target["local_deleted"]) if "local_deleted" in target else not restoring_deletion and bool(current_payload.get("local_deleted"))
+    return restore_date, archived, local_deleted
+
+
+def _validate_planned_unit_undo_date(
+    entity_id: str, current_payload: dict[str, Any], restore_date: str, archived: bool, local_deleted: bool,
+) -> None:
+    current_date = str(current_payload.get("date") or "")[:10]
+    restored_from_hidden = (bool(current_payload.get("archived")) or bool(current_payload.get("local_deleted"))) and not archived and not local_deleted
+    if (restore_date != current_date or restored_from_hidden) and restore_date and calendar_conflicts({"date": restore_date}, {entity_id}):
+        raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht wiederhergestellt werden.", reason="plan_date_conflict")
+
+
+def _undo_existing_planned_unit(
+    db: sqlite3.Connection, entity_id: str, current: dict[str, Any], target: dict[str, Any], history: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        current_payload = json.loads(current.get("payload") or "{}")
+    except (TypeError, ValueError) as exc:
+        raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.") from exc
+    if not isinstance(current_payload, dict):
+        raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.")
+    restore_date, archived, local_deleted = _planned_unit_undo_state(current_payload, target, history)
+    _validate_planned_unit_undo_date(entity_id, current_payload, restore_date, archived, local_deleted)
+    restored_target = dict(target)
+    if restore_date:
+        previous_start = str(current_payload.get("start_date_local") or "")
+        suffix = previous_start[10:] if len(previous_start) > 10 and previous_start[10] == "T" else ISO_MIDNIGHT_SUFFIX
+        restored_target["start_date_local"] = restore_date + suffix
+    restored = normalize_planned_unit(
+        {**current_payload, **restored_target, "archived": archived, "local_deleted": local_deleted},
+        local_id=entity_id,
+        external_id=str(current.get("external_id") or current_payload.get("external_id") or "") or None,
+        sync_status="local",
+    )
+    db.execute(UPDATE_PLANNED_UNIT_SQL, (json.dumps(restored, ensure_ascii=False), utc_now(), entity_id))
+    return restored
+
+
+def _undo_planned_unit_change(
+    db: sqlite3.Connection, entity_id: str, current: dict[str, Any] | None, target: dict[str, Any] | None, history: dict[str, Any],
+) -> dict[str, Any] | None:
+    if target is None:
+        db.execute("DELETE FROM planned_units WHERE local_id=?", (entity_id,))
+        return None
+    if current:
+        return _undo_existing_planned_unit(db, entity_id, current, target, history)
+    restore_date = str(target.get("date") or "")[:10]
+    if restore_date and calendar_conflicts({"date": restore_date}, {entity_id}):
+        raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht wiederhergestellt werden.", reason="plan_date_conflict")
+    restored = normalize_planned_unit(target, local_id=entity_id, sync_status="local")
+    _insert_planned_unit(db, restored)
+    return restored
+
+
+def _undo_training_plan_change(
+    db: sqlite3.Connection, entity_id: str, current: dict[str, Any] | None, target: dict[str, Any] | None, history: dict[str, Any],
+) -> dict[str, Any] | None:
+    if target is None:
+        db.execute("DELETE FROM training_plans WHERE id=?", (entity_id,))
+        return None
+    if current:
+        db.execute(
+            "UPDATE training_plans SET name=?, goal=?, start_date=?, end_date=?, status=?, updated_at=? WHERE id=?",
+            (target.get("name", current["name"]), target.get("goal", current["goal"]), target.get("start_date", current["start_date"]), target.get("end_date", current["end_date"]), target.get("status", current["status"]), utc_now(), entity_id),
+        )
+        return {**current, **target}
+    now = utc_now()
+    db.execute(
+        "INSERT INTO training_plans(id, name, goal, start_date, end_date, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (entity_id, target.get("name", ""), target.get("goal", ""), target.get("start_date", ""), target.get("end_date", ""), target.get("status", "draft"), now, now),
+    )
+    return target
+
+
+UNDO_ENTITY_HANDLERS = {
+    "profile": _undo_profile_change,
+    "workout_library": _undo_workout_library_change,
+    "competition": _undo_competition_change,
+    "planned_unit": _undo_planned_unit_change,
+    "training_plan": _undo_training_plan_change,
+}
+
+
+def _apply_change_undo(payload: dict[str, Any]) -> dict[str, Any]:
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT * FROM change_history WHERE id=?", (change_id,)).fetchone()
-        if not row:
-            raise AppError(404, "Änderung nicht gefunden.")
-        history = dict(row)
-        if history["action"] not in {"create", "update", "delete"}:
-            raise AppError(409, "Eine Undo-Aktion kann nicht erneut zurückgenommen werden.")
-        current, current_projection = _history_current(db, history["entity_type"], history["entity_id"])
-        expected = str(payload.get("expected_current_hash") or "")
-        if expected != history["after_hash"] or _audit_hash(current_projection) != expected:
-            raise AppError(409, "Die lokale Änderung wurde inzwischen weiter geändert; Undo wurde abgebrochen.")
-        target, _ = _history_target(history)
+        history, current, target = _undo_history_state(db, payload)
         entity_type = history["entity_type"]
         entity_id = history["entity_id"]
-        if entity_type == "profile":
-            if target is None:
-                target = dict(DEFAULT_PROFILE)
-            restored = dict(current or DEFAULT_PROFILE)
-            restored.update(target)
-            PROFILE_REPOSITORY.set(db, json.dumps(normalize_profile(restored), ensure_ascii=False))
-            after = normalize_profile(restored)
-        elif entity_type == "workout_library":
-            if target is None:
-                db.execute("DELETE FROM workout_library WHERE local_id=?", (entity_id,))
-                after = None
-            elif current:
-                try:
-                    restored = normalize_library_workout({**json.loads(current["payload"]), **target}, local_id=entity_id, external_id=current.get("external_id"), sync_status="local")
-                except (TypeError, ValueError) as exc:
-                    raise AppError(409, "Die Bibliothekseinheit kann nicht wiederhergestellt werden.") from exc
-                db.execute("UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', sync_error=NULL, updated_at=? WHERE local_id=?", (json.dumps(restored, ensure_ascii=False), utc_now(), entity_id))
-                after = {**restored, "sync_status": "local"}
-            else:
-                restored = normalize_library_workout(target, local_id=entity_id, external_id=None, sync_status="local")
-                now = utc_now()
-                db.execute(INSERT_LIBRARY_SQL, (entity_id, entity_id, json.dumps(restored, ensure_ascii=False), now))
-                after = restored
-        elif entity_type == "competition":
-            if target is None:
-                db.execute("DELETE FROM competitions WHERE id=?", (entity_id,))
-                after = None
-            elif current:
-                normalized = normalize_competition({**current, **target, "id": entity_id})
-                db.execute("UPDATE competitions SET name=?, event_date=?, sport=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?", (normalized["name"], normalized["event_date"], normalized["sport"], normalized["priority"], normalized["distance"], normalized["target"], normalized["course_profile"], normalized["notes"], normalized["category"], normalized["start_date_local"], normalized["description"], normalized["moving_time"], utc_now(), entity_id))
-                after = {**normalized, "sync_state": "local"}
-            else:
-                normalized = normalize_competition({**target, "id": entity_id})
-                now = utc_now()
-                db.execute("INSERT INTO competitions(id, name, event_date, sport, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)", (entity_id, normalized["name"], normalized["event_date"], normalized["sport"], normalized["priority"], normalized["distance"], normalized["target"], normalized["course_profile"], normalized["notes"], normalized["category"], normalized["start_date_local"], normalized["description"], normalized["moving_time"], now, now))
-                after = {**normalized, "sync_state": "local"}
-        elif entity_type == "planned_unit":
-            if target is None:
-                db.execute("DELETE FROM planned_units WHERE local_id=?", (entity_id,))
-                after = None
-            elif current:
-                try:
-                    current_payload = json.loads(current.get("payload") or "{}")
-                except (TypeError, ValueError) as exc:
-                    raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.") from exc
-                if not isinstance(current_payload, dict):
-                    raise AppError(409, "Die lokale Planung kann nicht wiederhergestellt werden.")
-                restore_date = str(target.get("date") or current_payload.get("date") or "")[:10]
-                current_date = str(current_payload.get("date") or "")[:10]
-                restoring_deletion = history.get("action") == "delete"
-                if "archived" in target:
-                    target_archived = bool(target["archived"])
-                elif restoring_deletion:
-                    target_archived = False
-                else:
-                    target_archived = bool(current_payload.get("archived"))
-                if "local_deleted" in target:
-                    target_local_deleted = bool(target["local_deleted"])
-                elif restoring_deletion:
-                    target_local_deleted = False
-                else:
-                    target_local_deleted = bool(current_payload.get("local_deleted"))
-                schedule_change = restore_date != current_date or (
-                    (bool(current_payload.get("archived")) or bool(current_payload.get("local_deleted")))
-                    and not target_archived and not target_local_deleted
-                )
-                if schedule_change and restore_date and calendar_conflicts({"date": restore_date}, {entity_id}):
-                    raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht wiederhergestellt werden.", reason="plan_date_conflict")
-                restored_target = dict(target)
-                if restore_date:
-                    previous_start = str(current_payload.get("start_date_local") or "")
-                    time_suffix = previous_start[10:] if len(previous_start) > 10 and previous_start[10] == "T" else ISO_MIDNIGHT_SUFFIX
-                    restored_target["start_date_local"] = restore_date + time_suffix
-                restored = normalize_planned_unit(
-                    {
-                        **current_payload,
-                        **restored_target,
-                        "archived": target_archived,
-                        "local_deleted": target_local_deleted,
-                    },
-                    local_id=entity_id,
-                    external_id=str(current.get("external_id") or current_payload.get("external_id") or "") or None,
-                    sync_status="local",
-                )
-                db.execute(
-                    UPDATE_PLANNED_UNIT_SQL,
-                    (json.dumps(restored, ensure_ascii=False), utc_now(), entity_id),
-                )
-                after = restored
-            else:
-                restore_date = str(target.get("date") or "")[:10]
-                if restore_date and calendar_conflicts({"date": restore_date}, {entity_id}):
-                    raise AppError(409, "Die lokale Einheit kann wegen einer bestehenden Kalendereinheit nicht wiederhergestellt werden.", reason="plan_date_conflict")
-                restored = normalize_planned_unit(target, local_id=entity_id, sync_status="local")
-                _insert_planned_unit(db, restored)
-                after = restored
-        elif entity_type == "training_plan":
-            if target is None:
-                db.execute("DELETE FROM training_plans WHERE id=?", (entity_id,))
-                after = None
-            elif current:
-                db.execute("UPDATE training_plans SET name=?, goal=?, start_date=?, end_date=?, status=?, updated_at=? WHERE id=?", (target.get("name", current["name"]), target.get("goal", current["goal"]), target.get("start_date", current["start_date"]), target.get("end_date", current["end_date"]), target.get("status", current["status"]), utc_now(), entity_id))
-                after = {**current, **target}
-            else:
-                now = utc_now()
-                db.execute("INSERT INTO training_plans(id, name, goal, start_date, end_date, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (entity_id, target.get("name", ""), target.get("goal", ""), target.get("start_date", ""), target.get("end_date", ""), target.get("status", "draft"), now, now))
-                after = target
-        else:
+        handler = UNDO_ENTITY_HANDLERS.get(entity_type)
+        if not handler:
             raise AppError(400, "Unbekannte lokale Änderung.")
+        after = handler(db, entity_id, current, target, history)
         if entity_type in {"planned_unit", "training_plan"}:
             _bump_planning_revision(db)
         _record_change(db, entity_type, entity_id, "undo", current, after, source="undo")
-    return {"status": "undone", "change_id": change_id, "entity_type": entity_type, "entity_id": entity_id, "remote_untouched": True}
+    return {"status": "undone", "change_id": history["id"], "entity_type": entity_type, "entity_id": entity_id, "remote_untouched": True}
 
 
 def get_kv(key: str, db: sqlite3.Connection | None = None) -> str | None:
