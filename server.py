@@ -6712,6 +6712,19 @@ def remote_competition_date(event: dict[str, Any]) -> str | None:
         return None
 
 
+def remote_competition_moving_time(value: Any) -> int | None:
+    try:
+        return competition_moving_time(value)
+    except AppError:
+        return None
+
+
+def remote_competition_distance(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return str(int(value)) if float(value).is_integer() else str(value)
+    return competition_distance(value)
+
+
 def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
     event_date = remote_competition_date(event)
     name = str(event.get("name") or "").strip()[:COMPETITION_TEXT_LIMITS["name"]]
@@ -6721,15 +6734,8 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
     category = str(event.get("category") or "RACE_B").upper()
     priority = category.rsplit("_", 1)[-1] if category.rsplit("_", 1)[-1] in {"A", "B", "C"} else "B"
     start_date_local = str(event.get("start_date_local") or f"{event_date}{ISO_MIDNIGHT_SUFFIX}")[:19]
-    try:
-        moving_time = competition_moving_time(event.get("moving_time"))
-    except AppError:
-        moving_time = None
-    distance = event.get("distance")
-    if isinstance(distance, (int, float)):
-        distance = str(int(distance)) if float(distance).is_integer() else str(distance)
-    else:
-        distance = competition_distance(distance)
+    moving_time = remote_competition_moving_time(event.get("moving_time"))
+    distance = remote_competition_distance(event.get("distance"))
     description = str(event.get("description") or "").strip()[:COMPETITION_TEXT_LIMITS["description"]]
     return {
         "intervals_event_id": str(event.get("id") or event.get("intervals_event_id") or "").strip() or None,
