@@ -10380,6 +10380,100 @@ def _fill_illness_checkins(db: Any, pause: dict[str, Any], now: str) -> int:
     return filled
 
 
+def _adaptive_change_stale_reason(current: Any, expected_fingerprint: str) -> str | None:
+    if not isinstance(current, dict):
+        return "changed"
+    if current.get("local_deleted") or current.get("archived"):
+        return "missing"
+    if not expected_fingerprint or adaptive_workout_fingerprint(current) != expected_fingerprint:
+        return "changed"
+    return None
+
+
+def _apply_adaptive_change(
+    db: Any, change: dict[str, Any], now: str,
+) -> tuple[int, dict[str, Any] | None]:
+    draft_id = str(change.get("library_workout_id") or "")
+    replacement = change.get("payload")
+    if not draft_id or not isinstance(replacement, dict):
+        return 0, None
+    draft = db.execute("SELECT id, payload, sync_state FROM planned_units WHERE local_id=?", (draft_id,)).fetchone()
+    if not draft:
+        return 0, {"library_workout_id": draft_id, "reason": "missing"}
+    try:
+        current = json.loads(draft["payload"])
+    except (TypeError, ValueError):
+        current = None
+    expected_fingerprint = str(change.get("source_fingerprint") or "")
+    stale_reason = _adaptive_change_stale_reason(current, expected_fingerprint)
+    if stale_reason:
+        return 0, {"library_workout_id": draft_id, "reason": stale_reason}
+    before = {**current, "sync_status": draft.get("sync_state") or current.get("sync_status")}
+    if str(current.get("date") or "")[:10] < local_now().date().isoformat():
+        return 0, {"library_workout_id": draft_id, "reason": "past"}
+    replacement = {
+        **replacement,
+        "id": draft_id,
+        "moving_time": int(replacement.get("duration_minutes") or 0) * 60,
+        "sync_status": "local",
+    }
+    if not replacement.get("archived") and not replacement.get("local_deleted"):
+        validate_workout_description(replacement)
+        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+            replacement.pop(key, None)
+    db.execute(UPDATE_PLANNED_UNIT_SQL, (json.dumps(replacement, ensure_ascii=False), now, draft_id))
+    _record_change(
+        db, "planned_unit", draft_id, "update", before,
+        {**replacement, "sync_status": "local"}, source="adaptive_replan",
+    )
+    return 1, None
+
+
+def _apply_adaptive_changes(
+    db: Any, changes: Any, now: str,
+) -> tuple[int, list[dict[str, Any]]]:
+    updated = 0
+    stale: list[dict[str, Any]] = []
+    for change in changes if isinstance(changes, list) else []:
+        if not isinstance(change, dict):
+            continue
+        changed, stale_item = _apply_adaptive_change(db, change, now)
+        updated += changed
+        if stale_item:
+            stale.append(stale_item)
+    return updated, stale
+
+
+def _adaptive_replan_status(stale: list[dict[str, Any]], updated: int) -> str:
+    if stale and not updated:
+        return "stale"
+    if stale:
+        return "partial"
+    return "applied"
+
+
+def _adaptive_replan_result(
+    status: str, normalized_id: str, updated: int, updated_checkins: int,
+    stale: list[dict[str, Any]], illness_pause: dict[str, Any] | None,
+    remote_sync: dict[str, Any] | None,
+) -> dict[str, Any]:
+    result = {
+        "status": status if stale else "ok",
+        "id": normalized_id,
+        "updated": updated,
+        "updated_checkins": updated_checkins,
+        "illness_pause": illness_pause,
+        "intervals_sync": remote_sync,
+        "planning": planning_state(),
+    }
+    if stale:
+        result.update({
+            "stale": stale,
+            "message": "Die Vorschau war teilweise oder vollständig veraltet; die betroffenen Einheiten wurden nicht überschrieben.",
+        })
+    return result
+
+
 def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool = False) -> dict[str, Any]:
     try:
         normalized_id = str(uuid.UUID(str(adjustment_id)))
@@ -10396,61 +10490,15 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
         payload = json.loads(row["payload"])
         illness_pause = payload.get("illness_pause") if isinstance(payload.get("illness_pause"), dict) else None
         active_illness_pause = illness_pause if illness_pause and not illness_pause.get("approved") else None
-        updated = 0
-        updated_checkins = 0
-        stale: list[dict[str, Any]] = []
         now = utc_now()
-        for change in payload.get("changes", []):
-            draft_id = str(change.get("library_workout_id") or "")
-            replacement = change.get("payload")
-            if not draft_id or not isinstance(replacement, dict):
-                continue
-            draft = db.execute("SELECT id, payload, sync_state FROM planned_units WHERE local_id=?", (draft_id,)).fetchone()
-            if not draft:
-                stale.append({"library_workout_id": draft_id, "reason": "missing"})
-                continue
-            try:
-                current = json.loads(draft["payload"])
-            except (TypeError, ValueError):
-                current = None
-            expected_fingerprint = str(change.get("source_fingerprint") or "")
-            if not isinstance(current, dict) or current.get("local_deleted") or current.get("archived") or not expected_fingerprint or adaptive_workout_fingerprint(current) != expected_fingerprint:
-                if isinstance(current, dict) and (current.get("local_deleted") or current.get("archived")):
-                    stale.append({"library_workout_id": draft_id, "reason": "missing"})
-                    continue
-                stale.append({"library_workout_id": draft_id, "reason": "changed"})
-                continue
-            before = {**current, "sync_status": draft.get("sync_state") or current.get("sync_status")}
-            if str(current.get("date") or "")[:10] < local_now().date().isoformat():
-                stale.append({"library_workout_id": draft_id, "reason": "past"})
-                continue
-            replacement = {
-                **replacement,
-                "id": draft_id,
-                "moving_time": int(replacement.get("duration_minutes") or 0) * 60,
-                "sync_status": "local",
-            }
-            if not replacement.get("archived") and not replacement.get("local_deleted"):
-                validate_workout_description(replacement)
-                for key in ("workout_doc", "icu_training_load", "icu_intensity"):
-                    replacement.pop(key, None)
-            db.execute(
-                UPDATE_PLANNED_UNIT_SQL,
-                (json.dumps(replacement, ensure_ascii=False), now, draft_id),
-            )
-            _record_change(db, "planned_unit", draft_id, "update", before, {**replacement, "sync_status": "local"}, source="adaptive_replan")
-            updated += 1
+        updated, stale = _apply_adaptive_changes(db, payload.get("changes"), now)
+        updated_checkins = 0
         if updated:
             _bump_planning_revision(db)
         if active_illness_pause:
             updated_checkins = _fill_illness_checkins(db, active_illness_pause, now)
             payload["illness_pause"] = {**active_illness_pause, "approved": True}
-        if stale and not updated:
-            status = "stale"
-        elif stale:
-            status = "partial"
-        else:
-            status = "applied"
+        status = _adaptive_replan_status(stale, updated)
         PLAN_ADJUSTMENT_REPOSITORY.mark_applied(
             db, normalized_id, json.dumps(payload, ensure_ascii=False), status, now
         )
@@ -10460,22 +10508,7 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
             remote_sync = sync_illness_pause_to_intervals(active_illness_pause)
         except Exception as exc:
             remote_sync = {"status": "error", "error": redact_text(str(exc))[:1000]}
-    if stale:
-        return {
-            "status": status,
-            "id": normalized_id,
-            "updated": updated,
-            "updated_checkins": updated_checkins,
-            "stale": stale,
-            "illness_pause": illness_pause,
-            "intervals_sync": remote_sync,
-            "message": "Die Vorschau war teilweise oder vollständig veraltet; die betroffenen Einheiten wurden nicht überschrieben.",
-            "planning": planning_state(),
-        }
-    return {
-        "status": "ok", "id": normalized_id, "updated": updated, "updated_checkins": updated_checkins,
-        "illness_pause": illness_pause, "intervals_sync": remote_sync, "planning": planning_state(),
-    }
+    return _adaptive_replan_result(status, normalized_id, updated, updated_checkins, stale, illness_pause, remote_sync)
 
 
 def season_plan_summary() -> dict[str, Any]:
