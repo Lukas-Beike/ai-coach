@@ -15899,6 +15899,34 @@ def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
         raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
+def _notify_openai_stream_response_id(
+    event: dict[str, Any], kind: str, on_response_id: Callable[[str], None] | None,
+) -> None:
+    if kind not in {"response.created", "response.in_progress"}:
+        return
+    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+    if not isinstance(candidate, dict):
+        return
+    response_id = str(candidate.get("id") or "").strip()
+    if response_id and on_response_id is not None:
+        on_response_id(response_id)
+
+
+def _forward_openai_stream_delta(event: dict[str, Any], kind: str, on_text_delta: Any) -> None:
+    if kind != "response.output_text.delta":
+        return
+    delta = event.get("delta")
+    if isinstance(delta, str) and delta:
+        on_text_delta(delta)
+
+
+def _openai_stream_final_response(event: dict[str, Any], kind: str) -> dict[str, Any] | None:
+    if kind not in {"response.completed", "response.incomplete", "response.failed"}:
+        return None
+    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
+    return candidate if isinstance(candidate, dict) else None
+
+
 def _consume_openai_sse_event(
     data_lines: list[str], event_name: str, on_text_delta: Any,
     on_response_id: Callable[[str], None] | None,
@@ -15913,21 +15941,9 @@ def _consume_openai_sse_event(
     except json.JSONDecodeError as exc:
         raise AppError(502, "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben.", reason="invalid_response") from exc
     kind = event_name or str(event.get("type") or "")
-    candidate = event.get("response") if isinstance(event.get("response"), dict) else event
-    if kind in {"response.created", "response.in_progress"} and isinstance(candidate, dict):
-        response_id = str(candidate.get("id") or "").strip()
-        if response_id and on_response_id is not None:
-            on_response_id(response_id)
-    final_response = None
-    if kind == "response.output_text.delta":
-        delta = event.get("delta")
-        if isinstance(delta, str) and delta:
-            on_text_delta(delta)
-    elif kind in {"response.completed", "response.incomplete", "response.failed"}:
-        candidate = event.get("response") if isinstance(event.get("response"), dict) else event
-        if isinstance(candidate, dict):
-            final_response = candidate
-    return final_response, "", []
+    _notify_openai_stream_response_id(event, kind, on_response_id)
+    _forward_openai_stream_delta(event, kind, on_text_delta)
+    return _openai_stream_final_response(event, kind), "", []
 
 
 def _read_openai_stream_response(
@@ -16723,42 +16739,49 @@ def chat_stream_events(session_csrf_hash: str, operation_id: str) -> queue.Queue
     return events if isinstance(events, queue.Queue) else None
 
 
-def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:
+def _close_chat_provider_response(response: Any) -> None:
+    if response is None:
+        return
+    try:
+        response.close()
+    except (OSError, ValueError):
+        pass
+
+
+def _cancel_attached_chat_stream(session_csrf_hash: str, operation_id: Any) -> tuple[dict[str, Any] | None, Any]:
     with CHAT_STREAM_LOCK:
         stream = CHAT_STREAMS.get(session_csrf_hash)
-        if stream:
-            if operation_id and str(operation_id) != stream["operation_id"]:
-                raise AppError(409, "Die angegebene Coach-Anfrage ist nicht mehr aktiv.")
-            stream["cancel_event"].set()
-            response = getattr(stream["cancel_event"], "_provider_response", None) or getattr(stream["cancel_event"], "_openai_response", None)
-            result = {"status": "cancelling", "operation_id": stream["operation_id"]}
+        if not stream:
+            return None, None
+        if operation_id and str(operation_id) != stream["operation_id"]:
+            raise AppError(409, "Die angegebene Coach-Anfrage ist nicht mehr aktiv.")
+        stream["cancel_event"].set()
+        response = getattr(stream["cancel_event"], "_provider_response", None) or getattr(stream["cancel_event"], "_openai_response", None)
+        return {"status": "cancelling", "operation_id": stream["operation_id"]}, response
+
+
+def _cancel_background_chat_job(session_csrf_hash: str, operation_id: Any) -> dict[str, Any]:
+    job = _active_background_coach_job(session_csrf_hash, str(operation_id or "") or None)
+    if not job:
+        return {"status": "not_running"}
+    receipt = job["receipt"]
+    _merge_coach_command_receipt(job["client_turn_id"], {"cancel_requested": True, "phase": "cancelling"})
+    with CHAT_STREAM_LOCK:
+        background_event = COACH_JOB_CANCEL_EVENTS.get(str(receipt.get("operation_id") or ""))
+        if background_event is not None:
+            background_event.set()
+            response = getattr(background_event, "_provider_response", None) or getattr(background_event, "_openai_response", None)
         else:
             response = None
-            result = None
+    _close_chat_provider_response(response)
+    return {"status": "cancelling", "operation_id": receipt.get("operation_id")}
+
+
+def cancel_chat_stream(session_csrf_hash: str, operation_id: Any = None) -> dict[str, Any]:
+    result, response = _cancel_attached_chat_stream(session_csrf_hash, operation_id)
     if result is None:
-        job = _active_background_coach_job(session_csrf_hash, str(operation_id or "") or None)
-        if not job:
-            return {"status": "not_running"}
-        receipt = job["receipt"]
-        _merge_coach_command_receipt(job["client_turn_id"], {"cancel_requested": True, "phase": "cancelling"})
-        with CHAT_STREAM_LOCK:
-            background_event = COACH_JOB_CANCEL_EVENTS.get(str(receipt.get("operation_id") or ""))
-            if background_event is not None:
-                background_event.set()
-                response = getattr(background_event, "_provider_response", None) or getattr(background_event, "_openai_response", None)
-            else:
-                response = None
-        if response is not None:
-            try:
-                response.close()
-            except (OSError, ValueError):
-                pass
-        return {"status": "cancelling", "operation_id": receipt.get("operation_id")}
-    if response is not None:
-        try:
-            response.close()
-        except (OSError, ValueError):
-            pass
+        return _cancel_background_chat_job(session_csrf_hash, operation_id)
+    _close_chat_provider_response(response)
     return result
 
 
