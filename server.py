@@ -7001,82 +7001,111 @@ def resolve_competition_conflict(competition_id: Any, strategy: Any) -> dict[str
     return {"status": "resolved", "strategy": selected, "competition": saved, "competitions": list_competitions()}
 
 
+def _competition_remote_indexes(
+    remote_events: list[dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[tuple[str, str, str], dict[str, Any]]]:
+    return (
+        {str(event.get("external_id")): event for event in remote_events if event.get("external_id")},
+        {str(event.get("id")): event for event in remote_events if event.get("id")},
+        {
+            key: event
+            for event in remote_events
+            if (key := competition_sync_key(event)) is not None
+        },
+    )
+
+
+def _competition_dirty_row_action(
+    row: dict[str, Any],
+    remote_by_external: dict[str, dict[str, Any]],
+    remote_by_id: dict[str, dict[str, Any]],
+    remote_by_identity: dict[tuple[str, str, str], dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not supported_competition_sport(row.get("sport")):
+        return None, None
+    remote = remote_by_id.get(str(row["intervals_event_id"])) if row.get("intervals_event_id") else None
+    if remote is None and row.get("external_id"):
+        remote = remote_by_external.get(str(row["external_id"]))
+    identity_remote = remote_by_identity.get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
+    if remote is None:
+        remote = identity_remote
+    if identity_remote and row.get("sync_state") != "local_override":
+        return None, {
+            "type": "conflict",
+            "local_id": str(row["id"]),
+            "remote_id": str(identity_remote.get("id") or ""),
+            "name": str(row.get("name") or ""),
+            "event_date": str(row.get("event_date") or ""),
+            "sport": str(row.get("sport") or ""),
+            "reason": "remote_identity_changed",
+        }
+    if row.get("intervals_event_id") and remote is None:
+        return None, {
+            "type": "conflict",
+            "local_id": str(row["id"]),
+            "remote_id": str(row.get("intervals_event_id") or ""),
+            "name": str(row.get("name") or ""),
+            "event_date": str(row.get("event_date") or ""),
+            "sport": str(row.get("sport") or ""),
+            "reason": "remote_missing",
+        }
+    payload = competition_event_payload(row)
+    return payload, {
+        "type": "change" if remote is not None else "create",
+        "local_id": str(row["id"]),
+        "remote_id": str((remote or {}).get("id") or row.get("intervals_event_id") or ""),
+        "name": str(row.get("name") or ""),
+        "event_date": str(row.get("event_date") or ""),
+        "sport": str(row.get("sport") or ""),
+        "payload_hash": hashlib.sha256(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def _competition_delete_identifiers(tombstones: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {"id": row["intervals_event_id"]} if row.get("intervals_event_id") else {"external_id": row["external_id"]}
+        for row in tombstones
+        if row.get("intervals_event_id") or row.get("external_id")
+    ]
+
+
+def _competition_remote_signature(remote_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    fields = ("id", "external_id", "name", "start_date_local", "type", "category", "distance", "moving_time", "target", "description")
+    return [
+        {key: event.get(key) for key in fields}
+        for event in sorted(remote_events, key=lambda item: (str(item.get("id") or ""), str(item.get("external_id") or "")))
+    ]
+
+
+def _competition_plan_summary(actions: list[dict[str, Any]]) -> dict[str, int]:
+    return {kind: sum(1 for action in actions if action["type"] == kind) for kind in ("create", "change", "delete", "conflict")}
+
+
 def _competition_sync_plan(
     local_rows: list[dict[str, Any]],
     tombstones: list[dict[str, Any]],
     remote_events: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Build a remote mutation plan without changing local or provider state."""
-    remote_by_external = {str(event.get("external_id")): event for event in remote_events if event.get("external_id")}
-    remote_by_id = {str(event.get("id")): event for event in remote_events if event.get("id")}
-    remote_by_identity = {
-        key: event
-        for event in remote_events
-        if (key := competition_sync_key(event)) is not None
-    }
+    remote_by_external, remote_by_id, remote_by_identity = _competition_remote_indexes(remote_events)
     actions: list[dict[str, Any]] = []
     outbound: list[dict[str, Any]] = []
     dirty_rows = [row for row in local_rows if row.get("sync_dirty")]
     for row in dirty_rows:
-        if not supported_competition_sport(row.get("sport")):
-            continue
-        remote = None
-        if row.get("intervals_event_id"):
-            remote = remote_by_id.get(str(row["intervals_event_id"]))
-        if remote is None and row.get("external_id"):
-            remote = remote_by_external.get(str(row["external_id"]))
-        identity_remote = remote_by_identity.get(competition_sync_key(row)) if not row.get("intervals_event_id") else None
-        if remote is None:
-            remote = identity_remote
-        if identity_remote and row.get("sync_state") != "local_override":
-            actions.append({
-                "type": "conflict",
-                "local_id": str(row["id"]),
-                "remote_id": str(identity_remote.get("id") or ""),
-                "name": str(row.get("name") or ""),
-                "event_date": str(row.get("event_date") or ""),
-                "sport": str(row.get("sport") or ""),
-                "reason": "remote_identity_changed",
-            })
-            continue
-        if row.get("intervals_event_id") and remote is None:
-            actions.append({
-                "type": "conflict",
-                "local_id": str(row["id"]),
-                "remote_id": str(row.get("intervals_event_id") or ""),
-                "name": str(row.get("name") or ""),
-                "event_date": str(row.get("event_date") or ""),
-                "sport": str(row.get("sport") or ""),
-                "reason": "remote_missing",
-            })
-            continue
-        payload = competition_event_payload(row)
-        outbound.append(payload)
-        actions.append({
-            "type": "change" if remote is not None else "create",
-            "local_id": str(row["id"]),
-            "remote_id": str((remote or {}).get("id") or row.get("intervals_event_id") or ""),
-            "name": str(row.get("name") or ""),
-            "event_date": str(row.get("event_date") or ""),
-            "sport": str(row.get("sport") or ""),
-            "payload_hash": hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest(),
-        })
-    delete_identifiers = [
-        {"id": row["intervals_event_id"]} if row.get("intervals_event_id") else {"external_id": row["external_id"]}
-        for row in tombstones if row.get("intervals_event_id") or row.get("external_id")
-    ]
+        payload, action = _competition_dirty_row_action(row, remote_by_external, remote_by_id, remote_by_identity)
+        if payload is not None:
+            outbound.append(payload)
+        if action is not None:
+            actions.append(action)
+    delete_identifiers = _competition_delete_identifiers(tombstones)
     for identifier in delete_identifiers:
         actions.append({"type": "delete", **{key: str(value) for key, value in identifier.items()}})
-    remote_signature = [
-        {
-            key: event.get(key)
-            for key in ("id", "external_id", "name", "start_date_local", "type", "category", "distance", "moving_time", "target", "description")
-        }
-        for event in sorted(remote_events, key=lambda item: (str(item.get("id") or ""), str(item.get("external_id") or "")))
-    ]
+    remote_signature = _competition_remote_signature(remote_events)
     basis = {"actions": actions, "remote": remote_signature}
     fingerprint = hashlib.sha256(json.dumps(basis, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
-    summary = {kind: sum(1 for action in actions if action["type"] == kind) for kind in ("create", "change", "delete", "conflict")}
+    summary = _competition_plan_summary(actions)
     return {
         "actions": actions,
         "outbound": outbound,
