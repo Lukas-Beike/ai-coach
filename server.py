@@ -10819,6 +10819,44 @@ def list_coach_planned_workouts(limit: int = 250) -> dict[str, Any]:
     return {"local": local, "intervals": [], "canonical": canonical_planned_workouts([], local, limit), "source": "local"}
 
 
+def _local_calendar_competition(competition: dict[str, Any]) -> dict[str, Any]:
+    event_date = str(competition.get("event_date") or "")[:10]
+    linked = bool(competition.get("external_id"))
+    return {
+        **competition,
+        "date": event_date,
+        "start_date_local": competition.get("start_date_local") or f"{event_date}{ISO_MIDNIGHT_SUFFIX}",
+        "type": competition.get("sport") or "Competition",
+        "category": competition.get("category") or "RACE_B",
+        "is_competition": True,
+        "is_local": True,
+        "is_remote": linked,
+        "sync_source": LOCAL_INTERVALS_SCOPE if linked else "local",
+        "sync_status": competition.get("sync_state") or "local",
+    }
+
+
+def _local_calendar_external_event(event: Any) -> dict[str, Any] | None:
+    if not isinstance(event, dict) or int(event.get("training_relevant") or 0) != 1:
+        return None
+    return {
+        **event,
+        "date": str(event.get("event_date") or "")[:10],
+        "is_external_calendar": True,
+        "is_local": True,
+        "is_remote": False,
+        "sync_source": "external-calendar",
+        "sync_status": "read-only",
+    }
+
+
+def _local_calendar_sort_key(item: dict[str, Any]) -> tuple[str, str]:
+    return (
+        str(item.get("start_date_local") or item.get("date") or item.get("event_date") or "9999-12-31"),
+        str(item.get("name") or "").casefold(),
+    )
+
+
 def local_calendar_events(
     planned: list[Any] | None = None,
     competitions: list[Any] | None = None,
@@ -10826,26 +10864,12 @@ def local_calendar_events(
 ) -> list[dict[str, Any]]:
     """Resolve the read model shared by the plan UI and coach-facing clients."""
     result = [dict(item) for item in (planned if planned is not None else list_dated_local_planned_workouts()) if isinstance(item, dict)]
-    for competition in competitions if competitions is not None else list_competitions():
-        if not isinstance(competition, dict):
-            continue
-        result.append({
-            **competition,
-            "date": str(competition.get("event_date") or "")[:10],
-            "start_date_local": competition.get("start_date_local") or f"{str(competition.get('event_date') or '')[:10]}{ISO_MIDNIGHT_SUFFIX}",
-            "type": competition.get("sport") or "Competition",
-            "category": competition.get("category") or "RACE_B",
-            "is_competition": True,
-            "is_local": True,
-            "is_remote": bool(competition.get("external_id")),
-            "sync_source": LOCAL_INTERVALS_SCOPE if competition.get("external_id") else "local",
-            "sync_status": competition.get("sync_state") or "local",
-        })
+    result.extend(_local_calendar_competition(item) for item in (competitions if competitions is not None else list_competitions()) if isinstance(item, dict))
     for event in external_events if external_events is not None else list_external_calendar_events(1000, training_relevant_only=True):
-        if isinstance(event, dict) and int(event.get("training_relevant") or 0) == 1:
-            result.append({**event, "date": str(event.get("event_date") or "")[:10], "is_external_calendar": True, "is_local": True, "is_remote": False, "sync_source": "external-calendar", "sync_status": "read-only"})
-    result.sort(key=lambda item: (str(item.get("start_date_local") or item.get("date") or item.get("event_date") or "9999-12-31"), str(item.get("name") or "").casefold()))
-    return result
+        projected = _local_calendar_external_event(event)
+        if projected:
+            result.append(projected)
+    return sorted(result, key=_local_calendar_sort_key)
 
 
 def update_planned_unit_sync_state(local_id: str, state: str, error: str | None = None, *, remote_event: dict[str, Any] | None = None) -> None:
