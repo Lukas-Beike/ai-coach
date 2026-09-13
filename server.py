@@ -7759,6 +7759,40 @@ def _weather_training_windows(target_date: date) -> list[tuple[int, int, str]]:
     return [(6, 21, "Wochenende")]
 
 
+def _weather_interval_summary(interval: list[dict[str, float | int | str]]) -> dict[str, Any]:
+    """Calculate the forecast values used for one possible training window."""
+    precipitation = [_weather_number(item.get("precipitation_probability")) for item in interval]
+    rain = [(_weather_number(item.get("rain")) or 0) + (_weather_number(item.get("showers")) or 0) for item in interval]
+    temperatures = [_weather_number(item.get("apparent_temperature")) for item in interval]
+    gusts = [_weather_number(item.get("wind_gusts_10m")) for item in interval]
+    wind_speeds = [_weather_number(item.get("wind_speed_10m")) for item in interval]
+    directions = [_weather_number(item.get("wind_direction_10m")) for item in interval]
+    return {
+        "precipitation_average": sum(value for value in precipitation if value is not None) / max(1, len([value for value in precipitation if value is not None])),
+        "rain_total": sum(rain),
+        "temperature_average": sum(value for value in temperatures if value is not None) / max(1, len([value for value in temperatures if value is not None])),
+        "gust_maximum": max(gusts) if gusts else 0,
+        "wind_speed_average": sum(value for value in wind_speeds if value is not None) / max(1, len([value for value in wind_speeds if value is not None])),
+        "wind_direction_average": sum(value for value in directions if value is not None) / max(1, len([value for value in directions if value is not None])) if any(value is not None for value in directions) else None,
+        "weather_codes": [int(item["weather_code"]) for item in interval if item.get("weather_code") is not None],
+    }
+
+
+def _weather_window_score(event: dict[str, Any], summary: dict[str, Any]) -> float:
+    """Score one valid window; lower scores are more suitable for training."""
+    severe_weather = sum(25 for code in summary["weather_codes"] if code >= 95) + sum(8 for code in summary["weather_codes"] if 61 <= code <= 86)
+    running = "run" in str(event.get("type") or "").casefold()
+    return (
+        summary["precipitation_average"] * 0.8
+        + summary["rain_total"] * 8
+        + max(0, summary["wind_speed_average"] - 20) * (0.5 if running else 1.4)
+        + max(0, summary["gust_maximum"] - 30) * (1.0 if is_outdoor_activity(event) and not running else 0.5)
+        + max(0, 4 - summary["temperature_average"]) * 1.5
+        + max(0, summary["temperature_average"] - 27) * 1.2
+        + severe_weather
+    )
+
+
 def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> dict[str, Any] | None:
     event_date = str(event.get("start_date_local") or event.get("date") or "")[:10]
     if not re.fullmatch(DATE_ONLY_PATTERN, event_date):
@@ -7785,26 +7819,8 @@ def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> 
                 continue
             if any(int(item["hour"]) != start_hour + offset for offset, item in enumerate(interval)):
                 continue
-            precipitation = [_weather_number(item.get("precipitation_probability")) for item in interval]
-            rain = [(_weather_number(item.get("rain")) or 0) + (_weather_number(item.get("showers")) or 0) for item in interval]
-            temperatures = [_weather_number(item.get("apparent_temperature")) for item in interval]
-            gusts = [_weather_number(item.get("wind_gusts_10m")) for item in interval]
-            wind_speeds = [_weather_number(item.get("wind_speed_10m")) for item in interval]
-            codes = [int(item["weather_code"]) for item in interval if item.get("weather_code") is not None]
-            precipitation_avg = sum(value for value in precipitation if value is not None) / max(1, len([value for value in precipitation if value is not None]))
-            temperature_avg = sum(value for value in temperatures if value is not None) / max(1, len([value for value in temperatures if value is not None]))
-            gust_max = max(gusts) if gusts else 0
-            wind_speed_avg = sum(value for value in wind_speeds if value is not None) / max(1, len([value for value in wind_speeds if value is not None]))
-            severe_weather = sum(25 for code in codes if code >= 95) + sum(8 for code in codes if 61 <= code <= 86)
-            score = (
-                precipitation_avg * 0.8
-                + sum(rain) * 8
-                + max(0, wind_speed_avg - 20) * (1.4 if "run" not in str(event.get("type") or "").casefold() else 0.5)
-                + max(0, gust_max - 30) * (1.0 if is_outdoor_activity(event) and "run" not in str(event.get("type") or "").casefold() else 0.5)
-                + max(0, 4 - temperature_avg) * 1.5
-                + max(0, temperature_avg - 27) * 1.2
-                + severe_weather
-            )
+            summary = _weather_interval_summary(interval)
+            score = _weather_window_score(event, summary)
             # When the forecast is equally good, prefer a practical daytime slot
             # over the narrow pre-work window. Weather remains the dominant factor.
             convenience_penalty = 2 if availability == WORKDAY_TIME_LABEL else 0
@@ -7812,19 +7828,14 @@ def _weather_recommendation(event: dict[str, Any], forecast: dict[str, Any]) -> 
     if not candidates:
         return None
     _, start_hour, best, availability = min(candidates, key=lambda item: (item[0], item[1]))
-    best_precipitation = [_weather_number(item.get("precipitation_probability")) for item in best]
-    precipitation_avg = round(sum(value for value in best_precipitation if value is not None) / max(1, len([value for value in best_precipitation if value is not None])))
-    temperatures = [_weather_number(item.get("apparent_temperature")) for item in best]
-    temperature_avg = round(sum(value for value in temperatures if value is not None) / max(1, len([value for value in temperatures if value is not None])))
-    gusts = [_weather_number(item.get("wind_gusts_10m")) for item in best]
-    gust_max = round(max(gusts)) if gusts else None
-    wind_speeds = [_weather_number(item.get("wind_speed_10m")) for item in best]
-    wind_speed_avg = round(sum(value for value in wind_speeds if value is not None) / max(1, len([value for value in wind_speeds if value is not None])))
-    directions = [_weather_number(item.get("wind_direction_10m")) for item in best]
-    wind_direction = round(sum(value for value in directions if value is not None) / max(1, len([value for value in directions if value is not None]))) if any(value is not None for value in directions) else None
+    summary = _weather_interval_summary(best)
+    precipitation_avg = round(summary["precipitation_average"])
+    temperature_avg = round(summary["temperature_average"])
+    gust_max = round(summary["gust_maximum"])
+    wind_speed_avg = round(summary["wind_speed_average"])
+    wind_direction = round(summary["wind_direction_average"]) if summary["wind_direction_average"] is not None else None
     end_hour = start_hour + duration_hours
-    best_codes = [int(item["weather_code"]) for item in best if item.get("weather_code") is not None]
-    best_code = best_codes[0] if best_codes else None
+    best_code = summary["weather_codes"][0] if summary["weather_codes"] else None
     recommendation = {
         "date": event_date,
         "event_id": str(event.get("id")) if event.get("id") is not None else None,
