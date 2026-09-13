@@ -13335,6 +13335,46 @@ def _run_full_provider_resync(provider: str, operation_id: str, reason: str) -> 
     return sync_garmin(days=ALL_SYNC_DAYS, operation_id=operation_id, reason=reason)
 
 
+def _start_full_provider_resync(keys: dict[str, str], label: str) -> None:
+    set_kv(keys["running"], "1")
+    set_kv(keys["status"], f"{label}: bestehende Daten bleiben erhalten, Resync läuft…")
+    set_kv(keys["error"], "")
+    set_kv(keys["status"], f"{label}: vollständiger Resync läuft…")
+
+
+def _complete_full_provider_resync(keys: dict[str, str], result: dict[str, Any]) -> str:
+    finished_at = utc_now()
+    set_kv(keys["last_at"], finished_at)
+    set_kv(keys["error"], "")
+    return finished_at
+
+
+def _record_full_provider_resync_failure(keys: dict[str, str], provider: str, exc: Exception) -> str:
+    failure_code = operation_error_code(exc)
+    set_kv(keys["error"], redact_text(str(exc))[:1000])
+    LOGGER.exception(
+        "Full provider resynchronization failed",
+        extra={"event": "provider_full_resync_failed", "context": {"provider": provider}},
+        exc_info=True,
+    )
+    return failure_code
+
+
+def _finish_full_provider_resync(
+    gate: Any, keys: dict[str, str], operation_id: str, provider: str, operation_started: float,
+    operation_succeeded: bool, operation_result: Any, operation_failure_code: str | None,
+) -> None:
+    try:
+        set_kv(keys["running"], "0")
+        set_kv(keys["status"], "")
+    finally:
+        if operation_succeeded:
+            log_operation_event("operation_completed", operation_id, "full_resync", provider, "resync", operation_started, count=operation_result_count(operation_result))
+        else:
+            log_operation_event("operation_failed", operation_id, "full_resync", provider, "resync", operation_started, error_code=operation_failure_code or "internal_error")
+        gate.end_reset()
+
+
 def full_provider_resync(provider: str, operation_id: str | None = None) -> dict[str, Any]:
     _validate_full_provider_resync(provider)
     gate, keys, label = _full_provider_resync_details(provider)
@@ -13348,40 +13388,26 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
     operation_failure_code: str | None = None
     log_operation_event("operation_started", operation_id, "full_resync", provider, "resync", operation_started)
     try:
-        set_kv(keys["running"], "1")
-        set_kv(keys["status"], f"{label}: bestehende Daten bleiben erhalten, Resync läuft…")
-        set_kv(keys["error"], "")
         # A full resync refreshes provider caches in place. The sync functions
         # replace data only after a successful provider response, so the last
         # good snapshot and all athlete-owned records remain recoverable.
-        set_kv(keys["status"], f"{label}: vollständiger Resync läuft…")
+        _start_full_provider_resync(keys, label)
         result = _run_full_provider_resync(provider, operation_id, FULL_RESYNC_LABEL)
-        finished_at = utc_now()
-        set_kv(keys["last_at"], finished_at)
-        set_kv(keys["error"], "")
+        finished_at = _complete_full_provider_resync(keys, result)
         operation_result = result
         operation_succeeded = True
         return {"status": "ok", "source": provider, "resynced_at": finished_at, **result}
     except Exception as exc:
-        operation_failure_code = operation_error_code(exc)
-        set_kv(keys["error"], redact_text(str(exc))[:1000])
-        LOGGER.exception(
-            "Full provider resynchronization failed",
-            extra={"event": "provider_full_resync_failed", "context": {"provider": provider}},
-            exc_info=True,
-        )
+        operation_failure_code = _record_full_provider_resync_failure(keys, provider, exc)
         raise
     finally:
         try:
-            set_kv(keys["running"], "0")
-            set_kv(keys["status"], "")
+            _finish_full_provider_resync(
+                gate, keys, operation_id, provider, operation_started,
+                operation_succeeded, operation_result, operation_failure_code,
+            )
         finally:
-            if operation_succeeded:
-                log_operation_event("operation_completed", operation_id, "full_resync", provider, "resync", operation_started, count=operation_result_count(operation_result))
-            else:
-                log_operation_event("operation_failed", operation_id, "full_resync", provider, "resync", operation_started, error_code=operation_failure_code or "internal_error")
             OPERATION_CONTEXT.reset(operation_token)
-            gate.end_reset()
 
 
 def _wait_for_existing_intervals_sync(
@@ -13488,6 +13514,86 @@ def _record_intervals_sync_window(
     return sync_window, pagination
 
 
+def _execute_intervals_sync(
+    reason: str, activity_days: int, operation_id: str, end_date: date | None,
+    wait_for_performance: bool, cancel_event: threading.Event | None,
+) -> dict[str, Any]:
+    set_kv("sync_operation_started_at", get_kv("sync_operation_started_at") if get_kv("sync_running") == "1" else utc_now())
+    set_sync_operation_state(operation_id, "running", "fetching", 10, "Intervals.icu-Daten werden gelesen…")
+    set_kv("sync_running", "1")
+    set_kv("sync_status", "Intervals.icu: Synchronisierung läuft…")
+    fetch_kwargs = {"activity_days": activity_days}
+    if end_date is not None:
+        fetch_kwargs["end_date"] = end_date
+    if cancel_event is not None:
+        fetch_kwargs["cancel_event"] = cancel_event
+    snapshot = IntervalsClient().fetch_snapshot(**fetch_kwargs)
+    set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
+    snapshot, planned_import = _store_intervals_snapshot(snapshot, activity_days, end_date)
+    mark_daily_sync("intervals")
+    # Seed the local template catalog from the provider once. This is a
+    # read-only, idempotent import: existing local templates are preserved
+    # and pending local entries are still pushed only by the dedicated,
+    # explicitly confirmed library action.
+    library_imported, library_error, library_count = _seed_intervals_workout_library(reason, cancel_event)
+    # A successful full sync supersedes a transient morning-check-in
+    # network error that may otherwise keep the global status in warning.
+    set_kv("morning_checkin_error", "")
+    sync_window, pagination = _record_intervals_sync_window(activity_days, end_date, snapshot)
+    set_sync_operation_state(operation_id, "completed", "complete", 100, "Intervals.icu-Synchronisierung abgeschlossen.")
+    set_kv("sync_operation_finished_at", utc_now())
+    result = {
+        "status": "partial" if library_error else "ok",
+        "synced_at": snapshot["synced_at"],
+        "activities": len(snapshot["recent_activities"]),
+        "wellness": len(snapshot["recent_wellness"]),
+        "events": len(snapshot["upcoming_calendar"]),
+        "planned_import": planned_import,
+        "activity_days": activity_days,
+        "window_start": sync_window[0][0].isoformat(),
+        "window_end": sync_window[-1][1].isoformat(),
+        "library": library_count,
+        "library_imported": library_imported,
+        "library_error": library_error,
+        "pagination": pagination,
+    }
+    if end_date is None:
+        performance_job = _enqueue_automatic_performance_refresh(reason)
+    else:
+        performance_job = None
+    if performance_job:
+        result["performance_refresh_job_id"] = performance_job["id"]
+    if wait_for_performance:
+        _wait_for_performance_refresh(
+            performance_job["id"] if performance_job else None,
+            cancel_event=cancel_event,
+        )
+    return result
+
+
+def _record_intervals_sync_failure(operation_id: str, reason: str, exc: Exception) -> None:
+    if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
+        set_sync_operation_state(operation_id, "cancelled", "cancelled", 100, "Intervals.icu-Synchronisierung abgebrochen.")
+        set_kv("sync_operation_finished_at", utc_now())
+        return
+    set_kv("last_sync_error", redact_text(str(exc))[:1000])
+    set_sync_operation_state(operation_id, "error", "error", 100, "Intervals.icu-Synchronisierung fehlgeschlagen.", str(exc))
+    set_kv("sync_operation_finished_at", utc_now())
+    LOGGER.exception(
+        "Intervals.icu synchronization failed",
+        extra={"event": "sync_failed", "context": {"reason": reason, "last_success": get_kv("last_sync_at")}},
+        exc_info=True,
+    )
+
+
+def _finish_intervals_sync() -> None:
+    try:
+        set_kv("sync_running", "0")
+        set_kv("sync_status", "")
+    finally:
+        SYNC_LOCK.release()
+
+
 @observed_sync("intervals", "activities")
 @maintenance_operation
 @intervals_operation
@@ -13514,77 +13620,12 @@ def sync_intervals(
         )
     operation_id = operation_id or (get_kv("sync_operation_id") if get_kv("sync_running") == "1" else None) or uuid.uuid4().hex
     try:
-        set_kv("sync_operation_started_at", get_kv("sync_operation_started_at") if get_kv("sync_running") == "1" else utc_now())
-        set_sync_operation_state(operation_id, "running", "fetching", 10, "Intervals.icu-Daten werden gelesen…")
-        set_kv("sync_running", "1")
-        set_kv("sync_status", "Intervals.icu: Synchronisierung läuft…")
-        fetch_kwargs = {"activity_days": activity_days}
-        if end_date is not None:
-            fetch_kwargs["end_date"] = end_date
-        if cancel_event is not None:
-            fetch_kwargs["cancel_event"] = cancel_event
-        snapshot = IntervalsClient().fetch_snapshot(**fetch_kwargs)
-        set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
-        snapshot, planned_import = _store_intervals_snapshot(snapshot, activity_days, end_date)
-        mark_daily_sync("intervals")
-        # Seed the local template catalog from the provider once. This is a
-        # read-only, idempotent import: existing local templates are preserved
-        # and pending local entries are still pushed only by the dedicated,
-        # explicitly confirmed library action.
-        library_imported, library_error, library_count = _seed_intervals_workout_library(reason, cancel_event)
-        # A successful full sync supersedes a transient morning-check-in
-        # network error that may otherwise keep the global status in warning.
-        set_kv("morning_checkin_error", "")
-        sync_window, pagination = _record_intervals_sync_window(activity_days, end_date, snapshot)
-        set_sync_operation_state(operation_id, "completed", "complete", 100, "Intervals.icu-Synchronisierung abgeschlossen.")
-        set_kv("sync_operation_finished_at", utc_now())
-        result_status = "partial" if library_error else "ok"
-        performance_job = None
-        if end_date is None:
-            performance_job = _enqueue_automatic_performance_refresh(reason)
-        result = {
-            "status": result_status,
-            "synced_at": snapshot["synced_at"],
-            "activities": len(snapshot["recent_activities"]),
-            "wellness": len(snapshot["recent_wellness"]),
-            "events": len(snapshot["upcoming_calendar"]),
-            "planned_import": planned_import,
-            "activity_days": activity_days,
-            "window_start": sync_window[0][0].isoformat(),
-            "window_end": sync_window[-1][1].isoformat(),
-            "library": library_count,
-            "library_imported": library_imported,
-            "library_error": library_error,
-            "pagination": pagination,
-        }
-        if performance_job:
-            result["performance_refresh_job_id"] = performance_job["id"]
-        if wait_for_performance:
-            _wait_for_performance_refresh(
-                performance_job["id"] if performance_job else None,
-                cancel_event=cancel_event,
-            )
-        return result
+        return _execute_intervals_sync(reason, activity_days, operation_id, end_date, wait_for_performance, cancel_event)
     except Exception as exc:
-        if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
-            set_sync_operation_state(operation_id, "cancelled", "cancelled", 100, "Intervals.icu-Synchronisierung abgebrochen.")
-            set_kv("sync_operation_finished_at", utc_now())
-            raise
-        set_kv("last_sync_error", redact_text(str(exc))[:1000])
-        set_sync_operation_state(operation_id, "error", "error", 100, "Intervals.icu-Synchronisierung fehlgeschlagen.", str(exc))
-        set_kv("sync_operation_finished_at", utc_now())
-        LOGGER.exception(
-            "Intervals.icu synchronization failed",
-            extra={"event": "sync_failed", "context": {"reason": reason, "last_success": get_kv("last_sync_at")}},
-            exc_info=True,
-        )
+        _record_intervals_sync_failure(operation_id, reason, exc)
         raise
     finally:
-        try:
-            set_kv("sync_running", "0")
-            set_kv("sync_status", "")
-        finally:
-            SYNC_LOCK.release()
+        _finish_intervals_sync()
 
 
 @observed_sync("intervals", "performance")
