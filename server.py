@@ -2570,26 +2570,39 @@ def _provider_freshness_inputs() -> tuple[dict[tuple[str, str], Any], dict[tuple
     return fallbacks, fallback_errors, configured
 
 
-def _provider_freshness_status(
-    key: tuple[str, str], configured: bool, row: dict[str, Any] | None, last_good: Any, fallback_error: bool,
-) -> tuple[str, str | None]:
-    state = "not_configured" if not configured else "never_loaded"
-    if configured and row and row["status"] == "running":
-        state = "syncing"
-    elif configured and row and row["status"] == "error":
-        state = "stale" if last_good else "error"
-    elif configured and row and row["status"] == "partial":
-        state = "partial"
-    elif configured and last_good:
+def _provider_freshness_last_good_state(key: tuple[str, str], last_good: Any) -> str:
+    if last_good:
         try:
             age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_good.replace("Z", UTC_OFFSET_SUFFIX))).total_seconds()
         except (TypeError, ValueError):
             age = float("inf")
-        state = "stale" if age > PROVIDER_REFRESH_STALE_SECONDS[key] else "fresh"
-    elif configured and fallback_error:
-        state = "stale" if last_good else "error"
-    error_code = row.get("error_code") if row and row["status"] == "error" else "provider_error" if fallback_error else None
-    return state, error_code
+        return "stale" if age > PROVIDER_REFRESH_STALE_SECONDS[key] else "fresh"
+    return "error"
+
+
+def _provider_fallback_error_code(fallback_error: bool) -> str | None:
+    return "provider_error" if fallback_error else None
+
+
+def _provider_freshness_status(
+    key: tuple[str, str], configured: bool, row: dict[str, Any] | None, last_good: Any, fallback_error: bool,
+) -> tuple[str, str | None]:
+    if not configured:
+        return "not_configured", None
+    if row:
+        status = row["status"]
+        if status == "running":
+            return "syncing", None
+        if status == "error":
+            state = "stale" if last_good else "error"
+            return state, row.get("error_code")
+        if status == "partial":
+            return "partial", _provider_fallback_error_code(fallback_error)
+    if last_good:
+        return _provider_freshness_last_good_state(key, last_good), _provider_fallback_error_code(fallback_error)
+    if fallback_error:
+        return "error", "provider_error"
+    return "never_loaded", None
 
 
 def provider_freshness_state() -> list[dict[str, Any]]:
