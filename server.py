@@ -11109,133 +11109,192 @@ class _RepairCalendarBatch:
         return outcomes
 
 
+@dataclass
+class _RepairCalendarContext:
+    local_id: str
+    expected_hash: str
+    batch: _RepairCalendarBatch | None
+    workout: dict[str, Any]
+    planned_date: date
+    today: date
+    removing: bool
+    client: Any
+    athlete: str
+    remote_id: str
+    identities: set[str]
+    other_remote_ids: set[str]
+    other_external_ids: set[str]
+    newest: str
+
+
+def _repair_calendar_context(local_id: str, expected_hash: str, batch: _RepairCalendarBatch | None) -> _RepairCalendarContext:
+    with DB_LOCK, database() as db:
+        row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
+        other_rows = db.execute(
+            "SELECT local_id, json_extract(payload, '$.remote_event_id') AS remote_id, "
+            "json_extract(payload, '$.remote_event_external_id') AS remote_external_id FROM planned_units WHERE local_id<>?",
+            (local_id,),
+        ).fetchall()
+    if not row or _library_payload_hash(row["payload"]) != expected_hash:
+        raise AppError(409, "Die Planung hat sich seit dem Reparaturauftrag geaendert.", reason="planning_revision_conflict")
+    workout = json.loads(row["payload"])
+    today = local_now().date()
+    planned_date = date.fromisoformat(str(workout.get("date") or ""))
+    if planned_date < today:
+        raise AppError(400, "Reparatur-Sync ist nur fuer zukuenftige geplante Einheiten erlaubt.", reason="invalid_plan")
+    client = IntervalsClient()
+    return _RepairCalendarContext(
+        local_id=local_id,
+        expected_hash=expected_hash,
+        batch=batch,
+        workout=workout,
+        planned_date=planned_date,
+        today=today,
+        removing=bool(workout.get("local_deleted") or workout.get("archived")),
+        client=client,
+        athlete=quote(client.config.intervals_athlete_id, safe=""),
+        remote_id=str(workout.get("remote_event_id") or ""),
+        identities={
+            f"{COACH_EVENT_EXTERNAL_PREFIX}{local_id}",
+            *([str(workout["remote_event_external_id"])] if workout.get("remote_event_external_id") else []),
+        },
+        other_remote_ids={str(item["remote_id"]) for item in other_rows if item.get("remote_id")},
+        other_external_ids={
+            *{f"{COACH_EVENT_EXTERNAL_PREFIX}{item['local_id']}" for item in other_rows},
+            *{str(item["remote_external_id"]) for item in other_rows if item.get("remote_external_id")},
+        },
+        newest=max(planned_date, today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat(),
+    )
+
+
+def _repair_calendar_recheck(context: _RepairCalendarContext, message: str) -> None:
+    with DB_LOCK, database() as db:
+        current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (context.local_id,)).fetchone()
+    if not current or _library_payload_hash(current["payload"]) != context.expected_hash:
+        raise AppError(409, message, reason="planning_revision_conflict")
+
+
+def _repair_calendar_related_event(context: _RepairCalendarContext, event: dict[str, Any]) -> bool:
+    event_id = str(event.get("id") or "")
+    belongs_elsewhere = event_id in context.other_remote_ids or str(event.get("external_id") or "") in context.other_external_ids
+    identified = bool(event_id and (event_id == context.remote_id or str(event.get("external_id") or "") in context.identities))
+    if identified:
+        invalid = (
+            belongs_elsewhere or event.get("category") != "WORKOUT"
+            or str(event.get("start_date_local") or "")[:10] < context.today.isoformat()
+            or event.get("paired_activity_id") or event.get("paired_event_id")
+        )
+        if invalid:
+            raise AppError(409, "Eine zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
+        return True
+    same_name = (
+        not context.removing and not belongs_elsewhere and event.get("category") == "WORKOUT"
+        and str(event.get("start_date_local") or "").startswith(context.planned_date.isoformat())
+        and str(event.get("name") or "").strip().casefold() == str(context.workout.get("name") or "").strip().casefold()
+    )
+    if same_name:
+        raise AppError(409, "Eine gleichnamige Remote-Einheit am selben Tag ist nicht eindeutig zugeordnet. Keine automatische Kopie oder Loeschung durchgefuehrt.", reason="intervals_workout_identity_ambiguous")
+    return False
+
+
+def _repair_calendar_related_events(context: _RepairCalendarContext, events: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    if events is None:
+        events = context.batch.snapshot() if context.batch else context.client.get_paged_collection(
+            f"/athlete/{context.athlete}/events",
+            {"oldest": context.today.isoformat(), "newest": context.newest, "category": "WORKOUT"},
+            "repair_workouts",
+        )
+    return [event for event in events if _repair_calendar_related_event(context, event)]
+
+
+def _repair_calendar_check_remote_identity(context: _RepairCalendarContext, related: list[dict[str, Any]]) -> None:
+    if not context.remote_id or any(str(event.get("id")) == context.remote_id for event in related):
+        return
+    try:
+        context.client.get(f"/athlete/{context.athlete}/events/{quote(context.remote_id, safe='')}")
+    except AppError as exc:
+        if exc.status == 404 or (isinstance(exc.__cause__, HTTPError) and exc.__cause__.code == 404):
+            return
+        raise
+    raise AppError(409, "Die zugeordnete Remote-Einheit liegt ausserhalb des Reparaturzeitraums.", reason="intervals_workout_identity_conflict")
+
+
+def _repair_calendar_upsert(context: _RepairCalendarContext, keeper: dict[str, Any] | None) -> None:
+    payload = workout_event_payload(context.local_id, context.workout)
+    if keeper:
+        payload["id"] = str(keeper["id"])
+        payload["external_id"] = str(keeper.get("external_id") or payload["external_id"])
+    context.identities.add(payload["external_id"])
+    _repair_calendar_recheck(context, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.")
+    response = context.client.upsert_calendar_events([payload])
+    result = response[0] if isinstance(response, list) and len(response) == 1 else None
+    if not isinstance(result, dict) or not result.get("id"):
+        raise AppError(502, "Intervals.icu hat keine eindeutige reparierte Einheit zurueckgegeben.", reason="intervals_workout_verification_failed")
+    context.remote_id = str(result["id"])
+    if context.batch:
+        context.batch.remember({**result, "external_id": payload["external_id"]})
+    with DB_LOCK:
+        try:
+            _repair_calendar_recheck(context, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.")
+        except AppError:
+            update_planned_unit_sync_state(context.local_id, "sync_error", "Planung waehrend der Reparatur geaendert.", remote_event={**result, "external_id": payload["external_id"]})
+            raise
+        update_planned_unit_sync_state(context.local_id, "syncing", remote_event={**result, "external_id": payload["external_id"]})
+        with database() as db:
+            current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (context.local_id,)).fetchone()
+            context.expected_hash = _library_payload_hash(current["payload"])
+    if not str(result.get("start_date_local") or "").startswith(context.planned_date.isoformat()) or result.get("name") != context.workout.get("name"):
+        raise AppError(502, "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestaetigt.", reason="intervals_workout_verification_failed")
+    validate_intervals_workout_result(context.workout, result)
+
+
+def _repair_calendar_delete_duplicates(context: _RepairCalendarContext, related: list[dict[str, Any]]) -> None:
+    for event in related:
+        if not context.removing and str(event["id"]) == context.remote_id:
+            continue
+        _repair_calendar_recheck(context, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.")
+        context.client.delete_event(str(event["id"]))
+        if context.batch:
+            context.batch.forget(str(event["id"]))
+
+
+def _repair_calendar_completion(context: _RepairCalendarContext) -> Callable[[list[dict[str, Any]] | None], dict[str, Any] | None]:
+    def complete(events: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+        remaining = _repair_calendar_related_events(context, events)
+        verified = None
+        if context.removing:
+            if remaining:
+                raise AppError(502, "Die entfernten Remote-Einheiten sind noch vorhanden.", reason="intervals_workout_verification_failed")
+        elif len(remaining) != 1 or str(remaining[0]["id"]) != context.remote_id:
+            raise AppError(502, "Der Kalender bestaetigt keine eindeutige reparierte Einheit.", reason="intervals_workout_verification_failed")
+        else:
+            event = remaining[0]
+            if not str(event.get("start_date_local") or "").startswith(context.planned_date.isoformat()) or event.get("name") != context.workout.get("name"):
+                raise AppError(502, "Der Kalender bestaetigt Datum oder Namen der reparierten Einheit nicht.", reason="intervals_workout_verification_failed")
+            validate_intervals_workout_result(context.workout, event)
+            verified = event
+        with DB_LOCK:
+            _repair_calendar_recheck(context, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.")
+            update_planned_unit_sync_state(context.local_id, "synced", remote_event=verified)
+        return verified
+    return complete
+
+
 def _repair_local_planned_unit_calendar_entry(local_id: str, expected_hash: str, *, batch: _RepairCalendarBatch | None = None) -> dict[str, Any] | None:
     """Reconcile one explicitly selected future unit using exact remote identities."""
     with _planned_unit_sync_guard(local_id):
-        with DB_LOCK, database() as db:
-            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
-            other_rows = db.execute(
-                "SELECT local_id, json_extract(payload, '$.remote_event_id') AS remote_id, "
-                "json_extract(payload, '$.remote_event_external_id') AS remote_external_id FROM planned_units WHERE local_id<>?",
-                (local_id,),
-            ).fetchall()
-            other_remote_ids = {str(item["remote_id"]) for item in other_rows if item.get("remote_id")}
-            other_external_ids = {f"{COACH_EVENT_EXTERNAL_PREFIX}{item['local_id']}" for item in other_rows}
-            other_external_ids.update(str(item["remote_external_id"]) for item in other_rows if item.get("remote_external_id"))
-        if not row or _library_payload_hash(row["payload"]) != expected_hash:
-            raise AppError(409, "Die Planung hat sich seit dem Reparaturauftrag geaendert.", reason="planning_revision_conflict")
-
-        def recheck():
-            with DB_LOCK, database() as db:
-                current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
-                if not current or _library_payload_hash(current["payload"]) != expected_hash:
-                    raise AppError(409, "Die Planung wurde waehrend der Reparatur geaendert. Bitte erneut abgleichen.", reason="planning_revision_conflict")
-
-        workout = json.loads(row["payload"])
-        today = local_now().date()
-        planned_date = date.fromisoformat(str(workout.get("date") or ""))
-        if planned_date < today:
-            raise AppError(400, "Reparatur-Sync ist nur fuer zukuenftige geplante Einheiten erlaubt.", reason="invalid_plan")
-        removing = bool(workout.get("local_deleted") or workout.get("archived"))
-        payload = None if removing else workout_event_payload(local_id, workout)
-        client = IntervalsClient()
-        athlete = quote(client.config.intervals_athlete_id, safe="")
-        remote_id = str(workout.get("remote_event_id") or "")
-        identities = {f"{COACH_EVENT_EXTERNAL_PREFIX}{local_id}"}
-        if workout.get("remote_event_external_id"):
-            identities.add(str(workout["remote_event_external_id"]))
-        newest = max(planned_date, today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)).isoformat()
-
-        def related_events(events=None):
-            if events is None:
-                events = batch.snapshot() if batch else client.get_paged_collection(
-                    f"/athlete/{athlete}/events", {"oldest": today.isoformat(), "newest": newest, "category": "WORKOUT"}, "repair_workouts",
-                )
-            related = []
-            for event in events:
-                event_id = str(event.get("id") or "")
-                belongs_elsewhere = event_id in other_remote_ids or str(event.get("external_id") or "") in other_external_ids
-                identified = bool(event_id and (event_id == remote_id or str(event.get("external_id") or "") in identities))
-                if identified:
-                    if belongs_elsewhere or event.get("category") != "WORKOUT" or str(event.get("start_date_local") or "")[:10] < today.isoformat() or event.get("paired_activity_id") or event.get("paired_event_id"):
-                        raise AppError(409, "Eine zugeordnete Einheit ist keine freie zukuenftige Planung mehr.", reason="intervals_workout_identity_conflict")
-                    related.append(event)
-                elif (not removing and not belongs_elsewhere and event.get("category") == "WORKOUT" and str(event.get("start_date_local") or "").startswith(planned_date.isoformat())
-                      and str(event.get("name") or "").strip().casefold() == str(workout.get("name") or "").strip().casefold()):
-                    raise AppError(409, "Eine gleichnamige Remote-Einheit am selben Tag ist nicht eindeutig zugeordnet. Keine automatische Kopie oder Loeschung durchgefuehrt.", reason="intervals_workout_identity_ambiguous")
-            return related
-
-        related = related_events()
-        if remote_id and not any(str(event.get("id")) == remote_id for event in related):
-            # A mapped object outside the fetched window must never be silently
-            # recreated or deleted. Only a confirmed 404 permits recreation.
-            try:
-                client.get(f"/athlete/{athlete}/events/{quote(remote_id, safe='')}")
-            except AppError as exc:
-                if exc.status != 404 and not (isinstance(exc.__cause__, HTTPError) and exc.__cause__.code == 404):
-                    raise
-            else:
-                raise AppError(409, "Die zugeordnete Remote-Einheit liegt ausserhalb des Reparaturzeitraums.", reason="intervals_workout_identity_conflict")
-        keeper = next((event for event in related if str(event.get("id")) == remote_id), related[0] if related else None)
-        result = None
-        if not removing:
-            if keeper:
-                payload["id"] = str(keeper["id"])
-                payload["external_id"] = str(keeper.get("external_id") or payload["external_id"])
-            identities.add(payload["external_id"])
-            recheck()
-            response = client.upsert_calendar_events([payload])
-            result = response[0] if isinstance(response, list) and len(response) == 1 else None
-            if not isinstance(result, dict) or not result.get("id"):
-                raise AppError(502, "Intervals.icu hat keine eindeutige reparierte Einheit zurueckgegeben.", reason="intervals_workout_verification_failed")
-            remote_id = str(result["id"])
-            if batch:
-                batch.remember({**result, "external_id": payload["external_id"]})
-            with DB_LOCK:
-                try:
-                    recheck()
-                except AppError:
-                    # The remote write happened; retain its identity on the
-                    # current local payload without marking the new edit synced.
-                    update_planned_unit_sync_state(local_id, "sync_error", "Planung waehrend der Reparatur geaendert.", remote_event={**result, "external_id": payload["external_id"]})
-                    raise
-                update_planned_unit_sync_state(local_id, "syncing", remote_event={**result, "external_id": payload["external_id"]})
-                with database() as db:
-                    current = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
-                    expected_hash = _library_payload_hash(current["payload"])
-            if not str(result.get("start_date_local") or "").startswith(planned_date.isoformat()) or result.get("name") != workout.get("name"):
-                raise AppError(502, "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestaetigt.", reason="intervals_workout_verification_failed")
-            validate_intervals_workout_result(workout, result)
-        for event in related:
-            if removing or str(event["id"]) != remote_id:
-                recheck()
-                client.delete_event(str(event["id"]))
-                if batch:
-                    batch.forget(str(event["id"]))
-
-        def complete(events=None):
-            remaining = related_events(events)
-            verified = None
-            if removing:
-                if remaining:
-                    raise AppError(502, "Die entfernten Remote-Einheiten sind noch vorhanden.", reason="intervals_workout_verification_failed")
-            else:
-                if len(remaining) != 1 or str(remaining[0]["id"]) != remote_id:
-                    raise AppError(502, "Der Kalender bestaetigt keine eindeutige reparierte Einheit.", reason="intervals_workout_verification_failed")
-                if not str(remaining[0].get("start_date_local") or "").startswith(planned_date.isoformat()) or remaining[0].get("name") != workout.get("name"):
-                    raise AppError(502, "Der Kalender bestaetigt Datum oder Namen der reparierten Einheit nicht.", reason="intervals_workout_verification_failed")
-                validate_intervals_workout_result(workout, remaining[0])
-                verified = remaining[0]
-            with DB_LOCK:
-                recheck()
-                update_planned_unit_sync_state(local_id, "synced", remote_event=verified)
-            return verified
-
-        if batch:
-            batch.completions.append((local_id, complete))
-        else:
-            result = complete()
-        return result
+        context = _repair_calendar_context(local_id, expected_hash, batch)
+        related = _repair_calendar_related_events(context)
+        _repair_calendar_check_remote_identity(context, related)
+        keeper = next((event for event in related if str(event.get("id")) == context.remote_id), related[0] if related else None)
+        if not context.removing:
+            _repair_calendar_upsert(context, keeper)
+        _repair_calendar_delete_duplicates(context, related)
+        complete = _repair_calendar_completion(context)
+        if context.batch:
+            context.batch.completions.append((local_id, complete))
+            return None
+        return complete()
 
 
 def _sync_local_planned_unit_calendar_entry(local_id: str) -> dict[str, Any] | None:
