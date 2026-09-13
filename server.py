@@ -19322,6 +19322,62 @@ def _wait_for_coach_response_retry(delay: int, cancel_event: threading.Event | N
         time.sleep(delay)
 
 
+def _structured_coach_response_attempt(
+    payload: dict[str, Any],
+    *,
+    request_payload: dict[str, Any],
+    context: dict[str, Any],
+    message: str,
+    command_receipts: list[dict[str, Any]],
+    attachments: list[dict[str, Any]],
+    client_turn_id: str,
+    ai_provider: str,
+    background_owned: bool,
+    on_text_delta: Any,
+    cancel_event: threading.Event | None,
+    recovery_state: dict[str, bool],
+    state: dict[str, Any],
+    attempt: int,
+    checkpoint: Any,
+    on_delta: Any,
+) -> dict[str, Any] | None:
+    try:
+        return _send_structured_coach_response(
+            payload,
+            resume_id=state["resume_id"],
+            checkpoint=checkpoint,
+            on_delta=on_delta,
+            on_text_delta=on_text_delta,
+            cancel_event=cancel_event,
+            background_owned=background_owned,
+            ai_provider=ai_provider,
+        )
+    except AppError as exc:
+        resumed = _resume_background_coach_response(
+            exc, payload, state["resume_id"], checkpoint, cancel_event,
+            background_owned=background_owned, ai_provider=ai_provider,
+        )
+        if resumed is not None:
+            return resumed
+        if _recover_invalid_structured_conversation(
+            exc, payload, request_payload, context=context, message=message,
+            command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
+            ai_provider=ai_provider, recovery_state=recovery_state,
+            request_delta_emitted=state["request_delta_emitted"], attempt=attempt,
+        ):
+            state["resume_id"] = ""
+            return None
+        delay = _response_retry_delay(
+            exc, ai_provider=ai_provider, attempt=attempt,
+            request_delta_emitted=state["request_delta_emitted"],
+        )
+        if delay is None:
+            raise
+        state["resume_id"] = ""
+        _wait_for_coach_response_retry(delay, cancel_event, attempt)
+        return None
+
+
 def _structured_coach_response(
     payload: dict[str, Any],
     *,
@@ -19338,17 +19394,15 @@ def _structured_coach_response(
     recovery_state: dict[str, bool],
     resume_id: str = "",
 ) -> dict[str, Any]:
-    request_delta_emitted = False
+    state: dict[str, Any] = {"request_delta_emitted": False, "resume_id": resume_id}
 
     def on_delta(delta: str) -> None:
-        nonlocal request_delta_emitted
-        request_delta_emitted = True
+        state["request_delta_emitted"] = True
         if on_text_delta is not None:
             on_text_delta(delta)
 
     def checkpoint(response_id: str) -> None:
-        nonlocal resume_id
-        resume_id = response_id
+        state["resume_id"] = response_id
         _merge_coach_command_receipt(client_turn_id, {
             "status": "running",
             "phase": "waiting_openai",
@@ -19360,39 +19414,26 @@ def _structured_coach_response(
 
     for attempt in range(3):
         _raise_chat_cancelled(cancel_event)
-        try:
-            return _send_structured_coach_response(
-                payload,
-                resume_id=resume_id,
-                checkpoint=checkpoint,
-                on_delta=on_delta,
-                on_text_delta=on_text_delta,
-                cancel_event=cancel_event,
-                background_owned=background_owned,
-                ai_provider=ai_provider,
-            )
-        except AppError as exc:
-            resumed = _resume_background_coach_response(
-                exc, payload, resume_id, checkpoint, cancel_event,
-                background_owned=background_owned, ai_provider=ai_provider,
-            )
-            if resumed is not None:
-                return resumed
-            if _recover_invalid_structured_conversation(
-                exc, payload, request_payload, context=context, message=message,
-                command_receipts=command_receipts, attachments=attachments, client_turn_id=client_turn_id,
-                ai_provider=ai_provider, recovery_state=recovery_state,
-                request_delta_emitted=request_delta_emitted, attempt=attempt,
-            ):
-                resume_id = ""
-                continue
-            delay = _response_retry_delay(
-                exc, ai_provider=ai_provider, attempt=attempt, request_delta_emitted=request_delta_emitted,
-            )
-            if delay is None:
-                raise
-            resume_id = ""
-            _wait_for_coach_response_retry(delay, cancel_event, attempt)
+        response = _structured_coach_response_attempt(
+            payload,
+            request_payload=request_payload,
+            context=context,
+            message=message,
+            command_receipts=command_receipts,
+            attachments=attachments,
+            client_turn_id=client_turn_id,
+            ai_provider=ai_provider,
+            background_owned=background_owned,
+            on_text_delta=on_text_delta,
+            cancel_event=cancel_event,
+            recovery_state=recovery_state,
+            state=state,
+            attempt=attempt,
+            checkpoint=checkpoint,
+            on_delta=on_delta,
+        )
+        if response is not None:
+            return response
     raise AppError(502, "Der KI-Dienst konnte die Antwort nicht fertigstellen.", reason="response_failed")
 
 
