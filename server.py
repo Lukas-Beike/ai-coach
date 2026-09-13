@@ -10769,6 +10769,32 @@ def _canonical_planned_workout_sort_key(item: dict[str, Any]) -> tuple[str, str,
     )
 
 
+def _canonical_local_events(
+    local_rows: list[dict[str, Any]], remote_by_id: dict[str, dict[str, Any]],
+    remote_by_external: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], set[str]]:
+    result: list[dict[str, Any]] = []
+    joined_remote_ids: set[str] = set()
+    for entry in local_rows:
+        linked = _canonical_linked_remote(entry, remote_by_id, remote_by_external)
+        if linked is not None:
+            joined_remote_ids.add(str(linked.get("id")))
+        result.append(_canonical_local_event(entry, linked))
+    return result, joined_remote_ids
+
+
+def _canonical_unjoined_remote_events(
+    remote_rows: list[dict[str, Any]], joined_remote_ids: set[str],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for event in remote_rows:
+        event_id = str(event.get("id") or "")
+        if event_id and event_id in joined_remote_ids:
+            continue
+        result.append(_canonical_remote_event(event))
+    return result
+
+
 def canonical_planned_workouts(
     remote: list[Any] | None,
     local: list[Any] | None,
@@ -10783,20 +10809,8 @@ def canonical_planned_workouts(
     remote_rows = [dict(item) for item in (remote or []) if isinstance(item, dict)]
     local_rows = [dict(item) for item in (local or []) if isinstance(item, dict)]
     remote_by_id, remote_by_external = _canonical_remote_indexes(remote_rows)
-    joined_remote_ids: set[str] = set()
-    result: list[dict[str, Any]] = []
-
-    for entry in local_rows:
-        linked = _canonical_linked_remote(entry, remote_by_id, remote_by_external)
-        if linked is not None:
-            joined_remote_ids.add(str(linked.get("id")))
-        result.append(_canonical_local_event(entry, linked))
-
-    for event in remote_rows:
-        event_id = str(event.get("id") or "")
-        if event_id and event_id in joined_remote_ids:
-            continue
-        result.append(_canonical_remote_event(event))
+    result, joined_remote_ids = _canonical_local_events(local_rows, remote_by_id, remote_by_external)
+    result.extend(_canonical_unjoined_remote_events(remote_rows, joined_remote_ids))
     return sorted(result, key=_canonical_planned_workout_sort_key)[: max(1, min(int(limit), 1000))]
 
 
