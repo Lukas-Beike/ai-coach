@@ -8842,82 +8842,91 @@ def compact_snapshot(athlete: Any, activities: Any, wellness: Any, events: Any, 
     }
 
 
-def validate_workout_description(workout: dict[str, Any]) -> float | None:
-    """Require quantity-first endurance steps; never guess intent from prose.
+WORKOUT_STEP_QUANTITY = re.compile(r"\d+(?:[.,]\d+)?\s*(?P<unit>[A-Za-z'\"]+)")
+WORKOUT_STEP_QUANTITY_UNITS = {
+    "km", "mtr", "mi", "yd", "yard", "yards", "meter", "meters", "metre", "metres",
+    "minute", "minutes", "min", "mins", "second", "seconds", "sec", "secs", "hour", "hours", "hr", "hrs",
+    "h", "m", "s", "'", '"',
+}
+WORKOUT_STEP_TIME_UNITS = {"h", "m", "s", "hours", "hrs", "minutes", "mins", "seconds", "secs", "'", '"'}
 
-    This is a deliberately narrower authoring contract than the provider's
-    cue-first syntax: arbitrary text before a quantity could be either a cue
-    or a conditional instruction. Reject it for the Coach to rewrite instead
-    of silently adding distance or dropping a legitimate workout step.
-    """
-    sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
-    if sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:
-        return
-    quantity = re.compile(r"\d+(?:[.,]\d+)?\s*(?P<unit>[A-Za-z'\"]+)")
-    quantity_units = {
-        "km", "mtr", "mi", "yd", "yard", "yards", "meter", "meters", "metre", "metres",
-        "minute", "minutes", "min", "mins", "second", "seconds", "sec", "secs", "hour", "hours", "hr", "hrs",
-        "h", "m", "s", "'", '"',
-    }
-    for line_number, line in enumerate(str(workout.get("description") or "")[:12000].splitlines(), 1):
+
+def _workout_step_amounts(text: str) -> list[re.Match[str]]:
+    """Return step quantities, excluding pace denominators such as /100m."""
+    return [
+        match for match in WORKOUT_STEP_QUANTITY.finditer(text)
+        if match.group("unit") in WORKOUT_STEP_QUANTITY_UNITS
+        and (match.start() == 0 or text[match.start() - 1] != "/")
+    ]
+
+
+def _raise_ambiguous_workout_step(line_number: int, message: str) -> None:
+    raise AppError(400, f"Workout-Text in Zeile {line_number} ist mehrdeutig: {message}", reason="ambiguous_workout_step")
+
+
+def _is_composite_duration(amounts: list[re.Match[str]]) -> bool:
+    return all(
+        current.start() == previous.end()
+        and previous.group("unit").casefold() in WORKOUT_STEP_TIME_UNITS
+        and current.group("unit").casefold() in WORKOUT_STEP_TIME_UNITS
+        for previous, current in zip(amounts, amounts[1:])
+    )
+
+
+def _validate_endurance_workout_steps(description: str) -> None:
+    for line_number, line in enumerate(description.splitlines(), 1):
         stripped = line.lstrip(" \t")
         if not stripped.startswith("-"):
             continue
         text = stripped[1:].lstrip(" \t")
         if not text:
             continue
-        # Pace denominators (e.g. 2:00/100m Pace) are targets, not steps.
-        amounts = [
-            match for match in quantity.finditer(text)
-            if match.group("unit") in quantity_units
-            and (match.start() == 0 or text[match.start() - 1] != "/")
-        ]
+        amounts = _workout_step_amounts(text)
         if amounts and amounts[0].start() != 0:
-            raise AppError(
-                400,
-                f"Workout-Text in Zeile {line_number} ist mehrdeutig: "
+            _raise_ambiguous_workout_step(
+                line_number,
                 "Trainingsschritte mit '- ' muessen direkt mit Dauer oder Distanz beginnen "
                 "(z.B. '- 6km Z1 HR'). Hinweise, Bedingungen und optionale Gesamtstrecken "
                 "als eigenen Absatz ohne '- ' schreiben; sonst zaehlt Intervals.icu sie als weitere Schritte.",
-                reason="ambiguous_workout_step",
             )
-        # Composite durations such as 1h30m are one provider step. Any other
-        # second quantity, including a distance range or an optional extension,
-        # would be parsed by Intervals.icu as another executable step.
-        if len(amounts) > 1:
-            time_units = {"h", "m", "s", "hours", "hrs", "minutes", "mins", "seconds", "secs", "'", '"'}
-            if any(
-                current.start() != previous.end()
-                or previous.group("unit").casefold() not in time_units
-                or current.group("unit").casefold() not in time_units
-                for previous, current in zip(amounts, amounts[1:])
-            ):
-                raise AppError(
-                    400,
-                    f"Workout-Text in Zeile {line_number} ist mehrdeutig: "
-                    "Ein Trainingsschritt darf nur eine Distanz oder Dauer enthalten; "
-                    "zusammengesetzte Zeiten wie '- 1h30m Z2' sind erlaubt. "
-                    "Optionale Gesamtstrecken als eigenen Absatz ohne '- ' schreiben.",
-                    reason="ambiguous_workout_step",
-                )
+        if len(amounts) > 1 and not _is_composite_duration(amounts):
+            _raise_ambiguous_workout_step(
+                line_number,
+                "Ein Trainingsschritt darf nur eine Distanz oder Dauer enthalten; "
+                "zusammengesetzte Zeiten wie '- 1h30m Z2' sind erlaubt. "
+                "Optionale Gesamtstrecken als eigenen Absatz ohne '- ' schreiben.",
+            )
 
+
+def _structured_workout_duration(description: str, target: str) -> tuple[float, bool]:
     try:
-        seconds, has_distance = structured_duration(str(workout.get("description") or "")[:12000], str(workout.get("target") or "AUTO"))
+        return structured_duration(description, target)
     except WorkoutTextError as exc:
         raise AppError(400, str(exc), reason=exc.reason) from exc
+
+
+def _validate_workout_duration_match(seconds: float, has_distance: bool, expected_seconds: float | None) -> None:
+    if expected_seconds is None or (seconds <= expected_seconds if has_distance else abs(seconds - expected_seconds) <= 30):
+        return
+    raise AppError(
+        400,
+        f"Trainingsschritte ergeben {seconds / 60:g} Minuten, die angegebene Dauer ist {expected_seconds / 60:g} Minuten. "
+        "Dauer und Workout-Text einschliesslich aller Wiederholungen, Pausen, Warmup und Cooldown abgleichen; keine fehlenden Minuten erfinden.",
+        reason="workout_duration_mismatch",
+    )
+
+
+def validate_workout_description(workout: dict[str, Any]) -> float | None:
+    """Require quantity-first endurance steps; never guess intent from prose."""
+    sport = intervals_workout_sport(workout.get("sport") or workout.get("type"))
+    if sport not in INTERVALS_ENDURANCE_WORKOUT_TYPES:
+        return
+    description = str(workout.get("description") or "")[:12000]
+    _validate_endurance_workout_steps(description)
+    seconds, has_distance = _structured_workout_duration(description, str(workout.get("target") or "AUTO"))
     expected_minutes = as_number(workout.get("duration_minutes"))
     expected_seconds = expected_minutes * 60 if expected_minutes is not None else as_number(workout.get("moving_time"))
-    # Whole-minute local metadata may round sub-minute steps, but must never
-    # hide missing intervals. Distance durations depend on provider settings.
-    if expected_seconds is not None and (
-        seconds > expected_seconds if has_distance else abs(seconds - expected_seconds) > 30
-    ):
-        raise AppError(
-            400,
-            f"Trainingsschritte ergeben {seconds / 60:g} Minuten, die angegebene Dauer ist {expected_seconds / 60:g} Minuten. "
-            "Dauer und Workout-Text einschliesslich aller Wiederholungen, Pausen, Warmup und Cooldown abgleichen; keine fehlenden Minuten erfinden.",
-            reason="workout_duration_mismatch",
-        )
+    _validate_workout_duration_match(seconds, has_distance, expected_seconds)
     return None if has_distance else seconds
 
 
