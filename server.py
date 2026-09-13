@@ -13282,6 +13282,110 @@ def full_provider_resync(provider: str, operation_id: str | None = None) -> dict
             gate.end_reset()
 
 
+def _wait_for_existing_intervals_sync(
+    wait_for_performance: bool, cancel_event: threading.Event | None, previous_sync_at: str | None,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + INTERVALS_SYNC_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        _raise_chat_cancelled(cancel_event)
+        remaining = max(0.05, min(1.0, deadline - time.monotonic()))
+        if not SYNC_LOCK.acquire(timeout=remaining):
+            continue
+        try:
+            current_sync_at = get_kv("last_sync_at")
+            if current_sync_at and current_sync_at != previous_sync_at:
+                try:
+                    completed_activity_days = int(get_kv("last_sync_activity_days") or 0)
+                except (TypeError, ValueError):
+                    completed_activity_days = 0
+                if wait_for_performance:
+                    _wait_for_performance_refresh(cancel_event=cancel_event)
+                return {
+                    "status": "ok", "waited_for_existing": True, "synced_at": current_sync_at,
+                    **({"activity_days": completed_activity_days} if completed_activity_days > 0 or completed_activity_days == ALL_SYNC_DAYS else {}),
+                }
+            last_error = redact_text(get_kv("last_sync_error") or "")
+            detail = f" {last_error[:300]}" if last_error else ""
+            raise AppError(
+                503,
+                f"Die laufende Intervals.icu-Synchronisierung konnte nicht abgeschlossen werden.{detail}",
+                reason="provider_refresh_failed",
+            )
+        finally:
+            SYNC_LOCK.release()
+    raise AppError(
+        503,
+        "Die laufende Intervals.icu-Synchronisierung ist noch nicht abgeschlossen. Bitte später erneut versuchen.",
+        reason="provider_busy",
+    )
+
+
+def _store_intervals_snapshot(
+    snapshot: dict[str, Any], activity_days: int, end_date: date | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if end_date is not None:
+        snapshot = merge_historical_snapshot(latest_snapshot(), snapshot)
+        save_snapshot(snapshot, update_full_sync=False)
+    else:
+        save_snapshot(snapshot, activity_days=activity_days)
+    provider_sync = snapshot.get("provider_sync", {})
+    calendar_window = provider_sync.get("calendar_window", {}) if isinstance(provider_sync, dict) else {}
+    planned_import = {"imported": 0, "updated": 0, "conflicts": 0}
+    if end_date is None:
+        with DB_LOCK, database() as db:
+            pending_repair = db.execute(
+                "SELECT 1 FROM sync_jobs WHERE provider='intervals' AND type='plan_push' "
+                "AND status IN ('queued', 'running') AND json_extract(payload, '$.repair')=1 LIMIT 1"
+            ).fetchone()
+            if pending_repair:
+                planned_import["deferred_for_repair"] = True
+            elif not get_kv("planned_units_initial_import_at"):
+                planned_import = upsert_remote_planned_units(
+                    snapshot.get("upcoming_calendar", []),
+                    calendar_start=calendar_window.get("start"),
+                    calendar_end=calendar_window.get("end"),
+                )
+                set_kv("planned_units_initial_import_at", snapshot["synced_at"])
+    return snapshot, planned_import
+
+
+def _seed_intervals_workout_library(
+    reason: str, cancel_event: threading.Event | None,
+) -> tuple[int, str | None, int]:
+    library_imported = 0
+    library_error = None
+    if not get_kv("last_library_sync_at"):
+        try:
+            kwargs = {"reason": f"Initialer Intervals.icu-Sync ({reason})"}
+            if cancel_event is not None:
+                kwargs["cancel_event"] = cancel_event
+            library_refresh = refresh_workout_library(**kwargs)
+            library_imported = int(library_refresh.get("workouts") or 0)
+        except Exception as exc:
+            if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
+                raise
+            library_error = redact_text(str(exc))[:1000]
+            set_kv("last_library_sync_error", library_error)
+    return library_imported, library_error, len(list_workout_library())
+
+
+def _record_intervals_sync_window(
+    activity_days: int, end_date: date | None, snapshot: dict[str, Any],
+) -> tuple[list[tuple[date, date]], dict[str, Any]]:
+    sync_window = sync_date_windows(activity_days, end_date)
+    update_provider_sync_cursor("intervals", "activities", sync_window[-1][1].isoformat(), snapshot["synced_at"])
+    update_provider_sync_cursor("intervals", "wellness", sync_window[-1][1].isoformat(), snapshot["synced_at"])
+    if end_date is not None:
+        update_provider_sync_cursor("intervals", "historical", sync_window[0][0].isoformat(), snapshot["synced_at"])
+    set_kv("last_sync_window_start", sync_window[0][0].isoformat())
+    set_kv("last_sync_window_end", sync_window[-1][1].isoformat())
+    set_kv("last_sync_activity_days", str(activity_days))
+    provider_sync = snapshot.get("provider_sync", {})
+    pagination = provider_sync.get("pagination", {}) if isinstance(provider_sync, dict) else {}
+    set_kv("last_sync_pagination", json.dumps(pagination, ensure_ascii=False, separators=(",", ":")))
+    return sync_window, pagination
+
+
 @observed_sync("intervals", "activities")
 @maintenance_operation
 @intervals_operation
@@ -13303,38 +13407,8 @@ def sync_intervals(
     if not acquired:
         if not wait_for_existing:
             return {"status": "already_running"}
-        previous_sync_at = get_kv("last_sync_at")
-        deadline = time.monotonic() + INTERVALS_SYNC_WAIT_SECONDS
-        while time.monotonic() < deadline:
-            _raise_chat_cancelled(cancel_event)
-            remaining = max(0.05, min(1.0, deadline - time.monotonic()))
-            if SYNC_LOCK.acquire(timeout=remaining):
-                try:
-                    current_sync_at = get_kv("last_sync_at")
-                    if current_sync_at and current_sync_at != previous_sync_at:
-                        try:
-                            completed_activity_days = int(get_kv("last_sync_activity_days") or 0)
-                        except (TypeError, ValueError):
-                            completed_activity_days = 0
-                        if wait_for_performance:
-                            _wait_for_performance_refresh(cancel_event=cancel_event)
-                        return {
-                            "status": "ok", "waited_for_existing": True, "synced_at": current_sync_at,
-                            **({"activity_days": completed_activity_days} if completed_activity_days > 0 or completed_activity_days == ALL_SYNC_DAYS else {}),
-                        }
-                    last_error = redact_text(get_kv("last_sync_error") or "")
-                    detail = f" {last_error[:300]}" if last_error else ""
-                    raise AppError(
-                        503,
-                        f"Die laufende Intervals.icu-Synchronisierung konnte nicht abgeschlossen werden.{detail}",
-                        reason="provider_refresh_failed",
-                    )
-                finally:
-                    SYNC_LOCK.release()
-        raise AppError(
-            503,
-            "Die laufende Intervals.icu-Synchronisierung ist noch nicht abgeschlossen. Bitte später erneut versuchen.",
-            reason="provider_busy",
+        return _wait_for_existing_intervals_sync(
+            wait_for_performance, cancel_event, get_kv("last_sync_at"),
         )
     operation_id = operation_id or (get_kv("sync_operation_id") if get_kv("sync_running") == "1" else None) or uuid.uuid4().hex
     try:
@@ -13349,66 +13423,17 @@ def sync_intervals(
             fetch_kwargs["cancel_event"] = cancel_event
         snapshot = IntervalsClient().fetch_snapshot(**fetch_kwargs)
         set_sync_operation_state(operation_id, "running", "storing", 75, "Lokale Trainingsdaten werden aktualisiert…")
-        if end_date is not None:
-            snapshot = merge_historical_snapshot(latest_snapshot(), snapshot)
-            save_snapshot(snapshot, update_full_sync=False)
-        else:
-            save_snapshot(snapshot, activity_days=activity_days)
-        calendar_window = snapshot.get("provider_sync", {}).get("calendar_window", {}) if isinstance(snapshot.get("provider_sync"), dict) else {}
-        planned_import = {"imported": 0, "updated": 0, "conflicts": 0}
-        if end_date is None:
-            with DB_LOCK, database() as db:
-                # The durable queue also protects the gaps between sibling
-                # repair jobs and survives process restarts. Check at import
-                # time: a repair may have been queued while fetching above.
-                pending_repair = db.execute(
-                    "SELECT 1 FROM sync_jobs WHERE provider='intervals' AND type='plan_push' "
-                    "AND status IN ('queued', 'running') AND json_extract(payload, '$.repair')=1 LIMIT 1"
-                ).fetchone()
-                if pending_repair:
-                    planned_import["deferred_for_repair"] = True
-                elif not get_kv("planned_units_initial_import_at"):
-                    planned_import = upsert_remote_planned_units(
-                        snapshot.get("upcoming_calendar", []),
-                        calendar_start=calendar_window.get("start"),
-                        calendar_end=calendar_window.get("end"),
-                    )
-                    set_kv("planned_units_initial_import_at", snapshot["synced_at"])
+        snapshot, planned_import = _store_intervals_snapshot(snapshot, activity_days, end_date)
         mark_daily_sync("intervals")
         # Seed the local template catalog from the provider once. This is a
         # read-only, idempotent import: existing local templates are preserved
         # and pending local entries are still pushed only by the dedicated,
         # explicitly confirmed library action.
-        library_imported = 0
-        library_error = None
-        if not get_kv("last_library_sync_at"):
-            try:
-                if cancel_event is not None:
-                    library_refresh = refresh_workout_library(
-                        reason=f"Initialer Intervals.icu-Sync ({reason})", cancel_event=cancel_event
-                    )
-                else:
-                    library_refresh = refresh_workout_library(reason=f"Initialer Intervals.icu-Sync ({reason})")
-                library_imported = int(library_refresh.get("workouts") or 0)
-            except Exception as exc:
-                if isinstance(exc, AppError) and exc.reason == "chat_cancelled":
-                    raise
-                library_error = redact_text(str(exc))[:1000]
-                set_kv("last_library_sync_error", library_error)
-        library_count = len(list_workout_library())
+        library_imported, library_error, library_count = _seed_intervals_workout_library(reason, cancel_event)
         # A successful full sync supersedes a transient morning-check-in
         # network error that may otherwise keep the global status in warning.
         set_kv("morning_checkin_error", "")
-        sync_window = sync_date_windows(activity_days, end_date)
-        update_provider_sync_cursor("intervals", "activities", sync_window[-1][1].isoformat(), snapshot["synced_at"])
-        update_provider_sync_cursor("intervals", "wellness", sync_window[-1][1].isoformat(), snapshot["synced_at"])
-        if end_date is not None:
-            update_provider_sync_cursor("intervals", "historical", sync_window[0][0].isoformat(), snapshot["synced_at"])
-        set_kv("last_sync_window_start", sync_window[0][0].isoformat())
-        set_kv("last_sync_window_end", sync_window[-1][1].isoformat())
-        set_kv("last_sync_activity_days", str(activity_days))
-        pagination = snapshot.get("provider_sync", {}).get("pagination", {}) if isinstance(snapshot, dict) else {}
-        set_kv("last_sync_pagination", json.dumps(pagination, ensure_ascii=False, separators=(",", ":")))
+        sync_window, pagination = _record_intervals_sync_window(activity_days, end_date, snapshot)
         set_sync_operation_state(operation_id, "completed", "complete", 100, "Intervals.icu-Synchronisierung abgeschlossen.")
         set_kv("sync_operation_finished_at", utc_now())
         result_status = "partial" if library_error else "ok"
@@ -13842,7 +13867,7 @@ def height_in_cm(value: Any) -> float | int | None:
 
 def _performance_snapshot_inputs(
     snapshot: dict[str, Any],
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], list[Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     athlete = snapshot.get("athlete") if isinstance(snapshot.get("athlete"), dict) else {}
     wellness_rows = [row for row in snapshot.get("recent_wellness", []) if isinstance(row, dict)] if isinstance(snapshot.get("recent_wellness"), list) else []
     activities = snapshot.get("recent_activities") if isinstance(snapshot.get("recent_activities"), list) else []
@@ -13851,7 +13876,7 @@ def _performance_snapshot_inputs(
     run = sport_setting(athlete, "run")
     wellness_ride = sport_info_setting(latest_wellness, "ride")
     wellness_run = sport_info_setting(latest_wellness, "run")
-    return athlete, wellness_rows, activities, latest_wellness, ride, run, wellness_ride, wellness_run
+    return athlete, activities, latest_wellness, ride, run, wellness_ride, wellness_run
 
 
 def _latest_ride_activity(activities: list[Any]) -> dict[str, Any]:
@@ -13965,7 +13990,7 @@ def _performance_vo2_and_prediction_metrics(
 
 
 def api_performance_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    athlete, wellness_rows, activities, latest_wellness, ride, run, wellness_ride, wellness_run = _performance_snapshot_inputs(snapshot)
+    athlete, activities, latest_wellness, ride, run, wellness_ride, wellness_run = _performance_snapshot_inputs(snapshot)
     latest_ride_activity = _latest_ride_activity(activities)
     latest_ride_eftp = first_present(latest_ride_activity, ("icu_eftp", "eftp", "eFTP"))
     current_ride_eftp = intervals_eftp_value(ride) or intervals_eftp_value(wellness_ride)
@@ -14411,18 +14436,14 @@ def current_performance_context(snapshot: dict[str, Any] | None = None) -> dict[
     recovery = _performance_recovery_context(garmin, latest_wellness, wellness_rows, today)
     sleep_hours = recovery["sleep_hours"]
     sleep_source = recovery["sleep_source"]
-    sleep_average = recovery["sleep_average"]
     sleep_score = recovery["sleep_score"]
     sleep_score_source = recovery["sleep_score_source"]
     resting_hr = recovery["resting_hr"]
     resting_hr_source = recovery["resting_hr_source"]
-    resting_hr_average = recovery["resting_hr_average"]
     hrv = recovery["hrv"]
     hrv_source = recovery["hrv_source"]
-    hrv_average = recovery["hrv_average"]
     readiness_current = recovery["readiness"]
     readiness_source = recovery["readiness_source"]
-    readiness_average = recovery["readiness_average"]
     metrics = api_performance_metrics(snapshot)
     load_context = _performance_load_context(activities, wellness_rows, latest_wellness, today)
     load = load_context["load"]
