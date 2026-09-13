@@ -652,6 +652,17 @@ class CoachTests(unittest.TestCase):
         performance.assert_called_once_with()
         competitions.assert_called_once_with(reason="Coach request", push_local=True, operation_id="job-competition")
 
+    def test_normalized_intervals_job_type_dispatches_targeted_operation(self):
+        refresh_job = {
+            "id": "job-normalized-performance", "provider": "intervals", "type": " PERFORMANCE_REFRESH ",
+            "payload": json.dumps({"reason": "Coach request"}),
+        }
+        with patch.object(server, "refresh_current_performance", return_value={"status": "ok"}) as performance, patch.object(
+            server, "sync_intervals", side_effect=AssertionError("normalized job fell through to full sync")
+        ):
+            self.assertEqual(server._execute_sync_job(refresh_job)["status"], "ok")
+        performance.assert_called_once_with()
+
     def test_intervals_job_delegates_performance_follow_up_to_common_sync_path(self):
         refresh_job = {
             "id": "job-refresh", "provider": "intervals", "type": "refresh",

@@ -2390,18 +2390,28 @@ def _execute_garmin_sync_job(job: dict[str, Any], payload: dict[str, Any], reaso
     return result
 
 
+def _execute_intervals_specific_job(
+    job: dict[str, Any], payload: dict[str, Any], reason: str, job_type: str,
+) -> dict[str, Any] | None:
+    if job_type == "performance_refresh":
+        return refresh_current_performance()
+    if job_type == "competition_push":
+        return sync_competitions(reason=reason, push_local=True, operation_id=job["id"])
+    if job_type == "plan_push":
+        return _sync_selected_workout_library({"entries": payload.get("entries"), **({"repair": True} if payload.get("repair") else {})})
+    return None
+
+
 def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
     envelope = _sync_job_payload(
         str(job.get("provider") or ""), str(job.get("type") or ""), _decode_sync_job_payload(job.get("payload")),
     )
     payload, provider, job_type = envelope["payload"], envelope["provider"], envelope["type"]
     reason = str(payload.get("reason") or "Persistenter Providerjob")
-    if provider == "intervals" and job_type == "performance_refresh":
-        return refresh_current_performance()
-    if provider == "intervals" and job_type == "competition_push":
-        return sync_competitions(reason=reason, push_local=True, operation_id=job["id"])
-    if provider == "intervals" and job_type == "plan_push":
-        return _sync_selected_workout_library({"entries": payload.get("entries"), **({"repair": True} if payload.get("repair") else {})})
+    if provider == "intervals":
+        specific = _execute_intervals_specific_job(job, payload, reason, job_type)
+        if specific is not None:
+            return specific
     if job_type == "plan_push":
         raise AppError(409, "Plan-Push-Jobs werden erst durch den autorisierten Planungsworkflow ausgeführt.", reason="unsupported_job")
     if provider == "intervals":
