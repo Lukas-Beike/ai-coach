@@ -20481,6 +20481,14 @@ def _background_coach_stream_delta(operation_id: str, text: str) -> None:
     publish_chat_stream_event(operation_id, "delta", {"text": text})
 
 
+def _background_coach_delta_callback(
+    operation_id: str, receipt: dict[str, Any], stream_attached: bool,
+) -> Any:
+    if not stream_attached or receipt.get("openai_response_id"):
+        return None
+    return lambda text: _background_coach_stream_delta(operation_id, text)
+
+
 def _background_coach_stream_receipt(operation_id: str, value: dict[str, Any]) -> None:
     publish_chat_stream_event(
         operation_id, "completed", {key: item for key, item in value.items() if key != "session_key"},
@@ -20529,8 +20537,7 @@ def _execute_background_coach_job(
         refresh_morning_body_battery(local_now().date())
     result = chat_with_coach(
         message,
-        on_text_delta=lambda text: _background_coach_stream_delta(operation_id, text)
-        if stream_attached and not receipt.get("openai_response_id") else None,
+        on_text_delta=_background_coach_delta_callback(operation_id, receipt, stream_attached),
         cancel_event=cancel_event,
         session_csrf_hash=session_csrf_hash,
         client_turn_id=client_turn_id,
