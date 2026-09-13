@@ -4530,7 +4530,8 @@ class CoachTests(unittest.TestCase):
             server.AppError(502, "Provider error", reason="provider_unavailable"), commands, commands[:1], [], [],
         )
         self.assertEqual(status, "completed")
-        self.assertEqual(text, "Wie fühlst du dich?")
+        self.assertTrue(text.startswith("Wie fühlst du dich?"))
+        self.assertIn("Bereits erfolgreich ausgefuehrt", text)
         self.assertEqual(question, "Wie fühlst du dich?")
         self.assertFalse(cancelled)
 
