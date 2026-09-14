@@ -3,6 +3,7 @@ import unittest
 from backend.sync.jobs import (
     aggregate_job_status,
     bounded_progress,
+    job_dto,
     is_retryable_error,
     retry_delay,
     validate_job_request,
@@ -28,6 +29,18 @@ class SyncJobContractTests(unittest.TestCase):
         self.assertEqual(retry_delay(4, base_seconds=10, max_seconds=25), 25)
         self.assertTrue(is_retryable_error("network_error"))
         self.assertFalse(is_retryable_error("auth_required"))
+
+    def test_job_dto_decodes_payload_and_bounds_item_projection(self):
+        result = job_dto(
+            {"id": "job-1", "provider": "garmin", "type": "refresh", "payload": '{"days": 7}'},
+            [{"id": 1, "item_key": "activities", "operation": "read", "status": "completed", "attempts": 1}],
+        )
+        self.assertEqual(result["payload"], {"days": 7})
+        self.assertEqual(result["progress"], {"completed": 1, "total": 1})
+        self.assertEqual(set(result["items"][0]), {
+            "id", "item_key", "operation", "remote_id", "status", "attempts",
+            "error_class", "error_detail", "created_at", "updated_at",
+        })
 
 
 if __name__ == "__main__":

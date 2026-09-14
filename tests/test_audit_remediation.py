@@ -182,7 +182,8 @@ assert test_server.server.CONFIG.ai_provider == 'openai'
         with server.DB_LOCK, server.database() as db:
             db.executemany("INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
                            [(item["id"], item["id"], json.dumps(item), server.utc_now()) for item in records])
-        token = dialogue.fixtures.CoachTests.create_test_session(self)
+        from support import create_test_session
+        token = create_test_session(server)
         # This temporary SQLite fixture exercises pagination and real session
         # authentication; secure startup has separate SQLCipher integration tests.
         startup = patch.object(server, "security_configuration_error", return_value=None)

@@ -7,12 +7,12 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import test_server as fixtures
+from support import isolated_server
 from backend.coach.dialogue import validate_request
 
 server = fixtures.server
@@ -23,12 +23,7 @@ class DialogueHarness:
         temporary = tempfile.TemporaryDirectory(prefix="coach-dialogue-test-")
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
-        for name, value in (("CONFIG", replace(server.CONFIG, app_password="")), ("DATA_DIR", root),
-                            ("DB_PATH", root / "test.db"), ("LOG_PATH", root / "test.log")):
-            context = patch.object(server, name, value)
-            context.start()
-            self.addCleanup(context.stop)
-        server.initialise_database()
+        self.enterContext(isolated_server(server, root))
         fixtures.CoachTests.setUp(self)
         fixed = patch.object(server, "local_now", return_value=datetime(2026, 9, 7, 12, tzinfo=timezone.utc))
         fixed.start()

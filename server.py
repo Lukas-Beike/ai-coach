@@ -48,11 +48,25 @@ from urllib.request import Request, urlopen
 from backend.db import row_factory as database_row_factory
 from backend.db.repositories import ActivityFeedbackRepository, ChatRepository, CheckinRepository, CompetitionRepository, KeyValueRepository, PlanAdjustmentRepository, ProfileRepository, SnapshotRepository, TrainingPlanRepository
 from backend.db.manager import DatabaseManager
-from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
+from backend.db.schema import (
+    CURRENT_DATABASE_INDEXES,
+    CURRENT_DATABASE_SCHEMA,
+    configure_cipher,
+    database_index_names,
+    database_schema_is_current,
+    database_table_names,
+    initialize_schema,
+)
+from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_local_env as load_config_env
+from backend.providers.intervals_client import IntervalsClient as _IntervalsClient
+from backend.providers.gemini import function_tools as gemini_function_tools, response_text as gemini_response_text
+from backend.providers.openai import response_failure_reason as openai_response_failure_reason, response_text as openai_response_text
+from backend.providers.http import error_detail as provider_error_detail, read_bounded_response
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 from backend.sync.windows import split_date_windows
+from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
 from backend.sync.jobs import (
@@ -60,6 +74,8 @@ from backend.sync.jobs import (
     ITEM_STATUSES,
     aggregate_job_status,
     bounded_progress,
+    decode_job_payload,
+    job_dto,
     is_retryable_error,
     retry_delay,
     validate_job_request,
@@ -77,6 +93,12 @@ from backend.coach.context import (
     detailed_coach_activity as detailed_coach_activity_value,
 )
 from backend.coach.dialogue import INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
+from backend.coach.tools import build_tool_contracts
+from backend.coach.service import (
+    command_receipt, effects_from_receipts, mark_resolved_receipts,
+    outcome_status,
+)
+from backend.coach.authorization import authorized_operations, require_operation, require_scope, scope_values
 from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines, coach_observed_sync_lines
 from backend.http_api.responses import (
     header_items as response_header_items,
@@ -196,8 +218,7 @@ INVALID_PLANNING_DATE_ERROR = "Das Planungsdatum muss das Format JJJJ-MM-TT habe
 STALE_PLANNING_REVISION_ERROR = "Die lokale Planrevision ist inzwischen veraltet."
 UNSUPPORTED_BYDAY_ERROR = "BYDAY der Kalender-Wiederholung wird nicht unterstützt."
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.11.1"
-DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+APP_VERSION = "1.11.2"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -469,86 +490,21 @@ def garmin_operation(function: Any) -> Any:
     return guarded
 
 
-def _read_local_env(path: Path) -> list[str]:
-    try:
-        return path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-
-
-def _parse_local_env_line(raw_line: str) -> tuple[str, str] | None:
-    line = raw_line.strip()
-    if not line or line.startswith("#"):
-        return None
-    if line.startswith("export "):
-        line = line[7:].lstrip()
-    key, separator, value = line.partition("=")
-    key = key.strip()
-    if not separator or not re.fullmatch(r"(?a:(?!\d)\w+)", key):
-        return None
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        value = value[1:-1]
-    return key, value
-
-
 def load_local_env() -> None:
-    """Load local and persistent settings while preserving non-empty process env values."""
-    for env_path in (ROOT / ".env", DATA_DIR / ".env"):
-        for raw_line in _read_local_env(env_path):
-            parsed = _parse_local_env_line(raw_line)
-            if parsed and not os.environ.get(parsed[0]):
-                # Docker/Unraid values supplied with -e are authoritative. Empty
-                # process values still allow a persisted local setting to fill in.
-                os.environ[parsed[0]] = parsed[1]
+    """Compatibility entrypoint for tests and settings persistence."""
+    load_config_env(ROOT, DATA_DIR)
 
 
-load_local_env()
+CONFIG = load_config(ROOT, DATA_DIR)
 
 
-def env_int(name: str, default: int) -> int:
-    try:
-        return int(os.environ.get(name, str(default)))
-    except (TypeError, ValueError):
-        return default
+class IntervalsClient(_IntervalsClient):
+    """Entrypoint compatibility wrapper with explicit provider dependencies."""
+
+    def __init__(self, config: Config | None = None, *, request: Callable[..., Any] | None = None):
+        super().__init__(config or CONFIG, request=request or http_json)
 
 
-def env_bool(name: str, default: bool = False) -> bool:
-    value = str(os.environ.get(name, "")).strip().casefold()
-    if not value:
-        return default
-    return value in {"1", "true", "yes", "on"}
-
-
-@dataclass(frozen=True)
-class Config:
-    port: int = int(os.environ.get("PORT", "8090"))
-    openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
-    openai_base_url: str = os.environ.get("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)
-    openai_model: str = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna")
-    gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
-    gemini_model: str = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
-    ai_provider: str = os.environ.get("AI_PROVIDER", "").strip().casefold()
-    intervals_api_key: str = os.environ.get("INTERVALS_API_KEY", "")
-    intervals_athlete_id: str = os.environ.get("INTERVALS_ATHLETE_ID", "0")
-    garmin_email: str = os.environ.get("GARMIN_EMAIL", "")
-    garmin_password: str = os.environ.get("GARMIN_PASSWORD", "")
-    garmin_tokenstore: str = os.environ.get("GARMINTOKENS", str(DATA_DIR / "garmin_tokens"))
-    # Optional local fixture for testing the Garmin UI/context without a Garmin
-    # login or the optional third-party package.
-    garmin_fixture_path: str = os.environ.get("GARMIN_FIXTURE_PATH", "")
-    # Read-only access via a shared calendar's private iCal address.
-    # The address is a credential and must remain server-side.
-    calendar_ical_url: str = os.environ.get("CALENDAR_ICAL_URL", "")
-    app_password: str = os.environ.get("APP_PASSWORD", "")
-    # Set COOKIE_SECURE=true when TLS is terminated before this application.
-    # It stays opt-in so the documented local HTTP development flow works.
-    secure_cookies: bool = env_bool("COOKIE_SECURE", False)
-    # -1 disables automatic deletion; this is the safe default for an athlete's history.
-    data_retention_days: int = env_int("DATA_RETENTION_DAYS", -1)
-
-
-CONFIG = Config()
 LOGGER = logging.getLogger("intervals_coach")
 MODEL_OPTIONS = (
     {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
@@ -1139,21 +1095,6 @@ def security_configuration_error() -> str | None:
     return None
 
 
-def _sqlcipher_key(password: str) -> str:
-    # PRAGMA values cannot be bound with sqlite parameters. Escaping the
-    # single quote keeps the value inside the literal and never logs it.
-    return password.replace("'", "''")
-
-
-def _configure_cipher(db: Any, password: str) -> None:
-    db.execute(f"PRAGMA key='{_sqlcipher_key(password)}'")
-    db.execute("PRAGMA cipher_compatibility = 4")
-    db.execute("PRAGMA cipher_memory_security = ON")
-
-
-# A request-scoped connection lets composite reads reuse one SQLCipher setup.
-# The outer caller still owns DB_LOCK; nested database() calls only reuse it.
-DATABASE_CONTEXT: ContextVar[Any | None] = ContextVar("database_context", default=None)
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar("operation_context", default=None)
 DATABASE_MANAGER: DatabaseManager | None = None
 DATABASE_MANAGER_SIGNATURE: tuple[str, str, bool] | None = None
@@ -1367,7 +1308,7 @@ def database_manager() -> DatabaseManager:
             DB_PATH,
             sqlite_backend if CONFIG.app_password else sqlite3,
             password=CONFIG.app_password,
-            configure=_configure_cipher,
+            configure=configure_cipher,
             row_factory=database_row_factory,
             reader_count=4,
             timeout=20,
@@ -1379,16 +1320,9 @@ def database_manager() -> DatabaseManager:
 
 @contextmanager
 def database():
-    existing = DATABASE_CONTEXT.get()
-    if existing is not None:
-        yield existing
-        return
+    """Use the database manager as the sole nested transaction owner."""
     with database_manager().unit_of_work() as db:
-        context_token = DATABASE_CONTEXT.set(db)
-        try:
-            yield db
-        finally:
-            DATABASE_CONTEXT.reset(context_token)
+        yield db
 
 
 def initialise_database() -> None:
@@ -1400,297 +1334,7 @@ def initialise_database() -> None:
                 "Für diesen Release ist ein leerer Datenbestand erforderlich."
             )
         if not existing_tables:
-            db.executescript(
-                """
-            PRAGMA journal_mode=WAL;
-            CREATE TABLE kv (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE messages (
-                attachments TEXT NOT NULL DEFAULT '[]',
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
-                content TEXT NOT NULL,
-                client_turn_id TEXT,
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                payload TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-             CREATE TABLE workout_library (
-                 id TEXT PRIMARY KEY,
-                 local_id TEXT NOT NULL UNIQUE,
-                 external_id TEXT,
-                payload TEXT NOT NULL,
-                sync_dirty INTEGER NOT NULL DEFAULT 1,
-                sync_state TEXT NOT NULL DEFAULT 'local',
-                sync_error TEXT,
-                last_synced_at TEXT,
-                 updated_at TEXT NOT NULL
-             );
-             CREATE TABLE planned_units (
-                 id TEXT PRIMARY KEY,
-                 local_id TEXT NOT NULL UNIQUE,
-                 external_id TEXT,
-                 payload TEXT NOT NULL,
-                 sync_dirty INTEGER NOT NULL DEFAULT 1,
-                 sync_state TEXT NOT NULL DEFAULT 'local',
-                 sync_error TEXT,
-                 sync_conflict TEXT NOT NULL DEFAULT '',
-                 baseline_hash TEXT,
-                 last_synced_at TEXT,
-                 plan_id TEXT,
-                 revision INTEGER NOT NULL DEFAULT 0,
-                 tombstone INTEGER NOT NULL DEFAULT 0,
-                 command_id TEXT,
-                 created_at TEXT NOT NULL,
-                 updated_at TEXT NOT NULL
-             );
-            CREATE TABLE planning_state (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                revision INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE coach_plan_artifacts (
-                id TEXT PRIMARY KEY,
-                conversation_id TEXT,
-                client_turn_id TEXT,
-                base_revision INTEGER NOT NULL,
-                status TEXT NOT NULL CHECK (status IN ('draft', 'committed', 'superseded')),
-                payload TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX idx_coach_plan_artifacts_conversation
-                ON coach_plan_artifacts(conversation_id, created_at DESC);
-            CREATE TABLE coach_commands (
-                id TEXT PRIMARY KEY,
-                client_turn_id TEXT NOT NULL UNIQUE,
-                conversation_id TEXT,
-                intent TEXT NOT NULL,
-                target_system TEXT NOT NULL,
-                artifact_id TEXT,
-                status TEXT NOT NULL,
-                receipt TEXT,
-                error_class TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (artifact_id) REFERENCES coach_plan_artifacts(id)
-            );
-            CREATE TABLE sync_jobs (
-                id TEXT PRIMARY KEY,
-                provider TEXT NOT NULL,
-                type TEXT NOT NULL,
-                status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'partial', 'failed')),
-                payload TEXT NOT NULL,
-                requested_by TEXT NOT NULL,
-                attempts INTEGER NOT NULL DEFAULT 0,
-                progress_total INTEGER NOT NULL DEFAULT 0,
-                progress_completed INTEGER NOT NULL DEFAULT 0,
-                error_class TEXT,
-                available_at TEXT,
-                started_at TEXT,
-                finished_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX idx_sync_jobs_status_available
-                ON sync_jobs(status, available_at, created_at);
-            CREATE TABLE sync_job_items (
-                id TEXT PRIMARY KEY,
-                job_id TEXT NOT NULL,
-                item_key TEXT NOT NULL,
-                operation TEXT NOT NULL,
-                payload_hash TEXT NOT NULL,
-                remote_id TEXT,
-                status TEXT NOT NULL,
-                attempts INTEGER NOT NULL DEFAULT 0,
-                error_class TEXT,
-                error_detail TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(job_id, item_key),
-                FOREIGN KEY (job_id) REFERENCES sync_jobs(id) ON DELETE CASCADE
-            );
-            CREATE INDEX idx_sync_job_items_status ON sync_job_items(job_id, status);
-            CREATE TABLE provider_sync_cursors (
-                provider TEXT NOT NULL,
-                stream TEXT NOT NULL,
-                cursor TEXT,
-                high_water_mark TEXT,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (provider, stream)
-            );
-            CREATE TABLE competitions (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                event_date TEXT NOT NULL,
-                sport TEXT NOT NULL,
-                priority TEXT NOT NULL,
-                distance TEXT NOT NULL,
-                target TEXT NOT NULL,
-                course_profile TEXT NOT NULL,
-                notes TEXT NOT NULL,
-                category TEXT NOT NULL DEFAULT 'RACE_B',
-                start_date_local TEXT,
-                description TEXT NOT NULL DEFAULT '',
-                moving_time INTEGER,
-                intervals_event_id TEXT,
-                external_id TEXT,
-                sync_dirty INTEGER NOT NULL DEFAULT 1,
-                sync_state TEXT NOT NULL DEFAULT 'local',
-                sync_conflict TEXT NOT NULL DEFAULT '',
-                last_synced_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE competition_sync_tombstones (
-                id TEXT PRIMARY KEY,
-                intervals_event_id TEXT,
-                external_id TEXT,
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE training_plans (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                goal TEXT NOT NULL,
-                start_date TEXT NOT NULL,
-                end_date TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE athlete_checkins (
-                checkin_date TEXT PRIMARY KEY,
-                soreness INTEGER,
-                stress INTEGER,
-                motivation INTEGER,
-                session_rpe INTEGER,
-                day_form TEXT NOT NULL DEFAULT '',
-                illness TEXT NOT NULL DEFAULT '',
-                pain TEXT NOT NULL DEFAULT '',
-                available_minutes INTEGER,
-                availability_notes TEXT NOT NULL DEFAULT '',
-                notes TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE activity_feedback (
-                activity_id TEXT PRIMARY KEY,
-                activity_name TEXT NOT NULL DEFAULT '',
-                activity_date TEXT NOT NULL DEFAULT '',
-                notes TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE plan_adjustments (
-                id TEXT PRIMARY KEY,
-                payload TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                applied_at TEXT
-            );
-            CREATE TABLE coach_action_proposals (
-                id TEXT PRIMARY KEY,
-                session_csrf_hash TEXT NOT NULL,
-                action_type TEXT NOT NULL,
-                target_system TEXT NOT NULL,
-                object_ids TEXT NOT NULL,
-                diff TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                payload_hash TEXT NOT NULL,
-                action_token_hash TEXT,
-                status TEXT NOT NULL,
-                expires_at REAL NOT NULL,
-                created_at TEXT NOT NULL,
-                used_at TEXT
-            );
-            CREATE TABLE change_history (
-                id TEXT PRIMARY KEY,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                action TEXT NOT NULL,
-                source TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                before_hash TEXT NOT NULL,
-                after_hash TEXT NOT NULL,
-                diff TEXT NOT NULL
-            );
-            CREATE INDEX idx_change_history_created_at ON change_history(created_at DESC);
-            CREATE INDEX idx_change_history_entity ON change_history(entity_type, entity_id, created_at DESC);
-            CREATE TABLE provider_refresh_history (
-                id TEXT PRIMARY KEY,
-                provider TEXT NOT NULL,
-                area TEXT NOT NULL,
-                operation_id TEXT NOT NULL,
-                trigger TEXT NOT NULL,
-                started_at TEXT NOT NULL,
-                finished_at TEXT,
-                phase TEXT NOT NULL,
-                status TEXT NOT NULL,
-                error_code TEXT,
-                next_retry_at TEXT
-            );
-            CREATE INDEX idx_provider_refresh_created_at ON provider_refresh_history(started_at DESC);
-            CREATE INDEX idx_provider_refresh_area ON provider_refresh_history(provider, area, started_at DESC);
-            CREATE TABLE public_event_sources (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                url TEXT NOT NULL UNIQUE,
-                last_sync_at TEXT,
-                last_error TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE public_event_candidates (
-                id TEXT PRIMARY KEY,
-                source_id TEXT NOT NULL,
-                uid TEXT NOT NULL,
-                name TEXT NOT NULL,
-                event_date TEXT NOT NULL,
-                sport TEXT NOT NULL,
-                distance TEXT NOT NULL DEFAULT '',
-                location TEXT NOT NULL DEFAULT '',
-                url TEXT NOT NULL DEFAULT '',
-                description TEXT NOT NULL DEFAULT '',
-                imported_competition_id TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(source_id, uid),
-                FOREIGN KEY(source_id) REFERENCES public_event_sources(id) ON DELETE CASCADE
-            );
-            CREATE TABLE external_calendar_events (
-                id TEXT PRIMARY KEY,
-                uid TEXT NOT NULL,
-                name TEXT NOT NULL,
-                event_date TEXT NOT NULL,
-                start_local TEXT NOT NULL,
-                end_local TEXT NOT NULL,
-                duration_minutes INTEGER NOT NULL,
-                all_day INTEGER NOT NULL DEFAULT 0,
-                training_relevant INTEGER NOT NULL DEFAULT 1,
-                no_intensity INTEGER NOT NULL DEFAULT 0,
-                short_only INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL,
-                UNIQUE(uid, start_local)
-            );
-            CREATE TABLE sessions (
-                token_hash TEXT PRIMARY KEY,
-                csrf_hash TEXT NOT NULL,
-                expires_at REAL NOT NULL,
-                created_at TEXT NOT NULL,
-                last_seen TEXT NOT NULL
-            );
-                """
-            )
-            db.execute("CREATE UNIQUE INDEX idx_workout_library_external_id ON workout_library(external_id) WHERE external_id IS NOT NULL")
-            db.execute("CREATE UNIQUE INDEX idx_planned_units_local_id ON planned_units(local_id)")
-            db.execute("CREATE INDEX idx_planned_units_external_id ON planned_units(external_id)")
-            db.execute("CREATE INDEX idx_planned_units_date ON planned_units(json_extract(payload, '$.date'))")
+            initialize_schema(db)
         db.execute(
             "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
             (utc_now(),),
@@ -1933,50 +1577,6 @@ def _normalized_generic_sync_job(envelope: dict[str, Any]) -> dict[str, Any]:
     return {"provider": envelope["provider"], "type": envelope["type"], "payload": normalized}
 
 
-def _decode_sync_job_payload(value: Any) -> dict[str, Any]:
-    try:
-        payload = json.loads(value or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def _sync_job_dto(job: Any, items: list[Any]) -> dict[str, Any]:
-    item_dtos: list[dict[str, Any]] = []
-    for item in items:
-        item_dtos.append({
-            "id": item["id"],
-            "item_key": item["item_key"],
-            "operation": item["operation"],
-            "remote_id": item.get("remote_id"),
-            "status": item["status"],
-            "attempts": int(item.get("attempts") or 0),
-            "error_class": item.get("error_class"),
-            "error_detail": item.get("error_detail"),
-            "created_at": item.get("created_at"),
-            "updated_at": item.get("updated_at"),
-        })
-    completed, total = bounded_progress(item_dtos)
-    status = str(job.get("status") or aggregate_job_status(item_dtos))
-    return {
-        "id": job["id"],
-        "provider": job["provider"],
-        "type": job["type"],
-        "status": status,
-        "payload": _decode_sync_job_payload(job.get("payload")),
-        "requested_by": job.get("requested_by") or "system",
-        "attempts": int(job.get("attempts") or 0),
-        "progress": {"completed": completed, "total": total},
-        "available_at": job.get("available_at"),
-        "started_at": job.get("started_at"),
-        "finished_at": job.get("finished_at"),
-        "error_class": job.get("error_class"),
-        "items": item_dtos,
-        "created_at": job.get("created_at"),
-        "updated_at": job.get("updated_at"),
-    }
-
-
 def sync_job_state(job_id: str) -> dict[str, Any]:
     """Return one persisted job without exposing provider credentials."""
     with DB_LOCK, database() as db:
@@ -1984,7 +1584,7 @@ def sync_job_state(job_id: str) -> dict[str, Any]:
         if not job:
             raise AppError(404, "Synchronisationsjob nicht gefunden.", reason="sync_job_not_found")
         items = db.execute("SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)).fetchall()
-        return _sync_job_dto(job, items)
+        return job_dto(job, items)
 
 
 def sync_jobs_state(limit: int = SYNC_JOB_LIST_LIMIT) -> list[dict[str, Any]]:
@@ -1994,7 +1594,7 @@ def sync_jobs_state(limit: int = SYNC_JOB_LIST_LIMIT) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         for job in jobs:
             items = db.execute("SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job["id"],)).fetchall()
-            result.append(_sync_job_dto(job, items))
+            result.append(job_dto(job, items))
         return result
 
 
@@ -2404,7 +2004,7 @@ def _execute_intervals_specific_job(
 
 def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
     envelope = _sync_job_payload(
-        str(job.get("provider") or ""), str(job.get("type") or ""), _decode_sync_job_payload(job.get("payload")),
+        str(job.get("provider") or ""), str(job.get("type") or ""), decode_job_payload(job.get("payload")),
     )
     payload, provider, job_type = envelope["payload"], envelope["provider"], envelope["type"]
     reason = str(payload.get("reason") or "Persistenter Providerjob")
@@ -3202,21 +2802,13 @@ def sync_date_windows(days: int, end_date: date | None = None) -> list[tuple[dat
 
 def provider_sync_cursor(provider: str, stream: str) -> dict[str, Any]:
     with DB_LOCK, database() as db:
-        row = db.execute(
-            "SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors WHERE provider=? AND stream=?",
-            (provider, stream),
-        ).fetchone()
-    return dict(row) if row else {"provider": provider, "stream": stream, "cursor": None, "high_water_mark": None, "updated_at": None}
+        return read_cursor(db, provider, stream)
 
 
 def update_provider_sync_cursor(provider: str, stream: str, cursor: str, high_water_mark: str | None = None) -> None:
     now = utc_now()
     with DB_LOCK, database() as db:
-        db.execute(
-            "INSERT INTO provider_sync_cursors(provider, stream, cursor, high_water_mark, updated_at) VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(provider, stream) DO UPDATE SET cursor=excluded.cursor, high_water_mark=excluded.high_water_mark, updated_at=excluded.updated_at",
-            (str(provider)[:40], str(stream)[:80], str(cursor)[:120], str(high_water_mark or "")[:120], now),
-        )
+        write_cursor(db, provider, stream, cursor, high_water_mark, now)
 
 
 def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:
@@ -7766,8 +7358,7 @@ def _intervals_error_detail(parsed: Any) -> str:
 
 def _safe_interval_error_detail(raw_body: bytes) -> str:
     """Redact and bound an Intervals.icu response detail before displaying it."""
-    detail = _intervals_error_detail(_provider_error_body(raw_body))
-    return re.sub(r"\s+", " ", redact_text(detail)).strip()[:500]
+    return provider_error_detail(raw_body, redact=lambda value, *, limit: re.sub(r"\s+", " ", redact_text(value)).strip()[:limit])
 
 
 def upstream_http_error_message(status: int, raw_body: bytes, service: str | None) -> str:
@@ -7879,14 +7470,12 @@ def _read_http_response(response: Any, cancel_event: threading.Event | None) -> 
     try:
         _raise_chat_cancelled(cancel_event)
         try:
-            raw = response.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
-        except TypeError:  # Small fake responses in unit tests may not accept a size.
-            raw = response.read()
+            raw = read_bounded_response(response, MAX_EXTERNAL_RESPONSE_BYTES, before_read=lambda: _raise_chat_cancelled(cancel_event))
+        except ValueError as exc:
+            raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.") from exc
     finally:
         if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
             cancel_event._provider_response = None
-    if len(raw) > MAX_EXTERNAL_RESPONSE_BYTES:
-        raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.")
     return raw
 
 
@@ -9067,307 +8656,6 @@ def training_calendar_items(planned: list[Any], activities: list[Any]) -> list[d
     return combined
 
 
-class IntervalsClient:
-    def __init__(self, config: Config = CONFIG):
-        self.config = config
-        credentials = base64.b64encode(f"API_KEY:{config.intervals_api_key}".encode()).decode()
-        self.headers = {"Authorization": f"Basic {credentials}"}
-        self.base = "https://intervals.icu/api/v1"
-        self._read_transport = IntervalsReadTransport(
-            self.base,
-            self.headers,
-            lambda *args, **kwargs: http_json(*args, **kwargs),
-        )
-        self._write_transport = IntervalsWriteTransport(
-            self.base,
-            self.headers,
-            lambda *args, **kwargs: http_json(*args, **kwargs),
-        )
-        self.pagination: dict[str, dict[str, Any]] = {}
-        self._workout_folder_id: int | None = None
-
-    def get(self, path: str, params: dict[str, Any] | None = None, *, cancel_event: threading.Event | None = None) -> Any:
-        return self._read_transport.get(path, params, cancel_event=cancel_event)
-
-    def get_paged_collection(
-        self,
-        path: str,
-        params: dict[str, Any] | None,
-        collection: str,
-        page_size: int = 500,
-        cancel_event: threading.Event | None = None,
-    ) -> list[dict[str, Any]]:
-        rows, page_metadata = fetch_paged_collection(
-            self.get,
-            path,
-            params,
-            collection,
-            error=lambda message: AppError(502, message),
-            page_size=page_size,
-            cancel_event=cancel_event,
-        )
-        previous = self.pagination.get(collection) or {"pages": 0, "records": 0, "complete": True}
-        self.pagination[collection] = {
-            "pages": int(previous.get("pages") or 0) + int(page_metadata["pages"]),
-            "records": int(previous.get("records") or 0) + int(page_metadata["records"]),
-            "complete": bool(previous.get("complete", True)) and bool(page_metadata["complete"]),
-        }
-        return rows
-
-    @intervals_operation
-    def post(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
-        return self._write_transport.post(path, payload, params)
-
-    @intervals_operation
-    def put(self, path: str, payload: Any, params: dict[str, Any] | None = None) -> Any:
-        return self._write_transport.put(path, payload, params)
-
-    @intervals_operation
-    def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        return self._write_transport.delete(path, params)
-
-    def get_workout_library(self, *, cancel_event: threading.Event | None = None) -> list[dict[str, Any]]:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.get_paged_collection(
-            f"/athlete/{athlete}/workouts", {}, "workout_library", cancel_event=cancel_event
-        )
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Trainingsbibliothek zurÃ¼ckgegeben.")
-        fields = (
-            "id", "name", "description", "type", "moving_time", "distance",
-            "target", "workout_doc", "icu_training_load", "icu_intensity", "indoor",
-            "tags", "folder_id",
-        )
-        return [selected(item, fields) for item in result if isinstance(item, dict)]
-
-    @staticmethod
-    def _folder_id(value: Any) -> int | None:
-        if isinstance(value, bool):
-            return None
-        try:
-            folder_id = int(value)
-        except (TypeError, ValueError):
-            return None
-        return folder_id if folder_id > 0 else None
-
-    def get_or_create_workout_folder(self) -> int:
-        """Return the private library folder used for coach-created templates."""
-        if self._workout_folder_id is not None:
-            return self._workout_folder_id
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        folders = self.get(f"/athlete/{athlete}/folders")
-        if isinstance(folders, dict):
-            folders = folders.get("folders") or folders.get("data") or []
-        if not isinstance(folders, list):
-            raise AppError(502, "Intervals.icu hat keine gültige Ordnerliste zurückgegeben.")
-        matching: list[dict[str, Any]] = []
-        pending = [item for item in folders if isinstance(item, dict)]
-        while pending:
-            folder = pending.pop(0)
-            if str(folder.get("name") or "").strip() == APP_NAME:
-                matching.append(folder)
-            children = folder.get("children")
-            if isinstance(children, list):
-                pending.extend(item for item in children if isinstance(item, dict))
-        for folder in matching:
-            folder_id = self._folder_id(folder.get("id"))
-            if folder_id is not None:
-                self._workout_folder_id = folder_id
-                return folder_id
-        created = self.post(f"/athlete/{athlete}/folders", {"name": APP_NAME})
-        folder_id = self._folder_id(created.get("id") if isinstance(created, dict) else None)
-        if folder_id is None:
-            raise AppError(502, "Intervals.icu hat keinen gültigen Ordner zurückgegeben.")
-        self._workout_folder_id = folder_id
-        return folder_id
-
-    def create_library_workouts(self, workouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        for workout in workouts:
-            validate_workout_description(workout)
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        folder_id = self.get_or_create_workout_folder()
-        created: list[dict[str, Any]] = []
-        for workout in workouts:
-            payload = {
-                "name": str(workout.get("name") or "Coach-Einheit")[:200],
-                "description": str(workout.get("description") or "")[:12000],
-                "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
-                "folder_id": folder_id,
-                "target": workout.get("target") or "AUTO",
-            }
-            result = self.post(f"/athlete/{athlete}/workouts", payload)
-            if not isinstance(result, dict):
-                raise AppError(502, "Intervals.icu hat keine Trainingsbibliotheks-Einheit zurÃ¼ckgegeben.")
-            created.append(result)
-        return created
-
-    def update_library_workout(self, workout_id: str, workout: dict[str, Any]) -> dict[str, Any]:
-        validate_workout_description(workout)
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        remote_id = quote(str(workout_id), safe="")
-        payload = {
-            "name": str(workout.get("name") or "Coach-Einheit")[:200],
-            "description": str(workout.get("description") or "")[:12000],
-            "type": intervals_workout_sport(workout.get("type") or workout.get("sport")),
-            "target": workout.get("target") or "AUTO",
-        }
-        folder_id = self._folder_id(workout.get("folder_id"))
-        # Intervals.icu requires folder_id for workout updates as well as
-        # creates. Resolve a missing folder through the private Coach folder.
-        payload["folder_id"] = folder_id if folder_id is not None else self.get_or_create_workout_folder()
-        result = self.put(f"/athlete/{athlete}/workouts/{remote_id}", payload)
-        if not isinstance(result, dict):
-            raise AppError(502, "Intervals.icu returned no updated library workout.")
-        return result
-
-    def plan_library_workout(self, workout_id: str, workout: dict[str, Any], plan_date: str) -> dict[str, Any]:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        payload = workout_event_payload(f"library-{workout_id}-{plan_date}", {
-            "date": plan_date,
-            "sport": workout.get("type") or workout.get("sport") or "Ride",
-            "name": workout.get("name") or "Bibliotheks-Einheit",
-            "description": workout.get("description") or "",
-            "duration_minutes": workout.get("duration_minutes") or max(5, round(float(workout.get("moving_time") or 3600) / 60)),
-            "target": workout.get("target") or "AUTO",
-        })
-        result = self.post(f"/athlete/{athlete}/events/bulk", [payload], {"upsert": "true"})
-        if not isinstance(result, list) or not result:
-            raise AppError(502, "Intervals.icu hat keine geplante Einheit zurÃ¼ckgegeben.")
-        validate_intervals_workout_result(workout, result[0])
-        return result[0]
-
-    def fetch_snapshot(
-        self,
-        activity_days: int = 42,
-        end_date: date | None = None,
-        cancel_event: threading.Event | None = None,
-    ) -> dict[str, Any]:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        today = end_date or local_now().date()
-        calendar_start = today - timedelta(days=PLANNED_CALENDAR_HISTORY_DAYS)
-        calendar_end = today + timedelta(days=PLANNED_CALENDAR_FUTURE_DAYS)
-        existing = latest_snapshot() or {}
-        incremental = bool(existing) and activity_days != ALL_SYNC_DAYS
-        request_days = activity_days
-        activities: list[Any] = []
-        wellness: list[Any] = []
-        for window_start, window_end in sync_date_windows(request_days, today):
-            _raise_chat_cancelled(cancel_event)
-            range_params = {"oldest": window_start.isoformat(), "newest": window_end.isoformat()}
-            activities.extend(self.get_paged_collection(f"/athlete/{athlete}/activities", range_params, "activities", cancel_event=cancel_event))
-            wellness.extend(self.get_paged_collection(f"/athlete/{athlete}/wellness", range_params, "wellness", cancel_event=cancel_event))
-        activities = deduplicate_api_records(activities)
-        wellness = deduplicate_api_records(wellness)
-        _raise_chat_cancelled(cancel_event)
-        events = self.get_paged_collection(
-            f"/athlete/{athlete}/events",
-            {"oldest": calendar_start.isoformat(), "newest": calendar_end.isoformat()},
-            "events",
-            cancel_event=cancel_event,
-        )
-        _raise_chat_cancelled(cancel_event)
-        athlete_kwargs = {"cancel_event": cancel_event} if cancel_event is not None else {}
-        athlete_data = self.get(f"/athlete/{athlete}", **athlete_kwargs)
-        incoming = compact_snapshot(athlete_data, activities, wellness, events, history_days=request_days)
-        # Keep the complete provider collections in the durable snapshot. The
-        # compact fields above are the read model; Coach projection is the only
-        # layer allowed to reduce them for prompt size.
-        incoming["raw_provider_data"] = {
-            "athlete": athlete_data if isinstance(athlete_data, dict) else {},
-            "activities": activities,
-            "wellness": wellness,
-            "upcoming_calendar": events,
-        }
-        incoming["provider_sync"] = {
-            "pagination": self.pagination,
-            "calendar_window": {"start": calendar_start.isoformat(), "end": calendar_end.isoformat()},
-        }
-        if not incremental:
-            return incoming
-        merged = dict(incoming)
-        merged["recent_activities"] = deduplicate_api_records(incoming["recent_activities"] + existing.get("recent_activities", []))[:500]
-        merged["recent_wellness"] = deduplicate_api_records(incoming["recent_wellness"] + existing.get("recent_wellness", []))[-(max(42, activity_days) + 1):]
-        previous_raw = existing.get("raw_provider_data") if isinstance(existing.get("raw_provider_data"), dict) else {}
-        merged["raw_provider_data"] = {
-            "athlete": incoming["raw_provider_data"]["athlete"],
-            "activities": deduplicate_api_records(incoming["raw_provider_data"]["activities"] + (previous_raw.get("activities") or [])),
-            "wellness": deduplicate_api_records(incoming["raw_provider_data"]["wellness"] + (previous_raw.get("wellness") or [])),
-            "upcoming_calendar": incoming["raw_provider_data"]["upcoming_calendar"],
-        }
-        merged["incremental"] = True
-        merged["incremental_window_days"] = request_days
-        return merged
-
-    def fetch_competition_events(self) -> list[dict[str, Any]]:
-        """Fetch a broad calendar range for target-event synchronization."""
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        today = local_now().date()
-        result = self.get_paged_collection(
-            f"/athlete/{athlete}/events",
-            {
-                "oldest": (today - timedelta(days=365)).isoformat(),
-                "newest": (today + timedelta(days=730)).isoformat(),
-            },
-            "competition_events",
-        )
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Kalenderevents zurückgegeben.")
-        return [event for event in result if isinstance(event, dict)]
-
-    def upsert_competition_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if not events:
-            return []
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Zielwettkämpfe zurückgegeben.")
-        return [event for event in result if isinstance(event, dict)]
-
-    def upsert_calendar_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Upsert explicitly approved non-workout calendar events."""
-        if not events:
-            return []
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        result = self.post(f"/athlete/{athlete}/events/bulk", events, {"upsert": "true"})
-        if not isinstance(result, list):
-            raise AppError(502, "Intervals.icu hat keine Kalendereinträge zurückgegeben.")
-        return [event for event in result if isinstance(event, dict)]
-
-    def bulk_delete_events(self, identifiers: list[dict[str, str]]) -> Any:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        return self.put(f"/athlete/{athlete}/events/bulk-delete", identifiers)
-
-    def fetch_performance_snapshot(self, existing_snapshot: dict[str, Any] | None) -> dict[str, Any]:
-        """Refresh athlete settings and wellness only; do not request activities or calendar events."""
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        today = local_now().date()
-        wellness_start = today - timedelta(days=90)
-        athlete_data = self.get(f"/athlete/{athlete}")
-        wellness = self.get_paged_collection(
-            f"/athlete/{athlete}/wellness",
-            {"oldest": wellness_start.isoformat(), "newest": today.isoformat()},
-            "performance_wellness",
-        )
-        existing_snapshot = existing_snapshot if isinstance(existing_snapshot, dict) else {}
-        snapshot = compact_snapshot(
-            athlete_data,
-            existing_snapshot.get("recent_activities", []),
-            wellness,
-            existing_snapshot.get("upcoming_calendar", []),
-            history_days=90,
-        )
-        snapshot["provider_sync"] = {"pagination": self.pagination}
-        snapshot["raw_provider_data"] = {"athlete": athlete_data, "wellness": wellness}
-        return snapshot
-
-    def delete_event(self, event_id: str) -> Any:
-        athlete = quote(self.config.intervals_athlete_id, safe="")
-        return self.delete(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")
-
-    def delete_activity(self, activity_id: str) -> Any:
-        return self.delete(f"/activity/{quote(activity_id, safe='')}")
-
-
 def deduplicate_api_records(records: list[Any]) -> list[Any]:
     """Merge adjacent date-window responses without duplicating boundary rows."""
     result: list[Any] = []
@@ -9784,26 +9072,36 @@ def _save_local_plan_entries(
     return created
 
 
+def _save_workout_library_entries_in_db(
+    db: Any, normalized_workouts: list[dict[str, Any]], plan_name: str, goal: str,
+) -> list[dict[str, Any]]:
+    plan_id = str(uuid.uuid4()) if plan_name.strip() else ""
+    now = utc_now()
+    templates = [item for item in list_workout_library(db=db) if not item.get("date")]
+    if plan_id:
+        _create_training_plan_record(db, plan_id, normalized_workouts, plan_name, goal, now)
+    _validate_plan_calendar(normalized_workouts)
+    created = _save_local_plan_entries(db, normalized_workouts, templates, plan_id, plan_name, now)
+    if created:
+        _bump_planning_revision(db)
+    return created
+
+
 def save_workout_library_entries(
     workouts: list[dict[str, Any]],
     plan_name: str = "",
     goal: str = "",
+    *,
+    db: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Store planned coach sessions locally, reusing cached templates first."""
     if not isinstance(workouts, list) or not workouts:
         raise AppError(400, "Mindestens eine Einheit ist erforderlich.")
     normalized_workouts = [normalize_workout(item) for item in workouts]
-    plan_id = str(uuid.uuid4()) if plan_name.strip() else ""
-    now = utc_now()
+    if db is not None:
+        return _save_workout_library_entries_in_db(db, normalized_workouts, plan_name, goal)
     with DB_LOCK, database() as db:
-        templates = [item for item in list_workout_library() if not item.get("date")]
-        if plan_id:
-            _create_training_plan_record(db, plan_id, normalized_workouts, plan_name, goal, now)
-        _validate_plan_calendar(normalized_workouts)
-        created = _save_local_plan_entries(db, normalized_workouts, templates, plan_id, plan_name, now)
-        if created:
-            _bump_planning_revision(db)
-    return created
+        return _save_workout_library_entries_in_db(db, normalized_workouts, plan_name, goal)
 
 
 def list_training_plans(limit: int = 30) -> list[dict[str, Any]]:
@@ -11070,13 +10368,19 @@ def upsert_workout_library(workouts: list[dict[str, Any]], remove_missing: bool 
     return normalized
 
 
-def list_workout_library(limit: int = 500, include_archived: bool = False) -> list[dict[str, Any]]:
+def list_workout_library(limit: int = 500, include_archived: bool = False, *, db: Any | None = None) -> list[dict[str, Any]]:
+    if db is not None:
+        return _list_workout_library_in_db(db, limit, include_archived)
     with DB_LOCK, database() as db:
-        rows = db.execute(
-            "SELECT payload FROM workout_library WHERE json_extract(payload, '$.date') IS NULL "
-            "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT ?",
-            (max(1, min(int(limit) * (2 if include_archived else 1), 1000)),),
-        ).fetchall()
+        return _list_workout_library_in_db(db, limit, include_archived)
+
+
+def _list_workout_library_in_db(db: Any, limit: int, include_archived: bool) -> list[dict[str, Any]]:
+    rows = db.execute(
+        "SELECT payload FROM workout_library WHERE json_extract(payload, '$.date') IS NULL "
+        "ORDER BY lower(json_extract(payload, '$.type')), lower(json_extract(payload, '$.name')) LIMIT ?",
+        (max(1, min(int(limit) * (2 if include_archived else 1), 1000)),),
+    ).fetchall()
     result = []
     for row in rows:
         try:
@@ -12904,38 +12208,54 @@ def _save_local_planned_workout_update(
         _bump_planning_revision(db)
 
 
-def update_local_planned_workout(
+def _update_local_planned_workout_in_db(
+    db: Any,
     local_id: str,
     values: Any,
     *,
     skip_calendar_conflict: bool = False,
     bump_planning_revision: bool = True,
 ) -> dict[str, Any]:
-    """Edit or remove a dated local plan without writing to a provider."""
     normalized_id, values, action = _planned_workout_update_request(local_id, values)
-    with DB_LOCK, database() as db:
-        row, current, before = _load_local_planned_workout(db, normalized_id)
-        if action == "delete":
-            _delete_local_planned_workout(
-                db, normalized_id, current, before, bump_planning_revision=bump_planning_revision
-            )
-            updated = None
-        else:
-            candidate = _planned_workout_update_candidate(current, action, values)
-            _validate_planned_workout_date(
-                candidate, current, normalized_id, skip_calendar_conflict=skip_calendar_conflict
-            )
-            updated = _normalized_planned_workout_update(
-                candidate, current, row, normalized_id, action, values
-            )
-            _save_local_planned_workout_update(
-                db, normalized_id, updated, before, bump_planning_revision=bump_planning_revision
-            )
+    row, current, before = _load_local_planned_workout(db, normalized_id)
     if action == "delete":
-        publish_state_event("coach", {"status": "changed"})
+        _delete_local_planned_workout(
+            db, normalized_id, current, before, bump_planning_revision=bump_planning_revision
+        )
         return {"status": "deleted", "local_id": normalized_id}
-    publish_state_event("coach", {"status": "changed"})
+    candidate = _planned_workout_update_candidate(current, action, values)
+    _validate_planned_workout_date(candidate, current, normalized_id, skip_calendar_conflict=skip_calendar_conflict)
+    updated = _normalized_planned_workout_update(candidate, current, row, normalized_id, action, values)
+    _save_local_planned_workout_update(
+        db, normalized_id, updated, before, bump_planning_revision=bump_planning_revision
+    )
     return {"status": "local", "local_id": normalized_id, "library_entry": updated}
+
+
+def update_local_planned_workout(
+    local_id: str,
+    values: Any,
+    *,
+    skip_calendar_conflict: bool = False,
+    bump_planning_revision: bool = True,
+    db: Any | None = None,
+) -> dict[str, Any]:
+    """Edit or remove a dated local plan without writing to a provider."""
+    if db is not None:
+        return _update_local_planned_workout_in_db(
+            db, local_id, values, skip_calendar_conflict=skip_calendar_conflict,
+            bump_planning_revision=bump_planning_revision,
+        )
+    with DB_LOCK, database() as db:
+        result = _update_local_planned_workout_in_db(
+            db, local_id, values, skip_calendar_conflict=skip_calendar_conflict,
+            bump_planning_revision=bump_planning_revision,
+        )
+    if result["status"] == "deleted":
+        publish_state_event("coach", {"status": "changed"})
+        return result
+    publish_state_event("coach", {"status": "changed"})
+    return result
 
 
 def _planned_conflict_resolution_request(local_id: Any, strategy: Any) -> tuple[str, str]:
@@ -15141,9 +14461,10 @@ def record_openai_usage(response: dict[str, Any], operation: str) -> None:
 
 
 def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
-    if not isinstance(result, dict):
+    failure = openai_response_failure_reason(path, result, OPENAI_RESPONSES_PATH)
+    if failure == "invalid_response":
         raise AppError(502, "OpenAI response is not a JSON object.", reason="invalid_response")
-    if result.get("error"):
+    if failure == "response_error":
         provider_error = result["error"]
         code = provider_error.get("code") if isinstance(provider_error, dict) else None
         code = code if isinstance(code, str) and code in OPENAI_RESPONSE_ERROR_CODES else None
@@ -15152,14 +14473,12 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
         error = AppError(502, "OpenAI returned an error response.", reason="response_error")
         error.provider_error_code = code
         raise error
-    if path == OPENAI_RESPONSES_PATH:
-        response_status = str(result.get("status") or "").casefold()
-        if response_status in {"failed", "cancelled"}:
-            record_openai_status({"state": "error", "reason": "response_failed", "message": "OpenAI did not complete the coach response.", "http_status": 200})
-            raise AppError(502, "OpenAI did not complete the coach response.", reason="response_failed")
-        if response_status and response_status not in {"completed", "incomplete", "in_progress", "queued"}:
-            record_openai_status({"state": "error", "reason": "invalid_response_status", "message": "OpenAI returned an unknown response status.", "http_status": 200})
-            raise AppError(502, "OpenAI returned an unknown response status.", reason="invalid_response_status")
+    if failure == "response_failed":
+        record_openai_status({"state": "error", "reason": "response_failed", "message": "OpenAI did not complete the coach response.", "http_status": 200})
+        raise AppError(502, "OpenAI did not complete the coach response.", reason="response_failed")
+    if failure == "invalid_response_status":
+        record_openai_status({"state": "error", "reason": "invalid_response_status", "message": "OpenAI returned an unknown response status.", "http_status": 200})
+        raise AppError(502, "OpenAI returned an unknown response status.", reason="invalid_response_status")
     return result
 
 
@@ -15492,21 +14811,11 @@ def _gemini_local_chat_history() -> list[dict[str, Any]]:
 
 
 def _gemini_text(result: Any) -> str:
-    candidates = result.get("candidates") if isinstance(result, dict) else []
-    candidate = candidates[0] if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict) else {}
-    content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
-    parts = content.get("parts") if isinstance(content.get("parts"), list) else []
-    return "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict) and part.get("text")).strip()
+    return gemini_response_text(result)
 
 
 def _gemini_tools(tools: Any) -> list[dict[str, Any]]:
-    declarations = []
-    for tool in tools if isinstance(tools, list) else []:
-        if not isinstance(tool, dict) or tool.get("type") != "function" or not tool.get("name"):
-            continue
-        declarations.append({"name": str(tool["name"]), "description": str(tool.get("description") or ""),
-                             "parametersJsonSchema": tool.get("parameters") if isinstance(tool.get("parameters"), dict) else {"type": "object", "properties": {}}})
-    return [{"functionDeclarations": declarations}] if declarations else []
+    return gemini_function_tools(tools)
 
 
 def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:  # NOSONAR - provider payload assembly is intentionally kept atomic
@@ -16298,34 +15607,8 @@ def reset_coach_chat() -> dict[str, Any]:
     return {"status": "ok", "generation": get_kv("chat_generation"), "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
 
 
-def _output_content_text(content: Any) -> str | None:
-    """Normalize one Responses API message-content entry to display text."""
-    if not isinstance(content, dict):
-        return None
-    if content.get("type") in {"output_text", "text"} and content.get("text"):
-        return content["text"]
-    if content.get("type") == "refusal" and content.get("refusal"):
-        return f"The coach declined to answer: {content['refusal']}"
-    return None
-
-
-def _output_item_parts(item: Any) -> list[str]:
-    """Extract all displayable content from one Responses API output item."""
-    if not isinstance(item, dict):
-        return []
-    if item.get("type") == "refusal" and item.get("refusal"):
-        return [f"The coach declined to answer: {item['refusal']}"]
-    if item.get("type") != "message":
-        return []
-    return [text for content in item.get("content", []) if (text := _output_content_text(content))]
-
-
 def output_text(response: dict[str, Any]) -> str:
-    direct = response.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
-    parts = [part for item in response.get("output", []) for part in _output_item_parts(item)]
-    return "\n".join(parts).strip()
+    return openai_response_text(response)
 
 
 COACH_ACTION_TTL_SECONDS = 10 * 60
@@ -16555,11 +15838,7 @@ def _restore_coach_session_csrf_hash(session_key: str) -> str:
 
 
 def _coach_command_receipt(value: Any) -> dict[str, Any]:
-    try:
-        receipt = json.loads(value or "{}") if not isinstance(value, dict) else dict(value)
-    except (TypeError, ValueError):
-        receipt = {}
-    return receipt if isinstance(receipt, dict) else {}
+    return command_receipt(value)
 
 
 def _merge_coach_command_receipt(client_turn_id: str, updates: dict[str, Any]) -> dict[str, Any]:
@@ -16822,242 +16101,15 @@ def unregister_chat_stream(session_csrf_hash: str, operation_id: str) -> None:
 
 COACH_TOOL_MAX_ROUNDS = 12
 COACH_COMMAND_STALE_SECONDS = 15 * 60
-COACH_CANONICAL_TOOL_NAMES = (
-    "read_profile",
-    "update_profile",
-    "read_training_state",
-    "list_recent_activities",
-    "get_activity_details",
-    "list_workout_library",
-    "list_planned_workouts",
-    "list_change_history",
-    "list_competitions",
-    "list_training_plans",
-    "stage_training_plan",
-    "commit_training_plan",
-    "replace_training_plan",
-    "apply_training_changes",
-    "manage_training_templates",
-    "save_checkin",
-    "save_activity_feedback",
-    "delete_activity_feedback",
-    "save_competition",
-    "delete_competition",
-    "start_provider_refresh",
-    "refresh_current_performance",
-    "start_intervals_plan_sync",
-    "sync_competitions",
-    "get_sync_job",
-    "resolve_training_sync_conflict",
-    "preview_adaptive_replan",
-    "apply_adaptive_replan",
-    "update_training_plan",
-    "undo_training_change",
-    "apply_workout_library_plan",
+COACH_CANONICAL_TOOL_NAMES, COACH_STRUCTURED_TOOLS, STRUCTURED_READ_ONLY_TOOLS, COACH_DIALOGUE_TOOLS = build_tool_contracts(
+    default_profile=DEFAULT_PROFILE,
+    checkin_text_limits=CHECKIN_TEXT_LIMITS,
+    checkin_score_fields=CHECKIN_SCORE_FIELDS,
+    training_change_limit=COACH_TRAINING_CHANGE_LIMIT,
+    library_bulk_max_entries=LIBRARY_BULK_MAX_ENTRIES,
+    training_plan_statuses=TRAINING_PLAN_STATUSES,
+    dialogue_tools=dialogue_tools,
 )
-
-
-def _canonical_coach_tool(
-    name: str,
-    description: str,
-    properties: dict[str, Any] | None = None,
-    *,
-    strict: bool = False,
-) -> dict[str, Any]:
-    """Declare a focused schema for one structured Coach operation.
-
-    Read-only tools with no arguments are strict. Mutable tools retain
-    optional fields where the operation supports partial updates, but no
-    longer receive every unrelated Coach parameter.
-    """
-    return {
-        "type": "function",
-        "name": name,
-        "description": description,
-        "strict": strict or not bool(properties),
-        "parameters": {
-            "type": "object",
-            "properties": properties or {},
-            "required": list(properties or {}) if strict else [],
-            "additionalProperties": False,
-        },
-    }
-
-
-COACH_STRUCTURED_TOOLS = [
-    _canonical_coach_tool("read_profile", "Read the current durable athlete profile before making a partial profile update."),
-    _canonical_coach_tool("update_profile", "Save explicitly requested permanent athlete facts or preferences. Read the profile first; change only named fields, preserving existing text when adding facts. Temporary planning constraints belong to the plan or check-in.", {
-        "changes": {"type": "array", "minItems": 1, "maxItems": len(DEFAULT_PROFILE), "items": {
-            "type": "object", "additionalProperties": False, "required": ["field", "expected_value", "value"],
-            "properties": {"field": {"type": "string", "enum": list(DEFAULT_PROFILE)},
-                           "expected_value": {"type": "string", "maxLength": 4000},
-                           "value": {"type": "string", "maxLength": 4000}},
-        }},
-    }, strict=True),
-    _canonical_coach_tool("read_training_state", "Read current local training references. For full repair include inactive entries and follow planned_units_page.next_cursor until has_more is false BEFORE editing or syncing. A changed planning revision invalidates the cursor; restart enumeration in that case.", {"include_inactive": {"type": "boolean"}, "cursor": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": COACH_TRAINING_CHANGE_LIMIT}}),
-    _canonical_coach_tool("list_recent_activities", "Read completed activities from the latest local snapshot without refreshing a provider.", {"days": {"type": "integer"}, "limit": {"type": "integer"}}),
-    _canonical_coach_tool("get_activity_details", "Read a bounded, sanitized detailed analysis projection for exactly one completed Intervals.icu activity from the local snapshot. Use only after an explicit request to analyse or deeply review that one activity; resolve its exact activity ID with list_recent_activities first when needed. Never use this for generic activity summaries or all past activities.", {"activity_id": {"type": "string", "minLength": 1, "maxLength": 200}}, strict=True),
-    _canonical_coach_tool("list_workout_library", "Read saved local training templates; local library data is authoritative.", {"limit": {"type": "integer"}, "include_archived": {"type": "boolean"}}),
-    _canonical_coach_tool("list_planned_workouts", "Read future locally scheduled workouts.", {"limit": {"type": "integer"}}),
-    _canonical_coach_tool("list_change_history", "Read local change-history references that can be used to request an undo preview.", {"limit": {"type": "integer"}}),
-    _canonical_coach_tool("list_competitions", "Read locally stored target competitions."),
-    _canonical_coach_tool("list_training_plans", "Read locally stored training-plan metadata."),
-    _canonical_coach_tool("stage_training_plan", "Store a complete local training-plan draft. Include only future workouts, no rest-day placeholders or already completed activities. At most one workout per date; respect existing calendar conflicts. Correct rejected arguments before committing. Never writes remotely.", {"payload": {
-        "type": "object", "additionalProperties": False,
-        "required": ["plan_name", "goal", "workouts"],
-        "properties": {
-            "plan_name": {"type": "string"},
-            "goal": {"type": "string"},
-            "workouts": {
-                "type": "array", "minItems": 1, "maxItems": 366,
-                "items": {
-                    "type": "object", "additionalProperties": False,
-                    "required": ["date", "sport", "name", "description", "duration_minutes", "target", "rationale"],
-                    "properties": {
-                        "date": {"type": "string", "description": "Local workout date in YYYY-MM-DD format; plan span at most 730 days."},
-                        "sport": {"type": "string", "description": "Sport, e.g. Ride, VirtualRide, Run, Swim or WeightTraining."},
-                        "name": {"type": "string"},
-                        "description": {"type": "string", "minLength": 1, "description": "Workout instructions, including intervals or strength exercises as appropriate."},
-                        "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 600},
-                        "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]},
-                        "rationale": {"type": "string", "minLength": 1},
-                    },
-                },
-            },
-        },
-    }}, strict=True),
-    _canonical_coach_tool("commit_training_plan", "Commit a referenced local training-plan artifact atomically.", {"artifact_id": {"type": "string"}}),
-    _canonical_coach_tool(
-        "replace_training_plan",
-        "Atomically replace local Coach/library plan units within the requested period. Use the planning revision returned by read_training_state. "
-        "This operation may create, update, and archive a different number of sessions and never writes remotely.",
-        {
-            "payload": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["plan_name", "goal", "workouts"],
-                "properties": {
-                    "plan_name": {"type": "string", "minLength": 1},
-                    "goal": {"type": "string"},
-                    "workouts": {
-                        "type": "array", "minItems": 1, "maxItems": 366,
-                        "items": {
-                            "type": "object", "additionalProperties": False,
-                            "required": ["date", "sport", "name", "description", "duration_minutes", "target", "rationale"],
-                            "properties": {
-                                "date": {"type": "string", "description": "Local workout date in YYYY-MM-DD format."},
-                                "sport": {"type": "string"},
-                                "name": {"type": "string"},
-                                "description": {"type": "string", "minLength": 1},
-                                "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 600},
-                                "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]},
-                                "rationale": {"type": "string", "minLength": 1},
-                            },
-                        },
-                    },
-                },
-            },
-            "expected_revision": {"type": "integer"},
-        },
-        strict=True,
-    ),
-    _canonical_coach_tool("apply_training_changes", "Apply an explicitly authorized set of local training changes atomically. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every change.", {"changes": {"type": "array", "minItems": 1, "maxItems": COACH_TRAINING_CHANGE_LIMIT, "description": "For complete-plan edits, include the expected_payload_hash returned for every local_id.", "items": {"type": "object", "properties": {"local_id": {"type": "string"}, "action": {"type": "string", "enum": ["update", "archive", "restore", "delete"], "description": "Moving a workout uses update with its new date."}, "date": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "duration_minutes": {"type": "integer"}, "target": {"type": "string"}, "type": {"type": "string"}, "sport": {"type": "string"}, "expected_payload_hash": {"type": "string"}}}}, "expected_revision": {"type": "integer", "description": "Required for complete-plan edits; use planning_revision from read_training_state."}}),
-    _canonical_coach_tool("manage_training_templates", "Create, update, archive, restore, or delete undated local templates. Resolve local_id with list_workout_library for edits; creation requires name and workout description. Scheduling is a separate local action.", {"templates": {"type": "array", "minItems": 1, "maxItems": 28, "items": {
-        "type": "object", "additionalProperties": False, "required": ["action"], "properties": {
-            "action": {"type": "string", "enum": ["create", "update", "archive", "restore", "delete"]},
-            "local_id": {"type": "string", "format": "uuid"}, "name": {"type": "string"},
-            "description": {"type": "string"}, "sport": {"type": "string", "enum": ["Ride", "VirtualRide", "Run", "Swim", "WeightTraining"]},
-            "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 1440},
-            "target": {"type": "string", "enum": ["AUTO", "POWER", "HR", "PACE"]},
-        },
-    }}}),
-    _canonical_coach_tool("apply_workout_library_plan", "Schedule saved templates locally after conflict checks. Resolve the template ID from list_workout_library. Never writes remotely.", {"entries": {"type": "array", "minItems": 1, "maxItems": 14, "items": {
-        "type": "object", "additionalProperties": False, "required": ["library_workout_id", "date"],
-        "properties": {"library_workout_id": {"type": "string", "format": "uuid"}, "date": {"type": "string", "format": "date"}},
-    }}}),
-    _canonical_coach_tool("save_checkin", "Save explicitly stated daily condition, illness, pain or availability. Omit unknown fields; scores are 0-10. checkin_date defaults to the athlete-local today and cannot be in the future. Empty fields preserve existing feedback.", {"payload": {
-        "type": "object", "additionalProperties": False, "properties": {
-            "checkin_date": {"type": "string", "format": "date"},
-            **{field: {"type": "string", "maxLength": limit} for field, limit in CHECKIN_TEXT_LIMITS.items()},
-            **{field: {"type": ["integer", "null"], "minimum": 0, "maximum": 10} for field in CHECKIN_SCORE_FIELDS},
-            "available_minutes": {"type": ["integer", "null"], "minimum": 0, "maximum": 1440},
-        },
-    }}),
-    _canonical_coach_tool("save_activity_feedback", "Save the athlete's explicitly stated observations about an existing completed activity. Resolve its exact ID from the local snapshot or list_recent_activities first. Never invent an activity ID or observations. This tool cannot create completed activities.", {"payload": {
-        "type": "object", "additionalProperties": False,
-        "required": ["activity_id", "activity_name", "activity_date", "notes"],
-        "properties": {
-            "activity_id": {"type": "string", "minLength": 1, "description": "Exact existing activity ID from the current local snapshot."},
-            "activity_name": {"type": ["string", "null"]},
-            "activity_date": {"type": ["string", "null"]},
-            "notes": {"type": "string", "minLength": 1, "description": "Only observations explicitly stated by the athlete."},
-        },
-    }}, strict=True),
-    _canonical_coach_tool("delete_activity_feedback", "Delete the local feedback record for one completed activity.", {"activity_id": {"type": "string"}}),
-    _canonical_coach_tool("save_competition", "Create or update one local target competition. Creation needs name, event_date and sport; for edits use competition_id from list_competitions and only changed fields. This does not push to Intervals.icu.", {"payload": {
-        "type": "object", "additionalProperties": False, "properties": {
-            "competition_id": {"type": "string", "format": "uuid"},
-            **{field: {"type": "string"} for field in ("name", "event_date", "start_date_local", "sport", "distance", "target", "course_profile", "notes", "description")},
-            "priority": {"type": "string", "enum": ["A", "B", "C"]},
-            "moving_time_seconds": {"type": ["integer", "null"], "minimum": 0},
-        },
-    }}),
-    _canonical_coach_tool("delete_competition", "Delete one locally stored target competition.", {"competition_id": {"type": "string"}}),
-    _canonical_coach_tool("start_provider_refresh", "Queue an explicitly requested read-only provider refresh.", {"days": {"type": "integer"}, "reason": {"type": "string"}}),
-    _canonical_coach_tool("refresh_current_performance", "Queue an explicit Intervals.icu performance-metrics refresh without reloading activities.", {"reason": {"type": "string"}}),
-    _canonical_coach_tool("start_intervals_plan_sync", "Queue an explicitly requested Intervals.icu push. For repair use repair=true, the current expected_revision, local_plan scope and no entries: the server selects the complete requested period, including already-synced and inactive units. First correct local workout text and sport. Repair verifies the remote calendar and removes only exact identity duplicates. An explicit repair selection must cover the entire period. For ordinary selected entries copy local_id and expected_payload_hash from read_training_state into library_workout_id and expected_payload_hash. For all_pending or created omit entries; the server resolves them. A follow-up sync of previously saved workouts uses selected or all_pending; created only refers to additions in THIS turn.", {"entries": {"type": "array", "minItems": 1, "maxItems": LIBRARY_BULK_MAX_ENTRIES, "items": {
-        "type": "object", "additionalProperties": False, "required": ["library_workout_id", "expected_payload_hash"],
-        "properties": {"library_workout_id": {"type": "string", "format": "uuid", "description": "Exact local_id of a planned unit, never a remote event ID or a scope token."},
-                       "expected_payload_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
-    }}, "reason": {"type": "string"}, "expected_revision": {"type": "integer", "description": "For complete-period repair omit entries, authorize local_plan and pass planning_revision from read_training_state. The server resolves every active and inactive unit and chunks the complete manifest."}, "repair": {"type": "boolean", "description": "Reconcile the complete requested future period; requires an explicit repair/resync request. An explicit entries selection must cover the entire period."}}),
-    _canonical_coach_tool("sync_competitions", "Queue an explicitly requested push of local target competitions to Intervals.icu.", {"reason": {"type": "string"}}),
-    _canonical_coach_tool("get_sync_job", "Read one local synchronization job.", {"job_id": {"type": "string"}}),
-    _canonical_coach_tool("resolve_training_sync_conflict", "Resolve a local conflict using local_id and strategy (keep_local or adopt_remote), with local target. Or retry a failed/partial job using only job_id: read get_sync_job first, use its provider target, and include sync_job:<id> plus intervals_sync for pushes (remote_write=true) or <provider>_refresh for reads.", {"local_id": {"type": "string"}, "job_id": {"type": "string"}, "strategy": {"type": "string", "enum": ["keep_local", "adopt_remote"]}}),
-    _canonical_coach_tool("preview_adaptive_replan", "Calculate a local adaptive planning preview without changing workouts."),
-    _canonical_coach_tool("apply_adaptive_replan", "Apply the latest adaptive planning preview after explicit Coach approval.", {"adjustment_id": {"type": "string"}, "sync_illness_to_intervals": {"type": "boolean"}}),
-    _canonical_coach_tool("update_training_plan", "Update or delete metadata for a plan resolved by list_training_plans. Deletion removes only the plan metadata; scheduled workouts remain. Use apply_training_patch for workout changes.", {"payload": {
-        "type": "object", "additionalProperties": False, "required": ["plan_id"], "properties": {
-            "plan_id": {"type": "string", "format": "uuid"}, "action": {"type": "string", "enum": ["update", "delete"]},
-            **{field: {"type": "string"} for field in ("name", "goal", "start_date", "end_date")},
-            "status": {"type": "string", "enum": sorted(TRAINING_PLAN_STATUSES)},
-        },
-    }}),
-    _canonical_coach_tool("undo_training_change", "Return an undo preview for a local change; do not apply it silently.", {"change_id": {"type": "string"}}),
-]
-
-
-STRUCTURED_READ_ONLY_TOOLS = {
-    "read_profile",
-    "read_training_state", "list_recent_activities", "get_activity_details", "list_workout_library", "list_planned_workouts",
-    "list_change_history", "list_competitions", "list_training_plans", "get_sync_job",
-}
-
-
-COACH_DIALOGUE_TOOLS = dialogue_tools(
-    [tool for tool in COACH_STRUCTURED_TOOLS if tool["name"] != "apply_training_changes"],
-    STRUCTURED_READ_ONLY_TOOLS,
-)
-_patch_properties = {
-    "changes": next(tool for tool in COACH_STRUCTURED_TOOLS if tool["name"] == "apply_training_changes")["parameters"]["properties"]["changes"],
-    "workouts": next(tool for tool in COACH_STRUCTURED_TOOLS if tool["name"] == "stage_training_plan")["parameters"]["properties"]["payload"]["properties"]["workouts"],
-    "expected_revision": {"type": "integer"}, "plan_name": {"type": "string"}, "goal": {"type": "string"},
-}
-_patch_properties["changes"] = {**_patch_properties["changes"], "minItems": 0}
-_patch_properties["workouts"] = {**_patch_properties["workouts"], "minItems": 0}
-COACH_DIALOGUE_TOOLS.extend(dialogue_tools([
-    _canonical_coach_tool("apply_training_patch", "Apply related moves, edits, deletions and additions in one atomic local change. Read revision and per-unit hashes first. Existing objects keep their IDs. No remote writes.", _patch_properties),
-], STRUCTURED_READ_ONLY_TOOLS))
-COACH_DIALOGUE_TOOLS.extend([
-    _canonical_coach_tool("clarify_coach_request", "Keep the current request and its constraints for a concrete clarification. Source IDs refer to user messages; summary includes all unresolved requirements.", {
-        "source_message_ids": {"type": "array", "items": {"type": "integer"}, "maxItems": 24},
-        "summary": {"type": "string"}, "question": {"type": "string"},
-    }, strict=True),
-    _canonical_coach_tool("cancel_coach_request", "Close the pending request when the athlete cancels it; completed effects remain recorded."),
-    _canonical_coach_tool("inspect_activity_duplicates", "Inspect the latest cycling activity for duplicate Wahoo/Garmin recordings. Prefer Wahoo for analysis. A returned removal preview still requires the athlete's explicit confirmation; this tool never deletes remotely."),
-])
-STRUCTURED_READ_ONLY_TOOLS.add("inspect_activity_duplicates")
-
-
 def coach_execution_scope(action: dict[str, Any] | None = None) -> dict[str, Any]:
     """HTTP turns enter the durable queue; actual workload follows structured data."""
     period = (action or {}).get("period")
@@ -17067,15 +16119,11 @@ def coach_execution_scope(action: dict[str, Any] | None = None) -> dict[str, Any
 
 
 def _coach_scope_values(intent: dict[str, Any]) -> set[str]:
-    scope = intent.get("authorization_scope")
-    if not isinstance(scope, list):
-        return set()
-    return {str(value).strip()[:120] for value in scope if isinstance(value, str) and value.strip()}
+    return scope_values(intent)
 
 
 def _require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
-    scope = _coach_scope_values(intent)
-    if not any(token in scope for token in tokens):
+    if not require_scope(intent, *tokens):
         raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.", reason="intent_scope_denied")
 
 
@@ -17523,7 +16571,7 @@ def _apply_structured_training_change_rows(
             applied.append({"local_id": create_local_planned_unit(entry_payload, db=db, bump_planning_revision=False)["id"], "status": "local"})
         else:
             applied.append(update_local_planned_workout(
-                change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False
+                change["local_id"], change, skip_calendar_conflict=True, bump_planning_revision=False, db=db
             ))
     return applied
 
@@ -17569,20 +16617,21 @@ def _update_structured_training_plan_bounds(plans_needing_bounds: set[str], db: 
         _update_structured_training_plan_bound(plan_id, db)
 
 
-def _apply_structured_training_changes(
-    arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
+def _apply_structured_training_changes_in_db(
+    db: Any,
+    arguments: dict[str, Any], *,
+    require_revision: bool = False,
+    authorized_plan_id: str | None = None,
 ) -> dict[str, Any]:
     changes = _prepare_structured_training_changes(arguments)
-    with DB_LOCK, database() as db:
-        current_revision = _validate_structured_training_change_revisions(
-            changes, arguments, require_revision=require_revision, db=db,
-        )
-        derived_plan, plans_needing_bounds = _derive_structured_training_plan(changes, authorized_plan_id, db)
-        applied = _apply_structured_training_change_rows(changes, derived_plan, db)
-        _bump_planning_revision(db)
-        _update_structured_training_plan_bounds(plans_needing_bounds, db)
-        revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
-    publish_state_event("planning", {"status": "changed"})
+    current_revision = _validate_structured_training_change_revisions(
+        changes, arguments, require_revision=require_revision, db=db,
+    )
+    derived_plan, plans_needing_bounds = _derive_structured_training_plan(changes, authorized_plan_id, db)
+    applied = _apply_structured_training_change_rows(changes, derived_plan, db)
+    _bump_planning_revision(db)
+    _update_structured_training_plan_bounds(plans_needing_bounds, db)
+    revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
     result_changes = [{"local_id": item.get("local_id"), "status": item.get("status")} for item in applied]
     return {
         "ok": True,
@@ -17591,6 +16640,17 @@ def _apply_structured_training_changes(
         "changes": result_changes,
         "library_entry_ids": list(dict.fromkeys(item["local_id"] for item in result_changes if item.get("local_id"))),
     }
+
+
+def _apply_structured_training_changes(
+    arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
+) -> dict[str, Any]:
+    with DB_LOCK, database() as db:
+        result = _apply_structured_training_changes_in_db(
+            db, arguments, require_revision=require_revision, authorized_plan_id=authorized_plan_id,
+        )
+    publish_state_event("planning", {"status": "changed"})
+    return result
 
 
 def _prepare_structured_plan_replacement(arguments: dict[str, Any]) -> tuple[dict[str, Any], int, list[dict[str, Any]], str, str, dict[str, str]]:
@@ -18024,7 +17084,7 @@ def _structured_coach_profile_result(arguments: dict[str, Any], intent: dict[str
 
 
 def _authorized_coach_athlete_operation(intent: dict[str, Any], operation: str, message: str) -> None:
-    if operation not in _structured_authorized_operations(intent):
+    if not require_operation(intent, operation):
         raise AppError(403, message, reason="intent_scope_denied")
 
 
@@ -18259,19 +17319,16 @@ def _structured_coach_plan_tool_result(
     name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
     conversation_id: str, client_turn_id: str,
 ) -> dict[str, Any] | None:
-    if name == "stage_training_plan":
-        return _stage_structured_training_plan(arguments, intent, conversation_id, client_turn_id)
-    if name == "commit_training_plan":
-        return _commit_structured_training_plan(arguments, intent, conversation_id)
-    if name == "replace_training_plan":
-        return _replace_structured_coach_training_plan(arguments, intent)
-    if name == "apply_training_changes":
-        return _apply_structured_coach_training_changes(arguments, intent)
-    if name == "manage_training_templates":
-        return _structured_coach_training_template_result(arguments, intent)
-    if name == "apply_workout_library_plan":
-        return _structured_coach_apply_library_plan_result(arguments, intent)
-    return None
+    handlers: dict[str, Callable[[], dict[str, Any]]] = {
+        "stage_training_plan": lambda: _stage_structured_training_plan(arguments, intent, conversation_id, client_turn_id),
+        "commit_training_plan": lambda: _commit_structured_training_plan(arguments, intent, conversation_id),
+        "replace_training_plan": lambda: _replace_structured_coach_training_plan(arguments, intent),
+        "apply_training_changes": lambda: _apply_structured_coach_training_changes(arguments, intent),
+        "manage_training_templates": lambda: _structured_coach_training_template_result(arguments, intent),
+        "apply_workout_library_plan": lambda: _structured_coach_apply_library_plan_result(arguments, intent),
+    }
+    handler = handlers.get(name)
+    return handler() if handler else None
 
 
 def _start_structured_provider_refresh(
@@ -18588,12 +17645,7 @@ def _structured_coach_tool_result(
 
 
 def _structured_authorized_operations(intent: dict[str, Any]) -> set[str]:
-    """Return the operation sequence explicitly authorized for this turn."""
-    operations = {str(intent.get("operation") or "").strip()}
-    follow_ups = intent.get("follow_up_operations")
-    if isinstance(follow_ups, list):
-        operations.update(str(value).strip() for value in follow_ups if str(value).strip())
-    return operations
+    return authorized_operations(intent)
 
 
 def _coach_dialogue_pending_messages(db: Any, messages: list[dict[str, Any]], pending: dict[str, Any] | None) -> None:
@@ -18854,11 +17906,14 @@ def _apply_training_patch(arguments: dict[str, Any], action: dict[str, Any]) -> 
         if type(arguments.get("expected_revision")) is not int or arguments["expected_revision"] != revision:
             raise AppError(409, "Der Plan wurde inzwischen geändert. Lies den aktuellen Stand erneut.", reason="planning_revision_conflict")
         _validate_training_patch_schedule(changes, workouts, ids, db)
-        changed = _apply_structured_training_changes(arguments, require_revision=True) if changes else {"changes": []}
+        changed = _apply_structured_training_changes_in_db(db, arguments, require_revision=True) if changes else {"changes": []}
         plan_name = str(arguments.get("plan_name") or ("Coach-Plan" if action["request"]["constraints"] else ""))
-        created = save_workout_library_entries(workouts, plan_name, str(arguments.get("goal") or "")) if workouts else []
+        created = save_workout_library_entries(
+            workouts, plan_name, str(arguments.get("goal") or ""), db=db,
+        ) if workouts else []
         _store_training_patch_constraints(created, ids, action["request"]["constraints"], db)
         revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
+    publish_state_event("planning", {"status": "changed"})
     return {"ok": True, "status": "applied", "planning_revision": revision, "changes": changed["changes"], "library_entry_ids": [item["id"] for item in created]}
 
 
@@ -19482,17 +18537,12 @@ def _structured_coach_response(
 
 
 def _mark_resolved_coach_receipts(command_receipts: list[dict[str, Any]], failures: list[dict[str, Any]]) -> None:
-    for entry in command_receipts:
-        if not entry.get("result", {}).get("ok"):
-            entry["resolved"] = not any(entry is failure for failure in failures)
+    mark_resolved_receipts(command_receipts, failures)
 
 
 def _coach_effects(command_receipts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     internal_tools = STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
-    return [
-        entry for entry in command_receipts
-        if entry.get("result", {}).get("ok") and entry["tool"] not in internal_tools
-    ]
+    return effects_from_receipts(command_receipts, internal_tools)
 
 
 def _structured_coach_outcome_text(
@@ -19536,13 +18586,10 @@ def _structured_coach_outcome_status(
     *, question: str, incomplete_answer: bool, failures: list[dict[str, Any]],
     missing_answer: bool, effects: list[dict[str, Any]], cancelled: bool,
 ) -> str:
-    if question:
-        return "completed"
-    if incomplete_answer or ((failures or missing_answer) and effects):
-        return "partial"
-    if failures or missing_answer:
-        return "failed"
-    return "cancelled" if cancelled else "completed"
+    return outcome_status(
+        question=question, incomplete_answer=incomplete_answer, failures=failures,
+        missing_answer=missing_answer, effects=effects, cancelled=cancelled,
+    )
 
 
 def _structured_coach_outcome(
@@ -20914,7 +19961,7 @@ def public_bootstrap() -> dict[str, Any]:
     """Return bounded local state without waiting for any provider network call."""
     # The startup screen waits for this response. Keep all of its local reads
     # on one connection so SQLCipher is keyed once instead of once per helper.
-    # The nested helpers reuse the active DATABASE_CONTEXT connection.
+    # The nested helpers reuse the active DatabaseManager unit of work.
     with DB_LOCK, database():
         snapshot = latest_snapshot()
         local_planned = list_dated_local_planned_workouts(limit=250)
@@ -21615,75 +20662,9 @@ def _privacy_export_file() -> Path:
         raise
 
 
-CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
-    "kv": {"key", "value", "updated_at"},
-    "messages": {"id", "role", "content", "client_turn_id", "created_at", "attachments"},
-    "snapshots": {"id", "payload", "created_at"},
-    "workout_library": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "last_synced_at", "updated_at"},
-    "planned_units": {"id", "local_id", "external_id", "payload", "sync_dirty", "sync_state", "sync_error", "sync_conflict", "baseline_hash", "last_synced_at", "plan_id", "revision", "tombstone", "command_id", "created_at", "updated_at"},
-    "planning_state": {"id", "revision", "updated_at"},
-    "coach_plan_artifacts": {"id", "conversation_id", "client_turn_id", "base_revision", "status", "payload", "created_at", "updated_at"},
-    "coach_commands": {"id", "client_turn_id", "conversation_id", "intent", "target_system", "artifact_id", "status", "receipt", "error_class", "created_at", "updated_at"},
-    "sync_jobs": {"id", "provider", "type", "status", "payload", "requested_by", "attempts", "progress_total", "progress_completed", "error_class", "available_at", "started_at", "finished_at", "created_at", "updated_at"},
-    "sync_job_items": {"id", "job_id", "item_key", "operation", "payload_hash", "remote_id", "status", "attempts", "error_class", "error_detail", "created_at", "updated_at"},
-    "provider_sync_cursors": {"provider", "stream", "cursor", "high_water_mark", "updated_at"},
-    "competitions": {"id", "name", "event_date", "sport", "priority", "distance", "target", "course_profile", "notes", "category", "start_date_local", "description", "moving_time", "intervals_event_id", "external_id", "sync_dirty", "sync_state", "sync_conflict", "last_synced_at", "created_at", "updated_at"},
-    "competition_sync_tombstones": {"id", "intervals_event_id", "external_id", "created_at"},
-    "training_plans": {"id", "name", "goal", "start_date", "end_date", "status", "created_at", "updated_at"},
-    "athlete_checkins": {"checkin_date", "soreness", "stress", "motivation", "session_rpe", "day_form", "illness", "pain", "available_minutes", "availability_notes", "notes", "created_at", "updated_at"},
-    "activity_feedback": {"activity_id", "activity_name", "activity_date", "notes", "created_at", "updated_at"},
-    "plan_adjustments": {"id", "payload", "status", "created_at", "applied_at"},
-    "coach_action_proposals": {"id", "session_csrf_hash", "action_type", "target_system", "object_ids", "diff", "payload", "payload_hash", "action_token_hash", "status", "expires_at", "created_at", "used_at"},
-    "change_history": {"id", "entity_type", "entity_id", "action", "source", "created_at", "before_hash", "after_hash", "diff"},
-    "provider_refresh_history": {"id", "provider", "area", "operation_id", "trigger", "started_at", "finished_at", "phase", "status", "error_code", "next_retry_at"},
-    "public_event_sources": {"id", "name", "url", "last_sync_at", "last_error", "created_at", "updated_at"},
-    "public_event_candidates": {"id", "source_id", "uid", "name", "event_date", "sport", "distance", "location", "url", "description", "imported_competition_id", "created_at", "updated_at"},
-    "external_calendar_events": {"id", "uid", "name", "event_date", "start_local", "end_local", "duration_minutes", "all_day", "training_relevant", "no_intensity", "short_only", "updated_at"},
-    "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
-}
-CURRENT_DATABASE_INDEXES = {
-    "idx_change_history_created_at",
-    "idx_change_history_entity",
-    "idx_coach_plan_artifacts_conversation",
-    "idx_planned_units_date",
-    "idx_planned_units_external_id",
-    "idx_planned_units_local_id",
-    "idx_provider_refresh_area",
-    "idx_provider_refresh_created_at",
-    "idx_sync_job_items_status",
-    "idx_sync_jobs_status_available",
-    "idx_workout_library_external_id",
-}
-
-
-def database_table_names(db: Any) -> set[str]:
-    return {
-        str(row["name"])
-        for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        if not str(row["name"]).startswith("sqlite_")
-    }
-
-
-def database_index_names(db: Any) -> set[str]:
-    return {
-        str(row["name"])
-        for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
-        if not str(row["name"]).startswith("sqlite_")
-}
-
-
-def database_schema_is_current(db: Any) -> bool:
-    if database_table_names(db) != set(CURRENT_DATABASE_SCHEMA):
-        return False
-    if database_index_names(db) != CURRENT_DATABASE_INDEXES:
-        return False
-    return all(
-        columns == {
-            row["name"]
-            for row in db.execute(f"PRAGMA table_info({table})").fetchall()
-        }
-        for table, columns in CURRENT_DATABASE_SCHEMA.items()
-    )
+# Transitional names for restore/test consumers; implementation ownership is
+# in backend.db.schema.
+_configure_cipher = configure_cipher
 
 
 def _checkpoint_database_locked() -> None:
