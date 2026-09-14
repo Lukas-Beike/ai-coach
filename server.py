@@ -71,7 +71,7 @@ from backend.sync.status import persist_sync_operation_state, project_sync_statu
 from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
 from backend.sync.refresh import cleanup_refresh_history, create_refresh_record, finish_refresh_record
 from backend.sync.snapshots import latest_snapshot as latest_snapshot_in_transaction, save_snapshot as save_snapshot_in_transaction
-from backend.sync.reconcile import persist_planned_unit_state
+from backend.sync.reconcile import ReconcileDependencies, persist_planned_unit_state
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.planning.service import update_plan_bounds
 from backend.planning.service import TRAINING_PLAN_STATUSES, update_plan_metadata
@@ -10675,8 +10675,11 @@ def update_planned_unit_sync_state(local_id: str, state: str, error: str | None 
     """Persist planning sync state without changing the canonical workout data."""
     with DB_LOCK, database() as db:
         persist_planned_unit_state(
-            db, local_id, state, error, remote_event, redact=redact_text,
-            payload_hash=_planned_unit_payload_hash, now=utc_now(), bump_revision=_bump_planning_revision,
+            db, local_id, state, error, remote_event,
+            dependencies=ReconcileDependencies(
+                redact=redact_text, payload_hash=_planned_unit_payload_hash,
+                now=utc_now(), bump_revision=_bump_planning_revision,
+            ),
         )
 
 

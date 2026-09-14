@@ -2,7 +2,7 @@ import json
 import sqlite3
 import unittest
 
-from backend.sync.reconcile import persist_planned_unit_state
+from backend.sync.reconcile import ReconcileDependencies, persist_planned_unit_state
 
 
 class SyncReconcileTests(unittest.TestCase):
@@ -14,8 +14,10 @@ class SyncReconcileTests(unittest.TestCase):
         bumped = []
         self.assertTrue(persist_planned_unit_state(
             db, "unit-1", "synced", None, {"id": "remote-1", "external_id": "ext-1", "moving_time": 600},
-            redact=lambda value: value, payload_hash=lambda value: "hash", now="now",
-            bump_revision=lambda connection: bumped.append(connection),
+            dependencies=ReconcileDependencies(
+                redact=lambda value: value, payload_hash=lambda value: "hash", now="now",
+                bump_revision=lambda connection: bumped.append(connection),
+            ),
         ))
         row = db.execute("SELECT payload, sync_state, sync_dirty, external_id, baseline_hash FROM planned_units").fetchone()
         payload = json.loads(row["payload"])
