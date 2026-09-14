@@ -66,6 +66,7 @@ from backend.providers.workout_text import WorkoutTextError, canonical_workout_z
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
 from backend.sync.windows import split_date_windows
+from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
 from backend.sync.jobs import (
@@ -2831,21 +2832,13 @@ def sync_date_windows(days: int, end_date: date | None = None) -> list[tuple[dat
 
 def provider_sync_cursor(provider: str, stream: str) -> dict[str, Any]:
     with DB_LOCK, database() as db:
-        row = db.execute(
-            "SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors WHERE provider=? AND stream=?",
-            (provider, stream),
-        ).fetchone()
-    return dict(row) if row else {"provider": provider, "stream": stream, "cursor": None, "high_water_mark": None, "updated_at": None}
+        return read_cursor(db, provider, stream)
 
 
 def update_provider_sync_cursor(provider: str, stream: str, cursor: str, high_water_mark: str | None = None) -> None:
     now = utc_now()
     with DB_LOCK, database() as db:
-        db.execute(
-            "INSERT INTO provider_sync_cursors(provider, stream, cursor, high_water_mark, updated_at) VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(provider, stream) DO UPDATE SET cursor=excluded.cursor, high_water_mark=excluded.high_water_mark, updated_at=excluded.updated_at",
-            (str(provider)[:40], str(stream)[:80], str(cursor)[:120], str(high_water_mark or "")[:120], now),
-        )
+        write_cursor(db, provider, stream, cursor, high_water_mark, now)
 
 
 def set_kv(key: str, value: str, db: sqlite3.Connection | None = None) -> None:

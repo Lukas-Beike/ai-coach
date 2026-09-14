@@ -5,7 +5,8 @@ import unittest
 from copy import deepcopy
 from unittest.mock import patch
 
-from test_server import server, parsed_workout_fixture
+from test_server import server
+from support import parsed_workout_fixture
 
 
 class WorkoutTextTests(unittest.TestCase):
