@@ -40,7 +40,12 @@ def apply_adaptive_changes(adjustment_id: str, dependencies: AdaptiveDependencie
         if active_illness_pause:
             updated_checkins = dependencies.fill_checkins(db, active_illness_pause, now)
             payload["illness_pause"] = {**active_illness_pause, "approved": True}
-        status = "stale" if stale and not updated else "partial" if stale else "applied"
+        if stale and not updated:
+            status = "stale"
+        elif stale:
+            status = "partial"
+        else:
+            status = "applied"
         dependencies.repository.mark_applied(
             db, adjustment_id, json.dumps(payload, ensure_ascii=False), status, now,
         )
