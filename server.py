@@ -75,6 +75,7 @@ from backend.sync.reconcile import ReconcileDependencies, persist_planned_unit_s
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.planning.service import update_plan_bounds
 from backend.planning.service import TRAINING_PLAN_STATUSES, update_plan_metadata
+from backend.planning.adaptive import AdaptiveDependencies, apply_adaptive_changes
 from backend.sync.jobs import (
     JOB_STATUSES,
     ITEM_STATUSES,
@@ -9721,29 +9722,22 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
         normalized_id = str(uuid.UUID(str(adjustment_id)))
     except (ValueError, AttributeError) as exc:
         raise AppError(400, "Ungültige Plananpassung.") from exc
-    with DB_LOCK, database() as db:
-        row = PLAN_ADJUSTMENT_REPOSITORY.get(db, normalized_id)
-        if not row:
-            raise AppError(404, "Plananpassung nicht gefunden.")
-        if row["status"] == "applied":
-            return {"status": "already_applied", "id": normalized_id}
-        if row["status"] in {"stale", "partial"}:
-            return {"status": "already_" + str(row["status"]), "id": normalized_id}
-        payload = json.loads(row["payload"])
-        illness_pause = payload.get("illness_pause") if isinstance(payload.get("illness_pause"), dict) else None
-        active_illness_pause = illness_pause if illness_pause and not illness_pause.get("approved") else None
-        now = utc_now()
-        updated, stale = _apply_adaptive_changes(db, payload.get("changes"), now)
-        updated_checkins = 0
-        if updated:
-            _bump_planning_revision(db)
-        if active_illness_pause:
-            updated_checkins = _fill_illness_checkins(db, active_illness_pause, now)
-            payload["illness_pause"] = {**active_illness_pause, "approved": True}
-        status = _adaptive_replan_status(stale, updated)
-        PLAN_ADJUSTMENT_REPOSITORY.mark_applied(
-            db, normalized_id, json.dumps(payload, ensure_ascii=False), status, now
-        )
+    try:
+        applied = apply_adaptive_changes(normalized_id, AdaptiveDependencies(
+            transaction=lambda: _planning_transaction(), repository=PLAN_ADJUSTMENT_REPOSITORY,
+            apply_changes=_apply_adaptive_changes, fill_checkins=_fill_illness_checkins,
+            bump_revision=_bump_planning_revision, now=utc_now,
+        ))
+    except LookupError as exc:
+        raise AppError(404, str(exc)) from exc
+    status = applied["status"]
+    if status.startswith("already_"):
+        return applied
+    updated = applied["updated"]
+    updated_checkins = applied["updated_checkins"]
+    stale = applied["stale"]
+    illness_pause = applied["illness_pause"]
+    active_illness_pause = illness_pause if illness_pause and not illness_pause.get("approved") else None
     remote_sync: dict[str, Any] | None = None
     if sync_illness_to_intervals and active_illness_pause:
         try:
