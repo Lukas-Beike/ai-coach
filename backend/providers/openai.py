@@ -24,8 +24,8 @@ def response_failure_reason(path: str, result: Any, responses_path: str = "/resp
 def _content_text(content: Any) -> str | None:
     if not isinstance(content, dict):
         return None
-    if content.get("type") in {"output_text", "text"} and content.get("text"):
-        return str(content["text"])
+    if content.get("type") in {"output_text", "text"} and isinstance(content.get("text"), str) and content["text"]:
+        return content["text"]
     if content.get("type") == "refusal" and content.get("refusal"):
         return f"The coach declined to answer: {content['refusal']}"
     return None

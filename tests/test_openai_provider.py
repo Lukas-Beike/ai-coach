@@ -16,6 +16,9 @@ class OpenAIProviderTests(unittest.TestCase):
             {"type": "output_text", "text": "hello"},
             {"type": "refusal", "refusal": "no"},
         ]}]}), "hello\nThe coach declined to answer: no")
+        self.assertEqual(response_text({"output": [{"type": "message", "content": [
+            {"type": "output_text", "text": {"secret": "must not display"}},
+        ]}]}), "")
 
 
 if __name__ == "__main__":

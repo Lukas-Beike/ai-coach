@@ -15900,28 +15900,6 @@ def reset_coach_chat() -> dict[str, Any]:
     return {"status": "ok", "generation": get_kv("chat_generation"), "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
 
 
-def _output_content_text(content: Any) -> str | None:
-    """Normalize one Responses API message-content entry to display text."""
-    if not isinstance(content, dict):
-        return None
-    if content.get("type") in {"output_text", "text"} and content.get("text"):
-        return content["text"]
-    if content.get("type") == "refusal" and content.get("refusal"):
-        return f"The coach declined to answer: {content['refusal']}"
-    return None
-
-
-def _output_item_parts(item: Any) -> list[str]:
-    """Extract all displayable content from one Responses API output item."""
-    if not isinstance(item, dict):
-        return []
-    if item.get("type") == "refusal" and item.get("refusal"):
-        return [f"The coach declined to answer: {item['refusal']}"]
-    if item.get("type") != "message":
-        return []
-    return [text for content in item.get("content", []) if (text := _output_content_text(content))]
-
-
 def output_text(response: dict[str, Any]) -> str:
     return openai_response_text(response)
 
