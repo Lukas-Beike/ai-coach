@@ -70,6 +70,7 @@ from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
 from backend.sync.refresh import cleanup_refresh_history, create_refresh_record, finish_refresh_record
+from backend.sync.snapshots import latest_snapshot as latest_snapshot_in_transaction, save_snapshot as save_snapshot_in_transaction
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.sync.jobs import (
     JOB_STATUSES,
@@ -12264,22 +12265,17 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
 
 def latest_snapshot() -> dict[str, Any] | None:
     with DB_LOCK, database() as db:
-        payload = SNAPSHOT_REPOSITORY.latest_payload(db)
-    return json.loads(payload) if payload else None
+        return latest_snapshot_in_transaction(db, SNAPSHOT_REPOSITORY)
 
 
 def save_snapshot(
     snapshot: dict[str, Any], update_full_sync: bool = True, *, activity_days: int | None = None
 ) -> None:
     with DB_LOCK, database() as db:
-        SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
-        if update_full_sync:
-            set_kv("last_sync_at", snapshot["synced_at"], db)
-            set_kv("last_sync_error", "", db)
-            if activity_days is not None:
-                set_kv("last_sync_activity_days", str(activity_days), db)
-        if not update_full_sync:
-            set_kv("last_performance_refresh_at", snapshot["synced_at"], db)
+        save_snapshot_in_transaction(
+            db, snapshot, SNAPSHOT_REPOSITORY, update_full_sync=update_full_sync,
+            activity_days=activity_days, set_value=set_kv,
+        )
 
 
 def merge_performance_snapshot(current: dict[str, Any] | None, performance: dict[str, Any]) -> dict[str, Any]:
