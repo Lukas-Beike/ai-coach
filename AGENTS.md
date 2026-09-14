@@ -49,10 +49,28 @@ private VPN; it must not be exposed directly to the public internet.
 
 ## Architecture and durable state
 
-- `server.py`: HTTP API, authentication, SQLite/SQLCipher persistence,
-  Intervals.icu and Garmin clients, synchronization, performance derivation,
-  OpenAI client, voice transcription, logs, morning check-in, planning,
-  competition/calendar handling, backups, and workout library/planning.
+- `server.py`: application entry point and composition root for configuration,
+  dependency wiring, startup and shutdown. Existing HTTP and domain logic is
+  legacy code to extract incrementally; it is not a precedent for new logic.
+- `backend/`: owns application logic. New business logic and use-case
+  orchestration must live in the appropriate domain module here, never in
+  `server.py`. Use `coach/` for Coach workflows, `planning/` for training-plan
+  changes, `sync/` for synchronization and scheduling, `providers/` for external
+  service adapters, `db/` for persistence, `http_api/` for HTTP handling, and
+  `backup/` for backup/export workflows. Extend an existing cohesive module
+  first; add a focused module only when the responsibility needs its own home.
+- When a feature extends logic still in `server.py`, extract the affected
+  cohesive responsibility into `backend/` as part of that change. Keep the
+  extraction scoped to the feature. A localized corrective fix may remain in
+  legacy code, but must not add a new responsibility or workflow there.
+- Backend modules must not import `server.py` or access its globals indirectly.
+  Pass required dependencies explicitly and keep transaction boundaries with
+  the use case that owns them. Moving helpers while leaving all orchestration
+  in `server.py` does not complete an extraction.
+- Review backend changes for this ownership rule. Preserve behavior and
+  security/data-integrity contracts, and verify extracted logic with focused
+  tests using temporary storage and mocked providers. Reduce `server.py`
+  through clear ownership, not compressed formatting or arbitrary line limits.
 - `public/`: browser/PWA client. Its scoped instructions are in
   `public/AGENTS.md`.
 - `tests/`: standard-library unit tests. Its scoped instructions are in
