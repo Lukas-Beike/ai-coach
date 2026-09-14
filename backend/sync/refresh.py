@@ -66,12 +66,16 @@ def finish_refresh_record(
         "WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 20",
         (row["provider"], row["area"]),
     ).fetchall()
-    next_retry = retry_at(
-        rows,
-        current_error_code=error_code if status == "error" else None,
-        now=now,
-        base_seconds=base_seconds,
-        max_seconds=max_seconds,
+    next_retry = (
+        retry_at(
+            rows,
+            current_error_code=error_code,
+            now=now,
+            base_seconds=base_seconds,
+            max_seconds=max_seconds,
+        )
+        if status == "error"
+        else None
     )
     db.execute(
         "UPDATE provider_refresh_history SET finished_at=?, phase=?, status=?, error_code=?, next_retry_at=? WHERE id=?",
