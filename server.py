@@ -73,6 +73,7 @@ from backend.sync.refresh import cleanup_refresh_history, create_refresh_record,
 from backend.sync.snapshots import latest_snapshot as latest_snapshot_in_transaction, save_snapshot as save_snapshot_in_transaction
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.planning.service import update_plan_bounds
+from backend.planning.service import TRAINING_PLAN_STATUSES, update_plan_metadata
 from backend.sync.jobs import (
     JOB_STATUSES,
     ITEM_STATUSES,
@@ -9083,71 +9084,25 @@ def _normalise_training_plan_id(value: Any) -> str:
         raise AppError(400, "Ungültige Trainingsplan-ID.") from exc
 
 
-TRAINING_PLAN_STATUS_ALIASES = {
-    "entwurf": "draft",
-    "geplant": "planned",
-    "aktiv": "active",
-    "abgeschlossen": "completed",
-    "archiviert": "archived",
-    "abgebrochen": "cancelled",
-    "pausiert": "paused",
-}
-TRAINING_PLAN_STATUSES = frozenset({"draft", "planned", "active", "completed", "archived", "cancelled", "paused"})
-
-
-def _training_plan_candidate(current: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
-    candidate = {
-        "id": current["id"],
-        "name": str(values.get("name") or current.get("name") or "").strip()[:200],
-        "goal": str(values.get("goal") or current.get("goal") or "").strip()[:2000],
-        "start_date": str(values.get("start_date") or current.get("start_date") or "").strip(),
-        "end_date": str(values.get("end_date") or current.get("end_date") or "").strip(),
-        "status": TRAINING_PLAN_STATUS_ALIASES.get(
-            str(values.get("status") or current.get("status") or "planned").strip().casefold(),
-            str(values.get("status") or current.get("status") or "planned").strip().casefold(),
-        ),
-    }
-    if not candidate["name"]:
-        raise AppError(400, "Ein Trainingsplan benötigt einen Namen.")
-    if candidate["status"] not in TRAINING_PLAN_STATUSES:
-        raise AppError(400, "Ungültiger Trainingsplanstatus.")
-    try:
-        start = date.fromisoformat(candidate["start_date"])
-        end = date.fromisoformat(candidate["end_date"])
-    except ValueError as exc:
-        raise AppError(400, "Start- und Enddatum müssen das Format JJJJ-MM-TT haben.") from exc
-    if start > end:
-        raise AppError(400, "Das Startdatum darf nicht nach dem Enddatum liegen.")
-    return candidate
+@contextmanager
+def _planning_transaction():
+    with DB_LOCK, database() as db:
+        yield db
 
 
 def update_training_plan(plan_id: Any, values: Any) -> dict[str, Any]:
     """Update or remove local training-plan metadata without touching workouts or providers."""
     normalized_id = _normalise_training_plan_id(plan_id)
-    if not isinstance(values, dict):
-        raise AppError(400, "Der Trainingsplan muss als Objekt gesendet werden.")
-    action = str(values.get("action") or "update").strip().casefold()
-    with DB_LOCK, database() as db:
-        current = TRAINING_PLAN_REPOSITORY.get(db, normalized_id)
-        if not current:
-            raise AppError(404, "Trainingsplan nicht gefunden.")
-        if action == "delete":
-            TRAINING_PLAN_REPOSITORY.delete(db, normalized_id)
-            _record_change(db, "training_plan", normalized_id, "delete", current, None)
-            _bump_planning_revision(db)
-            result = {"status": "deleted", "plan_id": normalized_id, "plan": None}
-        elif action == "update":
-            candidate = _training_plan_candidate(current, values)
-            TRAINING_PLAN_REPOSITORY.update(
-                db, normalized_id, candidate["name"], candidate["goal"], candidate["start_date"],
-                candidate["end_date"], candidate["status"], utc_now(),
-            )
-            updated = {**current, **candidate}
-            _record_change(db, "training_plan", normalized_id, "update", current, updated)
-            _bump_planning_revision(db)
-            result = {"status": "updated", "plan_id": normalized_id, "plan": updated}
-        else:
-            raise AppError(400, "Unbekannte Aktion für den Trainingsplan.")
+    try:
+        result = update_plan_metadata(
+            normalized_id, values, transaction=lambda: _planning_transaction(),
+            repository=TRAINING_PLAN_REPOSITORY, record_change=_record_change,
+            bump_revision=_bump_planning_revision, now=utc_now,
+        )
+    except LookupError as exc:
+        raise AppError(404, str(exc)) from exc
+    except ValueError as exc:
+        raise AppError(400, str(exc)) from exc
     publish_state_event("coach", {"status": "changed"})
     return result
 
