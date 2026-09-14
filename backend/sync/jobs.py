@@ -51,6 +51,9 @@ def decode_job_payload(value: Any) -> dict[str, Any]:
 
 def job_dto(job: Mapping[str, Any], items: list[Mapping[str, Any]]) -> dict[str, Any]:
     """Build the public, credential-free representation of one sync job."""
+    if not hasattr(job, "get"):
+        job = dict(job)
+    normalized_items = [item if hasattr(item, "get") else dict(item) for item in items]
     item_dtos = [
         {
             "id": item["id"],
@@ -64,7 +67,7 @@ def job_dto(job: Mapping[str, Any], items: list[Mapping[str, Any]]) -> dict[str,
             "created_at": item.get("created_at"),
             "updated_at": item.get("updated_at"),
         }
-        for item in items
+        for item in normalized_items
     ]
     completed, total = bounded_progress(item_dtos)
     return {
