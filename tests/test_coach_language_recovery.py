@@ -37,7 +37,11 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         def sync(_):
             return {**self.call("start_intervals_plan_sync", {}, ["local_plan", "intervals_sync"],
                                 target="intervals", remote_write=True, sync_scope="all_pending"), "id": "resp_sync"}
-        with patch.object(server.time, "sleep") as sleep, patch.object(server, "enqueue_sync_job", wraps=server.enqueue_sync_job) as enqueue:
+        with (
+            patch.object(server.time, "sleep") as sleep,
+            patch.object(server.secrets, "randbelow", return_value=0),
+            patch.object(server, "enqueue_sync_job", wraps=server.enqueue_sync_job) as enqueue,
+        ):
             result, model = self.turn("Bitte den Plan nochmal übertragen", [sync, limited, {"id": "resp_final", "output_text": "Sync beauftragt."}])
         self.assertEqual(result["status"], "completed")
         enqueue.assert_called_once()
@@ -51,13 +55,29 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertIn("intervals_sync", previous["steps"][0]["scope"])
 
     def test_rate_limit_exhaustion_has_specific_message_and_no_false_effect(self):
-        with patch.object(server.time, "sleep") as sleep:
+        with patch.object(server.time, "sleep") as sleep, patch.object(server.secrets, "randbelow", return_value=0):
             result, model = self.turn("Bitte synchronisieren", [limited, limited, limited])
         self.assertEqual(model.call_count, 3)
         self.assertEqual(sleep.call_count, 2)
         self.assertEqual(result["status"], "failed")
         self.assertIn("Anfragelimit", result["message"]["content"])
         self.assertEqual(result["sync_job_ids"], [])
+
+    def test_rate_limit_retry_uses_provider_delay_and_bounded_jitter(self):
+        error = server.AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded")
+        error.retry_after_seconds = 7
+        with patch.object(server.secrets, "randbelow", return_value=250):
+            delay = server._response_retry_delay(
+                error, ai_provider="openai", attempt=0, request_delta_emitted=False,
+            )
+        self.assertEqual(delay, 7.25)
+
+    def test_rate_limit_retry_defers_when_provider_delay_exceeds_retry_budget(self):
+        error = server.AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded")
+        error.retry_after_seconds = server.OPENAI_MAX_RETRY_DELAY_SECONDS + 1
+        self.assertIsNone(server._response_retry_delay(
+            error, ai_provider="openai", attempt=0, request_delta_emitted=False,
+        ))
 
     def test_rate_limit_wait_can_be_cancelled(self):
         event = threading.Event()

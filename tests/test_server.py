@@ -8206,6 +8206,45 @@ class CoachTests(unittest.TestCase):
             self.assertEqual(details["reason"], code)
             self.assertIn("Limit", details["message"])
 
+    def test_openai_retry_after_is_parsed_for_transient_rate_limits(self):
+        details = server.openai_error_details(
+            429,
+            json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8"),
+            {"retry-after": "12.5"},
+        )
+        self.assertEqual(details["reason"], "rate_limit_exceeded")
+        self.assertEqual(details["retry_after_seconds"], 13)
+        self.assertIsNone(server._retry_after_seconds({"retry-after": "not-a-delay"}))
+
+    def test_openai_retry_after_is_attached_to_transient_http_error(self):
+        error_body = json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8")
+        upstream_error = server.HTTPError(
+            "https://api.openai.com/v1/responses",
+            429,
+            "Too Many Requests",
+            {"retry-after": "7"},
+            BytesIO(error_body),
+        )
+        with patch.object(server, "urlopen", side_effect=upstream_error):
+            with self.assertRaises(server.AppError) as raised:
+                server.http_json("POST", "https://api.openai.com/v1/responses", payload={}, service="openai")
+        self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
+        self.assertEqual(raised.exception.retry_after_seconds, 7)
+
+    def test_openai_stream_retry_after_is_attached_to_transient_http_error(self):
+        error_body = json.dumps({"error": {"code": "rate_limit_exceeded"}}).encode("utf-8")
+        upstream_error = server.HTTPError(
+            "https://api.openai.com/v1/responses",
+            429,
+            "Too Many Requests",
+            {"retry-after": "9"},
+            BytesIO(error_body),
+        )
+        with self.assertRaises(server.AppError) as raised:
+            server._handle_openai_stream_http_error(upstream_error, {}, time.monotonic(), 0)
+        self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
+        self.assertEqual(raised.exception.retry_after_seconds, 9)
+
     def test_openai_log_reasons_are_static_allowlisted_values(self):
         self.assertEqual(server.safe_openai_log_reason("project_spend_limit_exceeded"), "usage_limit_exceeded")
         self.assertEqual(server.safe_openai_log_reason("provider-private-message"), "http_error")

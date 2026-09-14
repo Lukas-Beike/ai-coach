@@ -196,7 +196,7 @@ INVALID_PLANNING_DATE_ERROR = "Das Planungsdatum muss das Format JJJJ-MM-TT habe
 STALE_PLANNING_REVISION_ERROR = "Die lokale Planrevision ist inzwischen veraltet."
 UNSUPPORTED_BYDAY_ERROR = "BYDAY der Kalender-Wiederholung wird nicht unterstützt."
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.11.0"
+APP_VERSION = "1.11.1"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
@@ -7505,6 +7505,7 @@ def sync_competitions(
 
 
 OPENAI_RATE_LIMIT_HEADERS = {
+    "retry-after": "retry_after",
     "x-ratelimit-limit-requests": "limit_requests",
     "x-ratelimit-remaining-requests": "remaining_requests",
     "x-ratelimit-reset-requests": "reset_requests",
@@ -7514,6 +7515,21 @@ OPENAI_RATE_LIMIT_HEADERS = {
 }
 OPENAI_STATUS_KEY = "openai_status"
 GEMINI_STATUS_KEY = "gemini_status"
+OPENAI_MAX_RETRY_DELAY_SECONDS = 60
+
+
+def _retry_after_seconds(headers: Any) -> int | None:
+    """Parse a bounded numeric Retry-After hint without retaining raw headers."""
+    if headers is None:
+        return None
+    try:
+        value = headers.get("retry-after")
+        seconds = float(str(value).strip())
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return max(1, min(int(math.ceil(seconds)), 24 * 60 * 60))
 
 
 def _safe_openai_error_token(value: Any) -> str | None:
@@ -7607,16 +7623,20 @@ def _openai_error_reason(status: int, error: dict[str, Any]) -> tuple[str, str]:
     return "http_error", f"OpenAI konnte die Anfrage nicht verarbeiten (HTTP {status})."
 
 
-def openai_error_details(status: int, raw_body: bytes) -> dict[str, Any]:
+def openai_error_details(status: int, raw_body: bytes, headers: Any = None) -> dict[str, Any]:
     """Classify an OpenAI error without exposing the provider's raw message."""
     reason, message = _openai_error_reason(status, _provider_error_payload(raw_body))
-    return {
+    details = {
         "state": "error",
         "reason": reason,
         "message": message,
         "http_status": status,
         "updated_at": utc_now(),
     }
+    retry_after = _retry_after_seconds(headers)
+    if retry_after is not None:
+        details["retry_after_seconds"] = retry_after
+    return details
 
 
 def safe_openai_log_reason(reason: Any) -> str:
@@ -7940,7 +7960,7 @@ def _handle_http_error(
     raw_error = _read_http_error_body(exc)
     if service == "openai":
         record_openai_rate_limits(getattr(exc, "headers", None))
-        error_details = openai_error_details(exc.code, raw_error)
+        error_details = openai_error_details(exc.code, raw_error, getattr(exc, "headers", None))
         record_openai_status(error_details)
     elif service == "gemini":
         error_details = gemini_error_details(exc.code, raw_error)
@@ -7972,7 +7992,11 @@ def _handle_http_error(
         if service == "gemini":
             _record_gemini_status("error", error_details["message"], reason=error_details["reason"], status=exc.code)
         status = exc.code if service == "gemini" or exc.code == 429 else 502
-        raise AppError(status, error_details["message"], reason=error_details["reason"]) from exc
+        error = AppError(status, error_details["message"], reason=error_details["reason"])
+        retry_after = error_details.get("retry_after_seconds")
+        if isinstance(retry_after, int):
+            error.retry_after_seconds = retry_after
+        raise error from exc
     raise AppError(502, upstream_http_error_message(exc.code, raw_error, service), reason="provider_http_error") from exc
 
 
@@ -16042,12 +16066,16 @@ def _handle_openai_stream_http_error(
 ) -> NoReturn:
     raw_error = _read_http_error_body(exc)
     status = int(getattr(exc, "code", 502) or 502)
-    details = openai_error_details(status, raw_error)
+    details = openai_error_details(status, raw_error, getattr(exc, "headers", None))
     record_openai_status(details)
     reason = safe_openai_log_reason(details["reason"])
     _log_openai_stream_failure(context, started, stream_bytes, reason, status)
     _capture_openai_stream_failure(status, details["reason"], started, stream_bytes, openai_error_diagnostic_details(raw_error, getattr(exc, "headers", None)))
-    raise AppError(status, details["message"], reason=details["reason"]) from exc
+    error = AppError(status, details["message"], reason=details["reason"])
+    retry_after = details.get("retry_after_seconds")
+    if isinstance(retry_after, int):
+        error.retry_after_seconds = retry_after
+    raise error from exc
 
 
 def _handle_openai_stream_timeout(
@@ -19304,14 +19332,21 @@ def _recover_invalid_structured_conversation(
     return True
 
 
-def _response_retry_delay(exc: AppError, *, ai_provider: str, attempt: int, request_delta_emitted: bool) -> int | None:
+def _response_retry_delay(exc: AppError, *, ai_provider: str, attempt: int, request_delta_emitted: bool) -> float | None:
     rate_limited = exc.reason == "rate_limit_exceeded" or getattr(exc, "provider_error_code", None) == "rate_limit_exceeded"
     if ai_provider != "openai" or not rate_limited or attempt == 2 or request_delta_emitted:
         return None
-    return 5 * (attempt + 1)
+    retry_after = getattr(exc, "retry_after_seconds", None)
+    if isinstance(retry_after, int):
+        if retry_after > OPENAI_MAX_RETRY_DELAY_SECONDS:
+            return None
+        base_delay = retry_after
+    else:
+        base_delay = 5 * (attempt + 1)
+    return base_delay + secrets.randbelow(1000) / 1000
 
 
-def _wait_for_coach_response_retry(delay: int, cancel_event: threading.Event | None, attempt: int) -> None:
+def _wait_for_coach_response_retry(delay: float, cancel_event: threading.Event | None, attempt: int) -> None:
     LOGGER.warning(
         "Coach response rate limited; retrying",
         extra={"event": "coach_response_retry", "context": {"attempt": attempt + 1, "retry_in_seconds": delay}},
