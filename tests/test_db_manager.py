@@ -6,11 +6,12 @@ import unittest
 from pathlib import Path
 
 from backend.db.manager import DatabaseManager
+from backend.db.schema import database_schema_is_current, initialize_schema
 
 
 class DatabaseManagerTests(unittest.TestCase):
     def make_manager(self, root: str) -> DatabaseManager:
-        return DatabaseManager(Path(root) / "test.db", sqlite3, reader_count=4)
+        return DatabaseManager(Path(root) / "test.db", sqlite3, reader_count=4, row_factory=sqlite3.Row)
 
     def test_unit_of_work_rolls_back_and_reader_pool_reuses_connections(self):
         with tempfile.TemporaryDirectory() as root:
@@ -71,6 +72,15 @@ class DatabaseManagerTests(unittest.TestCase):
                 self.assertIsNone(manager._writer)
             with manager.unit_of_work() as db:
                 db.execute("INSERT INTO records(value) VALUES ('restored')")
+            manager.close()
+
+    def test_initialize_schema_creates_the_current_schema_contract(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = self.make_manager(root)
+            self.addCleanup(manager.close)
+            with manager.unit_of_work() as db:
+                initialize_schema(db)
+                self.assertTrue(database_schema_is_current(db))
             manager.close()
 
 
