@@ -58,6 +58,7 @@ from backend.db.schema import (
 )
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_local_env as load_config_env
 from backend.providers.intervals import IntervalsReadTransport, IntervalsWriteTransport, fetch_paged_collection
+from backend.providers.gemini import function_tools as gemini_function_tools, response_text as gemini_response_text
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
@@ -15408,21 +15409,11 @@ def _gemini_local_chat_history() -> list[dict[str, Any]]:
 
 
 def _gemini_text(result: Any) -> str:
-    candidates = result.get("candidates") if isinstance(result, dict) else []
-    candidate = candidates[0] if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict) else {}
-    content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
-    parts = content.get("parts") if isinstance(content.get("parts"), list) else []
-    return "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict) and part.get("text")).strip()
+    return gemini_response_text(result)
 
 
 def _gemini_tools(tools: Any) -> list[dict[str, Any]]:
-    declarations = []
-    for tool in tools if isinstance(tools, list) else []:
-        if not isinstance(tool, dict) or tool.get("type") != "function" or not tool.get("name"):
-            continue
-        declarations.append({"name": str(tool["name"]), "description": str(tool.get("description") or ""),
-                             "parametersJsonSchema": tool.get("parameters") if isinstance(tool.get("parameters"), dict) else {"type": "object", "properties": {}}})
-    return [{"functionDeclarations": declarations}] if declarations else []
+    return gemini_function_tools(tools)
 
 
 def _gemini_request_payload(payload: dict[str, Any], model: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:  # NOSONAR - provider payload assembly is intentionally kept atomic
