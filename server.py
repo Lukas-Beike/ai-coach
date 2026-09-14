@@ -94,7 +94,10 @@ from backend.coach.context import (
 )
 from backend.coach.dialogue import INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
 from backend.coach.tools import build_tool_contracts
-from backend.coach.service import command_receipt
+from backend.coach.service import (
+    command_receipt, effects_from_receipts, mark_resolved_receipts,
+    outcome_status,
+)
 from backend.coach.authorization import authorized_operations, require_operation, require_scope, scope_values
 from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines, coach_observed_sync_lines
 from backend.http_api.responses import (
@@ -18534,17 +18537,12 @@ def _structured_coach_response(
 
 
 def _mark_resolved_coach_receipts(command_receipts: list[dict[str, Any]], failures: list[dict[str, Any]]) -> None:
-    for entry in command_receipts:
-        if not entry.get("result", {}).get("ok"):
-            entry["resolved"] = not any(entry is failure for failure in failures)
+    mark_resolved_receipts(command_receipts, failures)
 
 
 def _coach_effects(command_receipts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     internal_tools = STRUCTURED_READ_ONLY_TOOLS | {"clarify_coach_request", "cancel_coach_request"}
-    return [
-        entry for entry in command_receipts
-        if entry.get("result", {}).get("ok") and entry["tool"] not in internal_tools
-    ]
+    return effects_from_receipts(command_receipts, internal_tools)
 
 
 def _structured_coach_outcome_text(
@@ -18588,13 +18586,10 @@ def _structured_coach_outcome_status(
     *, question: str, incomplete_answer: bool, failures: list[dict[str, Any]],
     missing_answer: bool, effects: list[dict[str, Any]], cancelled: bool,
 ) -> str:
-    if question:
-        return "completed"
-    if incomplete_answer or ((failures or missing_answer) and effects):
-        return "partial"
-    if failures or missing_answer:
-        return "failed"
-    return "cancelled" if cancelled else "completed"
+    return outcome_status(
+        question=question, incomplete_answer=incomplete_answer, failures=failures,
+        missing_answer=missing_answer, effects=effects, cancelled=cancelled,
+    )
 
 
 def _structured_coach_outcome(
