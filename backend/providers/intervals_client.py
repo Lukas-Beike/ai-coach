@@ -6,6 +6,7 @@ import base64
 from collections.abc import Callable
 from datetime import date, timedelta
 from functools import wraps
+import sys
 import threading
 from typing import Any
 from urllib.parse import quote
@@ -17,6 +18,13 @@ from backend.providers.intervals import (
 
 
 def _app() -> Any:
+    # ``python server.py`` registers the entrypoint as ``__main__``. Importing
+    # ``server`` here would execute a second application with separate errors,
+    # gates and database state. Tests import the entrypoint as ``server`` and
+    # use the fallback below.
+    active = sys.modules.get("__main__")
+    if active is not None and hasattr(active, "initialise_database"):
+        return active
     import server
     return server
 
@@ -332,5 +340,4 @@ class IntervalsClient:
 
     def delete_activity(self, activity_id: str) -> Any:
         return self.delete(f"/activity/{quote(activity_id, safe='')}")
-
 
