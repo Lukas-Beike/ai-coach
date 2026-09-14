@@ -58,7 +58,7 @@ from backend.db.schema import (
     initialize_schema,
 )
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_local_env as load_config_env
-from backend.providers.intervals_client import IntervalsClient
+from backend.providers.intervals_client import IntervalsClient as _IntervalsClient
 from backend.providers.gemini import function_tools as gemini_function_tools, response_text as gemini_response_text
 from backend.providers.openai import response_failure_reason as openai_response_failure_reason, response_text as openai_response_text
 from backend.providers.http import error_detail as provider_error_detail, read_bounded_response
@@ -493,6 +493,15 @@ def load_local_env() -> None:
 
 
 CONFIG = load_config(ROOT, DATA_DIR)
+
+
+class IntervalsClient(_IntervalsClient):
+    """Entrypoint compatibility wrapper with explicit provider dependencies."""
+
+    def __init__(self, config: Config | None = None, *, request: Callable[..., Any] | None = None):
+        super().__init__(config or CONFIG, request=request or http_json)
+
+
 LOGGER = logging.getLogger("intervals_coach")
 MODEL_OPTIONS = (
     {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "description": "Effizient für kostenbewusste Nutzung"},
