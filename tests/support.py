@@ -121,3 +121,17 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
         for item in reversed(patches):
             item.stop()
 
+
+def create_test_session(server) -> str:
+    """Create one authenticated session without depending on a test case."""
+    import uuid
+
+    token = f"session-{uuid.uuid4().hex}"
+    now = server.time.time()
+    with server.DB_LOCK, server.database() as db:
+        db.execute(
+            "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+            (server.session_token_hash(token), server.session_token_hash("csrf"), now + server.SESSION_TTL_SECONDS, server.utc_now(), server.utc_now()),
+        )
+    return token
+

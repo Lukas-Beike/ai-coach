@@ -15,7 +15,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
 from unittest.mock import Mock, patch
-from support import IntervalsRequestRecorder, RecordedIntervalsClient, parsed_workout_fixture
+from support import IntervalsRequestRecorder, RecordedIntervalsClient, create_test_session, parsed_workout_fixture
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
 os.environ.update({
@@ -147,16 +147,6 @@ class CoachTests(unittest.TestCase):
         with server.CHAT_STREAM_LOCK:
             server.CHAT_STREAMS.clear()
             server.COACH_JOB_CANCEL_EVENTS.clear()
-
-    def create_test_session(self):
-        token = f"session-{uuid.uuid4().hex}"
-        now = server.time.time()
-        with server.DB_LOCK, server.database() as db:
-            db.execute(
-                "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-                (server.session_token_hash(token), server.session_token_hash("csrf"), now + server.SESSION_TTL_SECONDS, server.utc_now(), server.utc_now()),
-            )
-        return token
 
     def test_database_uses_exact_current_schema(self):
         server.initialise_database()
@@ -1286,7 +1276,7 @@ class CoachTests(unittest.TestCase):
             def __init__(self, cookies=""):
                 self.headers = {"Cookie": cookies}
 
-        token = self.create_test_session()
+        token = create_test_session(server)
         token_hash = server.session_token_hash(token)
         old_seen = "2020-01-01T00:00:00+00:00"
         with server.DB_LOCK, server.database() as db:
@@ -1314,7 +1304,7 @@ class CoachTests(unittest.TestCase):
             def __init__(self, cookies=""):
                 self.headers = {"Cookie": cookies}
 
-        token = self.create_test_session()
+        token = create_test_session(server)
         with server.DB_LOCK, server.database() as db:
             db.execute("UPDATE sessions SET expires_at=? WHERE token_hash=?", (server.time.time() - 1, server.session_token_hash(token)))
         self.assertIsNone(server.authenticated_session(Handler(f"ic_session={token}")))
@@ -1341,7 +1331,7 @@ class CoachTests(unittest.TestCase):
             def __init__(self, cookies=""):
                 self.headers = {"Cookie": cookies}
 
-        token = self.create_test_session()
+        token = create_test_session(server)
         cookies = f"ic_session={token}"
         barrier = threading.Barrier(8)
         results = []
@@ -1385,7 +1375,7 @@ class CoachTests(unittest.TestCase):
             def __init__(self, cookies=""):
                 self.headers = {"Cookie": cookies}
 
-        token = self.create_test_session()
+        token = create_test_session(server)
         server.logout_user(Handler(f"ic_session={token}"))
         self.assertIsNone(server.authenticated_session(Handler(f"ic_session={token}")))
 
