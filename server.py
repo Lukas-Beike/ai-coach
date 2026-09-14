@@ -69,6 +69,7 @@ from backend.sync.windows import split_date_windows
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
+from backend.sync.refresh import cleanup_refresh_history, create_refresh_record, finish_refresh_record
 from backend.sync.jobs import (
     JOB_STATUSES,
     ITEM_STATUSES,
@@ -1372,53 +1373,19 @@ def initialise_database() -> None:
 
 def _provider_refresh_cleanup(db: Any) -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=PROVIDER_REFRESH_RETENTION_DAYS)).isoformat()
-    db.execute("DELETE FROM provider_refresh_history WHERE started_at < ?", (cutoff,))
-    db.execute(
-        "DELETE FROM provider_refresh_history WHERE id NOT IN "
-        "(SELECT id FROM provider_refresh_history ORDER BY started_at DESC LIMIT ?)",
-        (PROVIDER_REFRESH_MAX_ROWS,),
-    )
+    cleanup_refresh_history(db, cutoff=cutoff, max_rows=PROVIDER_REFRESH_MAX_ROWS)
 
 
 def _provider_refresh_start(provider: str, area: str, operation_id: str, trigger: str) -> str:
     refresh_id = uuid.uuid4().hex
     with DB_LOCK, database() as db:
         _provider_refresh_cleanup(db)
-        db.execute(
-            "INSERT INTO provider_refresh_history(id, provider, area, operation_id, trigger, started_at, phase, status) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'queued', 'running')",
-            (refresh_id, provider, area, operation_id, trigger, utc_now()),
+        create_refresh_record(
+            db, refresh_id=refresh_id, provider=provider, area=area,
+            operation_id=operation_id, trigger=trigger, started_at=utc_now(),
         )
     publish_state_event("provider", {"provider": provider, "area": area, "status": "loading", "refresh_id": refresh_id})
     return refresh_id
-
-
-def _provider_refresh_retry_at(
-    db: Any,
-    provider: str,
-    area: str,
-    current_error_code: str | None = None,
-) -> str | None:
-    rows = db.execute(
-        "SELECT status, error_code FROM provider_refresh_history "
-        "WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 20",
-        (provider, area),
-    ).fetchall()
-    failures = 1 if current_error_code else 0
-    if current_error_code in {"auth_required", "invalid_configuration"}:
-        return None
-    for row in rows:
-        if row["status"] in {"success", "partial", "skipped"}:
-            break
-        if row["status"] != "error":
-            continue
-        if row["error_code"] in {"auth_required", "invalid_configuration"}:
-            return None
-        failures += 1
-    if not failures:
-        return None
-    delay = min(PROVIDER_REFRESH_RETRY_BASE_SECONDS * (2 ** min(failures - 1, 5)), PROVIDER_REFRESH_RETRY_MAX_SECONDS)
-    return (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
 
 
 def _provider_refresh_finish(
@@ -1429,21 +1396,22 @@ def _provider_refresh_finish(
     error_code: str | None = None,
 ) -> None:
     finished_at = utc_now()
-    provider = None
-    area = None
     with DB_LOCK, database() as db:
-        row = db.execute(
-            "SELECT provider, area FROM provider_refresh_history WHERE id=?",
-            (refresh_id,),
-        ).fetchone()
-        if not row:
-            return
-        next_retry_at = _provider_refresh_retry_at(db, row["provider"], row["area"], error_code) if status == "error" else None
-        db.execute(
-            "UPDATE provider_refresh_history SET finished_at=?, phase=?, status=?, error_code=?, next_retry_at=? WHERE id=?",
-            (finished_at, phase, status, error_code, next_retry_at, refresh_id),
+        provider_area = finish_refresh_record(
+            db,
+            refresh_id=refresh_id,
+            finished_at=finished_at,
+            phase=phase,
+            status=status,
+            error_code=error_code,
+            now=datetime.now(timezone.utc),
+            base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
+            max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
         )
+        if provider_area is None:
+            return
         _provider_refresh_cleanup(db)
+        provider, area = provider_area
     if provider and area:
         if status == "success":
             public_status = "ready"

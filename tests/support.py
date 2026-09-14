@@ -135,3 +135,22 @@ def create_test_session(server) -> str:
         )
     return token
 
+
+def reset_application_state(server) -> None:
+    """Clear disposable application state without invoking a test case lifecycle."""
+    tables = (
+        "messages", "coach_commands", "coach_plan_artifacts", "snapshots", "training_plans",
+        "workout_library", "planned_units", "competitions", "competition_sync_tombstones",
+        "athlete_checkins", "activity_feedback", "plan_adjustments", "coach_action_proposals",
+        "change_history", "provider_refresh_history", "sync_job_items", "sync_jobs",
+        "provider_sync_cursors", "public_event_candidates", "public_event_sources",
+        "external_calendar_events", "sessions", "kv",
+    )
+    with server.DB_LOCK, server.database() as db:
+        for table in tables:
+            db.execute(f"DELETE FROM {table}")
+    server.save_profile({})
+    with server.CHAT_STREAM_LOCK:
+        server.CHAT_STREAMS.clear()
+        server.COACH_JOB_CANCEL_EVENTS.clear()
+

@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import test_server as fixtures
-from support import isolated_server
+from support import isolated_server, reset_application_state
 from backend.coach.dialogue import validate_request
 
 server = fixtures.server
@@ -24,7 +24,7 @@ class DialogueHarness:
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         self.enterContext(isolated_server(server, root))
-        fixtures.CoachTests.setUp(self)
+        reset_application_state(server)
         fixed = patch.object(server, "local_now", return_value=datetime(2026, 9, 7, 12, tzinfo=timezone.utc))
         fixed.start()
         self.addCleanup(fixed.stop)
