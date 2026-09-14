@@ -91,18 +91,18 @@ jobs:
               });
               const codexReviews = reviews.filter((review) => codexBotLogins.has(review.user?.login) && review.submitted_at);
               if (codexReviews.length === 0) return 'initial';
-              const p1ReviewIds = new Set(codexReviews
-                .filter((review) => /\[P1\]/i.test(review.body || ''))
-                .map((review) => review.id));
               const comments = await github.paginate(github.rest.pulls.listReviewComments, {
                 owner: context.repo.owner, repo: context.repo.repo,
                 pull_number: pullRequest.number, per_page: 100,
               });
-              if (comments.some((comment) => codexBotLogins.has(comment.user?.login) &&
-                p1ReviewIds.has(comment.pull_request_review_id) && /\[P1\]/i.test(comment.body || ''))) {
-                return 'p1';
-              }
-              return p1ReviewIds.size > 0 ? 'p1' : 'none';
+              const latestReview = [...codexReviews]
+                .sort((left, right) => Date.parse(right.submitted_at) - Date.parse(left.submitted_at))[0];
+              const latestReviewHasP1 = /\[P1\]/i.test(latestReview.body || '') || comments.some((comment) => (
+                codexBotLogins.has(comment.user?.login) &&
+                comment.pull_request_review_id === latestReview.id &&
+                /\[P1\]/i.test(comment.body || '')
+              ));
+              return latestReviewHasP1 ? 'p1' : 'none';
             };
             if (context.eventName === 'workflow_dispatch') {
               const pullRequestNumber = Number(context.payload.inputs?.pull_request_number);
