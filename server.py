@@ -9731,6 +9731,8 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
     except LookupError as exc:
         raise AppError(404, str(exc)) from exc
     status = applied["status"]
+    if status.startswith("already_"):
+        return applied
     updated = applied["updated"]
     updated_checkins = applied["updated_checkins"]
     stale = applied["stale"]
