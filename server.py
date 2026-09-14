@@ -70,6 +70,7 @@ from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
 from backend.sync.refresh import cleanup_refresh_history, create_refresh_record, finish_refresh_record
+from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.sync.jobs import (
     JOB_STATUSES,
     ITEM_STATUSES,
@@ -10134,52 +10135,15 @@ def create_local_planned_unit(
     return entry
 
 
-def _planned_unit_rows(limit: int, include_archived: bool, future_only: bool) -> list[Any]:
-    with DB_LOCK, database() as db:
-        clauses = []
-        params: list[Any] = []
-        if not include_archived:
-            clauses.append("COALESCE(json_extract(payload, '$.archived'), 0) = 0")
-        if future_only:
-            clauses.extend([
-                "COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
-                "substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ?",
-            ])
-            params.append(local_now().date().isoformat())
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = db.execute(
-            "SELECT local_id, payload, sync_state, sync_error, sync_conflict FROM planned_units "
-            f"{where} ORDER BY json_extract(payload, '$.date'), lower(json_extract(payload, '$.name')), local_id LIMIT ?",
-            (*params, max(1, min(int(limit) * (2 if include_archived else 1), 1000))),
-        ).fetchall()
-    return rows
-
-
-def _planned_unit_payload(row: Any, include_archived: bool) -> dict[str, Any] | None:
-    try:
-        payload = json.loads(row.get("payload") or "{}")
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(payload, dict) or (not include_archived and payload.get("archived")):
-        return None
-    payload["id"] = str(row.get("local_id") or payload.get("id") or "")
-    payload["local_id"] = payload["id"]
-    payload["sync_status"] = str(row.get("sync_state") or payload.get("sync_status") or "local")
-    if row.get("sync_error"):
-        payload["sync_error"] = str(row["sync_error"])[:1000]
-    if row.get("sync_conflict"):
-        try:
-            payload["sync_conflict"] = json.loads(row["sync_conflict"])
-        except (TypeError, ValueError):
-            payload["sync_conflict"] = {"raw": str(row["sync_conflict"])[:1000]}
-    return payload
-
-
 def list_planned_units(limit: int = 500, include_archived: bool = False, *, future_only: bool = False) -> list[dict[str, Any]]:
+    with DB_LOCK, database() as db:
+        rows = planned_unit_rows(
+            db, limit, include_archived, future_only, today=local_now().date(),
+        )
     return [
         payload
-        for row in _planned_unit_rows(limit, include_archived, future_only)
-        if (payload := _planned_unit_payload(row, include_archived)) is not None
+        for row in rows
+        if (payload := planned_unit_payload(row, include_archived)) is not None
     ]
 
 
