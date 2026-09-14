@@ -59,6 +59,7 @@ from backend.db.schema import (
 from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_local_env as load_config_env
 from backend.providers.intervals_client import IntervalsClient
 from backend.providers.gemini import function_tools as gemini_function_tools, response_text as gemini_response_text
+from backend.providers.openai import response_failure_reason as openai_response_failure_reason, response_text as openai_response_text
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
@@ -14753,9 +14754,10 @@ def record_openai_usage(response: dict[str, Any], operation: str) -> None:
 
 
 def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
-    if not isinstance(result, dict):
+    failure = openai_response_failure_reason(path, result, OPENAI_RESPONSES_PATH)
+    if failure == "invalid_response":
         raise AppError(502, "OpenAI response is not a JSON object.", reason="invalid_response")
-    if result.get("error"):
+    if failure == "response_error":
         provider_error = result["error"]
         code = provider_error.get("code") if isinstance(provider_error, dict) else None
         code = code if isinstance(code, str) and code in OPENAI_RESPONSE_ERROR_CODES else None
@@ -14764,14 +14766,12 @@ def _validate_openai_response(path: str, result: Any) -> dict[str, Any]:
         error = AppError(502, "OpenAI returned an error response.", reason="response_error")
         error.provider_error_code = code
         raise error
-    if path == OPENAI_RESPONSES_PATH:
-        response_status = str(result.get("status") or "").casefold()
-        if response_status in {"failed", "cancelled"}:
-            record_openai_status({"state": "error", "reason": "response_failed", "message": "OpenAI did not complete the coach response.", "http_status": 200})
-            raise AppError(502, "OpenAI did not complete the coach response.", reason="response_failed")
-        if response_status and response_status not in {"completed", "incomplete", "in_progress", "queued"}:
-            record_openai_status({"state": "error", "reason": "invalid_response_status", "message": "OpenAI returned an unknown response status.", "http_status": 200})
-            raise AppError(502, "OpenAI returned an unknown response status.", reason="invalid_response_status")
+    if failure == "response_failed":
+        record_openai_status({"state": "error", "reason": "response_failed", "message": "OpenAI did not complete the coach response.", "http_status": 200})
+        raise AppError(502, "OpenAI did not complete the coach response.", reason="response_failed")
+    if failure == "invalid_response_status":
+        record_openai_status({"state": "error", "reason": "invalid_response_status", "message": "OpenAI returned an unknown response status.", "http_status": 200})
+        raise AppError(502, "OpenAI returned an unknown response status.", reason="invalid_response_status")
     return result
 
 
@@ -15900,34 +15900,8 @@ def reset_coach_chat() -> dict[str, Any]:
     return {"status": "ok", "generation": get_kv("chat_generation"), "remote_conversation_deleted": remote_deleted, "message": "Neuer Coach-Chat wird beim nächsten Senden erstellt."}
 
 
-def _output_content_text(content: Any) -> str | None:
-    """Normalize one Responses API message-content entry to display text."""
-    if not isinstance(content, dict):
-        return None
-    if content.get("type") in {"output_text", "text"} and content.get("text"):
-        return content["text"]
-    if content.get("type") == "refusal" and content.get("refusal"):
-        return f"The coach declined to answer: {content['refusal']}"
-    return None
-
-
-def _output_item_parts(item: Any) -> list[str]:
-    """Extract all displayable content from one Responses API output item."""
-    if not isinstance(item, dict):
-        return []
-    if item.get("type") == "refusal" and item.get("refusal"):
-        return [f"The coach declined to answer: {item['refusal']}"]
-    if item.get("type") != "message":
-        return []
-    return [text for content in item.get("content", []) if (text := _output_content_text(content))]
-
-
 def output_text(response: dict[str, Any]) -> str:
-    direct = response.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
-    parts = [part for item in response.get("output", []) for part in _output_item_parts(item)]
-    return "\n".join(parts).strip()
+    return openai_response_text(response)
 
 
 COACH_ACTION_TTL_SECONDS = 10 * 60
