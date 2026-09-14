@@ -76,7 +76,9 @@ from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.planning.service import update_plan_bounds
 from backend.planning.service import TRAINING_PLAN_STATUSES, update_plan_metadata
 from backend.planning.adaptive import AdaptiveDependencies, apply_adaptive_changes
-from backend.planning.changes import PlanningChangeDependencies, apply_structured_changes
+from backend.planning.changes import (
+    PlanningChangeDependencies, apply_structured_changes, apply_structured_changes_in_db,
+)
 from backend.sync.jobs import (
     JOB_STATUSES,
     ITEM_STATUSES,
@@ -16392,10 +16394,8 @@ def _apply_structured_training_change_rows(
     return applied
 
 
-def _apply_structured_training_changes(
-    arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
-) -> dict[str, Any]:
-    result = apply_structured_changes(arguments, PlanningChangeDependencies(
+def _planning_change_dependencies() -> PlanningChangeDependencies:
+    return PlanningChangeDependencies(
         transaction=lambda: _planning_transaction(),
         prepare=_prepare_structured_training_changes,
         validate=lambda changes, values, db, required: _validate_structured_training_change_revisions(
@@ -16409,9 +16409,28 @@ def _apply_structured_training_changes(
             update_plan=TRAINING_PLAN_REPOSITORY.update, record_change=_record_change, now=utc_now,
         ),
         read_revision=lambda db: int((db.execute(SELECT_PLANNING_REVISION_SQL).fetchone() or {}).get("revision") or 0),
-    ), require_revision=require_revision, authorized_plan_id=authorized_plan_id)
+    )
+
+
+def _apply_structured_training_changes(
+    arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
+) -> dict[str, Any]:
+    result = apply_structured_changes(
+        arguments, _planning_change_dependencies(),
+        require_revision=require_revision, authorized_plan_id=authorized_plan_id,
+    )
     publish_state_event("planning", {"status": "changed"})
     return result
+
+
+def _apply_structured_training_changes_in_db(
+    db: Any, arguments: dict[str, Any], *, require_revision: bool = False,
+    authorized_plan_id: str | None = None,
+) -> dict[str, Any]:
+    return apply_structured_changes_in_db(
+        db, arguments, _planning_change_dependencies(),
+        require_revision=require_revision, authorized_plan_id=authorized_plan_id,
+    )
 
 
 def _prepare_structured_plan_replacement(arguments: dict[str, Any]) -> tuple[dict[str, Any], int, list[dict[str, Any]], str, str, dict[str, str]]:
