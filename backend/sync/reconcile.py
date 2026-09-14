@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
+
+
+@dataclass(frozen=True)
+class ReconcileDependencies:
+    redact: Callable[[str], str]
+    payload_hash: Callable[[Any], str]
+    bump_revision: Callable[[Any], None]
+    now: str
 
 
 def persist_planned_unit_state(
@@ -14,10 +23,7 @@ def persist_planned_unit_state(
     error: str | None,
     remote_event: dict[str, Any] | None,
     *,
-    redact: Callable[[str], str],
-    payload_hash: Callable[[Any], str],
-    now: str,
-    bump_revision: Callable[[Any], None],
+    dependencies: ReconcileDependencies,
 ) -> bool:
     row = db.execute("SELECT payload FROM planned_units WHERE local_id = ?", (local_id,)).fetchone()
     if not row:
@@ -51,14 +57,14 @@ def persist_planned_unit_state(
             json.dumps(payload, ensure_ascii=False),
             0 if state in {"synced", "remote_missing"} else 1,
             state,
-            redact(str(error))[:1000] if error else None,
+            dependencies.redact(str(error))[:1000] if error else None,
             "" if state != "conflict" else None,
             remote_external_id or None,
-            payload_hash(payload) if synced else None,
-            now if synced else None,
-            now,
+            dependencies.payload_hash(payload) if synced else None,
+            dependencies.now if synced else None,
+            dependencies.now,
             local_id,
         ),
     )
-    bump_revision(db)
+    dependencies.bump_revision(db)
     return True
