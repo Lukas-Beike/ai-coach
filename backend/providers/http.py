@@ -48,5 +48,10 @@ class ProviderHTTPError(Exception):
 
 def classify_provider_status(status: int, service: str, detail: Any = "") -> ProviderHTTPError:
     """Classify an HTTP response without leaking its body to callers."""
-    category = "rate_limited" if status == 429 else "authentication" if status in {401, 403} else "http"
+    if status == 429:
+        category = "rate_limited"
+    elif status in {401, 403}:
+        category = "authentication"
+    else:
+        category = "http"
     return ProviderHTTPError(service, category, status, redact_provider_text(detail))
