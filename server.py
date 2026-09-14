@@ -7681,7 +7681,7 @@ def _intervals_error_detail(parsed: Any) -> str:
 
 def _safe_interval_error_detail(raw_body: bytes) -> str:
     """Redact and bound an Intervals.icu response detail before displaying it."""
-    return provider_error_detail(raw_body)
+    return provider_error_detail(raw_body, redact=lambda value, *, limit: re.sub(r"\s+", " ", redact_text(value)).strip()[:limit])
 
 
 def upstream_http_error_message(status: int, raw_body: bytes, service: str | None) -> str:

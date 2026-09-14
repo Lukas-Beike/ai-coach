@@ -15,6 +15,8 @@ class ProviderHTTPTests(unittest.TestCase):
     def test_error_detail_is_redacted_and_bounded(self):
         raw = b'{"error":{"message":"authorization: bearer secret-token"}}'
         self.assertEqual(error_detail(raw), "authorization: [REDACTED]")
+        self.assertEqual(error_detail(b'{"error":"Invalid workout type"}'), "Invalid workout type")
+        self.assertEqual(error_detail(b'{"error":{},"message":"top-level detail"}'), "top-level detail")
 
 
 if __name__ == "__main__":
