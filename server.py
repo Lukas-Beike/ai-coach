@@ -74,6 +74,8 @@ from backend.sync.jobs import (
     ITEM_STATUSES,
     aggregate_job_status,
     bounded_progress,
+    decode_job_payload,
+    job_dto,
     is_retryable_error,
     retry_delay,
     validate_job_request,
@@ -1563,50 +1565,6 @@ def _normalized_generic_sync_job(envelope: dict[str, Any]) -> dict[str, Any]:
     return {"provider": envelope["provider"], "type": envelope["type"], "payload": normalized}
 
 
-def _decode_sync_job_payload(value: Any) -> dict[str, Any]:
-    try:
-        payload = json.loads(value or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def _sync_job_dto(job: Any, items: list[Any]) -> dict[str, Any]:
-    item_dtos: list[dict[str, Any]] = []
-    for item in items:
-        item_dtos.append({
-            "id": item["id"],
-            "item_key": item["item_key"],
-            "operation": item["operation"],
-            "remote_id": item.get("remote_id"),
-            "status": item["status"],
-            "attempts": int(item.get("attempts") or 0),
-            "error_class": item.get("error_class"),
-            "error_detail": item.get("error_detail"),
-            "created_at": item.get("created_at"),
-            "updated_at": item.get("updated_at"),
-        })
-    completed, total = bounded_progress(item_dtos)
-    status = str(job.get("status") or aggregate_job_status(item_dtos))
-    return {
-        "id": job["id"],
-        "provider": job["provider"],
-        "type": job["type"],
-        "status": status,
-        "payload": _decode_sync_job_payload(job.get("payload")),
-        "requested_by": job.get("requested_by") or "system",
-        "attempts": int(job.get("attempts") or 0),
-        "progress": {"completed": completed, "total": total},
-        "available_at": job.get("available_at"),
-        "started_at": job.get("started_at"),
-        "finished_at": job.get("finished_at"),
-        "error_class": job.get("error_class"),
-        "items": item_dtos,
-        "created_at": job.get("created_at"),
-        "updated_at": job.get("updated_at"),
-    }
-
-
 def sync_job_state(job_id: str) -> dict[str, Any]:
     """Return one persisted job without exposing provider credentials."""
     with DB_LOCK, database() as db:
@@ -1614,7 +1572,7 @@ def sync_job_state(job_id: str) -> dict[str, Any]:
         if not job:
             raise AppError(404, "Synchronisationsjob nicht gefunden.", reason="sync_job_not_found")
         items = db.execute("SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)).fetchall()
-        return _sync_job_dto(job, items)
+        return job_dto(job, items)
 
 
 def sync_jobs_state(limit: int = SYNC_JOB_LIST_LIMIT) -> list[dict[str, Any]]:
@@ -1624,7 +1582,7 @@ def sync_jobs_state(limit: int = SYNC_JOB_LIST_LIMIT) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         for job in jobs:
             items = db.execute("SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job["id"],)).fetchall()
-            result.append(_sync_job_dto(job, items))
+            result.append(job_dto(job, items))
         return result
 
 
@@ -2034,7 +1992,7 @@ def _execute_intervals_specific_job(
 
 def _execute_sync_job(job: dict[str, Any]) -> dict[str, Any]:
     envelope = _sync_job_payload(
-        str(job.get("provider") or ""), str(job.get("type") or ""), _decode_sync_job_payload(job.get("payload")),
+        str(job.get("provider") or ""), str(job.get("type") or ""), decode_job_payload(job.get("payload")),
     )
     payload, provider, job_type = envelope["payload"], envelope["provider"], envelope["type"]
     reason = str(payload.get("reason") or "Persistenter Providerjob")
