@@ -16,6 +16,34 @@ class ReconcileDependencies:
     now: str
 
 
+def _load_payload(row: Any) -> dict[str, Any]:
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except (TypeError, ValueError):
+        payload = {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _apply_remote_event(
+    payload: dict[str, Any], state: str, remote_event: dict[str, Any] | None
+) -> str:
+    if not isinstance(remote_event, dict):
+        return ""
+    if remote_event.get("id") not in (None, ""):
+        payload["remote_event_id"] = str(remote_event["id"])
+    if remote_event.get("external_id") not in (None, ""):
+        external_id = str(remote_event["external_id"])
+        payload["remote_event_external_id"] = external_id
+        payload["external_id"] = external_id
+    if state == "synced":
+        for key in ("moving_time", "workout_doc", "icu_training_load", "icu_intensity"):
+            if remote_event.get(key) is not None:
+                payload[key] = remote_event[key]
+            elif key != "moving_time":
+                payload.pop(key, None)
+    return str(remote_event.get("external_id") or "").strip()
+
+
 def persist_planned_unit_state(
     db: Any,
     local_id: str,
@@ -28,27 +56,10 @@ def persist_planned_unit_state(
     row = db.execute("SELECT payload FROM planned_units WHERE local_id = ?", (local_id,)).fetchone()
     if not row:
         return False
-    try:
-        payload = json.loads(row["payload"] or "{}")
-    except (TypeError, ValueError):
-        payload = {}
-    payload = payload if isinstance(payload, dict) else {}
+    payload = _load_payload(row)
     payload["sync_status"] = state
-    if isinstance(remote_event, dict):
-        if remote_event.get("id") not in (None, ""):
-            payload["remote_event_id"] = str(remote_event["id"])
-        if remote_event.get("external_id") not in (None, ""):
-            external_id = str(remote_event["external_id"])
-            payload["remote_event_external_id"] = external_id
-            payload["external_id"] = external_id
-        if state == "synced":
-            for key in ("moving_time", "workout_doc", "icu_training_load", "icu_intensity"):
-                if remote_event.get(key) is not None:
-                    payload[key] = remote_event[key]
-                elif key != "moving_time":
-                    payload.pop(key, None)
     synced = state == "synced"
-    remote_external_id = str(remote_event.get("external_id") or "").strip() if isinstance(remote_event, dict) else ""
+    remote_external_id = _apply_remote_event(payload, state, remote_event)
     db.execute(
         "UPDATE planned_units SET payload=?, sync_dirty=?, sync_state=?, sync_error=?, "
         "sync_conflict=?, external_id=COALESCE(?, external_id), baseline_hash=COALESCE(?, baseline_hash), "
