@@ -5912,6 +5912,37 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(current[first["id"]], second_date.isoformat())
         self.assertEqual(current[second["id"]], first_date.isoformat())
 
+    def test_training_patch_rolls_back_existing_updates_when_creation_fails(self):
+        existing = server.create_local_planned_unit({
+            "date": (date.today() + timedelta(days=4)).isoformat(),
+            "sport": "Ride", "name": "Before", "description": "- 30m 60% easy",
+        })
+        revision = server._structured_training_state()["planning_revision"]
+        expected_hash = next(
+            item["expected_payload_hash"]
+            for item in server._structured_training_state()["planned_units"]
+            if item["local_id"] == existing["id"]
+        )
+        arguments = {
+            "expected_revision": revision,
+            "changes": [{"local_id": existing["id"], "action": "update", "name": "Changed", "expected_payload_hash": expected_hash}],
+            "workouts": [{
+                "date": (date.today() + timedelta(days=5)).isoformat(),
+                "sport": "Run", "name": "New", "description": "- 30m 60% easy",
+                "duration_minutes": 30, "target": "AUTO",
+            }],
+        }
+        with patch.object(server, "save_workout_library_entries", side_effect=RuntimeError("creation failed")):
+            with self.assertRaises(RuntimeError):
+                server._apply_training_patch(arguments, {
+                    "authorization_scope": ["local_plan"],
+                    "request": {"constraints": []},
+                })
+        current = {item["id"]: item for item in server.list_planned_units()}
+        self.assertEqual(current[existing["id"]]["name"], "Before")
+        self.assertEqual(len(current), 1)
+        self.assertEqual(server._structured_training_state()["planning_revision"], revision)
+
     def test_openai_background_response_is_created_checkpointed_and_polled(self):
         captured = {}
         checkpoints = []
