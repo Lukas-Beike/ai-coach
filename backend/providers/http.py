@@ -8,11 +8,14 @@ an application error by their caller.
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import dataclass
 from typing import Any
 
 
 _SECRET_PATTERNS = (
+    (re.compile(r"(?i)https?://[^\s<>\"'`]+"), "[REDACTED_URL]"),
+    (re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"), "[REDACTED]"),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"), "[REDACTED_OPENAI_KEY]"),
     (re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"), "[REDACTED_GEMINI_KEY]"),
     (re.compile(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+"), r"\1[REDACTED]"),
@@ -50,3 +53,44 @@ def classify_provider_status(status: int, service: str, detail: Any = "") -> Pro
     """Classify an HTTP response without leaking its body to callers."""
     category = {429: "rate_limited", 401: "authentication", 403: "authentication"}.get(status, "http")
     return ProviderHTTPError(service, category, status, redact_provider_text(detail))
+
+
+def read_bounded_response(response: Any, max_bytes: int, *, before_read: Any = None) -> bytes:
+    """Read a provider response without accepting oversized bodies."""
+    if before_read is not None:
+        before_read()
+    try:
+        try:
+            raw = response.read(max_bytes + 1)
+        except TypeError:
+            raw = response.read()
+    finally:
+        if before_read is not None:
+            before_read()
+    if len(raw) > max_bytes:
+        raise ValueError("provider response exceeds configured size limit")
+    return raw
+
+
+def _decoded_error_payload(raw_body: bytes) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else None
+    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _first_error_field(payload: dict[str, Any], keys: tuple[str, ...] = ("message", "detail", "title")) -> Any:
+    return next((payload[key] for key in keys if payload.get(key)), "")
+
+
+def error_detail(raw_body: bytes, *, limit: int = 500, redact: Any = redact_provider_text) -> str:
+    """Extract a bounded, redacted detail from a JSON provider error body."""
+    payload = _decoded_error_payload(raw_body)
+    error = payload.get("error")
+    if isinstance(error, str) and error:
+        return redact(error, limit=limit)
+    detail = _first_error_field(error) if isinstance(error, dict) else _first_error_field(payload)
+    if not detail and isinstance(error, dict):
+        detail = _first_error_field(payload)
+    return redact(detail, limit=limit)

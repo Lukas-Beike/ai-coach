@@ -60,6 +60,7 @@ from backend.config import Config, DEFAULT_OPENAI_BASE_URL, load_config, load_lo
 from backend.providers.intervals_client import IntervalsClient
 from backend.providers.gemini import function_tools as gemini_function_tools, response_text as gemini_response_text
 from backend.providers.openai import response_failure_reason as openai_response_failure_reason, response_text as openai_response_text
+from backend.providers.http import error_detail as provider_error_detail, read_bounded_response
 from backend.providers.workout_text import WorkoutTextError, canonical_workout_zones, structured_duration, verify_workout_readback
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 from backend.providers.calendar import ical_duration, parse_ics_date, parse_ics_value, unfold_ical
@@ -7680,8 +7681,7 @@ def _intervals_error_detail(parsed: Any) -> str:
 
 def _safe_interval_error_detail(raw_body: bytes) -> str:
     """Redact and bound an Intervals.icu response detail before displaying it."""
-    detail = _intervals_error_detail(_provider_error_body(raw_body))
-    return re.sub(r"\s+", " ", redact_text(detail)).strip()[:500]
+    return provider_error_detail(raw_body, redact=lambda value, *, limit: re.sub(r"\s+", " ", redact_text(value)).strip()[:limit])
 
 
 def upstream_http_error_message(status: int, raw_body: bytes, service: str | None) -> str:
@@ -7793,14 +7793,12 @@ def _read_http_response(response: Any, cancel_event: threading.Event | None) -> 
     try:
         _raise_chat_cancelled(cancel_event)
         try:
-            raw = response.read(MAX_EXTERNAL_RESPONSE_BYTES + 1)
-        except TypeError:  # Small fake responses in unit tests may not accept a size.
-            raw = response.read()
+            raw = read_bounded_response(response, MAX_EXTERNAL_RESPONSE_BYTES, before_read=lambda: _raise_chat_cancelled(cancel_event))
+        except ValueError as exc:
+            raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.") from exc
     finally:
         if cancel_event is not None and getattr(cancel_event, "_provider_response", None) is response:
             cancel_event._provider_response = None
-    if len(raw) > MAX_EXTERNAL_RESPONSE_BYTES:
-        raise AppError(502, "Die Antwort des externen Dienstes ist zu groß.")
     return raw
 
 
