@@ -17307,19 +17307,16 @@ def _structured_coach_plan_tool_result(
     name: str, arguments: dict[str, Any], *, intent: dict[str, Any],
     conversation_id: str, client_turn_id: str,
 ) -> dict[str, Any] | None:
-    if name == "stage_training_plan":
-        return _stage_structured_training_plan(arguments, intent, conversation_id, client_turn_id)
-    if name == "commit_training_plan":
-        return _commit_structured_training_plan(arguments, intent, conversation_id)
-    if name == "replace_training_plan":
-        return _replace_structured_coach_training_plan(arguments, intent)
-    if name == "apply_training_changes":
-        return _apply_structured_coach_training_changes(arguments, intent)
-    if name == "manage_training_templates":
-        return _structured_coach_training_template_result(arguments, intent)
-    if name == "apply_workout_library_plan":
-        return _structured_coach_apply_library_plan_result(arguments, intent)
-    return None
+    handlers: dict[str, Callable[[], dict[str, Any]]] = {
+        "stage_training_plan": lambda: _stage_structured_training_plan(arguments, intent, conversation_id, client_turn_id),
+        "commit_training_plan": lambda: _commit_structured_training_plan(arguments, intent, conversation_id),
+        "replace_training_plan": lambda: _replace_structured_coach_training_plan(arguments, intent),
+        "apply_training_changes": lambda: _apply_structured_coach_training_changes(arguments, intent),
+        "manage_training_templates": lambda: _structured_coach_training_template_result(arguments, intent),
+        "apply_workout_library_plan": lambda: _structured_coach_apply_library_plan_result(arguments, intent),
+    }
+    handler = handlers.get(name)
+    return handler() if handler else None
 
 
 def _start_structured_provider_refresh(
