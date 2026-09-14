@@ -86,6 +86,34 @@ def job_dto(job: Mapping[str, Any], items: list[Mapping[str, Any]]) -> dict[str,
     }
 
 
+def read_job(db: Any, job_id: str) -> tuple[Any | None, list[Any]]:
+    """Read one job and its ordered items through a caller-owned connection."""
+    job = db.execute("SELECT * FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
+    if job is None:
+        return None, []
+    items = db.execute(
+        "SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)
+    ).fetchall()
+    return job, items
+
+
+def list_jobs(db: Any, limit: int) -> list[dict[str, Any]]:
+    """Project recent jobs without taking ownership of the database scope."""
+    jobs = db.execute(
+        "SELECT * FROM sync_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+    return [job_dto(job, read_job(db, job["id"])[1]) for job in jobs]
+
+
+def has_active_job(db: Any, provider: str, job_type: str) -> bool:
+    row = db.execute(
+        "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? "
+        "AND status IN ('queued', 'running') LIMIT 1",
+        (provider, job_type),
+    ).fetchone()
+    return row is not None
+
+
 def utc_timestamp(now: datetime | None = None) -> str:
     """Return a stable UTC timestamp for durable job records."""
     value = now or datetime.now(timezone.utc)

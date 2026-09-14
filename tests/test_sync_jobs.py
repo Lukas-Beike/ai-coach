@@ -1,10 +1,14 @@
 import unittest
+import sqlite3
 
 from backend.sync.jobs import (
     aggregate_job_status,
     bounded_progress,
     job_dto,
     is_retryable_error,
+    has_active_job,
+    list_jobs,
+    read_job,
     retry_delay,
     validate_job_request,
 )
@@ -41,6 +45,22 @@ class SyncJobContractTests(unittest.TestCase):
             "id", "item_key", "operation", "remote_id", "status", "attempts",
             "error_class", "error_detail", "created_at", "updated_at",
         })
+
+    def test_persistence_helpers_use_caller_owned_connection(self):
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        db.executescript(
+            "CREATE TABLE sync_jobs (id TEXT, provider TEXT, type TEXT, status TEXT, payload TEXT, requested_by TEXT, attempts INTEGER, available_at TEXT, started_at TEXT, finished_at TEXT, error_class TEXT, created_at TEXT, updated_at TEXT);"
+            "CREATE TABLE sync_job_items (id INTEGER, job_id TEXT, item_key TEXT, operation TEXT, remote_id TEXT, status TEXT, attempts INTEGER, error_class TEXT, error_detail TEXT, created_at TEXT, updated_at TEXT);"
+        )
+        db.execute("INSERT INTO sync_jobs VALUES ('j1','garmin','refresh','queued','{}','test',0,NULL,NULL,NULL,NULL,'1','1')")
+        db.execute("INSERT INTO sync_job_items VALUES (1,'j1','data','read',NULL,'queued',0,NULL,NULL,'1','1')")
+        db.commit()
+        job, items = read_job(db, "j1")
+        self.assertEqual(job["id"], "j1")
+        self.assertEqual(list_jobs(db, 1)[0]["id"], "j1")
+        self.assertTrue(has_active_job(db, "garmin", "refresh"))
+        db.close()
 
 
 if __name__ == "__main__":
