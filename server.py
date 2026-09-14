@@ -91,6 +91,7 @@ from backend.coach.context import (
 )
 from backend.coach.dialogue import INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
 from backend.coach.tools import build_tool_contracts
+from backend.coach.service import command_receipt
 from backend.coach.authorization import authorized_operations, require_operation, require_scope, scope_values
 from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines, coach_observed_sync_lines
 from backend.http_api.responses import (
@@ -15874,11 +15875,7 @@ def _restore_coach_session_csrf_hash(session_key: str) -> str:
 
 
 def _coach_command_receipt(value: Any) -> dict[str, Any]:
-    try:
-        receipt = json.loads(value or "{}") if not isinstance(value, dict) else dict(value)
-    except (TypeError, ValueError):
-        receipt = {}
-    return receipt if isinstance(receipt, dict) else {}
+    return command_receipt(value)
 
 
 def _merge_coach_command_receipt(client_turn_id: str, updates: dict[str, Any]) -> dict[str, Any]:
