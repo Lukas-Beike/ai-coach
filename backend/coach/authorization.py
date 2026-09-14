@@ -80,3 +80,26 @@ def dialogue_tools(tools: list[dict[str, Any]], read_tools: set[str]) -> list[di
             tool["parameters"]["properties"]["_request"] = deepcopy(REQUEST_SCHEMA)
             tool["parameters"].setdefault("required", []).append("_request")
     return result
+
+
+def scope_values(intent: dict[str, Any]) -> set[str]:
+    scope = intent.get("authorization_scope")
+    if not isinstance(scope, list):
+        return set()
+    return {str(value).strip()[:120] for value in scope if isinstance(value, str) and value.strip()}
+
+
+def authorized_operations(intent: dict[str, Any]) -> set[str]:
+    operations = {str(intent.get("operation") or "").strip()}
+    follow_ups = intent.get("follow_up_operations")
+    if isinstance(follow_ups, list):
+        operations.update(str(value).strip() for value in follow_ups if str(value).strip())
+    return operations
+
+
+def require_scope(intent: dict[str, Any], *tokens: str) -> bool:
+    return any(token in scope_values(intent) for token in tokens)
+
+
+def require_operation(intent: dict[str, Any], operation: str) -> bool:
+    return operation in authorized_operations(intent)
