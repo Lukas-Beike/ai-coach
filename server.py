@@ -91,6 +91,7 @@ from backend.coach.context import (
 )
 from backend.coach.dialogue import INSTRUCTIONS as COACH_DIALOGUE_INSTRUCTIONS, dialogue_tools, validate_request
 from backend.coach.tools import build_tool_contracts
+from backend.coach.authorization import authorized_operations, require_operation, require_scope, scope_values
 from backend.coach.outcomes import COACH_ACTION_LABELS, coach_effect_label, coach_failure_lines, coach_observed_sync_lines
 from backend.http_api.responses import (
     header_items as response_header_items,
@@ -16158,15 +16159,11 @@ def coach_execution_scope(action: dict[str, Any] | None = None) -> dict[str, Any
 
 
 def _coach_scope_values(intent: dict[str, Any]) -> set[str]:
-    scope = intent.get("authorization_scope")
-    if not isinstance(scope, list):
-        return set()
-    return {str(value).strip()[:120] for value in scope if isinstance(value, str) and value.strip()}
+    return scope_values(intent)
 
 
 def _require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
-    scope = _coach_scope_values(intent)
-    if not any(token in scope for token in tokens):
+    if not require_scope(intent, *tokens):
         raise AppError(403, "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.", reason="intent_scope_denied")
 
 
@@ -17127,7 +17124,7 @@ def _structured_coach_profile_result(arguments: dict[str, Any], intent: dict[str
 
 
 def _authorized_coach_athlete_operation(intent: dict[str, Any], operation: str, message: str) -> None:
-    if operation not in _structured_authorized_operations(intent):
+    if not require_operation(intent, operation):
         raise AppError(403, message, reason="intent_scope_denied")
 
 
@@ -17691,12 +17688,7 @@ def _structured_coach_tool_result(
 
 
 def _structured_authorized_operations(intent: dict[str, Any]) -> set[str]:
-    """Return the operation sequence explicitly authorized for this turn."""
-    operations = {str(intent.get("operation") or "").strip()}
-    follow_ups = intent.get("follow_up_operations")
-    if isinstance(follow_ups, list):
-        operations.update(str(value).strip() for value in follow_ups if str(value).strip())
-    return operations
+    return authorized_operations(intent)
 
 
 def _coach_dialogue_pending_messages(db: Any, messages: list[dict[str, Any]], pending: dict[str, Any] | None) -> None:
