@@ -72,6 +72,7 @@ from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_
 from backend.sync.refresh import cleanup_refresh_history, create_refresh_record, finish_refresh_record
 from backend.sync.snapshots import latest_snapshot as latest_snapshot_in_transaction, save_snapshot as save_snapshot_in_transaction
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
+from backend.planning.service import update_plan_bounds
 from backend.sync.jobs import (
     JOB_STATUSES,
     ITEM_STATUSES,
@@ -16497,47 +16498,6 @@ def _apply_structured_training_change_rows(
     return applied
 
 
-def _structured_training_plan_member_dates(plan_id: str, db: Any) -> list[str]:
-    rows = db.execute(
-        "SELECT payload FROM planned_units "
-        "WHERE json_extract(payload, '$.plan_id') = ? "
-        "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
-        "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
-        (plan_id,),
-    ).fetchall()
-    dates = []
-    for row in rows:
-        try:
-            payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
-            payload = {}
-        if isinstance(payload, dict) and str(payload.get("date") or "")[:10]:
-            dates.append(str(payload["date"])[:10])
-    return dates
-
-
-def _update_structured_training_plan_bound(plan_id: str, db: Any) -> None:
-    plan = TRAINING_PLAN_REPOSITORY.get(db, plan_id)
-    member_dates = _structured_training_plan_member_dates(plan_id, db)
-    if not plan or not member_dates:
-        return
-    next_start, next_end = min(member_dates), max(member_dates)
-    if plan.get("start_date") == next_start and plan.get("end_date") == next_end:
-        return
-    updated_at = utc_now()
-    updated_plan = {**plan, "start_date": next_start, "end_date": next_end, "updated_at": updated_at}
-    TRAINING_PLAN_REPOSITORY.update(
-        db, plan_id, updated_plan["name"], updated_plan.get("goal") or "", next_start, next_end,
-        updated_plan.get("status") or "planned", updated_at,
-    )
-    _record_change(db, "training_plan", plan_id, "update", plan, updated_plan, source="coach_apply")
-
-
-def _update_structured_training_plan_bounds(plans_needing_bounds: set[str], db: Any) -> None:
-    for plan_id in sorted(plans_needing_bounds):
-        _update_structured_training_plan_bound(plan_id, db)
-
-
 def _apply_structured_training_changes_in_db(
     db: Any,
     arguments: dict[str, Any], *,
@@ -16551,7 +16511,10 @@ def _apply_structured_training_changes_in_db(
     derived_plan, plans_needing_bounds = _derive_structured_training_plan(changes, authorized_plan_id, db)
     applied = _apply_structured_training_change_rows(changes, derived_plan, db)
     _bump_planning_revision(db)
-    _update_structured_training_plan_bounds(plans_needing_bounds, db)
+    update_plan_bounds(
+        db, plans_needing_bounds, get_plan=TRAINING_PLAN_REPOSITORY.get,
+        update_plan=TRAINING_PLAN_REPOSITORY.update, record_change=_record_change, now=utc_now,
+    )
     revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
     result_changes = [{"local_id": item.get("local_id"), "status": item.get("status")} for item in applied]
     return {
