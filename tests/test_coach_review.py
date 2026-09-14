@@ -10,6 +10,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 from unittest.mock import patch
 import test_server as fixtures
+from support import reset_application_state
 
 server = fixtures.server
 
@@ -22,7 +23,7 @@ class CoachReviewTests(unittest.TestCase):
         for name, value in (("CONFIG",replace(server.CONFIG,app_password="")),("DATA_DIR",root),("DB_PATH",root/"test.db"),("LOG_PATH",root/"test.log")):
             context=patch.object(server,name,value);context.start();self.addCleanup(context.stop)
         server.initialise_database()
-        fixtures.CoachTests.setUp(self)
+        reset_application_state(server)
 
     def intent(self, operation, scope, follow=()):
         return {"intent": "local_action", "operation": operation, "target_system": "local", "artifact_id": None, "ambiguities": [], "authorization_scope": list(scope), "follow_up_operations": list(follow)}

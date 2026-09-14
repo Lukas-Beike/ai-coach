@@ -69,13 +69,26 @@ from backend.sync.windows import split_date_windows
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.status import persist_sync_operation_state, project_sync_status
 from backend.sync.daily import daily_sync_is_due, mark_daily_sync as mark_daily_sync_value
+from backend.sync.refresh import cleanup_refresh_history, create_refresh_record, finish_refresh_record
+from backend.sync.snapshots import latest_snapshot as latest_snapshot_in_transaction, save_snapshot as save_snapshot_in_transaction
+from backend.sync.reconcile import ReconcileDependencies, persist_planned_unit_state
+from backend.planning.repository import planned_unit_payload, planned_unit_rows
+from backend.planning.service import update_plan_bounds
+from backend.planning.service import TRAINING_PLAN_STATUSES, update_plan_metadata
+from backend.planning.adaptive import AdaptiveDependencies, apply_adaptive_changes
+from backend.planning.changes import (
+    PlanningChangeDependencies, apply_structured_changes, apply_structured_changes_in_db,
+)
 from backend.sync.jobs import (
     JOB_STATUSES,
     ITEM_STATUSES,
     aggregate_job_status,
     bounded_progress,
     decode_job_payload,
+    has_active_job,
     job_dto,
+    list_jobs,
+    read_job,
     is_retryable_error,
     retry_delay,
     validate_job_request,
@@ -218,7 +231,7 @@ INVALID_PLANNING_DATE_ERROR = "Das Planungsdatum muss das Format JJJJ-MM-TT habe
 STALE_PLANNING_REVISION_ERROR = "Die lokale Planrevision ist inzwischen veraltet."
 UNSUPPORTED_BYDAY_ERROR = "BYDAY der Kalender-Wiederholung wird nicht unterstützt."
 STATIC_IMMUTABLE_MAX_AGE = 31536000
-APP_VERSION = "1.11.2"
+APP_VERSION = "1.11.3"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 100_000_000
@@ -1369,53 +1382,19 @@ def initialise_database() -> None:
 
 def _provider_refresh_cleanup(db: Any) -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=PROVIDER_REFRESH_RETENTION_DAYS)).isoformat()
-    db.execute("DELETE FROM provider_refresh_history WHERE started_at < ?", (cutoff,))
-    db.execute(
-        "DELETE FROM provider_refresh_history WHERE id NOT IN "
-        "(SELECT id FROM provider_refresh_history ORDER BY started_at DESC LIMIT ?)",
-        (PROVIDER_REFRESH_MAX_ROWS,),
-    )
+    cleanup_refresh_history(db, cutoff=cutoff, max_rows=PROVIDER_REFRESH_MAX_ROWS)
 
 
 def _provider_refresh_start(provider: str, area: str, operation_id: str, trigger: str) -> str:
     refresh_id = uuid.uuid4().hex
     with DB_LOCK, database() as db:
         _provider_refresh_cleanup(db)
-        db.execute(
-            "INSERT INTO provider_refresh_history(id, provider, area, operation_id, trigger, started_at, phase, status) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'queued', 'running')",
-            (refresh_id, provider, area, operation_id, trigger, utc_now()),
+        create_refresh_record(
+            db, refresh_id=refresh_id, provider=provider, area=area,
+            operation_id=operation_id, trigger=trigger, started_at=utc_now(),
         )
     publish_state_event("provider", {"provider": provider, "area": area, "status": "loading", "refresh_id": refresh_id})
     return refresh_id
-
-
-def _provider_refresh_retry_at(
-    db: Any,
-    provider: str,
-    area: str,
-    current_error_code: str | None = None,
-) -> str | None:
-    rows = db.execute(
-        "SELECT status, error_code FROM provider_refresh_history "
-        "WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 20",
-        (provider, area),
-    ).fetchall()
-    failures = 1 if current_error_code else 0
-    if current_error_code in {"auth_required", "invalid_configuration"}:
-        return None
-    for row in rows:
-        if row["status"] in {"success", "partial", "skipped"}:
-            break
-        if row["status"] != "error":
-            continue
-        if row["error_code"] in {"auth_required", "invalid_configuration"}:
-            return None
-        failures += 1
-    if not failures:
-        return None
-    delay = min(PROVIDER_REFRESH_RETRY_BASE_SECONDS * (2 ** min(failures - 1, 5)), PROVIDER_REFRESH_RETRY_MAX_SECONDS)
-    return (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
 
 
 def _provider_refresh_finish(
@@ -1426,21 +1405,22 @@ def _provider_refresh_finish(
     error_code: str | None = None,
 ) -> None:
     finished_at = utc_now()
-    provider = None
-    area = None
     with DB_LOCK, database() as db:
-        row = db.execute(
-            "SELECT provider, area FROM provider_refresh_history WHERE id=?",
-            (refresh_id,),
-        ).fetchone()
-        if not row:
-            return
-        next_retry_at = _provider_refresh_retry_at(db, row["provider"], row["area"], error_code) if status == "error" else None
-        db.execute(
-            "UPDATE provider_refresh_history SET finished_at=?, phase=?, status=?, error_code=?, next_retry_at=? WHERE id=?",
-            (finished_at, phase, status, error_code, next_retry_at, refresh_id),
+        provider_area = finish_refresh_record(
+            db,
+            refresh_id=refresh_id,
+            finished_at=finished_at,
+            phase=phase,
+            status=status,
+            error_code=error_code,
+            now=datetime.now(timezone.utc),
+            base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
+            max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
         )
+        if provider_area is None:
+            return
         _provider_refresh_cleanup(db)
+        provider, area = provider_area
     if provider and area:
         if status == "success":
             public_status = "ready"
@@ -1580,31 +1560,21 @@ def _normalized_generic_sync_job(envelope: dict[str, Any]) -> dict[str, Any]:
 def sync_job_state(job_id: str) -> dict[str, Any]:
     """Return one persisted job without exposing provider credentials."""
     with DB_LOCK, database() as db:
-        job = db.execute("SELECT * FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
+        job, items = read_job(db, job_id)
         if not job:
             raise AppError(404, "Synchronisationsjob nicht gefunden.", reason="sync_job_not_found")
-        items = db.execute("SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)).fetchall()
         return job_dto(job, items)
 
 
 def sync_jobs_state(limit: int = SYNC_JOB_LIST_LIMIT) -> list[dict[str, Any]]:
     bounded_limit = max(1, min(int(limit), SYNC_JOB_LIST_LIMIT))
     with DB_LOCK, database() as db:
-        jobs = db.execute("SELECT * FROM sync_jobs ORDER BY created_at DESC LIMIT ?", (bounded_limit,)).fetchall()
-        result: list[dict[str, Any]] = []
-        for job in jobs:
-            items = db.execute("SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job["id"],)).fetchall()
-            result.append(job_dto(job, items))
-        return result
+        return list_jobs(db, bounded_limit)
 
 
 def _sync_job_active(provider: str, job_type: str = "refresh") -> bool:
     with DB_LOCK, database() as db:
-        row = db.execute(
-            "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? AND status IN ('queued', 'running') LIMIT 1",
-            (provider, job_type),
-        ).fetchone()
-    return bool(row)
+        return has_active_job(db, provider, job_type)
 
 
 def _enqueue_automatic_performance_refresh(reason: str) -> dict[str, Any] | None:
@@ -9119,71 +9089,25 @@ def _normalise_training_plan_id(value: Any) -> str:
         raise AppError(400, "Ungültige Trainingsplan-ID.") from exc
 
 
-TRAINING_PLAN_STATUS_ALIASES = {
-    "entwurf": "draft",
-    "geplant": "planned",
-    "aktiv": "active",
-    "abgeschlossen": "completed",
-    "archiviert": "archived",
-    "abgebrochen": "cancelled",
-    "pausiert": "paused",
-}
-TRAINING_PLAN_STATUSES = frozenset({"draft", "planned", "active", "completed", "archived", "cancelled", "paused"})
-
-
-def _training_plan_candidate(current: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
-    candidate = {
-        "id": current["id"],
-        "name": str(values.get("name") or current.get("name") or "").strip()[:200],
-        "goal": str(values.get("goal") or current.get("goal") or "").strip()[:2000],
-        "start_date": str(values.get("start_date") or current.get("start_date") or "").strip(),
-        "end_date": str(values.get("end_date") or current.get("end_date") or "").strip(),
-        "status": TRAINING_PLAN_STATUS_ALIASES.get(
-            str(values.get("status") or current.get("status") or "planned").strip().casefold(),
-            str(values.get("status") or current.get("status") or "planned").strip().casefold(),
-        ),
-    }
-    if not candidate["name"]:
-        raise AppError(400, "Ein Trainingsplan benötigt einen Namen.")
-    if candidate["status"] not in TRAINING_PLAN_STATUSES:
-        raise AppError(400, "Ungültiger Trainingsplanstatus.")
-    try:
-        start = date.fromisoformat(candidate["start_date"])
-        end = date.fromisoformat(candidate["end_date"])
-    except ValueError as exc:
-        raise AppError(400, "Start- und Enddatum müssen das Format JJJJ-MM-TT haben.") from exc
-    if start > end:
-        raise AppError(400, "Das Startdatum darf nicht nach dem Enddatum liegen.")
-    return candidate
+@contextmanager
+def _planning_transaction():
+    with DB_LOCK, database() as db:
+        yield db
 
 
 def update_training_plan(plan_id: Any, values: Any) -> dict[str, Any]:
     """Update or remove local training-plan metadata without touching workouts or providers."""
     normalized_id = _normalise_training_plan_id(plan_id)
-    if not isinstance(values, dict):
-        raise AppError(400, "Der Trainingsplan muss als Objekt gesendet werden.")
-    action = str(values.get("action") or "update").strip().casefold()
-    with DB_LOCK, database() as db:
-        current = TRAINING_PLAN_REPOSITORY.get(db, normalized_id)
-        if not current:
-            raise AppError(404, "Trainingsplan nicht gefunden.")
-        if action == "delete":
-            TRAINING_PLAN_REPOSITORY.delete(db, normalized_id)
-            _record_change(db, "training_plan", normalized_id, "delete", current, None)
-            _bump_planning_revision(db)
-            result = {"status": "deleted", "plan_id": normalized_id, "plan": None}
-        elif action == "update":
-            candidate = _training_plan_candidate(current, values)
-            TRAINING_PLAN_REPOSITORY.update(
-                db, normalized_id, candidate["name"], candidate["goal"], candidate["start_date"],
-                candidate["end_date"], candidate["status"], utc_now(),
-            )
-            updated = {**current, **candidate}
-            _record_change(db, "training_plan", normalized_id, "update", current, updated)
-            _bump_planning_revision(db)
-            result = {"status": "updated", "plan_id": normalized_id, "plan": updated}
-        else:
-            raise AppError(400, "Unbekannte Aktion für den Trainingsplan.")
+    try:
+        result = update_plan_metadata(
+            normalized_id, values, transaction=lambda: _planning_transaction(),
+            repository=TRAINING_PLAN_REPOSITORY, record_change=_record_change,
+            bump_revision=_bump_planning_revision, now=utc_now,
+        )
+    except LookupError as exc:
+        raise AppError(404, str(exc)) from exc
+    except ValueError as exc:
+        raise AppError(400, str(exc)) from exc
     publish_state_event("coach", {"status": "changed"})
     return result
 
@@ -9801,29 +9725,22 @@ def apply_adaptive_replan(adjustment_id: Any, *, sync_illness_to_intervals: bool
         normalized_id = str(uuid.UUID(str(adjustment_id)))
     except (ValueError, AttributeError) as exc:
         raise AppError(400, "Ungültige Plananpassung.") from exc
-    with DB_LOCK, database() as db:
-        row = PLAN_ADJUSTMENT_REPOSITORY.get(db, normalized_id)
-        if not row:
-            raise AppError(404, "Plananpassung nicht gefunden.")
-        if row["status"] == "applied":
-            return {"status": "already_applied", "id": normalized_id}
-        if row["status"] in {"stale", "partial"}:
-            return {"status": "already_" + str(row["status"]), "id": normalized_id}
-        payload = json.loads(row["payload"])
-        illness_pause = payload.get("illness_pause") if isinstance(payload.get("illness_pause"), dict) else None
-        active_illness_pause = illness_pause if illness_pause and not illness_pause.get("approved") else None
-        now = utc_now()
-        updated, stale = _apply_adaptive_changes(db, payload.get("changes"), now)
-        updated_checkins = 0
-        if updated:
-            _bump_planning_revision(db)
-        if active_illness_pause:
-            updated_checkins = _fill_illness_checkins(db, active_illness_pause, now)
-            payload["illness_pause"] = {**active_illness_pause, "approved": True}
-        status = _adaptive_replan_status(stale, updated)
-        PLAN_ADJUSTMENT_REPOSITORY.mark_applied(
-            db, normalized_id, json.dumps(payload, ensure_ascii=False), status, now
-        )
+    try:
+        applied = apply_adaptive_changes(normalized_id, AdaptiveDependencies(
+            transaction=lambda: _planning_transaction(), repository=PLAN_ADJUSTMENT_REPOSITORY,
+            apply_changes=_apply_adaptive_changes, fill_checkins=_fill_illness_checkins,
+            bump_revision=_bump_planning_revision, now=utc_now,
+        ))
+    except LookupError as exc:
+        raise AppError(404, str(exc)) from exc
+    status = applied["status"]
+    if status.startswith("already_"):
+        return applied
+    updated = applied["updated"]
+    updated_checkins = applied["updated_checkins"]
+    stale = applied["stale"]
+    illness_pause = applied["illness_pause"]
+    active_illness_pause = illness_pause if illness_pause and not illness_pause.get("approved") else None
     remote_sync: dict[str, Any] | None = None
     if sync_illness_to_intervals and active_illness_pause:
         try:
@@ -10173,52 +10090,15 @@ def create_local_planned_unit(
     return entry
 
 
-def _planned_unit_rows(limit: int, include_archived: bool, future_only: bool) -> list[Any]:
-    with DB_LOCK, database() as db:
-        clauses = []
-        params: list[Any] = []
-        if not include_archived:
-            clauses.append("COALESCE(json_extract(payload, '$.archived'), 0) = 0")
-        if future_only:
-            clauses.extend([
-                "COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
-                "substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ?",
-            ])
-            params.append(local_now().date().isoformat())
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = db.execute(
-            "SELECT local_id, payload, sync_state, sync_error, sync_conflict FROM planned_units "
-            f"{where} ORDER BY json_extract(payload, '$.date'), lower(json_extract(payload, '$.name')), local_id LIMIT ?",
-            (*params, max(1, min(int(limit) * (2 if include_archived else 1), 1000))),
-        ).fetchall()
-    return rows
-
-
-def _planned_unit_payload(row: Any, include_archived: bool) -> dict[str, Any] | None:
-    try:
-        payload = json.loads(row.get("payload") or "{}")
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(payload, dict) or (not include_archived and payload.get("archived")):
-        return None
-    payload["id"] = str(row.get("local_id") or payload.get("id") or "")
-    payload["local_id"] = payload["id"]
-    payload["sync_status"] = str(row.get("sync_state") or payload.get("sync_status") or "local")
-    if row.get("sync_error"):
-        payload["sync_error"] = str(row["sync_error"])[:1000]
-    if row.get("sync_conflict"):
-        try:
-            payload["sync_conflict"] = json.loads(row["sync_conflict"])
-        except (TypeError, ValueError):
-            payload["sync_conflict"] = {"raw": str(row["sync_conflict"])[:1000]}
-    return payload
-
-
 def list_planned_units(limit: int = 500, include_archived: bool = False, *, future_only: bool = False) -> list[dict[str, Any]]:
+    with DB_LOCK, database() as db:
+        rows = planned_unit_rows(
+            db, limit, include_archived, future_only, today=local_now().date(),
+        )
     return [
         payload
-        for row in _planned_unit_rows(limit, include_archived, future_only)
-        if (payload := _planned_unit_payload(row, include_archived)) is not None
+        for row in rows
+        if (payload := planned_unit_payload(row, include_archived)) is not None
     ]
 
 
@@ -10788,73 +10668,16 @@ def local_calendar_events(
     return sorted(result, key=_local_calendar_sort_key)
 
 
-def _planned_unit_sync_payload(raw_payload: Any, state: str) -> dict[str, Any]:
-    try:
-        payload = json.loads(raw_payload or "{}")
-    except (TypeError, ValueError):
-        payload = {}
-    payload = payload if isinstance(payload, dict) else {}
-    payload["sync_status"] = state
-    return payload
-
-
-def _merge_planned_unit_remote_event(payload: dict[str, Any], state: str, remote_event: dict[str, Any] | None) -> None:
-    if not isinstance(remote_event, dict):
-        return
-    if remote_event.get("id") not in (None, ""):
-        payload["remote_event_id"] = str(remote_event["id"])
-    if remote_event.get("external_id") not in (None, ""):
-        external_id = str(remote_event["external_id"])
-        payload["remote_event_external_id"] = external_id
-        payload["external_id"] = external_id
-    if state != "synced":
-        return
-    for key in ("moving_time", "workout_doc", "icu_training_load", "icu_intensity"):
-        if remote_event.get(key) is not None:
-            payload[key] = remote_event[key]
-        elif key != "moving_time":
-            payload.pop(key, None)
-
-
-def _planned_unit_sync_update_values(
-    payload: dict[str, Any], state: str, error: str | None, remote_event: dict[str, Any] | None, now: str,
-) -> tuple[str, int, str, str | None, str | None, str | None, str | None]:
-    synced = state == "synced"
-    remote_external_id = str(remote_event.get("external_id") or "").strip() if isinstance(remote_event, dict) else ""
-    return (
-        json.dumps(payload, ensure_ascii=False),
-        0 if state in {"synced", "remote_missing"} else 1,
-        state,
-        redact_text(str(error))[:1000] if error else None,
-        remote_external_id or None,
-        _planned_unit_payload_hash(payload) if synced else None,
-        now if synced else None,
-    )
-
-
 def update_planned_unit_sync_state(local_id: str, state: str, error: str | None = None, *, remote_event: dict[str, Any] | None = None) -> None:
     """Persist planning sync state without changing the canonical workout data."""
     with DB_LOCK, database() as db:
-        row = db.execute("SELECT payload FROM planned_units WHERE local_id = ?", (local_id,)).fetchone()
-        if not row:
-            return
-        payload = _planned_unit_sync_payload(row["payload"], state)
-        _merge_planned_unit_remote_event(payload, state, remote_event)
-        now = utc_now()
-        values = _planned_unit_sync_update_values(payload, state, error, remote_event, now)
-        db.execute(
-            "UPDATE planned_units SET payload=?, sync_dirty=?, sync_state=?, sync_error=?, "
-            "sync_conflict=?, external_id=COALESCE(?, external_id), baseline_hash=COALESCE(?, baseline_hash), last_synced_at=COALESCE(?, last_synced_at), updated_at=? "
-            "WHERE local_id=?",
-            (
-                *values[:4],
-                "" if state != "conflict" else None,
-                *values[4:],
-                now,
-                local_id,
+        persist_planned_unit_state(
+            db, local_id, state, error, remote_event,
+            dependencies=ReconcileDependencies(
+                redact=redact_text, payload_hash=_planned_unit_payload_hash,
+                now=utc_now(), bump_revision=_bump_planning_revision,
             ),
         )
-        _bump_planning_revision(db)
 
 
 @contextmanager
@@ -12339,22 +12162,17 @@ def resolve_planned_unit_conflict(local_id: Any, strategy: Any) -> dict[str, Any
 
 def latest_snapshot() -> dict[str, Any] | None:
     with DB_LOCK, database() as db:
-        payload = SNAPSHOT_REPOSITORY.latest_payload(db)
-    return json.loads(payload) if payload else None
+        return latest_snapshot_in_transaction(db, SNAPSHOT_REPOSITORY)
 
 
 def save_snapshot(
     snapshot: dict[str, Any], update_full_sync: bool = True, *, activity_days: int | None = None
 ) -> None:
     with DB_LOCK, database() as db:
-        SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
-        if update_full_sync:
-            set_kv("last_sync_at", snapshot["synced_at"], db)
-            set_kv("last_sync_error", "", db)
-            if activity_days is not None:
-                set_kv("last_sync_activity_days", str(activity_days), db)
-        if not update_full_sync:
-            set_kv("last_performance_refresh_at", snapshot["synced_at"], db)
+        save_snapshot_in_transaction(
+            db, snapshot, SNAPSHOT_REPOSITORY, update_full_sync=update_full_sync,
+            activity_days=activity_days, set_value=set_kv,
+        )
 
 
 def merge_performance_snapshot(current: dict[str, Any] | None, performance: dict[str, Any]) -> dict[str, Any]:
@@ -16576,81 +16394,43 @@ def _apply_structured_training_change_rows(
     return applied
 
 
-def _structured_training_plan_member_dates(plan_id: str, db: Any) -> list[str]:
-    rows = db.execute(
-        "SELECT payload FROM planned_units "
-        "WHERE json_extract(payload, '$.plan_id') = ? "
-        "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
-        "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
-        (plan_id,),
-    ).fetchall()
-    dates = []
-    for row in rows:
-        try:
-            payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
-            payload = {}
-        if isinstance(payload, dict) and str(payload.get("date") or "")[:10]:
-            dates.append(str(payload["date"])[:10])
-    return dates
-
-
-def _update_structured_training_plan_bound(plan_id: str, db: Any) -> None:
-    plan = TRAINING_PLAN_REPOSITORY.get(db, plan_id)
-    member_dates = _structured_training_plan_member_dates(plan_id, db)
-    if not plan or not member_dates:
-        return
-    next_start, next_end = min(member_dates), max(member_dates)
-    if plan.get("start_date") == next_start and plan.get("end_date") == next_end:
-        return
-    updated_at = utc_now()
-    updated_plan = {**plan, "start_date": next_start, "end_date": next_end, "updated_at": updated_at}
-    TRAINING_PLAN_REPOSITORY.update(
-        db, plan_id, updated_plan["name"], updated_plan.get("goal") or "", next_start, next_end,
-        updated_plan.get("status") or "planned", updated_at,
+def _planning_change_dependencies() -> PlanningChangeDependencies:
+    return PlanningChangeDependencies(
+        transaction=lambda: _planning_transaction(),
+        prepare=_prepare_structured_training_changes,
+        validate=lambda changes, values, db, required: _validate_structured_training_change_revisions(
+            changes, values, require_revision=required, db=db,
+        ),
+        derive_plan=_derive_structured_training_plan,
+        apply_rows=_apply_structured_training_change_rows,
+        bump_revision=_bump_planning_revision,
+        update_bounds=lambda db, plan_ids: update_plan_bounds(
+            db, plan_ids, get_plan=TRAINING_PLAN_REPOSITORY.get,
+            update_plan=TRAINING_PLAN_REPOSITORY.update, record_change=_record_change, now=utc_now,
+        ),
+        read_revision=lambda db: int((db.execute(SELECT_PLANNING_REVISION_SQL).fetchone() or {}).get("revision") or 0),
     )
-    _record_change(db, "training_plan", plan_id, "update", plan, updated_plan, source="coach_apply")
-
-
-def _update_structured_training_plan_bounds(plans_needing_bounds: set[str], db: Any) -> None:
-    for plan_id in sorted(plans_needing_bounds):
-        _update_structured_training_plan_bound(plan_id, db)
-
-
-def _apply_structured_training_changes_in_db(
-    db: Any,
-    arguments: dict[str, Any], *,
-    require_revision: bool = False,
-    authorized_plan_id: str | None = None,
-) -> dict[str, Any]:
-    changes = _prepare_structured_training_changes(arguments)
-    current_revision = _validate_structured_training_change_revisions(
-        changes, arguments, require_revision=require_revision, db=db,
-    )
-    derived_plan, plans_needing_bounds = _derive_structured_training_plan(changes, authorized_plan_id, db)
-    applied = _apply_structured_training_change_rows(changes, derived_plan, db)
-    _bump_planning_revision(db)
-    _update_structured_training_plan_bounds(plans_needing_bounds, db)
-    revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()
-    result_changes = [{"local_id": item.get("local_id"), "status": item.get("status")} for item in applied]
-    return {
-        "ok": True,
-        "status": "applied",
-        "planning_revision": int((revision or {}).get("revision") or current_revision),
-        "changes": result_changes,
-        "library_entry_ids": list(dict.fromkeys(item["local_id"] for item in result_changes if item.get("local_id"))),
-    }
 
 
 def _apply_structured_training_changes(
     arguments: dict[str, Any], *, require_revision: bool = False, authorized_plan_id: str | None = None,
 ) -> dict[str, Any]:
-    with DB_LOCK, database() as db:
-        result = _apply_structured_training_changes_in_db(
-            db, arguments, require_revision=require_revision, authorized_plan_id=authorized_plan_id,
-        )
+    result = apply_structured_changes(
+        arguments, _planning_change_dependencies(),
+        require_revision=require_revision, authorized_plan_id=authorized_plan_id,
+    )
     publish_state_event("planning", {"status": "changed"})
     return result
+
+
+def _apply_structured_training_changes_in_db(
+    db: Any, arguments: dict[str, Any], *, require_revision: bool = False,
+    authorized_plan_id: str | None = None,
+) -> dict[str, Any]:
+    return apply_structured_changes_in_db(
+        db, arguments, _planning_change_dependencies(),
+        require_revision=require_revision, authorized_plan_id=authorized_plan_id,
+    )
 
 
 def _prepare_structured_plan_replacement(arguments: dict[str, Any]) -> tuple[dict[str, Any], int, list[dict[str, Any]], str, str, dict[str, str]]:
