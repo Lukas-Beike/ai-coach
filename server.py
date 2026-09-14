@@ -75,7 +75,10 @@ from backend.sync.jobs import (
     aggregate_job_status,
     bounded_progress,
     decode_job_payload,
+    has_active_job,
     job_dto,
+    list_jobs,
+    read_job,
     is_retryable_error,
     retry_delay,
     validate_job_request,
@@ -1580,31 +1583,21 @@ def _normalized_generic_sync_job(envelope: dict[str, Any]) -> dict[str, Any]:
 def sync_job_state(job_id: str) -> dict[str, Any]:
     """Return one persisted job without exposing provider credentials."""
     with DB_LOCK, database() as db:
-        job = db.execute("SELECT * FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
+        job, items = read_job(db, job_id)
         if not job:
             raise AppError(404, "Synchronisationsjob nicht gefunden.", reason="sync_job_not_found")
-        items = db.execute("SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)).fetchall()
         return job_dto(job, items)
 
 
 def sync_jobs_state(limit: int = SYNC_JOB_LIST_LIMIT) -> list[dict[str, Any]]:
     bounded_limit = max(1, min(int(limit), SYNC_JOB_LIST_LIMIT))
     with DB_LOCK, database() as db:
-        jobs = db.execute("SELECT * FROM sync_jobs ORDER BY created_at DESC LIMIT ?", (bounded_limit,)).fetchall()
-        result: list[dict[str, Any]] = []
-        for job in jobs:
-            items = db.execute("SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job["id"],)).fetchall()
-            result.append(job_dto(job, items))
-        return result
+        return list_jobs(db, bounded_limit)
 
 
 def _sync_job_active(provider: str, job_type: str = "refresh") -> bool:
     with DB_LOCK, database() as db:
-        row = db.execute(
-            "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? AND status IN ('queued', 'running') LIMIT 1",
-            (provider, job_type),
-        ).fetchone()
-    return bool(row)
+        return has_active_job(db, provider, job_type)
 
 
 def _enqueue_automatic_performance_refresh(reason: str) -> dict[str, Any] | None:

@@ -51,6 +51,9 @@ def decode_job_payload(value: Any) -> dict[str, Any]:
 
 def job_dto(job: Mapping[str, Any], items: list[Mapping[str, Any]]) -> dict[str, Any]:
     """Build the public, credential-free representation of one sync job."""
+    if not hasattr(job, "get"):
+        job = dict(job)
+    normalized_items = [item if hasattr(item, "get") else dict(item) for item in items]
     item_dtos = [
         {
             "id": item["id"],
@@ -64,7 +67,7 @@ def job_dto(job: Mapping[str, Any], items: list[Mapping[str, Any]]) -> dict[str,
             "created_at": item.get("created_at"),
             "updated_at": item.get("updated_at"),
         }
-        for item in items
+        for item in normalized_items
     ]
     completed, total = bounded_progress(item_dtos)
     return {
@@ -84,6 +87,34 @@ def job_dto(job: Mapping[str, Any], items: list[Mapping[str, Any]]) -> dict[str,
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
     }
+
+
+def read_job(db: Any, job_id: str) -> tuple[Any | None, list[Any]]:
+    """Read one job and its ordered items through a caller-owned connection."""
+    job = db.execute("SELECT * FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
+    if job is None:
+        return None, []
+    items = db.execute(
+        "SELECT * FROM sync_job_items WHERE job_id=? ORDER BY created_at, id", (job_id,)
+    ).fetchall()
+    return job, items
+
+
+def list_jobs(db: Any, limit: int) -> list[dict[str, Any]]:
+    """Project recent jobs without taking ownership of the database scope."""
+    jobs = db.execute(
+        "SELECT * FROM sync_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+    return [job_dto(job, read_job(db, job["id"])[1]) for job in jobs]
+
+
+def has_active_job(db: Any, provider: str, job_type: str) -> bool:
+    row = db.execute(
+        "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? "
+        "AND status IN ('queued', 'running') LIMIT 1",
+        (provider, job_type),
+    ).fetchone()
+    return row is not None
 
 
 def utc_timestamp(now: datetime | None = None) -> str:
